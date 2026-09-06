@@ -90,8 +90,10 @@ check('a crashing PAGE is left alone — this handler only speaks for /api/',
 
 # ── the call route explains itself instead of crashing ──
 call = re.search(r'def api_make_call\(\):.*?\n(?=@app\.route)', SRC, re.S).group(0)
-check('the call route catches a locked database and says it is worth retrying',
-      'sqlite3.OperationalError' in call and 'Database busy' in call)
+check('the call route catches a database error and asks _sqlite_reason what it '
+      'actually was, instead of assuming it is a busy one (tests/test_sqlite_reason.py '
+      'covers that mapping)',
+      'sqlite3.OperationalError' in call and '_sqlite_reason(e)' in call)
 check('...and catches anything else rather than letting it become an HTML 500',
       'except Exception as e:' in call and 'traceback.print_exc()' in call)
 check('both log the real cause, so the server log still shows what happened',

@@ -44,6 +44,7 @@ except ImportError:
 from contextlib import contextmanager
 from flask import Flask, jsonify, request, session, render_template, redirect, make_response, send_from_directory
 from markupsafe import Markup
+import shutil
 import traceback
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -527,6 +528,27 @@ print(f"[startup] persistent storage: {os.path.exists('/data')}  db={DB_FILE}", 
 # background modules that import sqlite3 separately. The behaviour is
 # unchanged apart from the waiting.
 _sqlite3_connect = sqlite3.connect
+def _sqlite_reason(e) -> tuple:
+    """Turn a sqlite3.OperationalError into something worth showing.
+
+    These errors mean very different things and want very different actions,
+    but they arrive as one exception type, so a handler that assumes "locked"
+    tells a user to retry a read-only filesystem forever. Only the first case
+    is worth retrying; the rest need someone to look at the server, and the
+    message says so instead of pretending otherwise."""
+    t = str(e).lower()
+    if 'locked' in t or 'busy' in t:
+        return 'Database busy — try again in a moment', 503
+    if 'readonly' in t or 'read-only' in t:
+        return 'The database is read-only — the server storage needs attention', 500
+    if 'full' in t or 'disk i/o' in t or 'no space' in t:
+        return 'The server storage is full — this needs attention', 500
+    if 'no such table' in t or 'no such column' in t:
+        return 'Database schema is out of date on the server', 500
+    # Unmapped: show it rather than inventing a cause. It is a SQLite message
+    # about our own database, not anything private.
+    return f'Database error: {str(e)[:90]}', 500
+
 def _sqlite_connect_patient(*args, **kwargs):
     kwargs.setdefault('timeout', 30.0)
     conn = _sqlite3_connect(*args, **kwargs)
@@ -16081,11 +16103,14 @@ def api_make_call():
         conn.commit()
         return jsonify({'ok': True, 'symbol': symbol, 'price': price, 'calls_left_today': CALLS_PER_DAY_LIMIT - today_count - 1})
     except sqlite3.OperationalError as e:
-        # Almost always "database is locked" -- a write that collided with
-        # another one. Worth its own message because it IS worth retrying,
-        # unlike the generic failure below.
-        print(f'[calls] database busy placing call on {mint}: {e}', flush=True)
-        return jsonify({'ok': False, 'msg': 'Database busy — try again in a moment'}), 503
+        # sqlite3.OperationalError is NOT only "database is locked" -- it also
+        # covers a read-only file, a full disk, a missing column and more.
+        # Reporting all of them as "busy, try again" sends the user into a
+        # retry loop for problems retrying cannot fix, and hides the real
+        # cause. Say which one it actually is.
+        msg, code = _sqlite_reason(e)
+        print(f'[calls] {type(e).__name__} placing call on {mint}: {e}', flush=True)
+        return jsonify({'ok': False, 'msg': msg}), code
     except Exception as e:
         print(f'[calls] failed to place call on {mint}: {type(e).__name__}: {e}', flush=True)
         traceback.print_exc()
@@ -26897,6 +26922,43 @@ elif OWNER_WALLET != ADMIN_WALLET:
     print('         promotion-payment verification, the super-admin role guard, and')
     print('         is_admin/_is_owner() checks may now disagree about who the owner is.')
 init_db()
+
+def _db_write_selftest():
+    """Prove at startup that the database can actually be WRITTEN to, and say
+    so in the log.
+
+    Reads kept working while every write failed, which is the signature of a
+    read-only mount or a full volume -- and nothing in the app said so. The
+    only symptom was an error on whichever button the user happened to press,
+    with a cause nobody could see. This runs once, writes a row, deletes it,
+    and prints the result along with the free space on the data volume, so a
+    storage problem is visible in the log before anyone hits it.
+
+    Never raises: a diagnostic that can stop the app from starting is worse
+    than the problem it reports."""
+    try:
+        free = shutil.disk_usage(_DATA_DIR).free
+    except Exception:
+        free = -1
+    free_mb = free / (1024 * 1024) if free >= 0 else -1
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            conn.execute('CREATE TABLE IF NOT EXISTS _write_selftest (id INTEGER PRIMARY KEY, ts TEXT)')
+            conn.execute('INSERT INTO _write_selftest (ts) VALUES (?)', (str(time.time()),))
+            conn.execute('DELETE FROM _write_selftest')
+            conn.commit()
+        finally:
+            conn.close()
+        print(f'[startup] database is writable  ({free_mb:.0f} MB free on {_DATA_DIR})', flush=True)
+        if 0 <= free_mb < 50:
+            print(f'[startup] ⚠ only {free_mb:.0f} MB free — writes will start failing soon', flush=True)
+    except Exception as e:
+        print(f'[startup] ✗ DATABASE IS NOT WRITABLE: {type(e).__name__}: {e}', flush=True)
+        print(f'[startup]   db={DB_FILE}  free={free_mb:.0f} MB', flush=True)
+        print('[startup]   every write (calls, trades, settings) will fail until this is fixed', flush=True)
+
+_db_write_selftest()
 run_migrations()
 _encrypt_legacy_x_tokens()
 _load_banned_ips()
