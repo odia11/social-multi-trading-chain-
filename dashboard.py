@@ -26926,6 +26926,31 @@ init_db()
 
 DISK_LOW_BYTES = 300 * 1024 * 1024   # start reclaiming below this
 
+def _storage_breakdown() -> str:
+    """One line naming what is actually on the data volume.
+
+    Written after the volume filled up and nobody -- including me -- could
+    say what was using it without a shell, which a hosted container does not
+    give you. Knowing the database is 40 MB and the backups were 300 MB is
+    the difference between guessing at a new volume size and choosing one."""
+    def mb(n):
+        return f'{n / (1024 * 1024):.0f} MB'
+    try:
+        db  = os.path.getsize(DB_FILE) if os.path.exists(DB_FILE) else 0
+        wal = os.path.getsize(DB_FILE + '-wal') if os.path.exists(DB_FILE + '-wal') else 0
+        bk  = 0
+        if os.path.isdir(BACKUP_DIR):
+            for f in os.listdir(BACKUP_DIR):
+                try:
+                    bk += os.path.getsize(os.path.join(BACKUP_DIR, f))
+                except OSError:
+                    pass
+        used  = shutil.disk_usage(_DATA_DIR)
+        return (f'db {mb(db)} · wal {mb(wal)} · backups {mb(bk)} ({len(_backup_files())} files) · '
+                f'volume {mb(used.used)} used of {mb(used.total)}, {mb(used.free)} free')
+    except Exception as e:
+        return f'could not read storage: {e}'
+
 def _reclaim_disk_space() -> int:
     """Free space on the data volume without touching anything a user owns.
 
@@ -26996,12 +27021,13 @@ def _db_write_selftest():
             conn.commit()
         finally:
             conn.close()
-        print(f'[startup] database is writable  ({free_mb:.0f} MB free on {_DATA_DIR})', flush=True)
+        print(f'[startup] database is writable', flush=True)
+        print(f'[startup] storage: {_storage_breakdown()}', flush=True)
         if 0 <= free_mb < 50:
             print(f'[startup] ⚠ only {free_mb:.0f} MB free — writes will start failing soon', flush=True)
     except Exception as e:
         print(f'[startup] ✗ DATABASE IS NOT WRITABLE: {type(e).__name__}: {e}', flush=True)
-        print(f'[startup]   db={DB_FILE}  free={free_mb:.0f} MB', flush=True)
+        print(f'[startup]   storage: {_storage_breakdown()}', flush=True)
         print('[startup]   every write (calls, trades, settings) will fail until this is fixed', flush=True)
 
 _db_write_selftest()

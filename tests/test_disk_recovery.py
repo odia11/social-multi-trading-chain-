@@ -44,7 +44,8 @@ ns = {'os': os, 'gzip': gzip, 'shutil': shutil, 'sqlite3': sqlite3,
       'print': lambda *a, **k: None,
       'BACKUP_KEEP': 3, 'BACKUP_MIN_FREE_BYTES': 300 * 1024 * 1024,
       'DISK_LOW_BYTES': 300 * 1024 * 1024}
-for f in ('_free_bytes', '_backup_files', '_prune_backups', 'backup_database', '_reclaim_disk_space'):
+for f in ('_free_bytes', '_backup_files', '_prune_backups', 'backup_database',
+          '_reclaim_disk_space', '_storage_breakdown'):
     exec(fn(f), ns)
 
 # ── compression is the whole point ──
@@ -121,6 +122,21 @@ check('the trades are all still there — reclaiming only ever deletes copies',
       c.execute('SELECT COUNT(*) FROM trades').fetchone()[0] == 7000)
 c.close()
 
+# ── saying what is actually using the volume ──
+# Nobody could answer that without a shell, which a hosted container does not
+# give you. Choosing a new volume size is guesswork without it.
+line = ns['_storage_breakdown']()
+for part in ('db ', 'wal ', 'backups ', 'volume '):
+    check(f'the storage line names {part.strip()}', part in line)
+check('...with a file count, so "backups 300 MB" says how many that is',
+      'files)' in line)
+check('...and how much of the volume is used and how much is left',
+      'used of' in line and 'free' in line)
+ns_broken = dict(ns); ns_broken['_DATA_DIR'] = '/nonexistent/nope'
+exec(fn('_storage_breakdown'), ns_broken)
+check('an unreadable volume returns a message rather than raising during startup',
+      isinstance(ns_broken['_storage_breakdown'](), str))
+
 # ── the wiring ──
 st = fn('_db_write_selftest')
 check('startup checks free space before it checks writability, so a full volume '
@@ -130,6 +146,8 @@ check('...and says plainly when reclaiming was not enough, naming the one action
       'only the owner can take', 'Grow the Railway volume' in st)
 check('the self-test can never stop the app from starting',
       not re.search(r'^\s*raise\b', st, re.M))
+check('the breakdown is printed whether the database is writable or not — it is '
+      'most needed exactly when it is not', st.count('_storage_breakdown()') == 2)
 
 vac = re.search(r'# VACUUM rebuilds.*?VACUUM error', SRC, re.S).group(0)
 check('VACUUM is skipped on a nearly-full disk — it rebuilds the database into a '
