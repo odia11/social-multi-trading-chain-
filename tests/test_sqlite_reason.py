@@ -93,7 +93,7 @@ check('startup actually WRITES to the database rather than only opening it — '
       'INSERT INTO _write_selftest' in st and 'commit()' in st)
 check('...and cleans up after itself', 'DELETE FROM _write_selftest' in st)
 check('it reports free space, so a filling volume is visible before it breaks writes',
-      'disk_usage' in st and 'MB free' in st)
+      '_free_bytes()' in st and 'MB free' in st and 'disk_usage' in SRC)
 check('it warns while there is still room to act, not only once writes fail',
       'free_mb < 50' in st)
 check('a failure prints what actually went wrong and what it means for the app',

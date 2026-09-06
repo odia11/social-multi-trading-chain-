@@ -44,6 +44,7 @@ except ImportError:
 from contextlib import contextmanager
 from flask import Flask, jsonify, request, session, render_template, redirect, make_response, send_from_directory
 from markupsafe import Markup
+import gzip
 import shutil
 import traceback
 from werkzeug.exceptions import HTTPException
@@ -25382,10 +25383,10 @@ def admin_backups():
     try:
         if os.path.isdir(BACKUP_DIR):
             for fname in sorted(os.listdir(BACKUP_DIR), reverse=True):
-                if fname.startswith('orcagent_') and fname.endswith('.db'):
+                if fname.startswith('orcagent_') and (fname.endswith('.db') or fname.endswith('.db.gz')):
                     fpath = os.path.join(BACKUP_DIR, fname)
                     stat  = os.stat(fpath)
-                    date_str = fname.replace('orcagent_', '').replace('.db', '')
+                    date_str = fname.replace('orcagent_', '').replace('.db.gz', '').replace('.db', '')
                     backups.append({
                         'filename': fname,
                         'size':     stat.st_size,
@@ -26923,24 +26924,69 @@ elif OWNER_WALLET != ADMIN_WALLET:
     print('         is_admin/_is_owner() checks may now disagree about who the owner is.')
 init_db()
 
+DISK_LOW_BYTES = 300 * 1024 * 1024   # start reclaiming below this
+
+def _reclaim_disk_space() -> int:
+    """Free space on the data volume without touching anything a user owns.
+
+    Only two things here are disposable: old database backups (by definition
+    copies of something we still have) and the write-ahead log, which a
+    checkpoint retires. Trades, calls, posts and settings are never touched.
+    Returns the bytes recovered."""
+    freed = 0
+    before = _free_bytes()
+
+    n = len(_backup_files())
+    if n > 1:
+        freed += _prune_backups(keep=1)     # keep the newest, always
+        print(f'[startup] pruned {n - 1} old backup(s) to free space', flush=True)
+
+    try:
+        wal = DB_FILE + '-wal'
+        wal_before = os.path.getsize(wal) if os.path.exists(wal) else 0
+        if wal_before:
+            conn = sqlite3.connect(DB_FILE, isolation_level=None)
+            try:
+                conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+            finally:
+                conn.close()
+            wal_after = os.path.getsize(wal) if os.path.exists(wal) else 0
+            freed += max(0, wal_before - wal_after)
+            print(f'[startup] checkpointed WAL: {wal_before // (1024*1024)} MB -> '
+                  f'{wal_after // (1024*1024)} MB', flush=True)
+    except Exception as e:
+        print(f'[startup] WAL checkpoint failed: {e}', flush=True)
+
+    after = _free_bytes()
+    if before >= 0 and after >= 0:
+        freed = max(freed, after - before)
+    return freed
+
 def _db_write_selftest():
-    """Prove at startup that the database can actually be WRITTEN to, and say
-    so in the log.
+    """Prove at startup that the database can actually be WRITTEN to -- and
+    if the volume is nearly full, reclaim what can be reclaimed first.
 
     Reads kept working while every write failed, which is the signature of a
-    read-only mount or a full volume -- and nothing in the app said so. The
-    only symptom was an error on whichever button the user happened to press,
-    with a cause nobody could see. This runs once, writes a row, deletes it,
-    and prints the result along with the free space on the data volume, so a
-    storage problem is visible in the log before anyone hits it.
+    full volume or a read-only mount, and nothing in the app said so: the
+    only symptom was an error on whichever button the user happened to press.
+    This is where that becomes visible, and where it gets fixed if it can be
+    fixed without anyone's help -- the volume filling up is not something a
+    non-technical owner can clear by hand on a hosted container.
 
     Never raises: a diagnostic that can stop the app from starting is worse
     than the problem it reports."""
-    try:
-        free = shutil.disk_usage(_DATA_DIR).free
-    except Exception:
-        free = -1
+    free = _free_bytes()
     free_mb = free / (1024 * 1024) if free >= 0 else -1
+
+    if 0 <= free < DISK_LOW_BYTES:
+        print(f'[startup] ⚠ only {free_mb:.0f} MB free on {_DATA_DIR} — reclaiming', flush=True)
+        got = _reclaim_disk_space()
+        free = _free_bytes()
+        free_mb = free / (1024 * 1024) if free >= 0 else -1
+        print(f'[startup] reclaimed {got // (1024*1024)} MB — now {free_mb:.0f} MB free', flush=True)
+        if 0 <= free < DISK_LOW_BYTES:
+            print('[startup] ⚠ STILL LOW. Grow the Railway volume; the database cannot '
+                  'keep writing on a full disk.', flush=True)
     try:
         conn = sqlite3.connect(DB_FILE)
         try:
@@ -27057,44 +27103,93 @@ def _startup_fee_recovery():
 threading.Thread(target=_startup_fee_recovery, daemon=True).start()
 
 # ── DAILY DATABASE BACKUP ────────────────────────────────────────────────────
+BACKUP_KEEP          = 3               # compressed copies to retain
+BACKUP_MIN_FREE_BYTES = 300 * 1024 * 1024   # refuse to write one below this
+
+def _free_bytes(path=None) -> int:
+    """Free space on the data volume, or -1 if it cannot be read."""
+    try:
+        return shutil.disk_usage(path or _DATA_DIR).free
+    except Exception:
+        return -1
+
+def _backup_files() -> list:
+    """Existing backups, newest first. Matches both the compressed files we
+    write now and the plain .db ones older versions left behind, so those are
+    still listed and still pruned."""
+    try:
+        return sorted([f for f in os.listdir(BACKUP_DIR)
+                       if f.startswith('orcagent_') and (f.endswith('.db') or f.endswith('.db.gz'))],
+                      reverse=True)
+    except Exception:
+        return []
+
+def _prune_backups(keep: int = BACKUP_KEEP) -> int:
+    """Delete all but the `keep` newest backups. Never deletes the newest
+    one, whatever `keep` says -- a backup directory is worth shrinking, not
+    emptying."""
+    freed = 0
+    for old in _backup_files()[max(keep, 1):]:
+        try:
+            path = os.path.join(BACKUP_DIR, old)
+            freed += os.path.getsize(path)
+            os.remove(path)
+            print(f'[backup] pruned {old}', flush=True)
+        except Exception as e:
+            print(f'[backup] could not prune {old}: {e}', flush=True)
+    return freed
+
 def backup_database() -> bool:
     """
-    Hot-copy orcagent.db to BACKUP_DIR/orcagent_YYYY-MM-DD.db using the
-    sqlite3 online backup API (safe under concurrent reads/writes).
-    Retains the 7 most recent files; older ones are deleted.
-    Returns True on success.
+    Hot-copy orcagent.db to BACKUP_DIR/orcagent_YYYY-MM-DD.db.gz using the
+    sqlite3 online backup API (safe under concurrent reads/writes), then
+    gzip it.
+
+    Backups are gzipped and capped at BACKUP_KEEP because this directory is
+    what filled the volume: seven UNCOMPRESSED copies of the database is
+    eight times the database's own size sitting next to it, on the same
+    volume, and when that volume fills every write in the app starts failing
+    with "database or disk is full" while reads carry on working normally.
+    A SQLite file compresses several times over, so this is roughly a
+    ten-fold reduction in what backups cost.
+
+    It also refuses to run when space is already short. A backup that tips
+    the volume over does more harm than a missing day of backups.
     """
+    free = _free_bytes()
+    if 0 <= free < BACKUP_MIN_FREE_BYTES:
+        print(f'[backup] skipped — only {free // (1024*1024)} MB free; pruning instead', flush=True)
+        _prune_backups()
+        return False
     try:
         os.makedirs(BACKUP_DIR, exist_ok=True)
         date_str  = datetime.datetime.utcnow().strftime('%Y-%m-%d')
-        dest_path = os.path.join(BACKUP_DIR, f'orcagent_{date_str}.db')
+        tmp_path  = os.path.join(BACKUP_DIR, f'.orcagent_{date_str}.tmp')
+        dest_path = os.path.join(BACKUP_DIR, f'orcagent_{date_str}.db.gz')
         # Use sqlite3 online backup so we never read a torn page
         src  = sqlite3.connect(DB_FILE)
-        dest = sqlite3.connect(dest_path)
+        dest = sqlite3.connect(tmp_path)
         try:
             src.backup(dest)
         finally:
             dest.close()
             src.close()
-        size_kb = os.path.getsize(dest_path) // 1024
-        print(f'[backup] ✓ {dest_path} ({size_kb} KB)', flush=True)
+        raw_kb = os.path.getsize(tmp_path) // 1024
+        with open(tmp_path, 'rb') as f_in, gzip.open(dest_path, 'wb', compresslevel=6) as f_out:
+            shutil.copyfileobj(f_in, f_out, 1024 * 1024)
+        os.remove(tmp_path)
+        gz_kb = os.path.getsize(dest_path) // 1024
+        print(f'[backup] ✓ {dest_path} ({gz_kb} KB, from {raw_kb} KB)', flush=True)
     except Exception as e:
         print(f'[backup] ✗ failed: {e}', flush=True)
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)     # never leave a half-written copy eating the volume
+        except Exception:
+            pass
         return False
 
-    # Prune — keep only the 7 newest files
-    try:
-        files = sorted(
-            [f for f in os.listdir(BACKUP_DIR) if f.startswith('orcagent_') and f.endswith('.db')],
-            reverse=True,
-        )
-        for old in files[7:]:
-            old_path = os.path.join(BACKUP_DIR, old)
-            os.remove(old_path)
-            print(f'[backup] pruned {old}', flush=True)
-    except Exception as e:
-        print(f'[backup] prune error: {e}', flush=True)
-
+    _prune_backups()
     return True
 
 def _run_daily_db_maintenance():
@@ -27133,15 +27228,43 @@ def _run_daily_db_maintenance():
     except Exception as e:
         print(f'[db-maintenance] prune error: {e}', flush=True)
 
+    # Truncate the write-ahead log first. In WAL mode the -wal file grows
+    # until a checkpoint retires it, and a passive checkpoint leaves the file
+    # at its high-water mark -- so a busy day can leave hundreds of megabytes
+    # of WAL sitting on the volume indefinitely. This is cheap, needs no
+    # spare space, and is the one reclaim that always works.
     try:
-        # A fresh connection in autocommit mode -- VACUUM can't run inside a
-        # transaction, and needs exclusive access to rebuild the file.
-        vconn = sqlite3.connect(DB_FILE, isolation_level=None)
+        wal = DB_FILE + '-wal'
+        wal_before = os.path.getsize(wal) if os.path.exists(wal) else 0
+        wconn = sqlite3.connect(DB_FILE, isolation_level=None)
+        try:
+            wconn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+        finally:
+            wconn.close()
+        wal_after = os.path.getsize(wal) if os.path.exists(wal) else 0
+        if wal_before:
+            print(f'[db-maintenance] WAL {wal_before // 1024}KB -> {wal_after // 1024}KB', flush=True)
+    except Exception as e:
+        print(f'[db-maintenance] WAL checkpoint error: {e}', flush=True)
+
+    try:
+        # VACUUM rebuilds the database into a temporary copy, so it needs
+        # roughly the size of the database FREE on the same volume. Running it
+        # on a nearly-full disk is how a space problem becomes an outage:
+        # it fails, and it can fill what little is left while failing.
         size_before = os.path.getsize(DB_FILE)
-        vconn.execute('VACUUM')
-        vconn.close()
-        size_after = os.path.getsize(DB_FILE)
-        print(f'[db-maintenance] VACUUM done — {size_before // 1024}KB -> {size_after // 1024}KB', flush=True)
+        free = _free_bytes()
+        if 0 <= free < size_before * 2:
+            print(f'[db-maintenance] VACUUM skipped — needs ~{size_before * 2 // (1024*1024)} MB '
+                  f'free, have {free // (1024*1024)} MB', flush=True)
+        else:
+            # A fresh connection in autocommit mode -- VACUUM can't run inside a
+            # transaction, and needs exclusive access to rebuild the file.
+            vconn = sqlite3.connect(DB_FILE, isolation_level=None)
+            vconn.execute('VACUUM')
+            vconn.close()
+            size_after = os.path.getsize(DB_FILE)
+            print(f'[db-maintenance] VACUUM done — {size_before // 1024}KB -> {size_after // 1024}KB', flush=True)
     except Exception as e:
         print(f'[db-maintenance] VACUUM error: {e}', flush=True)
 
