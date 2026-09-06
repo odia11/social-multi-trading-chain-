@@ -44,6 +44,8 @@ except ImportError:
 from contextlib import contextmanager
 from flask import Flask, jsonify, request, session, render_template, redirect, make_response, send_from_directory
 from markupsafe import Markup
+import traceback
+from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 from cryptography.fernet import Fernet, InvalidToken
@@ -14731,6 +14733,30 @@ def _honeypot():
     return jsonify({'error': 'Not found'}), 404
 
 
+@app.errorhandler(Exception)
+def _api_never_returns_html(e):
+    """Any unhandled exception in an /api/ route used to fall through to
+    Flask's HTML 500 page. Every fetch in this app does `await r.json()`,
+    which then throws on the HTML -- and every one of those throws is caught
+    by a handler that says "Network error, try again". So a server-side crash
+    was reported to the user as a connection problem: the retry it advises
+    cannot help, and nothing on screen says what actually broke.
+
+    API routes now always answer JSON, and the traceback is logged so the
+    real cause is visible in the server log instead of being swallowed."""
+    if isinstance(e, HTTPException):
+        # A deliberate abort(...) -- keep its status, but still speak JSON on
+        # /api/. 404 has its own handler below and never reaches here.
+        if request.path.startswith('/api/'):
+            return jsonify({'ok': False, 'msg': e.description or 'Request failed'}), e.code
+        return e
+    print(f'[error] unhandled exception on {request.method} {request.path}: '
+          f'{type(e).__name__}: {e}', flush=True)
+    traceback.print_exc()
+    if request.path.startswith('/api/'):
+        return jsonify({'ok': False, 'msg': 'Server error — this is on us, not your connection'}), 500
+    raise e
+
 @app.errorhandler(404)
 def _not_found(e):
     if request.path.startswith('/api/'):
@@ -16025,6 +16051,16 @@ def api_make_call():
         )
         conn.commit()
         return jsonify({'ok': True, 'symbol': symbol, 'price': price, 'calls_left_today': CALLS_PER_DAY_LIMIT - today_count - 1})
+    except sqlite3.OperationalError as e:
+        # Almost always "database is locked" -- a write that collided with
+        # another one. Worth its own message because it IS worth retrying,
+        # unlike the generic failure below.
+        print(f'[calls] database busy placing call on {mint}: {e}', flush=True)
+        return jsonify({'ok': False, 'msg': 'Database busy — try again in a moment'}), 503
+    except Exception as e:
+        print(f'[calls] failed to place call on {mint}: {type(e).__name__}: {e}', flush=True)
+        traceback.print_exc()
+        return jsonify({'ok': False, 'msg': 'Could not place the call — we logged it'}), 500
     finally:
         conn.close()
 

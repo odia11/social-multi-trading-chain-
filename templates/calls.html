@@ -443,20 +443,32 @@ async function _submitCall(){
       headers: {'Content-Type':'application/json','X-CSRF-Token':_callsCsrfToken},
       body: JSON.stringify({mint: _callSelected.mint})
     });
-    var d = await r.json();
-    if(d.ok){
+    // Read the body ONCE as text, then try to parse it. r.json() on a
+    // non-JSON body throws, and that throw used to land in the catch below
+    // and be reported as "Network error" -- so a server-side failure told
+    // the user to check their connection, and retrying could never help.
+    var raw = await r.text();
+    var d = null;
+    try{ d = JSON.parse(raw); }catch(_){}
+    if(d && d.ok){
       msg.textContent = 'Call placed on $'+d.symbol+' at '+_fmtCallPrice(d.price)+'. '+d.calls_left_today+' call(s) left today.';
       msg.className = 'call-msg ok';
       document.getElementById('call-search-input').value = '';
       _callSelected = null;
       _loadCallsList();
     } else {
-      msg.textContent = d.msg || 'Could not place call.';
+      // Say which of the three it was: the server explained itself, the
+      // server broke, or we never reached it (handled in the catch).
+      msg.textContent = (d && d.msg) ? d.msg
+        : 'Server error ' + r.status + ' — this is on us, not your connection.';
       msg.className = 'call-msg err';
+      if(!d) console.error('[calls] non-JSON response', r.status, raw.slice(0, 400));
     }
   }catch(e){
-    msg.textContent = 'Network error — try again.';
+    // Only a genuine failure to reach the server reaches here now.
+    msg.textContent = 'Could not reach the server — check your connection.';
     msg.className = 'call-msg err';
+    console.error('[calls] request failed', e);
   }
   btn.disabled = false;
 }
