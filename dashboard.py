@@ -508,6 +508,35 @@ HEARTBEAT_FILE = os.path.join(_DATA_DIR, 'heartbeat.txt')
 _APP_START     = time.time()
 print(f"[startup] persistent storage: {os.path.exists('/data')}  db={DB_FILE}", flush=True)
 
+# ── SQLITE: how long a connection waits for the write lock ─────────────
+# The database is already in WAL mode (set once in init_db, and stored in the
+# file itself), so readers never block writers. What WAL does NOT change is
+# that there can only be one WRITER at a time -- and this process has many:
+# the request threads plus the bot loop, the monitor, the surge radar, the
+# gas sweep and the calls-peak refresh, all on one file.
+#
+# When a write can't get the lock it waits `busy_timeout` and then raises
+# "database is locked". Python's default is 5 seconds, which a burst of
+# background writes can exceed -- that is what produced the "Database busy"
+# on Make a Call. Thirty seconds is far longer than any single write here
+# takes, so a caller now queues instead of failing.
+#
+# Applied by wrapping sqlite3.connect once, rather than editing the ~360
+# call sites that open the database. Every one of them looks the function up
+# on the module at call time, so they all pick this up -- including the
+# background modules that import sqlite3 separately. The behaviour is
+# unchanged apart from the waiting.
+_sqlite3_connect = sqlite3.connect
+def _sqlite_connect_patient(*args, **kwargs):
+    kwargs.setdefault('timeout', 30.0)
+    conn = _sqlite3_connect(*args, **kwargs)
+    try:
+        conn.execute('PRAGMA busy_timeout=30000')
+    except Exception:
+        pass          # a connection too broken to take a pragma will fail loudly on its own
+    return conn
+sqlite3.connect = _sqlite_connect_patient
+
 TAKE_PROFIT     = 0.05   # 5%  — universal take profit
 BOT_BRIDGE_MAX_PER_TX  = 10.0  # USD — hardcoded, not user-configurable
 BOT_BRIDGE_MAX_PER_DAY = 25.0  # USD — hardcoded, not user-configurable
@@ -16201,38 +16230,49 @@ def _calls_peak_loop():
     days, not seconds, so this doesn't need fast-poll-grade frequency."""
     while True:
         try:
+            # Read the mint list, then CLOSE before the network work. This
+            # used to hold one connection open across every DexScreener
+            # round-trip -- up to 10s each plus a 0.3s pause, so minutes at a
+            # time on a busy day -- and then write through that same
+            # long-lived connection. Fetch first, connect second, write, done.
             conn = sqlite3.connect(DB_FILE)
             try:
                 rows = conn.execute(
                     "SELECT DISTINCT mint FROM token_calls WHERE timestamp >= datetime('now','-30 days')"
                 ).fetchall()
-                mints = [r[0] for r in rows]
-                price_by_mint = {}
-                for i in range(0, len(mints), 30):
-                    chunk = mints[i:i+30]
-                    try:
-                        r = _dex_get('https://api.dexscreener.com/latest/dex/tokens/' + ','.join(chunk),
-                                     timeout=10, ttl_override=90)
-                        if not r:
-                            continue
-                        pairs = r.json().get('pairs', []) or []
-                        for p in pairs:
-                            m = (p.get('baseToken') or {}).get('address', '')
-                            price = float(p.get('priceUsd', 0) or 0)
-                            if m and price > 0 and m not in price_by_mint:
-                                price_by_mint[m] = price
-                    except Exception as e:
-                        print(f'[calls-peak] chunk error: {e}', flush=True)
-                    time.sleep(0.3)
-                for mint, price in price_by_mint.items():
-                    conn.execute(
-                        'UPDATE token_calls SET peak_price=?, peak_at=CURRENT_TIMESTAMP '
-                        'WHERE mint=? AND ?>peak_price',
-                        (price, mint, price)
-                    )
-                conn.commit()
             finally:
                 conn.close()
+            mints = [r[0] for r in rows]
+            price_by_mint = {}
+            for i in range(0, len(mints), 30):
+                chunk = mints[i:i+30]
+                try:
+                    r = _dex_get('https://api.dexscreener.com/latest/dex/tokens/' + ','.join(chunk),
+                                 timeout=10, ttl_override=90)
+                    if not r:
+                        continue
+                    pairs = r.json().get('pairs', []) or []
+                    for p in pairs:
+                        m = (p.get('baseToken') or {}).get('address', '')
+                        price = float(p.get('priceUsd', 0) or 0)
+                        if m and price > 0 and m not in price_by_mint:
+                            price_by_mint[m] = price
+                except Exception as e:
+                    print(f'[calls-peak] chunk error: {e}', flush=True)
+                time.sleep(0.3)
+
+            if price_by_mint:
+                conn = sqlite3.connect(DB_FILE)
+                try:
+                    for mint, price in price_by_mint.items():
+                        conn.execute(
+                            'UPDATE token_calls SET peak_price=?, peak_at=CURRENT_TIMESTAMP '
+                            'WHERE mint=? AND ?>peak_price',
+                            (price, mint, price)
+                        )
+                    conn.commit()
+                finally:
+                    conn.close()
         except Exception as e:
             print(f'[calls-peak] loop error: {e}', flush=True)
         time.sleep(120)
@@ -17428,6 +17468,31 @@ def api_instant_trade():
         # Update DB: trades log + user_tokens portfolio
         new_balance = None
         try:
+            # Price lookup BEFORE the database is touched. This used to sit
+            # between the INSERT below and its commit, so the write lock on
+            # the whole database was held for the length of a DexScreener
+            # round-trip (up to 6 seconds). SQLite allows exactly one writer,
+            # so every other write in the process -- placing a call, recording
+            # a trade, saving a setting -- queued behind an HTTP request and
+            # could time out with "database is locked". Nothing about this
+            # lookup needs a connection open, so it happens first.
+            _buy_price_usd = 0.0
+            if side == 'buy':
+                try:
+                    _pr = _dex_get(
+                        'https://api.dexscreener.com/latest/dex/tokens/' + token_address,
+                        timeout=6
+                    )
+                    if _pr and _pr.status_code == 200:
+                        _sol_pairs = [p for p in (_pr.json().get('pairs') or [])
+                                      if p.get('chainId') == 'solana']
+                        if _sol_pairs:
+                            _best = max(_sol_pairs,
+                                        key=lambda p: float((p.get('liquidity') or {}).get('usd') or 0))
+                            _buy_price_usd = float(_best.get('priceUsd') or 0)
+                except Exception:
+                    pass
+
             conn     = sqlite3.connect(DB_FILE)
             user_row = conn.execute(
                 'SELECT id FROM users WHERE wallet_address=?', (wallet,)
@@ -17443,22 +17508,6 @@ def api_instant_trade():
                      0, 0, now, token_address, 'manual', side, round(token_amount, 6))
                 )
                 if side == 'buy':
-                    # Fetch current token price for avg_price tracking
-                    _buy_price_usd = 0.0
-                    try:
-                        _pr = _dex_get(
-                            'https://api.dexscreener.com/latest/dex/tokens/' + token_address,
-                            timeout=6
-                        )
-                        if _pr and _pr.status_code == 200:
-                            _sol_pairs = [p for p in (_pr.json().get('pairs') or [])
-                                          if p.get('chainId') == 'solana']
-                            if _sol_pairs:
-                                _best = max(_sol_pairs,
-                                            key=lambda p: float((p.get('liquidity') or {}).get('usd') or 0))
-                                _buy_price_usd = float(_best.get('priceUsd') or 0)
-                    except Exception:
-                        pass
                     conn.execute(
                         '''INSERT INTO user_tokens (user_id, token_address, symbol, amount, avg_price, updated_at)
                            VALUES (?, ?, ?, ?, ?, ?)
