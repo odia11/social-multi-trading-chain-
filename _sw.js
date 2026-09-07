@@ -1,3 +1,12 @@
+
+var _shown=null,_opened=null,_focused=null,_navigated=null,_clients=[];
+var clients={matchAll:function(){return Promise.resolve(_clients);},
+             openWindow:function(u){_opened=u;return Promise.resolve(null);}};
+var listeners={};
+var self={location:{origin:'https://orcagent.fun'},
+          addEventListener:function(n,f){listeners[n]=f;},
+          registration:{showNotification:function(t,o){_shown={title:t,opts:o};return Promise.resolve();}},
+          clients:clients};
 // OrcAgent service worker — receives Web Push events and shows notifications
 // even when the site itself is closed.
 self.addEventListener('install', function(event) {
@@ -60,3 +69,29 @@ self.addEventListener('notificationclick', function(event) {
     })
   );
 });
+
+function mkClient(url, canNavigate){
+  var c={url:url, focus:function(){_focused=this.url;return Promise.resolve(this);}};
+  if(canNavigate) c.navigate=function(u){_navigated=u;this.url=u;return Promise.resolve(this);};
+  return c;
+}
+function reset(list){_clients=list;_opened=_focused=_navigated=null;}
+function click(url){
+  var waited=null;
+  listeners['notificationclick']({notification:{close:function(){},data:url?{url:url}:null},
+                                  waitUntil:function(p){waited=p;}});
+  return waited.then(function(){return {opened:_opened,focused:_focused,navigated:_navigated};});
+}
+listeners['push']({data:{json:function(){return {title:'t',body:'b',url:'/live-market?mint=0xABC'};}},
+                   waitUntil:function(p){return p;}});
+var out={push_data_url:_shown.opts.data.url};
+var TARGET='https://orcagent.fun/live-market?mint=0xABC';
+Promise.resolve()
+ .then(function(){reset([]);return click('/live-market?mint=0xABC');}).then(function(r){out.no_window=r;})
+ .then(function(){reset([mkClient('https://orcagent.fun/live-market',true)]);return click('/live-market?mint=0xABC');}).then(function(r){out.open_on_live_market=r;})
+ .then(function(){reset([mkClient('https://orcagent.fun/home',true)]);return click('/live-market?mint=0xABC');}).then(function(r){out.open_elsewhere=r;})
+ .then(function(){reset([mkClient(TARGET,true)]);return click('/live-market?mint=0xABC');}).then(function(r){out.already_there=r;})
+ .then(function(){reset([mkClient('https://orcagent.fun/home',false)]);return click('/live-market?mint=0xABC');}).then(function(r){out.no_navigate=r;})
+ .then(function(){reset([mkClient('https://evil.example/x',true)]);return click('/live-market?mint=0xABC');}).then(function(r){out.foreign=r;})
+ .then(function(){reset([mkClient('https://orcagent.fun/home',true)]);return click(null);}).then(function(r){out.no_url=r;})
+ .then(function(){console.log(JSON.stringify(out));});

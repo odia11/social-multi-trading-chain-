@@ -747,6 +747,9 @@ function patchFeedList(){
 // nothing is added, removed, or reordered, and no DOM node is recreated.
 // An explicit user action (sort/filter/liquidity change) still does the
 // full, freshly-ordered rebuild, since that's exactly what was asked for.
+// Set from ?mint= at startup; consumed by the first loadFeed() that finishes.
+var _pendingDeepLinkMint = null;
+
 function loadFeed(isPoll){
   if(_feedInFlight) return;
   _feedInFlight = true;
@@ -777,7 +780,16 @@ function loadFeed(isPoll){
       updateHeaderCounts();
     })
     .catch(function(){})
-    .finally(function(){ _feedInFlight = false; });
+    .finally(function(){
+      _feedInFlight = false;
+      // Runs whether that load succeeded or failed: a deep-linked token is
+      // still worth showing when the scanner itself is having a bad minute.
+      if(_pendingDeepLinkMint){
+        var _m = _pendingDeepLinkMint;
+        _pendingDeepLinkMint = null;
+        prependSearchedToken(_m, '', '');
+      }
+    });
 }
 
 /* ── trade actions ── */
@@ -1310,15 +1322,20 @@ document.addEventListener('DOMContentLoaded', function(){
     if(d && d.ok){ _copyStatus.copying = d.copying; _copyStatus.target = d.target_wallet; loadTraders(); }
   }).catch(function(){});
 
-  // A token opened via the shared navbar's search lands here as ?mint=<addr>
-  // (a plain full-page navigation, since the navbar itself has no feed to
-  // inject into on every other page) -- inject it once the first scanner
-  // load has had a chance to populate ST.tokens, so it isn't immediately
-  // overwritten by that response.
+  // A token arrives here as ?mint=<addr> from the shared navbar's search, the
+  // wallet, the calls page and a surge push notification -- all plain
+  // full-page navigations, since none of those have this feed to inject into.
+  //
+  // It has to be injected AFTER the first scanner load, which replaces
+  // ST.tokens wholesale and would wipe it. That used to be a 900ms guess:
+  // fine on a fast connection, and on a slow one the token silently vanished
+  // -- worst of all on a notification tap, which is the one moment it has to
+  // work. It is now queued and injected when that first load actually
+  // finishes, however long it takes.
   var _qMint = new URLSearchParams(location.search).get('mint');
   if(_qMint){
     history.replaceState(null, '', location.pathname);
-    setTimeout(function(){ prependSearchedToken(_qMint, '', ''); }, 900);
+    _pendingDeepLinkMint = _qMint;
   }
 
   setInterval(function(){ loadFeed(true); }, 15000);
