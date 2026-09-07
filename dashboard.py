@@ -14532,10 +14532,19 @@ def notify_surge(surge: dict):
         if not user_ids:
             return
         symbol = surge.get('symbol') or '?'
+        mint   = surge.get('mint') or ''
         title, body = _surge_alert_text(surge, decision)
-        # Deliberately points at Live Market rather than a buy screen: this
-        # says something is happening, not that it is worth buying.
-        _send_push_notifications_bulk(user_ids, title, body, '/live-market')
+        # Deep-link straight to the token's card on Live Market (not a buy
+        # screen) -- says something is happening, still one tap from acting
+        # on it. ?mint= is the deep-link Live Market actually reads (see
+        # live-market-pro.js), and the same one the navbar search, the wallet,
+        # the calls page and the trade notifications already use. Encoded
+        # because it lands in a URL; falls back to the plain page if the
+        # radar somehow handed over a surge with no mint.
+        # safe='' because quote() leaves "/" alone by default, which is right
+        # for a path and wrong for a query value.
+        push_url = f"/live-market?mint={urllib.parse.quote(mint, safe='')}" if mint else '/live-market'
+        _send_push_notifications_bulk(user_ids, title, body, push_url)
         print(f'[surge-alert] pushed {decision["kind"]} ${symbol} '
               f'({surge.get("vol_ratio")}x) to {len(user_ids)} user(s)', flush=True)
     except Exception as e:
