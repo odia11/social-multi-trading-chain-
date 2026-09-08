@@ -161,6 +161,30 @@ check('...and it is not flagged, because nothing is unresolved',
       not r4.needs_investigation)
 
 
+# ── a swap that landed and reverted: resolved, not ambiguous ──
+q4b = make_quote('100', user_id=6)
+r4b = X.execute_trade(
+    conn, quote_id=q4b.quote_id, idempotency_key='k4b', available_usd=D('500'),
+    swap_executor=lambda p: X.SwapOutcome(submitted=True, confirmed=False, reverted=True,
+                                          tx_hash='0xREVERT',
+                                          error='Swap transaction reverted on-chain'))
+check('a swap that reverted on-chain is a failure with its hash kept — the '
+      'transaction is real, it just did not do anything',
+      r4b.state == L.FAILED and r4b.tx_hash == '0xREVERT')
+check('...and is NOT flagged: a revert is a resolved outcome, unlike a timeout',
+      not r4b.needs_investigation)
+res4b = conn.execute("SELECT status, amount_usd FROM balance_reservations WHERE trade_id=?",
+                     (r4b.trade_id,)).fetchone()
+check('...and only the GAS stays claimed, because that is the only money that '
+      'left the wallet — holding the whole $100 would lock up a balance the '
+      'user still has',
+      res4b[0] == 'settled' and D(res4b[1]) == D(q4b.to_dict()['costs_by_kind']['source_gas']))
+
+check('a reverted swap and an unconfirmed one are told apart, which the legacy '
+      'path cannot do at all — it throws the hash away on a receipt timeout',
+      r4b.needs_investigation != r3.needs_investigation)
+
+
 # ── an executor that raises is the ambiguous case, and is treated as such ──
 def boom(plan):
     raise RuntimeError('RPC died mid-send')
@@ -193,7 +217,7 @@ def slow(plan):
     # A second trade arrives while this one is in flight.
     held.append(X.execute_trade(conn, quote_id=qb.quote_id, idempotency_key='kb',
                                 available_usd=D('150'),
-                                swap_executor=lambda p: X.SwapOutcome(True, True, '0xB')))
+                                swap_executor=lambda p: X.SwapOutcome(submitted=True, confirmed=True, tx_hash='0xB')))
     return X.SwapOutcome(submitted=True, confirmed=True, tx_hash='0xA')
 
 ra = X.execute_trade(conn, quote_id=qa.quote_id, idempotency_key='ka',
@@ -209,7 +233,7 @@ check('...and the second is refused, because the first already claimed the money
 q7 = make_quote('100', user_id=9)
 r7 = X.execute_trade(
     conn, quote_id=q7.quote_id, idempotency_key='k7', available_usd=D('500'),
-    swap_executor=lambda p: X.SwapOutcome(True, True, '0xFEE'),
+    swap_executor=lambda p: X.SwapOutcome(submitted=True, confirmed=True, tx_hash='0xFEE'),
     fee_charger=lambda p, o: X.FeeOutcome(charged=False, error='fee wallet out of gas'))
 check('a fee that fails after a confirmed swap does NOT fail the trade — the swap '
       'happened, and rewriting that would be a false record', r7.state == L.COMPLETED)
@@ -227,18 +251,43 @@ def fee_boom(p, o):
     raise RuntimeError('fee transfer reverted')
 r8 = X.execute_trade(conn, quote_id=q8.quote_id, idempotency_key='k8',
                      available_usd=D('500'),
-                     swap_executor=lambda p: X.SwapOutcome(True, True, '0xF2'),
+                     swap_executor=lambda p: X.SwapOutcome(submitted=True, confirmed=True, tx_hash='0xF2'),
                      fee_charger=fee_boom)
 check('a fee charger that raises is caught and recorded, never re-runs the swap',
       r8.state == L.COMPLETED and any('reverted' in w for w in r8.warnings))
+
+
+# ── a fee that was dispatched but not yet collected ──
+q8b = make_quote('100', user_id=17)
+r8b = X.execute_trade(
+    conn, quote_id=q8b.quote_id, idempotency_key='k8b', available_usd=D('500'),
+    swap_executor=lambda p: X.SwapOutcome(submitted=True, confirmed=True, tx_hash='0xF3'),
+    fee_charger=lambda p, o: X.FeeOutcome(charged=False, pending=True, usd=p.fee_usd))
+check('a fee handed to a background transfer is reported as pending, not as '
+      'collected — asserting a collection nobody has seen is the same false '
+      'success this engine refuses everywhere else',
+      r8b.state == L.COMPLETED and not r8b.needs_investigation)
+c8b = {(k, ph): (u, dt) for k, ph, u, dt in conn.execute(
+    'SELECT kind, phase, usd, detail FROM trade_costs WHERE trade_id=?', (r8b.trade_id,))}
+check('...and the fee is still recorded at its full amount, because the USER\'s '
+      'budget did pay it — whether OrcAgent collected it is a separate question',
+      D(c8b[('platform_fee', 'actual')][0]) == D(q8b.to_dict()['costs_by_kind']['platform_fee'])
+      and 'dispatched' in c8b[('platform_fee', 'actual')][1])
+
+try:
+    X.FeeOutcome(charged=True, pending=True)
+    ok = False
+except X.ExecutionError:
+    ok = True
+check('a fee cannot claim to be both collected and pending', ok)
 
 
 # ── costs: quoted and actual, side by side ──
 q9 = make_quote('100', user_id=11)
 r9 = X.execute_trade(conn, quote_id=q9.quote_id, idempotency_key='k9',
                      available_usd=D('500'),
-                     swap_executor=lambda p: X.SwapOutcome(
-                         True, True, '0xC', actual_gas_usd=D('0.55')))
+                     swap_executor=lambda p: X.SwapOutcome(submitted=True, confirmed=True, tx_hash='0xC',
+                                       actual_gas_usd=D('0.55')))
 drift = L.cost_drift(conn, r9.trade_id)
 check('gas that came in above the quote shows as drift on that cost alone',
       round(drift['source_gas']['drift'], 2) == 0.20)
@@ -249,7 +298,7 @@ check('the slippage reserve is quoted but never written as an actual cost — it
 r10 = X.execute_trade(
     conn, quote_id=make_quote('100', user_id=12).quote_id, idempotency_key='k10',
     available_usd=D('500'),
-    swap_executor=lambda p: X.SwapOutcome(True, True, '0xD',
+    swap_executor=lambda p: X.SwapOutcome(submitted=True, confirmed=True, tx_hash='0xD',
                                           actual_spend_usd=D('120')))
 check('a trade that came in over its quote says so instead of absorbing it',
       any('above the' in w for w in r10.warnings))
@@ -263,8 +312,8 @@ gid = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
 q11 = make_quote('100', user_id=13)
 r11 = X.execute_trade(conn, quote_id=q11.quote_id, idempotency_key='k11',
                       available_usd=D('500'),
-                      swap_executor=lambda p: X.SwapOutcome(
-                          True, True, '0xG', gas_sponsorship_id=gid))
+                      swap_executor=lambda p: X.SwapOutcome(submitted=True, confirmed=True,
+                                        tx_hash='0xG', gas_sponsorship_id=gid))
 rep = S.subsidy_report(conn)
 check('a sponsored grant tied to a completed trade is charged to that trade',
       conn.execute('SELECT trade_id FROM gas_sponsorships WHERE id=?',

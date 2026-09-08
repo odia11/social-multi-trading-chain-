@@ -90,17 +90,28 @@ class SwapPlan:
     same_chain: bool
 
 
-@dataclass(frozen=True)
+# kw_only: these fields mean very different things and several are bools, so
+# a positional call that drifts by one argument reports a revert as a hash and
+# is not obviously wrong at the call site. Naming them is not optional.
+@dataclass(frozen=True, kw_only=True)
 class SwapOutcome:
     """What actually happened on-chain.
 
-    `submitted` and `confirmed` are separate on purpose. An executor that
-    cannot tell the difference must report submitted=True, confirmed=False
-    -- which is treated as money possibly gone, not as a success and not as
-    a clean failure.
+    Three outcomes, not two, because they mean different things for the
+    user's money:
+
+      not submitted            -- nothing left the wallet; the claim goes back
+      submitted and reverted   -- it landed and definitively did not execute;
+                                  only gas was spent, so only gas is kept
+      submitted, not confirmed -- unknown; the money may be gone, so the claim
+                                  is kept and a human is asked
+
+    An executor that cannot tell a revert from a timeout must report the
+    third, which is the pessimistic one.
     """
     submitted: bool
     confirmed: bool
+    reverted: bool = False
     tx_hash: str = ''
     actual_spend_usd: Optional[Decimal] = None
     actual_gas_usd: Optional[Decimal] = None
@@ -108,12 +119,27 @@ class SwapOutcome:
     error: str = ''
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class FeeOutcome:
+    """Collected, failed, or dispatched and not yet known.
+
+    The third state is not a hedge. The app's fee charger hands the transfer
+    to a background thread and returns before it has happened, so a charger
+    that reported `charged=True` would be asserting a collection nobody has
+    seen -- the same false success this module refuses everywhere else.
+    `pending` says what is actually true: the user's budget carried the fee,
+    the transfer is out, and whether it landed is recorded in the fees table
+    rather than here.
+    """
     charged: bool
+    pending: bool = False
     usd: Decimal = Decimal('0')
     tx_hash: str = ''
     error: str = ''
+
+    def __post_init__(self):
+        if self.charged and self.pending:
+            raise ExecutionError('a fee cannot be both collected and pending')
 
 
 @dataclass
@@ -248,6 +274,20 @@ def execute_trade(conn, *, quote_id: str, idempotency_key: str, available_usd,
     if not outcome.submitted:
         return fail(outcome.error or 'the swap was not sent')
 
+    if outcome.reverted:
+        # It landed and definitively did not execute. The purchase never
+        # happened, so the only money that left the wallet is gas -- and
+        # keeping the whole claim would lock up a balance the user still has.
+        gas = _d(outcome.actual_gas_usd) if outcome.actual_gas_usd is not None else plan.gas_usd
+        L.settle(conn, trade_id, gas, now=clock())
+        reason = outcome.error or 'the swap reverted on-chain'
+        L.transition(conn, trade_id, L.FAILED, now=clock(),
+                     source_tx_hash=outcome.tx_hash, failure_reason=reason[:500],
+                     needs_investigation=0)
+        return ExecutionResult(trade_id=trade_id, state=L.FAILED, created=True,
+                               tx_hash=outcome.tx_hash, failure_reason=reason,
+                               needs_investigation=False, warnings=warnings)
+
     if not outcome.confirmed:
         # Rule 3. Sent, but not known to have landed. Not a success.
         L.settle(conn, trade_id, total_spend, now=clock())
@@ -268,7 +308,7 @@ def execute_trade(conn, *, quote_id: str, idempotency_key: str, available_usd,
     # ── the fee, after the swap is real ──
     fee = FeeOutcome(charged=True, usd=plan.fee_usd) if fee_charger is None else \
         _charge_safely(fee_charger, plan, outcome)
-    if not fee.charged:
+    if not (fee.charged or fee.pending):
         # The swap happened. The fee did not. That is a debt, recorded as
         # such -- never a reason to unwind or repeat a confirmed swap.
         warnings.append(f'the platform fee was not collected: {fee.error}')
@@ -292,12 +332,13 @@ def execute_trade(conn, *, quote_id: str, idempotency_key: str, available_usd,
             warnings.append(f'gas grant could not be attached to this trade: {e}')
 
     L.settle(conn, trade_id, actual_spend, now=clock())
+    unresolved_fee = not (fee.charged or fee.pending)
     L.transition(conn, trade_id, L.COMPLETED, now=clock(),
                  actual_spend_usd=str(actual_spend), actual_subsidy_usd='0',
-                 needs_investigation=1 if not fee.charged else 0)
+                 needs_investigation=1 if unresolved_fee else 0)
     return ExecutionResult(trade_id=trade_id, state=L.COMPLETED, created=True,
                            tx_hash=outcome.tx_hash, actual_spend_usd=str(actual_spend),
-                           needs_investigation=not fee.charged, warnings=warnings)
+                           needs_investigation=unresolved_fee, warnings=warnings)
 
 
 def _charge_safely(fee_charger, plan, outcome) -> FeeOutcome:
@@ -341,9 +382,15 @@ def _actual_cost_lines(plan: SwapPlan, outcome: SwapOutcome, fee: FeeOutcome) ->
                               bool(outcome.gas_sponsorship_id),
                               'fronted by sponsor, charged to the user'
                               if outcome.gas_sponsorship_id else ''))
-    lines.append(CostLine(KIND_PLATFORM_FEE, _d(fee.usd) if fee.charged else _d(0),
-                          PAYER_USER, 'orcagent', False,
-                          '' if fee.charged else f'NOT COLLECTED: {fee.error}'))
+    # A pending fee carries its amount: the user's budget did pay it, which is
+    # what this line records. Whether OrcAgent's transfer landed is a
+    # collection question, tracked where collections are tracked.
+    if fee.charged or fee.pending:
+        lines.append(CostLine(KIND_PLATFORM_FEE, _d(fee.usd), PAYER_USER, 'orcagent', False,
+                              '' if fee.charged else 'dispatched; collection recorded separately'))
+    else:
+        lines.append(CostLine(KIND_PLATFORM_FEE, _d(0), PAYER_USER, 'orcagent', False,
+                              f'NOT COLLECTED: {fee.error}'))
     return lines
 
 

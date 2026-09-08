@@ -154,7 +154,7 @@ check('gas that cannot be priced also refuses rather than costing zero',
       R['nogas_status'] == 200 and R['nogas']['can_execute'] is False
       and 'gas' in R['nogas']['reject_reason'])
 
-# ── still read-only ──
+# ── still executes nothing ──
 import ast                                                    # noqa: E402
 src = open(REPO + '/dashboard.py').read()
 tree = ast.parse(src)
@@ -167,10 +167,19 @@ forbidden = {'_execute_evm_swap', '_execute_user_swap', '_execute_user_swap_ex',
              '_sponsor_evm_gas', '_sponsor_solana_gas', '_ensure_evm_gas'}
 check('the quote endpoint calls nothing that executes, charges or sponsors — it '
       'prices a trade and stops there', not (called & forbidden))
-writes = [n for n in ast.walk(fn) if isinstance(n, ast.Constant)
-          and isinstance(n.value, str)
-          and any(w in n.value.upper() for w in ('INSERT ', 'UPDATE ', 'DELETE '))]
-check('...and writes nothing to the database', not writes)
+# The one thing it does write is the quote it just showed. Execution reads
+# that row instead of re-pricing, so the number cannot move between being
+# shown and being spent. Asserted by name rather than by "no INSERT appears
+# in this function": the INSERT lives in the ledger, so the old spelling of
+# this check would have passed no matter what the endpoint stored.
+called_attrs = {n.func.attr for n in ast.walk(fn)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+check('...and the only thing it stores is the quote itself, so execution spends '
+      'the number the user was shown rather than a fresh one',
+      'save_quote' in called_attrs)
+check('...it stores nothing else — no trade, no reservation, no cost line',
+      not (called_attrs & {'start_execution', 'reserve', 'record_costs', 'settle',
+                           'transition', 'execute_trade', 'attach_to_trade'}))
 
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)

@@ -56,6 +56,7 @@ from werkzeug.exceptions import HTTPException
 from trade_engine import registry as te_registry
 from trade_engine import ledger as te_ledger
 from trade_engine import subsidy as te_subsidy
+from trade_engine import execute as te_execute
 from trade_engine.costs import CostError as TeCostError
 from trade_engine.providers import JupiterProvider, ZeroExProvider, ProviderError as TeProviderError
 from trade_engine.quote import QuoteError as TeQuoteError, QuoteRequest, build_quote
@@ -7194,6 +7195,13 @@ _ERC20_FULL_ABI = _ERC20_MIN_ABI + [
      'name': 'transfer', 'outputs': [{'name': '', 'type': 'bool'}], 'type': 'function'},
 ]
 
+# Two failure messages _execute_evm_swap() returns that mean very different
+# things for a user's money, named so a caller can tell them apart instead of
+# matching on prose. A revert is resolved -- the swap did not happen and only
+# gas was spent. An unconfirmed send is not resolved: the money may be gone.
+SWAP_REVERTED_MSG = 'Swap transaction reverted on-chain'
+SWAP_UNCONFIRMED_PREFIX = 'UNCONFIRMED'
+
 def _get_0x_quote(sell_token: str, buy_token: str, sell_amount_raw: int, taker: str, chain: str = 'bsc') -> dict:
     """sell_amount_raw is already in the sell token's smallest unit (respect
     its own decimals -- see the 18-vs-6-decimal USDC note earlier). 0x's
@@ -7384,9 +7392,235 @@ def api_trade_quote():
         # real reason, not as a server error and never as a zero-cost route.
         return jsonify({'ok': True, 'can_execute': False, 'reject_reason': str(e)}), 200
 
+    # Stored as it was shown. Execution reads THIS row rather than re-pricing:
+    # the point of an expiry is that the number does not move once a user has
+    # been given it, and a fresh calculation at execute time is a different
+    # number wearing the same quote id.
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        te_ledger.save_quote(conn, quote)
+    finally:
+        conn.close()
+
     body = quote.to_dict()
     body['ok'] = True
     return jsonify(body)
+
+
+# ── TRADE ENGINE: execution ─────────────────────────────────────────────────
+# The one path that executes a trade against the ceiling the user was shown.
+# Everything chain-shaped lives here; the engine in trade_engine/execute.py
+# does the ordering, the claim on the money and the state machine, and never
+# sees a key.
+#
+# Nothing legacy calls this yet. The eight existing execution endpoints are
+# untouched -- they are moved over one at a time, starting with the manual
+# EVM buy, so a mistake here cannot take out a working trade path.
+
+def _te_evm_swap_executor(enc_blob: str, wallet: str, evm_address: str):
+    """An executor for one user's EVM wallet.
+
+    Returns a callable the engine drives. The key is decrypted inside the
+    call, for the call, and dropped by _use_key's finally -- the engine holds
+    the closure, never the key.
+
+    The mapping from _execute_evm_swap()'s (ok, msg, tx_hash) to the engine's
+    three outcomes is the whole reason this wrapper exists:
+
+      no hash        -> never broadcast; the user's claim goes back in full
+      hash + revert  -> landed, definitively did nothing; only gas was spent
+      hash + neither -> UNCONFIRMED; the money may be gone, so it stays claimed
+
+    Before the fix in _execute_evm_swap(), the third case was indistinguishable
+    from the first -- a receipt timeout returned tx_hash='', so a swap that had
+    really been broadcast looked exactly like one that never left.
+    """
+    def run(plan):
+        with _use_key(enc_blob, wallet) as pk:
+            gas_ok, gas_msg, _bridge_id = _ensure_evm_gas(
+                plan.user_id, wallet, pk, evm_address, plan.chain)
+            if not gas_ok:
+                # Nothing has been sent, so this is a clean refusal and the
+                # reservation is released. No auto-bridge is started from
+                # this path: a bridge finishes minutes later, long after the
+                # quote this trade is bound to has expired.
+                return te_execute.SwapOutcome(
+                    submitted=False, confirmed=False,
+                    error=f'cannot trade on {plan.chain} yet — {gas_msg}')
+            # The PURCHASE, not the ceiling. This single argument is the
+            # difference between the engine and every legacy endpoint.
+            ok, err, tx_hash = _execute_evm_swap(
+                wallet, pk, 'buy', plan.token_address, str(plan.purchase_usd), plan.chain)
+
+        if ok:
+            return te_execute.SwapOutcome(submitted=True, confirmed=True, tx_hash=tx_hash)
+        if not tx_hash:
+            return te_execute.SwapOutcome(submitted=False, confirmed=False,
+                                          error=err or 'the swap was not sent')
+        if err == SWAP_REVERTED_MSG:
+            return te_execute.SwapOutcome(submitted=True, confirmed=False, reverted=True,
+                                          tx_hash=tx_hash, error=err)
+        return te_execute.SwapOutcome(submitted=True, confirmed=False, tx_hash=tx_hash,
+                                      error=err or 'sent but not confirmed')
+    return run
+
+
+def _te_evm_fee_charger(enc_blob: str, wallet: str, symbol: str):
+    """Charges the platform fee that was already inside the user's ceiling.
+
+    Reported as PENDING, never as collected. _charge_evm_txn_fee() hands the
+    transfer to a background thread and returns before it has happened, so
+    there is nothing here that could honestly claim the money arrived --
+    whether it did is written to the fees table by that thread, which is
+    where collections are tracked.
+
+    The amount passed is the PURCHASE. The legacy path passes the full amount
+    the user typed and so charges 0.75% of a number the user never agreed to
+    spend; here the fee is 0.75% of what is actually being bought, which is
+    what the quote already subtracted from the ceiling.
+    """
+    def charge(plan, outcome):
+        with _use_key(enc_blob, wallet) as pk:
+            _charge_evm_txn_fee(pk, wallet, plan.user_id, symbol,
+                                float(plan.purchase_usd), 'buy', plan.chain)
+        return te_execute.FeeOutcome(charged=False, pending=True, usd=plan.fee_usd)
+    return charge
+
+
+@app.route('/api/trade/execute', methods=['POST'])
+@rate_limit(10, 60)
+def api_trade_execute():
+    """Execute a quote that was already given, once.
+
+    The caller sends a quote_id, not an amount. Every number this trade uses
+    comes from the stored quote -- a client that sends a different amount,
+    a different token or a different chain is ignored, because the only thing
+    that may be spent is what the user was actually shown.
+    """
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'msg': 'Connect a wallet first'}), 401
+    data = request.get_json(silent=True) or {}
+    quote_id = str(data.get('quote_id') or '').strip()
+    if not quote_id:
+        return jsonify({'ok': False, 'msg': 'No quote given'}), 400
+
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        uid = _get_uid(conn, wallet)
+        if not uid:
+            return jsonify({'ok': False, 'msg': 'User not found'}), 404
+        quote_row = te_ledger.load_quote(conn, quote_id)
+    finally:
+        conn.close()
+
+    if not quote_row:
+        return jsonify({'ok': False, 'msg': 'That quote no longer exists. Request a new one.'}), 404
+    # A quote id is a bearer token for someone's money. Checked against the
+    # authenticated user rather than trusted, so one account can never execute
+    # a quote priced for another's wallet and balance.
+    if quote_row['user_id'] != uid or quote_row['wallet'] != wallet:
+        return jsonify({'ok': False, 'msg': 'That quote is not yours'}), 403
+
+    chain = quote_row['destination_chain']
+    if chain not in EVM_CHAINS:
+        # Solana, bridges and copy trading still run on their existing paths.
+        # Refusing is honest; silently falling back to a legacy path would
+        # execute a trade the engine's guarantees do not cover.
+        return jsonify({'ok': False,
+                        'msg': f'The trade engine does not execute {chain} yet'}), 400
+
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        row = conn.execute(
+            'SELECT id, encrypted_private_key_bsc, bsc_wallet_address FROM users '
+            'WHERE wallet_address=?', (wallet,)).fetchone()
+    finally:
+        conn.close()
+    if not row or not row[1]:
+        return jsonify({'ok': False, 'msg': 'No EVM trading wallet configured'}), 400
+    _uid, enc_blob, evm_address = row
+    if not evm_address:
+        return jsonify({'ok': False, 'msg': 'No EVM trading wallet configured'}), 400
+
+    # Read server-side. A balance the client sends is a number the client
+    # chose, and this one decides how much may be claimed.
+    try:
+        available = Decimal(str(get_evm_usdc_balance(evm_address, chain)))
+    except Exception as e:
+        return jsonify({'ok': False, 'msg': f'Could not read your {chain} balance: {e}'}), 502
+
+    # The idempotency key is namespaced to the user so one account cannot
+    # collide with (and so read back) another's trade. With no key from the
+    # client the quote itself is the key: one quote, one trade, which is the
+    # safe default rather than a new trade per click.
+    client_key = str(data.get('idempotency_key') or '').strip()[:100]
+    idem = f'{uid}:{client_key}' if client_key else f'{uid}:quote:{quote_id}'
+
+    td = get_token_data(quote_row['token_address'])
+    symbol = (td.get('symbol') or quote_row['token_address'][:8]) if td else quote_row['token_address'][:8]
+
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        result = te_execute.execute_trade(
+            conn, quote_id=quote_id, idempotency_key=idem, available_usd=available,
+            swap_executor=_te_evm_swap_executor(enc_blob, wallet, evm_address),
+            fee_charger=_te_evm_fee_charger(enc_blob, wallet, symbol),
+        )
+    except te_execute.QuoteNotUsable as e:
+        return jsonify({'ok': False, 'requote': True, 'msg': str(e)}), 409
+    except te_execute.ExecutionError as e:
+        return jsonify({'ok': False, 'msg': str(e)}), 400
+    finally:
+        conn.close()
+
+    body = result.to_dict()
+    body['ok'] = result.state == te_ledger.COMPLETED
+    body['symbol'] = symbol
+    body['token_address'] = quote_row['token_address']
+    body['chain'] = chain
+    if not body['ok']:
+        body['msg'] = result.failure_reason or 'The trade did not complete'
+    return jsonify(body), 200
+
+
+@app.route('/api/trade/status/<trade_id>', methods=['GET'])
+@rate_limit(60, 60)
+def api_trade_status(trade_id):
+    """Where a trade got to, and what it really cost.
+
+    Costs come back quoted against actual per kind rather than as one total:
+    a total that happens to match can hide gas that came in expensive against
+    a reserve that was never used, and the first of those is the one worth
+    seeing.
+    """
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'msg': 'Connect a wallet first'}), 401
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        uid = _get_uid(conn, wallet)
+        trade = te_ledger.get_trade(conn, str(trade_id))
+        if not trade or trade['user_id'] != uid:
+            # Same answer for "does not exist" and "belongs to someone else",
+            # so trade ids cannot be probed for.
+            return jsonify({'ok': False, 'msg': 'No such trade'}), 404
+        drift = te_ledger.cost_drift(conn, str(trade_id))
+    finally:
+        conn.close()
+    return jsonify({
+        'ok': True,
+        'trade_id': trade['trade_id'],
+        'state': trade['state'],
+        'completed': trade['state'] == te_ledger.COMPLETED,
+        'finished': trade['state'] in te_ledger.TERMINAL,
+        'max_spend_usd': trade['max_spend_usd'],
+        'actual_spend_usd': trade['actual_spend_usd'] or '',
+        'tx_hash': trade['source_tx_hash'] or '',
+        'failure_reason': trade['failure_reason'] or '',
+        'needs_investigation': bool(trade['needs_investigation']),
+        'costs': drift,
+    })
 
 
 # ── CROSS-CHAIN BRIDGE (0x Cross-Chain API) ─────────────────────────────────
@@ -7655,13 +7889,24 @@ def _execute_evm_swap(wallet: str, private_key: str, action: str, token_address:
             return False, msg, ''
         tx_hash_hex = tx_hash.hex()
         print(f'[{chain}-swap] sent: {tx_hash_hex}', flush=True)
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=90)
+        # The receipt wait gets its own except. Before, a timeout here fell
+        # through to the outer handler, which returns tx_hash='' -- so a swap
+        # that was broadcast and simply took longer than 90s was reported as
+        # if nothing had ever been sent, and its hash was lost. That is the
+        # one failure that must never look clean: the trade may well have
+        # landed. It now comes back with its hash and a message that says
+        # UNCONFIRMED, distinct from a revert, which is a resolved outcome.
+        try:
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=90)
+        except Exception as e:
+            print(f'[{chain}-swap] UNCONFIRMED after 90s: {tx_hash_hex}: {e}', flush=True)
+            return False, f'{SWAP_UNCONFIRMED_PREFIX}: sent but not confirmed within 90s', tx_hash_hex
         success = receipt.status == 1
         print(f'[{chain}-swap] {"confirmed" if success else "reverted on-chain"}: {tx_hash_hex}', flush=True)
         # tx_hash_hex is returned even on-chain-revert -- the transaction did
         # broadcast and has a real hash, it just didn't succeed; only the
         # never-broadcast failure paths above return ''.
-        return success, ('' if success else 'Swap transaction reverted on-chain'), tx_hash_hex
+        return success, ('' if success else SWAP_REVERTED_MSG), tx_hash_hex
     except Exception as e:
         msg = f'{type(e).__name__}: {_redact_keys(str(e))[:100]}'
         print(f'[{chain}-swap] error for {wallet[:8]}...: {type(e).__name__}: {e}', flush=True)
