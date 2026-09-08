@@ -47,7 +47,16 @@ from markupsafe import Markup
 import gzip
 import shutil
 import traceback
+from decimal import Decimal, ROUND_UP
 from werkzeug.exceptions import HTTPException
+# Pure arithmetic, no external dependencies -- see trade_engine/costs.py.
+# Imported unguarded on purpose: a silent fallback here would let the app
+# start with the spend ceiling missing, which is the one failure this
+# module exists to prevent. tests/test_module_imports.py catches breakage.
+from trade_engine import registry as te_registry
+from trade_engine.costs import CostError as TeCostError
+from trade_engine.providers import JupiterProvider, ZeroExProvider, ProviderError as TeProviderError
+from trade_engine.quote import QuoteError as TeQuoteError, QuoteRequest, build_quote
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 from cryptography.fernet import Fernet, InvalidToken
@@ -7196,6 +7205,175 @@ def _get_0x_quote(sell_token: str, buy_token: str, sell_amount_raw: int, taker: 
     )
     r.raise_for_status()
     return r.json()
+
+# ── TRADE ENGINE: quoting ───────────────────────────────────────────────────
+# Read-only. This prices a trade and nothing else -- it signs nothing, sends
+# nothing, and no existing execution path calls it. It exists so the all-in
+# cost of a trade can be seen and compared against real trades before
+# anything is wired to it.
+#
+# The engine itself lives in trade_engine/ and knows nothing about this app.
+# Everything app-shaped -- how to reach 0x, what gas costs, whether a wallet
+# needs sponsoring -- is injected from here.
+
+_TE_GAS_CACHE: dict = {}          # chain -> (fetched_at, usd_per_swap)
+_TE_GAS_TTL = 60
+_TE_SOL_SWAP_FEE = Decimal('0.00002')   # SOL: network + priority fee for one swap
+
+def _te_native_price_usd(chain: str) -> Decimal:
+    """What one unit of the chain's gas token is worth, in the stable the
+    trade is funded with.
+
+    Priced through 0x rather than a new price feed: quoting native -> USDC is
+    the same integration the app already uses, and it answers the question
+    that actually matters here (what the gas will cost in the currency the
+    ceiling is denominated in) rather than a general market price.
+    """
+    cfg = EVM_CHAINS[chain]
+    quote = _get_0x_quote(BNB_NATIVE_ADDR, cfg['usdc'], 10 ** 18,
+                          BNB_NATIVE_ADDR, chain)
+    buy = quote.get('buyAmount')
+    if not buy:
+        raise TeQuoteError(f'no {cfg["native_symbol"]} price available on {chain}')
+    stable = te_registry.get_chain(chain).stable
+    return te_registry.from_raw(int(buy), stable)
+
+def _te_gas_usd(chain: str) -> Decimal:
+    """Cost in USD of the gas one swap needs on `chain`.
+
+    Raises rather than returning zero when it cannot be determined. A zero
+    here would silently drop a real cost out of the user's ceiling, which is
+    exactly the failure the ceiling exists to prevent.
+    """
+    now = time.time()
+    cached = _TE_GAS_CACHE.get(chain)
+    if cached and now - cached[0] < _TE_GAS_TTL:
+        return cached[1]
+
+    if te_registry.get_chain(chain).kind == 'svm':
+        if _sol_price_usd <= 0:
+            raise TeQuoteError('SOL price has not loaded yet — cannot price gas')
+        usd = (_TE_SOL_SWAP_FEE * Decimal(str(_sol_price_usd))).quantize(Decimal('0.01'))
+    else:
+        w3 = _get_web3(chain)
+        gas_price_wei = Decimal(w3.eth.gas_price)
+        native_usd = _te_native_price_usd(chain)
+        usd = ((gas_price_wei * Decimal(GAS_TOPUP_TX_GAS_UNITS) / Decimal(10) ** 18)
+               * native_usd).quantize(Decimal('0.01'), rounding=ROUND_UP)
+
+    _TE_GAS_CACHE[chain] = (now, usd)
+    return usd
+
+def _te_needs_sponsored_gas(chain: str, address: str) -> bool:
+    """Whether this wallet has no native token and the sponsor would front it.
+
+    Only affects how the cost is LABELLED, never whether it is charged: a
+    sponsored cost is still the user's, which is what keeps the sponsor a
+    payment rail instead of a subsidy. Failing closed (assuming sponsorship)
+    is the safe direction -- it can only make the quote more conservative.
+    """
+    if te_registry.get_chain(chain).kind == 'svm':
+        return False
+    if not (GAS_SPONSOR_PRIVATE_KEY and address):
+        return False
+    try:
+        w3 = _get_web3(chain)
+        return w3.eth.get_balance(w3.to_checksum_address(address)) == 0
+    except Exception:
+        return True
+
+def _te_swap_provider(chain: str):
+    """The aggregator that serves this chain, wrapping the app's own call."""
+    if te_registry.get_chain(chain).kind == 'svm':
+        return JupiterProvider(lambda sell, buy, amount: _jupiter_quote(sell, buy, amount))
+    return ZeroExProvider(_get_0x_quote)
+
+def _jupiter_quote(input_mint: str, output_mint: str, amount_raw: int) -> dict:
+    """Jupiter's quote endpoint, through the same proxy the swap path uses."""
+    base = (JUPITER_PROXY.rstrip('/') if JUPITER_PROXY else 'https://quote-api.jup.ag')
+    r = requests.get(
+        f'{base}/v6/quote',
+        params={'inputMint': input_mint, 'outputMint': output_mint,
+                'amount': str(int(amount_raw)), 'slippageBps': 100},
+        timeout=10,
+    )
+    r.raise_for_status()
+    return r.json()
+
+@app.route('/api/trade/quote', methods=['POST'])
+@rate_limit(30, 60)
+def api_trade_quote():
+    """Price a trade against a hard spend ceiling. Executes nothing.
+
+    The amount the caller sends is the MAXIMUM TOTAL they will spend, not the
+    size of the purchase: every cost comes out of it, and the purchase is
+    what remains. A route whose costs do not fit is reported as
+    can_execute=false with a reason, never trimmed to fit.
+    """
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'msg': 'Connect a wallet first'}), 401
+    data = request.get_json(silent=True) or {}
+
+    dest_chain = str(data.get('chain') or data.get('destination_chain') or '').strip().lower()
+    token_address = str(data.get('token_address') or data.get('mint') or '').strip()
+    source_chain = str(data.get('source_chain') or dest_chain).strip().lower()
+    try:
+        # str() first: a JSON number arrives as a float, and a float is
+        # refused by the cost engine on purpose.
+        max_spend = Decimal(str(data.get('max_spend_usd', data.get('amount_usd', '0'))))
+    except Exception:
+        return jsonify({'ok': False, 'msg': 'Invalid amount'}), 400
+    if max_spend <= 0:
+        return jsonify({'ok': False, 'msg': 'Enter an amount greater than zero'}), 400
+    # A missing token is a malformed request, not a market condition. Kept
+    # distinct from the un-executable-quote answer below so a caller can tell
+    # "you sent something wrong" from "this trade cannot be done right now".
+    if not token_address:
+        return jsonify({'ok': False, 'msg': 'No token given'}), 400
+
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        uid = _get_uid(conn, wallet)
+        row = conn.execute(
+            'SELECT bsc_wallet_address FROM users WHERE wallet_address=?', (wallet,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if not uid:
+        return jsonify({'ok': False, 'msg': 'User not found'}), 404
+
+    try:
+        chain_cfg = te_registry.get_chain(dest_chain)
+    except te_registry.RegistryError as e:
+        return jsonify({'ok': False, 'msg': str(e)}), 400
+    taker = wallet if chain_cfg.kind == 'svm' else ((row[0] if row else '') or '')
+    if not taker:
+        return jsonify({'ok': False, 'msg': f'No {chain_cfg.display_name} wallet yet'}), 400
+
+    try:
+        req_obj = QuoteRequest(
+            user_id=uid, wallet=wallet, source_chain=source_chain,
+            destination_chain=dest_chain, token_address=token_address,
+            max_spend_usd=max_spend, taker_address=taker,
+            mode=str(data.get('mode') or 'manual'),
+        )
+        quote = build_quote(
+            req_obj,
+            swap_provider=_te_swap_provider(dest_chain),
+            gas_estimator=_te_gas_usd,
+            fee_rate=Decimal(str(FEE_RATE_TXN)),
+            gas_is_sponsored=lambda c: _te_needs_sponsored_gas(c, taker),
+        )
+    except (TeQuoteError, TeCostError, TeProviderError, te_registry.RegistryError) as e:
+        # A quote that cannot be priced is reported as un-executable with the
+        # real reason, not as a server error and never as a zero-cost route.
+        return jsonify({'ok': True, 'can_execute': False, 'reject_reason': str(e)}), 200
+
+    body = quote.to_dict()
+    body['ok'] = True
+    return jsonify(body)
+
 
 # ── CROSS-CHAIN BRIDGE (0x Cross-Chain API) ─────────────────────────────────
 # Superseded a first-draft Solana<->BSC bridge built on Mayan Finance's
