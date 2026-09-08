@@ -54,6 +54,7 @@ from werkzeug.exceptions import HTTPException
 # start with the spend ceiling missing, which is the one failure this
 # module exists to prevent. tests/test_module_imports.py catches breakage.
 from trade_engine import registry as te_registry
+from trade_engine import ledger as te_ledger
 from trade_engine.costs import CostError as TeCostError
 from trade_engine.providers import JupiterProvider, ZeroExProvider, ProviderError as TeProviderError
 from trade_engine.quote import QuoteError as TeQuoteError, QuoteRequest, build_quote
@@ -2382,6 +2383,13 @@ def init_db():
         UNIQUE(user_id, token_address)
     )''')
     c.execute('CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlist(user_id)')
+    # Trade-engine tables: quotes, executions, per-cost drift and balance
+    # reservations. Owned by trade_engine/ledger.py so the schema lives with
+    # the code that reads it and can be tested standalone; created here so it
+    # exists from the first start like every other table. Nothing writes to
+    # them yet -- no trade runs through the engine.
+    te_ledger.ensure_schema(conn)
+
     conn.commit()
     conn.close()
 
