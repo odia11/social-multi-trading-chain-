@@ -55,6 +55,7 @@ from werkzeug.exceptions import HTTPException
 # module exists to prevent. tests/test_module_imports.py catches breakage.
 from trade_engine import registry as te_registry
 from trade_engine import ledger as te_ledger
+from trade_engine import subsidy as te_subsidy
 from trade_engine.costs import CostError as TeCostError
 from trade_engine.providers import JupiterProvider, ZeroExProvider, ProviderError as TeProviderError
 from trade_engine.quote import QuoteError as TeQuoteError, QuoteRequest, build_quote
@@ -2389,6 +2390,11 @@ def init_db():
     # exists from the first start like every other table. Nothing writes to
     # them yet -- no trade runs through the engine.
     te_ledger.ensure_schema(conn)
+    # Two columns on the existing gas_sponsorships table so a grant can be
+    # tied to the trade whose budget paid for it. Until a trade does that,
+    # every grant is a subsidy — which is exactly what the admin counter
+    # now reports instead of leaving invisible.
+    te_subsidy.apply_migrations(conn)
 
     conn.commit()
     conn.close()
@@ -25325,7 +25331,13 @@ def admin_gas_sponsor():
         return jsonify({'ok': True, 'enabled': False, 'sponsor_address': '', 'sol_sponsor_address': '',
                         'fee_wallet': EVM_CHAIN_FEE_WALLET or '', 'chains': [],
                         'totals': {'fees_to_sponsor': 0.0, 'fees_to_fee_wallet': 0.0,
-                                   'granted_count': 0, 'users_helped': 0}})
+                                   'granted_count': 0, 'users_helped': 0},
+                        # Same shape whether sponsorship is configured or not,
+                        # so the panel never has to guess whether the field exists.
+                        'subsidy': {'granted_usd': '0', 'recovered_usd': '0',
+                                    'outstanding_usd': '0', 'tracked_grants': 0,
+                                    'legacy_unrecoverable_usd': '0', 'legacy_grants': 0,
+                                    'zero_subsidy': True}})
 
     ok_filter = "(status IS NULL OR status='ok') AND (fee_tx IS NULL OR fee_tx NOT LIKE 'FAILED:%')"
     per_chain_fees, per_chain_grants, per_chain_refill = {}, {}, {}
@@ -25360,6 +25372,13 @@ def admin_gas_sponsor():
                 totals['granted_count'] += cnt
             totals['users_helped'] = conn.execute(
                 "SELECT COUNT(DISTINCT user_id) FROM gas_sponsorships WHERE status='sent'").fetchone()[0]
+            # What OrcAgent has paid for users and not got back.
+            # outstanding_usd is the figure that has to reach zero. The
+            # legacy total is reported separately because grants made before
+            # recovery existed cannot be recovered, and folding an
+            # unrecoverable historical loss into a live counter would leave
+            # it permanently non-zero and therefore useless as a signal.
+            subsidy = te_subsidy.subsidy_report(conn)
         finally:
             conn.close()
     except Exception as e:
@@ -25449,6 +25468,7 @@ def admin_gas_sponsor():
         'chains': chains,
         'totals': totals,
         'target_grants': GAS_SPONSOR_TARGET_GRANTS,
+        'subsidy': subsidy,
     })
 
 @app.route('/api/admin/collect-fees', methods=['POST'])
