@@ -507,6 +507,50 @@ LOG_FILE     = os.path.join(_DATA_DIR, 'trades.log')
 DB_FILE        = os.path.join(_DATA_DIR, 'orcagent.db')
 BACKUP_DIR     = os.path.join(_DATA_DIR, 'backups')
 HEARTBEAT_FILE = os.path.join(_DATA_DIR, 'heartbeat.txt')
+
+# ── DATA VOLUME ───────────────────────────────────────────────────────
+# Defined HERE, next to the paths they read, rather than beside
+# backup_database() where they are mostly used. The startup storage check
+# runs long before that point in the file, and having them further down is
+# what took the site off the air: _db_write_selftest() called _free_bytes()
+# a hundred lines before its def, so the module raised NameError on import
+# and the app never started at all.
+BACKUP_KEEP          = 3               # compressed copies to retain
+BACKUP_MIN_FREE_BYTES = 300 * 1024 * 1024   # refuse to write one below this
+
+def _free_bytes(path=None) -> int:
+    """Free space on the data volume, or -1 if it cannot be read."""
+    try:
+        return shutil.disk_usage(path or _DATA_DIR).free
+    except Exception:
+        return -1
+
+def _backup_files() -> list:
+    """Existing backups, newest first. Matches both the compressed files we
+    write now and the plain .db ones older versions left behind, so those are
+    still listed and still pruned."""
+    try:
+        return sorted([f for f in os.listdir(BACKUP_DIR)
+                       if f.startswith('orcagent_') and (f.endswith('.db') or f.endswith('.db.gz'))],
+                      reverse=True)
+    except Exception:
+        return []
+
+def _prune_backups(keep: int = BACKUP_KEEP) -> int:
+    """Delete all but the `keep` newest backups. Never deletes the newest
+    one, whatever `keep` says -- a backup directory is worth shrinking, not
+    emptying."""
+    freed = 0
+    for old in _backup_files()[max(keep, 1):]:
+        try:
+            path = os.path.join(BACKUP_DIR, old)
+            freed += os.path.getsize(path)
+            os.remove(path)
+            print(f'[backup] pruned {old}', flush=True)
+        except Exception as e:
+            print(f'[backup] could not prune {old}: {e}', flush=True)
+    return freed
+
 _APP_START     = time.time()
 print(f"[startup] persistent storage: {os.path.exists('/data')}  db={DB_FILE}", flush=True)
 
@@ -27138,42 +27182,6 @@ def _startup_fee_recovery():
 threading.Thread(target=_startup_fee_recovery, daemon=True).start()
 
 # ── DAILY DATABASE BACKUP ────────────────────────────────────────────────────
-BACKUP_KEEP          = 3               # compressed copies to retain
-BACKUP_MIN_FREE_BYTES = 300 * 1024 * 1024   # refuse to write one below this
-
-def _free_bytes(path=None) -> int:
-    """Free space on the data volume, or -1 if it cannot be read."""
-    try:
-        return shutil.disk_usage(path or _DATA_DIR).free
-    except Exception:
-        return -1
-
-def _backup_files() -> list:
-    """Existing backups, newest first. Matches both the compressed files we
-    write now and the plain .db ones older versions left behind, so those are
-    still listed and still pruned."""
-    try:
-        return sorted([f for f in os.listdir(BACKUP_DIR)
-                       if f.startswith('orcagent_') and (f.endswith('.db') or f.endswith('.db.gz'))],
-                      reverse=True)
-    except Exception:
-        return []
-
-def _prune_backups(keep: int = BACKUP_KEEP) -> int:
-    """Delete all but the `keep` newest backups. Never deletes the newest
-    one, whatever `keep` says -- a backup directory is worth shrinking, not
-    emptying."""
-    freed = 0
-    for old in _backup_files()[max(keep, 1):]:
-        try:
-            path = os.path.join(BACKUP_DIR, old)
-            freed += os.path.getsize(path)
-            os.remove(path)
-            print(f'[backup] pruned {old}', flush=True)
-        except Exception as e:
-            print(f'[backup] could not prune {old}: {e}', flush=True)
-    return freed
-
 def backup_database() -> bool:
     """
     Hot-copy orcagent.db to BACKUP_DIR/orcagent_YYYY-MM-DD.db.gz using the
