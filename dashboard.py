@@ -934,6 +934,13 @@ print(f'[startup] JUPITER_PROXY_URL = {(JUPITER_PROXY[:40] + "...") if len(JUPIT
 API_SHARED_SECRET  = os.environ.get('API_SHARED_SECRET', '')
 FEE_RATE_DEFAULT = 0.05  # 5% performance fee on profitable trades only
 FEE_RATE_TXN     = 0.0075  # 0.75% transaction fee, charged on BOTH the buy and the sell
+
+# Whether the manual EVM buy runs through the trade engine, where the amount
+# a user enters is the MAXIMUM they spend and the purchase is what remains
+# after gas, the fee and the slippage reserve. Off puts that one route back on
+# the pre-engine path, which swaps the full amount and charges the fee on top
+# -- a way back if the engine misbehaves in production, not an equal option.
+TRADE_ENGINE_MANUAL_EVM = os.getenv('TRADE_ENGINE_MANUAL_EVM', '1').strip() not in ('0', 'false', 'False', '')
                             # leg of every trade (see _charge_txn_fee()) -- so a full
                             # round-trip pays 1.5% total, split as two separate 0.75%
                             # charges rather than one combined charge at close.
@@ -7322,6 +7329,38 @@ def _jupiter_quote(input_mint: str, output_mint: str, amount_raw: int) -> dict:
     r.raise_for_status()
     return r.json()
 
+def _te_build_and_store_quote(*, uid, wallet, source_chain, dest_chain, token_address,
+                              max_spend, taker, mode='manual'):
+    """Price a trade and store it exactly as it was priced.
+
+    One function so the quote endpoint and any path that quotes for itself
+    cannot drift apart on fee rate, gas or sponsorship -- two copies of this
+    is how a route ends up pricing on different terms from the one the user
+    was shown.
+
+    Storing is not optional. Execution reads the stored row rather than
+    re-pricing, because the point of an expiry is that the number does not
+    move once a user has been given it.
+    """
+    quote = build_quote(
+        QuoteRequest(
+            user_id=uid, wallet=wallet, source_chain=source_chain,
+            destination_chain=dest_chain, token_address=token_address,
+            max_spend_usd=max_spend, taker_address=taker, mode=mode,
+        ),
+        swap_provider=_te_swap_provider(dest_chain),
+        gas_estimator=_te_gas_usd,
+        fee_rate=Decimal(str(FEE_RATE_TXN)),
+        gas_is_sponsored=lambda c: _te_needs_sponsored_gas(c, taker),
+    )
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        te_ledger.save_quote(conn, quote)
+    finally:
+        conn.close()
+    return quote
+
+
 @app.route('/api/trade/quote', methods=['POST'])
 @rate_limit(30, 60)
 def api_trade_quote():
@@ -7374,33 +7413,14 @@ def api_trade_quote():
         return jsonify({'ok': False, 'msg': f'No {chain_cfg.display_name} wallet yet'}), 400
 
     try:
-        req_obj = QuoteRequest(
-            user_id=uid, wallet=wallet, source_chain=source_chain,
-            destination_chain=dest_chain, token_address=token_address,
-            max_spend_usd=max_spend, taker_address=taker,
-            mode=str(data.get('mode') or 'manual'),
-        )
-        quote = build_quote(
-            req_obj,
-            swap_provider=_te_swap_provider(dest_chain),
-            gas_estimator=_te_gas_usd,
-            fee_rate=Decimal(str(FEE_RATE_TXN)),
-            gas_is_sponsored=lambda c: _te_needs_sponsored_gas(c, taker),
-        )
+        quote = _te_build_and_store_quote(
+            uid=uid, wallet=wallet, source_chain=source_chain, dest_chain=dest_chain,
+            token_address=token_address, max_spend=max_spend, taker=taker,
+            mode=str(data.get('mode') or 'manual'))
     except (TeQuoteError, TeCostError, TeProviderError, te_registry.RegistryError) as e:
         # A quote that cannot be priced is reported as un-executable with the
         # real reason, not as a server error and never as a zero-cost route.
         return jsonify({'ok': True, 'can_execute': False, 'reject_reason': str(e)}), 200
-
-    # Stored as it was shown. Execution reads THIS row rather than re-pricing:
-    # the point of an expiry is that the number does not move once a user has
-    # been given it, and a fresh calculation at execute time is a different
-    # number wearing the same quote id.
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        te_ledger.save_quote(conn, quote)
-    finally:
-        conn.close()
 
     body = quote.to_dict()
     body['ok'] = True
@@ -7487,6 +7507,48 @@ def _te_evm_fee_charger(enc_blob: str, wallet: str, symbol: str):
     return charge
 
 
+def _te_run_evm_trade(*, quote_id, idem, available, wallet, enc_blob, evm_address,
+                      symbol, token_address, chain, user_id):
+    """Run one stored quote on an EVM chain, and record the position it opened.
+
+    One function so /api/trade/execute and any legacy route forwarded onto the
+    engine behave identically -- including the bookkeeping, which is the part
+    that would quietly diverge if each caller did it itself.
+
+    The position is opened at the PURCHASE, not at the amount the user typed.
+    The legacy path records the typed amount as the spend while having also
+    paid a fee on top of it, so every position it opens overstates what was
+    bought and understates what it cost.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        result = te_execute.execute_trade(
+            conn, quote_id=quote_id, idempotency_key=idem, available_usd=available,
+            swap_executor=_te_evm_swap_executor(enc_blob, wallet, evm_address),
+            fee_charger=_te_evm_fee_charger(enc_blob, wallet, symbol),
+        )
+        quote_row = te_ledger.load_quote(conn, quote_id)
+    finally:
+        conn.close()
+
+    # Only a COMPLETED trade opens a position. A trade that was sent but never
+    # confirmed deliberately does not: recording a position for a swap nobody
+    # has seen land would put a holding on screen that may not exist, and the
+    # user would then try to sell it.
+    if result.state == te_ledger.COMPLETED and result.created:
+        purchase = float(quote_row['token_purchase_usd']) if quote_row else 0.0
+        td = get_token_data(token_address)
+        entry_price = float(td['price']) if td and td.get('price') else 0.0
+        _upsert_open_position(user_id, wallet, token_address, {
+            'amount':    (purchase / entry_price) if entry_price > 0 else 0.0,
+            'buy_price': entry_price,
+            'spend':     purchase,
+            'symbol':    symbol,
+            'opened_at': time.time(),
+        }, source='manual', chain=chain)
+    return result
+
+
 @app.route('/api/trade/execute', methods=['POST'])
 @rate_limit(10, 60)
 def api_trade_execute():
@@ -7560,19 +7622,16 @@ def api_trade_execute():
     td = get_token_data(quote_row['token_address'])
     symbol = (td.get('symbol') or quote_row['token_address'][:8]) if td else quote_row['token_address'][:8]
 
-    conn = sqlite3.connect(DB_FILE)
     try:
-        result = te_execute.execute_trade(
-            conn, quote_id=quote_id, idempotency_key=idem, available_usd=available,
-            swap_executor=_te_evm_swap_executor(enc_blob, wallet, evm_address),
-            fee_charger=_te_evm_fee_charger(enc_blob, wallet, symbol),
-        )
+        result = _te_run_evm_trade(
+            quote_id=quote_id, idem=idem, available=available, wallet=wallet,
+            enc_blob=enc_blob, evm_address=evm_address, symbol=symbol,
+            token_address=quote_row['token_address'], chain=chain,
+            user_id=uid)
     except te_execute.QuoteNotUsable as e:
         return jsonify({'ok': False, 'requote': True, 'msg': str(e)}), 409
     except te_execute.ExecutionError as e:
         return jsonify({'ok': False, 'msg': str(e)}), 400
-    finally:
-        conn.close()
 
     body = result.to_dict()
     body['ok'] = result.state == te_ledger.COMPLETED
@@ -12880,6 +12939,12 @@ def api_evm_trade_buy():
         # SAME bridge and completes automatically once gas lands (via
         # _execute_auto_buy_after_bridge()), instead of the user seeing a
         # dead error and having to press Buy again once it's ready.
+        #
+        # Kept HERE rather than inside the engine's executor because that
+        # ride-along is a real feature and a bridge finishes minutes later,
+        # long after the quote a trade is bound to has expired. By the time
+        # the engine runs, gas is already sufficient and its own check is a
+        # cheap confirmation.
         if evm_address:
             _gas_ok, _gas_msg, _gas_bridge_id = _ensure_evm_gas(
                 user_id, wallet, pk, evm_address, chain,
@@ -12892,23 +12957,94 @@ def api_evm_trade_buy():
                         'msg': 'Activating this chain for your wallet — your buy will complete automatically once ready.',
                     })
                 return jsonify({'ok': False, 'msg': f'Cannot trade on {chain} yet — {_gas_msg}'}), 400
-        buy_ok, buy_err, buy_tx_hash = _execute_evm_swap(wallet, pk, 'buy', token_address, str(amount_usdc), chain)
-    if not buy_ok:
-        return jsonify({'ok': False, 'msg': buy_err or 'Swap failed'}), 502
+
+    # ── through the trade engine ──
+    # What changes for the user: amount_usdc is now the MAXIMUM they spend,
+    # not the size of the purchase. Every cost -- gas, the 0.75% fee, the
+    # slippage reserve -- comes out of it, and the purchase is what remains.
+    # Before this, the full amount was swapped and the fee was charged on top,
+    # so the real spend was always above the number on screen.
+    #
+    # TRADE_ENGINE_MANUAL_EVM=0 puts this route back on the old path without a
+    # code change. It is here because this is the first phase that alters how
+    # real money moves, not because the old path is preferred.
+    if not TRADE_ENGINE_MANUAL_EVM:
+        return _legacy_evm_trade_buy(wallet, enc_blob, user_id, evm_address,
+                                     chain, token_address, amount_usdc)
+
     td          = get_token_data(token_address)
     entry_price = float(td['price']) if td and td.get('price') else 0.0
     symbol      = (td.get('symbol') or token_address[:8]) if td else token_address[:8]
-    pos = {
-        'amount':    (amount_usdc / entry_price) if entry_price > 0 else 0.0,
-        'buy_price': entry_price,
-        'spend':     amount_usdc,
-        'symbol':    symbol,
-        'opened_at': time.time(),
-    }
-    _upsert_open_position(user_id, wallet, token_address, pos, source='manual', chain=chain)
-    _charge_evm_txn_fee(pk, wallet, user_id, symbol, amount_usdc, 'buy', chain)
-    return jsonify({'ok': True, 'chain': chain, 'amount_usdc': amount_usdc, 'token_address': token_address,
-                     'entry_price': entry_price, 'symbol': symbol, 'tx_hash': buy_tx_hash})
+    try:
+        quote = _te_build_and_store_quote(
+            uid=user_id, wallet=wallet, source_chain=chain, dest_chain=chain,
+            token_address=token_address, max_spend=Decimal(str(amount_usdc)),
+            taker=evm_address, mode='manual')
+    except (TeQuoteError, TeCostError, TeProviderError, te_registry.RegistryError) as e:
+        return jsonify({'ok': False, 'msg': f'Could not price this trade: {e}'}), 502
+    qbody = quote.to_dict()
+    if not qbody.get('can_execute'):
+        # Priced, and it does not fit. Reported rather than trimmed to fit:
+        # the ceiling is the user's, not a target to squeeze a trade into.
+        return jsonify({'ok': False, 'msg': qbody.get('reject_reason')
+                        or 'This trade cannot be done within that amount'}), 400
+
+    try:
+        result = _te_run_evm_trade(
+            quote_id=quote.quote_id,
+            # One buy per quote. A double-click cannot become two swaps,
+            # which is the behaviour the old route had no defence against.
+            idem=f'{user_id}:quote:{quote.quote_id}',
+            available=Decimal(str(current_balance)), wallet=wallet, enc_blob=enc_blob,
+            evm_address=evm_address, symbol=symbol, token_address=token_address,
+            chain=chain, user_id=user_id)
+    except te_execute.QuoteNotUsable as e:
+        return jsonify({'ok': False, 'requote': True, 'msg': str(e)}), 409
+
+    if result.state != te_ledger.COMPLETED:
+        return jsonify({'ok': False, 'msg': result.failure_reason or 'Swap failed',
+                        'tx_hash': result.tx_hash, 'trade_id': result.trade_id,
+                        'needs_investigation': result.needs_investigation}), 502
+    return jsonify({'ok': True, 'chain': chain,
+                    # What was actually bought, which is now less than the
+                    # amount entered because the costs came out of it.
+                    'amount_usdc': float(qbody['token_purchase_usd']),
+                    'max_spend_usd': float(qbody['max_spend_usd']),
+                    'costs': qbody['costs_by_kind'],
+                    'token_address': token_address, 'entry_price': entry_price,
+                    'symbol': symbol, 'tx_hash': result.tx_hash,
+                    'trade_id': result.trade_id, 'warnings': result.warnings})
+
+
+def _legacy_evm_trade_buy(wallet, enc_blob, user_id, evm_address, chain,
+                          token_address, amount_usdc):
+    """The pre-engine buy, kept behind TRADE_ENGINE_MANUAL_EVM=0.
+
+    It swaps the FULL amount and then charges 0.75% of it on top, so the
+    user's real spend exceeds what they entered. That is the behaviour the
+    engine exists to replace; this is here as a way back if the engine path
+    misbehaves in production, not as an equal alternative.
+    """
+    with _use_key(enc_blob, wallet) as pk:
+        buy_ok, buy_err, buy_tx_hash = _execute_evm_swap(
+            wallet, pk, 'buy', token_address, str(amount_usdc), chain)
+        if not buy_ok:
+            return jsonify({'ok': False, 'msg': buy_err or 'Swap failed',
+                            'tx_hash': buy_tx_hash}), 502
+        td          = get_token_data(token_address)
+        entry_price = float(td['price']) if td and td.get('price') else 0.0
+        symbol      = (td.get('symbol') or token_address[:8]) if td else token_address[:8]
+        _upsert_open_position(user_id, wallet, token_address, {
+            'amount':    (amount_usdc / entry_price) if entry_price > 0 else 0.0,
+            'buy_price': entry_price,
+            'spend':     amount_usdc,
+            'symbol':    symbol,
+            'opened_at': time.time(),
+        }, source='manual', chain=chain)
+        _charge_evm_txn_fee(pk, wallet, user_id, symbol, amount_usdc, 'buy', chain)
+    return jsonify({'ok': True, 'chain': chain, 'amount_usdc': amount_usdc,
+                    'token_address': token_address, 'entry_price': entry_price,
+                    'symbol': symbol, 'tx_hash': buy_tx_hash})
 
 @app.route('/api/evm/trade/sell', methods=['POST'])
 @rate_limit(10, 60)

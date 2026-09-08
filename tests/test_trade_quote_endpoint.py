@@ -172,14 +172,25 @@ check('the quote endpoint calls nothing that executes, charges or sponsors — i
 # shown and being spent. Asserted by name rather than by "no INSERT appears
 # in this function": the INSERT lives in the ledger, so the old spelling of
 # this check would have passed no matter what the endpoint stored.
-called_attrs = {n.func.attr for n in ast.walk(fn)
-                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
-check('...and the only thing it stores is the quote itself, so execution spends '
-      'the number the user was shown rather than a fresh one',
-      'save_quote' in called_attrs)
+def _calls(name):
+    f = next(n for n in ast.walk(tree)
+             if isinstance(n, ast.FunctionDef) and n.name == name)
+    return ({c.func.attr for c in ast.walk(f)
+             if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)}
+            | {c.func.id for c in ast.walk(f)
+               if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)})
+
+endpoint_calls = _calls('api_trade_quote')
+check('the endpoint prices through the shared builder rather than its own copy — '
+      'two copies is how one route ends up quoting on different terms from the '
+      'one the user was shown',
+      '_te_build_and_store_quote' in endpoint_calls)
+stores = endpoint_calls | _calls('_te_build_and_store_quote')
+check('...and the only thing stored is the quote itself, so execution spends the '
+      'number the user was shown rather than a fresh one', 'save_quote' in stores)
 check('...it stores nothing else — no trade, no reservation, no cost line',
-      not (called_attrs & {'start_execution', 'reserve', 'record_costs', 'settle',
-                           'transition', 'execute_trade', 'attach_to_trade'}))
+      not (stores & {'start_execution', 'reserve', 'record_costs', 'settle',
+                     'transition', 'execute_trade', 'attach_to_trade'}))
 
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)

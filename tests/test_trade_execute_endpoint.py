@@ -43,17 +43,29 @@ c = d.app.test_client()
 
 WALLET = 'WALLET1'
 EVM = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+def ensure_user(conn, wallet, evm):
+    """Create the user if absent, then give it a trading wallet.
+
+    INSERT OR IGNORE alone is not enough: it silently does nothing when the
+    row already exists, so a previous run's half-set-up user would be reused
+    and the test would quietly exercise the wrong thing. And _get_uid only
+    looks up -- it never creates -- so relying on it means depending on rows
+    somebody else's test left behind.
+    """
+    conn.execute('INSERT OR IGNORE INTO users (wallet_address) VALUES (?)', (wallet,))
+    conn.execute("UPDATE users SET bsc_wallet_address=?, encrypted_private_key_bsc='ENC' "
+                 'WHERE wallet_address=?', (evm, wallet))
+    conn.commit()
+    row = conn.execute('SELECT id, encrypted_private_key_bsc, bsc_wallet_address '
+                       'FROM users WHERE wallet_address=?', (wallet,)).fetchone()
+    assert row and row[1] and row[2], (wallet, row)
+    return row[0]
+
 conn = sqlite3.connect(d.DB_FILE)
-# Created through the app's own path, then given a trading wallet: an
-# INSERT OR IGNORE here silently does nothing if the table has a NOT NULL
-# column, and the test would then be exercising a user that does not exist.
-uid = d._get_uid(conn, WALLET)
-other_uid = d._get_uid(conn, 'OTHER')
-conn.execute("UPDATE users SET bsc_wallet_address=?, encrypted_private_key_bsc='ENCRYPTED' "
-             "WHERE wallet_address IN (?, 'OTHER')", (EVM, WALLET))
-conn.commit()
-assert uid and other_uid and uid != other_uid, (uid, other_uid)
+uid = ensure_user(conn, WALLET, EVM)
+other_uid = ensure_user(conn, 'OTHER', EVM)
 conn.close()
+assert uid != other_uid, (uid, other_uid)
 
 # ── everything that touches a chain, replaced ──
 d._authenticated_wallet = lambda: WALLET
@@ -296,18 +308,49 @@ check('a chain the engine does not cover is refused outright rather than quietly
 import ast                                                        # noqa: E402
 src = open(REPO + '/dashboard.py').read()
 tree = ast.parse(src)
-legacy = {'api_evm_trade_buy', 'api_bsc_trade_buy', 'api_instant_trade',
-          'api_manual_buy', 'api_pump_scanner_buy'}
-touched = []
-for n in ast.walk(tree):
-    if isinstance(n, ast.FunctionDef) and n.name in legacy:
-        for sub in ast.walk(n):
-            if (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute)
-                    and sub.func.attr in ('execute_trade', 'save_quote')):
-                touched.append(n.name)
-check('no legacy execution endpoint has been rewired yet — they are moved one at '
-      'a time, so a mistake in the engine cannot take out a working trade path',
-      not touched)
+funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+
+
+def reaches_engine(name, seen=None):
+    """Whether this endpoint runs a trade through the engine, directly or
+    through one of the app's own helpers.
+
+    Followed transitively on purpose: the forwarding goes through
+    _te_run_evm_trade, so a check that only looked for a direct
+    execute_trade() call in the endpoint body would report every route as
+    untouched no matter what it had been wired to.
+    """
+    seen = seen or set()
+    if name in seen or name not in funcs:
+        return False
+    seen.add(name)
+    for sub in ast.walk(funcs[name]):
+        if isinstance(sub, ast.Call):
+            f = sub.func
+            if isinstance(f, ast.Attribute) and f.attr == 'execute_trade':
+                return True
+            if isinstance(f, ast.Name) and reaches_engine(f.id, seen):
+                return True
+    return False
+
+
+check('the manual EVM buy — the route behind the Buy button on Live Market — now '
+      'runs through the engine',
+      reaches_engine('api_evm_trade_buy'))
+still_legacy = {n for n in ('api_bsc_trade_buy', 'api_instant_trade', 'api_manual_buy',
+                            'api_pump_scanner_buy', 'api_evm_trade_sell',
+                            'api_bsc_trade_sell')
+                if not reaches_engine(n)}
+check('every other execution endpoint is still on its old path — they are moved '
+      'one at a time so a mistake in the engine cannot take out several working '
+      'trade paths at once. Still to go: '
+      + ', '.join(sorted(still_legacy)),
+      still_legacy == {'api_bsc_trade_buy', 'api_instant_trade', 'api_manual_buy',
+                       'api_pump_scanner_buy', 'api_evm_trade_sell',
+                       'api_bsc_trade_sell'})
+check('the old EVM buy is still reachable behind the flag rather than deleted, so '
+      'this phase can be undone without a code change',
+      'TRADE_ENGINE_MANUAL_EVM' in src and '_legacy_evm_trade_buy' in funcs)
 
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)
