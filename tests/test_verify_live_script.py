@@ -139,5 +139,17 @@ check('...and reports the HTTP status when the feed itself is the problem, '
 check('...then hands the price back to the module, so the Solana gas figures '
       'after it have something to work with', 'd._sol_price_usd = price' in sol_src)
 
+# A quote is built FOR an address. 0x answers 400 when that address is not a
+# real one -- which is exactly what the native-token sentinel produced on the
+# first live run, on every chain at once.
+check('the ceiling check quotes for a wallet that actually exists rather than '
+      'inventing a taker',
+      'd.BNB_NATIVE_ADDR' not in SCRIPT and '_gas_sponsor_address()' in SCRIPT)
+check('...falling back to a real user wallet from the database when no sponsor '
+      'is configured', 'bsc_wallet_address' in SCRIPT)
+check('...and skipping the check with a reason when there is no wallet at all, '
+      'rather than running it against a made-up address',
+      'no wallet to quote for' in SCRIPT)
+
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)

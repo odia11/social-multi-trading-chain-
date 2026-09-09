@@ -192,5 +192,26 @@ check('...it stores nothing else — no trade, no reservation, no cost line',
       not (stores & {'start_execution', 'reserve', 'record_costs', 'settle',
                      'transition', 'execute_trade', 'attach_to_trade'}))
 
+# ── a valuation is not a swap ──────────────────────────────────────────────
+# _te_native_price_usd asks "what is one BNB worth in USDC". It used to ask
+# that through /quote, which builds a swap FOR somebody and requires a real
+# taker -- and the value passed for that taker was the native-token sentinel,
+# which is not an address. 0x answered 400 on every chain. It could not be
+# caught in development, where 0x is unreachable, so it is pinned here.
+native_fn = next(n for n in ast.walk(tree)
+                 if isinstance(n, ast.FunctionDef) and n.name == '_te_native_price_usd')
+native_src = ast.get_source_segment(src, native_fn) or ''
+check('the native-price lookup uses the PRICE endpoint, not the quote endpoint '
+      '— it is a valuation, and nobody is swapping anything',
+      '_get_0x_price' in native_src and '_get_0x_quote' not in native_src)
+check('...so it never has to invent a taker. Passing the native-token sentinel '
+      'as an address is what produced a 400 on every chain at once',
+      'BNB_NATIVE_ADDR' in native_src and native_src.count('BNB_NATIVE_ADDR') == 1)
+price_fn = next(n for n in ast.walk(tree)
+                if isinstance(n, ast.FunctionDef) and n.name == '_get_0x_price')
+price_src = ast.get_source_segment(src, price_fn) or ''
+check('the price endpoint is called without a taker parameter at all',
+      'allowance-holder/price' in price_src and 'taker' not in price_src.split('params=')[1].split(')')[0])
+
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)

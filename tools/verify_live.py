@@ -168,10 +168,37 @@ def main():
     section('trade engine — a real quote, priced end to end')
     from decimal import Decimal
 
+    # A quote is built FOR somebody, and 0x rejects a taker that is not a real
+    # address -- which is how the native-token sentinel being passed here
+    # produced a 400 on every chain. Use a wallet that actually exists: the
+    # gas sponsor if configured, otherwise any user's EVM address.
+    taker = ''
+    try:
+        taker = d._gas_sponsor_address() or ''
+    except Exception:
+        pass
+    if not taker:
+        try:
+            conn = __import__('sqlite3').connect(d.DB_FILE)
+            try:
+                row = conn.execute(
+                    "SELECT bsc_wallet_address FROM users WHERE bsc_wallet_address "
+                    "IS NOT NULL AND bsc_wallet_address != '' LIMIT 1").fetchone()
+                taker = (row or [''])[0] or ''
+            finally:
+                conn.close()
+        except Exception:
+            pass
+    if not taker:
+        report(WARN, 'no wallet to quote for',
+               'a quote is built for a specific address, and there is no gas '
+               'sponsor and no user wallet to use — so the ceiling check below '
+               'is skipped rather than run against a made-up taker')
+
     priced_any = False
     for chain, cfg_ in d.EVM_CHAINS.items():
         token = cfg_.get('usdc')       # quoting the chain's own stable: always routable
-        if not token or not os.getenv('ZEROX_API_KEY'):
+        if not token or not os.getenv('ZEROX_API_KEY') or not taker:
             continue
 
         def quote(chain=chain, token=token):
@@ -180,7 +207,7 @@ def main():
                 d.QuoteRequest(user_id=0, wallet='verify', source_chain=chain,
                                destination_chain=chain, token_address=token,
                                max_spend_usd=Decimal('100'),
-                               taker_address=d.BNB_NATIVE_ADDR),
+                               taker_address=taker),
                 swap_provider=d._te_swap_provider(chain),
                 gas_estimator=d._te_gas_usd,
                 fee_rate=Decimal(str(d.FEE_RATE_TXN)),
@@ -206,7 +233,8 @@ def main():
 
     if not priced_any:
         report(WARN, 'no chain could be priced',
-               'without a working 0x key and RPC, no EVM trade can be quoted')
+               'without a working 0x key, an RPC and a wallet to quote for, no '
+               'EVM trade can be priced')
 
     # ── the wallets that have to hold something ──
     section('sponsor wallets')

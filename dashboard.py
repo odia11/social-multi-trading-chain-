@@ -7293,6 +7293,34 @@ def _get_0x_quote(sell_token: str, buy_token: str, sell_amount_raw: int, taker: 
     r.raise_for_status()
     return r.json()
 
+def _get_0x_price(sell_token: str, buy_token: str, sell_amount_raw: int,
+                  chain: str = 'bsc') -> dict:
+    """What one asset is worth in another, with no transaction attached.
+
+    Separate from _get_0x_quote because /quote builds a swap for a specific
+    wallet and REQUIRES a valid taker, while /price answers the question
+    "what is this worth" and does not. Asking /quote for a price meant
+    inventing a taker, and the value invented for it -- the native-token
+    sentinel 0xEeee...EEeE -- is not an address at all, so 0x answered 400
+    for every chain. It never showed up in development because 0x is
+    unreachable from there.
+    """
+    if not ZEROX_API_KEY:
+        raise RuntimeError('ZEROX_API_KEY not configured')
+    r = requests.get(
+        'https://api.0x.org/swap/allowance-holder/price',
+        params={
+            'chainId': EVM_CHAINS[chain]['zerox_chain_id'],
+            'sellToken': sell_token,
+            'buyToken': buy_token,
+            'sellAmount': str(sell_amount_raw),
+        },
+        headers={'0x-api-key': ZEROX_API_KEY, '0x-version': 'v2'},
+        timeout=15,
+    )
+    r.raise_for_status()
+    return r.json()
+
 # ── TRADE ENGINE: quoting ───────────────────────────────────────────────────
 # Read-only. This prices a trade and nothing else -- it signs nothing, sends
 # nothing, and no existing execution path calls it. It exists so the all-in
@@ -7317,8 +7345,10 @@ def _te_native_price_usd(chain: str) -> Decimal:
     ceiling is denominated in) rather than a general market price.
     """
     cfg = EVM_CHAINS[chain]
-    quote = _get_0x_quote(BNB_NATIVE_ADDR, cfg['usdc'], 10 ** 18,
-                          BNB_NATIVE_ADDR, chain)
+    # /price, not /quote: this is a valuation, not a swap for anybody. See
+    # _get_0x_price -- passing the native sentinel as a taker to /quote is
+    # what made every chain answer 400.
+    quote = _get_0x_price(BNB_NATIVE_ADDR, cfg['usdc'], 10 ** 18, chain)
     buy = quote.get('buyAmount')
     if not buy:
         raise TeQuoteError(f'no {cfg["native_symbol"]} price available on {chain}')
