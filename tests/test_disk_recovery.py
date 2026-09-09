@@ -184,8 +184,9 @@ st = fn('_db_write_selftest')
 check('startup checks free space before it checks writability, so a full volume '
       'is reclaimed rather than merely reported',
       st.index('_reclaim_disk_space()') < st.index('INSERT INTO _write_selftest'))
-check('...and says plainly when reclaiming was not enough, naming the one action '
-      'only the owner can take', 'Grow the Railway volume' in st)
+check('...and says plainly when reclaiming was not enough, naming the actions '
+      'only the owner can take — without naming a host this no longer runs on',
+      'STILL LOW' in st and 'grow the volume' in st and 'Railway' not in st)
 check('the self-test can never stop the app from starting',
       not re.search(r'^\s*raise\b', st, re.M))
 check('the breakdown is printed whether the database is writable or not — it is '

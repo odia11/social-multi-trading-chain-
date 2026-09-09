@@ -899,13 +899,13 @@ WALLET_ADDRESS   = os.environ.get('WALLET_ADDRESS', '')
 USDC_MINT        = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 SOL_MINT         = 'So11111111111111111111111111111111111111112'
 SOLANA_RPC       = 'https://api.mainnet-beta.solana.com'
-SOLANA_RPC_URL   = os.environ.get('SOLANA_RPC_URL', '')   # set in Railway — overrides all fallbacks
+SOLANA_RPC_URL   = os.environ.get('SOLANA_RPC_URL', '')   # set in the env file — overrides all fallbacks
 HELIUS_RPC       = os.environ.get('HELIUS_RPC', '')        # full Helius URL e.g. https://mainnet.helius-rpc.com/?api-key=xxx
 HELIUS_API_KEY   = os.environ.get('HELIUS_API_KEY', '')
 # ── BSC (multi-chain) config — mirrors the Solana RPC pattern above ──
 BSC_CHAIN_ID     = 56
 BSC_RPC          = 'https://bsc-dataseed.binance.org/'      # public fallback, Binance-operated
-BSC_RPC_URL      = os.environ.get('BSC_RPC_URL', '')        # set in Railway — overrides fallback (Alchemy/Ankr/etc)
+BSC_RPC_URL      = os.environ.get('BSC_RPC_URL', '')        # set in the env file — overrides fallback (Alchemy/Ankr/etc)
 USDC_BSC_ADDR    = '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d'  # USDC (BEP-20), 18 decimals -- NOT 6 like Solana/Ethereum
 ZEROX_API_KEY    = os.environ.get('ZEROX_API_KEY', '')      # required for BSC swaps -- get one at dashboard.0x.org
 BNB_NATIVE_ADDR  = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'  # 0x's sentinel address for the native gas token
@@ -933,8 +933,8 @@ ADMIN_WALLET     = 'HC5ahspSox3XRmDbzXjXVoAASuY89RCmGUKwp87FRJS5'
 # gas sponsor panel, force-close, all of it.
 #
 # OWNER_WALLET itself may be a comma-separated list, and OWNER_WALLETS can
-# add more, so ownership can be granted or revoked in Railway without a
-# deploy. The operator's own wallet is listed below as well so the platform
+# add more, so ownership can be granted or revoked in the env file without
+# a deploy. The operator's own wallet is listed below as well so the platform
 # always has a working owner even if that env var is blank or stale -- which
 # is exactly the state that made every admin button answer "Unauthorized".
 #
@@ -1369,7 +1369,7 @@ def is_valid_solana_private_key(key: str) -> bool:
     return False
 
 # ── HONEYPOT GATE (logging only — no IP blocking) ──
-# Owner/trusted IPs — set via Railway env var, comma-separated (e.g. "1.2.3.4,5.6.7.8").
+# Owner/trusted IPs — set via env var, comma-separated (e.g. "1.2.3.4,5.6.7.8").
 _OWNER_IPS = frozenset(
     ip.strip() for ip in os.environ.get('OWNER_IP_WHITELIST', '').split(',') if ip.strip()
 )
@@ -3359,7 +3359,8 @@ def _owner_denied(wallet: str, action: str = 'This action'):
     role = get_user_role(wallet) if wallet else 'user'
     if not OWNER_WALLETS:
         msg = (f'{action} is restricted to an owner wallet, but none is configured on the '
-               f'server — set OWNER_WALLET in Railway to the wallet you sign in with.')
+               f'server — set OWNER_WALLET in /etc/orcagent.env on the server to the '
+               f'wallet you sign in with, then restart.')
     else:
         msg = (f'{action} is restricted to an owner wallet. You are signed in as {short} '
                f'(role: {role}), which is not one.')
@@ -4678,8 +4679,9 @@ def _discover_x_buzz() -> list[str]:
     """Lightweight X/Twitter buzz discovery via Claude + web search -- finds
     candidate cashtags for the narrative agent's normal pipeline elsewhere
     to evaluate; this function makes no buy/pass call itself. Logged to
-    Railway via print() only, not agent_journal -- this is discovery, not
-    a decision, so there's nothing here worth an audit-trail entry for.
+    the service journal via print() only, not agent_journal -- this is
+    discovery, not a decision, so there's nothing here worth an audit-trail
+    entry for.
 
     Uses web_search_20260209 (current dynamic-filtering tool type) rather
     than the web_search_20250305 the original spec named -- same
@@ -17757,7 +17759,7 @@ def wallet_send():
 
 
 # Two-entry RPC list for the frontend proxy endpoints:
-# SOLANA_RPC_URL (Railway env var) first; public mainnet-beta as fallback.
+# SOLANA_RPC_URL (env var) first; public mainnet-beta as fallback.
 _PROXY_RPCS = [u for u in [SOLANA_RPC_URL, SOLANA_RPC] if u]
 print(f'[rpc] PROXY_RPCS: {_PROXY_RPCS}', flush=True)
 
@@ -27967,7 +27969,7 @@ def admin_ai_filters_reject():
 if not OWNER_WALLET:
     print('WARNING: OWNER_WALLET is not set in environment variables.')
     print('         is_admin will never be true for any user.')
-    print('         Set OWNER_WALLET in Railway Variables and redeploy.')
+    print('         Set OWNER_WALLET in /etc/orcagent.env and restart.')
 elif OWNER_WALLET != ADMIN_WALLET:
     # Non-fatal by design -- OWNER_WALLET and ADMIN_WALLET are allowed to
     # differ (see the comment where they're defined), but in this app's
@@ -28215,8 +28217,8 @@ def _db_write_selftest():
         free_mb = free / (1024 * 1024) if free >= 0 else -1
         print(f'[startup] reclaimed {got // (1024*1024)} MB — now {free_mb:.0f} MB free', flush=True)
         if 0 <= free < DISK_LOW_BYTES:
-            print('[startup] ⚠ STILL LOW. Grow the Railway volume; the database cannot '
-                  'keep writing on a full disk.', flush=True)
+            print('[startup] ⚠ STILL LOW. Free more space or grow the volume; the '
+                  'database cannot keep writing on a full disk.', flush=True)
     try:
         conn = sqlite3.connect(DB_FILE)
         try:
@@ -28269,7 +28271,8 @@ threading.Thread(target=surge_radar.surge_loop, daemon=True).start()
 if not OWNER_WALLETS:
     print('[startup] ⚠ no owner wallet configured — every owner-only admin action '
           '(Collect Fees, key rotation, the gas sponsor panel) will refuse for everyone, '
-          'including you. Set it in Railway to the wallet you sign in with.', flush=True)
+          'including you. Set OWNER_WALLET in /etc/orcagent.env to the wallet you sign '
+          'in with, then restart.', flush=True)
 else:
     # Printed so "why was I refused?" is answerable from the logs alone,
     # without guessing whether the env var matches the wallet you sign in

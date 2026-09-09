@@ -583,7 +583,8 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
       </div>
       <div id="gs-disabled" class="tbl-empty" style="display:none">
         Gas sponsorship is off — set GAS_SPONSOR_PRIVATE_KEY (EVM chains) and/or
-        SOL_GAS_SPONSOR_PRIVATE_KEY (Solana) in Railway to enable it.
+        SOL_GAS_SPONSOR_PRIVATE_KEY (Solana) in /etc/orcagent.env on the server,
+        then restart, to enable it.
       </div>
       <div id="gs-panel" style="display:none">
         <div class="stat-grid">
@@ -1537,7 +1538,8 @@ async function loadGasSponsor() {
       // Set explicitly rather than relying on the markup's default -- the
       // error branch above may have replaced this text on an earlier load.
       off.textContent = 'Gas sponsorship is off — set GAS_SPONSOR_PRIVATE_KEY (EVM chains) and/or '
-                      + 'SOL_GAS_SPONSOR_PRIVATE_KEY (Solana) in Railway to enable it.';
+                      + 'SOL_GAS_SPONSOR_PRIVATE_KEY (Solana) in /etc/orcagent.env on the server, '
+                      + 'then restart, to enable it.';
       off.style.display = '';
     }
     document.getElementById('gs-address').textContent = 'not configured';

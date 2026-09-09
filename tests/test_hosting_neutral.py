@@ -348,5 +348,26 @@ check('...and the guidance names the venv shebang first, since a permission '
       'error there points at the file rather than at the cause',
       'is almost never the file' in UPDATE and 'head -1 $APP_DIR/venv/bin/gunicorn' in UPDATE)
 
+
+# ── the instructions the owner reads must name the host they are on ───────
+# Being host-neutral in the CODE is not the same as being host-neutral in the
+# TEXT. These lines told the owner to go and set a variable in Railway, which
+# is not where their server is any more — a message that sends someone to the
+# wrong place is worse than no message.
+DASH = open(REPO + '/dashboard.py').read()
+ADMIN = open(REPO + '/templates/admin.html').read()
+_INSTRUCTS = [l for l in (DASH + ADMIN).splitlines()
+              if 'Railway' in l and ('Set ' in l or 'set ' in l or 'Grow ' in l)]
+check('no message still tells the owner to set something in Railway, which is '
+      'not where this runs any more', not _INSTRUCTS)
+check('...and they name the file that actually holds the configuration, so the '
+      'instruction is followable', '/etc/orcagent.env' in DASH
+      and '/etc/orcagent.env' in ADMIN)
+check('...including the one the admin gas-sponsor panel shows when no sponsor '
+      'key is configured', 'in /etc/orcagent.env on the server' in ADMIN)
+check('the comments that NARRATE the move are left alone — they explain why the '
+      'host checks look the way they do, and erasing them loses the reason',
+      'this moved to another host' in DASH)
+
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)
