@@ -89,6 +89,17 @@
 .lmtd-sol-input:focus{border-color:var(--accent)}
 .lmtd-sol-input-unit{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--muted);font-weight:700}
 .lmtd-pct-row{display:flex;gap:6px;margin-bottom:12px}
+/* Where the money goes, sitting under the amount it explains rather than
+   floating as a card of its own. */
+.lmtd-spend-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.lmtd-quote{border-top:1px solid var(--bg4);padding-top:9px;margin-bottom:12px;display:flex;flex-direction:column;gap:4px;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--muted)}
+.lmtd-quote-row{display:flex;justify-content:space-between;gap:10px;font-variant-numeric:tabular-nums}
+.lmtd-quote-row>span:last-child{white-space:nowrap}
+.lmtd-quote-top{color:var(--text);font-weight:700}
+.lmtd-quote-get{color:var(--green);font-weight:700;border-top:1px solid var(--bg4);padding-top:6px;margin-top:3px}
+.lmtd-quote-note{font-family:inherit;font-size:10.5px;line-height:1.45;color:var(--muted)}
+.lmtd-quote-bad{font-size:11.5px;color:var(--red);line-height:1.45}
+.lmtd-quote-wait{font-size:11.5px;color:var(--muted)}
 .lmtd-pct-btn{flex:1;background:var(--bg2);border:1px solid var(--bg4);color:var(--muted);border-radius:8px;padding:7px 0;font-size:11px;font-weight:700;cursor:pointer;transition:all .15s;font-family:'JetBrains Mono',monospace}
 .lmtd-pct-btn:hover{color:var(--text);border-color:var(--bg3)}
 .lmtd-action-btn{width:100%;border:none;border-radius:10px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;font-family:'JetBrains Mono',monospace;transition:opacity .15s;margin-bottom:14px}

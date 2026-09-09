@@ -9,6 +9,13 @@
 // Extracted from live_market.html so bug fixes and improvements land in one
 // place instead of drifting between two copies.
 
+// The chains whose trades are denominated in USDC rather than SOL. BSC is
+// handled separately only because it kept its own route.
+var _TC_EVM_CHAINS = ['base', 'arbitrum', 'polygon'];
+var _TC_ALL_EVM    = ['bsc'].concat(_TC_EVM_CHAINS);
+function _tcIsEvm(chain){ return _TC_ALL_EVM.indexOf(chain) !== -1; }
+function _tcUnit(chain){ return _tcIsEvm(chain) ? 'USDC' : 'SOL'; }
+
 async function _doTrade(sym, pairAddr, side, amount, tokenAddr, chain){
   chain = chain || 'solana';
   try{
@@ -25,12 +32,19 @@ async function _doTrade(sym, pairAddr, side, amount, tokenAddr, chain){
     if(chain === 'bsc'){
       // BSC uses two separate buy/sell routes (not one side-flagged endpoint
       // like Solana's /api/instant-trade), and trades are USDC-denominated,
-      // not SOL-denominated -- see _execute_bsc_swap() on the backend.
+      // not SOL-denominated -- see _execute_evm_swap() on the backend.
       // /api/bsc/trade/buy reads amount_usdc specifically (not amount) --
       // /api/bsc/trade/sell ignores amount entirely and sells the full
       // tracked position server-side, so it's harmless to still send here.
       url = side === 'buy' ? '/api/bsc/trade/buy' : '/api/bsc/trade/sell';
       body = {token_address: tokenAddr, amount_usdc: amount, amount: amount};
+    } else if(_TC_EVM_CHAINS.indexOf(chain) !== -1){
+      // Base, Arbitrum and Polygon. These used to fall through to the Solana
+      // branch below, which validates a base58 mint -- so a 0x address was
+      // rejected as invalid and an EVM token simply could not be bought from
+      // this card at all.
+      url = side === 'buy' ? '/api/evm/trade/buy' : '/api/evm/trade/sell';
+      body = {chain: chain, token_address: tokenAddr, amount_usdc: amount};
     } else {
       url = '/api/instant-trade';
       body = {symbol:sym, pair_address:pairAddr, side:side, amount_sol:amount, token_address:tokenAddr};
@@ -565,21 +579,35 @@ function _lmtdSidePanelHtml(p, sym, addr){
   var mcap  = _fmtNum(p.marketCap || p.fdv || null);
   var buys  = p.txns&&p.txns.h24 ? p.txns.h24.buys : 0;
   var sells = p.txns&&p.txns.h24 ? p.txns.h24.sells : 0;
-  var pctChipsHtml = _lmtdSide === 'buy'
-    ? [25,50,75,100].map(function(pct){
-        return '<button class="lmtd-pct-btn" onclick="_lmtdSetPct('+pct+')">'+(pct===100?'MAX':pct+'%')+'</button>';
-      }).join('')
-    : '<button class="lmtd-pct-btn" onclick="_lmtdSetPct(100)">MAX</button>';
+  var chain = (p && p.chainId) || 'solana';
+  var isEvm = _tcIsEvm(chain);
+  var unit  = _tcUnit(chain);
+  // The percentage chips work off the wallet's SOL balance. On an EVM chain
+  // the trade is denominated in USDC, so those percentages would be of the
+  // wrong currency entirely -- they are left out rather than shown against a
+  // balance that has nothing to do with the amount being spent.
+  var pctChipsHtml = isEvm ? ''
+    : (_lmtdSide === 'buy'
+        ? [25,50,75,100].map(function(pct){
+            return '<button class="lmtd-pct-btn" onclick="_lmtdSetPct('+pct+')">'+(pct===100?'MAX':pct+'%')+'</button>';
+          }).join('')
+        : '<button class="lmtd-pct-btn" onclick="_lmtdSetPct(100)">MAX</button>');
   return ''
     +'<div class="lmtd-side-tabs">'
       +'<button class="lmtd-side-tab buy'+(_lmtdSide==='buy'?' active':'')+'" onclick="_lmtdSetSide(\'buy\')">Buy</button>'
       +'<button class="lmtd-side-tab sell'+(_lmtdSide==='sell'?' active':'')+'" onclick="_lmtdSetSide(\'sell\')">Sell</button>'
     +'</div>'
+    // The unit follows the chain. It was hardcoded to SOL, so on BSC the
+    // field said SOL while the amount was spent as USDC.
+    +(isEvm && _lmtdSide === 'buy'
+        ? '<div class="lmtd-spend-label">You spend at most</div>' : '')
     +'<div class="lmtd-sol-input-wrap">'
-      +'<input class="lmtd-sol-input" id="lmtd-sol-input" type="number" min="0.001" step="0.1" value="0.1" onclick="event.stopPropagation()">'
-      +'<span class="lmtd-sol-input-unit">SOL</span>'
+      +'<input class="lmtd-sol-input" id="lmtd-sol-input" type="number" min="0.001" step="'
+      +(isEvm?'1':'0.1')+'" value="'+(isEvm?'10':'0.1')+'" oninput="_lmtdQuote()" onclick="event.stopPropagation()">'
+      +'<span class="lmtd-sol-input-unit">'+_esc(unit)+'</span>'
     +'</div>'
-    +'<div class="lmtd-pct-row">'+pctChipsHtml+'</div>'
+    +(pctChipsHtml ? '<div class="lmtd-pct-row">'+pctChipsHtml+'</div>' : '')
+    +'<div class="lmtd-quote" id="lmtd-quote" style="display:none"></div>'
     +'<button class="lmtd-action-btn '+_lmtdSide+'" id="lmtd-action-btn">'+(_lmtdSide==='buy'?'Buy':'Sell')+' $'+_esc(sym)+'</button>'
     +'<div class="lmtd-compact-stats">'
       +'<div class="lmtd-compact-stat-row"><span class="lmtd-compact-stat-label">Volume 24h</span><span class="lmtd-compact-stat-value">'+vol+'</span></div>'
@@ -590,14 +618,98 @@ function _lmtdSidePanelHtml(p, sym, addr){
     +'</div>';
 }
 
+/* ── what the money buys, before it is spent ──────────────────────────────
+   Same /api/trade/quote the Live Market panel uses, so the two surfaces
+   cannot show different numbers for the same trade. EVM buys only: a Solana
+   buy has no ceiling to price against, since the platform fee there already
+   comes out of the amount inside the swap itself. */
+var _lmtdQuoteTimer = null;
+var _lmtdQuoteData  = null;
+
+var _TC_COST_LABELS = {
+  source_gas:       'Network fee',
+  destination_gas:  'Network fee (destination)',
+  platform_fee:     'OrcAgent fee',
+  bridge_fee:       'Bridge fee',
+  dex_fee:          'DEX fee',
+  slippage_reserve: 'Slippage reserve'
+};
+
+function _lmtdQuote(){
+  clearTimeout(_lmtdQuoteTimer);
+  _lmtdQuoteData = null;
+  var box = document.getElementById('lmtd-quote');
+  if(!box) return;
+  var chain = (_lmtdPair && _lmtdPair.chainId) || 'solana';
+  if(!_tcIsEvm(chain) || _lmtdSide !== 'buy'){
+    box.style.display = 'none'; box.innerHTML = ''; return;
+  }
+  var input = document.getElementById('lmtd-sol-input');
+  var amt = parseFloat(input ? input.value : '');
+  if(!amt || amt <= 0){ box.style.display='none'; box.innerHTML=''; return; }
+  box.style.display = 'block';
+  box.innerHTML = '<div class="lmtd-quote-wait">Pricing…</div>';
+  // Debounced: a quote is a live route lookup, not a local calculation.
+  _lmtdQuoteTimer = setTimeout(function(){ _lmtdFetchQuote(amt, chain); }, 450);
+}
+
+function _lmtdFetchQuote(amt, chain){
+  var addr = (_lmtdPair && _lmtdPair.baseToken && _lmtdPair.baseToken.address) || _lmtdActiveMint;
+  var box  = document.getElementById('lmtd-quote');
+  if(!box || !addr) return;
+  var _csrf = (document.querySelector('meta[name="csrf-token"]')||{}).content||_lmCsrf||'';
+  fetch('/api/trade/quote', {
+    method:'POST', credentials:'include',
+    headers:{'Content-Type':'application/json','X-CSRF-Token':_csrf,'X-CSRFToken':_csrf,
+             'X-Requested-With':'XMLHttpRequest'},
+    body: JSON.stringify({chain:chain, token_address:addr, max_spend_usd:String(amt)})
+  }).then(function(r){ return r.json(); }).then(function(d){
+    var input = document.getElementById('lmtd-sol-input');
+    // The user kept typing: this prices an amount they are no longer asking about.
+    if(!input || parseFloat(input.value) !== amt) return;
+    var el = document.getElementById('lmtd-quote');
+    if(!el) return;
+    if(!d || d.ok === false || d.can_execute === false){
+      el.innerHTML = '<div class="lmtd-quote-bad">'
+        + _esc((d && (d.reject_reason || d.msg)) || 'Could not price this trade') + '</div>';
+      return;
+    }
+    _lmtdQuoteData = d;
+    var rows = '';
+    var kinds = d.costs_by_kind || {};
+    for(var k in kinds){
+      if(!Object.prototype.hasOwnProperty.call(kinds, k)) continue;
+      rows += '<div class="lmtd-quote-row"><span>' + _esc(_TC_COST_LABELS[k] || k)
+            + '</span><span>-' + _esc(Number(kinds[k]).toFixed(2)) + '</span></div>';
+    }
+    el.innerHTML =
+        '<div class="lmtd-quote-row lmtd-quote-top"><span>You spend</span><span>'
+      +   _esc(Number(d.max_spend_usd).toFixed(2)) + ' USDC</span></div>'
+      + rows
+      + '<div class="lmtd-quote-row lmtd-quote-get"><span>You get</span><span>'
+      +   _esc(Number(d.token_purchase_usd).toFixed(2)) + ' USDC worth</span></div>'
+      + (kinds.slippage_reserve
+          ? '<div class="lmtd-quote-note">The slippage reserve is held back against '
+            + 'price movement, not charged. Anything unused stays yours.</div>' : '');
+  }).catch(function(){
+    var el = document.getElementById('lmtd-quote');
+    if(el) el.innerHTML = '<div class="lmtd-quote-bad">Could not reach the pricing service</div>';
+  });
+}
+
 function _lmtdWireSidePanel(sym, addr){
+  // Priced on open, not only after a keystroke: the field has a default
+  // amount in it, and a breakdown that appears only once you type would
+  // leave that default unexplained.
+  _lmtdQuote();
   var btn = document.getElementById('lmtd-action-btn');
   if(!btn) return;
   btn.addEventListener('click', function(){
     var input     = document.getElementById('lmtd-sol-input');
     var amount    = input ? input.value : '0.1';
     var pairAddr  = (_lmtdPair && _lmtdPair.pairAddress) || '';
-    executeTrade(sym, pairAddr, _lmtdSide, amount, addr, btn);
+    executeTrade(sym, pairAddr, _lmtdSide, amount, addr, btn,
+                 (_lmtdPair && _lmtdPair.chainId) || 'solana');
   });
 }
 
@@ -1081,14 +1193,19 @@ function _toast(msg, ok){
 }
 
 /* ── trade execution (modal) ── */
-async function executeTrade(symbol, pairAddress, side, amountStr, tokenAddress, btn){
+async function executeTrade(symbol, pairAddress, side, amountStr, tokenAddress, btn, chain){
+  // `chain` used to be absent here, so _doTrade defaulted it to 'solana' and
+  // every EVM token bought from this card was sent to the Solana route and
+  // rejected as an invalid mint. The EVM branches in _doTrade were reachable
+  // only from live_market.html, never from this button.
+  chain = chain || 'solana';
   var amount = parseFloat(amountStr);
-  if(!amount||amount<=0){ _toast('Enter a valid SOL amount', false); return; }
+  if(!amount||amount<=0){ _toast('Enter a valid ' + _tcUnit(chain) + ' amount', false); return; }
   var origHtml = btn ? btn.innerHTML : '';
   var origBg   = btn ? btn.style.background : '';
   var spinner  = '<span style="display:inline-block;width:12px;height:12px;border:2px solid rgba(0,0,0,.25);border-top-color:rgba(0,0,0,.6);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle"></span>';
   if(btn){ btn.innerHTML=spinner; btn.disabled=true; }
-  var ok = await _doTrade(symbol, pairAddress, side, amount, tokenAddress);
+  var ok = await _doTrade(symbol, pairAddress, side, amount, tokenAddress, chain);
   if(btn){ btn.innerHTML=origHtml; btn.disabled=false; btn.style.background=origBg; }
   if(ok) _toast(side==='buy' ? 'Buy order executed' : 'Sold', true);
 }

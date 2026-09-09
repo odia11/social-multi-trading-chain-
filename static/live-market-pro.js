@@ -807,9 +807,139 @@ function openBuyPanel(idx){
   var t = ST.tokens[Number(idx)];
   var isEvm = t && !!EVM_TRADE_CHAINS[t.chain];
   panel.style.display = 'flex';
-  panel.innerHTML = '<input class="pt-buy-input" id="pt-buy-amt-'+idx+'" type="number" min="0" step="any" placeholder="'+(isEvm?('Amount in '+evmCurrencyLabel(t.chain)):'Amount in SOL')+'">'
+  // "You spend (max)" rather than "Amount": on an EVM chain this number is
+  // the ceiling, and what is actually bought is what remains after the
+  // network fee, the platform fee and the slippage reserve come out of it.
+  // The breakdown below shows exactly that, before anything is signed.
+  panel.innerHTML =
+      '<label class="pt-buy-label" for="pt-buy-amt-'+idx+'">'
+    +   (isEvm ? 'You spend at most' : 'You spend')
+    +   ' <span class="pt-buy-cur">'+esc(isEvm?evmCurrencyLabel(t.chain):'SOL')+'</span>'
+    + '</label>'
+    + '<input class="pt-buy-input" id="pt-buy-amt-'+idx+'" type="number" min="0" step="any" '
+    +   'inputmode="decimal" placeholder="0.00">'
+    + '<div class="pt-quote" id="pt-quote-'+idx+'" style="display:none"></div>'
     + '<button class="pt-buy-confirm" data-action="confirm-buy" data-idx="'+idx+'">Confirm Buy</button>'
     + '<div class="pt-buy-msg" id="pt-buy-msg-'+idx+'" style="display:none"></div>';
+  if(isEvm){
+    var input = document.getElementById('pt-buy-amt-'+idx);
+    if(input) input.addEventListener('input', function(){ scheduleQuote(idx); });
+  }
+}
+
+/* ── live cost breakdown ───────────────────────────────────────────────────
+   Only for the EVM chains: /api/trade/quote prices a trade against a spend
+   ceiling, and it is the same quote the buy then executes, so what is shown
+   here is what is spent rather than an estimate drawn separately.
+
+   Solana has no such quote -- its buy has no ceiling to price against, since
+   the platform fee there already comes out of the amount inside the swap
+   itself -- so no breakdown is shown for it rather than a made-up one. */
+var _quoteTimers = {};
+var _quotes      = {};
+
+function _quoteCurrency(t){ return evmCurrencyLabel(t.chain); }
+
+function scheduleQuote(idx){
+  clearTimeout(_quoteTimers[idx]);
+  delete _quotes[idx];
+  var box = document.getElementById('pt-quote-'+idx);
+  var input = document.getElementById('pt-buy-amt-'+idx);
+  var amt = parseFloat(input ? input.value : '');
+  if(!amt || amt <= 0){ if(box){ box.style.display='none'; box.innerHTML=''; } return; }
+  if(box){
+    box.style.display = 'block';
+    box.innerHTML = '<div class="pt-quote-wait">Pricing…</div>';
+  }
+  // Debounced: a quote is a live route lookup, and firing one per keystroke
+  // would spend the rate limit on numbers the user is still typing.
+  _quoteTimers[idx] = setTimeout(function(){ fetchQuote(idx, amt); }, 450);
+}
+
+function fetchQuote(idx, amt){
+  var t = ST.tokens[Number(idx)];
+  if(!t) return;
+  var box = document.getElementById('pt-quote-'+idx);
+  fetch('/api/trade/quote', {
+    method:'POST', credentials:'include', headers: authHeaders(),
+    body: JSON.stringify({chain:t.chain, token_address:t.mint, max_spend_usd:String(amt)})
+  }).then(function(r){ return r.json(); }).then(function(d){
+    var input = document.getElementById('pt-buy-amt-'+idx);
+    // The user kept typing while this was in flight: this answer prices an
+    // amount they are no longer asking about.
+    if(!input || parseFloat(input.value) !== amt) return;
+    if(!box) return;
+    if(!d || d.ok === false || d.can_execute === false){
+      _quotes[idx] = null;
+      box.innerHTML = '<div class="pt-quote-bad">'
+        + esc((d && (d.reject_reason || d.msg)) || 'Could not price this trade')
+        + '</div>';
+      return;
+    }
+    _quotes[idx] = {
+      id: d.quote_id, amt: amt,
+      expiresAt: Date.now() + (Number(d.expires_in_seconds) || 0) * 1000,
+      purchase: d.token_purchase_usd
+    };
+    renderQuote(idx, d, t);
+  }).catch(function(){
+    _quotes[idx] = null;
+    if(box) box.innerHTML = '<div class="pt-quote-bad">Could not reach the pricing service</div>';
+  });
+}
+
+var COST_LABELS = {
+  source_gas:       'Network fee',
+  destination_gas:  'Network fee (destination)',
+  platform_fee:     'OrcAgent fee',
+  bridge_fee:       'Bridge fee',
+  dex_fee:          'DEX fee',
+  slippage_reserve: 'Slippage reserve'
+};
+
+function renderQuote(idx, d, t){
+  var box = document.getElementById('pt-quote-'+idx);
+  if(!box) return;
+  var cur = _quoteCurrency(t);
+  var rows = '';
+  var kinds = d.costs_by_kind || {};
+  for(var k in kinds){
+    if(!Object.prototype.hasOwnProperty.call(kinds, k)) continue;
+    rows += '<div class="pt-quote-row"><span>' + esc(COST_LABELS[k] || k) + '</span>'
+          + '<span>-' + esc(Number(kinds[k]).toFixed(2)) + '</span></div>';
+  }
+  box.innerHTML =
+      '<div class="pt-quote-row pt-quote-top"><span>You spend</span><span>'
+    +   esc(Number(d.max_spend_usd).toFixed(2)) + ' ' + esc(cur) + '</span></div>'
+    + rows
+    + '<div class="pt-quote-row pt-quote-get"><span>You get</span><span>'
+    +   esc(Number(d.token_purchase_usd).toFixed(2)) + ' ' + esc(cur)
+    +   ' of $' + esc(t.symbol || '') + '</span></div>'
+    // The reserve is money held back against price movement, not a charge.
+    // Saying so is the difference between a cost the user resents and one
+    // they understand.
+    + (kinds.slippage_reserve
+        ? '<div class="pt-quote-note">The slippage reserve is held back against '
+          + 'price movement, not charged. Anything unused stays yours.</div>'
+        : '')
+    + '<div class="pt-quote-note" id="pt-quote-exp-'+idx+'"></div>';
+  tickQuoteExpiry(idx);
+}
+
+function tickQuoteExpiry(idx){
+  var q = _quotes[idx];
+  var el = document.getElementById('pt-quote-exp-'+idx);
+  if(!q || !el) return;
+  var left = Math.max(0, Math.round((q.expiresAt - Date.now())/1000));
+  if(left <= 0){
+    el.textContent = 'This price has expired — edit the amount to get a new one.';
+    el.className = 'pt-quote-note pt-quote-stale';
+    _quotes[idx] = null;
+    return;
+  }
+  el.textContent = 'Price held for ' + left + 's.';
+  el.className = 'pt-quote-note';
+  setTimeout(function(){ tickQuoteExpiry(idx); }, 1000);
 }
 
 function confirmBuy(idx){
@@ -820,7 +950,7 @@ function confirmBuy(idx){
   var msgEl = document.getElementById('pt-buy-msg-'+idx);
   if(!amt || amt<=0){ showMsg(msgEl, 'Enter a valid amount', false); return; }
   var btn = document.querySelector('#pt-buy-panel-'+idx+' .pt-buy-confirm');
-  if(btn){ btn.disabled = true; btn.textContent = '…'; }
+  if(btn){ btn.disabled = true; btn.textContent = 'Buying…'; }
   // Which chain this token lives on decides both the endpoint and the
   // currency the entered amount is denominated in: BSC keeps its own
   // dedicated route, Base/Arbitrum/Polygon share the generic /api/evm/*
@@ -833,6 +963,18 @@ function confirmBuy(idx){
   var body = isBsc ? {token_address:t.mint, amount_usdc:amt}
     : isEvm ? {chain:t.chain, token_address:t.mint, amount_usdc:amt}
     : {symbol:t.symbol, token_address:t.mint, pair_address:t.pair_address, side:'buy', amount_sol:amt};
+
+  // When a live quote for this exact amount is still good, execute THAT
+  // quote rather than asking the buy route to price a fresh one. The
+  // difference matters: the user agreed to the numbers they were shown, and
+  // a second pricing a moment later is a different set of numbers wearing
+  // the same intent. The buy route prices correctly either way, so this is
+  // about honouring what was on screen, not about correctness of the total.
+  var q = _quotes[idx];
+  if(isEvm && q && q.id && q.amt === amt && q.expiresAt > Date.now()){
+    url  = '/api/trade/execute';
+    body = {quote_id: q.id};
+  }
   fetch(url, {
     method:'POST', credentials:'include', headers: authHeaders(),
     body: JSON.stringify(body)
@@ -855,9 +997,25 @@ function confirmBuy(idx){
     // of this only checked the Solana shape, so every successful BSC buy
     // showed "Buy failed" anyway).
     if(d && (d.success || d.tx || d.ok || d.sig || d.tx_hash)){
-      showMsg(msgEl, 'Bought $'+t.symbol+' for '+amt+' '+(isEvm?evmCurrencyLabel(t.chain):'SOL'), true);
+      // What was BOUGHT, which on an EVM chain is less than what was spent
+      // -- the costs came out of the ceiling. Saying "bought for $100" when
+      // $97.43 of token was bought is the mismatch this whole change removes.
+      var got = (d.amount_usdc != null) ? d.amount_usdc : amt;
+      var cur = isEvm ? evmCurrencyLabel(t.chain) : 'SOL';
+      var line = 'Bought ' + got + ' ' + cur + ' of $' + t.symbol;
+      if(d.max_spend_usd != null && Number(d.max_spend_usd) > Number(got)){
+        line += ' (spent ' + d.max_spend_usd + ' ' + cur + ')';
+      }
+      showMsg(msgEl, line, true);
       if(input) input.value = '';
-      setTimeout(function(){ closeBuyPanel(idx); }, 2200);
+      delete _quotes[idx];
+      setTimeout(function(){ closeBuyPanel(idx); }, 2600);
+    } else if(d && d.requote){
+      // The quote expired between being shown and being confirmed. Re-price
+      // rather than executing at a number the user never saw.
+      showMsg(msgEl, 'That price expired — repricing…', false);
+      delete _quotes[idx];
+      scheduleQuote(idx);
     } else {
       showMsg(msgEl, (d && (d.error||d.msg)) || 'Buy failed', false);
     }

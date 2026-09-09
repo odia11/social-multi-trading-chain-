@@ -219,6 +219,20 @@ input{font-family:inherit}
 .pt-buy-msg{font-size:11px;margin-top:2px}
 .pt-buy-msg.ok{color:var(--green)}
 .pt-buy-msg.err{color:var(--red)}
+/* Where the money goes, before anything is signed. Deliberately not a card:
+   it belongs to the input above it, so it shares that edge rather than
+   floating as a separate object. */
+.pt-buy-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted2)}
+.pt-buy-cur{color:var(--muted)}
+.pt-quote{border-top:1px solid var(--line2);padding-top:7px;display:flex;flex-direction:column;gap:3px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+.pt-quote-row{display:flex;justify-content:space-between;gap:10px;font-variant-numeric:tabular-nums}
+.pt-quote-row>span:last-child{white-space:nowrap}
+.pt-quote-top{color:var(--text);font-weight:700}
+.pt-quote-get{color:var(--green);font-weight:700;border-top:1px solid var(--line2);padding-top:5px;margin-top:2px}
+.pt-quote-note{font-family:inherit;font-size:10px;line-height:1.4;color:var(--muted2)}
+.pt-quote-stale{color:var(--red)}
+.pt-quote-bad{font-size:11px;color:var(--red);line-height:1.4}
+.pt-quote-wait{font-size:11px;color:var(--muted2)}
 
 .pt-chart-wrap{position:relative;height:222px;background:var(--bg)}
 .pt-chart-svg{width:100%;height:200px;display:block}
