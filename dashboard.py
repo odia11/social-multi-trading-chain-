@@ -6036,9 +6036,18 @@ def _execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str,
             # Positive confirmation, not merely the absence of a failure
             # line: an unrecognised output shape must read as "not collected"
             # rather than quietly asserting a fee that may not exist.
+            #
+            # The two legs prove it differently. A buy splices a SOL transfer
+            # into its own transaction and announces the quote it asks for; a
+            # sell uses Jupiter's platformFeeBps, which only appears when the
+            # fee account was prepared successfully. Either can fall back to a
+            # fee-less swap, and both fallbacks say so.
             out = result.stdout or ''
-            capture['fee_bundled'] = ('[fee] buy: requesting quote' in out
-                                      and 'bundled buy fee failed' not in out)
+            failed = ('bundled buy fee failed' in out
+                      or 'retrying once without it' in out)
+            marker = ('[fee] buy: requesting quote' if action == 'buy'
+                      else 'bps platform fee)')
+            capture['fee_bundled'] = (marker in out) and not failed
         return ok, tx_hash, err_msg, token_amount, sol_amount
     except subprocess.TimeoutExpired:
         add_user_log(wallet, 'Swap error: timed out after 120s')
@@ -13125,6 +13134,50 @@ def api_bsc_trade_sell():
                           wallet_label='BSC')
 
 
+# A buy is serialized per (wallet, mint) so a double-click cannot become two
+# buys of the same token. Same idiom, and the same single-process limit, as
+# the sell lock above.
+_solana_buy_locks: dict = {}
+_solana_buy_locks_guard = threading.Lock()
+
+
+def _get_solana_buy_lock(wallet: str, mint: str) -> threading.Lock:
+    with _solana_buy_locks_guard:
+        key = (wallet, mint)
+        lock = _solana_buy_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _solana_buy_locks[key] = lock
+        return lock
+
+
+# What a Solana wallet has to keep back so it can still act afterwards.
+#
+# A swap's own network and priority fees are around 0.00002 SOL, but a first
+# buy of a token also creates an associated token account (~0.00204 SOL of
+# rent), and the position has to remain SELLABLE -- a wallet drained to zero
+# owns tokens it cannot move, which is the worst state to leave someone in.
+# Both buy paths previously spent min(configured size, entire balance) and so
+# could land exactly there.
+SOL_NETWORK_RESERVE = 0.005
+# The smallest buy worth making. Together these two define the minimum
+# balance, which is why that floor is not written as a bare 0.01 any more:
+# a floor that does not account for the reserve leaves a band where the
+# balance passes the check and there is nothing left to spend.
+SOL_MIN_SPEND = 0.005
+
+# How long a repeat buy of the same token by the same wallet is treated as a
+# double-click rather than a second intent.
+#
+# A lock alone does not solve this the way it does for a sell. A sell finds
+# the position gone and stops; a buy is ADDITIVE, so serializing two clicks
+# just makes both of them spend, in order. Buying the same token twice is a
+# legitimate thing to want -- doing it twice inside a few seconds is not, and
+# that is the only case this refuses.
+SOLANA_BUY_REPEAT_WINDOW = 15
+_recent_solana_buys: dict = {}
+
+
 # A sell is serialized per (wallet, token, chain) so a double-click cannot
 # read one open position twice and sell it twice. Same idiom as the gas lock.
 #
@@ -13136,7 +13189,9 @@ _evm_sell_locks: dict = {}
 _evm_sell_locks_guard = threading.Lock()
 
 
-def _get_evm_sell_lock(wallet: str, token: str, chain: str) -> threading.Lock:
+def _get_sell_lock(wallet: str, token: str, chain: str) -> threading.Lock:
+    """Serializes sells of one position. Named for what it does rather than
+    for EVM: /api/instant-trade uses it for Solana too."""
     with _evm_sell_locks_guard:
         key = (wallet, token, chain)
         lock = _evm_sell_locks.get(key)
@@ -13187,7 +13242,7 @@ def _evm_sell_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM
         return jsonify({'ok': False, 'msg': f'No {wallet_label} trading wallet configured'}), 400
     user_id, enc_blob = row[0], row[1]
 
-    with _get_evm_sell_lock(wallet, token_address, chain):
+    with _get_sell_lock(wallet, token_address, chain):
         # Read the position INSIDE the lock. Reading it outside is what let
         # two clicks both see the same holding. The amount still comes from
         # the tracked position and never from the client, so a caller cannot
@@ -17994,24 +18049,44 @@ def api_swap_quote():
 @app.route('/api/instant-trade', methods=['POST', 'OPTIONS'])
 @rate_limit(10, 60)
 def api_instant_trade():
+    """Live Market's one-click Solana buy and sell.
+
+    WHAT THIS USED TO DO DIFFERENTLY FROM EVERY OTHER SOLANA TRADE
+    It built its own subprocess call rather than going through
+    _execute_user_swap_ex(), which made it a third copy of that pattern and,
+    more importantly, meant it skipped _ensure_solana_gas() -- the one place
+    the app guarantees a wallet can pay Solana's own network fee, and which
+    every other Solana buy and sell funnels through. A user whose trading
+    wallet was out of SOL got a raw swap failure here where the same trade
+    from anywhere else would have been topped up first.
+
+    It also sent fees to FEE_WALLET directly instead of _sol_fee_recipient(),
+    so while the Solana gas sponsor was below target, this endpoint's fees
+    were the only ones not feeding it.
+
+    And it decrypted the key itself instead of using _use_key(), so a key
+    access from the app's busiest trade route was the one that never reached
+    the security log.
+
+    All three are gone: it now calls the same wrapper as everything else.
+    """
     # CORS preflight — _instant_trade_cors after_request stamps the headers automatically.
     if request.method == 'OPTIONS':
         return app.response_class('', status=200)
 
     if not request.is_json:
-        return jsonify({'error': 'Content-Type must be application/json', 'received': request.content_type}), 400
+        return jsonify({'error': 'Content-Type must be application/json',
+                        'received': request.content_type}), 400
 
     try:
-
         wallet = _authenticated_wallet()
         if not wallet:
             return jsonify({'error': 'not logged in', 'logged_in': False}), 401
 
         data          = request.get_json(silent=True) or {}
-        symbol        = str(data.get('symbol',        '')).strip().upper()
+        symbol        = str(data.get('symbol', '')).strip().upper()
         token_address = str(data.get('token_address', '')).strip()
-        pair_address  = str(data.get('pair_address',  '')).strip()
-        side          = str(data.get('side',          '')).strip().lower()
+        side          = str(data.get('side', '')).strip().lower()
         try:
             amount_sol = float(data.get('amount_sol', 0))
         except (TypeError, ValueError):
@@ -18025,7 +18100,6 @@ def api_instant_trade():
         except (TypeError, ValueError):
             amount_token = 0.0
 
-
         if side not in ('buy', 'sell'):
             return jsonify({'error': 'side must be buy or sell'}), 400
         if not token_address:
@@ -18034,190 +18108,160 @@ def api_instant_trade():
             return jsonify({'error': 'Invalid token address'}), 400
         if side == 'buy' and amount_sol <= 0:
             return jsonify({'error': 'amount_sol must be > 0 for buy'}), 400
-        if side == 'buy':
-            fetch_user_balances(wallet)
-            current_sol = get_user_state(wallet).get('sol', 0)
-            if current_sol < amount_sol + 0.005:
-                return jsonify({'error': f'Insufficient SOL balance. You have {current_sol:.4f} SOL, need at least {amount_sol + 0.005:.4f} SOL (includes network fee).'}), 400
 
-        # Fetch encrypted key
+        conn = sqlite3.connect(DB_FILE)
         try:
-            conn = sqlite3.connect(DB_FILE)
-            row  = conn.execute(
-                'SELECT encrypted_private_key FROM users WHERE wallet_address=?', (wallet,)
-            ).fetchone()
-            conn.close()
+            row = conn.execute(
+                'SELECT id, encrypted_private_key FROM users WHERE wallet_address=?',
+                (wallet,)).fetchone()
         except Exception as e:
             traceback.print_exc()
             return jsonify({'error': f'DB error: {e}'}), 500
-        if not row or not row[0]:
+        finally:
+            conn.close()
+        if not row or not row[1]:
             return jsonify({'error': 'No private key saved — add it in Settings'}), 400
+        uid, enc_blob = row[0], row[1]
 
-        try:
-            private_key = decrypt_private_key(row[0], wallet)
-        except Exception as e:
-            traceback.print_exc()
-            return jsonify({'error': 'Could not decrypt private key'}), 500
+        # The same per-(wallet, token) serialization the other Solana paths
+        # use, and for a buy the same repeat window: a buy is additive, so a
+        # double-click that is merely serialized still spends twice.
+        lock = (_get_solana_buy_lock(wallet, token_address) if side == 'buy'
+                else _get_sell_lock(wallet, token_address, 'solana'))
+        with lock:
+            if side == 'buy':
+                last = _recent_solana_buys.get((wallet, token_address), 0)
+                if time.time() - last < SOLANA_BUY_REPEAT_WINDOW:
+                    return jsonify({'error': f'You just bought this token. Wait '
+                                             f'{SOLANA_BUY_REPEAT_WINDOW}s to buy more.',
+                                    'duplicate': True}), 429
 
-        # Run swap in subprocess (same pattern as _execute_user_swap but captures sig)
-        try:
-            env                       = os.environ.copy()
-            env['WALLET_ADDRESS']     = wallet
-            env['WALLET_PRIVATE_KEY'] = private_key
-            # Same 0.75% platform fee as the bot's own trades -- orcagent_solana.py
-            # folds it into this swap's own transaction either way (Jupiter's
-            # platformFee for a sell, our own spliced-in transfer instruction
-            # for a buy), so it's never a separate visible transfer. Bookkeeping
-            # (fees table, referral payout) happens just below via _charge_txn_fee().
-            env['FEE_WALLET']         = FEE_WALLET
-            env['FEE_RATE_TXN']       = str(FEE_RATE_TXN)
-            _ext_hit('jupiter')
-            amount_str = str(amount_sol) if side == 'buy' else (str(amount_token) if amount_token > 0 else '0')
-            result = subprocess.run(
-                [sys.executable, os.path.join(BASE, 'orcagent_solana.py'),
-                 side, token_address, amount_str],
-                env=env, capture_output=True, text=True, timeout=120
-            )
-            env['WALLET_PRIVATE_KEY'] = ''
-            _fee_pk                   = private_key  # kept only for the buy-leg fee transfer below
-            private_key               = ''
-        except subprocess.TimeoutExpired:
-            return jsonify({'error': 'Trade timed out (>120s)'}), 504
-        except Exception as e:
-            traceback.print_exc()
-            return jsonify({'error': f'Swap subprocess error: {e}'}), 500
+                fetch_user_balances(wallet)
+                current_sol = get_user_state(wallet).get('sol', 0)
+                # The reserve is the same one the other Solana buys keep back,
+                # rather than a separate 0.005 written out here.
+                if current_sol < amount_sol + SOL_NETWORK_RESERVE:
+                    return jsonify({'error':
+                        f'Insufficient SOL balance. You have {current_sol:.4f} SOL, need at '
+                        f'least {amount_sol + SOL_NETWORK_RESERVE:.4f} SOL (includes network '
+                        f'fee).'}), 400
+                _recent_solana_buys[(wallet, token_address)] = time.time()
 
-        stdout = _redact_keys(result.stdout.strip())
-        stderr = _redact_keys(result.stderr.strip())
-        add_user_log(wallet, f'instant-trade {side} {symbol}: ' + (stdout[-300:] or stderr[-200:]))
+            amount_str = (str(amount_sol) if side == 'buy'
+                          else (str(amount_token) if amount_token > 0 else '0'))
+            swap_info = {}
+            with _use_key(enc_blob, wallet) as pk:
+                # One wrapper for every Solana swap in the app: it guarantees
+                # the gas top-up, routes the fee to the right recipient, parses
+                # the realized fill, and reports whether the platform fee
+                # actually rode along.
+                ok, sig, err_msg, token_amount, sol_amount = _execute_user_swap_ex(
+                    wallet, pk, side, token_address, amount_str, capture=swap_info)
 
-        if result.returncode != 0:
-            err_msg = (stderr.split('\n')[-1] if stderr else '') or \
-                      (stdout.split('\n')[-1] if stdout else '') or \
-                      'Swap failed (no output)'
-            return jsonify({'error': err_msg[-200:], 'detail': stderr[-500:]}), 500
+            if not ok:
+                if side == 'buy':
+                    # Nothing was bought, so nothing is being double-clicked.
+                    _recent_solana_buys.pop((wallet, token_address), None)
+                return jsonify({'error': (err_msg or 'Swap failed')[-200:]}), 500
+            if not sig:
+                # _execute_user_swap_ex already treats a missing signature as a
+                # failure; this is the belt to that braces, because reporting a
+                # trade with no transaction is exactly the false success this
+                # whole phase is about.
+                return jsonify({'error': 'Swap ran but no signature returned'}), 500
 
-        # Extract TX signature from stdout: "… TX:<sig>"
-        sig = None
-        for line in stdout.split('\n'):
-            if 'TX:' in line:
-                sig = line.split('TX:')[-1].strip().split()[0]
-                break
+            sol_recorded = amount_sol if side == 'buy' else sol_amount
 
-        if not sig:
-            return jsonify({'error': 'Swap ran but no signature returned', 'stdout': stdout[-300:]}), 500
-
-        # Parse the real amounts orcagent_solana.py reports for this swap --
-        # "BUY ... got:<token_qty> TX:..." for buys, "SELL ... amt:<token_qty>
-        # sol:<sol_received> ..." for sells. Previously this endpoint just
-        # hardcoded entry_price/exit_price=0 and amount=0 for sells, so the
-        # Wallet page's Recent Activity list had no token quantity at all and
-        # showed "-0.0000 SOL" for every sell.
-        token_amount  = 0.0
-        sol_recorded  = amount_sol if side == 'buy' else 0.0
-        for line in stdout.split('\n'):
-            if side == 'buy' and line.startswith('BUY') and 'got:' in line:
-                try:
-                    token_amount = float(line.split('got:')[1].split()[0])
-                except (ValueError, IndexError):
-                    pass
-                break
-            if side == 'sell' and line.startswith('SELL') and 'amt:' in line:
-                try:
-                    token_amount = float(line.split('amt:')[1].split()[0])
-                except (ValueError, IndexError):
-                    pass
-                if 'sol:' in line:
-                    try:
-                        sol_recorded = float(line.split('sol:')[1].split()[0])
-                    except (ValueError, IndexError):
-                        pass
-                break
-
-        # Update DB: trades log + user_tokens portfolio
-        new_balance = None
-        try:
             # Price lookup BEFORE the database is touched. This used to sit
-            # between the INSERT below and its commit, so the write lock on
-            # the whole database was held for the length of a DexScreener
-            # round-trip (up to 6 seconds). SQLite allows exactly one writer,
-            # so every other write in the process -- placing a call, recording
-            # a trade, saving a setting -- queued behind an HTTP request and
-            # could time out with "database is locked". Nothing about this
-            # lookup needs a connection open, so it happens first.
-            _buy_price_usd = 0.0
+            # between the INSERT below and its commit, so the write lock on the
+            # whole database was held for the length of a DexScreener round-trip
+            # (up to 6 seconds). SQLite allows exactly one writer, so every other
+            # write in the process queued behind an HTTP request and could time
+            # out with "database is locked".
+            buy_price_usd = 0.0
             if side == 'buy':
                 try:
-                    _pr = _dex_get(
-                        'https://api.dexscreener.com/latest/dex/tokens/' + token_address,
-                        timeout=6
-                    )
-                    if _pr and _pr.status_code == 200:
-                        _sol_pairs = [p for p in (_pr.json().get('pairs') or [])
-                                      if p.get('chainId') == 'solana']
-                        if _sol_pairs:
-                            _best = max(_sol_pairs,
-                                        key=lambda p: float((p.get('liquidity') or {}).get('usd') or 0))
-                            _buy_price_usd = float(_best.get('priceUsd') or 0)
+                    pr = _dex_get('https://api.dexscreener.com/latest/dex/tokens/'
+                                  + token_address, timeout=6)
+                    if pr and pr.status_code == 200:
+                        sol_pairs = [p for p in (pr.json().get('pairs') or [])
+                                     if p.get('chainId') == 'solana']
+                        if sol_pairs:
+                            best = max(sol_pairs, key=lambda p: float(
+                                (p.get('liquidity') or {}).get('usd') or 0))
+                            buy_price_usd = float(best.get('priceUsd') or 0)
                 except Exception:
                     pass
 
-            conn     = sqlite3.connect(DB_FILE)
-            user_row = conn.execute(
-                'SELECT id FROM users WHERE wallet_address=?', (wallet,)
-            ).fetchone()
-            if user_row:
-                uid = user_row[0]
-                now = datetime.datetime.utcnow().isoformat()
-                conn.execute(
-                    'INSERT INTO trades '
-                    '(user_id, token, entry_price, exit_price, amount, pnl, fee_amount, timestamp, mint_address, source, side, token_amount) '
-                    'VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-                    (uid, symbol, 0, 0, round(sol_recorded, 6),
-                     0, 0, now, token_address, 'manual', side, round(token_amount, 6))
-                )
-                if side == 'buy':
+            try:
+                conn = sqlite3.connect(DB_FILE)
+                try:
+                    now = datetime.datetime.utcnow().isoformat()
                     conn.execute(
-                        '''INSERT INTO user_tokens (user_id, token_address, symbol, amount, avg_price, updated_at)
-                           VALUES (?, ?, ?, ?, ?, ?)
-                           ON CONFLICT(user_id, token_address) DO UPDATE SET
-                               symbol     = excluded.symbol,
-                               amount     = user_tokens.amount + excluded.amount,
-                               avg_price  = CASE
-                                   WHEN excluded.avg_price > 0 AND (user_tokens.amount + excluded.amount) > 0
-                                   THEN (user_tokens.amount * user_tokens.avg_price
-                                         + excluded.amount * excluded.avg_price)
-                                        / (user_tokens.amount + excluded.amount)
-                                   ELSE COALESCE(NULLIF(user_tokens.avg_price, 0), excluded.avg_price)
-                               END,
-                               updated_at = excluded.updated_at''',
-                        (uid, token_address, symbol, amount_sol, _buy_price_usd, now)
-                    )
-                else:
-                    conn.execute(
-                        '''INSERT INTO user_tokens (user_id, token_address, symbol, amount, updated_at)
-                           VALUES (?, ?, ?, 0, ?)
-                           ON CONFLICT(user_id, token_address) DO UPDATE SET
-                               amount     = 0,
-                               updated_at = excluded.updated_at''',
-                        (uid, token_address, symbol, now)
-                    )
-                conn.commit()
-                # Same 0.75% platform fee as the bot's own trades, folded into
-                # the swap's own transaction either way (see the
-                # FEE_WALLET/FEE_RATE_TXN env vars set above) -- sell via
-                # Jupiter's platformFee, buy via our own spliced-in transfer
-                # instruction (orcagent_solana.py's execute_swap()). No
-                # separate transfer for users to notice leaving their wallet.
-                if side == 'buy':
-                    _charge_txn_fee(_fee_pk, wallet, uid, symbol, amount_sol, 'buy', bundled=True)
-                else:
-                    _charge_txn_fee(_fee_pk, wallet, uid, symbol, sol_recorded, 'sell', bundled=True)
-            conn.close()
-        except Exception as e:
-            traceback.print_exc()
+                        'INSERT INTO trades '
+                        '(user_id, token, entry_price, exit_price, amount, pnl, fee_amount, '
+                        'timestamp, mint_address, source, side, token_amount) '
+                        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                        (uid, symbol, 0, 0, round(sol_recorded, 6), 0, 0, now,
+                         token_address, 'manual', side, round(token_amount, 6)))
+                    if side == 'buy':
+                        conn.execute(
+                            '''INSERT INTO user_tokens (user_id, token_address, symbol, amount, avg_price, updated_at)
+                               VALUES (?, ?, ?, ?, ?, ?)
+                               ON CONFLICT(user_id, token_address) DO UPDATE SET
+                                   symbol     = excluded.symbol,
+                                   amount     = user_tokens.amount + excluded.amount,
+                                   avg_price  = CASE
+                                       WHEN excluded.avg_price > 0 AND (user_tokens.amount + excluded.amount) > 0
+                                       THEN (user_tokens.amount * user_tokens.avg_price
+                                             + excluded.amount * excluded.avg_price)
+                                            / (user_tokens.amount + excluded.amount)
+                                       ELSE COALESCE(NULLIF(user_tokens.avg_price, 0), excluded.avg_price)
+                                   END,
+                                   updated_at = excluded.updated_at''',
+                            (uid, token_address, symbol, amount_sol, buy_price_usd, now))
+                    elif amount_token <= 0:
+                        # Only a SELL-EVERYTHING zeroes the holding. A partial
+                        # sell used to zero it too, so selling a slice made the
+                        # rest of the position vanish from the portfolio while
+                        # the tokens were still in the wallet.
+                        #
+                        # A partial sell deliberately writes nothing here rather
+                        # than subtracting: this column holds the SOL SPENT for a
+                        # buy, not a token quantity, so subtracting a token
+                        # amount from it would mix two units. Leaving the stale
+                        # figure is wrong too, and is a disclosed limitation --
+                        # the fix is to give this column one meaning, which is
+                        # its own change.
+                        conn.execute(
+                            '''INSERT INTO user_tokens (user_id, token_address, symbol, amount, updated_at)
+                               VALUES (?, ?, ?, 0, ?)
+                               ON CONFLICT(user_id, token_address) DO UPDATE SET
+                                   amount     = 0,
+                                   updated_at = excluded.updated_at''',
+                            (uid, token_address, symbol, now))
+                    conn.commit()
+                finally:
+                    conn.close()
+            except Exception:
+                traceback.print_exc()
 
-        # Fetch updated SOL balance from RPC (best-effort)
+            # Recorded only when the fee really rode along inside the swap.
+            # Both legs can fall back to a fee-less swap, and this used to
+            # assert bundled=True regardless -- writing a fees row and paying a
+            # 20% referral cut on money nobody collected.
+            if swap_info.get('fee_bundled'):
+                with _use_key(enc_blob, wallet) as pk:
+                    _charge_txn_fee(pk, wallet, uid, symbol,
+                                    amount_sol if side == 'buy' else sol_recorded,
+                                    side, bundled=True)
+            else:
+                print(f'[fee] {wallet[:6]}... {symbol} {side}: the platform fee was NOT '
+                      f'collected inside the swap, so nothing is recorded for it',
+                      flush=True)
+
+        # Best-effort balance refresh, outside the lock -- it is display only.
+        new_balance = None
         try:
             for _rpc in _PROXY_RPCS:
                 try:
@@ -18232,11 +18276,16 @@ def api_instant_trade():
             pass
 
         return jsonify({
-            'success':     True,
-            'tx':          sig,
-            'side':        side,
-            'symbol':      symbol,
-            'new_balance': new_balance,
+            'success':        True,
+            'tx':             sig,
+            'side':           side,
+            'symbol':         symbol,
+            'token_amount':   round(token_amount, 6),
+            'sol_amount':     round(sol_recorded, 6),
+            'new_balance':    new_balance,
+            # False means the swap went through without the platform fee, so
+            # the fees table has no row for this trade.
+            'fee_collected':  bool(swap_info.get('fee_bundled')),
         })
 
     except Exception as e:
@@ -22973,50 +23022,6 @@ def api_manual_buy():
         wallet, str((request.json or {}).get('mint_address', '')).strip(),
         log_label='MANUAL BUY', enforce_position_cap=True,
         idle_note=' — start the bot for automatic TP/SL')
-
-
-# A buy is serialized per (wallet, mint) so a double-click cannot become two
-# buys of the same token. Same idiom, and the same single-process limit, as
-# the sell lock above.
-_solana_buy_locks: dict = {}
-_solana_buy_locks_guard = threading.Lock()
-
-
-def _get_solana_buy_lock(wallet: str, mint: str) -> threading.Lock:
-    with _solana_buy_locks_guard:
-        key = (wallet, mint)
-        lock = _solana_buy_locks.get(key)
-        if lock is None:
-            lock = threading.Lock()
-            _solana_buy_locks[key] = lock
-        return lock
-
-
-# What a Solana wallet has to keep back so it can still act afterwards.
-#
-# A swap's own network and priority fees are around 0.00002 SOL, but a first
-# buy of a token also creates an associated token account (~0.00204 SOL of
-# rent), and the position has to remain SELLABLE -- a wallet drained to zero
-# owns tokens it cannot move, which is the worst state to leave someone in.
-# Both buy paths previously spent min(configured size, entire balance) and so
-# could land exactly there.
-SOL_NETWORK_RESERVE = 0.005
-# The smallest buy worth making. Together these two define the minimum
-# balance, which is why that floor is not written as a bare 0.01 any more:
-# a floor that does not account for the reserve leaves a band where the
-# balance passes the check and there is nothing left to spend.
-SOL_MIN_SPEND = 0.005
-
-# How long a repeat buy of the same token by the same wallet is treated as a
-# double-click rather than a second intent.
-#
-# A lock alone does not solve this the way it does for a sell. A sell finds
-# the position gone and stops; a buy is ADDITIVE, so serializing two clicks
-# just makes both of them spend, in order. Buying the same token twice is a
-# legitimate thing to want -- doing it twice inside a few seconds is not, and
-# that is the only case this refuses.
-SOLANA_BUY_REPEAT_WINDOW = 15
-_recent_solana_buys: dict = {}
 
 
 def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,

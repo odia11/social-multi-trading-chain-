@@ -311,6 +311,11 @@ tree = ast.parse(src)
 funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
 
 
+def _calls_in(name):
+    return {c.func.id for c in ast.walk(funcs[name])
+            if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)}
+
+
 def reaches_engine(name, seen=None):
     """Whether this endpoint runs a trade through the engine, directly or
     through one of the app's own helpers.
@@ -362,10 +367,14 @@ check('the Solana buys are deliberately NOT on the engine — they already spend
       'exactly what was asked, and the engine cannot price Solana without a '
       'live SOL price and a Jupiter route', not solana_on_engine)
 
-still_legacy = {n for n in ('api_instant_trade',) if not reaches_engine(n)}
-check('the last path still on its old code is api_instant_trade, which handles '
-      'both sides of a trade across chains in one endpoint and is its own piece '
-      'of work', still_legacy == {'api_instant_trade'})
+# api_instant_trade is Solana too, and off the engine for the same reason --
+# its own defects are covered in tests/test_instant_trade.py.
+check('the Solana one-click route is not on the engine either, for the same '
+      'reason as the other two', not reaches_engine('api_instant_trade'))
+check('...but it no longer runs its own swap subprocess: every Solana trade in '
+      'the app now funnels through one wrapper, which is what guarantees the '
+      'network-fee top-up',
+      '_execute_user_swap_ex' in _calls_in('api_instant_trade'))
 check('the old EVM buy is still reachable behind the flag rather than deleted, so '
       'this phase can be undone without a code change',
       'TRADE_ENGINE_MANUAL_EVM' in src and '_legacy_evm_trade_buy' in funcs)

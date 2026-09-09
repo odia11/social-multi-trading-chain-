@@ -143,14 +143,30 @@ check('a cycle that found no prices opens no write connection at all',
       'if price_by_mint:' in loop)
 
 # ── the same pattern in the trade recorder ──
-trade = re.search(r'def api_instant_trade\(\):.*?\n(?=@app\.route)', SRC, re.S).group(0)
-_ins  = trade.index('INSERT INTO trades')
+# Checked by position in the parse tree rather than by matching source text:
+# the previous spelling pinned exact indentation and a local variable's name,
+# so reformatting the function broke the test while the property it cares
+# about was still perfectly true. A guard that fails on a rename is a guard
+# nobody trusts.
+import ast                                                        # noqa: E402
+_tree  = ast.parse(SRC)
+_trade = next(n for n in ast.walk(_tree)
+              if isinstance(n, ast.FunctionDef) and n.name == 'api_instant_trade')
+_dex_lines = [n.lineno for n in ast.walk(_trade)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+              and n.func.id == '_dex_get']
+_insert_lines = [n.lineno for n in ast.walk(_trade) if isinstance(n, ast.Constant)
+                 and isinstance(n.value, str) and 'INSERT INTO trades' in n.value]
+_connect_lines = [n.lineno for n in ast.walk(_trade)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                  and n.func.attr == 'connect']
 check('the price lookup happens BEFORE the trade row is inserted — it used to sit '
       'between the INSERT and its commit, holding the write lock across a '
       '6-second HTTP call',
-      trade.index("_dex_get(\n                        'https://api.dexscreener.com") < _ins)
+      _dex_lines and _insert_lines and max(_dex_lines) < min(_insert_lines))
 check('...and no connection is even open while that lookup runs',
-      trade.index('conn     = sqlite3.connect(DB_FILE)') > trade.index('_buy_price_usd = 0.0'))
+      _connect_lines and min(c for c in _connect_lines
+                             if c > max(_dex_lines)) > max(_dex_lines))
 
 # ── a standing guard over the whole file ──
 # This is the class of bug, not two instances of it: any write left
