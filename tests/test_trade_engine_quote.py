@@ -233,5 +233,61 @@ called = {n.func.attr for n in ast.walk(tree)
 check('nothing here signs or broadcasts',
       not {'send_raw_transaction', 'sign_transaction', 'sendTransaction'} & called)
 
+# ── closing the decimals gap honestly ──────────────────────────────────────
+# The registry refuses to guess: an asset nobody has confirmed stays None and
+# raises. Robinhood Chain's USDG was the one in that state, and on the first
+# live run it did exactly that. The gap closes by READING the contract, not by
+# somebody typing a plausible number into the file.
+import importlib                                                  # noqa: E402
+R2 = importlib.reload(__import__('trade_engine.registry', fromlist=['x']))
+
+check('the registry can name what it has not verified, so the gap is findable '
+      'before a trade hits it rather than during one',
+      any(a.symbol == 'USDG' for a in R2.unverified_assets()))
+
+usdg = '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168'
+filled = R2.verify_decimals('robinhood', usdg, 6, 'test contract')
+check('a value read from the contract fills the blank', filled.decimals == 6)
+check('...and is recorded as verified, with where it came from, so the next '
+      'reader knows it was measured rather than assumed',
+      'verified 6 from test contract' in filled.note)
+check('...leaving nothing unverified', not R2.unverified_assets())
+check('re-reading the same value is fine',
+      R2.verify_decimals('robinhood', usdg, 6, 'test contract').decimals == 6)
+
+try:
+    R2.verify_decimals('robinhood', usdg, 18, 'a lying rpc')
+    ok = False
+except R2.RegistryError:
+    ok = True
+check('a DIFFERENT answer is refused rather than accepted. A runtime lookup '
+      'must not be able to resize every trade on a chain because one RPC '
+      'replied wrongly', ok)
+
+try:
+    R2.verify_decimals('bsc', '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', 6, 'x')
+    ok = False
+except R2.RegistryError:
+    ok = True
+check("...and an already-verified value cannot be overwritten either — BSC's "
+      '18-decimal USDC is the asset this whole registry exists for', ok)
+
+for bad in (6.0, True, -1, 99, '6'):
+    try:
+        R2.verify_decimals('robinhood', usdg, bad, 'x')
+        ok = False
+    except R2.RegistryError:
+        ok = True
+    check(f'{bad!r} is refused as a decimals value', ok)
+
+try:
+    R2.verify_decimals('bsc', '0xdeadbeef', 6, 'x')
+    ok = False
+except R2.RegistryError:
+    ok = True
+check("an address that is not the chain's native or stable asset is refused, "
+      'rather than silently recording decimals for something the registry '
+      'does not track', ok)
+
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)

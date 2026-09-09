@@ -7335,6 +7335,45 @@ _TE_GAS_CACHE: dict = {}          # chain -> (fetched_at, usd_per_swap)
 _TE_GAS_TTL = 60
 _TE_SOL_SWAP_FEE = Decimal('0.00002')   # SOL: network + priority fee for one swap
 
+_TE_DECIMALS_DONE: set = set()
+
+def _te_ensure_decimals(chain: str) -> None:
+    """Fill in any asset whose decimals the registry refuses to guess.
+
+    The registry leaves an unconfirmed asset at None and raises rather than
+    assuming -- an unverified 6 that turns out to be 18 is a 10^12 sizing
+    error. Robinhood Chain's USDG is the one asset in that state. The answer
+    is on the contract; this reads it and tells the registry, which is the
+    thing its own error message asks for.
+
+    Read once per chain per process. Failure is not fatal here: the trade that
+    needs it will still refuse, with the registry's own message, rather than
+    proceeding on a guess.
+    """
+    if chain in _TE_DECIMALS_DONE:
+        return
+    try:
+        cfg = te_registry.get_chain(chain)
+        if cfg.kind != 'evm':
+            _TE_DECIMALS_DONE.add(chain)
+            return
+        for asset in (cfg.native, cfg.stable):
+            if asset.decimals is not None:
+                continue
+            w3 = _get_web3(chain)
+            got = int(w3.eth.contract(
+                address=w3.to_checksum_address(asset.address),
+                abi=_ERC20_MIN_ABI).functions.decimals().call())
+            te_registry.verify_decimals(chain, asset.address, got,
+                                        source=f'{chain} contract')
+            print(f'[trade-engine] {asset.symbol} on {chain} has {got} decimals '
+                  f'(read from the contract)', flush=True)
+        _TE_DECIMALS_DONE.add(chain)
+    except Exception as e:
+        print(f'[trade-engine] could not read decimals on {chain}: '
+              f'{type(e).__name__}: {e}', flush=True)
+
+
 def _te_native_price_usd(chain: str) -> Decimal:
     """What one unit of the chain's gas token is worth, in the stable the
     trade is funded with.
@@ -7344,6 +7383,7 @@ def _te_native_price_usd(chain: str) -> Decimal:
     that actually matters here (what the gas will cost in the currency the
     ceiling is denominated in) rather than a general market price.
     """
+    _te_ensure_decimals(chain)
     cfg = EVM_CHAINS[chain]
     # /price, not /quote: this is a valuation, not a swap for anybody. See
     # _get_0x_price -- passing the native sentinel as a taker to /quote is
@@ -7430,6 +7470,7 @@ def _te_build_and_store_quote(*, uid, wallet, source_chain, dest_chain, token_ad
     re-pricing, because the point of an expiry is that the number does not
     move once a user has been given it.
     """
+    _te_ensure_decimals(dest_chain)
     quote = build_quote(
         QuoteRequest(
             user_id=uid, wallet=wallet, source_chain=source_chain,

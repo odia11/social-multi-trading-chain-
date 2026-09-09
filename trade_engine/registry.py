@@ -129,6 +129,62 @@ CHAINS: dict = {
 }
 
 
+def verify_decimals(chain: str, address: str, decimals: int,
+                    source: str = 'contract') -> Asset:
+    """Record decimals that were READ from the deployed contract.
+
+    The registry refuses to guess -- an unverified 6 that turns out to be 18
+    is a 10^12 sizing error -- so an asset it does not know stays None and
+    raises. This is how that gap is closed properly: by the app reading
+    decimals() on-chain and telling the registry the answer, rather than by
+    somebody typing a plausible number into this file.
+
+    Only ever fills a blank. An asset whose decimals are already known is not
+    overwritten: a value that has been verified is not something a runtime
+    lookup should be able to change, because that is how a wrong RPC answer
+    would silently resize every trade on a chain.
+    """
+    if not isinstance(decimals, int) or isinstance(decimals, bool):
+        raise RegistryError(f'decimals must be an int, got {decimals!r}')
+    if not 0 <= decimals <= 36:
+        raise RegistryError(f'{decimals} is not a plausible decimals value')
+
+    ch = get_chain(chain)
+    for field in ('native', 'stable'):
+        asset = getattr(ch, field)
+        if asset.address.lower() != (address or '').lower():
+            continue
+        if asset.decimals is not None:
+            if asset.decimals != decimals:
+                raise RegistryError(
+                    f'{asset.symbol} on {chain} is recorded as {asset.decimals} '
+                    f'decimals but the {source} says {decimals} — refusing to '
+                    f'change a verified value at runtime'
+                )
+            return asset
+        filled = Asset(chain=asset.chain, address=asset.address,
+                       symbol=asset.symbol, decimals=decimals, kind=asset.kind,
+                       note=(asset.note + f' [verified {decimals} from {source}]').strip())
+        CHAINS[ch.name] = Chain(
+            name=ch.name, kind=ch.kind, chain_id=ch.chain_id,
+            native=filled if field == 'native' else ch.native,
+            stable=filled if field == 'stable' else ch.stable,
+            swap_provider=ch.swap_provider, display_name=ch.display_name)
+        return filled
+    raise RegistryError(f'{address} is not the native or stable asset of {chain}')
+
+
+def unverified_assets() -> list:
+    """Every asset whose decimals nobody has confirmed, so a caller can go and
+    read them rather than discovering the gap mid-trade."""
+    out = []
+    for ch in CHAINS.values():
+        for asset in (ch.native, ch.stable):
+            if asset.decimals is None:
+                out.append(asset)
+    return out
+
+
 def get_chain(name: str) -> Chain:
     chain = CHAINS.get((name or '').strip().lower())
     if chain is None:
