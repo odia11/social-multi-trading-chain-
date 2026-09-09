@@ -10983,6 +10983,7 @@ def _get_index_base_html():
         with open(alert_path, 'r', encoding='utf-8') as f:
             html = html.replace('__ALERT_MODAL__', f.read())
         html = html.replace('__NAVBAR__', _navbar_html('feed'))
+        html = html.replace('__IMAGE_LIGHTBOX__', _image_lightbox_html())
         html = html.replace('__API_SHARED_SECRET__', API_SHARED_SECRET)
         html = html.replace('__ASSET_VER__', _APP_VERSION)
         _INDEX_BASE_CACHE['key']  = key
@@ -15910,7 +15911,49 @@ _APP_VERSION: str = _app_version()
 
 @app.context_processor
 def _inject_app_version():
-    return {'app_version': _APP_VERSION, 'navbar_html': _navbar_html}
+    return {'app_version': _APP_VERSION, 'navbar_html': _navbar_html,
+            'image_lightbox_html': _image_lightbox_html}
+
+# ── Shared full-size image viewer ──
+# The DM page had one; the feed did not. Post images there opened in
+# #avatar-lightbox instead -- capped at 360px, because it was built to show a
+# profile picture. So tapping a photo someone posted gave you a thumbnail of
+# a thumbnail.
+#
+# One Python function rather than a second copy of the markup, for the same
+# reason _navbar_html is one: dashboard.html is not rendered through Jinja
+# (it is spliced by _get_index_base_html), so a shared partial cannot serve
+# both, and two hand-kept copies drift.
+def _image_lightbox_html() -> Markup:
+    """Markup and styles for the tap-to-enlarge viewer.
+
+    Deliberately separate from the avatar lightbox rather than replacing it:
+    an avatar is a small round crop and enlarging it past its own resolution
+    only shows the blur. A posted photo is the opposite -- it exists to be
+    looked at.
+    """
+    return Markup("""
+<style>
+#img-lightbox{display:none;position:fixed;inset:0;background:rgba(10,11,14,.92);z-index:9999;
+  align-items:center;justify-content:center;cursor:pointer}
+#img-lightbox.open{display:flex}
+/* Bounded by the viewport, never by a pixel count: the whole point is to see
+   the picture as large as the screen allows. */
+#img-lightbox img{max-width:94vw;max-height:88vh;border-radius:12px;object-fit:contain;
+  box-shadow:0 20px 60px rgba(0,0,0,.55);cursor:default}
+#img-lightbox-close{position:fixed;top:max(16px,env(safe-area-inset-top));right:16px;
+  background:rgba(10,11,14,.7);border:1px solid rgba(247,185,85,.35);border-radius:50%;
+  width:40px;height:40px;color:#f7b955;font-size:20px;line-height:1;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;font-family:inherit;
+  transition:border-color .15s,background .15s}
+#img-lightbox-close:hover{background:rgba(247,185,85,.12);border-color:#f7b955}
+</style>
+<div id="img-lightbox" onclick="_closeImgLightbox()">
+  <button id="img-lightbox-close" onclick="event.stopPropagation();_closeImgLightbox()"
+          aria-label="Close" title="Close">&times;</button>
+  <img id="img-lightbox-img" src="" alt="" onclick="event.stopPropagation()">
+</div>""")
+
 
 # ── Shared top navbar (same visual language as /live-market's topbar) ──
 # One Python function instead of a Jinja {% include %} so the exact same

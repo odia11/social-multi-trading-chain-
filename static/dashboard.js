@@ -8000,6 +8000,36 @@ function _closeAvatarLightbox(){
   if(lb) lb.classList.remove('open');
 }
 
+// Posted photos used to open in the AVATAR lightbox, which caps at 360px
+// because it exists to show a profile picture. Tapping a photo therefore gave
+// you a thumbnail of a thumbnail. This is the viewer the DM page has always
+// had: bounded by the viewport, not by a pixel count.
+//
+// The avatar one stays for avatars. Enlarging a small round crop past its own
+// resolution only shows you the blur.
+function _openImgLightbox(url){
+  var lb  = document.getElementById('img-lightbox');
+  var img = document.getElementById('img-lightbox-img');
+  if(!lb || !img){
+    // The viewer is not on this page. Opening the file directly beats doing
+    // nothing at all when someone taps a photo.
+    if(url) window.open(url, '_blank');
+    return;
+  }
+  img.src = url;
+  lb.classList.add('open');
+  // Nothing behind it should scroll while it is up.
+  try{ document.body.style.overflow = 'hidden'; }catch(e){}
+}
+function _closeImgLightbox(){
+  var lb = document.getElementById('img-lightbox');
+  if(lb) lb.classList.remove('open');
+  try{ document.body.style.overflow = ''; }catch(e){}
+}
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape') _closeImgLightbox();
+});
+
 async function loadHomeFeed(){
   const filter = _homeFeedFilter === 'following' ? 'following' : 'all';
   const el = document.getElementById('center-feed');
@@ -9006,7 +9036,7 @@ function _renderFeedCard(e){
     +textBody
     +'</div>'
     +(e.image_url
-      ? '<div class="fc-post-image-wrap" onclick="event.stopPropagation();_showAvatarLightbox('+esc(JSON.stringify(e.image_url))+')"><img class="fc-post-image" src="'+esc(e.image_url)+'" alt="" loading="lazy"></div>'
+      ? '<div class="fc-post-image-wrap" onclick="event.stopPropagation();_openImgLightbox('+esc(JSON.stringify(e.image_url))+')"><img class="fc-post-image" src="'+esc(e.image_url)+'" alt="" loading="lazy"></div>'
       : '')
     +editHtml
     +'<div class="fc-actions" onclick="event.stopPropagation()">'
