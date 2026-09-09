@@ -87,5 +87,22 @@ check('the live check says fronting is off, rather than listing six zero '
 check('...and the sponsor balances are skipped rather than reported as empty',
       V.count("not used (ORCAGENT_FRONTS_GAS is off)") == 2)
 
+# ── the dead end has to name the way out, and the cheap one first ──────────
+# With fronting off, a wallet at zero native gas is a real block. The message
+# offered one route: deposit $5 of SOL to be bridged. That was advice from
+# when the sponsor existed and the bridge was a rare fallback — telling
+# someone to move $5 through a bridge to enable a $1 trade is not the best
+# available answer, and it is now the ONLY one the app was offering.
+boot = fn('_bootstrap_evm_gas_via_bridge')
+check('the dead end offers sending the chain\'s own gas token directly',
+      'Send a ' in boot and 'a few cents is enough' in boot)
+check('...before the bridge route, because a few cents beats moving $5 of SOL '
+      'to enable a $1 trade',
+      boot.index('a few cents is enough') < boot.index('of SOL and it will'))
+check('...while keeping the bridge, which works from capital the user already '
+      'holds on Solana', 'GAS_BOOTSTRAP_SOL_USD' in boot)
+check('...and names the wallet to send to, rather than leaving the user to find '
+      'it', 'evm_address or' in boot)
+
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)

@@ -8774,10 +8774,21 @@ def _bootstrap_evm_gas_via_bridge(user_id: int, wallet: str, evm_address: str, c
         # Worded as a concrete instruction (how much, and what happens next),
         # not "bootstrap"/"bridge" jargon -- this is what actually reaches
         # the Buy panel via "Cannot trade on {chain} yet -- {this message}".
-        add_user_log(wallet, f'[bot-{chain}] Cannot activate {chain} yet — deposit at least ${GAS_BOOTSTRAP_SOL_USD:.0f} of SOL '
-                              f'(you currently have {round(sol_bal,4)} SOL) — it gets converted into {native_symbol} gas automatically')
-        return False, (f'deposit at least ${GAS_BOOTSTRAP_SOL_USD:.0f} of SOL to your wallet — '
-                        f'that funds your first bit of {native_symbol} gas here automatically'), None
+        # Two ways out, and the direct one first because it is the better
+        # one: a few cents of the chain's own gas token beats bridging $5 of
+        # SOL to enable a $1 trade. The bridge route stays because it works
+        # from capital the user already holds on Solana, which is the case it
+        # was built for -- but offering only that was advice from when the
+        # platform still fronted gas and the bridge was the rare fallback.
+        _evm_addr_hint = evm_address or 'your wallet on this chain'
+        add_user_log(wallet, f'[bot-{chain}] Cannot activate {chain} yet — send a little '
+                             f'{native_symbol} to {_evm_addr_hint}, or deposit at least '
+                             f'${GAS_BOOTSTRAP_SOL_USD:.0f} of SOL (you have {round(sol_bal,4)}) '
+                             f'to have it bridged into {native_symbol} automatically')
+        return False, (f'this wallet has no {native_symbol} for network fees yet. Send a '
+                       f'little {native_symbol} to it on {chain} — a few cents is enough — '
+                       f'or deposit at least ${GAS_BOOTSTRAP_SOL_USD:.0f} of SOL and it will '
+                       f'be bridged into {native_symbol} for you'), None
 
     ok, msg, row_id = _execute_cross_chain_bridge(
         user_id, wallet, origin_chain='solana', dest_chain=chain,
