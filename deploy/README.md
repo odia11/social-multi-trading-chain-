@@ -136,6 +136,27 @@ Developer Portal has to match your domain exactly.
 
 ---
 
+## Check that the outside world is actually reachable
+
+```bash
+cd /opt/orcagent && sudo -u orcagent \
+  env $(grep -v '^#' /etc/orcagent.env | xargs) venv/bin/python tools/verify_live.py
+```
+
+Run this after the first start, and after any change to keys or networking.
+It calls 0x, Jupiter, DexScreener and every chain's RPC with your real keys,
+prices a real $100 trade, and checks that its parts add up to $100 rather
+than $100.75.
+
+It is read-only — it quotes and reads balances, signs nothing, sends nothing,
+and prints no key. Exit code 0 means everything the app trades through is
+reachable from this server.
+
+This matters more than it sounds. The development environment has no route to
+any of those services, so none of the trading adapters has ever run against a
+live API. Until this passes here, that part of the app is untested rather
+than tested.
+
 ## Running it day to day
 
 ```bash
@@ -171,7 +192,15 @@ is a second copy of all of it — two processes buying the same token, two gas
 grants for one empty wallet. `deploy/orcagent.service` pins it to one worker
 with four threads; please don't raise it.
 
-**Data lives in `/data`, code in `/opt/orcagent`.** The app switches to
-`/data` automatically when that directory exists. Keeping them apart is what
+There is now a second reason. The guards that stop a double-click becoming
+two buys or two sells are in-process locks: a second worker holds its own
+copy, and the second click gets through. Threads are fine — they share the
+locks — but workers are not. If the app ever has to scale past one, those
+guards need to become database claims first, the way the EVM buy's balance
+reservation already is.
+
+**Data lives in `/data`, code in `/opt/orcagent`.** The app reads `DATA_DIR`
+first and otherwise switches to `/data` automatically when that directory
+exists. Keeping them apart is what
 makes redeploying safe: `install.sh` replaces the code and never reaches into
 your database.
