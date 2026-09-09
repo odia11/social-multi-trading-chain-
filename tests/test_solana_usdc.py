@@ -110,5 +110,28 @@ check('...with the styling for a stated value actually defined, not a class '
 check('...and it says plainly that SOL is still needed for fees, because a '
       'wallet holding only USDC cannot trade', 'netwerkkosten' in ST)
 
+# ── the wallet page ────────────────────────────────────────────────────────
+# It led with SOL as "Available balance" and put USDC in a card below. After
+# the currency change that is backwards: a wallet holding $4.64 of tradeable
+# balance and no SOL read as completely empty.
+W = open(REPO + '/templates/wallet.html').read()
+
+check('the headline balance is what a trade is funded from',
+      'Available to trade' in W and 'USDC across all chains' in W)
+check('...and is filled from the USDC summary, not the SOL balance',
+      "_availEl.textContent=_tot" in W)
+check('SOL is shown as the network fee it now is, not as a balance',
+      'SOL for network fees' in W and 'id="fee-sol"' in W)
+check('...and is flagged when there is too little to send a trade. Running out '
+      'of SOL and having nothing to trade with are different problems needing '
+      'different deposits', 'SOL_FEE_RESERVE' in W and '_low ? ' in W)
+check('...against the same figure the server keeps back, not a second number '
+      'invented on the page', 'var SOL_FEE_RESERVE = 0.005' in W)
+check('the total is not printed twice — two headline numbers compete to be the '
+      'important one', W.count('id="usdc-total"') == 1
+      and 'Total USDC' not in W)
+check('a first load that fails blanks the headline rather than leaving a stale '
+      'or wrong figure', "_a.textContent='—'" in W)
+
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)

@@ -601,9 +601,12 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
     <div class="wlt-hero">
       <div class="wlt-hero-top">
         <div>
-          <div class="wlt-hero-lbl">Available balance</div>
+          <!-- USDC, not SOL. Every trade on every chain is funded with USDC
+               now; SOL only pays Solana's network fee. Leading with SOL made
+               a wallet holding $4.64 of tradeable balance read as empty. -->
+          <div class="wlt-hero-lbl">Available to trade</div>
           <div class="wlt-hero-num"><span id="avail">—</span></div>
-          <div class="wlt-hero-usd" id="avail-usd">≈ $—</div>
+          <div class="wlt-hero-usd" id="avail-sub">USDC across all chains</div>
         </div>
         <button class="wlt-hero-refresh" onclick="loadBalance()" title="Refresh">↻</button>
       </div>
@@ -616,6 +619,14 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
       <div class="wlt-hero-inpos">
         <span class="wlt-hero-inpos-lbl">In open positions</span>
         <span class="wlt-hero-inpos-val" id="inpos">0 SOL</span>
+      </div>
+      <!-- SOL has one job left: paying Solana's network fee. It is shown as
+           that rather than as a balance, and turns amber when there is not
+           enough to send a trade -- which is a different problem from having
+           nothing to trade with, and needs a different deposit. -->
+      <div class="wlt-hero-inpos" id="wlt-fee-row">
+        <span class="wlt-hero-inpos-lbl">SOL for network fees</span>
+        <span class="wlt-hero-inpos-val" id="fee-sol">—</span>
       </div>
     </div>
 
@@ -630,9 +641,12 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
          shows up here with no template change needed. -->
     <div class="dep-card" style="margin-bottom:16px">
       <div class="dep-header">
-        <span class="dep-title">Total USDC <span style="color:var(--muted);font-weight:500">(all chains)</span></span>
+        <span class="dep-title">USDC <span style="color:var(--muted);font-weight:500">per chain</span></span>
+        <!-- The total moved to the hero above, where the balance you actually
+             trade with belongs. Repeating it here would be two headline
+             numbers competing to be the important one. -->
+        <span class="dep-title" id="usdc-total" style="font-variant-numeric:tabular-nums">—</span>
       </div>
-      <div class="wlt-hero-num" id="usdc-total" style="margin-top:10px">—</div>
       <button class="wlt-usdc-toggle" id="usdc-tiles-toggle" onclick="_toggleUsdcTiles()">Per chain bekijken <span id="usdc-tiles-chevron">▾</span></button>
       <div class="wlt-bsc-balances wlt-usdc-tiles collapsed" id="usdc-chain-tiles">
         <div class="wlt-bsc-bal-item">
@@ -1933,12 +1947,29 @@ function _toggleTokTrade(i){
 
 // ── balance ───────────────────────────────────────────────
 var _balanceLoadedOnce=false
+// Mirrors SOL_NETWORK_RESERVE in dashboard.py -- what a Solana wallet has to
+// keep back to send a trade and later close it.
+var SOL_FEE_RESERVE = 0.005
+
 function loadBalance(){
   fetch('/api/wallet/balance').then(function(r){return r.json()}).then(function(d){
     if(d.sol!=null) document.getElementById('sol').textContent=parseFloat(d.sol).toFixed(4)
     if(d.usd!=null) document.getElementById('usd').textContent=parseFloat(d.usd).toFixed(2)
-    if(d.sol!=null) document.getElementById('avail').textContent=parseFloat(d.sol).toFixed(4)+' SOL'
-    if(d.usd!=null){var _auEl=document.getElementById('avail-usd');if(_auEl)_auEl.textContent='≈ $'+parseFloat(d.usd).toFixed(2)}
+    // The hero shows USDC (see loadUsdcSummary). SOL is reported here as
+    // what it now is: the network fee, flagged when there is not enough of
+    // it to send a trade. Running out of SOL and having nothing to trade
+    // with are different problems needing different deposits, so they are
+    // never the same number on screen.
+    if(d.sol!=null){
+      var _sol=parseFloat(d.sol), _feeEl=document.getElementById('fee-sol')
+      if(_feeEl){
+        _feeEl.textContent=_sol.toFixed(4)+' SOL'
+        var _low=_sol < SOL_FEE_RESERVE
+        _feeEl.style.color = _low ? '#f7b955' : ''
+        _feeEl.title = _low ? 'Not enough SOL to send a Solana trade — about '
+          + SOL_FEE_RESERVE + ' is needed. This is separate from your trading balance.' : ''
+      }
+    }
     if(d.in_positions_sol!=null) document.getElementById('inpos').textContent=parseFloat(d.in_positions_sol).toFixed(4)+' SOL'
     _balanceLoadedOnce=true
   }).catch(function(){
@@ -1975,7 +2006,12 @@ var _usdcSummaryCache=null   // last-fetched {solana_usdc, evm_chains} -- the Br
 function loadUsdcSummary(){
   fetch('/api/wallet/usdc-summary').then(function(r){return r.json()}).then(function(d){
     if(!d.ok) throw new Error(d.msg||'failed')
-    document.getElementById('usdc-total').textContent='$'+parseFloat(d.total_usdc).toFixed(2)
+    var _tot='$'+parseFloat(d.total_usdc).toFixed(2)
+    document.getElementById('usdc-total').textContent=_tot
+    // This is the balance a trade is actually funded from, so it is the one
+    // the hero shows.
+    var _availEl=document.getElementById('avail')
+    if(_availEl) _availEl.textContent=_tot
     document.getElementById('usdc-sol-val').textContent='$'+parseFloat(d.solana_usdc).toFixed(2)
     // evm_chains is {chain: usdc_balance} for every chain in EVM_CHAINS
     // (dashboard.py) -- rendered generically so a future chain added there
@@ -1996,6 +2032,7 @@ function loadUsdcSummary(){
     if(!_usdcLoadedOnce){
       document.getElementById('usdc-total').textContent='—'
       document.getElementById('usdc-sol-val').textContent='—'
+      var _a=document.getElementById('avail'); if(_a) _a.textContent='—'
     }
   })
 }
