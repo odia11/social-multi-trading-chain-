@@ -5934,7 +5934,8 @@ def _parse_swap_realized_amounts(action: str, amount_str: str, stdout: str) -> t
             break
     return token_amount, sol_amount
 
-def _execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str, amount_str: str, base: str = 'SOL') -> tuple:
+def _execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str,
+                          amount_str: str, base: str = 'SOL', capture: dict = None) -> tuple:
     """Same subprocess call as _execute_user_swap(), but also returns the
     transaction signature -- parsed from orcagent_solana.py's own stdout
     (a 'TX:<sig>' token), same parsing /api/instant-trade already does.
@@ -5946,6 +5947,14 @@ def _execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str,
     token was found; err_msg is '' on success; token_amount/sol_amount are
     the swap's *realized* fill (see _parse_swap_realized_amounts()), 0.0 on
     failure or if parsing found nothing.
+
+    `capture`, when given, is filled with facts about the swap that do not
+    fit the return tuple -- today just fee_bundled: whether the platform fee
+    was really spliced into the buy's own transaction. orcagent_solana.py
+    falls back to a fee-less swap if bundling fails, and a caller that
+    assumed it succeeded would record a fee in `fees` and pay a referral cut
+    on money nobody ever collected. Optional and additive, so no existing
+    call site changes.
 
     err_msg is the last non-empty line of the subprocess's STDOUT, not
     stderr -- orcagent_solana.py's [TRADE] diagnostics and its caught-
@@ -6023,6 +6032,13 @@ def _execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str,
             if not err_msg:
                 err_msg = 'swap failed with no output'
         token_amount, sol_amount = _parse_swap_realized_amounts(action, amount_str, result.stdout) if ok else (0.0, 0.0)
+        if capture is not None:
+            # Positive confirmation, not merely the absence of a failure
+            # line: an unrecognised output shape must read as "not collected"
+            # rather than quietly asserting a fee that may not exist.
+            out = result.stdout or ''
+            capture['fee_bundled'] = ('[fee] buy: requesting quote' in out
+                                      and 'bundled buy fee failed' not in out)
         return ok, tx_hash, err_msg, token_amount, sol_amount
     except subprocess.TimeoutExpired:
         add_user_log(wallet, 'Swap error: timed out after 120s')
@@ -6038,7 +6054,8 @@ def _execute_user_swap(wallet: str, private_key: str, action: str, mint: str, am
     ok, _tx_hash, _err_msg, _tok_amt, _sol_amt = _execute_user_swap_ex(wallet, private_key, action, mint, amount_str, base=base)
     return ok
 
-def _buy_and_get_realized(wallet: str, private_key: str, mint: str, spend_sol: float, quoted_price: float, base: str = 'SOL') -> tuple:
+def _buy_and_get_realized(wallet: str, private_key: str, mint: str, spend_sol: float,
+                          quoted_price: float, base: str = 'SOL', capture: dict = None) -> tuple:
     """Execute a buy swap and return (ok, entry_price, token_amount) using the
     swap's own realized fill (actual tokens received for the SOL spent, from
     orcagent_solana.py's stdout) instead of the last polled quoted_price --
@@ -6050,7 +6067,8 @@ def _buy_and_get_realized(wallet: str, private_key: str, mint: str, spend_sol: f
     currency spend_sol is actually denominated in and spent -- named
     spend_sol for backward compatibility with every pre-existing SOL-only
     caller, not because it's SOL-only anymore."""
-    ok, _tx, _err, token_amount, _sol_amt = _execute_user_swap_ex(wallet, private_key, 'buy', mint, str(spend_sol), base=base)
+    ok, _tx, _err, token_amount, _sol_amt = _execute_user_swap_ex(
+        wallet, private_key, 'buy', mint, str(spend_sol), base=base, capture=capture)
     if ok and token_amount > 0:
         return True, spend_sol / token_amount, token_amount
     fallback_amount = (spend_sol / quoted_price) if quoted_price > 0 else 0.0
@@ -22931,163 +22949,220 @@ def api_pump_scanner():
 @app.route('/api/pump-scanner/buy', methods=['POST'])
 @rate_limit(10, 60)
 def api_pump_scanner_buy():
-    ip     = request.remote_addr or '0.0.0.0'
+    """One-off buy from the pump scanner. No position cap: this is a
+    deliberate pick outside the scoring algorithm."""
     wallet = _authenticated_wallet()
     if not wallet:
-        _record_ip_failure(ip)
+        _record_ip_failure(request.remote_addr or '0.0.0.0')
         return jsonify({'ok': False, 'msg': 'Connect a wallet first'}), 401
-    mint = str((request.json or {}).get('mint', '')).strip()
-    if not is_valid_solana_address(mint):
-        return jsonify({'ok': False, 'msg': 'Invalid token address'}), 400
-    if _sec_check_state.get('trading_paused'):
-        return jsonify({'ok': False,
-                        'msg': 'Trading suspended — security check failure. Contact admin to resume.'}), 503
+    return _solana_buy_flow(
+        wallet, str((request.json or {}).get('mint', '')).strip(),
+        log_label='PUMP SCANNER buy', enforce_position_cap=False,
+        idle_note=' — start the trader for automatic TP/SL on this position')
 
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        c   = conn.cursor()
-        c.execute('SELECT id, encrypted_private_key, min_trade_size FROM users WHERE wallet_address=?', (wallet,))
-        row = c.fetchone()
-        bl = c.execute('SELECT 1 FROM user_blacklist WHERE user_id=? AND mint=?',
-                       (row[0], mint)).fetchone() if row else None
-    finally:
-        conn.close()
-    if not row or not row[1]:
-        return jsonify({'ok': False, 'msg': 'No trading key saved — add it in Settings first'}), 400
-    if bl:
-        return jsonify({'ok': False, 'msg': 'This token is on your avoid list'}), 400
-    enc_blob       = row[1]
-    min_trade_usdc = float(row[2]) if row[2] is not None else 1.0
-
-    token_data = get_token_data(mint)
-    if not token_data or token_data['price'] <= 0:
-        return jsonify({'ok': False, 'msg': 'Could not fetch a live price for this token'}), 400
-
-    try:
-        with _use_key(enc_blob, wallet) as _pk:
-            from solders.keypair import Keypair as _KP_buy
-            trading_wallet = str(_KP_buy.from_base58_string(_pk).pubkey())
-    except InvalidToken:
-        return jsonify({'ok': False, 'msg': 'Cannot decrypt trading key — please re-save it in Settings'}), 400
-    except Exception as e:
-        print(f'[pump-scanner/buy] key error for {wallet[:6]}...{wallet[-4:]}: {type(e).__name__}: {e}', flush=True)
-        return jsonify({'ok': False, 'msg': 'Cannot decrypt trading key — please re-save it in Settings'}), 400
-
-    us_sol = _get_user_sol(trading_wallet)
-    if us_sol < 0.01:
-        return jsonify({'ok': False, 'low_balance': True, 'trading_wallet': trading_wallet,
-                        'msg': '⚠️ Insufficient SOL balance. Please send SOL to your trading wallet to start trading.'}), 400
-    # Manual snipe uses the user's configured minimum trade size (conservative default
-    # for a one-off pick outside the scoring algorithm), converted to SOL.
-    spend = min_trade_usdc / _sol_price_usd if _sol_price_usd > 0 else 0.02
-    spend = round(min(spend, us_sol), 4)
-    if spend < 0.001:
-        return jsonify({'ok': False, 'msg': 'Insufficient SOL balance to buy'}), 400
-
-    with _use_key(enc_blob, wallet) as _pk:
-        ok, _entry_price, _tok_amt = _buy_and_get_realized(wallet, _pk, mint, spend, token_data['price'])
-    if not ok:
-        return jsonify({'ok': False, 'msg': 'Buy transaction failed — check logs for details'}), 500
-
-    us = get_user_state(wallet)
-    pos = us['positions'].get(mint, {'amount': 0.0, 'buy_price': 0.0, 'spend': 0.0})
-    pos['amount']          = pos.get('amount', 0.0) + _tok_amt
-    pos['buy_price']       = _entry_price
-    pos['spend']           = pos.get('spend', 0.0) + spend
-    pos['symbol']          = token_data['symbol'] or mint[:8]
-    pos['opened_at']       = time.time()
-    pos['entry_liquidity'] = float(token_data.get('liquidity', 0) or 0)
-    pos.update(_snapshot_entry_risk(wallet, _entry_price))
-    _upsert_open_position(row[0], wallet, mint, pos, source='manual')
-    _charge_txn_fee(_pk, wallet, row[0], pos['symbol'], spend, 'buy', bundled=True)
-    short = wallet[:6] + '...' + wallet[-4:]
-    add_user_log(wallet, '[' + short + '] PUMP SCANNER buy: ' + pos['symbol'] +
-                 ' for ' + str(spend) + ' SOL @ $' + str(token_data['price']))
-    _trigger_copy_buy(wallet, mint, token_data['price'], pos['symbol'], float(token_data.get('liquidity', 0) or 0))
-    note = '' if us.get('trader_running') else ' — start the trader for automatic TP/SL on this position'
-    return jsonify({'ok': True, 'msg': 'Bought ' + pos['symbol'] + note, 'symbol': pos['symbol'], 'spend': spend})
 
 @app.route('/api/manual_buy', methods=['POST'])
 @rate_limit(10, 60)
 def api_manual_buy():
-    ip     = request.remote_addr or '0.0.0.0'
+    """Manual Solana buy from the dashboard. Capped at five open positions."""
     wallet = _authenticated_wallet()
     if not wallet:
-        _record_ip_failure(ip)
+        _record_ip_failure(request.remote_addr or '0.0.0.0')
         return jsonify({'ok': False, 'msg': 'Connect a wallet first'}), 401
-    mint = str((request.json or {}).get('mint_address', '')).strip()
+    return _solana_buy_flow(
+        wallet, str((request.json or {}).get('mint_address', '')).strip(),
+        log_label='MANUAL BUY', enforce_position_cap=True,
+        idle_note=' — start the bot for automatic TP/SL')
+
+
+# A buy is serialized per (wallet, mint) so a double-click cannot become two
+# buys of the same token. Same idiom, and the same single-process limit, as
+# the sell lock above.
+_solana_buy_locks: dict = {}
+_solana_buy_locks_guard = threading.Lock()
+
+
+def _get_solana_buy_lock(wallet: str, mint: str) -> threading.Lock:
+    with _solana_buy_locks_guard:
+        key = (wallet, mint)
+        lock = _solana_buy_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _solana_buy_locks[key] = lock
+        return lock
+
+
+# What a Solana wallet has to keep back so it can still act afterwards.
+#
+# A swap's own network and priority fees are around 0.00002 SOL, but a first
+# buy of a token also creates an associated token account (~0.00204 SOL of
+# rent), and the position has to remain SELLABLE -- a wallet drained to zero
+# owns tokens it cannot move, which is the worst state to leave someone in.
+# Both buy paths previously spent min(configured size, entire balance) and so
+# could land exactly there.
+SOL_NETWORK_RESERVE = 0.005
+# The smallest buy worth making. Together these two define the minimum
+# balance, which is why that floor is not written as a bare 0.01 any more:
+# a floor that does not account for the reserve leaves a band where the
+# balance passes the check and there is nothing left to spend.
+SOL_MIN_SPEND = 0.005
+
+# How long a repeat buy of the same token by the same wallet is treated as a
+# double-click rather than a second intent.
+#
+# A lock alone does not solve this the way it does for a sell. A sell finds
+# the position gone and stops; a buy is ADDITIVE, so serializing two clicks
+# just makes both of them spend, in order. Buying the same token twice is a
+# legitimate thing to want -- doing it twice inside a few seconds is not, and
+# that is the only case this refuses.
+SOLANA_BUY_REPEAT_WINDOW = 15
+_recent_solana_buys: dict = {}
+
+
+def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
+                     enforce_position_cap: bool, idle_note: str):
+    """One Solana buy, for both /api/manual_buy and /api/pump-scanner/buy.
+
+    These were two copies of the same function differing only in the field
+    the mint arrives under, a position cap, and their log wording. Merged so
+    a fix lands on both -- the two below landed on neither.
+
+    WHAT CHANGED
+    1. The wallet keeps SOL back for fees. Both copies spent
+       min(trade size, whole balance), so a user with 0.02 SOL could buy for
+       0.02 and be left unable to pay for the sell.
+
+    2. A double-click cannot become two buys. The balance was read and the
+       swap fired with nothing in between to stop a second request doing the
+       same, and the position is additive -- so the second buy really did
+       spend again.
+
+    3. The platform fee is recorded only when it was actually taken.
+       orcagent_solana.py splices the fee into the buy's own transaction and
+       silently falls back to a fee-less swap if that fails; both copies then
+       called _charge_txn_fee(bundled=True) regardless, which writes a `fees`
+       row and pays a 20% referral cut on money nobody collected.
+
+    Note the fee itself was already right here: the bundled buy swaps
+    (spend - fee), so the wallet spends exactly what was asked. That is the
+    EVM bug this same phase had to fix, and Solana never had it.
+    """
     if not is_valid_solana_address(mint):
         return jsonify({'ok': False, 'msg': 'Invalid token address'}), 400
     if _sec_check_state.get('trading_paused'):
         return jsonify({'ok': False,
                         'msg': 'Trading suspended — contact admin to resume.'}), 503
+
     conn = sqlite3.connect(DB_FILE)
     try:
-        c = conn.cursor()
-        c.execute('SELECT id, encrypted_private_key, min_trade_size FROM users WHERE wallet_address=?', (wallet,))
-        row = c.fetchone()
-        bl = c.execute('SELECT 1 FROM user_blacklist WHERE user_id=? AND mint=?',
-                       (row[0], mint)).fetchone() if row else None
+        c   = conn.cursor()
+        row = c.execute('SELECT id, encrypted_private_key, min_trade_size FROM users '
+                        'WHERE wallet_address=?', (wallet,)).fetchone()
+        bl  = c.execute('SELECT 1 FROM user_blacklist WHERE user_id=? AND mint=?',
+                        (row[0], mint)).fetchone() if row else None
     finally:
         conn.close()
     if not row or not row[1]:
         return jsonify({'ok': False, 'msg': 'No trading key saved — add it in Settings first'}), 400
     if bl:
         return jsonify({'ok': False, 'msg': 'This token is on your avoid list'}), 400
-    enc_blob       = row[1]
-    min_trade_usdc = float(row[2]) if row[2] is not None else 1.0
-
-    us           = get_user_state(wallet)
-    open_pos     = sum(1 for p in us['positions'].values() if p.get('amount', 0) > 0)
-    already_held = us['positions'].get(mint, {}).get('amount', 0) > 0
-    if open_pos >= 5 and not already_held:
-        return jsonify({'ok': False, 'msg': 'Max 5 positions reached — sell one first'}), 400
-
-    token_data = get_token_data(mint)
-    if not token_data or token_data['price'] <= 0:
-        return jsonify({'ok': False, 'msg': 'Could not fetch a live price for this token'}), 400
+    user_id, enc_blob = row[0], row[1]
+    min_trade_usdc    = float(row[2]) if row[2] is not None else 1.0
 
     try:
         with _use_key(enc_blob, wallet) as _pk:
-            from solders.keypair import Keypair as _KP_mb
-            trading_wallet = str(_KP_mb.from_base58_string(_pk).pubkey())
+            from solders.keypair import Keypair as _KP
+            trading_wallet = str(_KP.from_base58_string(_pk).pubkey())
     except InvalidToken:
         return jsonify({'ok': False, 'msg': 'Cannot decrypt trading key — please re-save it in Settings'}), 400
     except Exception as e:
-        print(f'[manual-buy] key error for {wallet[:6]}...{wallet[-4:]}: {type(e).__name__}: {e}', flush=True)
+        print(f'[solana-buy] key error for {wallet[:6]}...{wallet[-4:]}: '
+              f'{type(e).__name__}: {e}', flush=True)
         return jsonify({'ok': False, 'msg': 'Cannot decrypt trading key — please re-save it in Settings'}), 400
 
-    us_sol = _get_user_sol(trading_wallet)
-    if us_sol < 0.01:
-        return jsonify({'ok': False, 'low_balance': True, 'trading_wallet': trading_wallet,
-                        'msg': '⚠️ Insufficient SOL balance — send SOL to your trading wallet first'}), 400
-    spend = min_trade_usdc / _sol_price_usd if _sol_price_usd > 0 else 0.02
-    spend = round(min(spend, us_sol), 4)
-    if spend < 0.001:
-        return jsonify({'ok': False, 'msg': 'Insufficient SOL balance'}), 400
+    with _get_solana_buy_lock(wallet, mint):
+        us = get_user_state(wallet)
+        if enforce_position_cap:
+            open_pos     = sum(1 for p in us['positions'].values() if p.get('amount', 0) > 0)
+            already_held = us['positions'].get(mint, {}).get('amount', 0) > 0
+            if open_pos >= 5 and not already_held:
+                return jsonify({'ok': False, 'msg': 'Max 5 positions reached — sell one first'}), 400
 
-    with _use_key(enc_blob, wallet) as _pk:
-        ok, _entry_price, _tok_amt = _buy_and_get_realized(wallet, _pk, mint, spend, token_data['price'])
-    if not ok:
-        return jsonify({'ok': False, 'msg': 'Buy transaction failed — check logs for details'}), 500
+        token_data = get_token_data(mint)
+        if not token_data or token_data['price'] <= 0:
+            return jsonify({'ok': False, 'msg': 'Could not fetch a live price for this token'}), 400
 
-    pos = us['positions'].get(mint, {'amount': 0.0, 'buy_price': 0.0, 'spend': 0.0})
-    pos['amount']          = pos.get('amount', 0.0) + _tok_amt
-    pos['buy_price']       = _entry_price
-    pos['spend']           = pos.get('spend', 0.0) + spend
-    pos['symbol']          = token_data['symbol'] or mint[:8]
-    pos['opened_at']       = time.time()
-    pos['entry_liquidity'] = float(token_data.get('liquidity', 0) or 0)
-    pos.update(_snapshot_entry_risk(wallet, _entry_price))
-    _upsert_open_position(row[0], wallet, mint, pos, source='manual')
-    _charge_txn_fee(_pk, wallet, row[0], pos['symbol'], spend, 'buy', bundled=True)
+        # A repeat inside the window is a double-click, not a second decision.
+        last = _recent_solana_buys.get((wallet, mint), 0)
+        if time.time() - last < SOLANA_BUY_REPEAT_WINDOW:
+            return jsonify({'ok': False, 'duplicate': True,
+                            'msg': f'You just bought this token. Wait '
+                                   f'{SOLANA_BUY_REPEAT_WINDOW}s to buy more of it.'}), 429
+
+        us_sol = _get_user_sol(trading_wallet)
+        # One floor, derived from the reserve rather than a bare 0.01, so
+        # there is no band where the balance passes the check and there is
+        # nothing left to spend after keeping the reserve back.
+        if us_sol < SOL_NETWORK_RESERVE + SOL_MIN_SPEND:
+            return jsonify({
+                'ok': False, 'low_balance': True, 'trading_wallet': trading_wallet,
+                'msg': f'⚠️ Not enough SOL — you have {us_sol:.4f}, and '
+                       f'{SOL_NETWORK_RESERVE} is kept back for network fees so the '
+                       f'position can still be sold. Send SOL to your trading '
+                       f'wallet to start trading.'}), 400
+
+        # The configured trade size, capped by what can be spent while still
+        # leaving the wallet able to pay for this swap and the eventual sell.
+        spend = round(min(min_trade_usdc / _sol_price_usd if _sol_price_usd > 0 else 0.02,
+                          us_sol - SOL_NETWORK_RESERVE), 4)
+
+        swap_info = {}
+        # Claimed before the swap, not after: a swap takes seconds, and the
+        # second click arrives during it.
+        _recent_solana_buys[(wallet, mint)] = time.time()
+        with _use_key(enc_blob, wallet) as _pk:
+            ok, entry_price, tok_amt = _buy_and_get_realized(
+                wallet, _pk, mint, spend, token_data['price'], capture=swap_info)
+            if not ok:
+                # Nothing was bought, so nothing is being double-clicked.
+                # Holding the window here would make a user wait 15s to retry
+                # a buy that never happened.
+                _recent_solana_buys.pop((wallet, mint), None)
+                return jsonify({'ok': False, 'msg': 'Buy transaction failed — check logs for details'}), 500
+
+            pos = us['positions'].get(mint, {'amount': 0.0, 'buy_price': 0.0, 'spend': 0.0})
+            pos['amount']          = pos.get('amount', 0.0) + tok_amt
+            pos['buy_price']       = entry_price
+            pos['spend']           = pos.get('spend', 0.0) + spend
+            pos['symbol']          = token_data['symbol'] or mint[:8]
+            pos['opened_at']       = time.time()
+            pos['entry_liquidity'] = float(token_data.get('liquidity', 0) or 0)
+            pos.update(_snapshot_entry_risk(wallet, entry_price))
+            _upsert_open_position(user_id, wallet, mint, pos, source='manual')
+
+            # Only when the fee really rode along inside the swap. Recording
+            # one that did not would book revenue nobody received and pay a
+            # referral cut on it.
+            if swap_info.get('fee_bundled'):
+                _charge_txn_fee(_pk, wallet, user_id, pos['symbol'], spend, 'buy', bundled=True)
+            else:
+                print(f'[fee] {wallet[:6]}... {pos["symbol"]} buy: the platform fee was '
+                      f'NOT collected inside the swap, so nothing is recorded for it',
+                      flush=True)
+
     short = wallet[:6] + '...' + wallet[-4:]
-    add_user_log(wallet, '[' + short + '] MANUAL BUY: ' + pos['symbol'] +
+    add_user_log(wallet, '[' + short + '] ' + log_label + ': ' + pos['symbol'] +
                  ' for ' + str(spend) + ' SOL @ $' + str(token_data['price']))
-    _trigger_copy_buy(wallet, mint, token_data['price'], pos['symbol'], float(token_data.get('liquidity', 0) or 0))
-    note = '' if us.get('trader_running') else ' — start the bot for automatic TP/SL'
+    _trigger_copy_buy(wallet, mint, token_data['price'], pos['symbol'],
+                      float(token_data.get('liquidity', 0) or 0))
+    note = '' if us.get('trader_running') else idle_note
     return jsonify({'ok': True, 'msg': 'Bought ' + pos['symbol'] + note,
-                    'symbol': pos['symbol'], 'spend': spend})
+                    'symbol': pos['symbol'], 'spend': spend,
+                    'entry_price': entry_price, 'amount': tok_amt,
+                    # False means the swap went through without the platform
+                    # fee -- surfaced rather than hidden, since the `fees`
+                    # table will have no row for this trade.
+                    'fee_collected': bool(swap_info.get('fee_bundled'))})
 
 
 @app.route('/api/manual_sell', methods=['POST'])

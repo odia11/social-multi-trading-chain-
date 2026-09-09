@@ -351,13 +351,21 @@ sells_on_engine = {n for n in ('api_evm_trade_sell', 'api_bsc_trade_sell')
 check('the sells are deliberately NOT on the engine — a buy-shaped quote would '
       'mean inventing numbers for fields a sell does not have', not sells_on_engine)
 
-still_legacy = {n for n in ('api_instant_trade', 'api_manual_buy',
-                            'api_pump_scanner_buy')
-                if not reaches_engine(n)}
-check('the remaining buy paths are still on their old code — they are moved one '
-      'at a time so a mistake in the engine cannot take out several working '
-      'trade paths at once. Still to go: ' + ', '.join(sorted(still_legacy)),
-      still_legacy == {'api_instant_trade', 'api_manual_buy', 'api_pump_scanner_buy'})
+# The Solana buys are not on the engine either, and for a reason worth
+# recording: the fee was never the problem there. A bundled Solana buy swaps
+# (spend - fee), so the wallet already spends exactly what was asked -- the
+# charged-on-top bug this phase fixed was EVM-only. Their own defects are
+# covered in tests/test_solana_buy_flow.py.
+solana_on_engine = {n for n in ('api_manual_buy', 'api_pump_scanner_buy')
+                    if reaches_engine(n)}
+check('the Solana buys are deliberately NOT on the engine — they already spend '
+      'exactly what was asked, and the engine cannot price Solana without a '
+      'live SOL price and a Jupiter route', not solana_on_engine)
+
+still_legacy = {n for n in ('api_instant_trade',) if not reaches_engine(n)}
+check('the last path still on its old code is api_instant_trade, which handles '
+      'both sides of a trade across chains in one endpoint and is its own piece '
+      'of work', still_legacy == {'api_instant_trade'})
 check('the old EVM buy is still reachable behind the flag rather than deleted, so '
       'this phase can be undone without a code change',
       'TRADE_ENGINE_MANUAL_EVM' in src and '_legacy_evm_trade_buy' in funcs)
