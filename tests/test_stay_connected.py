@@ -130,11 +130,27 @@ with tempfile.TemporaryDirectory() as tmp:
 # ── it must only be mintable off a real signature ─────────────────────────
 setter = fn('wallet_set') if any(
     isinstance(n, ast.FunctionDef) and n.name == 'wallet_set' for n in ast.walk(TREE)) else SRC
-check('a token is issued only where a signature has been verified, never off '
-      'a read-only connect',
-      '_issue_device_token(' in SRC
-      and SRC.count('_issue_device_token(') == 2   # the definition and one call
-      and 'Signature verification failed' in SRC[:SRC.index('_device_token =')])
+# Counting callers was the old shape of this check, and it broke the moment a
+# second legitimate caller appeared -- which taught nothing, because the rule
+# was never "one caller". The rule is that EVERY caller stands behind proof of
+# ownership. So they are enumerated and each one named.
+_minters = sorted(
+    n.name for n in ast.walk(TREE)
+    if isinstance(n, ast.FunctionDef)
+    and n.name != '_issue_device_token'          # its own definition, not a caller
+    and '_issue_device_token(' in (ast.get_source_segment(SRC, n) or ''))
+check('every place that mints a remembered login is one that has already '
+      'established who this is: the wallet login, and the endpoint that '
+      'remembers a session which is itself already authenticated. Nothing '
+      'else may mint one — a remembered login outlives the browser, so an '
+      'unproved claim would become a permanent one',
+      _minters == ['api_session_remember', 'set_wallet'], )
+check('...and the wallet login mints one only AFTER the signature has been '
+      'checked, not beside it',
+      'Signature verification failed' in SRC[:SRC.index('_device_token =')])
+check('...while the remembering endpoint refuses a read-only session, which '
+      'is an address someone typed and never proved',
+      '_authenticated_wallet()' in fn('api_session_remember'))
 
 resume = fn('api_session_resume')
 check('the resume endpoint gives one answer for expired, revoked, unknown and '
@@ -171,7 +187,13 @@ _branch = JS[JS.index('if(_me && _me.authenticated'):]
 _branch = _branch[:_branch.index('_resumeFromDeviceToken()')]
 check('...only when the server said there was no session, so a normal load '
       'costs nothing extra',
-      '} else {' in _branch and 'await' not in _branch.split('} else {')[0])
+      # The resume must sit on the far side of the else. Checking that no
+      # `await` appears before it was a proxy for that, and a wrong one: the
+      # signed-in branch legitimately awaits now (it asks to be remembered).
+      # What matters is which branch the resume is in, so that is what is
+      # asked.
+      '} else {' in _branch
+      and '_resumeFromDeviceToken' not in _branch.split('} else {')[0])
 check('a spent token is replaced immediately, or the next load would present '
       'a dead one', '_storeDeviceToken(r.token)' in JS)
 check('a refused token is dropped rather than retried forever',

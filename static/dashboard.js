@@ -3114,6 +3114,20 @@ function _inDappBrowser(){ return !!(window.solana||window.solflare); }
       if(_me && _me.authenticated && _me.wallet){
         _applySessionWallet(_me.wallet);
         if(_me.csrf_token) _csrfToken = _me.csrf_token;
+        // A session with nothing remembering it is one storage clear away
+        // from being gone. That is not a rare case: the installed app's
+        // first launch establishes a session from the handoff token in its
+        // start_url and nothing else, and anyone signed in from before
+        // remembered logins existed is in the same position. Ask for one.
+        if(!_deviceToken()){
+          try{
+            var _rm = await fetch('/api/session/remember',{
+              method:'POST', credentials:'include',
+              headers:{'X-CSRF-Token':_csrfToken}
+            }).then(function(r){ return r.json(); }).catch(function(){ return null; });
+            if(_rm && _rm.token) _storeDeviceToken(_rm.token);
+          }catch(e){}
+        }
       } else {
         // No session — but this browser may still be remembered. Ask before
         // sending anyone back to their wallet app for a signature they have

@@ -2512,6 +2512,28 @@ def init_db():
     )''')
     c.execute('CREATE INDEX IF NOT EXISTS idx_device_sessions_hash ON device_sessions(token_hash)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_device_sessions_wallet ON device_sessions(wallet)')
+
+    # ── carrying a login into the installed app ──
+    # On iOS an app added to the home screen gets its OWN storage: separate
+    # cookies AND separate localStorage. So neither the session nor the
+    # remembered login made in Safari is visible from inside it, and the app
+    # cannot make its own -- tapping Connect there opens Phantom's deeplink
+    # in Safari, and the new session lands over there instead. Connect in the
+    # browser, add to the home screen, and the app asks you to connect again.
+    #
+    # Exactly one thing crosses that boundary: the start_url baked into the
+    # manifest when the app is installed. So the manifest is served per
+    # session, with a one-time token in that URL, and the first launch of the
+    # installed app spends it for a session of its own.
+    c.execute('''CREATE TABLE IF NOT EXISTS app_handoffs (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        wallet     TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        created_at REAL NOT NULL,
+        expires_at REAL NOT NULL,
+        used_at    REAL
+    )''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_app_handoffs_hash ON app_handoffs(token_hash)')
     # community_messages / /community / /api/community/* -- removed (dead feature:
     # community_page() unconditionally redirected to '/' and never rendered
     # community.html, which was the only consumer of the message API; found
@@ -11033,6 +11055,30 @@ def _render_no_cache(*args, **kwargs):
 
 @app.route('/')
 def index():
+    # First launch of a newly installed home-screen app: the manifest baked a
+    # one-time token into its start_url, and spending it here is what gives
+    # that app -- which has its own cookie jar and can see nothing Safari
+    # stored -- a session of its own.
+    #
+    # Redirect afterwards rather than rendering: it takes the token out of the
+    # address bar and out of history, and it means a reload of the launched
+    # page does not present a spent token. A token that is expired, unknown or
+    # already used falls through silently to the normal page, because the
+    # start_url is permanent and every later launch presents the same one.
+    _hs = request.args.get('hs', '')
+    if _hs:
+        _hw = _redeem_handoff_token(_hs)
+        if _hw:
+            session.permanent = True
+            session.modified  = True
+            session['wallet'] = _hw
+            session.pop('readonly', None)
+            try:
+                session['user_id'] = get_or_create_user(_hw)
+            except Exception:
+                pass
+        return redirect('/')
+
     # Inject the client secret (if configured) so the frontend can echo it back
     # on mutating requests — see API_SHARED_SECRET / _csrf_check above.
     html = _get_index_base_html()
@@ -16624,6 +16670,137 @@ def _revoke_device_tokens(wallet: str) -> None:
             conn.close()
     except Exception as e:
         print(f'[device-session] revoke failed: {e}', flush=True)
+
+
+# A handoff is short-lived and single-use, unlike a remembered login: it
+# exists only to get one newly installed app its first session. It is not a
+# login by itself -- redeeming it is what mints the real remembered login.
+HANDOFF_TOKEN_DAYS = 30
+
+
+def _issue_handoff_token(wallet: str) -> str:
+    """Mint the token that goes in the manifest's start_url."""
+    if not wallet:
+        return ''
+    token = secrets.token_urlsafe(32)
+    now = time.time()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            conn.execute(
+                'INSERT INTO app_handoffs (wallet, token_hash, created_at, expires_at) '
+                'VALUES (?,?,?,?)',
+                (wallet, _hash_device_token(token), now,
+                 now + HANDOFF_TOKEN_DAYS * 86400))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f'[handoff] could not mint: {e}', flush=True)
+        return ''
+    return token
+
+
+def _redeem_handoff_token(token: str) -> str:
+    """Spend one. Returns the wallet, or '' for anything not currently valid.
+
+    Single-use. The start_url is baked into the installed app permanently, so
+    every later launch presents the same, now-spent token -- which must be a
+    silent no-op, not an error, because by then the app has a session of its
+    own and does not need it.
+    """
+    if not token:
+        return ''
+    h = _hash_device_token(token)
+    now = time.time()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            row = conn.execute(
+                'SELECT id, wallet, expires_at, used_at FROM app_handoffs '
+                'WHERE token_hash=?', (h,)).fetchone()
+            if not row:
+                return ''
+            row_id, wallet, expires_at, used_at = row
+            if used_at is not None or float(expires_at) < now:
+                return ''
+            conn.execute('UPDATE app_handoffs SET used_at=? WHERE id=?', (now, row_id))
+            conn.commit()
+            return wallet
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f'[handoff] redeem failed: {e}', flush=True)
+        return ''
+
+
+@app.route('/api/session/remember', methods=['POST'])
+@rate_limit(10, 300)
+def api_session_remember():
+    """Give the browser a remembered login for the session it already has.
+
+    Needed because a session can arrive without one. Two ways:
+      * the installed app's first launch, which spends a handoff token from
+        its start_url -- that establishes a session but no remembered login,
+        and the app's storage is its own, so without this it would be back
+        to square one the next time iOS clears it;
+      * anyone signed in from before remembered logins existed.
+
+    Not a way in. It mints nothing without an already-authenticated session,
+    and a read-only session -- an address someone typed, never proved -- gets
+    nothing, since that would make a claim persistent that was never proved
+    in the first place.
+    """
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False}), 401
+    try:
+        uid = session.get('user_id') or get_or_create_user(wallet)
+    except Exception:
+        return jsonify({'ok': False}), 500
+    token = _issue_device_token(uid, wallet)
+    if not token:
+        return jsonify({'ok': False}), 500
+    return jsonify({'ok': True, 'token': token})
+
+
+@app.route('/app.webmanifest')
+def app_webmanifest():
+    """The manifest, made per session.
+
+    Fetched with credentials (the link tag carries crossorigin="use-credentials"),
+    so when the person adding this to their home screen is signed in, the
+    start_url carries a one-time token that gives the installed app its own
+    session on first launch. Signed out, it is the plain start_url and this is
+    an ordinary static manifest.
+
+    Never cached: the response is specific to one person and contains a
+    credential.
+    """
+    wallet = session.get('wallet', '')
+    start = '/'
+    if wallet:
+        tok = _issue_handoff_token(wallet)
+        if tok:
+            start = '/?hs=' + tok
+    manifest = {
+        'name': 'OrcAgent',
+        'short_name': 'OrcAgent',
+        'start_url': start,
+        'scope': '/',
+        'display': 'standalone',
+        'background_color': '#0a0b0e',
+        'theme_color': '#f7b955',
+        'icons': [
+            {'src': '/static/favicon.svg?v=2', 'sizes': 'any', 'type': 'image/svg+xml'},
+            {'src': '/static/icon-192.png?v=2', 'sizes': '192x192', 'type': 'image/png', 'purpose': 'any'},
+            {'src': '/static/icon-512.png?v=2', 'sizes': '512x512', 'type': 'image/png', 'purpose': 'any'},
+            {'src': '/static/icon-512-maskable.png?v=1', 'sizes': '512x512', 'type': 'image/png', 'purpose': 'maskable'},
+        ],
+    }
+    resp = app.response_class(json.dumps(manifest), mimetype='application/manifest+json')
+    resp.headers['Cache-Control'] = 'no-store, private, max-age=0'
+    return resp
 
 
 @app.route('/api/session/resume', methods=['POST'])
