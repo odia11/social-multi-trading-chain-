@@ -219,6 +219,65 @@ function _storeDeviceToken(t){
 function _clearDeviceToken(){
   try{ localStorage.removeItem('orca_device_token'); }catch(e){}
 }
+/* ── PAIRING: signing in FROM the home-screen app ───────────────────────────
+   The app on the home screen cannot finish a wallet connection on its own.
+   It opens Phantom's deeplink, Phantom hands back to Safari, and the session
+   is created over there -- inside a storage container this app cannot see.
+   It starts the login and never hears how it ended, so it asked you to go and
+   do it in the browser instead, which is where this whole complaint started.
+
+   So it starts the login carrying a pairing token, and afterwards asks the
+   server who signed. The signature is still checked in exactly the same
+   place; this only carries the answer back to the side that asked. */
+function _pairToken(){
+  try{ return localStorage.getItem('orca_pair') || ''; }catch(e){ return ''; }
+}
+function _storePairToken(t){
+  try{ if(t) localStorage.setItem('orca_pair', t); }catch(e){}
+}
+function _clearPairToken(){
+  try{ localStorage.removeItem('orca_pair'); }catch(e){}
+}
+// Ask whether the sign-in that this app started has finished. Returns the
+// wallet, or '' for "not yet" -- which is also what it returns for expired
+// and unknown, so nothing here has to tell those apart.
+async function _claimPairing(){
+  var p = _pairToken();
+  if(!p) return '';
+  try{
+    var r = await fetch('/api/pair/claim', {
+      method: 'POST', credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({pair: p})
+    }).then(function(x){ return x.json(); }).catch(function(){ return null; });
+    if(r && r.ok && r.wallet){
+      _clearPairToken();
+      // The session now lives in THIS container. The remembered login is what
+      // keeps it there after iOS next clears storage -- without it the app
+      // would be back to square one in a week.
+      if(r.device_token) _storeDeviceToken(r.device_token);
+      if(r.csrf_token) _csrfToken = r.csrf_token;
+      return r.wallet;
+    }
+  }catch(e){}
+  return '';
+}
+
+// Coming back from Phantom does NOT reload the page -- iOS resumes the app
+// exactly where it was, so initApp never runs again and the answer would sit
+// on the server unread until the next cold start. Ask whenever the app
+// becomes visible again while a sign-in it started is still outstanding.
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState !== 'visible') return;
+  if(!_pairToken() || phantomKey) return;
+  _claimPairing().then(function(w){
+    // Reload rather than patching the screen in place: the app was showing
+    // the connect card, and everything past this point assumes a page that
+    // started out signed in.
+    if(w) window.location.reload();
+  });
+});
+
 // Returns the wallet if a session was restored, '' otherwise.
 async function _resumeFromDeviceToken(){
   var t = _deviceToken();
@@ -469,16 +528,22 @@ function _phantomMobileV1Connect(){
     if(noteEl){noteEl.textContent=txt;if(col)noteEl.style.color=col;}
     if(msgEl&&msgEl!==noteEl){msgEl.textContent=txt;msgEl.style.display='block';}
   }
-  if(isStandalonePWA){
-    var _pwaHtml='Open orcagent.fun in Safari/Chrome om je wallet te verbinden.'
-      +' <button type="button" onclick="_copyOrcagentUrl(this)" style="background:rgba(247,185,85,.1);border:1px solid rgba(247,185,85,.3);border-radius:5px;color:var(--accent);font-size:9px;padding:3px 8px;cursor:pointer;font-family:\'Share Tech Mono\',monospace;margin-left:6px;white-space:nowrap">⧉ Copy link</button>';
-    if(noteEl){noteEl.innerHTML=_pwaHtml;noteEl.style.color='var(--red)';}
-    if(msgEl&&msgEl!==noteEl){msgEl.innerHTML=_pwaHtml;msgEl.style.display='block';}
-    return;
-  }
+  // The home-screen app used to stop here and tell you to go and do it in
+  // Safari, because Phantom hands back to the browser and this app would
+  // never learn the outcome. It can now: it starts the login with a pairing
+  // token and asks the server afterwards who signed. So the only difference
+  // is that it takes a token with it.
   _setNote('Initialising connection…','var(--muted)');
+  var _pairPromise = isStandalonePWA
+    ? fetch('/api/pair/start',{method:'POST',credentials:'include',
+        headers:{'Content-Type':'application/json'},body:'{}'})
+        .then(function(r){ return r.json(); })
+        .then(function(d){ if(d&&d.ok&&d.pair){ _storePairToken(d.pair); return d.pair; } return ''; })
+        .catch(function(){ return ''; })
+    : Promise.resolve('');
+  _pairPromise.then(function(_pair){
   // Server generates the NaCl keypair — no browser storage needed
-  fetch('/api/phantom/init',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:'{}'})
+  fetch('/api/phantom/init',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({pair:_pair})})
   .then(function(r){return r.json();})
   .then(function(d){
     if(!d.ok||!d.dapp_pk||!d.token){
@@ -493,12 +558,19 @@ function _phantomMobileV1Connect(){
       redirect_link:_cbUrl,
       cluster:'mainnet-beta'
     });
+    if(_pair){
+      // It leaves the app to do this, and iOS gives no signal when it comes
+      // back with the job done -- so say what to do, rather than leaving a
+      // blank screen behind.
+      _setNote('Approve in Phantom, then come back to this app.','var(--muted)');
+    }
     window.location.href='https://phantom.app/ul/v1/connect?'+params.toString();
   })
   .catch(function(e){
     _setNote('Network error — please try again.','var(--red)');
     console.error('[phantom] init fetch failed:',e);
   });
+  });   // _pairPromise
 }
 
 function _applyPhantomDetection(phantomBtn, phantomNote){
@@ -3129,10 +3201,12 @@ function _inDappBrowser(){ return !!(window.solana||window.solflare); }
           }catch(e){}
         }
       } else {
-        // No session — but this browser may still be remembered. Ask before
-        // sending anyone back to their wallet app for a signature they have
-        // already given once.
-        var _w = await _resumeFromDeviceToken();
+        // No session — but this browser may still be remembered, or a sign-in
+        // it started somewhere else may have finished while it was in the
+        // background. Ask both before sending anyone back to their wallet for
+        // a signature they have already given.
+        var _w = await _claimPairing();
+        if(!_w) _w = await _resumeFromDeviceToken();
         if(_w){
           _applySessionWallet(_w);
           _me = await fetch('/api/session', {credentials:'include'})

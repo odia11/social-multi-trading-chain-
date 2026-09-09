@@ -2534,6 +2534,25 @@ def init_db():
         used_at    REAL
     )''')
     c.execute('CREATE INDEX IF NOT EXISTS idx_app_handoffs_hash ON app_handoffs(token_hash)')
+
+    # ── pairing: signing in FROM the installed app ──
+    # The home-screen app cannot complete a wallet connection by itself. It
+    # opens Phantom's deeplink, Phantom hands back to Safari, and the session
+    # is created over there -- in a storage container the app cannot see. The
+    # app started the login and never hears how it ended.
+    #
+    # So it starts one with a pairing token of its own, and asks afterwards.
+    # The signature is still verified exactly where it always was; this only
+    # carries the ANSWER back across the boundary to the side that asked.
+    c.execute('''CREATE TABLE IF NOT EXISTS pair_requests (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        token_hash TEXT NOT NULL UNIQUE,
+        wallet     TEXT,
+        created_at REAL NOT NULL,
+        expires_at REAL NOT NULL,
+        claimed_at REAL
+    )''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_pair_requests_hash ON pair_requests(token_hash)')
     # community_messages / /community / /api/community/* -- removed (dead feature:
     # community_page() unconditionally redirected to '/' and never rendered
     # community.html, which was the only consumer of the message API; found
@@ -11114,7 +11133,12 @@ def api_phantom_init():
     dapp_pk_bytes = bytes(sk_obj.public_key)
     dapp_sk_bytes = bytes(sk_obj)
     token = secrets.token_hex(32)
-    _phantom_sessions[token] = {'sk': dapp_sk_bytes, 'created': now}
+    # The pairing token, when the caller is a home-screen app that cannot see
+    # the session this login will create. It rides along in the phantom
+    # session -- which survives all four hops of the deeplink round trip --
+    # so it never has to appear in any URL.
+    _pair = str((request.get_json(silent=True) or {}).get('pair', '')).strip()
+    _phantom_sessions[token] = {'sk': dapp_sk_bytes, 'created': now, 'pair': _pair}
     print(f'[phantom] init token={token[:8]}… pk={_b58enc(dapp_pk_bytes)[:12]}…', flush=True)
     return jsonify({'ok': True, 'dapp_pk': _b58enc(dapp_pk_bytes), 'token': token})
 
@@ -11260,6 +11284,16 @@ def api_phantom_decrypt_signature():
     if not session_data:
         print(f'[phantom] decrypt-sig — token not found: {token[:8]}…', flush=True)
         return jsonify({'ok': False, 'error': 'session expired or invalid'}), 400
+    # The phantom session ends here, but set_wallet -- the next call, and the
+    # only place a signature is actually verified -- still needs to know which
+    # pairing to complete. Kept server-side, keyed by the same token the
+    # caller already holds, so the pairing token itself is never returned to
+    # any page.
+    if session_data.get('pair'):
+        _phantom_pair_pending[token] = (session_data['pair'], time.time())
+        for _t, (_p, _ts) in list(_phantom_pair_pending.items()):
+            if time.time() - _ts > PAIR_TTL_SECONDS:
+                _phantom_pair_pending.pop(_t, None)
     # Same value api_phantom_decrypt() used to build the connect-step box --
     # the client no longer needs to send it.
     phantom_pk_b58 = session_data.get('phantom_pk', '')
@@ -16734,6 +16768,132 @@ def _redeem_handoff_token(token: str) -> str:
         return ''
 
 
+# A pairing lives for minutes, not months: it exists to carry the outcome of
+# one sign-in back to the app that started it.
+PAIR_TTL_SECONDS = 900
+
+# token (the phantom deeplink session) -> pairing token, for the few seconds
+# between the signature being decrypted and set_wallet() verifying it. In
+# memory like _phantom_sessions itself, and for the same reason: the whole
+# deeplink round trip is already in memory, and the pairing ROW is in the
+# database, which is the part that has to survive.
+_phantom_pair_pending: dict = {}
+
+
+def _start_pair() -> str:
+    """Mint the token the installed app will ask with."""
+    token = secrets.token_urlsafe(32)
+    now = time.time()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            conn.execute('DELETE FROM pair_requests WHERE expires_at < ?', (now,))
+            conn.execute(
+                'INSERT INTO pair_requests (token_hash, created_at, expires_at) '
+                'VALUES (?,?,?)',
+                (_hash_device_token(token), now, now + PAIR_TTL_SECONDS))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f'[pair] could not start: {e}', flush=True)
+        return ''
+    return token
+
+
+def _complete_pair(pair_token: str, wallet: str) -> None:
+    """Record which wallet signed. Called from set_wallet and nowhere else --
+    the point in the whole application where a signature has been checked."""
+    if not pair_token or not wallet:
+        return
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            conn.execute(
+                'UPDATE pair_requests SET wallet=? WHERE token_hash=? AND claimed_at IS NULL '
+                'AND expires_at > ?',
+                (wallet, _hash_device_token(pair_token), time.time()))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f'[pair] could not complete: {e}', flush=True)
+
+
+def _claim_pair(pair_token: str) -> str:
+    """Spend a completed pairing. Returns the wallet, or '' if it is not
+    finished yet, already claimed, expired or unknown -- the caller polls, so
+    "not yet" and "never" deliberately look the same."""
+    if not pair_token:
+        return ''
+    now = time.time()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            row = conn.execute(
+                'SELECT id, wallet, expires_at, claimed_at FROM pair_requests '
+                'WHERE token_hash=?', (_hash_device_token(pair_token),)).fetchone()
+            if not row:
+                return ''
+            row_id, wallet, expires_at, claimed_at = row
+            if not wallet or claimed_at is not None or float(expires_at) < now:
+                return ''
+            conn.execute('UPDATE pair_requests SET claimed_at=? WHERE id=?', (now, row_id))
+            conn.commit()
+            return wallet
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f'[pair] could not claim: {e}', flush=True)
+        return ''
+
+
+@app.route('/api/pair/start', methods=['POST'])
+@csrf_exempt
+@rate_limit(10, 300)
+def api_pair_start():
+    """Begin a sign-in that will finish in another browser.
+
+    Exempt from CSRF for the same reason the connect endpoints are: there is
+    no session yet -- that is the entire problem being solved.
+    """
+    token = _start_pair()
+    if not token:
+        return jsonify({'ok': False}), 500
+    return jsonify({'ok': True, 'pair': token})
+
+
+@app.route('/api/pair/claim', methods=['POST'])
+@csrf_exempt
+@rate_limit(120, 300)
+def api_pair_claim():
+    """Ask whether the sign-in finished, and if so, take the session.
+
+    Polled, so the limit is generous -- but it is still a limit, because this
+    is unauthenticated and hands out sessions.
+
+    The wallet comes from the row the SERVER wrote after checking a signature.
+    Nothing the caller sends decides who they are; the token only says which
+    pending sign-in is being asked about.
+    """
+    body = request.json or {}
+    wallet = _claim_pair(str(body.get('pair', '')).strip())
+    if not wallet:
+        return jsonify({'ok': False, 'pending': True})
+    session.permanent = True
+    session.modified  = True
+    session['wallet'] = wallet
+    session.pop('readonly', None)
+    device_token = ''
+    try:
+        session['user_id'] = get_or_create_user(wallet)
+        device_token = _issue_device_token(session['user_id'], wallet)
+    except Exception:
+        pass
+    return jsonify({'ok': True, 'wallet': wallet, 'device_token': device_token,
+                    'csrf_token': _get_csrf_token()})
+
+
 @app.route('/api/session/remember', methods=['POST'])
 @rate_limit(10, 300)
 def api_session_remember():
@@ -16966,6 +17126,13 @@ def set_wallet():
         # Issued here and nowhere else: this is the one place a signature has
         # actually been checked. A read-only connect never reaches it.
         _device_token = _issue_device_token(_uid_for_device, address) if _uid_for_device else ''
+        # If a home-screen app started this login, tell it who signed. Here,
+        # because here is where the signature has been verified -- the wallet
+        # written to the pairing is the one this branch proved, never one a
+        # caller asked for.
+        _pending = _phantom_pair_pending.pop(str((request.json or {}).get('token', '')).strip(), None)
+        if _pending:
+            _complete_pair(_pending[0], address)
         threading.Thread(target=fetch_user_balances, args=(address,), daemon=True).start()
         add_user_log(address, 'Wallet connected: ' + address[:6] + '...' + address[-4:])
         # Multi-IP detection: same wallet from 3+ IPs in 1 h → CRITICAL alert + pause trader

@@ -139,12 +139,14 @@ _minters = sorted(
     if isinstance(n, ast.FunctionDef)
     and n.name != '_issue_device_token'          # its own definition, not a caller
     and '_issue_device_token(' in (ast.get_source_segment(SRC, n) or ''))
-check('every place that mints a remembered login is one that has already '
-      'established who this is: the wallet login, and the endpoint that '
-      'remembers a session which is itself already authenticated. Nothing '
-      'else may mint one — a remembered login outlives the browser, so an '
-      'unproved claim would become a permanent one',
-      _minters == ['api_session_remember', 'set_wallet'], )
+check('every place that mints a remembered login has already established who '
+      'this is, and there are exactly three: the wallet login itself; the '
+      'endpoint that remembers a session which is already authenticated; and '
+      'claiming a pairing, where the wallet came from a row the server wrote '
+      'after checking a signature. Nothing else may mint one — a remembered '
+      'login outlives the browser, so an unproved claim would become a '
+      'permanent one',
+      _minters == ['api_pair_claim', 'api_session_remember', 'set_wallet'])
 check('...and the wallet login mints one only AFTER the signature has been '
       'checked, not beside it',
       'Signature verification failed' in SRC[:SRC.index('_device_token =')])
@@ -173,9 +175,13 @@ check('logging out revokes the remembered logins before clearing the session',
       and logout.index('_revoke_device_tokens') < logout.index('session.clear()'))
 
 # ── the browser side ──────────────────────────────────────────────────────
-check('the token is stored at the single point every wallet login passes '
-      'through, not at each caller that reads the result',
-      JS.count('r.device_token) _storeDeviceToken') == 1)
+# Counting one call site was the old shape of this. It said "one place",
+# which was never the rule -- the rule is that a token is stored wherever one
+# is handed back, and nowhere else. There are now two ways in (a wallet login,
+# and claiming a pairing from the home-screen app), so both are named.
+check('a remembered login is stored wherever the server hands one back, and '
+      'only there: the wallet login, and claiming a pairing',
+      JS.count('_storeDeviceToken(r.device_token)') == 2)
 check('the session is resumed BEFORE anyone is sent back to their wallet app '
       'for a signature they already gave',
       '_resumeFromDeviceToken()' in JS

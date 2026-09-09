@@ -136,7 +136,11 @@ var _b58enc=(function(){
     var wr = await fetch('/api/wallet/set',{
       method: 'POST', credentials: 'include',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({address:sigR.wallet_address, nonce:sigR.auth_nonce, signature:sigR.signature, ref_code:_refCode})
+      // `token` so the server can finish a pairing: when a home-screen app
+      // started this login, it is waiting to be told who signed, and this is
+      // the request where that becomes known. The pairing token itself stays
+      // on the server -- this only says which sign-in round this was.
+      body: JSON.stringify({address:sigR.wallet_address, nonce:sigR.auth_nonce, signature:sigR.signature, ref_code:_refCode, token:token})
     }).then(function(r){ return r.json(); }).catch(function(){ return null; });
 
     if(wr && (wr.ok || wr.success)){
