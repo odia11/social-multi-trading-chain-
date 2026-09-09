@@ -129,7 +129,20 @@ line = ns['_storage_breakdown']()
 for part in ('db ', 'wal ', 'backups ', 'volume '):
     check(f'the storage line names {part.strip()}', part in line)
 check('...with a file count, so "backups 300 MB" says how many that is',
-      'files)' in line)
+      'files' in line and ')' in line)
+
+# The size and the count must describe the SAME files. They did not: the size
+# summed everything in the directory while the count listed only the app's own
+# backups, so a deploy script leaving copies there made three files look like
+# half a gigabyte.
+import os as _os                                                  # noqa: E402
+with open(_os.path.join(BK, 'pre-deploy-2026-01-01.db'), 'wb') as _f:
+    _f.write(b'x' * 5000)
+line2 = ns['_storage_breakdown']()
+check('a file the app did not write is counted as well as measured, and named '
+      'as not its own — the two halves of that sentence used to describe '
+      'different sets of files',
+      'mine +' in line2 and 'other' in line2)
 check('...and how much of the volume is used and how much is left',
       'used of' in line and 'free' in line)
 

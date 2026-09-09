@@ -28062,11 +28062,18 @@ def _storage_breakdown() -> str:
     try:
         db  = os.path.getsize(DB_FILE) if os.path.exists(DB_FILE) else 0
         wal = os.path.getsize(DB_FILE + '-wal') if os.path.exists(DB_FILE + '-wal') else 0
-        bk  = 0
+        # Counted the same way it is sized. The size used to include every
+        # file in the directory while the count only included the ones the app
+        # writes itself, so "497 MB (3 files)" was two different sets of files
+        # in one sentence -- and it made the deploy script's own copies look
+        # like the app's backups had grown enormous.
+        bk = 0
+        bk_n = 0
         if os.path.isdir(BACKUP_DIR):
             for f in os.listdir(BACKUP_DIR):
                 try:
                     bk += os.path.getsize(os.path.join(BACKUP_DIR, f))
+                    bk_n += 1
                 except OSError:
                     pass
         used  = shutil.disk_usage(_DATA_DIR)
@@ -28077,8 +28084,11 @@ def _storage_breakdown() -> str:
             img_part = f' (of which images {mb(_stored_image_bytes())})'
         except Exception:
             img_part = ''
+        own = len(_backup_files())
+        extra = bk_n - own
         return (f'db {mb(db)}{img_part} · wal {mb(wal)} · '
-                f'backups {mb(bk)} ({len(_backup_files())} files) · '
+                f'backups {mb(bk)} ({bk_n} files'
+                + (f', {own} mine + {extra} other' if extra else '') + ') · '
                 f'volume {mb(used.used)} used of {mb(used.total)}, {mb(used.free)} free')
     except Exception as e:
         return f'could not read storage: {e}'
