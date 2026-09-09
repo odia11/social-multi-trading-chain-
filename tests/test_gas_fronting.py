@@ -28,6 +28,7 @@ WHAT MUST STAY TRUE
     which is the only way "it comes back" is a fact rather than a hope.
 """
 import ast
+import re
 import sys
 
 REPO = '/home/user/Orc-agent-Solana-chain-'
@@ -200,11 +201,23 @@ check('the checks are still skipped, not failed, where the rule is off',
 # but rare is not never, and the message is what the user reads on the Buy
 # panel when it happens.
 boot = fn('_bootstrap_evm_gas_via_bridge')
+
+# Joined across the f-string continuations before matching. What is being
+# asserted is the sentence the user reads, and that must not depend on where
+# the source happens to wrap.
+def _joined(text):
+    return re.sub(r"'\s*\n\s*f'", '', text)
+
+# Only the branch that actually instructs the user — when fronting is off by
+# choice. The other branch is a platform failure and deliberately gives no
+# instruction at all; see tests/test_whose_failure.py.
+boot_msg = _joined(boot[boot.index('_evm_addr_hint'):])
+boot_msg = boot_msg[boot_msg.index('return False,'):]
 check('the dead end offers sending the chain\'s own gas token directly',
-      'Send a ' in boot and 'a few cents is enough' in boot)
+      'Send a ' in boot_msg and 'a few cents is enough' in boot_msg)
 check('...before the bridge route, because a few cents beats moving $5 of SOL '
       'to enable a $1 trade',
-      boot.index('a few cents is enough') < boot.index('of SOL and it will'))
+      boot_msg.index('a few cents is enough') < boot_msg.index('of SOL '))
 check('...while keeping the bridge, which works from capital the user already '
       'holds on Solana', 'GAS_BOOTSTRAP_SOL_USD' in boot)
 check('...and names the wallet to send to, rather than leaving the user to find '

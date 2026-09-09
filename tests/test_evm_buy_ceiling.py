@@ -224,8 +224,9 @@ check('a wallet being bootstrapped still returns pending with its bridge id, and
       'sends no swap',
       R['pending_status'] == 200 and R['pending']['pending']
       and R['pending']['bridge_id'] == 4242 and R['pending_swaps'] == 0)
-check('a wallet that cannot get gas at all still gets the plain refusal',
-      R['nogas_status'] == 400 and 'Cannot trade on base' in R['nogas']['msg'])
+check('a wallet that cannot get gas at all still gets the plain refusal, '
+      'naming the chain the way a person would rather than by its key',
+      R['nogas_status'] == 400 and 'Cannot trade on Base' in R['nogas']['msg'])
 check('the min/max trade-size clamp still applies before pricing — $99999 is '
       'clamped to the $200 maximum, and the purchase comes out of that',
       len(R['clamp_swaps']) == 1 and float(R['clamp_swaps'][0]['amount']) < 200)

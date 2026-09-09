@@ -8728,6 +8728,42 @@ def _refill_gas_sponsor(chain: str) -> tuple:
 
 GAS_BOOTSTRAP_SOL_USD = 5.0  # small, fixed USD-equivalent amount of the user's OWN SOL bridged to bootstrap a completely empty EVM gas balance -- kept a bit larger than the ongoing USDC top-up amount since a cross-chain bridge's own fees eat a bigger share of a very small transfer
 
+def _gas_shortfall_is_ours(chain: str) -> bool:
+    """Whether a user's inability to get gas on `chain` is OUR failure.
+
+    This decides who is told to do something about it, which is the whole
+    point. The platform exists to remove exactly this errand: a user holding
+    only USDC should never have to go and acquire a chain's native token
+    before they can trade. So when we are meant to be fronting that gas and
+    cannot -- no sponsor key, an empty sponsor wallet, an unreachable RPC --
+    the user did nothing wrong, and handing them an instruction ("send a
+    little ETH", "deposit $5 of SOL") is asking them to paper over an
+    operational problem of ours. They get told it is unavailable; the
+    operator gets told why.
+
+    False when ORCAGENT_FRONTS_GAS is deliberately off. That is a real
+    configuration choice, and there "fund your own gas" is the honest and
+    correct instruction rather than a way of passing the buck.
+
+    Fails towards OURS: if the sponsor's balance cannot be read, we do not
+    know that the user can be helped, so we do not hand them a chore on a
+    guess.
+    """
+    if not ORCAGENT_FRONTS_GAS:
+        return False
+    if not GAS_SPONSOR_PRIVATE_KEY:
+        return True
+    sponsor = _gas_sponsor_address()
+    if not sponsor:
+        return True
+    try:
+        w3 = _get_web3(chain)
+        bal = w3.eth.get_balance(w3.to_checksum_address(sponsor))
+        return bal < w3.eth.gas_price * GAS_TOPUP_TX_GAS_UNITS
+    except Exception:
+        return True
+
+
 def _bootstrap_evm_gas_via_bridge(user_id: int, wallet: str, evm_address: str, chain: str,
                                    auto_buy_token_address: str = None,
                                    auto_buy_requested_usdc: float = None) -> tuple:
@@ -8823,15 +8859,37 @@ def _bootstrap_evm_gas_via_bridge(user_id: int, wallet: str, evm_address: str, c
         # chain's own gas token beats bridging $5 of SOL to enable a $1 trade.
         # The bridge stays below it because it works from capital the user
         # already holds on Solana, which is the case it was built for.
+        _chain_name = SURGE_ALERT_CHAIN_NAMES.get(chain, chain)
+
+        # Who is this message FOR? That depends entirely on whose failure it
+        # is, and until now it did not: the same instruction went out whether
+        # the user was short of SOL or our own sponsor wallet was empty.
+        # Telling someone to go and buy ETH because we ran out of float is
+        # handing them our job, on the one screen where they were trying to
+        # spend money with us.
+        if _gas_shortfall_is_ours(chain):
+            # Loud, and aimed at the operator, who is the only one who can
+            # fix it. Not add_user_log -- this is not the user's business.
+            print(f'[gas-sponsor] ⚠ CANNOT ACTIVATE {chain} FOR A USER: the sponsor '
+                  f'wallet cannot fund a first transaction there, and this user has no '
+                  f'SOL to bootstrap from either. Top up the sponsor on {chain} — every '
+                  f'USDC-only user is blocked on this chain until you do.', flush=True)
+            return False, (f'{_chain_name} is temporarily unavailable — we are topping up '
+                           f'the network fees for it. Nothing to do on your side; try '
+                           f'again shortly, or trade on another chain in the meantime.'), None
+
+        # Fronting is deliberately off, so the user really does fund their own
+        # gas and this instruction is the honest one. Direct route first: a few
+        # cents of the chain's own token beats bridging $5 of SOL for a $1 trade.
         _evm_addr_hint = evm_address or 'your wallet on this chain'
-        add_user_log(wallet, f'[bot-{chain}] Cannot activate {chain} yet — send a little '
+        add_user_log(wallet, f'[bot-{chain}] Cannot activate {_chain_name} yet — send a little '
                              f'{native_symbol} to {_evm_addr_hint}, or deposit at least '
                              f'${GAS_BOOTSTRAP_SOL_USD:.0f} of SOL (you have {round(sol_bal,4)}) '
                              f'to have it bridged into {native_symbol} automatically')
         return False, (f'this wallet has no {native_symbol} for network fees yet. Send a '
-                       f'little {native_symbol} to it on {chain} — a few cents is enough — '
-                       f'or deposit at least ${GAS_BOOTSTRAP_SOL_USD:.0f} of SOL and it will '
-                       f'be bridged into {native_symbol} for you'), None
+                       f'little {native_symbol} to it on {_chain_name} — a few cents is '
+                       f'enough — or deposit at least ${GAS_BOOTSTRAP_SOL_USD:.0f} of SOL '
+                       f'and it will be bridged into {native_symbol} for you'), None
 
     ok, msg, row_id = _execute_cross_chain_bridge(
         user_id, wallet, origin_chain='solana', dest_chain=chain,
@@ -13195,7 +13253,9 @@ def _evm_buy_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM'
                         'chain': chain, 'token_address': token_address, 'amount_usdc': amount_usdc,
                         'msg': 'Activating this chain for your wallet — your buy will complete automatically once ready.',
                     })
-                return jsonify({'ok': False, 'msg': f'Cannot trade on {chain} yet — {_gas_msg}'}), 400
+                return jsonify({'ok': False,
+                                'msg': f'Cannot trade on {SURGE_ALERT_CHAIN_NAMES.get(chain, chain)} '
+                                       f'yet — {_gas_msg}'}), 400
 
     # ── through the trade engine ──
     # What changes for the user: amount_usdc is now the MAXIMUM they spend,
