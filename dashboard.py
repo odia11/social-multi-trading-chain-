@@ -2484,6 +2484,34 @@ def init_db():
         FOREIGN KEY (user_id) REFERENCES users(id)
     )''')
     c.execute('CREATE INDEX IF NOT EXISTS idx_webauthn_cred ON webauthn_credentials(credential_id)')
+    # ── remembered wallet connections ──
+    # A signed-in wallet should stay signed in. The session cookie alone
+    # cannot promise that: iOS clears storage for sites left unused for a
+    # week, and an app added to the home screen keeps its own cookie jar, so
+    # a perfectly valid login in Safari is invisible from inside it. Losing
+    # it there is worse than elsewhere, because a standalone app cannot
+    # complete the Phantom deeplink to get a new one.
+    #
+    # So a proven wallet login also mints a long-lived token the browser
+    # keeps, which can be exchanged for a fresh session. Only the SHA-256 of
+    # it is stored: a copy of this table is not a set of usable logins.
+    #
+    # Rotated on every use — see _redeem_device_token. If a stolen token is
+    # used, the real owner's copy stops working, which turns silent theft
+    # into a visible logout.
+    c.execute('''CREATE TABLE IF NOT EXISTS device_sessions (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id      INTEGER NOT NULL,
+        wallet       TEXT NOT NULL,
+        token_hash   TEXT NOT NULL UNIQUE,
+        created_at   REAL NOT NULL,
+        last_used_at REAL NOT NULL,
+        expires_at   REAL NOT NULL,
+        revoked      INTEGER DEFAULT 0,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+    )''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_device_sessions_hash ON device_sessions(token_hash)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_device_sessions_wallet ON device_sessions(wallet)')
     # community_messages / /community / /api/community/* -- removed (dead feature:
     # community_page() unconditionally redirected to '/' and never rendered
     # community.html, which was the only consumer of the message API; found
@@ -16501,6 +16529,132 @@ def webauthn_login():
         'csrf_token':      csrf_tok,
     })
 
+# ── remembering a proven wallet connection ────────────────────────────────
+# The rule these three functions exist to keep: connecting a wallet once
+# should be enough, and a deploy, a restart, or a week away should not undo
+# it. What is stored is a hash, what is handed out rotates on every use, and
+# a disconnect ends it everywhere.
+DEVICE_TOKEN_DAYS = 180
+
+def _hash_device_token(token: str) -> str:
+    return hashlib.sha256((token or '').encode()).hexdigest()
+
+
+def _issue_device_token(user_id: int, wallet: str) -> str:
+    """Mint a remembered login for the browser that just proved this wallet.
+
+    Called only after a signature has been verified — never off a read-only
+    connect, which proves nothing about who owns the address.
+    """
+    token = secrets.token_urlsafe(32)
+    now = time.time()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            conn.execute(
+                'INSERT INTO device_sessions (user_id, wallet, token_hash, created_at, '
+                'last_used_at, expires_at) VALUES (?,?,?,?,?,?)',
+                (user_id, wallet, _hash_device_token(token), now, now,
+                 now + DEVICE_TOKEN_DAYS * 86400))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f'[device-session] could not store a remembered login: {e}', flush=True)
+        return ''
+    return token
+
+
+def _redeem_device_token(token: str) -> tuple:
+    """Exchange a remembered login for a session. Returns (wallet, new_token).
+
+    Rotates: the presented token is spent and a fresh one issued. If a copy
+    has been stolen, whichever side redeems second finds a dead token and is
+    signed out — silent theft becomes a visible logout rather than two
+    sessions quietly sharing an account.
+
+    Returns ('', '') for anything not currently valid, without saying which
+    of the reasons it was.
+    """
+    if not token:
+        return '', ''
+    h = _hash_device_token(token)
+    now = time.time()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            row = conn.execute(
+                'SELECT id, user_id, wallet, expires_at, revoked FROM device_sessions '
+                'WHERE token_hash=?', (h,)).fetchone()
+            if not row:
+                return '', ''
+            row_id, user_id, wallet, expires_at, revoked = row
+            if revoked or float(expires_at) < now:
+                return '', ''
+            # Spend it before issuing the replacement, so a crash in between
+            # costs one login rather than leaving two valid tokens.
+            conn.execute('UPDATE device_sessions SET revoked=1 WHERE id=?', (row_id,))
+            new_token = secrets.token_urlsafe(32)
+            conn.execute(
+                'INSERT INTO device_sessions (user_id, wallet, token_hash, created_at, '
+                'last_used_at, expires_at) VALUES (?,?,?,?,?,?)',
+                (user_id, wallet, _hash_device_token(new_token), now, now,
+                 now + DEVICE_TOKEN_DAYS * 86400))
+            conn.commit()
+            return wallet, new_token
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f'[device-session] redeem failed: {e}', flush=True)
+        return '', ''
+
+
+def _revoke_device_tokens(wallet: str) -> None:
+    """Disconnecting means disconnecting. Every remembered login for this
+    wallet stops working, not only the one in this browser -- someone who
+    presses Disconnect because they are worried expects exactly that."""
+    if not wallet:
+        return
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            conn.execute('UPDATE device_sessions SET revoked=1 WHERE wallet=?', (wallet,))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f'[device-session] revoke failed: {e}', flush=True)
+
+
+@app.route('/api/session/resume', methods=['POST'])
+@csrf_exempt
+@rate_limit(20, 300)
+def api_session_resume():
+    """Turn a remembered login back into a session.
+
+    Exempt from CSRF for the same reason /api/wallet/set is: this is the
+    bootstrap that establishes a session, so it cannot require a token
+    scoped to one. The Origin check in _csrf_check still applies, and the
+    token itself is the credential.
+    """
+    body = request.json or {}
+    token = str(body.get('token', '')).strip()
+    wallet, new_token = _redeem_device_token(token)
+    if not wallet:
+        # Deliberately one answer for expired, revoked, unknown and malformed.
+        return jsonify({'ok': False, 'msg': 'This device is no longer remembered'}), 401
+    session.permanent = True
+    session.modified = True
+    session['wallet'] = wallet
+    session.pop('readonly', None)
+    try:
+        session['user_id'] = get_or_create_user(wallet)
+    except Exception:
+        pass
+    return jsonify({'ok': True, 'wallet': wallet, 'token': new_token,
+                    'csrf_token': _get_csrf_token()})
+
+
 @app.route('/api/session', methods=['GET'])
 @rate_limit(60, 60)
 def api_session():
@@ -16627,9 +16781,14 @@ def set_wallet():
         session.pop('readonly', None)
         # Generate (or retrieve) CSRF token for this session now that the session exists
         csrf_tok = _get_csrf_token()
+        _uid_for_device = None
         try:
             session['user_id'] = get_or_create_user(address, ref_code or None)
+            _uid_for_device = session['user_id']
         except: pass
+        # Issued here and nowhere else: this is the one place a signature has
+        # actually been checked. A read-only connect never reaches it.
+        _device_token = _issue_device_token(_uid_for_device, address) if _uid_for_device else ''
         threading.Thread(target=fetch_user_balances, args=(address,), daemon=True).start()
         add_user_log(address, 'Wallet connected: ' + address[:6] + '...' + address[-4:])
         # Multi-IP detection: same wallet from 3+ IPs in 1 h → CRITICAL alert + pause trader
@@ -16650,6 +16809,7 @@ def set_wallet():
         return jsonify({'ok': True, 'success': True, 'redirect': '/dashboard',
                         'wallet': address, 'has_trading_key': has_trading_key,
                         'is_admin': _is_owner(address), 'csrf_token': csrf_tok,
+                        'device_token': _device_token,
                         'status': user_status})
     else:
         prev = _current_wallet()
@@ -16661,6 +16821,11 @@ def set_wallet():
 @app.route('/api/logout', methods=['POST'])
 @csrf_exempt
 def logout():
+    # Remembered logins go too. Someone pressing Disconnect because they are
+    # worried about a device expects that to mean every device -- a session
+    # that clears here and silently resumes from a token tomorrow is the
+    # opposite of what the button says.
+    _revoke_device_tokens(session.get('wallet', ''))
     session.clear()
     return jsonify({'status': 'ok'})
 

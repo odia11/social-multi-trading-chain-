@@ -197,6 +197,52 @@ function _showWalletOptions(){
   _applySolflareDetection(solflareBtn, nullEl);
 }
 
+/* ── staying connected ──
+   A wallet connected once should stay connected: through a deploy, through
+   closing the app, through a week away. The session cookie cannot promise
+   that on its own — iOS clears storage for sites left unused, and an app on
+   the home screen keeps its own cookie jar, so a valid login in Safari is
+   invisible from inside it.
+
+   So a proven connection also gets a long-lived token, kept here, that is
+   exchanged for a fresh session when the cookie is gone. The server stores
+   only its hash and rotates it on every use; Disconnect revokes it
+   everywhere. */
+function _deviceToken(){
+  try{ return localStorage.getItem('orca_device_token') || ''; }catch(e){ return ''; }
+}
+function _storeDeviceToken(t){
+  // Private browsing throws on write. No remembering there, but nothing
+  // breaks either.
+  try{ if(t) localStorage.setItem('orca_device_token', t); }catch(e){}
+}
+function _clearDeviceToken(){
+  try{ localStorage.removeItem('orca_device_token'); }catch(e){}
+}
+// Returns the wallet if a session was restored, '' otherwise.
+async function _resumeFromDeviceToken(){
+  var t = _deviceToken();
+  if(!t) return '';
+  try{
+    var r = await fetch('/api/session/resume', {
+      method: 'POST', credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token: t})
+    }).then(function(x){ return x.json(); }).catch(function(){ return null; });
+    if(r && r.ok && r.wallet){
+      // The presented token is spent. Keeping it would sign this browser out
+      // on its next attempt.
+      _storeDeviceToken(r.token);
+      if(r.csrf_token) _csrfToken = r.csrf_token;
+      return r.wallet;
+    }
+    // Refused means revoked, expired, or already spent. Dropping it stops
+    // every later load retrying something that can never work again.
+    _clearDeviceToken();
+  }catch(e){}
+  return '';
+}
+
 /* ── the way back into an installed app ──
    A home-screen app cannot complete the Phantom deeplink: it opens Safari,
    and the session lands there instead. Once such an app loses its session
@@ -400,6 +446,10 @@ async function _connectWalletSignedInner(provider, address){
       body:JSON.stringify({address:address, signature:sigB58, nonce:nr.nonce, ref_code:_getStoredRefCode()})
     }).then(function(x){return x.json();}).catch(function(){return null;});
 
+    // Stored here, at the single point every wallet login passes through,
+    // rather than at each of the half-dozen call sites that read this
+    // result. This is what makes the next visit not need the wallet at all.
+    if(r && r.device_token) _storeDeviceToken(r.device_token);
     return r || {ok:false, msg:'Network error'};
   }
 
@@ -781,6 +831,9 @@ function disconnectWallet(){
     fetch('/api/logout',{method:'POST',credentials:'include'}).finally(function(){
       phantomKey=null; walletType=null; guestMode=false;
       localStorage.removeItem('orca_credential_id');
+      // Disconnect has to mean disconnected. Leaving the token behind would
+      // let the very next page load sign this browser straight back in.
+      _clearDeviceToken();
       localStorage.setItem('orca_manual_disconnect','1');
       window.location.reload();
     });
@@ -3093,6 +3146,16 @@ function _inDappBrowser(){ return !!(window.solana||window.solflare); }
       if(_me && _me.authenticated && _me.wallet){
         _applySessionWallet(_me.wallet);
         if(_me.csrf_token) _csrfToken = _me.csrf_token;
+      } else {
+        // No session — but this browser may still be remembered. Ask before
+        // sending anyone back to their wallet app for a signature they have
+        // already given once.
+        var _w = await _resumeFromDeviceToken();
+        if(_w){
+          _applySessionWallet(_w);
+          _me = await fetch('/api/session', {credentials:'include'})
+            .then(function(r){ return r.json(); }).catch(function(){ return _me; });
+        }
       }
       if(_me) _maybePromptPasskey(_me);
     }catch(e){}
