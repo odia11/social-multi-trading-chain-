@@ -157,9 +157,16 @@ check('...and still saying, when it is off, that empty wallets are the expected 
 check('an empty sponsor wallet is now a FINDING, because with fronting on it is '
       'the thing that silently breaks the first trade of every USDC-only user',
       'top these up' in V and 'raise RuntimeError(line' in V)
-check('...judged per chain against what that chain\'s gas actually costs, so a '
-      'BNB balance is not measured against an ETH yardstick',
-      'SPONSOR_LOW_CHEAP' in V and 'SPONSOR_LOW_NATIVE' in V)
+check('...judged per NATIVE SYMBOL, so a BNB balance is not measured against an '
+      'ETH yardstick — nor POL against a BNB one, which a two-bucket split got '
+      'wrong in both directions at once',
+      'SPONSOR_MIN = {' in V and "'BNB'" in V and "'POL'" in V
+      and 'SPONSOR_MIN.get(sym, SPONSOR_MIN_DEFAULT)' in V)
+check('...and an unrecognised native token still gets a floor rather than '
+      'silently passing', 'SPONSOR_MIN_DEFAULT' in V)
+check('...with the shortfall naming an amount, since "send BNB" leaves the '
+      'person guessing and guessing low leaves the wallet still unable to work',
+      'send ~{low:g} {sym}' in V)
 check('...and a missing key is called out as the contradiction it is when the '
       'deployment says it fronts',
       'is not set, but this ' in V and 'deployment fronts gas' in V)

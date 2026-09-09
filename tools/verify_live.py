@@ -270,12 +270,23 @@ def main():
                'sponsor wallets are meant to be empty — a low balance here is not '
                'a problem to fix')
 
-    # What counts as "enough" to keep fronting: roughly a handful of first
-    # transactions per chain. Below it the next user to arrive with only USDC
-    # falls through to the slow bridge, which is the failure this is here to
-    # catch BEFORE a user hits it.
-    SPONSOR_LOW_NATIVE = 0.002        # ETH-priced chains
-    SPONSOR_LOW_CHEAP = 0.5           # BNB/POL-priced chains
+    # What counts as "enough" to keep fronting: a few dollars per chain, which
+    # is dozens of first transactions. Below it the next user to arrive with
+    # only USDC falls through to the slow bridge, which is the failure this is
+    # here to catch BEFORE a user hits it.
+    #
+    # Per SYMBOL, not per bucket. Grouping BNB with POL was wrong in both
+    # directions at once: one BNB is worth hundreds of times one POL, so a
+    # single figure either nags forever about a BSC wallet holding plenty, or
+    # calls a Polygon wallet funded when it holds fifteen cents. These are
+    # each roughly the same few dollars in their own token.
+    SPONSOR_MIN = {
+        'ETH': 0.002,     # Base, Arbitrum, Robinhood Chain
+        'BNB': 0.01,
+        'POL': 20.0,
+        'MATIC': 20.0,
+    }
+    SPONSOR_MIN_DEFAULT = 0.002       # an unknown native token is priced like ETH
     SPONSOR_LOW_SOL = 0.05
 
     def evm_sponsor():
@@ -291,10 +302,13 @@ def main():
             try:
                 bal = d.get_evm_native_balance(addr, chain)
                 sym = d.EVM_CHAINS[chain]['native_symbol']
-                low = SPONSOR_LOW_CHEAP if sym in ('BNB', 'POL', 'MATIC') else SPONSOR_LOW_NATIVE
+                low = SPONSOR_MIN.get(sym, SPONSOR_MIN_DEFAULT)
                 out.append(f'{chain} {bal:.5f} {sym}' + ('  ← low' if bal < low else ''))
                 if bal < low:
-                    empty.append(f'{chain} (send {sym})')
+                    # Says how much, not just which: "send BNB" leaves the
+                    # person guessing at an amount, and guessing low is the
+                    # one that leaves the wallet still unable to do its job.
+                    empty.append(f'{chain} (send ~{low:g} {sym})')
             except Exception as e:
                 out.append(f'{chain} unreadable ({type(e).__name__})')
                 unreadable.append(chain)
