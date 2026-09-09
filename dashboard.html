@@ -489,8 +489,16 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
 .fc-pnl-sub.pos{color:#3ad29b}
 .fc-pnl-sub.neg{color:#f76b62}
 .fc-text{font-size:14.5px;color:#c7ccd4;line-height:1.55;margin-bottom:10px}
-.fc-post-image-wrap{margin-bottom:10px;border-radius:14px;overflow:hidden;border:1px solid #16191f;cursor:pointer}
-.fc-post-image{display:block;width:100%;aspect-ratio:16/9;max-height:400px;object-fit:cover}
+/* A posted photo keeps its own shape.
+   It used to be forced into a 16/9 box and cropped to fill it, so a square
+   or portrait picture lost both its sides -- on a shared card that meant the
+   first word of every line was cut off. The wrapper carries a background
+   because contain can leave bands beside a very tall image, and bands on the
+   card colour read as deliberate where transparent ones read as a bug.
+   max-height only bites on something extremely tall, which would otherwise
+   push the rest of the feed off the screen. */
+.fc-post-image-wrap{margin-bottom:10px;border-radius:14px;overflow:hidden;border:1px solid #16191f;cursor:pointer;background:#0d0f13}
+.fc-post-image{display:block;width:100%;height:auto;max-height:560px;object-fit:contain}
 .fc-actions{display:flex;align-items:center;gap:24px;margin-top:4px}
 .fc-view-count{font-size:11.5px;color:#565d68;font-family:'JetBrains Mono',monospace;margin-left:auto;user-select:none}
 .fc-action{display:flex;align-items:center;gap:5px;color:#565d68;font-size:13px;background:transparent;border:none;cursor:pointer;padding:0;font-family:'Geist',system-ui,sans-serif;transition:color .15s}

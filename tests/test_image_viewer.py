@@ -116,5 +116,27 @@ check('the preview shows the whole picture rather than a centre crop — it is '
 check('the remove button says what it does, for anyone not seeing the glyph',
       'aria-label="Remove image"' in prev)
 
+# ── the photo in the feed itself ──────────────────────────────────────────
+# It was forced into a 16/9 box and cropped to fill it, so a square or
+# portrait picture lost both its sides. On a shared card that cut the first
+# word off every line.
+import re as _re
+_feed = _re.search(r'\.fc-post-image\{([^}]*)\}', PAGE).group(1)
+check('a posted photo keeps its own shape instead of being forced into a '
+      '16/9 box', 'aspect-ratio' not in _feed)
+check('...and is fitted, not cropped, so nothing is cut off the sides',
+      'object-fit:contain' in _feed and 'object-fit:cover' not in _feed)
+check('...with its height following the picture rather than the box',
+      _re.search(r'(?:^|;)height:\s*auto', _feed))
+check('...and a cap that only bites on something extremely tall, which would '
+      'otherwise push the rest of the feed off the screen',
+      _re.search(r'max-height:\s*([0-9]+)px', _feed)
+      and int(_re.search(r'max-height:\s*([0-9]+)px', _feed).group(1)) >= 500)
+_wrap = _re.search(r'\.fc-post-image-wrap\{([^}]*)\}', PAGE).group(1)
+check('the wrapper has a background, since contain can leave bands beside a '
+      'tall image and a transparent band reads as a bug', 'background:' in _wrap)
+check('avatars still crop, which is what a round crop is for',
+      '.feed-composer-avatar img' in PAGE and 'object-fit:cover' in PAGE)
+
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)
