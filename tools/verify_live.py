@@ -31,8 +31,11 @@ OK, BAD, WARN = '  OK  ', ' FAIL ', ' WARN '
 results = []
 
 
-def report(status, name, detail=''):
-    results.append((status, name))
+def report(status, name, detail='', key=None):
+    # `key` is the bare name; `name` may carry the timing. The summary wants
+    # the first and the live output the second -- a summary that repeats
+    # "(843 ms)" is spending its width on the one number nobody needs twice.
+    results.append((status, key or name, detail))
     line = f'[{status}] {name}'
     if detail:
         line += f'\n         {detail}'
@@ -50,12 +53,12 @@ def attempt(name, fn, essential=True):
     try:
         detail = fn()
         ms = int((time.time() - t0) * 1000)
-        report(OK, f'{name} ({ms} ms)', detail or '')
+        report(OK, f'{name} ({ms} ms)', detail or '', key=name)
         return True
     except Exception as e:
         ms = int((time.time() - t0) * 1000)
         report(BAD if essential else WARN, f'{name} ({ms} ms)',
-               f'{type(e).__name__}: {e}')
+               f'{type(e).__name__}: {e}', key=name)
         return False
 
 
@@ -326,7 +329,7 @@ def main():
             # thing being checked — its being able to do its job is.
             raise RuntimeError(line + '\n         top these up: ' + ', '.join(empty))
         return line
-    attempt('EVM gas sponsor is funded', evm_sponsor, essential=False)
+    attempt('EVM gas sponsor funding', evm_sponsor, essential=False)
 
     def sol_sponsor():
         if not _fronting:
@@ -351,23 +354,45 @@ def main():
                 line + f'\n         enough for {left} more users — '
                        f'send {max(0.0, target - bal):.4f} SOL to this address')
         return line
-    attempt('Solana gas sponsor is funded', sol_sponsor, essential=False)
+    attempt('Solana gas sponsor funding', sol_sponsor, essential=False)
 
     # ── what it all means ──
     section('summary')
-    failed = [n for s, n in results if s == BAD]
-    warned = [n for s, n in results if s == WARN]
+    failed = [(n, d) for s, n, d in results if s == BAD]
+    warned = [(n, d) for s, n, d in results if s == WARN]
     print(f'{len(results) - len(failed) - len(warned)} passed · '
           f'{len(warned)} warning · {len(failed)} failed')
-    for n in failed:
-        print(f'  FAILED:  {n}')
-    for n in warned:
-        print(f'  warning: {n}')
-    if not failed:
-        print('\nEverything the app trades through is reachable from this server.')
-    else:
+
+    def _why(detail):
+        # The exception type is noise here -- the sentence after it is the
+        # part that says what to do. Everything the checks raise puts the
+        # instruction on the first line or the last.
+        text = (detail or '').split(': ', 1)[-1].strip()
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        if not lines:
+            return ''
+        tail = lines[-1]
+        return tail if ('send ' in tail or 'top these up' in tail) else lines[0]
+
+    for label, group in (('FAILED: ', failed), ('warning:', warned)):
+        for n, d in group:
+            why = _why(d)
+            print(f'  {label} {n}' + (f'\n             {why}' if why else ''))
+
+    if failed:
         print('\nThe failures above are things the app needs at runtime. A trade '
               'that depends on one of them will fail for a real user.')
+    elif warned:
+        # This used to print the all-clear whenever nothing had FAILED, so a
+        # deploy with both gas sponsors empty still signed off with
+        # "Everything the app trades through is reachable" -- true, and
+        # completely beside the point: reachable is not the same as working,
+        # and an empty sponsor blocks every user who holds only USDC.
+        print('\nEverything the app trades through is reachable, but the warnings '
+              'above are not cosmetic: each one is something a real user can '
+              'walk into. Read them before calling this deploy done.')
+    else:
+        print('\nEverything the app trades through is reachable from this server.')
     return 1 if failed else 0
 
 

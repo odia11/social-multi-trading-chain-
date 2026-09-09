@@ -173,5 +173,27 @@ check('the ceiling check buys the NATIVE token, not the stable the trade is '
       "token = d.BNB_NATIVE_ADDR" in main_src
       and "token = cfg_.get('usdc')" not in main_src)
 
+# ── a report has to be readable when it is BAD news ───────────────────────
+# "warning: EVM gas sponsor is funded" is what this printed with both sponsor
+# wallets empty. The check's name was phrased as a success and reprinted
+# verbatim whatever the outcome, so a failure stated the opposite of the
+# truth -- and the summary gave no reason, leaving the one line that said
+# what to send somewhere further up the scrollback.
+check('no check is NAMED as though it had already passed — the name is '
+      'reprinted under "warning:" and has to read correctly either way',
+      not re.search(r"attempt\(\s*'[^']*\bis (funded|reachable|configured)\b", SCRIPT))
+check('the summary repeats WHY, not only which check failed — otherwise it '
+      'sends you back through the whole report for one actionable line',
+      '_why(' in SCRIPT and 'failed = [(n, d)' in SCRIPT)
+check('...preferring the line that says what to send, since on a warning that '
+      'is the thing being looked for', "'send ' in tail" in SCRIPT)
+check('...and dropping the timing, the one number nobody needs twice',
+      'key=name' in SCRIPT and 'key or name' in SCRIPT)
+check('a run with warnings no longer signs off with the all-clear. It printed '
+      '"everything the app trades through is reachable" with both gas '
+      'sponsors empty — true, and beside the point, since an empty sponsor '
+      'blocks every user holding only USDC',
+      'elif warned:' in SCRIPT and 'not cosmetic' in SCRIPT)
+
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)
