@@ -96,6 +96,17 @@ check('balances are reported as how many users they could still activate, the '
       'same unit verify_live.py uses', 'users)' in SRC)
 check('it ends with a one-line verdict per chain, so the answer does not have '
       'to be reconstructed from the detail above it', 'verdicts.append(' in SRC)
+check('...carrying the AMOUNT, since five chains all reading "sponsor empty" '
+      'is nothing anyone can act on without scrolling back through five '
+      'blocks to find the figure',
+      "f'sponsor empty — send {top_up" in SRC)
+check('...and the amount is computed before it is used in that line, which a '
+      'reordering would silently break',
+      SRC.index('top_up = max(0,') < SRC.index("f'sponsor empty — send {top_up"))
+check('it names the wallet it actually examined, because it defaults to '
+      'OWNER_WALLET and reporting on the wrong account is a mistake that is '
+      'invisible unless said out loud',
+      'wallet examined' in JOINED and 'account you sign in with' in JOINED)
 
 # ── it has to be usable by the person who needs it ────────────────────────
 check('the wallet defaults to OWNER_WALLET, so the common case needs no '

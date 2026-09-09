@@ -121,7 +121,8 @@ def main():
         if not fronting:
             print(f'{BAD} fronting is off, so the only way in is to send a little '
                   f'{sym} to {evm_address} on this chain')
-            verdicts.append((chain, 'needs a manual top-up'))
+            verdicts.append((chain, f'needs a manual top-up — send '
+                                    f'{need * 2 / 1e18:.6f} {sym} to your wallet'))
             continue
         if not sponsor:
             verdicts.append((chain, 'no sponsor key'))
@@ -139,11 +140,15 @@ def main():
         if sponsor_native < grant:
             print(f'{BAD} the sponsor cannot fund even one wallet here. '
                   f'THIS is the blocker.')
-            print(f'    Send {(grant * getattr(d, "GAS_SPONSOR_TARGET_GRANTS", 30) - sponsor_native) / 1e18:.6f} '
-                  f'{sym} to {sponsor}')
+            top_up = max(0, grant * getattr(d, 'GAS_SPONSOR_TARGET_GRANTS', 30)
+                            - sponsor_native)
+            print(f'    Send {top_up / 1e18:.6f} {sym} to {sponsor}')
             print(f'    (or {grant / 1e18:.6f} {sym} to {evm_address} to unblock '
                   f'just this wallet)')
-            verdicts.append((chain, 'sponsor empty'))
+            # The amount rides along into the summary. Five chains all
+            # reading "sponsor empty" tells you nothing you can act on
+            # without scrolling back through five blocks to find the figure.
+            verdicts.append((chain, f'sponsor empty — send {top_up / 1e18:.6f} {sym}'))
             continue
 
         # The sponsor could pay. So if a user is still stuck, it is the
@@ -163,6 +168,13 @@ def main():
     print('\n' + '=' * 68)
     for chain, verdict in verdicts:
         print(f'  {chain:<12} {verdict}')
+    # Which wallet was examined, spelled out at the end. The script defaults
+    # to OWNER_WALLET, and if that is not the account you are signed in with
+    # on the site then the per-wallet figures above are about someone else --
+    # a mistake that is invisible unless it is said out loud.
+    print(f'\n  wallet examined: {wallet}')
+    print(f'  (pass a different one as the first argument if this is not the '
+          f'account you sign in with)')
     return 0
 
 
