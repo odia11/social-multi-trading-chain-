@@ -256,6 +256,11 @@ check('...along with the interpreter line, whether that interpreter exists, and 
       'the directory permissions — the three things you would check next',
       'interpreter line:' in INSTALL and 'interpreter present:' in INSTALL
       and 'directory:' in INSTALL)
+check('...and it runs from the install directory, because sudo carries the '
+      'CURRENT directory into the target user\'s session — run from a clone in '
+      "someone's home, sudo fails with \"can't chdir\" before the command runs, "
+      'and a perfectly good venv is reported broken',
+      'cd "$APP_DIR" && sudo -u "$APP_USER"' in INSTALL)
 check('rsync is installed rather than silently falling back to a copy that '
       'never deletes removed files', 'ca-certificates rsync' in INSTALL)
 check('...and the fallback says so instead of quietly deploying differently',

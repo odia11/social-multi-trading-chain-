@@ -83,7 +83,12 @@ chown -R "$APP_USER:$APP_USER" "$APP_DIR/venv"
 # The output is CAPTURED rather than discarded: a check that fails without
 # saying why just moves the guesswork one step later, which is the whole
 # problem it exists to solve.
-if ! VENV_ERR="$(sudo -u "$APP_USER" "$APP_DIR/venv/bin/gunicorn" --version 2>&1)"; then
+# `cd "$APP_DIR"` first, in a subshell. sudo carries the CURRENT directory
+# into the target user's session, and this script is normally run from the
+# git clone in someone's home -- which the service user cannot enter. sudo
+# then fails with "can't chdir" before the command runs at all, and the check
+# reports a broken venv that is in fact perfectly fine.
+if ! VENV_ERR="$(cd "$APP_DIR" && sudo -u "$APP_USER" "$APP_DIR/venv/bin/gunicorn" --version 2>&1)"; then
   printf '\n\033[1;31m✗ The service user cannot run %s\033[0m\n' "$APP_DIR/venv/bin/gunicorn"
   echo "  it said: $VENV_ERR"
   echo "  its interpreter line: $(head -1 "$APP_DIR/venv/bin/gunicorn")"
