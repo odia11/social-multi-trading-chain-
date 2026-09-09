@@ -26428,6 +26428,73 @@ _GECKOTERMINAL_NETWORK = {
     'solana': 'solana', 'bsc': 'bsc', 'base': 'base', 'arbitrum': 'arbitrum', 'polygon': 'polygon_pos',
 }
 
+# How long a live price may be reused. Short, because this is the number that
+# makes a chart look alive -- but not zero: one window still collapses every
+# viewer of the same token into a single upstream request.
+_LIVE_PRICE_TTL = 4
+
+
+@app.route('/api/market/prices')
+@rate_limit(240, 60)
+def api_market_prices():
+    """Current price for many pools at once.
+
+    Why this exists: the chart is drawn from 5-minute candles, so between
+    candles there is nothing new to draw and it sits perfectly still. The
+    missing piece is the price right now.
+
+    Fetching that per card would be one upstream request per card per tick.
+    DexScreener will take up to 30 pair addresses in a single call, so a page
+    showing thirty tokens costs ONE request -- fewer than the chart polling it
+    replaces, not more.
+
+    Addresses are validated for the chain they claim to be on and the list is
+    capped, rather than being pasted into a URL as sent. A caller cannot use
+    this to make the server fetch something else.
+    """
+    chain = request.args.get('chain', 'solana').strip().lower()
+    if chain not in EVM_CHAINS and chain != 'solana':
+        return jsonify({'ok': False, 'prices': {}})
+    dex_chain_id = EVM_CHAINS[chain]['dex_chain'] if chain in EVM_CHAINS else 'solana'
+
+    def _addr_ok(a):
+        return is_valid_evm_address(a) if chain in EVM_CHAINS else bool(_SOLANA_ADDR_RE.match(a))
+
+    wanted, seen = [], set()
+    for raw in (request.args.get('pairs', '') or '').split(','):
+        a = raw.strip()
+        if a and _addr_ok(a) and a.lower() not in seen:
+            seen.add(a.lower())
+            wanted.append(a)
+        if len(wanted) >= 30:      # DexScreener's own limit for one call
+            break
+    if not wanted:
+        return jsonify({'ok': True, 'prices': {}})
+
+    prices = {}
+    try:
+        r = _dex_get('https://api.dexscreener.com/latest/dex/pairs/'
+                     + dex_chain_id + '/' + ','.join(wanted),
+                     timeout=8, ttl_override=_LIVE_PRICE_TTL)
+        data = r.json() if (r and r.status_code == 200) else {}
+        rows = data.get('pairs') or ([data['pair']] if data.get('pair') else [])
+        for row in (rows or []):
+            addr = (row or {}).get('pairAddress') or ''
+            try:
+                px = float((row or {}).get('priceUsd') or 0)
+            except (TypeError, ValueError):
+                px = 0.0
+            if addr and px > 0:
+                prices[addr.lower()] = px
+    except Exception as e:
+        # A price tick is decoration on top of the candles. If it fails the
+        # chart keeps drawing exactly what it drew before, so this is a quiet
+        # empty answer rather than an error the page has to handle.
+        print(f'[prices] batch fetch failed: {e}', flush=True)
+
+    return jsonify({'ok': True, 'prices': prices})
+
+
 @app.route('/api/chart/<mint>')
 @rate_limit(60, 60)
 def api_chart(mint):

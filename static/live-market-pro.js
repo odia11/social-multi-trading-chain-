@@ -367,8 +367,72 @@ function chartTick(idx){
   if(!st || st.destroyed) return;
   fetchChart(st.mint, st.tf, st.pair, st.chain).then(function(r){
     if(!st || st.destroyed) return;
-    if(r && r.candles) renderChartSvg(idx, r.candles, r.current_price);
+    if(r && r.candles){
+      // Kept so a live price can redraw this chart without fetching the
+      // candles again -- the candles are the shape, the price is the movement.
+      st.candles = r.candles;
+      st.price   = r.current_price;
+      renderChartSvg(idx, st.candles, st.price);
+    }
   });
+}
+
+/* ── LIVE PRICE ────────────────────────────────────────────────────────────
+   The chart is drawn from 5-minute candles. Between two candles there is
+   genuinely nothing new to draw, so it sat perfectly still and looked frozen
+   -- polling the candles harder would not have changed that, because the data
+   itself only changes every few minutes.
+
+   What moves is the price right now. One request covers every chart on
+   screen (the server batches up to 30 pools into a single upstream call), so
+   this is cheaper than the chart polling it lets us slow down, not dearer. */
+var _priceTimer = null;
+
+function tickLivePrices(){
+  var byChain = {};
+  Object.keys(_chartTimers).forEach(function(idx){
+    var st = _chartTimers[idx];
+    if(!st || st.destroyed || !st.pair || !st.candles) return;
+    var c = st.chain || 'solana';
+    (byChain[c] = byChain[c] || []).push(idx);
+  });
+  Object.keys(byChain).forEach(function(chain){
+    var idxs  = byChain[chain];
+    var pairs = idxs.map(function(i){ return _chartTimers[i].pair; });
+    fetch('/api/market/prices?chain='+encodeURIComponent(chain)
+          +'&pairs='+encodeURIComponent(pairs.join(',')))
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!d || !d.prices) return;
+        idxs.forEach(function(i){
+          var st = _chartTimers[i];
+          if(!st || st.destroyed || !st.candles || !st.candles.length) return;
+          var px = d.prices[(st.pair||'').toLowerCase()];
+          if(!(px > 0) || px === st.price) return;
+          st.price = px;
+          // The newest candle is the one still forming, so its close IS the
+          // current price -- move it, and stretch its high/low to match, or
+          // the wick would end up outside its own candle.
+          var last = st.candles[st.candles.length - 1];
+          last.c = px;
+          if(px > last.h) last.h = px;
+          if(px < last.l) last.l = px;
+          renderChartSvg(i, st.candles, px);
+        });
+      })
+      .catch(function(){});   // decoration: a miss leaves the last drawing up
+  });
+}
+
+function startLivePrices(){
+  if(_priceTimer) return;
+  tickLivePrices();
+  _priceTimer = setInterval(function(){
+    // Nothing to ask about when the tab is in the background, and asking
+    // anyway is how a page ends up rate-limited for charts nobody is looking
+    // at. It resumes on the next tick when the tab comes back.
+    if(document.visibilityState === 'visible') tickLivePrices();
+  }, 4000);
 }
 
 // `chain` defaults to 'solana' -- the API's own default -- so a caller that
@@ -379,7 +443,11 @@ function mountChart(idx, mint, pairAddr, chain){
   var st = {destroyed:false, mint:mint, pair:pairAddr, chain:(chain||'solana'), tf:'5m', timer:null};
   _chartTimers[idx] = st;
   chartTick(idx);
-  st.timer = setInterval(function(){ chartTick(idx); }, 5000);
+  // 15s, not 5s: the server caches candles for 30 seconds, so polling every
+  // five asked the same question six times for one answer. Movement comes
+  // from the live price tick above instead, which costs one request for the
+  // whole page.
+  st.timer = setInterval(function(){ chartTick(idx); }, 15000);
   attachChartSvgScrub(idx);
 }
 function unmountChart(idx){
@@ -1586,6 +1654,9 @@ document.addEventListener('DOMContentLoaded', function(){
   setInterval(loadTape, 8000);
   setInterval(loadTraders, 30000);
   setInterval(loadPulse, 20000);
+  // The one that makes the charts move. Started once for the whole page, not
+  // per card -- it batches every visible chart into a single request.
+  startLivePrices();
 });
 
 })();
