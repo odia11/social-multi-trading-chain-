@@ -255,7 +255,14 @@ def main():
     # ── the wallets that have to hold something ──
     section('sponsor wallets')
 
+    if not getattr(d, 'ORCAGENT_FRONTS_GAS', False):
+        report(OK, 'OrcAgent fronts nothing',
+               'users fund their own gas, so the sponsor wallets are meant to be '
+               'empty — a low balance here is not a problem to fix')
+
     def evm_sponsor():
+        if not d.ORCAGENT_FRONTS_GAS:
+            return 'not used (ORCAGENT_FRONTS_GAS is off)'
         addr = d._gas_sponsor_address()
         if not addr:
             raise RuntimeError('GAS_SPONSOR_PRIVATE_KEY is not set — an empty EVM '
@@ -271,6 +278,8 @@ def main():
     attempt('EVM gas sponsor', evm_sponsor, essential=False)
 
     def sol_sponsor():
+        if not d.ORCAGENT_FRONTS_GAS:
+            return 'not used (ORCAGENT_FRONTS_GAS is off)'
         addr = d._sol_gas_sponsor_address()
         if not addr:
             raise RuntimeError('SOL_GAS_SPONSOR_PRIVATE_KEY is not set — users need '

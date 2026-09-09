@@ -78,5 +78,14 @@ check('the subsidy accounting is kept: it reports what past grants cost and '
       'whether they came back, which is still worth knowing even though no new '
       'ones are made', 'te_subsidy.subsidy_report' in SRC)
 
+# ── the check must not report the expected state as a problem ──────────────
+V = open(REPO + '/tools/verify_live.py').read()
+check('the live check says fronting is off, rather than listing six zero '
+      'balances that read like something is broken',
+      'OrcAgent fronts nothing' in V
+      and 'meant to be' in V and 'not a problem to fix' in V)
+check('...and the sponsor balances are skipped rather than reported as empty',
+      V.count("not used (ORCAGENT_FRONTS_GAS is off)") == 2)
+
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)
