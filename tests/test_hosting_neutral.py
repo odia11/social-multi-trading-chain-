@@ -217,6 +217,13 @@ check('...with the exact commands to go back to the commit that was working — 
 check('...and it names where the verified database copy is',
       '${BACKUP:-(none taken)}' in UPDATE)
 
+check('it prunes its own old backups. The app only prunes files it recognises '
+      "by an 'orcagent_' prefix, so these were invisible to it and grew by one "
+      'whole database per deploy — which is how the last disk problem started',
+      'pre-deploy-*.db' in UPDATE and 'tail -n +$((KEEP + 1))' in UPDATE)
+check('...keeping the most recent few, newest first, so the one it just took '
+      'is never the one removed', 'ls -1t' in UPDATE and 'KEEP=3' in UPDATE)
+
 check('it runs the live check at the end, so a deploy that quietly loses an API '
       'key is caught then rather than by a user', 'verify_live.py' in UPDATE)
 check('...and exits non-zero if the app is up but cannot reach what it trades '

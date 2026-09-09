@@ -38,6 +38,16 @@ if [ -f "$DB" ]; then
     || die "The backup did not verify. Nothing has been changed. Investigate before deploying."
   USERS=$(sqlite3 "$BACKUP" 'SELECT COUNT(*) FROM users;' 2>/dev/null || echo '?')
   echo "  $BACKUP  ($(du -h "$BACKUP" | cut -f1), $USERS users) — verified"
+
+  # Keep the last few and delete the rest. The app prunes its OWN backups,
+  # but it matches them by an 'orcagent_' prefix, so these are invisible to
+  # it -- they would sit there growing by one database per deploy until the
+  # volume filled, which is exactly how the last disk problem started.
+  KEEP=3
+  ls -1t "$DATA_DIR"/backups/pre-deploy-*.db 2>/dev/null | tail -n +$((KEEP + 1)) \
+    | while read -r old_backup; do
+        rm -f "$old_backup" && echo "  removed old $(basename "$old_backup")"
+      done
 else
   echo "  no database at $DB yet — nothing to back up"
 fi
