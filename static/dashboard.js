@@ -2,9 +2,9 @@ let traderOn=false, phantomKey=null, walletType=null, currentStep=0, _isAdmin=fa
 var _isReadonly = false;
 let guestMode = false;
 /* ── Pre-populate navbar from server session (eliminates "not connected" flash) ── */
-(function(){
-  var sw=window.__SESSION_WALLET||'', ss=window.__SESSION_SHORT||'';
+function _applySessionWallet(sw, ss){
   if(!sw) return;
+  ss = ss || (sw.length>8 ? (sw.slice(0,4)+'...'+sw.slice(-4)) : sw);
   phantomKey=sw;
   var pill=document.getElementById('wallet-pill');
   var sh=document.getElementById('wallet-short');
@@ -19,7 +19,11 @@ let guestMode = false;
     if(_al) _al.style.display='flex';
     if(_ab) _ab.style.display='';
   }
-})();
+}
+
+// Injected by / and /dashboard only. The other pages that load this file get
+// nothing here and have to ask the server instead — see initApp.
+_applySessionWallet(window.__SESSION_WALLET||'', window.__SESSION_SHORT||'');
 
 /* ── Referral code capture: ?ref=<code> in the URL survives (via localStorage)
    until the wallet-connect flow actually completes, which can happen much
@@ -3002,6 +3006,29 @@ function _inDappBrowser(){ return !!(window.solana||window.solflare); }
 
 // ── STARTUP: restore session ──
 (async function initApp(){
+  // Before concluding that nobody is signed in, ASK.
+  //
+  // __SESSION_WALLET is string-replaced into the HTML by / and /dashboard,
+  // and by nothing else — while six pages load this file. On the others it
+  // was undefined, so this ran as though the user were logged out and went
+  // off to request a fresh wallet signature. A user with a perfectly valid
+  // server session was told to sign in again every time they opened Live
+  // Market. The page must never infer "logged out" from its own HTML being
+  // quiet about it.
+  //
+  // Cheap: one GET, only when the injection did not already answer it.
+  if(!phantomKey){
+    try{
+      var _me = await fetch('/api/session', {credentials:'include'})
+        .then(function(r){ return r.json(); }).catch(function(){ return null; });
+      if(_me && _me.authenticated && _me.wallet){
+        _applySessionWallet(_me.wallet);
+        if(_me.csrf_token) _csrfToken = _me.csrf_token;
+      }
+    }catch(e){}
+  }
+  // Checked AFTER that, so the server stays the authority: a real disconnect
+  // clears the session too, and then the fetch above returns nothing anyway.
   if(localStorage.getItem('orca_manual_disconnect') && !phantomKey){ return; }
   if(phantomKey){ localStorage.removeItem('orca_manual_disconnect'); }
   // Check extension wallet before using session wallet

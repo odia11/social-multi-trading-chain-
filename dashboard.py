@@ -16384,6 +16384,40 @@ def webauthn_login():
         'csrf_token':      csrf_tok,
     })
 
+@app.route('/api/session', methods=['GET'])
+@rate_limit(60, 60)
+def api_session():
+    """Who is signed in, according to the server.
+
+    The frontend used to learn this one way only: __SESSION_WALLET, string-
+    replaced into the HTML. But that substitution happens in exactly two
+    routes -- / and /dashboard -- while six pages load dashboard.js. On any
+    of the others the variable was undefined, so the page concluded nobody
+    was signed in, and initApp went off to ask the wallet for a fresh
+    signature. A user with a perfectly good server session was told to log
+    in again, every time they opened Live Market.
+
+    A page must never infer "not signed in" from its own HTML being quiet.
+    It asks.
+
+    Nothing secret is returned. The wallet address is public, and the CSRF
+    token is only issued when a session already exists -- the same token the
+    connect endpoint hands back at the end of a real login.
+    """
+    wallet = session.get('wallet', '')
+    readonly = bool(session.get('readonly'))
+    return jsonify({
+        'ok': True,
+        'wallet': wallet,
+        'readonly': readonly,
+        # Deliberately separate from `wallet`: a read-only session HAS an
+        # address but has proved nothing, and _authenticated_wallet() treats
+        # it as nobody. The page needs the same distinction.
+        'authenticated': bool(wallet) and not readonly,
+        'csrf_token': _get_csrf_token() if wallet else '',
+    })
+
+
 @app.route('/api/wallet/set', methods=['POST'])
 @rate_limit(10, 60)
 def set_wallet():
