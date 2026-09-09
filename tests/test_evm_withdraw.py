@@ -86,7 +86,9 @@ check('gas is arranged before the transfer, since an ERC20 send is paid in the '
       'chain\'s NATIVE token and a USDC-only wallet cannot move its own USDC',
       '_ensure_evm_gas(' in w and w.index('_ensure_evm_gas(') < w.index('_send_evm_usdc_fee'))
 check('...and a wallet that cannot get gas is told so rather than left with a '
-      'failed transaction', 'Cannot send from' in w)
+      'failed transaction — through the translator, so it never shows our own '
+      'reason for it (see tests/test_gas_message_privacy.py)',
+      "_gas_refusal_message(" in w and "'send'" in w)
 
 # ── the amount is a ceiling, and the fee comes out of it ──────────────────
 # Same shape as a trade: the number typed is the MOST that leaves the wallet.

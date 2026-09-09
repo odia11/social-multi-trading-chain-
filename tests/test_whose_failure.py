@@ -75,20 +75,25 @@ ours = ours[:ours.index('_evm_addr_hint')]
 # The MESSAGE, not the branch. Comments in here quote the wording they are
 # explaining, and a check that reads them is checking prose about the code
 # rather than the code — which has now caught this file out twice.
-ours_msg = ours[ours.index('return False, ('):]
-check('when it is ours the user is told to simply come back, since there is '
-      'nothing they could do to speed it up',
-      'try again shortly' in ours_msg)
-check('...and told explicitly that there is nothing for them to do, which is '
-      'the whole correction', 'Nothing to do on your side' in ours)
-check('...and it names neither the chain nor the action, because every caller '
-      'already supplies both — "Cannot trade on X yet", "Cannot send from X '
-      'yet" — so doing it here printed the chain twice and gave buy-specific '
-      'advice to someone withdrawing',
-      'topping up the network fees for this chain' in ours_msg
-      and '_chain_name' not in ours_msg
-      and 'another chain' not in ours_msg)
-check('...with no instruction to go and acquire a gas token',
+ours_msg = ours[ours.index('return False, '):]
+# This branch used to return a sentence: "we are topping up the network fees
+# for this chain. Nothing to do on your side." Correct about whose failure it
+# was, and still the wrong thing to show somebody -- it described our own
+# plumbing on the screen where they were trying to spend money. It returns a
+# sentinel now, and _gas_refusal_message turns that into a plain "temporarily
+# unavailable". See tests/test_gas_message_privacy.py.
+check('when it is ours, no sentence is returned at all — there is no internal '
+      'reason a caller could print by mistake, because none is produced',
+      'GAS_UNAVAILABLE' in ours_msg)
+# Comments stripped first. The comment in this branch QUOTES the sentence it
+# removed, in order to explain why -- so a plain substring search reads the
+# explanation of the fix as the bug still being there. Same trap as the three
+# earlier ones in this suite, arriving from the opposite direction.
+_ours_code = '\n'.join(l for l in ours.split('\n') if not l.strip().startswith('#'))
+check('...and nothing explaining our own plumbing is left in the code of this '
+      'branch', 'topping up' not in _ours_code and 'sponsor wallet' not in ours_msg)
+check('...with no instruction to go and acquire a gas token, which is the '
+      'thing this branch exists NOT to say',
       'Send a little' not in ours_msg and 'deposit at least' not in ours_msg)
 check('...and nothing is written to the USER\'s activity log, because it is '
       'not their business', 'add_user_log(' not in ours)

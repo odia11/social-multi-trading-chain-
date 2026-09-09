@@ -6491,7 +6491,10 @@ def _bot_scan_evm_entry(user_id: int, wallet: str, positions: dict, chain: str, 
             _evm_addr = _EvmAccount.from_key(pk).address
             _gas_ok, _gas_msg, _gas_bridge_id = _ensure_evm_gas(user_id, wallet, pk, _evm_addr, chain)
             if not _gas_ok:
-                add_user_log(wallet, f'[bot-{chain}] Cannot buy {symbol} — {_gas_msg}')
+                add_user_log(wallet, f'[bot-{chain}] Cannot buy {symbol} — '
+                             + _gas_refusal_message(
+                                 _gas_msg, 'buy',
+                                 SURGE_ALERT_CHAIN_NAMES.get(chain, chain)))
                 return False
             add_user_log(wallet, f'[bot-{chain}] Best: {symbol} — BUYING (5m:{round(m5,1)}% 1h:{round(h1,1)}%)')
             buy_ok, buy_err, _tx_hash = _execute_evm_swap(wallet, pk, 'buy', mint, str(min_trade_usdc), chain)
@@ -6869,7 +6872,8 @@ def _execute_auto_buy_after_bridge(bridge_id: int, user_id: int, wallet: str, de
             # literal zero.
             _gas_ok, _gas_msg, _gas_bridge_id = _ensure_evm_gas(user_id, wallet, private_key, evm_address, dest_chain)
             if not _gas_ok:
-                _finish('failed', {'error': f'Cannot buy on {dest_chain} yet — {_gas_msg}'})
+                _finish('failed', {'error': _gas_refusal_message(
+                    _gas_msg, 'buy', SURGE_ALERT_CHAIN_NAMES.get(dest_chain, dest_chain))})
                 return
             buy_ok, buy_err, buy_tx_hash = _execute_evm_swap(
                 wallet, private_key, 'buy', token_address, str(amount_usdc), dest_chain)
@@ -7230,7 +7234,8 @@ def _narrative_agent_process_candidate(user_id: int, wallet: str, mint: str, cha
             _evm_addr = _EvmAccount.from_key(pk).address
             _gas_ok, _gas_msg, _gas_bridge_id = _ensure_evm_gas(user_id, wallet, pk, _evm_addr, 'bsc')
             if not _gas_ok:
-                ok, err, tx_hash = False, _gas_msg, ''
+                ok, err, tx_hash = False, _gas_refusal_message(
+                    _gas_msg, 'buy', SURGE_ALERT_CHAIN_NAMES.get('bsc', 'bsc')), ''
             else:
                 ok, err, tx_hash = _execute_bsc_swap(wallet, pk, 'buy', mint, str(amount))
 
@@ -7771,7 +7776,9 @@ def _te_evm_swap_executor(enc_blob: str, wallet: str, evm_address: str):
                 # quote this trade is bound to has expired.
                 return te_execute.SwapOutcome(
                     submitted=False, confirmed=False,
-                    error=f'cannot trade on {plan.chain} yet — {gas_msg}')
+                    error=_gas_refusal_message(
+                        gas_msg, 'trade',
+                        SURGE_ALERT_CHAIN_NAMES.get(plan.chain, plan.chain)))
             # The PURCHASE, not the ceiling. This single argument is the
             # difference between the engine and every legacy endpoint.
             ok, err, tx_hash = _execute_evm_swap(
@@ -8861,6 +8868,30 @@ def _refill_gas_sponsor(chain: str) -> tuple:
 
 GAS_BOOTSTRAP_SOL_USD = 5.0  # small, fixed USD-equivalent amount of the user's OWN SOL bridged to bootstrap a completely empty EVM gas balance -- kept a bit larger than the ongoing USDC top-up amount since a cross-chain bridge's own fees eat a bigger share of a very small transfer
 
+# Returned instead of a user-facing sentence when the reason a chain cannot
+# be used is ours (an empty sponsor wallet, no key, an RPC that will not
+# answer). Never shown; _gas_refusal_message turns it into something a person
+# should read.
+GAS_UNAVAILABLE = '__gas_unavailable__'
+
+
+def _gas_refusal_message(gas_msg: str, action: str, chain_label: str) -> str:
+    """The sentence a person actually sees when gas blocks them.
+
+    Two very different situations arrive here. If the shortfall is ours, they
+    get a plain "temporarily unavailable" -- no chain named, no explanation of
+    our float, nothing they could act on even if they wanted to, because there
+    is nothing for them to do. If it is genuinely their wallet that is short,
+    the message from the gas check is a real instruction and is passed through
+    with the chain named, since they need to know which one.
+    """
+    verb = {'trade': 'Trading', 'sell': 'Selling', 'send': 'Sending',
+            'buy': 'Buying'}.get(action, 'This')
+    if gas_msg == GAS_UNAVAILABLE:
+        return f'{verb} is temporarily unavailable. Please try again shortly.'
+    return f'Cannot {action} on {chain_label} yet — {gas_msg}'
+
+
 def _gas_shortfall_is_ours(chain: str) -> bool:
     """Whether a user's inability to get gas on `chain` is OUR failure.
 
@@ -9012,8 +9043,17 @@ def _bootstrap_evm_gas_via_bridge(user_id: int, wallet: str, evm_address: str, c
             # X yet — " -- so naming the chain here printed it twice, and
             # "trade on another chain" was plainly wrong advice to someone
             # who was trying to send money out, not buy something.
-            return False, ('we are topping up the network fees for this chain. '
-                           'Nothing to do on your side — try again shortly.'), None
+            # A sentinel, not a sentence. The user must be told something --
+            # a button that silently does nothing is worse than any message
+            # -- but they must not be told THIS: "we are topping up the
+            # network fees for this chain" is our own plumbing, on the one
+            # screen where somebody is trying to spend money with us. It
+            # reads as a broken product and it is not their business.
+            #
+            # The callers turn this into a plain "temporarily unavailable"
+            # in the words of whatever the person was actually doing. The
+            # detail stays where it can be acted on: the operator log above.
+            return False, GAS_UNAVAILABLE, None
 
         # Fronting is deliberately off, so the user really does fund their own
         # gas and this instruction is the honest one. Direct route first: a few
@@ -13431,8 +13471,9 @@ def _evm_buy_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM'
                         'msg': 'Activating this chain for your wallet — your buy will complete automatically once ready.',
                     })
                 return jsonify({'ok': False,
-                                'msg': f'Cannot trade on {SURGE_ALERT_CHAIN_NAMES.get(chain, chain)} '
-                                       f'yet — {_gas_msg}'}), 400
+                                'msg': _gas_refusal_message(
+                                    _gas_msg, 'trade',
+                                    SURGE_ALERT_CHAIN_NAMES.get(chain, chain))}), 400
 
     # ── through the trade engine ──
     # What changes for the user: amount_usdc is now the MAXIMUM they spend,
@@ -13725,7 +13766,8 @@ def _evm_sell_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM
             evm_addr = _EvmAccount.from_key(pk).address
             gas_ok, gas_msg, _ = _ensure_evm_gas(user_id, wallet, pk, evm_addr, chain)
             if not gas_ok:
-                return jsonify({'ok': False, 'msg': f'Cannot sell on {chain} yet — {gas_msg}'}), 400
+                return jsonify({'ok': False, 'msg': _gas_refusal_message(
+                    gas_msg, 'sell', SURGE_ALERT_CHAIN_NAMES.get(chain, chain))}), 400
 
             # Read before, read after: the difference is what this one swap
             # returned. Taken before the broadcast so a slow RPC afterwards
@@ -24963,7 +25005,8 @@ def api_withdraw_evm():
             gas_ok, gas_msg, _bridge_id = _ensure_evm_gas(user_id, wallet, _pk, evm_address, chain)
             if not gas_ok:
                 return jsonify({'ok': False,
-                                'error': f'Cannot send from {chain_name} yet — {gas_msg}'}), 400
+                                'error': _gas_refusal_message(
+                                    gas_msg, 'send', chain_name)}), 400
 
             # ── the amount is a ceiling, not a promise ──
             # The number typed in is the MOST that leaves the wallet, and the
