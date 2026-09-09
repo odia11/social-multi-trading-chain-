@@ -1164,14 +1164,6 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
 .trade-warn.show{display:block}
 
 /* ── INACTIVITY WARNING ── */
-.inact-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:2000;backdrop-filter:blur(6px)}
-.inact-card{background:var(--bg2);border:1px solid rgba(118,118,118,.4);border-radius:16px;padding:32px 28px;text-align:center;max-width:340px;width:90%;box-shadow:0 0 80px rgba(118,118,118,.12)}
-.inact-icon{font-size:40px;margin-bottom:14px}
-.inact-title{font-family:'Orbitron',monospace;font-size:13px;font-weight:700;color:var(--yellow);margin-bottom:10px;letter-spacing:.1em}
-.inact-msg{font-size:11px;color:var(--dim);margin-bottom:8px;line-height:1.7}
-.inact-timer{font-family:'Orbitron',monospace;font-size:26px;font-weight:700;color:var(--red);margin:12px 0 20px;letter-spacing:.05em}
-.inact-btn{background:var(--green);color:#ffffff;border:none;border-radius:8px;padding:11px 28px;font-family:'Orbitron',monospace;font-size:11px;font-weight:900;cursor:pointer;letter-spacing:.06em;transition:filter .15s;width:100%}
-.inact-btn:hover{filter:brightness(1.12)}
 
 /* ── MOBILE DEEP LINK BUTTONS ── */
 /* Dashed border = "opens external app", solid = "connects in-browser" */
@@ -2571,7 +2563,6 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
   /* ── HEADINGS/DISPLAY VALUES ABOVE 28px: scale down ── */
   #s-sol{font-size:24px}
   .ob-orc{font-size:36px}
-  .inact-icon{font-size:30px}
   .tips-slide-icon{font-size:24px}
 
   /* ── HEADER: hamburger | search (flex:1) | avatar ── */
@@ -2728,7 +2719,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
 .stat,.market-panel,.perf-panel,.pos-panel,.pnlc-panel,
 .live-feed-panel,.panel,.ps-panel,
 .lb-panel,.adash-wrap,.admin-panel,.modes .mode,
-.ob-box,.swiz-card,.s-card,.audit-card,.inact-card{
+.ob-box,.swiz-card,.s-card,.audit-card{
   backdrop-filter:blur(10px);
   -webkit-backdrop-filter:blur(10px);
   box-shadow:var(--shadow-card);
@@ -2777,7 +2768,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
 /* ── BUTTON STYLE UPGRADE ── */
 /* base: radius 8px, weight 600, smooth transition */
 .ob-btn,.mode-btn,.s-save,.swiz-next-btn,
-.bot-btn,.inc-burn-btn,.adash-back-btn,.audit-run-btn,.inact-btn,
+.bot-btn,.inc-burn-btn,.adash-back-btn,.audit-run-btn,
 .ps-buy-btn,.ps-sell-btn,
 .tpc-follow-btn,.tpc-copy-btn,.tpc-stop-copy-btn,.tpc-sol-btn,.tpc-msg-btn,
 .dpb-view-btn,.tv-me-profile-btn,.btn-follow,
@@ -2787,7 +2778,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
   transition:all .2s;
 }
 /* primary: solid green, black text */
-.s-save,.inact-btn,.ps-buy-btn,.dm-send-btn,.tpc-follow-btn,.btn-follow{
+.s-save,.ps-buy-btn,.dm-send-btn,.tpc-follow-btn,.btn-follow{
   background:#141414;color:#ffffff;border:none;
 }
 /* secondary: solid red, white text */
@@ -2800,7 +2791,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
   background:transparent;border:1px solid var(--border);color:var(--text);
 }
 /* primary hover glow */
-.s-save:hover:not(:disabled),.inact-btn:hover,
+.s-save:hover:not(:disabled),
 .ps-buy-btn:hover,.tpc-follow-btn:hover,.btn-follow:hover,
 .dm-send-btn:hover:not(:disabled){
   box-shadow:0 0 16px rgba(0,0,0,.3);filter:brightness(1.08);
@@ -3775,17 +3766,6 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
       <strong>No blacklisted tokens</strong><br>
       Use <span style="display:inline-flex;align-items:center;vertical-align:-2px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></span> Avoid on any token to add it here.
     </div>
-  </div>
-</div>
-
-<!-- INACTIVITY WARNING POPUP -->
-<div class="inact-overlay" id="inact-overlay" style="display:none" role="alertdialog" aria-modal="true" aria-labelledby="inact-title" onclick="stayConnected()">
-  <div class="inact-card" onclick="event.stopPropagation()">
-    <div class="inact-icon" style="display:flex;justify-content:center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
-    <div class="inact-title" id="inact-title">INACTIVITY WARNING</div>
-    <div class="inact-msg">You will be logged out in 2 minutes due to inactivity. Click anywhere to stay logged in.</div>
-    <div class="inact-timer" id="inact-countdown">120</div>
-    <button class="inact-btn" onclick="stayConnected()">STAY LOGGED IN</button>
   </div>
 </div>
 

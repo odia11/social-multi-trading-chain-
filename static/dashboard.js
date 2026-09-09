@@ -633,60 +633,29 @@ async function _initCsrf(){
 // Fetch CSRF token immediately on page load (before any user interaction)
 _initCsrf();
 
-// ── INACTIVITY TIMEOUT ──
-const INACT_WARN_MS   = 8 * 60 * 1000;  // warn at 8 min
-const INACT_LIMIT_MS  = 10 * 60 * 1000; // logout at 10 min
-let _lastActivity     = Date.now();
-let _warnShown        = false;
-let _warnTick         = null;
-
-function _resetActivity(){
-  _lastActivity = Date.now();
-  if(_warnShown) _hideInactWarning();
-}
-
-function _hideInactWarning(){
-  _warnShown = false;
-  document.getElementById('inact-overlay').style.display = 'none';
-  if(_warnTick){ clearInterval(_warnTick); _warnTick = null; }
-}
-
-function stayConnected(){ _resetActivity(); }
-
-function _showInactWarning(){
-  if(_warnShown || !phantomKey) return;
-  _warnShown = true;
-  document.getElementById('inact-overlay').style.display = 'flex';
-  if(_warnTick) clearInterval(_warnTick);
-  _warnTick = setInterval(()=>{
-    const rem = Math.max(0, INACT_LIMIT_MS - (Date.now() - _lastActivity));
-    const secs = Math.ceil(rem / 1000);
-    const el = document.getElementById('inact-countdown');
-    if(el) el.textContent = secs;
-    if(rem <= 0){ clearInterval(_warnTick); _warnTick = null; }
-  }, 500);
-}
-
-function _checkInactivity(){
-  if(!phantomKey) return;
-  if(traderOn){ _hideInactWarning(); return; } // never log out while bot is running
-  const idle = Date.now() - _lastActivity;
-  if(idle >= INACT_LIMIT_MS){
-    _hideInactWarning();
-    doLogout();
-  } else if(idle >= INACT_WARN_MS && !_warnShown){
-    _showInactWarning();
-  }
-}
-
-// User activity resets the timer
-['mousemove','mousedown','keydown','scroll','touchstart','click'].forEach(evt=>{
-  document.addEventListener(evt, _resetActivity, {passive:true});
-});
+// ── NO INACTIVITY TIMEOUT ──
+// There used to be one here: a warning at 8 minutes and an automatic logout
+// at 10. It is gone, deliberately.
+//
+// It was the everyday reason people were "thrown out". Read the feed, put the
+// phone down, come back after lunch -- signed out, and back to Phantom for a
+// signature you had already given. On a phone that is most sessions. And it
+// was worse than a plain logout: the timer ran in the browser, so backgrounding
+// the app or locking the screen counted as being idle, and the countdown that
+// was meant to warn you had no chance to be seen.
+//
+// A connection now ends when the person ends it. Disconnect is the only thing
+// that signs anyone out.
+//
+// What replaces it as protection is per-action, not per-session: the trading
+// key never leaves the server, sensitive actions can be put behind Face ID or
+// a passkey, and Disconnect revokes every remembered login on every device at
+// once. A timer that signs out someone reading the feed protects nothing that
+// those do not protect better, and it cost every single user their session
+// several times a day.
 
 // ── LOGOUT ──
 function doLogout(){
-  _hideInactWarning();
   phantomKey=null; walletType=null; _isAdmin=false;
   updateAuthBtns();
   fetch('/api/wallet/set',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({address:''})}).catch(()=>{});
@@ -1030,7 +999,6 @@ async function launchApp(){
   }
   updateAuthBtns();
   checkOwnerPanel(); _syncAdminNavLink();
-  _lastActivity = Date.now();
   /* guest mode banner */
   if(guestMode) _showGuestBanner();
   /* apply read-only restrictions */
@@ -3189,7 +3157,12 @@ function _inDappBrowser(){ return !!(window.solana||window.solflare); }
       let _tried=false;
       try{ _tried = sessionStorage.getItem('orca_wallet_mismatch_reload')==='1'; }catch(e){}
       let _cleared=false;
-      try{ _cleared = (await fetch('/api/logout',{method:'POST',credentials:'include'})).ok; }
+      // /api/session/clear, NOT /api/logout. This is the page signing itself
+      // out because the extension is on another account -- nobody pressed
+      // Disconnect. Logout revokes every remembered login on every device,
+      // which would turn "you switched account" into "you are signed out
+      // everywhere, forever".
+      try{ _cleared = (await fetch('/api/session/clear',{method:'POST',credentials:'include'})).ok; }
       catch(e){ _cleared=false; }
       if(_cleared && !_tried){
         try{ sessionStorage.setItem('orca_wallet_mismatch_reload','1'); }catch(e){}
@@ -5001,7 +4974,6 @@ async function burnSelected(){
 
 
 setInterval(fetchBalance,30000);
-setInterval(_checkInactivity,10000);
 
 // ── HEALTH / AUDIT (owner-only) ──
 let _auditLastTs=0;

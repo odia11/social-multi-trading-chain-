@@ -16818,6 +16818,26 @@ def set_wallet():
             add_user_log(prev, 'Wallet disconnected')
     return jsonify({'ok': True, 'wallet': session.get('wallet', '')})
 
+@app.route('/api/session/clear', methods=['POST'])
+@csrf_exempt
+def api_session_clear():
+    """End this browser's session WITHOUT touching remembered logins.
+
+    Not the same thing as Disconnect, and the difference matters. The page
+    clears the session by itself in one case: the wallet extension is on a
+    different account than the one this session belongs to. Nothing has been
+    stolen there -- somebody switched accounts -- so signing this browser out
+    is right and revoking every remembered login on every device they own is
+    not.
+
+    Two endpoints rather than one flag on /api/logout: which one revokes is
+    then decided here, by which URL was called, instead of by a value the
+    page sends. A page that could ask not to revoke could also be made to ask
+    that by someone else.
+    """
+    session.clear()
+    return jsonify({'status': 'ok'})
+
 @app.route('/api/logout', methods=['POST'])
 @csrf_exempt
 def logout():
