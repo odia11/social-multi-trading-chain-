@@ -45,7 +45,7 @@ ns = {'os': os, 'gzip': gzip, 'shutil': shutil, 'sqlite3': sqlite3,
       'BACKUP_KEEP': 3, 'BACKUP_MIN_FREE_BYTES': 300 * 1024 * 1024,
       'DISK_LOW_BYTES': 300 * 1024 * 1024}
 for f in ('_free_bytes', '_backup_files', '_prune_backups', 'backup_database',
-          '_reclaim_disk_space', '_storage_breakdown'):
+          '_reclaim_disk_space', '_storage_breakdown', '_stored_image_bytes'):
     exec(fn(f), ns)
 
 # ── compression is the whole point ──
@@ -132,6 +132,35 @@ check('...with a file count, so "backups 300 MB" says how many that is',
       'files)' in line)
 check('...and how much of the volume is used and how much is left',
       'used of' in line and 'free' in line)
+
+# ── the largest thing in the database, named ──
+# Every uploaded picture is stored as a base64 data URI in a TEXT column, so
+# the database IS the photo album. Before this it was invisible: the line said
+# "db 4700 MB" and gave no hint that almost all of it was images.
+c = sqlite3.connect(DB)
+c.execute('CREATE TABLE feed_posts (id INTEGER PRIMARY KEY, image_url TEXT)')
+c.execute("INSERT INTO feed_posts (image_url) VALUES ('data:image/png;base64,' || ?)",
+          ('A' * 400000,))
+c.execute("INSERT INTO feed_posts (image_url) VALUES ('no picture here')")
+c.commit(); c.close()
+check('the image total counts stored pictures', ns['_stored_image_bytes']() > 400000)
+check('...and only pictures, not every text column',
+      ns['_stored_image_bytes']() < 400100)
+check('the storage line names them, since it is the largest thing in there and '
+      'the line previously gave no hint of it',
+      'of which images' in ns['_storage_breakdown']())
+
+# The image total needs a query, and losing the whole line because that one
+# query failed would take away exactly what you need when the volume is full.
+broken = dict(ns)
+def _boom():
+    raise sqlite3.OperationalError('database is locked')
+broken['_stored_image_bytes'] = _boom
+exec(fn('_storage_breakdown'), broken)
+degraded = broken['_storage_breakdown']()
+check('if the image total cannot be read, the rest of the line still reports — '
+      'a failed sub-measurement must not cost you the storage figures',
+      'db ' in degraded and 'volume ' in degraded and 'used of' in degraded)
 ns_broken = dict(ns); ns_broken['_DATA_DIR'] = '/nonexistent/nope'
 exec(fn('_storage_breakdown'), ns_broken)
 check('an unreadable volume returns a message rather than raising during startup',

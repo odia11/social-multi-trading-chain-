@@ -14078,6 +14078,7 @@ def api_group_post_create(group_id):
         )
         if not any(image_data.startswith(p) for p in _ALLOWED_PREFIXES):
             return jsonify({'ok': False, 'msg': 'Only JPEG, PNG, GIF, or WebP images are accepted'}), 400
+        image_data = _shrink_image_data_uri(image_data)
         b64_part = image_data.split(',', 1)[1] if ',' in image_data else ''
         if len(b64_part) * 3 // 4 > 3 * 1024 * 1024:
             return jsonify({'ok': False, 'msg': 'Image too large (max 3 MB)'}), 400
@@ -14262,6 +14263,7 @@ def _group_image_upload(group_id, field, data):
         )
         if not any(data.startswith(p) for p in _ALLOWED_PREFIXES):
             return jsonify({'ok': False, 'msg': 'Only JPEG, PNG, GIF, or WebP images are accepted'})
+        data = _shrink_image_data_uri(data)
         b64_part = data.split(',', 1)[1] if ',' in data else ''
         if len(b64_part) * 3 // 4 > 2 * 1024 * 1024:
             return jsonify({'ok': False, 'msg': 'Image too large (max 2 MB)'})
@@ -16697,6 +16699,9 @@ def save_avatar():
         )
         if not any(avatar_data.startswith(p) for p in _ALLOWED_PREFIXES):
             return jsonify({'ok': False, 'msg': 'Only JPEG, PNG, GIF, or WebP images are accepted'})
+        # An avatar is never displayed large, so it is bounded harder.
+        avatar_data = _shrink_image_data_uri(avatar_data, max_edge=IMAGE_AVATAR_EDGE,
+                                            target_kb=120)
         b64_part = avatar_data.split(',', 1)[1] if ',' in avatar_data else ''
         if len(b64_part) * 3 // 4 > 2 * 1024 * 1024:
             return jsonify({'ok': False, 'msg': 'Image too large (max 2 MB)'})
@@ -16731,6 +16736,7 @@ def save_banner():
         )
         if not any(banner_data.startswith(p) for p in _ALLOWED_PREFIXES):
             return jsonify({'ok': False, 'msg': 'Only JPEG, PNG, GIF, or WebP images are accepted'})
+        banner_data = _shrink_image_data_uri(banner_data)
         b64_part = banner_data.split(',', 1)[1] if ',' in banner_data else ''
         if len(b64_part) * 3 // 4 > 2 * 1024 * 1024:
             return jsonify({'ok': False, 'msg': 'Image too large (max 2 MB)'})
@@ -18379,6 +18385,7 @@ def feed_post_create():
             return jsonify({'ok': False, 'msg': 'Only JPEG, PNG, GIF, or WebP images are accepted'}), 400
         is_gif = image_data.startswith('data:image/gif;base64,')
         max_bytes = 5 * 1024 * 1024 if is_gif else 2 * 1024 * 1024
+        image_data = _shrink_image_data_uri(image_data)
         b64_part = image_data.split(',', 1)[1] if ',' in image_data else ''
         if len(b64_part) * 3 // 4 > max_bytes:
             return jsonify({'ok': False, 'msg': f'Image too large (max {max_bytes // (1024*1024)} MB)'}), 400
@@ -21882,6 +21889,7 @@ def upload_dm_image():
     ext = raw_ext[-1].lower() if len(raw_ext) == 2 else ''
     if ext not in ALLOWED_EXT:
         ext = f.content_type.split('/')[-1].replace('jpeg', 'jpg')
+    data, ext = _shrink_image_bytes(data, ext)
     filename  = f'{uuid.uuid4().hex}.{ext}'
     save_path = os.path.join(DM_IMAGES_DIR, filename)
     with open(save_path, 'wb') as out:
@@ -21906,6 +21914,7 @@ def send_dm(peer_id):
         )
         if not any(text.startswith(p) for p in _ALLOWED_PREFIXES):
             return jsonify({'ok': False, 'msg': 'Only JPEG, PNG, GIF, or WebP images are accepted'}), 400
+        text = _shrink_image_data_uri(text)
         b64_part = text.split(',', 1)[1] if ',' in text else ''
         if len(b64_part) * 3 // 4 > 3 * 1024 * 1024:
             return jsonify({'ok': False, 'msg': 'Image too large (max 3 MB)'}), 400
@@ -22517,6 +22526,7 @@ def upload_chat_image():
     ext = raw_ext[-1].lower() if len(raw_ext) == 2 else ''
     if ext not in ALLOWED_EXT:
         ext = f.content_type.split('/')[-1].replace('jpeg', 'jpg')
+    data, ext = _shrink_image_bytes(data, ext)
     filename  = f'{uuid.uuid4().hex}.{ext}'
     save_path = os.path.join(CHAT_IMAGES_DIR, filename)
     with open(save_path, 'wb') as out:
@@ -25770,6 +25780,115 @@ def admin_fee_stats():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/admin/compact-images', methods=['GET', 'POST'])
+@rate_limit(5, 60)
+def admin_compact_images():
+    """Re-encode pictures already stored in the database, or report what that
+    would free.
+
+    GET reports. POST with {"apply": true} rewrites. It is not automatic and
+    it is not part of daily maintenance, because this changes content people
+    have already published -- their photos, re-encoded smaller. Making that
+    call is the owner's, not a background job's.
+
+    What it does is exactly what the upload path now does to new images, so a
+    picture stored before that existed ends up the same size as one stored
+    after. Originals are not kept: there is nowhere to keep them that is not
+    the volume this is trying to empty. Anything that cannot be improved, or
+    cannot be read, is left alone.
+
+    VACUUM afterwards is what actually returns the space to the filesystem --
+    without it SQLite keeps the freed pages for itself and the volume looks
+    exactly as full as before.
+    """
+    wallet = _authenticated_wallet()
+    if not wallet or not _is_owner(wallet):
+        return _owner_denied(wallet, 'Image compaction')
+
+    apply_changes = bool((request.get_json(silent=True) or {}).get('apply')) \
+        and request.method == 'POST'
+    targets = (('feed_posts', 'id', 'image_url'), ('group_posts', 'id', 'image_url'),
+               ('messages', 'id', 'content'), ('group_chat', 'id', 'content'),
+               ('users', 'id', 'avatar_url'), ('users', 'id', 'banner_url'),
+               ('groups', 'id', 'avatar_url'), ('groups', 'id', 'banner_url'))
+    report, before_total, after_total, rewritten = [], 0, 0, 0
+
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        for table, key, col in targets:
+            try:
+                rows = conn.execute(
+                    f"SELECT {key}, {col} FROM {table} WHERE {col} LIKE 'data:image/%'"
+                ).fetchall()
+            except sqlite3.Error:
+                continue          # that table or column does not exist here
+            t_before = t_after = t_rows = 0
+            for row_id, value in rows:
+                t_before += len(value or '')
+                shrunk = _shrink_image_data_uri(value)
+                t_after += len(shrunk)
+                if shrunk != value:
+                    t_rows += 1
+                    if apply_changes:
+                        conn.execute(f'UPDATE {table} SET {col}=? WHERE {key}=?',
+                                     (shrunk, row_id))
+            if rows:
+                report.append({'table': table, 'column': col, 'images': len(rows),
+                               'before_bytes': t_before, 'after_bytes': t_after,
+                               'would_rewrite': t_rows})
+            before_total += t_before
+            after_total  += t_after
+            rewritten    += t_rows
+        if apply_changes:
+            conn.commit()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify({'ok': False, 'msg': f'compaction failed: {e}'}), 500
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    vacuum_note = ''
+    if apply_changes and rewritten:
+        # Rewriting the rows frees pages inside the file; only VACUUM hands
+        # them back to the filesystem, which is the whole point here.
+        try:
+            vconn = sqlite3.connect(DB_FILE, isolation_level=None)
+            try:
+                vconn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+                vconn.execute('VACUUM')
+            finally:
+                vconn.close()
+            vacuum_note = 'database rebuilt, space returned to the volume'
+        except Exception as e:
+            vacuum_note = (f'rows rewritten but VACUUM failed ({e}) — the space is '
+                           f'free inside the database but not yet on the volume')
+
+    saved = max(0, before_total - after_total)
+    return jsonify({
+        'ok': True,
+        'applied': apply_changes,
+        'images': sum(r['images'] for r in report),
+        'would_rewrite' if not apply_changes else 'rewritten': rewritten,
+        'before_mb': round(before_total / (1024 * 1024), 1),
+        'after_mb': round(after_total / (1024 * 1024), 1),
+        'saves_mb': round(saved / (1024 * 1024), 1),
+        'by_table': report,
+        'vacuum': vacuum_note,
+        'storage': _storage_breakdown(),
+        'msg': (f'Rewrote {rewritten} images, freeing about '
+                f'{round(saved / (1024 * 1024), 1)} MB. {vacuum_note}'
+                if apply_changes else
+                f'{rewritten} of {sum(r["images"] for r in report)} stored images can be '
+                f'made smaller, freeing about {round(saved / (1024 * 1024), 1)} MB. '
+                f'POST here with {{"apply": true}} to do it — this rewrites '
+                f'published photos and does not keep the originals.'),
+    })
+
+
 @app.route('/api/admin/gas-sponsor')
 @rate_limit(20, 60)
 def admin_gas_sponsor():
@@ -27645,6 +27764,136 @@ init_db()
 
 DISK_LOW_BYTES = 300 * 1024 * 1024   # start reclaiming below this
 
+# ── image storage ───────────────────────────────────────────────────────────
+# Every uploaded picture is kept as a base64 data URI in a TEXT column, so a
+# photo does not land on the filesystem -- it lands in orcagent.db, and base64
+# adds a third on top of it. A 3 MB phone photo becomes about 4 MB of database,
+# a few hundred of them are gigabytes, and that database is what the volume
+# holds and what every backup copies. That is what filled the volume.
+#
+# Nothing here changes where images are stored. What it changes is their size:
+# a picture is re-encoded once, on the way in, to something no larger than the
+# screens that display it actually need.
+
+IMAGE_MAX_EDGE  = 1600            # px on the long side -- above any display size in the app
+IMAGE_TARGET_KB = 400             # what a full-width photo should cost
+IMAGE_AVATAR_EDGE = 512           # avatars and group icons are never shown larger
+
+
+def _shrink_image_data_uri(data_uri: str, max_edge: int = IMAGE_MAX_EDGE,
+                           target_kb: int = IMAGE_TARGET_KB) -> str:
+    """Re-encode an uploaded data URI down to something sensible.
+
+    Returns a data URI -- the shrunken one, or the ORIGINAL unchanged if it
+    cannot be improved or anything goes wrong. This runs on the upload path of
+    every picture in the app, so it must never be the reason a post fails: the
+    size limits at each call site still apply either way, and this only ever
+    makes the stored value smaller.
+
+    Animated GIFs are returned untouched. Re-encoding one through a single
+    frame would silently turn a user's animation into a still, which is worse
+    than storing it whole.
+    """
+    try:
+        if not data_uri or not data_uri.startswith('data:image/'):
+            return data_uri
+        header, _, b64_part = data_uri.partition(',')
+        if not b64_part:
+            return data_uri
+        raw = base64.b64decode(b64_part, validate=True)
+        img = Image.open(io.BytesIO(raw))
+
+        # An animated GIF keeps its frames; a still one is fair game.
+        if getattr(img, 'is_animated', False):
+            return data_uri
+
+        img.load()
+        # Transparency has to survive, so anything with an alpha channel stays
+        # PNG. Everything else becomes JPEG, which is what makes the saving.
+        has_alpha = img.mode in ('RGBA', 'LA') or (
+            img.mode == 'P' and 'transparency' in img.info)
+
+        if max(img.size) > max_edge:
+            img.thumbnail((max_edge, max_edge), Image.LANCZOS)
+
+        buf = io.BytesIO()
+        if has_alpha:
+            img.convert('RGBA').save(buf, format='PNG', optimize=True)
+            mime = 'image/png'
+        else:
+            rgb = img.convert('RGB')
+            # Step the quality down until it fits, rather than picking one
+            # number that is too low for a photo and too high for a screenshot.
+            for quality in (85, 78, 70, 62, 55):
+                buf = io.BytesIO()
+                rgb.save(buf, format='JPEG', quality=quality, optimize=True,
+                         progressive=True)
+                if buf.tell() <= target_kb * 1024:
+                    break
+            mime = 'image/jpeg'
+
+        out = buf.getvalue()
+        if len(out) >= len(raw):
+            # Already smaller than anything we would produce. Re-encoding it
+            # would only lose quality for nothing.
+            return data_uri
+        return 'data:' + mime + ';base64,' + base64.b64encode(out).decode('ascii')
+    except Exception as e:
+        print(f'[image] could not shrink an upload, storing it as sent: '
+              f'{type(e).__name__}: {e}', flush=True)
+        return data_uri
+
+
+def _shrink_image_bytes(data: bytes, ext: str) -> tuple:
+    """The same re-encoding for the two endpoints that receive a real file
+    rather than a data URI. Returns (bytes, extension), unchanged on any
+    failure or when the original is already the smaller of the two.
+
+    These land in static/ rather than on the data volume, so they are not what
+    filled it -- but a 5 MB upload is 5 MB of container disk either way, and
+    the file is served to phones that will never use the resolution.
+    """
+    try:
+        uri = 'data:image/' + ('jpeg' if ext in ('jpg', 'jpeg') else ext) + \
+              ';base64,' + base64.b64encode(data).decode('ascii')
+        out = _shrink_image_data_uri(uri)
+        if out is uri or not out.startswith('data:image/'):
+            return data, ext
+        header, _, b64_part = out.partition(',')
+        new_ext = 'jpg' if 'jpeg' in header else ('png' if 'png' in header else ext)
+        return base64.b64decode(b64_part), new_ext
+    except Exception:
+        return data, ext
+
+
+def _stored_image_bytes() -> int:
+    """How much of the database is pictures.
+
+    Reported rather than acted on: these are user posts, and re-encoding
+    content somebody already published is their call, not a maintenance job's.
+    """
+    total = 0
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            for table, col in (('feed_posts', 'image_url'), ('group_posts', 'image_url'),
+                               ('messages', 'content'), ('group_chat', 'content'),
+                               ('users', 'avatar_url'), ('users', 'banner_url'),
+                               ('groups', 'avatar_url'), ('groups', 'banner_url')):
+                try:
+                    row = conn.execute(
+                        f"SELECT COALESCE(SUM(LENGTH({col})), 0) FROM {table} "
+                        f"WHERE {col} LIKE 'data:image/%'").fetchone()
+                    total += int((row or (0,))[0] or 0)
+                except sqlite3.Error:
+                    continue      # that table or column does not exist here
+        finally:
+            conn.close()
+    except Exception:
+        return 0
+    return total
+
+
 def _storage_breakdown() -> str:
     """One line naming what is actually on the data volume.
 
@@ -27665,7 +27914,15 @@ def _storage_breakdown() -> str:
                 except OSError:
                     pass
         used  = shutil.disk_usage(_DATA_DIR)
-        return (f'db {mb(db)} · wal {mb(wal)} · backups {mb(bk)} ({len(_backup_files())} files) · '
+        # Its own try: the image total needs a database query, and losing the
+        # whole storage line because that one query failed would take away
+        # exactly the information you need when the volume is full.
+        try:
+            img_part = f' (of which images {mb(_stored_image_bytes())})'
+        except Exception:
+            img_part = ''
+        return (f'db {mb(db)}{img_part} · wal {mb(wal)} · '
+                f'backups {mb(bk)} ({len(_backup_files())} files) · '
                 f'volume {mb(used.used)} used of {mb(used.total)}, {mb(used.free)} free')
     except Exception as e:
         return f'could not read storage: {e}'
