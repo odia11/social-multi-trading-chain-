@@ -80,8 +80,16 @@ python3 -m venv "$APP_DIR/venv"
 chown -R "$APP_USER:$APP_USER" "$APP_DIR/venv"
 
 # Checked, not assumed. This is the exact failure that took the site down.
-if ! sudo -u "$APP_USER" "$APP_DIR/venv/bin/gunicorn" --version >/dev/null 2>&1; then
-  die "The service user cannot run $APP_DIR/venv/bin/gunicorn. Its interpreter is: $(head -1 "$APP_DIR/venv/bin/gunicorn")"
+# The output is CAPTURED rather than discarded: a check that fails without
+# saying why just moves the guesswork one step later, which is the whole
+# problem it exists to solve.
+if ! VENV_ERR="$(sudo -u "$APP_USER" "$APP_DIR/venv/bin/gunicorn" --version 2>&1)"; then
+  printf '\n\033[1;31m✗ The service user cannot run %s\033[0m\n' "$APP_DIR/venv/bin/gunicorn"
+  echo "  it said: $VENV_ERR"
+  echo "  its interpreter line: $(head -1 "$APP_DIR/venv/bin/gunicorn")"
+  echo "  interpreter present:  $(ls -l "$APP_DIR/venv/bin/python3" 2>&1)"
+  echo "  directory:            $(ls -ld "$APP_DIR" "$APP_DIR/venv" 2>&1 | tr '\n' ' ')"
+  exit 1
 fi
 echo "  $("$APP_DIR/venv/bin/gunicorn" --version) — runnable by $APP_USER"
 

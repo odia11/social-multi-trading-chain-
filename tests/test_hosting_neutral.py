@@ -247,9 +247,15 @@ check('...and rebuilds one whose scripts point outside the install directory, '
 check('...then PROVES the service user can actually run it, rather than '
       'assuming a successful pip install means a working venv',
       'sudo -u "$APP_USER" "$APP_DIR/venv/bin/gunicorn" --version' in INSTALL)
-check('...and stops with the interpreter path in the message if it cannot, so '
-      'the next person is not left reading file permissions',
-      'Its interpreter is:' in INSTALL)
+check('...and when it cannot, prints what the command ACTUALLY said rather '
+      'than discarding it. A check that fails without saying why moves the '
+      'guesswork one step later, which is the thing it exists to prevent',
+      'VENV_ERR=' in INSTALL and 'it said:' in INSTALL
+      and '--version >/dev/null 2>&1' not in INSTALL)
+check('...along with the interpreter line, whether that interpreter exists, and '
+      'the directory permissions — the three things you would check next',
+      'interpreter line:' in INSTALL and 'interpreter present:' in INSTALL
+      and 'directory:' in INSTALL)
 check('rsync is installed rather than silently falling back to a copy that '
       'never deletes removed files', 'ca-certificates rsync' in INSTALL)
 check('...and the fallback says so instead of quietly deploying differently',
