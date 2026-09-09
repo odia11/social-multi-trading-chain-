@@ -7431,6 +7431,12 @@ def _te_needs_sponsored_gas(chain: str, address: str) -> bool:
     """
     if te_registry.get_chain(chain).kind == 'svm':
         return False
+    # With fronting off, gas is never "sponsored" -- it is simply the user's
+    # cost, which is how the quote already prices it. The label only ever
+    # affected whether a cost was marked as fronted, never whether it was
+    # charged.
+    if not ORCAGENT_FRONTS_GAS:
+        return False
     if not (GAS_SPONSOR_PRIVATE_KEY and address):
         return False
     try:
@@ -8359,6 +8365,11 @@ def _sponsor_evm_gas(user_id: int, wallet: str, evm_address: str, chain: str) ->
     key by the caller -- this function never accepts a user-supplied
     destination, so a grant can only ever land in a wallet the app itself
     controls the key for."""
+    # Refused before anything else, and regardless of whether a key exists:
+    # the platform does not front a user's costs. The caller falls back to
+    # funding it from the user's own balance.
+    if not ORCAGENT_FRONTS_GAS:
+        return False, 'OrcAgent does not front gas — the user funds their own', ''
     if not GAS_SPONSOR_PRIVATE_KEY:
         return False, 'gas sponsorship not configured', ''
     if chain not in EVM_CHAINS:
@@ -8575,7 +8586,10 @@ def _ensure_solana_gas(wallet: str, private_key: str) -> tuple:
     -- ok=True means go ahead (there was already enough SOL, or a grant just
     landed). A no-op returning True whenever sponsorship isn't configured,
     so behaviour without a sponsor key is exactly what it was before."""
-    if not SOL_GAS_SPONSOR_PRIVATE_KEY:
+    # Same rule as the EVM side: no fronting. Returning True is not a claim
+    # that gas is present -- it never was -- it means "nothing to do here",
+    # and the swap itself reports a genuine shortfall.
+    if not ORCAGENT_FRONTS_GAS or not SOL_GAS_SPONSOR_PRIVATE_KEY:
         return True, ''
     try:
         from solders.keypair import Keypair as _KP
@@ -8843,18 +8857,21 @@ def _ensure_evm_gas_locked(user_id: int, wallet: str, private_key: str, evm_addr
 
     native_symbol = EVM_CHAINS[chain]['native_symbol']
     if native_bal_wei <= 0:
-        # Platform gas sponsorship first: it's the only path that fixes a
-        # from-zero wallet WITHOUT the user needing to hold SOL, it lands in
-        # seconds (a plain native transfer, not a cross-chain bridge), and it
-        # works on every chain -- so a user whose capital is entirely USDC on
-        # one chain can just trade. Falls through to the SOL bridge below
-        # whenever it's unavailable (not configured, capped, sponsor wallet
-        # empty, or no USDC on this chain to qualify), so nothing that worked
-        # before this existed stops working.
+        # A wallet at literal zero cannot pay for its own first transaction,
+        # so something has to move value in. With ORCAGENT_FRONTS_GAS off --
+        # the default -- that is a bridge from the user's OWN SOL, and this
+        # sponsor call refuses immediately.
+        #
+        # The sponsor path remains for a deployment that deliberately turns
+        # fronting on: it lands in seconds rather than minutes and works on
+        # every chain, which is worth having when the platform is willing to
+        # put up the float. It is off because it is the only path here that
+        # costs the platform anything.
         _sp_ok, _sp_msg, _sp_tx = _sponsor_evm_gas(user_id, wallet, evm_address, chain)
         if _sp_ok:
             return True, '', None
-        print(f'[bot-{chain}] gas sponsorship unavailable ({_sp_msg}) — falling back to a SOL bootstrap bridge', flush=True)
+        print(f'[bot-{chain}] no sponsored gas ({_sp_msg}) — bridging a little of the '
+              f"user's own SOL instead", flush=True)
         return _bootstrap_evm_gas_via_bridge(user_id, wallet, evm_address, chain,
                                               auto_buy_token_address, auto_buy_requested_usdc)
 
@@ -13281,6 +13298,24 @@ SOL_NETWORK_RESERVE = 0.005
 # SOL is still needed on Solana for network fees -- that is unavoidable and
 # separate from what a trade is funded with.
 SOLANA_BASE_CURRENCY = 'USDC'
+
+# Whether OrcAgent's own wallet ever fronts a user's gas.
+#
+# OFF, and off by default. The brief was that OrcAgent subsidises nothing,
+# and the first reading of that was "front it, then charge it back" -- net
+# zero, but it still means the platform parking real money on six chains and
+# carrying the risk of a grant that is never recovered. The plainer reading
+# is the right one: users fund their own gas, and OrcAgent puts up nothing.
+#
+# Nothing is lost by this. A wallet low on gas already tops itself up from
+# the user's OWN stablecoin on that chain, and a wallet at literal zero
+# bridges a little from the user's OWN SOL. Sponsorship was only ever a
+# faster route for the second case, and it is the only one that costs the
+# platform anything.
+#
+# The accounting from phase 4 stays: it reports what past grants cost and
+# whether they came back. With this off, no new ones are made.
+ORCAGENT_FRONTS_GAS = os.getenv('ORCAGENT_FRONTS_GAS', '').strip().lower() in ('1', 'true', 'yes', 'on')
 # The smallest sensible USDC buy. Below this the network fee is a large share
 # of the trade.
 SOLANA_MIN_SPEND_USDC = 1.0
