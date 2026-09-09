@@ -123,10 +123,29 @@ def main():
     section('Solana')
 
     def sol_price():
-        if d._sol_price_usd <= 0:
-            raise RuntimeError('SOL price has not loaded — the price feed is not '
-                               'reachable, and gas cannot be priced without it')
-        return f'SOL = ${d._sol_price_usd}'
+        """Fetch it the way the app does, rather than reading the global.
+
+        _sol_price_usd is only assigned inside the scanner loop, which runs
+        every 120 seconds in a background thread. A script that has just
+        imported the module always sees 0 there -- so checking that global
+        reported a failure that said nothing about whether the price feed
+        works. It checks the feed itself now, and hands the result to the
+        module so the Solana gas figures below have something to work with.
+        """
+        r = d._dex_get('https://api.dexscreener.com/latest/dex/tokens/' + d.SOL_MINT,
+                       timeout=8)
+        if not r or r.status_code != 200:
+            raise RuntimeError(f'price feed returned HTTP '
+                               f'{getattr(r, "status_code", "no response")}')
+        pairs = r.json().get('pairs') or []
+        p = next((x for x in pairs
+                  if (x.get('quoteToken') or {}).get('address') == d.USDC_MINT),
+                 pairs[0] if pairs else None)
+        price = float((p or {}).get('priceUsd', 0) or 0)
+        if price <= 1:
+            raise RuntimeError('no usable SOL/USDC pair in the feed response')
+        d._sol_price_usd = price
+        return f'SOL = ${price:.2f}'
     attempt('SOL price feed', sol_price)
 
     def jupiter():

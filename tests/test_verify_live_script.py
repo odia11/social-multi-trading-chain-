@@ -122,5 +122,22 @@ check('a missing ENCRYPTION_KEY is named as the likely cause rather than left '
       'as a stack trace', 'ENCRYPTION_KEY/SECRET_KEY' in SCRIPT)
 check('it says plainly that it is read-only', 'READ-ONLY' in SCRIPT)
 
+# ── checks must test the thing, not a side effect of it ──
+# The SOL check read d._sol_price_usd, a global assigned only inside the
+# scanner loop that runs every 120s in a background thread. A script that has
+# just imported the module always sees 0 there, so the check reported a
+# failure on a server whose price feed was perfectly fine -- and said nothing
+# about the feed either way.
+sol = next(n for n in ast.walk(tree)
+           if isinstance(n, ast.FunctionDef) and n.name == 'sol_price')
+sol_src = ast.get_source_segment(SCRIPT, sol) or ''
+check('the SOL price check calls the price feed instead of reading a global '
+      'that a background thread fills in later',
+      '_dex_get' in sol_src)
+check('...and reports the HTTP status when the feed itself is the problem, '
+      'which is the thing being tested', 'status_code' in sol_src)
+check('...then hands the price back to the module, so the Solana gas figures '
+      'after it have something to work with', 'd._sol_price_usd = price' in sol_src)
+
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)
