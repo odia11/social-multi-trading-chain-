@@ -151,5 +151,10 @@ check('...and skipping the check with a reason when there is no wallet at all, '
       'rather than running it against a made-up address',
       'no wallet to quote for' in SCRIPT)
 
+# A public RPC refusing a new server is a move-day problem, not a code one.
+check('an unreachable RPC names the endpoint AND the variable to change, so it '
+      'is one line in the env file rather than an afternoon of guessing',
+      "_RPC_URL in /etc/orcagent.env" in SCRIPT and 'endpoint:' in SCRIPT)
+
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)

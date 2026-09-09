@@ -100,9 +100,19 @@ def main():
 
     for chain in list(d.EVM_CHAINS):
         def rpc(chain=chain):
-            w3 = d._get_web3(chain)
-            block = w3.eth.block_number
-            gas = w3.eth.gas_price
+            try:
+                w3 = d._get_web3(chain)
+                block = w3.eth.block_number
+                gas = w3.eth.gas_price
+            except Exception as e:
+                # Public endpoints increasingly refuse datacenter addresses, and
+                # a server move changes yours. Naming the variable to set turns
+                # this from a puzzle into one line in the env file.
+                url = d.EVM_CHAINS[chain].get('rpc_url', '?')
+                raise RuntimeError(
+                    f'{type(e).__name__}: {e}\n         endpoint: {url}\n'
+                    f'         set {chain.upper()}_RPC_URL in /etc/orcagent.env '
+                    f'to a provider that accepts this server') from None
             return f'block {block}, gas {gas / 1e9:.3f} gwei'
         attempt(f'{chain}: RPC reachable', rpc)
 
