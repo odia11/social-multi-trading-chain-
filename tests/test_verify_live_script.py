@@ -13,6 +13,7 @@ Two other things matter as much as the names: that it never signs or sends
 anything, and that it never prints a secret.
 """
 import ast
+import re
 import sys
 
 REPO = '/home/user/Orc-agent-Solana-chain-'
@@ -142,9 +143,14 @@ check('...then hands the price back to the module, so the Solana gas figures '
 # A quote is built FOR an address. 0x answers 400 when that address is not a
 # real one -- which is exactly what the native-token sentinel produced on the
 # first live run, on every chain at once.
-check('the ceiling check quotes for a wallet that actually exists rather than '
+# The distinction matters both ways: the native sentinel is a perfectly good
+# thing to BUY and never a valid address to trade AS. Conflating the two is
+# what produced a 400 on every chain, so the check is written on taker_address
+# specifically rather than banning the constant outright.
+taker_arg = re.search(r'taker_address=([^,)\s]+)', SCRIPT)
+check('the ceiling check quotes FOR a wallet that actually exists rather than '
       'inventing a taker',
-      'd.BNB_NATIVE_ADDR' not in SCRIPT and '_gas_sponsor_address()' in SCRIPT)
+      taker_arg and taker_arg.group(1) == 'taker' and '_gas_sponsor_address()' in SCRIPT)
 check('...falling back to a real user wallet from the database when no sponsor '
       'is configured', 'bsc_wallet_address' in SCRIPT)
 check('...and skipping the check with a reason when there is no wallet at all, '
