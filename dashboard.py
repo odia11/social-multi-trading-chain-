@@ -8937,9 +8937,13 @@ def _bootstrap_evm_gas_via_bridge(user_id: int, wallet: str, evm_address: str, c
                   f'wallet cannot fund a first transaction there, and this user has no '
                   f'SOL to bootstrap from either. Top up the sponsor on {chain} — every '
                   f'USDC-only user is blocked on this chain until you do.', flush=True)
-            return False, (f'{_chain_name} is temporarily unavailable — we are topping up '
-                           f'the network fees for it. Nothing to do on your side; try '
-                           f'again shortly, or trade on another chain in the meantime.'), None
+            # Names neither the chain nor the action. Every caller already
+            # supplies both -- "Cannot trade on X yet — ", "Cannot send from
+            # X yet — " -- so naming the chain here printed it twice, and
+            # "trade on another chain" was plainly wrong advice to someone
+            # who was trying to send money out, not buy something.
+            return False, ('we are topping up the network fees for this chain. '
+                           'Nothing to do on your side — try again shortly.'), None
 
         # Fronting is deliberately off, so the user really does fund their own
         # gas and this instruction is the honest one. Direct route first: a few

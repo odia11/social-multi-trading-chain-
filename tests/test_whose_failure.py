@@ -72,14 +72,24 @@ check('the dead end asks whose failure it is before it says anything',
 
 ours = boot[boot.index('_gas_shortfall_is_ours(chain)'):]
 ours = ours[:ours.index('_evm_addr_hint')]
-check('when it is ours the user is told it is temporarily unavailable',
-      'temporarily unavailable' in ours)
+# The MESSAGE, not the branch. Comments in here quote the wording they are
+# explaining, and a check that reads them is checking prose about the code
+# rather than the code — which has now caught this file out twice.
+ours_msg = ours[ours.index('return False, ('):]
+check('when it is ours the user is told to simply come back, since there is '
+      'nothing they could do to speed it up',
+      'try again shortly' in ours_msg)
 check('...and told explicitly that there is nothing for them to do, which is '
       'the whole correction', 'Nothing to do on your side' in ours)
-check('...and offered something they CAN do right now instead of a dead stop',
-      'another chain' in ours)
+check('...and it names neither the chain nor the action, because every caller '
+      'already supplies both — "Cannot trade on X yet", "Cannot send from X '
+      'yet" — so doing it here printed the chain twice and gave buy-specific '
+      'advice to someone withdrawing',
+      'topping up the network fees for this chain' in ours_msg
+      and '_chain_name' not in ours_msg
+      and 'another chain' not in ours_msg)
 check('...with no instruction to go and acquire a gas token',
-      'Send a little' not in ours and 'deposit at least' not in ours)
+      'Send a little' not in ours_msg and 'deposit at least' not in ours_msg)
 check('...and nothing is written to the USER\'s activity log, because it is '
       'not their business', 'add_user_log(' not in ours)
 check('the OPERATOR is told instead, and told what it costs to leave it — '
