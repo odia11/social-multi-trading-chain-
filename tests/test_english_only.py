@@ -52,10 +52,47 @@ gebruikers|voorstellen|draait|dagelijks|schaalt|reden|gehouden|piek|winst|verlie
 # which is worse than not having it.
 LABEL_WORDS = """vandaag|gisteren|morgen|opslaan|annuleren|bevestigen|bezig|
 goedkeuren|afwijzen|instellen|wijzigen|kopieren|gekopieerd|onbekend|
-overzicht|opbrengst|opname|geanalyseerd|leeftijd|voorstellen|actieve"""
+overzicht|opbrengst|opname|geanalyseerd|voorstellen|actieve|
+bekijken|verbergen|tonen|kijken|wijzigen|aanpassen|weergeven|
+uitklappen|inklappen|vernieuwen|vervangen|herstellen|bewaren"""
 
 SENT = re.compile(r'\b(' + SENTENCE_WORDS.replace('\n', '').replace(' ', '') + r')\b', re.I)
 LABEL = re.compile(r'\b(' + LABEL_WORDS.replace('\n', '').replace(' ', '') + r')\b', re.I)
+
+# A hand-written word list only ever catches the words someone thought of.
+# "Per chain bekijken" shipped past the first version of this test for exactly
+# that reason. So there is a second signal that does not depend on anyone's
+# imagination: spelling patterns that are ordinary in Dutch and almost absent
+# from English. "ij" (bekijken, wijzigen, prijs, tijd), and the doubled "aa"
+# and "uu" (maar, jaar, naam, uur, duur) -- English has a handful of loanwords
+# with these and no more.
+SPELLING = re.compile(r'\b\w*(ij|aa|uu)\w*\b', re.I)
+# The English words that do contain them, so a real one is not flagged.
+SPELLING_OK = {'bazaar', 'bazaars', 'aardvark', 'salaam', 'kraal', 'markaz',
+               'vacuum', 'vacuums', 'continuum', 'residuum', 'aaa', 'naan',
+               'baa', 'raajd', 'fijian', 'beijing', 'hijack', 'hijacked',
+               'hijacking', 'hijra', 'raiju', 'tijuana'}
+
+
+def _spelling_hit(frag):
+    """Does this look like Dutch spelling, in something that is prose?
+
+    The signal is only meaningful in words. A wallet address, a base58
+    alphabet, a hex hash and a uuid are all long runs of arbitrary characters
+    and will contain 'aa' or 'ij' by chance -- flagging those would make the
+    test noisy enough to be ignored, which is the one way it can fail
+    completely.
+    """
+    if ' ' not in frag:
+        return False                       # an identifier, not a sentence
+    if re.search(r'[A-Za-z0-9]{20,}', frag):
+        return False                       # an address, hash or alphabet
+    for w in re.findall(r'[A-Za-z]+', frag):
+        if len(w) > 15 or w.lower() in SPELLING_OK:
+            continue
+        if re.search(r'(ij|aa|uu)', w, re.I):
+            return True
+    return False
 
 
 def shippable_strings(text):
@@ -92,7 +129,9 @@ def scan():
             except Exception:
                 continue
             for lineno, frag in shippable_strings(text):
-                dutch = len(SENT.findall(frag)) >= 2 or bool(LABEL.search(frag))
+                dutch = (len(SENT.findall(frag)) >= 2
+                         or bool(LABEL.search(frag))
+                         or _spelling_hit(frag))
                 if dutch:
                     hits.append((path[len(REPO) + 1:], lineno, frag[:110]))
     return hits

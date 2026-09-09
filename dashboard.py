@@ -4033,6 +4033,35 @@ _dex_last_good: dict = {}
 # GeckoTerminal candle cache: (pair_address, tf) → (timestamp, candles list)
 # separate from _dex_resp_cache since it's keyed on GeckoTerminal's pool+timeframe,
 # not a DexScreener URL, and stores parsed candle dicts rather than raw response text.
+# USDC balances, cached for a few seconds per address+chain.
+#
+# The Wallet page asks for all six on load and again on a poll, and a balance
+# does not change between two requests a second apart. Short enough that a
+# real deposit shows up almost immediately, and the refresh button bypasses it
+# entirely for the person who cannot wait even that long.
+_usdc_cache_lock = threading.Lock()
+_usdc_cache: dict = {}
+_USDC_CACHE_TTL = 12
+
+
+def _usdc_cache_get(key):
+    with _usdc_cache_lock:
+        hit = _usdc_cache.get(key)
+    if hit and time.time() - hit[0] < _USDC_CACHE_TTL:
+        return hit[1]
+    return None
+
+
+def _usdc_cache_put(key, value):
+    now = time.time()
+    with _usdc_cache_lock:
+        _usdc_cache[key] = (now, value)
+        if len(_usdc_cache) > 5000:
+            cutoff = now - 60
+            for k in [k for k, v in _usdc_cache.items() if v[0] < cutoff]:
+                del _usdc_cache[k]
+
+
 _chart_cache_lock = threading.Lock()
 _chart_cache: dict = {}
 _CHART_CACHE_TTL   = 30  # seconds
@@ -20540,7 +20569,7 @@ def post_permalink(post_id):
 <script>location.replace('/#post-{safe_id}');</script>
 </head>
 <body style="background:#0d1117;color:#eef1f5;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
-<a href="/#post-{safe_id}" style="color:#f7b955;font-size:18px;text-decoration:none">Bekijk op OrcAgent →</a>
+<a href="/#post-{safe_id}" style="color:#f7b955;font-size:18px;text-decoration:none">View on OrcAgent →</a>
 </body>
 </html>'''
     resp2 = make_response(html_doc)
@@ -20585,7 +20614,7 @@ def share_trade_page(id):
 <meta name="twitter:image" content="{image_url}">
 </head>
 <body style="background:#0d1117;color:#eef1f5;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
-<a href="{post_link}" style="color:#f7b955;font-size:18px;text-decoration:none">Bekijk op OrcAgent →</a>
+<a href="{post_link}" style="color:#f7b955;font-size:18px;text-decoration:none">View on OrcAgent →</a>
 </body>
 </html>'''
     resp = make_response(html_doc)
@@ -22569,7 +22598,6 @@ def api_wallet_usdc_summary():
         return jsonify({'ok': False, 'msg': 'No wallet connected'}), 401
 
     solana_wallet = _get_trading_wallet_address(wallet) or wallet
-    solana_usdc   = _get_solana_usdc_balance(solana_wallet)
 
     evm_address = ''
     try:
@@ -22581,17 +22609,58 @@ def api_wallet_usdc_summary():
     except Exception as e:
         print(f'[wallet] usdc-summary EVM wallet lookup failed for {wallet[:8]}...: {e}', flush=True)
 
-    evm_chains = {}
-    evm_total  = 0.0
+    # ── read every chain AT ONCE ──
+    # This used to be a loop: Solana, then bsc, then base, then arbitrum, then
+    # polygon, then robinhood -- six round trips to six different networks, one
+    # after the other, with the page showing nothing until the last one landed.
+    # The wait was the SUM of them, so one slow RPC held up the whole balance.
+    #
+    # They have nothing to do with each other, so they go together and the wait
+    # is the slowest single one instead. Six sequential half-seconds become
+    # about one.
+    #
+    # The refresh button sends bust=1 -- somebody who just deposited is asking
+    # precisely because they expect the number to have changed, and serving
+    # them a cached one would look broken.
+    bust = request.args.get('bust') == '1'
+
+    def _read(kind, chain=None):
+        key = ('sol', solana_wallet) if kind == 'sol' else ('evm', evm_address, chain)
+        if not bust:
+            hit = _usdc_cache_get(key)
+            if hit is not None:
+                return hit
+        val = 0.0
+        try:
+            val = (_get_solana_usdc_balance(solana_wallet) if kind == 'sol'
+                   else get_evm_usdc_balance(evm_address, chain))
+        except Exception as e:
+            print(f'[wallet] usdc-summary {kind}/{chain or "solana"} failed '
+                  f'for {wallet[:8]}...: {e}', flush=True)
+            # A chain that will not answer reads as zero for this response, but
+            # is NOT cached as zero -- otherwise one flaky RPC would hide real
+            # money for the whole TTL.
+            return 0.0
+        _usdc_cache_put(key, val)
+        return val
+
+    jobs = {'solana': ('sol', None)}
     for chain in EVM_CHAINS:
-        usdc = 0.0
-        if evm_address:
+        jobs[chain] = ('evm', chain)
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=len(jobs)) as ex:
+        futures = {ex.submit(_read, kind, ch): name for name, (kind, ch) in jobs.items()}
+        for fut, name in futures.items():
             try:
-                usdc = get_evm_usdc_balance(evm_address, chain)
+                results[name] = fut.result(timeout=12)
             except Exception as e:
-                print(f'[wallet] usdc-summary {chain} balance failed for {wallet[:8]}...: {e}', flush=True)
-        evm_chains[chain] = round(usdc, 4)
-        evm_total += usdc
+                print(f'[wallet] usdc-summary {name} timed out: {e}', flush=True)
+                results[name] = 0.0
+
+    solana_usdc = results.get('solana', 0.0)
+    evm_chains  = {c: round(results.get(c, 0.0), 4) for c in EVM_CHAINS}
+    evm_total   = sum(results.get(c, 0.0) for c in EVM_CHAINS)
 
     return jsonify({
         'ok':             True,

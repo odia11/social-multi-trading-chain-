@@ -614,7 +614,15 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
         <button class="wlt-action primary" onclick="_modalDeposit()"><span class="wlt-action-ic">↓</span>Deposit</button>
         <button class="wlt-action" onclick="_modalSend()"><span class="wlt-action-ic">→</span>Send</button>
         <button class="wlt-action" onclick="openSwapModal()"><span class="wlt-action-ic">⇄</span>Swap</button>
-        <button class="wlt-action" onclick="_modalBridge()"><span class="wlt-action-ic">⇌</span>Bridge</button>
+        <!-- No Bridge button. Buying on a chain with no USDC already bridges
+             by itself (_maybe_start_auto_bridge_for_buy): it finds a chain
+             with enough balance, moves the funds with a buffer, and finishes
+             the purchase. Offering the same thing as a manual chore, in an
+             action row of four where the other three are things people
+             actually do, asked everyone to understand a piece of plumbing
+             they never have to touch. The modal and the endpoints stay -- the
+             automatic path uses them, and in-flight bridges still show in the
+             history below. -->
       </div>
       <div class="wlt-hero-inpos">
         <span class="wlt-hero-inpos-lbl">In open positions</span>
@@ -647,7 +655,7 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
              numbers competing to be the important one. -->
         <span class="dep-title" id="usdc-total" style="font-variant-numeric:tabular-nums">—</span>
       </div>
-      <button class="wlt-usdc-toggle" id="usdc-tiles-toggle" onclick="_toggleUsdcTiles()">Per chain bekijken <span id="usdc-tiles-chevron">▾</span></button>
+      <button class="wlt-usdc-toggle" id="usdc-tiles-toggle" onclick="_toggleUsdcTiles()">View per chain <span id="usdc-tiles-chevron">▾</span></button>
       <div class="wlt-bsc-balances wlt-usdc-tiles collapsed" id="usdc-chain-tiles">
         <div class="wlt-bsc-bal-item">
           <span class="wlt-bsc-bal-lbl">Solana</span>
@@ -2127,7 +2135,7 @@ function _toggleUsdcTiles(){
   var chev=document.getElementById('usdc-tiles-chevron')
   if(!el) return
   var collapsed=el.classList.toggle('collapsed')
-  if(btn) btn.childNodes[0].textContent = collapsed ? 'Per chain bekijken ' : 'Per chain verbergen '
+  if(btn) btn.childNodes[0].textContent = collapsed ? 'View per chain ' : 'Hide per chain '
   if(chev) chev.textContent = collapsed ? '▾' : '▴'
 }
 var _usdcLoadedOnce=false
