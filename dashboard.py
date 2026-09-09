@@ -329,14 +329,31 @@ app.secret_key = _load_secret_key()
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 app.config['SESSION_COOKIE_HTTPONLY']    = True
 app.config['SESSION_COOKIE_SAMESITE']   = 'Lax'
-app.config['SESSION_COOKIE_SECURE']     = bool(os.getenv('RAILWAY_ENVIRONMENT'))
+# ── WHICH ENVIRONMENT THIS IS ──────────────────────────────────────────────
+# These three settings -- a Secure cookie, a cookie shared between www and the
+# bare domain, and HSTS -- used to be gated on RAILWAY_ENVIRONMENT. That
+# variable only exists on Railway, so the day this moved to another host all
+# three silently switched themselves off: the session cookie stopped being
+# marked Secure, www and the bare domain stopped sharing a login, and the
+# HSTS header disappeared. Nothing errored; it just quietly got less safe.
+#
+# So the question is now "is this production", not "is this Railway", and the
+# default is YES. Getting it wrong in this direction means Secure cookies on
+# a local http:// server, which is an annoyance; getting it wrong the other
+# way is a security hole that nobody notices. Local development sets DEV=1.
+IS_PRODUCTION = os.getenv('DEV', '').strip().lower() not in ('1', 'true', 'yes', 'on')
+# The site's own domain, without a leading dot. Overridable so the domain is
+# not baked into the code any more than the host was.
+PUBLIC_HOST   = os.getenv('PUBLIC_HOST', 'orcagent.fun').strip().lower().lstrip('.')
+
+app.config['SESSION_COOKIE_SECURE']     = IS_PRODUCTION
 app.config['SESSION_COOKIE_PATH']       = '/'
 # 'orca_s' avoids conflicts with the old 'session' cookie (no domain attr).
-# '.orcagent.fun' (dot prefix) lets both www and bare share the same session.
-# Only set in production — local dev keeps Flask defaults.
-if os.getenv('RAILWAY_ENVIRONMENT'):
+# The dot prefix lets both www and the bare domain share one session -- without
+# it a user is logged out simply by moving between them.
+if IS_PRODUCTION and PUBLIC_HOST:
     app.config['SESSION_COOKIE_NAME']   = 'orca_s'
-    app.config['SESSION_COOKIE_DOMAIN'] = '.orcagent.fun'
+    app.config['SESSION_COOKIE_DOMAIN'] = '.' + PUBLIC_HOST
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 @app.template_filter('fmtk')
@@ -513,8 +530,22 @@ DM_IMAGES_DIR   = os.path.join(BASE, 'static', 'dm_images')
 CHAT_IMAGES_DIR = os.path.join(BASE, 'static', 'chat_images')
 os.makedirs(DM_IMAGES_DIR,   exist_ok=True)
 os.makedirs(CHAT_IMAGES_DIR, exist_ok=True)
-# Use Railway persistent volume when available so the DB and logs survive redeploys.
-_DATA_DIR    = '/data' if os.path.exists('/data') else BASE
+# Where the database, backups and logs live -- the one directory that has to
+# survive a redeploy.
+#
+# DATA_DIR first, so this is not tied to any one host's convention: Railway
+# mounts a volume at /data, another host may put it anywhere, and a plain
+# server usually wants it outside the checkout so a git pull cannot sit on
+# top of the database. /data is still honoured when it exists, and the app
+# directory remains the last resort.
+_DATA_DIR    = (os.getenv('DATA_DIR', '').strip()
+                or ('/data' if os.path.exists('/data') else BASE))
+try:
+    os.makedirs(_DATA_DIR, exist_ok=True)
+except Exception as _dd_err:
+    print(f'[startup] DATA_DIR {_DATA_DIR!r} is not usable ({_dd_err}) — '
+          f'falling back to the app directory', flush=True)
+    _DATA_DIR = BASE
 LOG_FILE     = os.path.join(_DATA_DIR, 'trades.log')
 DB_FILE        = os.path.join(_DATA_DIR, 'orcagent.db')
 BACKUP_DIR     = os.path.join(_DATA_DIR, 'backups')
@@ -10528,7 +10559,7 @@ def _security_headers(resp):
         "object-src 'none'; "
         "base-uri 'self'; "
         "form-action 'self'")
-    if os.getenv('RAILWAY_ENVIRONMENT'):
+    if IS_PRODUCTION:
         resp.headers.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
     # Scan JSON responses for possible private key leak (87-88 char base58 = private key length).
     # Blocks on every path except _KEY_REVEAL_PATHS (fail closed) -- fields whose
