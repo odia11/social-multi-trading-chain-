@@ -432,7 +432,8 @@ function startLivePrices(){
     // anyway is how a page ends up rate-limited for charts nobody is looking
     // at. It resumes on the next tick when the tab comes back.
     if(document.visibilityState === 'visible') tickLivePrices();
-  }, 4000);
+  }, 2000);   // must not be shorter than the server's price window, or the
+              // extra ticks just re-ask for an answer that cannot have changed
 }
 
 // `chain` defaults to 'solana' -- the API's own default -- so a caller that

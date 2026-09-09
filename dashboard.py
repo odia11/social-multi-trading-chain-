@@ -26431,7 +26431,22 @@ _GECKOTERMINAL_NETWORK = {
 # How long a live price may be reused. Short, because this is the number that
 # makes a chart look alive -- but not zero: one window still collapses every
 # viewer of the same token into a single upstream request.
-_LIVE_PRICE_TTL = 4
+_LIVE_PRICE_TTL = 2
+
+# Cached per POOL, not per request.
+#
+# The first version leaned on _dex_get's cache, which is keyed on the whole
+# URL -- so the cache entry was the exact list of pools one page happened to
+# be showing. Two people looking at almost the same screen shared nothing, and
+# one card scrolling in or out invalidated the lot. At a four-second tick that
+# was survivable. At two it is the difference between one upstream request per
+# window and one per viewer per window.
+#
+# Keyed per pool, a page fetches only the pools whose own price has gone
+# stale, and everything anyone else already asked for in this window comes
+# back free.
+_live_price_lock = threading.Lock()
+_live_price_cache: dict = {}   # (chain, pair_lower) -> (fetched_at, price)
 
 
 @app.route('/api/market/prices')
@@ -26471,13 +26486,30 @@ def api_market_prices():
     if not wanted:
         return jsonify({'ok': True, 'prices': {}})
 
-    prices = {}
+    now = time.time()
+    prices, stale = {}, []
+    with _live_price_lock:
+        for a in wanted:
+            hit = _live_price_cache.get((chain, a.lower()))
+            if hit and now - hit[0] < _LIVE_PRICE_TTL:
+                prices[a.lower()] = hit[1]
+            else:
+                stale.append(a)
+    if not stale:
+        # Everything on this screen was already fetched for somebody else
+        # inside this window. No upstream request at all.
+        return jsonify({'ok': True, 'prices': prices})
+
     try:
+        # ttl_override=0 because the per-pool cache above is now the cache;
+        # leaving _dex_get's URL-keyed one in the way would only re-introduce
+        # the whole-list keying this replaced.
         r = _dex_get('https://api.dexscreener.com/latest/dex/pairs/'
-                     + dex_chain_id + '/' + ','.join(wanted),
-                     timeout=8, ttl_override=_LIVE_PRICE_TTL)
+                     + dex_chain_id + '/' + ','.join(stale),
+                     timeout=8, ttl_override=0)
         data = r.json() if (r and r.status_code == 200) else {}
         rows = data.get('pairs') or ([data['pair']] if data.get('pair') else [])
+        fresh = {}
         for row in (rows or []):
             addr = (row or {}).get('pairAddress') or ''
             try:
@@ -26485,11 +26517,20 @@ def api_market_prices():
             except (TypeError, ValueError):
                 px = 0.0
             if addr and px > 0:
-                prices[addr.lower()] = px
+                fresh[addr.lower()] = px
+        prices.update(fresh)
+        with _live_price_lock:
+            for k, v in fresh.items():
+                _live_price_cache[(chain, k)] = (now, v)
+            if len(_live_price_cache) > 2000:
+                cutoff = now - 60
+                for k in [k for k, v in _live_price_cache.items() if v[0] < cutoff]:
+                    del _live_price_cache[k]
     except Exception as e:
         # A price tick is decoration on top of the candles. If it fails the
         # chart keeps drawing exactly what it drew before, so this is a quiet
-        # empty answer rather than an error the page has to handle.
+        # answer -- and whatever WAS cached still goes back, rather than
+        # throwing away good prices because one fetch failed.
         print(f'[prices] batch fetch failed: {e}', flush=True)
 
     return jsonify({'ok': True, 'prices': prices})
