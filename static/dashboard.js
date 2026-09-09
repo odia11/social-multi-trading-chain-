@@ -3011,14 +3011,45 @@ function _inDappBrowser(){ return !!(window.solana||window.solflare); }
   const _n = phantomReady ? 'Phantom'    : solflareReady ? 'Solflare'      : null;
 
   // If session wallet exists but doesn't match the connected extension wallet → clear session & reload
+  //
+  // The reload is what makes the cleared session take effect. On its own it is
+  // also a loop with no way out: the logout's failure was swallowed and the
+  // reload happened anyway, so if the session was NOT actually cleared -- the
+  // request failed, or the page came back from cache -- the next load saw the
+  // very same mismatch and reloaded again. A page refreshing itself every
+  // second or two, forever, with nothing on screen explaining why.
+  //
+  // Two things have to be true for a reload to be able to help: the logout
+  // really succeeded, and this is the first time we have tried it in this tab.
+  // A mismatch that survives a successful clear is not something another
+  // reload can fix, so it is explained to the person instead of being retried.
   if(phantomKey && _p){
     const _extPk = _p.publicKey.toString();
     if(_extPk !== phantomKey){
-      await fetch('/api/logout',{method:'POST',credentials:'include'}).catch(()=>{});
-      window.location.reload();
+      let _tried=false;
+      try{ _tried = sessionStorage.getItem('orca_wallet_mismatch_reload')==='1'; }catch(e){}
+      let _cleared=false;
+      try{ _cleared = (await fetch('/api/logout',{method:'POST',credentials:'include'})).ok; }
+      catch(e){ _cleared=false; }
+      if(_cleared && !_tried){
+        try{ sessionStorage.setItem('orca_wallet_mismatch_reload','1'); }catch(e){}
+        window.location.reload();
+        return;
+      }
+      console.warn('[auth] wallet mismatch persists (logout ok:'+_cleared+', already reloaded:'+_tried+') — not reloading again');
+      const _mm=document.getElementById('wallet-install-msg');
+      if(_mm){
+        _mm.textContent='Je wallet-extensie staat op een ander account dan waarmee je hier '
+                      + 'bent ingelogd. Wissel in de extensie naar het juiste account of '
+                      + 'ontkoppel daar, en laad deze pagina opnieuw.';
+        _mm.style.display='block';
+      }
       return;
     }
   }
+  // Past the check without a mismatch: forget the one-shot marker, so a real
+  // mismatch later in this tab can still fix itself the quick way.
+  try{ sessionStorage.removeItem('orca_wallet_mismatch_reload'); }catch(e){}
 
   // If Flask session pre-populated phantomKey, go straight to launchApp — no extension
   // re-detection needed, and avoids a redundant /api/wallet/set round-trip.
