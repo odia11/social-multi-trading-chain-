@@ -12857,26 +12857,55 @@ def api_evm_balance(chain):
 @app.route('/api/evm/trade/buy', methods=['POST'])
 @rate_limit(10, 60)
 def api_evm_trade_buy():
-    """Base/Arbitrum/Polygon sibling of /api/bsc/trade/buy -- identical logic,
-    just parameterized by `chain` (in the JSON body) instead of being
-    hardcoded to BSC. See that route's comments for the reasoning behind
-    each step; not repeated here to avoid drift between two copies of the
-    same explanation. KNOWN LIMITATION: get_user_state(wallet)['positions']
-    is keyed by token_address alone, with no chain component -- harmless
-    across Solana (base58) vs any EVM chain (0x-hex) since the formats never
-    collide, but two DIFFERENT EVM chains in EVM_CHAINS both use 0x-hex
-    addresses, so a contract address intentionally deployed at the same
-    address on two of them (e.g. via CREATE2) would collide here. Ordinary,
-    independently-deployed tokens on different chains do not share
-    addresses in practice, so this is a narrow, disclosed edge case rather
-    than something fixed today."""
-    chain = str((request.get_json(silent=True) or {}).get('chain', '')).strip().lower()
-    if chain not in EVM_CHAINS:
-        return jsonify({'ok': False, 'msg': f'Unsupported chain {chain!r}'}), 400
+    """Manual buy on Base, Arbitrum, Polygon or BSC -- chain in the body."""
     wallet = _authenticated_wallet()
     if not wallet:
         return jsonify({'ok': False, 'msg': 'No wallet connected'}), 401
-    data          = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True) or {}
+    chain = str(data.get('chain', '')).strip().lower()
+    if chain not in EVM_CHAINS:
+        return jsonify({'ok': False, 'msg': f'Unsupported chain {chain!r}'}), 400
+    return _evm_buy_flow(wallet, data, chain)
+
+
+@app.route('/api/bsc/trade/buy', methods=['POST'])
+@rate_limit(10, 60)
+def api_bsc_trade_buy():
+    """The BSC route, kept because the frontend still calls it by this path.
+
+    It was a full copy of the EVM buy with the chain hardcoded; it now runs
+    the same flow, so BSC gets the spend ceiling at the same moment every
+    other chain does rather than staying on the old behaviour behind an
+    identical-looking button.
+    """
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'msg': 'No wallet connected'}), 401
+    return _evm_buy_flow(wallet, request.get_json(silent=True) or {}, 'bsc',
+                         wallet_label='BSC')
+
+
+def _evm_buy_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM'):
+    """One manual buy on one EVM chain, for both /api/evm/trade/buy and
+    /api/bsc/trade/buy.
+
+    These were two copies of the same function with the chain hardcoded in
+    one of them, and the comments in each said not to repeat the reasoning
+    "to avoid drift between two copies". Moving the first onto the trade
+    engine would have left the second copy quoting on terms the engine
+    replaced -- the same Buy button spending a different amount depending on
+    which chain the token happened to be on. Merged instead of copied a
+    third time.
+
+    KNOWN LIMITATION, carried over unchanged: get_user_state(wallet)
+    ['positions'] is keyed by token_address alone, with no chain component.
+    Harmless across Solana (base58) vs any EVM chain (0x-hex) since the
+    formats never collide, but two DIFFERENT EVM chains both use 0x-hex, so
+    a contract deployed at the same address on two of them (e.g. via
+    CREATE2) would collide. Independently-deployed tokens do not share
+    addresses in practice, so this is a narrow, disclosed edge case rather
+    than something fixed today.
+    """
     token_address = _sanitize(str(data.get('token_address', '')).strip())
     if not is_valid_evm_address(token_address):
         return jsonify({'ok': False, 'msg': 'Invalid token address'}), 400
@@ -12891,7 +12920,7 @@ def api_evm_trade_buy():
     finally:
         conn.close()
     if not row or not row[1]:
-        return jsonify({'ok': False, 'msg': 'No EVM trading wallet configured'}), 400
+        return jsonify({'ok': False, 'msg': f'No {wallet_label} trading wallet configured'}), 400
     enc_blob = row[1]
     min_size = float(row[2]) if row[2] is not None else 1.0
     max_size = float(row[3]) if row[3] is not None else 10.0
@@ -12902,6 +12931,9 @@ def api_evm_trade_buy():
         amount_usdc = float(amount_usdc)
     except (TypeError, ValueError):
         return jsonify({'ok': False, 'msg': 'Invalid amount'}), 400
+    # min_trade_size/max_trade_size are already USDC-denominated (see
+    # _migrate_trade_size_units) -- reused as-is rather than adding a
+    # separate per-chain limit setting.
     amount_usdc = max(min_size, min(max_size, amount_usdc))
     user_id = row[0]
 
@@ -13049,8 +13081,7 @@ def _legacy_evm_trade_buy(wallet, enc_blob, user_id, evm_address, chain,
 @app.route('/api/evm/trade/sell', methods=['POST'])
 @rate_limit(10, 60)
 def api_evm_trade_sell():
-    """Base/Arbitrum/Polygon sibling of /api/bsc/trade/sell -- see that
-    route's comments and api_evm_trade_buy()'s KNOWN LIMITATION note above."""
+    """Manual sell on Base, Arbitrum or Polygon -- chain in the body."""
     data  = request.get_json(silent=True) or {}
     chain = str(data.get('chain', '')).strip().lower()
     if chain not in EVM_CHAINS:
@@ -13058,56 +13089,157 @@ def api_evm_trade_sell():
     wallet = _authenticated_wallet()
     if not wallet:
         return jsonify({'ok': False, 'msg': 'No wallet connected'}), 401
+    return _evm_sell_flow(wallet, data, chain)
+
+
+@app.route('/api/bsc/trade/sell', methods=['POST'])
+@rate_limit(10, 60)
+def api_bsc_trade_sell():
+    """The BSC sell, kept because the frontend still calls it by this path.
+
+    It was a full copy of the EVM sell with the chain hardcoded, carrying the
+    same three defects; both are fixed once, here, rather than twice.
+    """
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'msg': 'No wallet connected'}), 401
+    return _evm_sell_flow(wallet, request.get_json(silent=True) or {}, 'bsc',
+                          wallet_label='BSC')
+
+
+# A sell is serialized per (wallet, token, chain) so a double-click cannot
+# read one open position twice and sell it twice. Same idiom as the gas lock.
+#
+# Its limit, stated rather than glossed over: this holds within one process.
+# The app runs as a single Flask process today, so it is effective; run with
+# several workers it would need to become a database claim like the one the
+# buy path takes.
+_evm_sell_locks: dict = {}
+_evm_sell_locks_guard = threading.Lock()
+
+
+def _get_evm_sell_lock(wallet: str, token: str, chain: str) -> threading.Lock:
+    with _evm_sell_locks_guard:
+        key = (wallet, token, chain)
+        lock = _evm_sell_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _evm_sell_locks[key] = lock
+        return lock
+
+
+def _evm_sell_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM'):
+    """Close a position on one EVM chain, for both sell routes.
+
+    THREE THINGS THAT WERE WRONG IN BOTH COPIES
+
+    1. It always answered ok:true. A sell that never executed came back as
+       {'ok': True, 'sell_executed': False}, so a caller checking `ok` -- the
+       obvious thing to check, and what every other route on this app means
+       by it -- read a failed sell as a success.
+
+    2. Two rapid clicks both read the same open position and both sold it.
+       The position is now read INSIDE a per-position lock that the sell
+       itself also holds, so the second click finds nothing open and stops.
+
+    3. The recorded exit price came from DexScreener rather than from the
+       swap, so the trade history stored a price the user did not get. It is
+       now measured from the wallet's own USDC balance across the swap, and
+       when that read fails the row is marked estimated instead of passing a
+       market quote off as the realised price.
+
+    Deliberately NOT on the trade engine. The engine prices a SPEND against a
+    ceiling and a sell has no spend; pushing one through a buy-shaped quote
+    would mean inventing numbers for fields that do not apply. A sell-side
+    quote is its own piece of work, and claiming this path has the engine's
+    guarantees when it does not would be worse than saying so.
+    """
     token_address = _sanitize(str(data.get('token_address', '')).strip())
     if not is_valid_evm_address(token_address):
         return jsonify({'ok': False, 'msg': 'Invalid token address'}), 400
-    us  = get_user_state(wallet)
-    pos = us['positions'].get(token_address, {})
-    if not pos.get('amount', 0.0) > 0:
-        return jsonify({'ok': False, 'msg': 'No open position for this token'}), 400
+
     conn = sqlite3.connect(DB_FILE)
     try:
         row = conn.execute(
-            'SELECT id, encrypted_private_key_bsc FROM users WHERE wallet_address=?', (wallet,)
-        ).fetchone()
+            'SELECT id, encrypted_private_key_bsc FROM users WHERE wallet_address=?',
+            (wallet,)).fetchone()
     finally:
         conn.close()
     if not row or not row[1]:
-        return jsonify({'ok': False, 'msg': 'No EVM trading wallet configured'}), 400
+        return jsonify({'ok': False, 'msg': f'No {wallet_label} trading wallet configured'}), 400
     user_id, enc_blob = row[0], row[1]
-    td         = get_token_data(token_address)
-    exit_price = float(td['price']) if td and td.get('price') else 0.0
-    symbol     = pos.get('symbol') or (td.get('symbol', token_address[:8]) if td else token_address[:8])
-    amount     = pos['amount']
-    with _use_key(enc_blob, wallet) as pk:
-        # Same auto-gas mechanism the autonomous bot's own exit path uses
-        # (see _ensure_evm_gas's module comment) -- a sell must not fail
-        # purely for lack of gas, since that's how a user actually closes a
-        # position and realizes (or cuts) a loss.
-        _evm_addr = _EvmAccount.from_key(pk).address
-        _gas_ok, _gas_msg, _gas_bridge_id = _ensure_evm_gas(user_id, wallet, pk, _evm_addr, chain)
-        if not _gas_ok:
-            return jsonify({'ok': False, 'msg': f'Cannot sell on {chain} yet — {_gas_msg}'}), 400
-        sell_ok, sell_err, sell_tx_hash = _execute_evm_swap(wallet, pk, 'sell', token_address, str(amount), chain)
-    entry     = pos.get('buy_price', 0.0)
-    pnl       = round(amount * (exit_price - entry), 4) if entry > 0 else 0.0
-    pnl_pct   = round((exit_price - entry) / entry * 100, 2) if entry > 0 else 0.0
-    opened_at = pos.get('opened_at', 0.0)
-    if sell_ok:
-        now = datetime.datetime.utcnow()
-        swap_usdc_amount = round(amount * exit_price, 6)
-        _charge_evm_txn_fee(pk, wallet, user_id, symbol, swap_usdc_amount, 'sell', chain,
-                             trade_ts=now.strftime('%Y-%m-%dT%H:%M:%SZ'), gross_profit=pnl)
-        fee_amount = round(swap_usdc_amount * FEE_RATE_TXN, 6)
+
+    with _get_evm_sell_lock(wallet, token_address, chain):
+        # Read the position INSIDE the lock. Reading it outside is what let
+        # two clicks both see the same holding. The amount still comes from
+        # the tracked position and never from the client, so a caller cannot
+        # ask to sell more than was bought.
+        pos = get_user_state(wallet)['positions'].get(token_address, {})
+        amount = pos.get('amount', 0.0)
+        if not amount > 0:
+            return jsonify({'ok': False, 'msg': 'No open position for this token'}), 400
+
+        td        = get_token_data(token_address)
+        quoted_px = float(td['price']) if td and td.get('price') else 0.0
+        symbol    = pos.get('symbol') or (td.get('symbol', token_address[:8]) if td else token_address[:8])
+
+        with _use_key(enc_blob, wallet) as pk:
+            # A sell must not fail purely for lack of gas -- this is how a
+            # user closes a position and cuts a loss.
+            evm_addr = _EvmAccount.from_key(pk).address
+            gas_ok, gas_msg, _ = _ensure_evm_gas(user_id, wallet, pk, evm_addr, chain)
+            if not gas_ok:
+                return jsonify({'ok': False, 'msg': f'Cannot sell on {chain} yet — {gas_msg}'}), 400
+
+            # Read before, read after: the difference is what this one swap
+            # returned. Taken before the broadcast so a slow RPC afterwards
+            # cannot make the two reads straddle someone else's transfer.
+            try:
+                usdc_before = get_evm_usdc_balance(evm_addr, chain)
+            except Exception as e:
+                usdc_before = None
+                print(f'[{chain}-sell] balance before sell unreadable: {e}', flush=True)
+
+            sell_ok, sell_err, sell_tx_hash = _execute_evm_swap(
+                wallet, pk, 'sell', token_address, str(amount), chain)
+
+            if not sell_ok:
+                # A sell that was broadcast but never confirmed keeps both its
+                # hash and its position: closing a position for a swap nobody
+                # has seen land would hide a holding the user still owns.
+                unconfirmed = bool(sell_tx_hash) and sell_err.startswith(SWAP_UNCONFIRMED_PREFIX)
+                return jsonify({
+                    'ok': False, 'chain': chain, 'sell_executed': False,
+                    'tx_hash': sell_tx_hash, 'unconfirmed': unconfirmed,
+                    'msg': sell_err or 'Sell failed',
+                }), 502
+
+            proceeds_usdc, exit_price, estimated = _evm_sell_proceeds(
+                evm_addr, chain, amount, quoted_px, usdc_before)
+            entry     = pos.get('buy_price', 0.0)
+            pnl       = round(amount * (exit_price - entry), 4) if entry > 0 else 0.0
+            pnl_pct   = round((exit_price - entry) / entry * 100, 2) if entry > 0 else 0.0
+            opened_at = pos.get('opened_at', 0.0)
+            ts        = datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+
+            # 0.75% on the sell leg's USDC amount, not on profit -- same model
+            # as _record_user_trade()'s Solana sell-leg fee call.
+            _charge_evm_txn_fee(pk, wallet, user_id, symbol, proceeds_usdc, 'sell', chain,
+                                trade_ts=ts, gross_profit=pnl)
+
+        fee_amount = round(proceeds_usdc * FEE_RATE_TXN, 6)
+        # Same trades-table insert + badge recalc as _record_user_trade(), so
+        # EVM sells count toward PnL history, badges and profile stats.
         try:
             conn2 = sqlite3.connect(DB_FILE)
             try:
                 conn2.execute(
                     '''INSERT INTO trades
-                       (user_id, token, entry_price, exit_price, amount, pnl, fee_amount, fee_paid, timestamp, opened_at, mint_address, source, chain)
+                       (user_id, token, entry_price, exit_price, amount, pnl, fee_amount,
+                        fee_paid, timestamp, opened_at, mint_address, source, chain)
                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                     (user_id, symbol, entry, exit_price, amount, pnl, fee_amount, 0,
-                     now.strftime('%Y-%m-%dT%H:%M:%SZ'), opened_at if opened_at else None,
+                     ts, opened_at if opened_at else None,
                      token_address, 'manual', chain))
                 conn2.commit()
             finally:
@@ -13116,175 +13248,42 @@ def api_evm_trade_sell():
             print(f'[{chain}-trade_record] DB write failed: {e}', flush=True)
         _recalculate_badges(wallet)
         _close_open_position(user_id, wallet, token_address, chain=chain)
-    return jsonify({'ok': True, 'chain': chain, 'pnl': pnl, 'pnl_pct': pnl_pct, 'exit_price': exit_price,
-                     'sell_executed': sell_ok, 'msg': ('' if sell_ok else sell_err), 'tx_hash': sell_tx_hash})
 
-@app.route('/api/bsc/trade/buy', methods=['POST'])
-@rate_limit(10, 60)
-def api_bsc_trade_buy():
-    wallet = _authenticated_wallet()
-    if not wallet:
-        return jsonify({'ok': False, 'msg': 'No wallet connected'}), 401
-    data          = request.get_json(silent=True) or {}
-    token_address = _sanitize(str(data.get('token_address', '')).strip())
-    if not is_valid_evm_address(token_address):
-        return jsonify({'ok': False, 'msg': 'Invalid token address'}), 400
-    amount_usdc = data.get('amount_usdc')
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        row = conn.execute(
-            'SELECT id, encrypted_private_key_bsc, min_trade_size, max_trade_size, bsc_wallet_address '
-            'FROM users WHERE wallet_address=?',
-            (wallet,)
-        ).fetchone()
-    finally:
-        conn.close()
-    if not row or not row[1]:
-        return jsonify({'ok': False, 'msg': 'No BSC trading wallet configured'}), 400
-    enc_blob = row[1]
-    min_size = float(row[2]) if row[2] is not None else 1.0
-    max_size = float(row[3]) if row[3] is not None else 10.0
-    evm_address = row[4]
-    if amount_usdc is None:
-        amount_usdc = max_size
-    try:
-        amount_usdc = float(amount_usdc)
-    except (TypeError, ValueError):
-        return jsonify({'ok': False, 'msg': 'Invalid amount'}), 400
-    # min_trade_size/max_trade_size are already USDC-denominated (see
-    # _migrate_trade_size_units) -- reused as-is rather than adding a
-    # separate BSC-specific limit setting.
-    amount_usdc = max(min_size, min(max_size, amount_usdc))
-    user_id = row[0]
+    return jsonify({'ok': True, 'chain': chain, 'pnl': pnl, 'pnl_pct': pnl_pct,
+                    'exit_price': exit_price, 'proceeds_usdc': proceeds_usdc,
+                    # True means the exit price is a market quote rather than
+                    # what this sell actually returned, so a caller can tell a
+                    # measured number from an estimated one.
+                    'exit_price_estimated': estimated,
+                    'sell_executed': True, 'msg': '', 'tx_hash': sell_tx_hash})
 
-    # Auto-bridge-then-buy -- see api_evm_trade_buy()'s identical block above
-    # for the full reasoning; not repeated here to avoid drift.
+
+def _evm_sell_proceeds(evm_address: str, chain: str, amount_sold: float,
+                       quoted_price: float, usdc_before) -> tuple:
+    """What the sell actually returned in USDC, and the price that implies.
+
+    Returns (proceeds_usdc, exit_price, estimated). `estimated` True means the
+    balance could not be measured and the market quote was used instead -- the
+    number is then a guess, and is labelled as one rather than written into the
+    trade history as the realised price.
+    """
+    fallback = (round(amount_sold * quoted_price, 6), quoted_price, True)
+    if usdc_before is None or not amount_sold > 0:
+        return fallback
     try:
-        current_balance = get_evm_usdc_balance(evm_address, 'bsc') if evm_address else 0.0
+        usdc_after = get_evm_usdc_balance(evm_address, chain)
     except Exception as e:
-        current_balance = 0.0
-        print(f'[bsc-buy] balance check failed: {e}', flush=True)
-    if current_balance < amount_usdc:
-        bridge_result = _maybe_start_auto_bridge_for_buy(user_id, wallet, evm_address, 'bsc', token_address, amount_usdc)
-        if bridge_result['started']:
-            return jsonify({
-                'ok': True, 'pending': True, 'bridge_id': bridge_result['bridge_id'],
-                'chain': 'bsc', 'token_address': token_address, 'amount_usdc': amount_usdc,
-                'msg': 'Buying...',
-            })
-        return jsonify({'ok': False, 'msg': bridge_result['msg']}), 400
+        print(f'[{chain}-sell] proceeds unreadable, falling back to the market '
+              f'price: {e}', flush=True)
+        return fallback
+    if usdc_after <= usdc_before:
+        # No increase means the reads did not capture this swap -- an
+        # unconfirmed balance, a different token's USDC. Reporting zero
+        # proceeds would write a total loss into the user's history.
+        return fallback
+    proceeds = round(usdc_after - usdc_before, 6)
+    return proceeds, round(proceeds / amount_sold, 12), False
 
-    with _use_key(enc_blob, wallet) as pk:
-        # Same auto-gas mechanism as api_evm_trade_buy() -- see its comment
-        # and _ensure_evm_gas's own module comment for the full reasoning,
-        # including why this buy's own token/amount rides along on a
-        # from-zero bootstrap bridge instead of erroring out.
-        if evm_address:
-            _gas_ok, _gas_msg, _gas_bridge_id = _ensure_evm_gas(
-                user_id, wallet, pk, evm_address, 'bsc',
-                auto_buy_token_address=token_address, auto_buy_requested_usdc=amount_usdc)
-            if not _gas_ok:
-                if _gas_bridge_id is not None:
-                    return jsonify({
-                        'ok': True, 'pending': True, 'bridge_id': _gas_bridge_id,
-                        'chain': 'bsc', 'token_address': token_address, 'amount_usdc': amount_usdc,
-                        'msg': 'Activating this chain for your wallet — your buy will complete automatically once ready.',
-                    })
-                return jsonify({'ok': False, 'msg': f'Cannot trade on bsc yet — {_gas_msg}'}), 400
-        buy_ok, buy_err, buy_tx_hash = _execute_bsc_swap(wallet, pk, 'buy', token_address, str(amount_usdc))
-    if not buy_ok:
-        return jsonify({'ok': False, 'msg': buy_err or 'Swap failed'}), 502
-    td          = get_token_data(token_address)
-    entry_price = float(td['price']) if td and td.get('price') else 0.0
-    symbol      = (td.get('symbol') or token_address[:8]) if td else token_address[:8]
-    pos = {
-        'amount':    (amount_usdc / entry_price) if entry_price > 0 else 0.0,
-        'buy_price': entry_price,
-        'spend':     amount_usdc,
-        'symbol':    symbol,
-        'opened_at': time.time(),
-    }
-    _upsert_open_position(user_id, wallet, token_address, pos, source='manual', chain='bsc')
-    _charge_bsc_txn_fee(pk, wallet, user_id, symbol, amount_usdc, 'buy')
-    return jsonify({'ok': True, 'amount_usdc': amount_usdc, 'token_address': token_address,
-                     'entry_price': entry_price, 'symbol': symbol, 'tx_hash': buy_tx_hash})
-
-@app.route('/api/bsc/trade/sell', methods=['POST'])
-@rate_limit(10, 60)
-def api_bsc_trade_sell():
-    wallet = _authenticated_wallet()
-    if not wallet:
-        return jsonify({'ok': False, 'msg': 'No wallet connected'}), 401
-    data          = request.get_json(silent=True) or {}
-    token_address = _sanitize(str(data.get('token_address', '')).strip())
-    if not is_valid_evm_address(token_address):
-        return jsonify({'ok': False, 'msg': 'Invalid token address'}), 400
-    # Sell amount comes from the tracked position, not the client, same as
-    # /api/trade/sell -- prevents mismatched bookkeeping between what was
-    # actually bought and what a caller claims to want to sell.
-    us  = get_user_state(wallet)
-    pos = us['positions'].get(token_address, {})
-    if not pos.get('amount', 0.0) > 0:
-        return jsonify({'ok': False, 'msg': 'No open position for this token'}), 400
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        row = conn.execute(
-            'SELECT id, encrypted_private_key_bsc FROM users WHERE wallet_address=?', (wallet,)
-        ).fetchone()
-    finally:
-        conn.close()
-    if not row or not row[1]:
-        return jsonify({'ok': False, 'msg': 'No BSC trading wallet configured'}), 400
-    user_id, enc_blob = row[0], row[1]
-    td         = get_token_data(token_address)
-    exit_price = float(td['price']) if td and td.get('price') else 0.0
-    symbol     = pos.get('symbol') or (td.get('symbol', token_address[:8]) if td else token_address[:8])
-    amount     = pos['amount']
-    with _use_key(enc_blob, wallet) as pk:
-        # Same auto-gas mechanism as api_evm_trade_sell() -- see its comment
-        # and _ensure_evm_gas's own module comment for the full reasoning.
-        _evm_addr = _EvmAccount.from_key(pk).address
-        _gas_ok, _gas_msg, _gas_bridge_id = _ensure_evm_gas(user_id, wallet, pk, _evm_addr, 'bsc')
-        if not _gas_ok:
-            return jsonify({'ok': False, 'msg': f'Cannot sell on bsc yet — {_gas_msg}'}), 400
-        sell_ok, sell_err, sell_tx_hash = _execute_bsc_swap(wallet, pk, 'sell', token_address, str(amount))
-    entry     = pos.get('buy_price', 0.0)
-    pnl       = round(amount * (exit_price - entry), 4) if entry > 0 else 0.0
-    pnl_pct   = round((exit_price - entry) / entry * 100, 2) if entry > 0 else 0.0
-    opened_at = pos.get('opened_at', 0.0)
-    if sell_ok:
-        now = datetime.datetime.utcnow()
-        # 0.75% fee on the sell leg's USDC amount, not on profit -- same model as
-        # _record_user_trade()'s Solana sell-leg fee call.
-        swap_usdc_amount = round(amount * exit_price, 6)
-        _charge_bsc_txn_fee(pk, wallet, user_id, symbol, swap_usdc_amount, 'sell',
-                             trade_ts=now.strftime('%Y-%m-%dT%H:%M:%SZ'), gross_profit=pnl)
-        fee_amount = round(swap_usdc_amount * FEE_RATE_TXN, 6)
-        # Same trades-table insert + badge recalc as _record_user_trade(), so BSC
-        # sells count toward PnL history, badges, and profile stats. Doesn't port
-        # _record_user_trade()'s in-memory daily_stats/trades_history (that's
-        # live-dashboard state for the Solana bot view, not durable history) or
-        # its cooldown/auto-verify/X-post side effects -- those are Solana-bot-
-        # specific and weren't asked for here.
-        try:
-            conn2 = sqlite3.connect(DB_FILE)
-            try:
-                conn2.execute(
-                    '''INSERT INTO trades
-                       (user_id, token, entry_price, exit_price, amount, pnl, fee_amount, fee_paid, timestamp, opened_at, mint_address, source, chain)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                    (user_id, symbol, entry, exit_price, amount, pnl, fee_amount, 0,
-                     now.strftime('%Y-%m-%dT%H:%M:%SZ'), opened_at if opened_at else None,
-                     token_address, 'manual', 'bsc'))
-                conn2.commit()
-            finally:
-                conn2.close()
-        except Exception as e:
-            print(f'[bsc-trade_record] DB write failed: {e}', flush=True)
-        _recalculate_badges(wallet)
-        _close_open_position(user_id, wallet, token_address, chain='bsc')
-    return jsonify({'ok': True, 'pnl': pnl, 'pnl_pct': pnl_pct, 'exit_price': exit_price,
-                     'sell_executed': sell_ok, 'msg': ('' if sell_ok else sell_err), 'tx_hash': sell_tx_hash})
 
 @app.route('/referrals')
 def referrals_page():

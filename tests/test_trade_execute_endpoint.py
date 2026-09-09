@@ -337,17 +337,27 @@ def reaches_engine(name, seen=None):
 check('the manual EVM buy — the route behind the Buy button on Live Market — now '
       'runs through the engine',
       reaches_engine('api_evm_trade_buy'))
-still_legacy = {n for n in ('api_bsc_trade_buy', 'api_instant_trade', 'api_manual_buy',
-                            'api_pump_scanner_buy', 'api_evm_trade_sell',
-                            'api_bsc_trade_sell')
+check('the BSC buy runs through it too — it was a copy of the EVM buy, and '
+      'leaving it behind would mean the same Buy button spending a different '
+      'amount depending on which chain the token was on',
+      reaches_engine('api_bsc_trade_buy'))
+
+# The sells are not on the engine and are not meant to be: it prices a SPEND
+# against a ceiling, and a sell has no spend. Their own defects are fixed in
+# tests/test_evm_sell_flow.py. Listed here so "not on the engine" stays a
+# recorded decision rather than something that looks like an oversight.
+sells_on_engine = {n for n in ('api_evm_trade_sell', 'api_bsc_trade_sell')
+                   if reaches_engine(n)}
+check('the sells are deliberately NOT on the engine — a buy-shaped quote would '
+      'mean inventing numbers for fields a sell does not have', not sells_on_engine)
+
+still_legacy = {n for n in ('api_instant_trade', 'api_manual_buy',
+                            'api_pump_scanner_buy')
                 if not reaches_engine(n)}
-check('every other execution endpoint is still on its old path — they are moved '
-      'one at a time so a mistake in the engine cannot take out several working '
-      'trade paths at once. Still to go: '
-      + ', '.join(sorted(still_legacy)),
-      still_legacy == {'api_bsc_trade_buy', 'api_instant_trade', 'api_manual_buy',
-                       'api_pump_scanner_buy', 'api_evm_trade_sell',
-                       'api_bsc_trade_sell'})
+check('the remaining buy paths are still on their old code — they are moved one '
+      'at a time so a mistake in the engine cannot take out several working '
+      'trade paths at once. Still to go: ' + ', '.join(sorted(still_legacy)),
+      still_legacy == {'api_instant_trade', 'api_manual_buy', 'api_pump_scanner_buy'})
 check('the old EVM buy is still reachable behind the flag rather than deleted, so '
       'this phase can be undone without a code change',
       'TRADE_ENGINE_MANUAL_EVM' in src and '_legacy_evm_trade_buy' in funcs)

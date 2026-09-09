@@ -97,10 +97,10 @@ def fake_fee(pk, wallet, user_id, symbol, usdc_amount, kind, chain='bsc', **kw):
     FEES.append({'usdc': usdc_amount, 'kind': kind})
 d._charge_evm_txn_fee = fake_fee
 
-def buy(body):
+def buy(body, path='/api/evm/trade/buy'):
     with d._rl_lock:
         d._rl_hits.clear()
-    r = c.post('/api/evm/trade/buy', json=body)
+    r = c.post(path, json=body)
     return r.status_code, r.get_json()
 
 # ── the engine path ──
@@ -154,6 +154,17 @@ out['legacy_status'], out['legacy'] = buy({'chain': 'base', 'token_address': EVM
 out['legacy_swaps'] = list(SWAPS)
 out['legacy_fees'] = list(FEES)
 d.TRADE_ENGINE_MANUAL_EVM = True
+
+# ── the BSC route, which was a full copy of this one ──
+SWAPS.clear(); FEES.clear()
+out['bsc_status'], out['bsc'] = buy({'token_address': EVM, 'amount_usdc': 100},
+                                    path='/api/bsc/trade/buy')
+out['bsc_swaps'] = list(SWAPS)
+
+# ── an unsupported chain is still refused on the EVM route ──
+out['badchain_status'], out['badchain'] = buy({'chain': 'ethereum',
+                                               'token_address': EVM,
+                                               'amount_usdc': 100})
 
 out['flag_default'] = bool(d.TRADE_ENGINE_MANUAL_EVM)
 print('__RESULT__' + json.dumps(out, default=str))
@@ -237,6 +248,34 @@ check('...including charging the fee on top of it, which is what the engine path
       'fixes', float(R['legacy_fees'][0]['usdc']) == 100.0)
 check('the engine path is the default; the old one needs an explicit opt-out',
       R['flag_default'] is True)
+
+# ── BSC gets the same treatment, at the same moment ──
+bsc = R['bsc']
+check('the BSC buy runs the same flow, so the ceiling holds there too — it was a '
+      'full copy with the chain hardcoded, and leaving it behind would mean the '
+      'same Buy button spending a different amount depending on the chain',
+      R['bsc_status'] == 200 and bsc['ok']
+      and len(R['bsc_swaps']) == 1 and float(R['bsc_swaps'][0]['amount']) < 100.0)
+check('...on BSC, from the stored quote', R['bsc_swaps'][0]['chain'] == 'bsc'
+      and bsc['chain'] == 'bsc')
+check('...and it reports what was bought against what was entered, as the other '
+      'chains do', float(bsc['amount_usdc']) < 100 and float(bsc['max_spend_usd']) == 100.0)
+
+check('a chain the platform does not trade is still refused on the EVM route',
+      R['badchain_status'] == 400 and 'ethereum' in R['badchain']['msg'])
+
+# ── one implementation, not two ──
+import ast                                                        # noqa: E402
+tree = ast.parse(open(REPO + '/dashboard.py').read())
+funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+for name in ('api_evm_trade_buy', 'api_bsc_trade_buy'):
+    body_calls = {c.func.id for c in ast.walk(funcs[name])
+                  if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)}
+    check(f'{name} is a thin route over the shared flow rather than its own copy',
+          '_evm_buy_flow' in body_calls)
+    check(f'...so {name} contains no swap or fee call of its own',
+          not (body_calls & {'_execute_evm_swap', '_execute_bsc_swap',
+                             '_charge_evm_txn_fee', '_charge_bsc_txn_fee'}))
 
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)

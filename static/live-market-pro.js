@@ -943,13 +943,20 @@ function handleSell(idx, btn){
     method:'POST', credentials:'include', headers: authHeaders(),
     body: JSON.stringify(body)
   }).then(function(r){ return r.json(); }).then(function(d){
-    // /api/bsc/trade/sell and /api/evm/trade/sell both always answer HTTP 200
-    // with ok:true (it means "the position was found and the sell was
-    // attempted"), so their REAL success signal is sell_executed, not ok --
-    // checking d.ok here like the Solana path does would show "Sold" even on
-    // a swap that actually failed.
-    var sold = isEvm ? !!(d && d.sell_executed) : !!(d && (d.success||d.tx||d.ok||d.sig));
-    toast(sold ? ('Sold $'+t.symbol) : ((d && (d.error||d.msg)) || 'Sell failed'));
+    // Both EVM sell routes used to answer HTTP 200 with ok:true even for a
+    // swap that failed -- ok meant only "the position was found and a sell
+    // was attempted" -- so sell_executed was the one trustworthy signal.
+    // They now answer ok:false with an error status when the sell does not
+    // go through, and the two agree; both are checked so this keeps working
+    // whichever version of the backend is deployed.
+    var sold = isEvm ? !!(d && d.ok && d.sell_executed)
+                     : !!(d && (d.success||d.tx||d.ok||d.sig));
+    // proceeds_usdc is what the swap actually returned, measured from the
+    // wallet across the trade -- shown only when it was measured, since the
+    // fallback is a market quote rather than the realised amount.
+    var got = (sold && d && d.proceeds_usdc != null && d.exit_price_estimated === false)
+      ? (' for $' + Number(d.proceeds_usdc).toFixed(2)) : '';
+    toast(sold ? ('Sold $'+t.symbol+got) : ((d && (d.error||d.msg)) || 'Sell failed'));
   }).catch(function(){ toast('Network error — sell not sent'); })
     .finally(function(){ btn.disabled=false; btn.textContent='Sell'; });
 }
