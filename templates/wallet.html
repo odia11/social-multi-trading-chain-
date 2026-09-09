@@ -1103,8 +1103,11 @@ function _sendSyncChain(){
     to.maxLength   = c.evm ? 42 : 44
   }
   if(bal){
-    var b = c.evm ? _bridgeBalanceFor(c.v) : null
-    bal.textContent = (b===null||b===undefined) ? '' : ('Balance: '+Number(b).toFixed(4)+' '+c.sym)
+    var b = _sendBalanceFor(c)
+    // '—' rather than nothing: an empty line reads as "you have no balance",
+    // which is a different statement from "this page has not loaded it yet".
+    bal.textContent = (b===null) ? 'Balance: —'
+                                 : ('Balance: '+Number(b).toFixed(4)+' '+c.sym)
   }
   // Stated up front, not discovered afterwards in the confirmation.
   var fee=document.getElementById('send-fee-note')
@@ -1112,6 +1115,55 @@ function _sendSyncChain(){
     ? 'The network fee comes out of this amount, so a little less may arrive.'
     : ''
 }
+function _sendBalanceFor(c){
+  var b = c.evm ? _bridgeBalanceFor(c.v) : _solBalanceCache
+  return (b===null||b===undefined) ? null : Number(b)
+}
+
+// MAX means two different things, because the fee is paid in two different
+// places.
+//
+// On an EVM chain the fee comes out of the amount -- the server arranges gas,
+// re-reads the balance and caps the transfer at what survived -- so the whole
+// balance is a legitimate figure to type and nothing has to be held back.
+//
+// On Solana the fee is paid in the very token being sent, and /api/wallet/send
+// does not deduct anything, so filling in the whole balance produces a
+// transaction that cannot pay for itself. A reserve stays behind, the same one
+// the fee row on this page already uses.
+function _sendSetMax(){
+  var c=_sendChain()
+  var amtEl=document.getElementById('send-amt')
+  var note=document.getElementById('send-note')
+  if(!amtEl) return
+  var b=_sendBalanceFor(c)
+  if(b===null){
+    // The balance simply is not loaded yet. Fetch it and stop, rather than
+    // filling in a zero that looks like an answer.
+    if(note){ note.style.color='var(--muted)'; note.textContent='Fetching your balance…' }
+    if(typeof loadUsdcSummary==='function') loadUsdcSummary()
+    if(typeof loadBalance==='function') loadBalance()
+    setTimeout(function(){
+      var b2=_sendBalanceFor(_sendChain())
+      if(note){ note.textContent = (b2===null) ? 'Could not read your balance — try again.' : '' }
+      if(b2!==null) _sendSetMax()
+    }, 1200)
+    return
+  }
+  var max = c.evm ? b : Math.max(0, b - SOL_FEE_RESERVE)
+  // Floored to 6 decimals for the same reason the server floors it: a value
+  // rounded up is a fraction more than the wallet holds.
+  max = Math.floor(max * 1e6) / 1e6
+  amtEl.value = max > 0 ? max : 0
+  if(note){
+    note.style.color='var(--muted)'
+    note.textContent = c.evm ? ''
+      : (max > 0 ? SOL_FEE_RESERVE+' SOL is left behind to pay the network fee.'
+                 : 'Not enough SOL to send anything after the network fee.')
+  }
+  _sendSyncChain()
+}
+
 function _modalSend(){
   _showModal(
     '<div class="w-modal-title">Send</div>'
@@ -1123,7 +1175,10 @@ function _modalSend(){
     +'<input class="w-modal-inp" id="send-to" placeholder="Solana wallet address…" maxlength="44">'
     +'<div class="w-modal-label">AMOUNT (<span id="send-sym">SOL</span>)</div>'
     +'<input class="w-modal-inp" id="send-amt" type="number" placeholder="0.00" min="0.000001" step="0.01">'
-    +'<div class="w-modal-note" id="send-bal" style="margin-top:6px"></div>'
+    +'<div class="br-bal-row" style="margin-top:6px">'
+      +'<span class="w-modal-note" id="send-bal"></span>'
+      +'<button type="button" class="br-bal-max" onclick="_sendSetMax()">MAX</button>'
+    +'</div>'
     +'<div class="w-modal-note" id="send-fee-note" style="margin-top:4px"></div>'
     +'<div class="w-modal-btns">'
       +'<button class="w-modal-btn w-modal-secondary" onclick="_closeModal()">Cancel</button>'
@@ -2021,6 +2076,7 @@ var _balanceLoadedOnce=false
 // Mirrors SOL_NETWORK_RESERVE in dashboard.py -- what a Solana wallet has to
 // keep back to send a trade and later close it.
 var SOL_FEE_RESERVE = 0.005
+var _solBalanceCache = null
 
 function loadBalance(){
   fetch('/api/wallet/balance').then(function(r){return r.json()}).then(function(d){
@@ -2041,6 +2097,9 @@ function loadBalance(){
           + SOL_FEE_RESERVE + ' is needed. This is separate from your trading balance.' : ''
       }
     }
+    // Kept so the Send modal's MAX has a figure to work from; it opens
+    // without fetching anything of its own.
+    if(d.sol!=null) _solBalanceCache=parseFloat(d.sol)
     if(d.in_positions_sol!=null) document.getElementById('inpos').textContent=parseFloat(d.in_positions_sol).toFixed(4)+' SOL'
     _balanceLoadedOnce=true
   }).catch(function(){

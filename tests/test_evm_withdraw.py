@@ -158,5 +158,31 @@ check('...and the confirmation shows what actually left plus the fee, instead '
       'of echoing the number that was typed',
       'd.amount_sent' in WAL and 'd.fee_deducted' in WAL)
 
+# ── MAX ───────────────────────────────────────────────────────────────────
+# It means two different things, because the fee is paid in two different
+# places: out of the amount on an EVM chain, out of the same token on Solana.
+check('there is a MAX button on the Send form', '_sendSetMax()' in WAL)
+check('on an EVM chain MAX is the whole balance, because the server takes the '
+      'fee out of it rather than needing headroom on top',
+      'c.evm ? b : Math.max(0, b - SOL_FEE_RESERVE)' in WAL)
+check('...while Solana keeps a reserve back, since the fee is paid in the very '
+      'token being sent and /api/wallet/send deducts nothing',
+      'SOL_FEE_RESERVE' in WAL and 'left behind to pay the network fee' in WAL)
+check('...and says so, rather than silently filling in less than the balance',
+      "note.textContent = c.evm ? ''" in WAL)
+check('MAX is floored to 6 decimals for the same reason the server floors it — '
+      'a value rounded up is a fraction more than the wallet holds',
+      'Math.floor(max * 1e6) / 1e6' in WAL)
+check('a balance that is not loaded yet is fetched rather than filled in as a '
+      'zero that looks like an answer',
+      'Fetching your balance' in WAL and 'b===null' in WAL)
+check('...and it gives up with a message instead of retrying forever',
+      'Could not read your balance' in WAL)
+check('the balance line reads "—" when unknown, since an empty line says "you '
+      'have nothing" and that is a different statement',
+      "'Balance: —'" in WAL)
+check('the SOL balance is remembered when the page loads it, so the form has '
+      'a figure without fetching its own', '_solBalanceCache=parseFloat(d.sol)' in WAL)
+
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)
