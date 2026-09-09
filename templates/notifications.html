@@ -331,9 +331,9 @@ function _ntfDayBucket(ts){
   if(isNaN(d)) return null;
   var startOfDay = function(dt){ return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()); };
   var days = Math.floor((startOfDay(new Date()) - startOfDay(d)) / 86400000);
-  if(days === 0) return 'Vandaag';
-  if(days === 1) return 'Gisteren';
-  if(days < 7) return 'Deze week';
+  if(days === 0) return 'Today';
+  if(days === 1) return 'Yesterday';
+  if(days < 7) return 'This week';
   return null;
 }
 function _render(){

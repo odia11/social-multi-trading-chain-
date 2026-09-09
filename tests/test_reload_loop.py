@@ -56,7 +56,11 @@ check('storage is wrapped, since it throws outright in some private-browsing '
 check('when it stops, it says why on screen rather than leaving a page that '
       'looks stuck', 'wallet-install-msg' in branch and 'textContent' in branch)
 check('...naming what the person has to do, in the extension, not what the app '
-      'saw', 'extensie' in branch and 'opnieuw' in branch)
+      'saw',
+      # Matched on the Dutch words until the app was translated. The check was
+      # never about the language -- it is that the message names the extension
+      # and asks for a reload, rather than reporting what the code noticed.
+      'extension' in branch and 'reload this page' in branch)
 check('...and leaves a console line with both facts, so the next person '
       'debugging this does not have to guess which half failed',
       'console.warn' in branch and 'logout ok:' in branch)

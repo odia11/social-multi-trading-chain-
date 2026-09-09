@@ -209,7 +209,7 @@ html,body{min-height:100%;background:var(--bg);font-family:var(--ui);color:var(-
         <div class="st-row">
           <div class="st-row-left">
             <div class="st-row-label">Min Trade Size (USDC)</div>
-            <div class="st-row-sub">Inzet per trade (bij een sterk signaal tot 2x hoger)</div>
+            <div class="st-row-sub">Stake per trade (up to 2x higher on a strong signal)</div>
           </div>
           <input id="s-minusdc" class="st-amber-inp" type="number" value="1" min="1" max="10000" step="1">
         </div>
@@ -217,7 +217,7 @@ html,body{min-height:100%;background:var(--bg);font-family:var(--ui);color:var(-
         <div class="st-row">
           <div class="st-row-left">
             <div class="st-row-label">Solana trade currency</div>
-            <div class="st-row-sub">Elke trade op Solana wordt gefinancierd met USDC, net als op de andere chains. Er blijft een klein beetje SOL nodig voor netwerkkosten — dat staat los van je handelssaldo.</div>
+            <div class="st-row-sub">Every Solana trade is funded with USDC, the same as on the other chains. A small amount of SOL is still needed for network fees — that is separate from your trading balance.</div>
           </div>
           <div class="st-row-value">USDC</div>
         </div>
@@ -405,16 +405,16 @@ html,body{min-height:100%;background:var(--bg);font-family:var(--ui);color:var(-
     <div class="modal-title">Enter Private Key</div>
     <textarea id="manage-inp" class="modal-textarea" placeholder="Paste your base58 private key here…" autocomplete="new-password" spellcheck="false"></textarea>
     <div class="manage-warn">
-      <p>Door een private key op te slaan:</p>
+      <p>By saving a private key:</p>
       <ul>
-        <li>wordt dit wallet je <strong>trading-wallet</strong> voor zowel de bot als copy-trade — geen wallet-pop-up meer per trade;</li>
-        <li>bewaart de server de sleutel <strong>versleuteld</strong> (encrypted at rest);</li>
-        <li>ben je zelf verantwoordelijk voor het saldo op dit wallet — gebruik geen wallet met je hoofdvermogen.</li>
+        <li>this wallet becomes your <strong>trading wallet</strong> for both the bot and copy-trading — no wallet pop-up on every trade;</li>
+        <li>the server stores the key <strong>encrypted</strong> (encrypted at rest);</li>
+        <li>you are responsible for the balance in this wallet — do not use a wallet holding your main funds.</li>
       </ul>
     </div>
     <label class="tos-checkbox-row">
       <input type="checkbox" id="manage-confirm-chk" onchange="document.getElementById('manage-save-btn').disabled=!this.checked">
-      <span>Ik begrijp dit en wil doorgaan</span>
+      <span>I understand and want to continue</span>
     </label>
     <div class="modal-btns">
       <button class="modal-btn modal-cancel" onclick="_closeManage()">Cancel</button>

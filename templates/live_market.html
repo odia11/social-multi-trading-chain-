@@ -1337,7 +1337,7 @@ function _lmChartEmptyEl(idx){
   if(!el){
     el = document.createElement('div');
     el.className = 'lm-poster-chart-empty';
-    el.textContent = 'Nog te weinig data';
+    el.textContent = 'Not enough data yet';
     chartEl.appendChild(el);
   }
   return el;
@@ -1667,7 +1667,7 @@ async function _lmConfirmBuy(idx, sym, addr, chain){
       // this same 401 -- the generic message reads like a bug to someone
       // who thinks they're already logged in, when what's actually missing
       // is a real (non-read-only) wallet connection.
-      _lmBuyMsg(idx, 'Verbind een echte wallet (geen read-only) om te kunnen handelen', false);
+      _lmBuyMsg(idx, 'Connect a real wallet (not read-only) to trade', false);
     } else {
       // d.msg covers /api/trade/buy's own failure paths, but a request that
       // never reaches that handler at all (CSRF check, shared-secret check,
@@ -2379,7 +2379,7 @@ window.addEventListener('pageshow', function(e){
 
 <div class="lm-global-search-results" id="lm-global-search-results"></div>
 
-<button id="lm-scroll-top-btn" class="lm-scroll-top-btn" title="Terug naar boven / zoeken" aria-label="Terug naar boven en zoeken">↑</button>
+<button id="lm-scroll-top-btn" class="lm-scroll-top-btn" title="Back to top / search" aria-label="Back to top and search">↑</button>
 <script>
 (function(){
   var btn = document.getElementById('lm-scroll-top-btn');

@@ -4434,15 +4434,15 @@ def get_ai_trade_decision(token_data: dict, mint: str, symbol: str, spend_sol: f
         return cached['decision']
 
     system_prompt = (
-        'Je bent een hyper-efficiënte, data-gedreven AI Trading Agent op de Solana blockchain. '
-        'Je doel is het maximaliseren van portfolio-waarde via spot trading in micro-cap tokens '
-        '(memecoins), met een strikte focus op risicobeheer. Geef altijd prioriteit aan '
-        'kapitaalbehoud boven winst. Dit token heeft de lokale anti-rugpull- en liquiditeitsfilters '
-        'al doorstaan (gelockte liquiditeit, holder-concentratie, mint/freeze authority) — jouw taak '
-        'is uitsluitend een laatste sanity-check op de onderstaande cijfers, geen herhaling van die '
-        'checks. Reageer UITSLUITEND met JSON, geen andere tekst, in exact dit formaat: '
+        'You are a hyper-efficient, data-driven AI Trading Agent on the Solana blockchain. '
+        'Your goal is to maximise portfolio value through spot trading in micro-cap tokens '
+        '(memecoins), with a strict focus on risk management. Always prioritise capital '
+        'preservation over profit. This token has already passed the local anti-rugpull and '
+        'liquidity filters (locked liquidity, holder concentration, mint/freeze authority) — your '
+        'job is only a final sanity check on the figures below, not a repeat of those checks. '
+        'Reply with JSON ONLY, no other text, in exactly this format: '
         '{"action": "BUY"|"HOLD", "token_address": "...", "amount_sol": 0.0, '
-        '"slippage_bps": 50, "reasoning": "korte motivatie voor de logboeken"}'
+        '"slippage_bps": 50, "reasoning": "short rationale for the logs"}'
     )
     user_prompt = (
         f'token_address: {mint}\n'
@@ -4455,8 +4455,8 @@ def get_ai_trade_decision(token_data: dict, mint: str, symbol: str, spend_sol: f
         f'buys_24h: {token_data.get("txns24h_buys", 0)}\n'
         f'sells_24h: {token_data.get("txns24h_sells", 0)}\n'
         f'proposed_spend_sol: {spend_sol}\n'
-        'Beoordeel of dit een verantwoorde entry is gegeven deze cijfers. Antwoord met action '
-        '"BUY" of "HOLD" — nooit "SELL", dit is een koop-beslissing.'
+        'Judge whether this is a responsible entry given these figures. Answer with action '
+        '"BUY" or "HOLD" — never "SELL"; this is a buy decision.'
     )
     decision = {'action': 'BUY', 'reasoning': 'AI check failed — failing open'}
     try:
@@ -4643,24 +4643,24 @@ def run_ai_self_analysis() -> dict:
             round((datetime.datetime.strptime(ts[:19], '%Y-%m-%dT%H:%M:%S')
                    - datetime.datetime.utcfromtimestamp(opened_at)).total_seconds() / 60, 1)
             if opened_at else None)
-        what = (f'{token}: {pnl_pct:+.1f}% (reden: {exit_reason or "onbekend"}, '
-                f'liquidity bij instap: ${liq or 0:,.0f}, LP locked: {lp_pct if lp_pct is not None else "?"}%, '
-                f'gehouden: {age_min if age_min is not None else "?"}min)')
+        what = (f'{token}: {pnl_pct:+.1f}% (reason: {exit_reason or "unknown"}, '
+                f'liquidity at entry: ${liq or 0:,.0f}, LP locked: {lp_pct if lp_pct is not None else "?"}%, '
+                f'held: {age_min if age_min is not None else "?"}min)')
         how_bits = []
         if sl_pct is not None:    how_bits.append(f'SL={sl_pct:.1f}%')
         if tp_pct is not None:    how_bits.append(f'TP={tp_pct:.1f}%')
         if entry_score is not None: how_bits.append(f'entry_score={entry_score:.0f}')
         if risk_score is not None:  how_bits.append(f'risk_score={risk_score:.0f}')
-        if entry_slip is not None:  how_bits.append(f'instap-slippage={entry_slip:.2f}%')
-        if exit_slip is not None:   how_bits.append(f'uitstap-slippage={exit_slip:.2f}%')
+        if entry_slip is not None:  how_bits.append(f'entry-slippage={entry_slip:.2f}%')
+        if exit_slip is not None:   how_bits.append(f'exit-slippage={exit_slip:.2f}%')
         cf = _trade_excursion_counterfactual(exit_reason, entry, pnl_pct, sl_pct, tp_pct,
                                               highest_price, lowest_price)
         if cf['kind'] == 'gave_back_peak':
-            how_bits.append(f'piek tijdens hold was +{cf["peak_pct"]}% (een lagere TP had dat kunnen vastzetten)')
+            how_bits.append(f'peak during hold was +{cf["peak_pct"]}% (a lower TP could have locked that in)')
         elif cf['kind'] == 'survived_drawdown':
-            how_bits.append(f'zakte -{cf["trough_pct"]}% weg voor herstel (een strakkere SL had dit een verlies gemaakt)')
-        how = ', '.join(how_bits) if how_bits else 'uitvoeringsdata onbeschikbaar'
-        return what + f' | HOE: {how}'
+            how_bits.append(f'dipped -{cf["trough_pct"]}% before recovering (a tighter SL would have made this a loss)')
+        how = ', '.join(how_bits) if how_bits else 'execution data unavailable'
+        return what + f' | HOW: {how}'
 
     scored = sorted(rows, key=_pnl_pct)
     worst  = scored[:10]
@@ -4682,38 +4682,39 @@ def run_ai_self_analysis() -> dict:
         elif cf['kind'] == 'survived_drawdown':
             fragile_wins.append(cf)
     counterfactual_summary = (
-        f'{len(gave_back)}/{len(rows)} trades bereikten een piek die ze weer teruggaven voor iets anders '
-        f'sloot (gem. gemiste winst als TP daar had gelegen: '
+        f'{len(gave_back)}/{len(rows)} trades reached a peak they gave back before closing for '
+        f'another reason (avg. profit missed if TP had been there: '
         f'{(sum(gave_back)/len(gave_back)):+.1f}%). ' if gave_back else
-        f'0/{len(rows)} trades gaven een piek terug. '
+        f'0/{len(rows)} trades gave back a peak. '
     ) + (
-        f'{len(fragile_wins)}/{len(rows)} winnende trades zakten eerst dieper weg dan hun eigen SL voordat ze '
-        f'herstelden naar TP (een strakkere SL-instelling had die winst een verlies gemaakt).'
+        f'{len(fragile_wins)}/{len(rows)} winning trades first dipped below their own SL before '
+        f'recovering to TP (a tighter SL setting would have turned that profit into a loss).'
         if fragile_wins else
-        f'0/{len(rows)} winnende trades waren op deze manier fragiel.'
+        f'0/{len(rows)} winning trades were fragile in this way.'
     )
 
     system_prompt = (
-        'Je bent de hoofd-strateeg van onze Solana AI trading bot. Analyseer twee dingen apart: '
-        '(1) WAT er getraded is -- welke patronen of indicatoren (te snel na lancering, te lage liquiditeit, '
-        'te weinig LP locked) leidden tot verliezen. Op basis daarvan stel je NIEUWE waarden voor voor precies '
-        'deze drie instap-filters: min_liquidity_usd, min_pair_age_minutes, min_lp_locked_pct. '
-        '(2) HOE er getraded is -- kijk naar de SL/TP-breedte, entry_score/risk_score en uitvoerings-slippage per '
-        'trade, en naar de meegegeven counterfactual-samenvatting (trades die een piek weer teruggaven, of '
-        'winnende trades die eigenlijk fragiel waren). Beschrijf wat dat zegt over de huidige SL/TP-instellingen '
-        '-- dit is GEEN backtest en claimt geen toekomstige winstgevendheid, alleen wat er met DEZE al afgesloten '
-        'trades zou zijn gebeurd als de exit-trigger elders had gelegen. Als de data voor een van beide analyses '
-        'ontoereikend is, zeg dat expliciet in plaats van iets te verzinnen. '
-        'Reageer UITSLUITEND met JSON, geen andere tekst, in exact dit formaat: '
+        'You are the head strategist for our Solana AI trading bot. Analyse two things separately: '
+        '(1) WHAT was traded -- which patterns or indicators (too soon after launch, liquidity too '
+        'low, too little LP locked) led to losses. On that basis, propose NEW values for exactly '
+        'these three entry filters: min_liquidity_usd, min_pair_age_minutes, min_lp_locked_pct. '
+        '(2) HOW it was traded -- look at the SL/TP width, entry_score/risk_score and execution '
+        'slippage per trade, and at the counterfactual summary provided (trades that gave back a '
+        'peak, or winning trades that were actually fragile). Describe what that says about the '
+        'current SL/TP settings -- this is NOT a backtest and claims nothing about future '
+        'profitability, only what would have happened to THESE already-closed trades had the exit '
+        'trigger been elsewhere. If the data is insufficient for either analysis, say so explicitly '
+        'rather than inventing something. '
+        'Reply with JSON ONLY, no other text, in exactly this format: '
         '{"min_liquidity_usd": 0, "min_pair_age_minutes": 0, "min_lp_locked_pct": 0, '
-        '"reasoning": "korte motivatie voor de instap-filters", '
-        '"how_analysis": "analyse van HOE er getraded werd, inclusief de counterfactuals"}'
+        '"reasoning": "short rationale for the entry filters", '
+        '"how_analysis": "analysis of HOW trading went, including the counterfactuals"}'
     )
     user_prompt = (
-        'HUIDIGE FILTERS: ' + json.dumps(get_ai_active_filters()) + '\n\n'
-        'COUNTERFACTUAL-SAMENVATTING (berekend, niet geschat): ' + counterfactual_summary + '\n\n'
-        'SUCCESVOLLE TRADES (afgelopen 24u):\n' + '\n'.join('- ' + _fmt(r) for r in best) + '\n\n'
-        'VERLIESGEVENDE TRADES (afgelopen 24u):\n' + '\n'.join('- ' + _fmt(r) for r in worst)
+        'CURRENT FILTERS: ' + json.dumps(get_ai_active_filters()) + '\n\n'
+        'COUNTERFACTUAL SUMMARY (calculated, not estimated): ' + counterfactual_summary + '\n\n'
+        'SUCCESSFUL TRADES (last 24h):\n' + '\n'.join('- ' + _fmt(r) for r in best) + '\n\n'
+        'LOSING TRADES (last 24h):\n' + '\n'.join('- ' + _fmt(r) for r in worst)
     )
     try:
         resp = requests.post(
@@ -4864,10 +4865,10 @@ def _discover_x_buzz() -> list[str]:
         # _resolve_buzz_pairs). Asking Solana-only meant a token blowing up on
         # Base or Robinhood Chain could never be discovered here at all.
         prompt = (
-            'Zoek naar memecoins die op dit moment opvallend veel besproken worden op '
-            'X/Twitter, ook als ze nog klein zijn qua volume. Kijk naar Solana, BNB Chain '
-            '(BSC), Base, Arbitrum, Polygon en Robinhood Chain. Geef ALLEEN een JSON-array '
-            'van cashtags terug, max 10, bv ["$FOO", "$BAR"].'
+            'Find memecoins being talked about unusually heavily right now on '
+            'X/Twitter, including ones still small by volume. Look at Solana, BNB Chain '
+            '(BSC), Base, Arbitrum, Polygon and Robinhood Chain. Return ONLY a JSON array '
+            'of cashtags, max 10, e.g. ["$FOO", "$BAR"].'
         )
         resp = requests.post(
             _ANTHROPIC_URL,
@@ -7116,7 +7117,7 @@ def _narrative_agent_process_candidate(user_id: int, wallet: str, mint: str, cha
     site."""
     if not NARRATIVE_AGENT_GLOBAL_LIVE and wallet != ADMIN_WALLET and wallet not in NARRATIVE_UNCAPPED_WALLETS:
         _agent_journal_log(user_id, mint, chain, mint[:8], phase='blocked', decision='pass',
-                            filter_result='agent nog in besloten test, nog niet live voor gebruikers')
+                            filter_result='agent still in closed testing, not yet live for users')
         return
 
     token_data = get_token_data(mint) or {}
@@ -7154,7 +7155,7 @@ def _narrative_agent_process_candidate(user_id: int, wallet: str, mint: str, cha
     if _use_pumpfun_gate and float(token_data.get('volume24h', 0) or 0) >= NARRATIVE_PUMPFUN_VOLUME_THRESHOLD:
         decision = 'buy'
         _agent_journal_log(user_id, mint, chain, symbol, phase='buy', decision='buy',
-                            filter_result='PUMPFUN-DEGEN AUTO-BUY (volume>=$10k, geen AI-review)')
+                            filter_result='PUMPFUN-DEGEN AUTO-BUY (volume>=$10k, no AI review)')
     else:
         signal   = get_narrative_signal(token_data, mint, symbol)
         decision = signal.get('decision', 'pass')
@@ -9666,7 +9667,7 @@ def _narrative_safety_gate(mint: str, chain: str) -> tuple:
         deepest_age_days = ((time.time() - deepest['pair_created_at'] / 1000) / 86400
                              if deepest['pair_created_at'] > 0 else 0)
         if deepest['ok'] and deepest['liquidity'] >= 500_000 and deepest_age_days >= 90:
-            exemption_note = 'LP-lock overgeslagen: blue-chip uitzondering (leeftijd+liquiditeit)'
+            exemption_note = 'LP-lock skipped: blue-chip exemption (age+liquidity)'
         else:
             lp = _check_lp_locked(mint)
             if not lp['ok'] or lp['lp_locked_pct'] < 50:
@@ -12711,7 +12712,7 @@ def _fetch_open_bot_positions(wallet):
     """Same open_positions query as /history's open-positions block above
     (WHERE user_id=? AND source='bot') -- shared by /live-trades (page) and
     /api/live-trades (JSON poll) so both stay in sync off one query. Adds
-    stake_sol (entry_price * amount) for the "Inzet" column, which /history
+    stake_sol (entry_price * amount) for the "Stake" column, which /history
     doesn't show."""
     open_positions = []
     try:

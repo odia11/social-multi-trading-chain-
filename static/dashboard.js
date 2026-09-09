@@ -793,7 +793,7 @@ async function connectWalletOnboard(type){
     document.getElementById('wallet-back-btn').style.display='flex';
     const r=await _connectWalletSigned(provider, phantomKey);
     if(!r?.ok && (r?.msg==='Signature rejected'||(r?.msg||'').startsWith('Nonce expired'))){
-      msgEl.textContent='Onderteken het verzoek in je wallet om in te loggen — probeer opnieuw';
+      msgEl.textContent='Sign the request in your wallet to log in — please try again';
       msgEl.style.display='block'; return;
     }
     if(r?.csrf_token) _csrfToken=r.csrf_token;
@@ -1025,7 +1025,7 @@ async function launchApp(){
         const _wp=walletType==='Phantom'?window.solana:window.solflare;
         const wr = await _connectWalletSigned(_wp, phantomKey);
         if(!wr?.ok && (wr?.msg==='Signature rejected'||(wr?.msg||'').startsWith('Nonce expired'))){
-          showLfToast('🔑','Onderteken het verzoek in je wallet om in te loggen — probeer opnieuw','warn');
+          showLfToast('🔑','Sign the request in your wallet to log in — please try again','warn');
         } else if(wr){ settingsHasKey=wr.has_trading_key||false; _isAdmin=wr.is_admin||false; _updateKeyStatus(); if(wr.csrf_token) _csrfToken=wr.csrf_token; }
       } else {
         // Pick up any server-side flag changes (key uploaded from another tab, etc.)
@@ -1250,7 +1250,7 @@ document.addEventListener('visibilitychange', async function(){
       const _wp=walletType==='Phantom'?window.solana:window.solflare;
       const wr=await _connectWalletSigned(_wp, phantomKey);
       if(!wr?.ok && (wr?.msg==='Signature rejected'||(wr?.msg||'').startsWith('Nonce expired'))){
-        showLfToast('🔑','Onderteken het verzoek in je wallet om in te loggen — probeer opnieuw','warn');
+        showLfToast('🔑','Sign the request in your wallet to log in — please try again','warn');
       } else if(wr){ settingsHasKey=wr.has_trading_key||false; _isAdmin=wr.is_admin||false; _updateKeyStatus(); checkOwnerPanel(); _syncAdminNavLink(); if(wr.csrf_token) _csrfToken=wr.csrf_token; }
     }
   }catch(e){}
@@ -2229,22 +2229,22 @@ async function fetchAdminAiFilters(){
     <div><span style="color:var(--muted)">Min LP locked</span><br>${f.min_lp_locked_pct||0}%</div>
   `;
   const props=r.proposals||[];
-  if(!props.length){ if(propsEl) propsEl.innerHTML='<div style="padding:12px;text-align:center">Nog geen voorstellen — draait dagelijks om 04:00 UTC, of klik "Run analyse nu".</div>'; return; }
+  if(!props.length){ if(propsEl) propsEl.innerHTML='<div style="padding:12px;text-align:center">No proposals yet — runs daily at 04:00 UTC, or click "Run analysis now".</div>'; return; }
   if(propsEl) propsEl.innerHTML=props.map(p=>{
     const badgeColor=p.status==='pending'?'#f7b955':(p.status==='approved'?'#3ad29b':'#f76b62');
     const pj=p.proposed||{};
     const actions=p.status==='pending'
       ? `<div style="display:flex;gap:8px;margin-top:8px">
-           <button onclick="reviewAiFilterProposal(${p.id},'approve')" style="background:rgba(58,210,155,.1);border:1px solid rgba(58,210,155,.3);border-radius:6px;padding:4px 12px;color:#3ad29b;font-size:10px;cursor:pointer">✓ Goedkeuren</button>
-           <button onclick="reviewAiFilterProposal(${p.id},'reject')" style="background:rgba(247,107,98,.1);border:1px solid rgba(247,107,98,.3);border-radius:6px;padding:4px 12px;color:#f76b62;font-size:10px;cursor:pointer">✗ Afwijzen</button>
+           <button onclick="reviewAiFilterProposal(${p.id},'approve')" style="background:rgba(58,210,155,.1);border:1px solid rgba(58,210,155,.3);border-radius:6px;padding:4px 12px;color:#3ad29b;font-size:10px;cursor:pointer">✓ Approve</button>
+           <button onclick="reviewAiFilterProposal(${p.id},'reject')" style="background:rgba(247,107,98,.1);border:1px solid rgba(247,107,98,.3);border-radius:6px;padding:4px 12px;color:#f76b62;font-size:10px;cursor:pointer">✗ Reject</button>
          </div>`
-      : `<div style="color:var(--muted);font-size:10px;margin-top:6px">${esc(p.status)} door ${esc((p.reviewed_by||'').slice(0,8))}… op ${esc(p.reviewed_at||'')}</div>`;
+      : `<div style="color:var(--muted);font-size:10px;margin-top:6px">${esc(p.status)} by ${esc((p.reviewed_by||'').slice(0,8))}… on ${esc(p.reviewed_at||'')}</div>`;
     return `<div style="background:var(--bg3);border:1px solid rgba(118,118,118,.2);border-radius:8px;padding:12px;margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <span style="font-family:monospace;font-size:10px;color:var(--muted)">#${p.id} — ${esc(p.created_at||'')} — ${p.trades_analyzed} trades geanalyseerd</span>
+        <span style="font-family:monospace;font-size:10px;color:var(--muted)">#${p.id} — ${esc(p.created_at||'')} — ${p.trades_analyzed} trades analysed</span>
         <span style="color:${badgeColor};font-size:10px;font-weight:700;text-transform:uppercase">${esc(p.status)}</span>
       </div>
-      <div style="font-family:monospace;font-size:11px;margin-bottom:6px">liquidity ≥ $${(pj.min_liquidity_usd||0).toLocaleString()} · leeftijd ≥ ${pj.min_pair_age_minutes||0}m · LP locked ≥ ${pj.min_lp_locked_pct||0}%</div>
+      <div style="font-family:monospace;font-size:11px;margin-bottom:6px">liquidity ≥ $${(pj.min_liquidity_usd||0).toLocaleString()} · age ≥ ${pj.min_pair_age_minutes||0}m · LP locked ≥ ${pj.min_lp_locked_pct||0}%</div>
       <div style="font-size:11px;color:#a0aec0">${esc(p.reasoning||'')}</div>
       ${actions}
     </div>`;
@@ -2253,10 +2253,10 @@ async function fetchAdminAiFilters(){
 
 async function runAiFilterAnalysis(){
   const btn=document.getElementById('ai-filters-run-btn');
-  btn.disabled=true; btn.textContent='Bezig…';
+  btn.disabled=true; btn.textContent='Working…';
   const r=await fetch('/api/admin/ai-filters/run-now',{method:'POST',headers:{'X-CSRF-Token':_csrfToken}}).then(r=>r.json()).catch(()=>null);
-  btn.disabled=false; btn.textContent='▶ Run analyse nu';
-  if(!r||!r.ok){ alert('Analyse mislukt: '+((r&&r.msg)||'onbekende fout')); return; }
+  btn.disabled=false; btn.textContent='▶ Run analysis now';
+  if(!r||!r.ok){ alert('Analysis failed: '+((r&&r.msg)||'unknown error')); return; }
   fetchAdminAiFilters();
 }
 
@@ -2266,7 +2266,7 @@ async function reviewAiFilterProposal(id,action){
     headers:{'Content-Type':'application/json','X-CSRF-Token':_csrfToken},
     body:JSON.stringify({proposal_id:id}),
   }).then(r=>r.json()).catch(()=>null);
-  if(!r||!r.ok){ alert('Actie mislukt: '+((r&&r.msg)||'onbekende fout')); return; }
+  if(!r||!r.ok){ alert('Action failed: '+((r&&r.msg)||'unknown error')); return; }
   fetchAdminAiFilters();
 }
 
@@ -3260,9 +3260,9 @@ function _inDappBrowser(){ return !!(window.solana||window.solflare); }
       console.warn('[auth] wallet mismatch persists (logout ok:'+_cleared+', already reloaded:'+_tried+') — not reloading again');
       const _mm=document.getElementById('wallet-install-msg');
       if(_mm){
-        _mm.textContent='Je wallet-extensie staat op een ander account dan waarmee je hier '
-                      + 'bent ingelogd. Wissel in de extensie naar het juiste account of '
-                      + 'ontkoppel daar, en laad deze pagina opnieuw.';
+        _mm.textContent='Your wallet extension is on a different account than the one you are '
+                      + 'signed in with here. Switch to the right account in the extension, '
+                      + 'or disconnect there, and reload this page.';
         _mm.style.display='block';
       }
       return;
@@ -3283,7 +3283,7 @@ function _inDappBrowser(){ return !!(window.solana||window.solflare); }
     const r=await _connectWalletSigned(_p, _pk);
     if(!r?.ok && (r?.msg==='Signature rejected'||(r?.msg||'').startsWith('Nonce expired'))){
       const _m=document.getElementById('wallet-install-msg');
-      if(_m){ _m.textContent='Onderteken het verzoek in je wallet om in te loggen — probeer opnieuw'; _m.style.display='block'; }
+      if(_m){ _m.textContent='Sign the request in your wallet to log in — please try again'; _m.style.display='block'; }
       return;
     }
     if(r?.csrf_token) _csrfToken=r.csrf_token;
@@ -9263,7 +9263,7 @@ function _renderFeedCard(e){
     +'<div class="fc-reply-row1">'
     +'<div class="fc-reply-avatar">'+_fcReplyAvatarHtml()+'</div>'
     +'<div class="fc-reply-pill">'
-    +'<input class="fc-reply-inp" id="rinp-'+esc(safePostId)+'" type="text" placeholder="Reageer op '+esc(e.username||'deze post')+'…" maxlength="500" '
+    +'<input class="fc-reply-inp" id="rinp-'+esc(safePostId)+'" type="text" placeholder="Reply to '+esc(e.username||'this post')+'…" maxlength="500" '
       +'oninput="_fcReplyCardSync(\'rcard-'+esc(safePostId)+'\')" onfocus="_fcReplyCardSync(\'rcard-'+esc(safePostId)+'\')" onblur="_fcReplyCardSync(\'rcard-'+esc(safePostId)+'\')" '
       +'onkeydown="if(event.key===\'Enter\'){event.preventDefault();_feedSubmitReply(this,\''+esc(safePostId)+'\')}">'
     +'<button class="fc-reply-tool" onclick="_emojiPickerToggle(event,\'repal-'+esc(safePostId)+'\',\'rinp-'+esc(safePostId)+'\')" title="Emoji">😊</button>'
@@ -9719,7 +9719,7 @@ function _feedToggleNestedReply(parentId, postId, btn){
     +'<div class="fc-reply-row1">'
     +'<div class="fc-reply-avatar">'+_fcReplyAvatarHtml()+'</div>'
     +'<div class="fc-reply-pill">'
-    +'<input class="fc-reply-inp" id="'+inpId+'" type="text" placeholder="Reageer op '+esc(authorName)+'…" maxlength="500" '
+    +'<input class="fc-reply-inp" id="'+inpId+'" type="text" placeholder="Reply to '+esc(authorName)+'…" maxlength="500" '
       +'oninput="_fcReplyCardSync(\''+cardId+'\')" onfocus="_fcReplyCardSync(\''+cardId+'\')" onblur="_fcReplyCardSync(\''+cardId+'\')" '
       +'onkeydown="if(event.key===\'Enter\'){event.preventDefault();_feedSubmitNestedReply(this,\''+postId.replace(/'/g,"\\'")+'\','+parentId+')}">'
     +'<button class="fc-reply-tool" onclick="_emojiPickerToggle(event,\'nrepal-'+parentId+'\',\''+inpId+'\')" title="Emoji">😊</button>'

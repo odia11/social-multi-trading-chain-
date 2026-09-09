@@ -89,7 +89,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:'J
       <div class="lt-row">
         <div class="lt-row-main">
           <div class="lt-row-sym">${{ p.token }}</div>
-          <div class="lt-row-sub">Inzet ${{ '%.2f' | format(p.stake_usd) }} &middot; Instap ${{ '%.6f' | format(p.entry_price) }}</div>
+          <div class="lt-row-sub">Stake ${{ '%.2f' | format(p.stake_usd) }} &middot; Instap ${{ '%.6f' | format(p.entry_price) }}</div>
           <div class="lt-row-sub">Exit&nbsp;&nbsp;TP ${{ '%.6f' | format(p.tp_price) }}{{ ' (1e deel)' if p.tiered_tp else '' }} &middot; SL ${{ '%.6f' | format(p.sl_price) }}</div>
           <div class="lt-row-sub">Open sinds {{ p.opened_at if p.opened_at else '—' }}</div>
         </div>
@@ -119,7 +119,7 @@ function _ltRowHtml(p){
   return '<div class="lt-row">'
     +'<div class="lt-row-main">'
       +'<div class="lt-row-sym">$'+_ltEsc(p.token)+'</div>'
-      +'<div class="lt-row-sub">Inzet $'+p.stake_usd.toFixed(2)+' &middot; Instap $'+Number(p.entry_price).toFixed(6)+'</div>'
+      +'<div class="lt-row-sub">Stake $'+p.stake_usd.toFixed(2)+' &middot; Instap $'+Number(p.entry_price).toFixed(6)+'</div>'
       +'<div class="lt-row-sub">Exit&nbsp;&nbsp;TP $'+Number(p.tp_price).toFixed(6)+tp1Note+' &middot; SL $'+Number(p.sl_price).toFixed(6)+'</div>'
       +'<div class="lt-row-sub">Open sinds '+_ltEsc(p.opened_at || '—')+'</div>'
     +'</div>'

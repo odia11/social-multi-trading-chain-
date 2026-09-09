@@ -3680,16 +3680,16 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
     <div class="modal-title">Enter Private Key</div>
     <textarea id="manage-inp" class="modal-textarea" placeholder="Paste your base58 private key here…" autocomplete="new-password" spellcheck="false"></textarea>
     <div class="manage-warn">
-      <p>Door een private key op te slaan:</p>
+      <p>By saving a private key:</p>
       <ul>
-        <li>wordt dit wallet je <strong>trading-wallet</strong> voor zowel de bot als copy-trade — geen wallet-pop-up meer per trade;</li>
-        <li>bewaart de server de sleutel <strong>versleuteld</strong> (encrypted at rest);</li>
-        <li>ben je zelf verantwoordelijk voor het saldo op dit wallet — gebruik geen wallet met je hoofdvermogen.</li>
+        <li>this wallet becomes your <strong>trading wallet</strong> for both the bot and copy-trading — no wallet pop-up on every trade;</li>
+        <li>the server stores the key <strong>encrypted</strong> (encrypted at rest);</li>
+        <li>you are responsible for the balance in this wallet — do not use a wallet holding your main funds.</li>
       </ul>
     </div>
     <label class="tos-checkbox-row">
       <input type="checkbox" id="manage-confirm-chk" onchange="document.getElementById('manage-save-btn').disabled=!this.checked">
-      <span>Ik begrijp dit en wil doorgaan</span>
+      <span>I understand and want to continue</span>
     </label>
     <div class="modal-btns">
       <button class="modal-btn modal-cancel" onclick="_closeManage()">Cancel</button>
@@ -4247,11 +4247,11 @@ __IMAGE_LIGHTBOX__
       <!-- AI Filters pane -->
       <div id="adpane-aifilters" style="display:none">
         <div class="adash-section-hdr" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <span>Actieve instap-filters</span>
-          <button onclick="runAiFilterAnalysis()" id="ai-filters-run-btn" style="background:#1c1c1c;border:1px solid #2e2e2e;border-radius:6px;padding:4px 12px;color:#ffffff;font-size:10px;font-family:'Share Tech Mono',monospace;cursor:pointer">▶ Run analyse nu</button>
+          <span>Active entry filters</span>
+          <button onclick="runAiFilterAnalysis()" id="ai-filters-run-btn" style="background:#1c1c1c;border:1px solid #2e2e2e;border-radius:6px;padding:4px 12px;color:#ffffff;font-size:10px;font-family:'Share Tech Mono',monospace;cursor:pointer">▶ Run analysis now</button>
         </div>
         <div id="ai-filters-active" style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;font-family:monospace;font-size:12px;color:#a0aec0">Loading…</div>
-        <div class="adash-section-hdr" style="margin-bottom:8px">Voorstellen (dagelijkse self-analyse)</div>
+        <div class="adash-section-hdr" style="margin-bottom:8px">Proposals (daily self-analysis)</div>
         <div id="ai-filters-proposals" style="font-size:11px;color:var(--muted)">Loading…</div>
       </div>
     </div>
@@ -4514,7 +4514,7 @@ __IMAGE_LIGHTBOX__
         <div class="st-row">
           <div class="st-row-left">
             <div class="st-row-label">Min Trade Size (USDC)</div>
-            <div class="st-row-sub">Inzet per trade (schaalt met signaalsterkte tot 3x hoger)</div>
+            <div class="st-row-sub">Stake per trade (scales with signal strength, up to 3x higher)</div>
           </div>
           <input id="ds-minusdc" class="st-amber-inp" type="number" value="1" min="1" max="10000" step="1">
         </div>

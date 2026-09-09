@@ -108,7 +108,8 @@ check('...and the page no longer sends a field the server ignores',
 check('...with the styling for a stated value actually defined, not a class '
       'name that renders as nothing', '.st-row-value{' in ST)
 check('...and it says plainly that SOL is still needed for fees, because a '
-      'wallet holding only USDC cannot trade', 'netwerkkosten' in ST)
+      'wallet holding only USDC cannot trade',
+      'network fees' in ST and 'SOL is still needed' in ST)
 
 # ── the wallet page ────────────────────────────────────────────────────────
 # It led with SOL as "Available balance" and put USDC in a card below. After
