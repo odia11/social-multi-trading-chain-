@@ -196,7 +196,10 @@ check('it does the whole deploy — backup, pull, install, restart, verify — s
       all(k in UPDATE for k in ('.backup', 'git -C', 'install.sh',
                                 'systemctl restart', 'verify_live.py')))
 check('it backs the database up BEFORE anything else moves',
-      UPDATE.index('.backup') < UPDATE.index('git -C'))
+      # Anchored on the pull command itself, not on a bare 'git -C' — that
+      # string also appears in the recovery advice the failure trap prints,
+      # which sits near the top of the file and is not a step at all.
+      UPDATE.index('.backup') < UPDATE.index('git -C "$REPO_DIR" pull'))
 check('...with .backup rather than cp, since a plain copy of a database being '
       'written to can be a file that no longer opens', "sqlite3 \"$DB\" \".backup" in UPDATE)
 check('...and OPENS that backup to prove it is restorable. A backup nobody has '
@@ -285,6 +288,19 @@ check('...and says the site is still on the old code, which is the question '
 check('...while staying quiet when the script already explained itself, so a '
       'real reason is never buried under a generic one',
       'die(){ EXPLAINED=1;' in UPDATE and UPDATE.count('EXPLAINED=1') >= 4)
+
+# The deadlock this script can put itself in: every step before the pull runs
+# from the copy already on disk, so a bug in one of them cannot be fixed by
+# running it again — the fix is on the far side of a pull that never happens.
+check('a failure BEFORE the pull says the script cannot fix itself by being '
+      'run again, because the newer version is still in the repository',
+      'PULLED' in UPDATE and 'cannot reach you by running it again' in UPDATE)
+check('...and gives the two commands that break the deadlock, with the real '
+      'clone path filled in rather than a placeholder',
+      'sudo git -C %s pull --ff-only' in UPDATE and '"$REPO_DIR"' in UPDATE)
+check('...and stops offering that advice once the pull has happened, when it '
+      'would be wrong', 'PULLED=1' in UPDATE
+      and UPDATE.index('PULLED=1') > UPDATE.index('git -C "$REPO_DIR" pull'))
 
 
 # ── the outage this actually caused ───────────────────────────────────────

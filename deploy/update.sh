@@ -27,6 +27,7 @@ die(){ EXPLAINED=1; printf '\n\033[1;31m✗ %s\033[0m\n' "$*"; exit 1; }
 # exit sets EXPLAINED, so this only speaks when nothing else did.
 EXPLAINED=0
 FAILED_LINE=''
+PULLED=0
 trap 'FAILED_LINE=$LINENO' ERR
 trap '_rc=$?
       if [ "$_rc" -ne 0 ] && [ "$EXPLAINED" != 1 ]; then
@@ -34,6 +35,18 @@ trap '_rc=$?
                "${FAILED_LINE:-?}" "$_rc"
         printf "  Nothing after that line ran. Your database was not touched and\n"
         printf "  the site is still on the code it was already running.\n"
+        # The trap that matters most. Everything before "Fetching the latest
+        # code" runs from the copy of this script already on disk, so a bug
+        # in it cannot be fixed by running it again -- the fix is sitting in
+        # the repository on the other side of a pull that never happens.
+        # Breaking that deadlock by hand is two commands, and nobody should
+        # have to work them out at the prompt.
+        if [ "$PULLED" != 1 ]; then
+          printf "\n  This stopped BEFORE the pull, so a newer version of this script\n"
+          printf "  cannot reach you by running it again. Pull by hand first:\n\n"
+          printf "      sudo git -C %s pull --ff-only\n" "$REPO_DIR"
+          printf "      sudo bash %s/deploy/update.sh\n" "$REPO_DIR"
+        fi
       fi' EXIT
 
 [ "$(id -u)" -eq 0 ] || die "Run this with sudo."
@@ -132,6 +145,8 @@ else
   echo "  $BEFORE -> $AFTER"
   git -C "$REPO_DIR" log --oneline "$BEFORE..$AFTER" | head -20 | sed 's/^/    /'
 fi
+
+PULLED=1
 
 say "Installing"
 bash "$REPO_DIR/deploy/install.sh" >/tmp/orcagent-install-$STAMP.log 2>&1 \
