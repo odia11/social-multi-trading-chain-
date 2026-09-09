@@ -16523,10 +16523,33 @@ def api_session():
     """
     wallet = session.get('wallet', '')
     readonly = bool(session.get('readonly'))
+
+    # Whether this wallet has a passkey, answered by the SERVER.
+    #
+    # The client used to work this out from localStorage, which is per browser
+    # context — and an app added to the home screen gets its own. So someone
+    # with a passkey registered in Safari looked, from inside the installed
+    # app, exactly like someone with none. That matters more there than
+    # anywhere else: the Phantom deeplink cannot complete inside a standalone
+    # app, so a passkey is the only way back in once a session is gone.
+    has_passkey = False
+    if wallet and not readonly:
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            try:
+                has_passkey = conn.execute(
+                    'SELECT 1 FROM webauthn_credentials c JOIN users u ON u.id=c.user_id '
+                    'WHERE u.wallet_address=? LIMIT 1', (wallet,)).fetchone() is not None
+            finally:
+                conn.close()
+        except Exception:
+            has_passkey = False   # unknown is not a reason to nag; the prompt can wait
+
     return jsonify({
         'ok': True,
         'wallet': wallet,
         'readonly': readonly,
+        'has_passkey': has_passkey,
         # Deliberately separate from `wallet`: a read-only session HAS an
         # address but has proved nothing, and _authenticated_wallet() treats
         # it as nobody. The page needs the same distinction.

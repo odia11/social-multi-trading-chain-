@@ -197,10 +197,69 @@ function _showWalletOptions(){
   _applySolflareDetection(solflareBtn, nullEl);
 }
 
-async function _setupFaceID(){
+/* ── the way back into an installed app ──
+   A home-screen app cannot complete the Phantom deeplink: it opens Safari,
+   and the session lands there instead. Once such an app loses its session
+   there is no route back — the connect screen can only tell you to go and
+   open the site in a browser. A passkey is the one credential that works
+   inside it, and the code for it has been here all along behind a prompt
+   that was never shown: #s-faceid-prompt sits inside Settings at
+   display:none, and nothing anywhere sets it visible.
+
+   Shown from the SERVER's answer, not localStorage. An installed app has its
+   own storage, so a passkey registered in Safari leaves no trace there — the
+   client cannot tell "no passkey" from "not this context". */
+function _passkeyBannerDismissed(){
+  try{ return localStorage.getItem('orca_pk_prompt_off') === '1'; }catch(e){ return false; }
+}
+function _dismissPasskeyBanner(){
+  var b = document.getElementById('pk-banner');
+  if(b) b.style.display = 'none';
+  try{ localStorage.setItem('orca_pk_prompt_off', '1'); }catch(e){}
+}
+function _maybePromptPasskey(session){
+  var b = document.getElementById('pk-banner');
+  if(!b || !session || !session.authenticated) return;
+  if(session.has_passkey) return;            // already has the way back
+  if(!window.PublicKeyCredential) return;    // device cannot make one
+  // Inside an installed app the reminder is not a convenience, so it is not
+  // dismissible-forever there: losing the session locks the person out.
+  // Read through a guard: this function is defined above the const that holds
+  // it, so a caller that ran earlier than expected would hit the temporal
+  // dead zone and throw instead of simply not prompting.
+  var standalone = false;
+  try{ standalone = isStandalonePWA; }catch(e){ standalone = false; }
+  if(_passkeyBannerDismissed() && !standalone) return;
+  var t = document.getElementById('pk-banner-title');
+  var sub = document.getElementById('pk-banner-sub');
+  if(standalone){
+    if(t) t.textContent = 'Set up Face ID to stay signed in';
+    if(sub) sub.textContent = 'Connecting a wallet does not work from an app on '
+      + 'your home screen — it opens the browser instead. Face ID is how you get '
+      + 'back in here if you are ever signed out.';
+  } else {
+    if(sub) sub.textContent = 'Sign in with Face ID instead of reconnecting your '
+      + 'wallet each time — and it keeps working if you add OrcAgent to your home screen.';
+  }
+  b.style.display = '';
+}
+function _setupPasskeyFromBanner(){
+  var btn = document.getElementById('pk-banner-btn');
+  var msg = document.getElementById('pk-banner-msg');
+  _setupFaceID({btn: btn, msg: msg, onDone: function(){
+    var b = document.getElementById('pk-banner');
+    if(b) setTimeout(function(){ b.style.display = 'none'; }, 2000);
+  }});
+}
+
+async function _setupFaceID(opts){
+  // The banner and the Settings prompt both drive this; each passes its own
+  // button and message element rather than the function guessing which
+  // surface it is reporting into.
+  opts = opts || {};
   var wallet=phantomKey;
-  var btn=document.getElementById('s-faceid-prompt-btn');
-  var msg=document.getElementById('s-faceid-prompt-msg');
+  var btn=opts.btn||document.getElementById('s-faceid-prompt-btn');
+  var msg=opts.msg||document.getElementById('s-faceid-prompt-msg');
   function _show(text,ok){
     if(!msg) return;
     msg.style.color=ok?'var(--green)':'var(--red)';
@@ -223,6 +282,7 @@ async function _setupFaceID(){
       localStorage.setItem('orca_credential_id',cred.id);
       _show('✓ Face ID saved!',true);
       _updateFaceIdStatus();
+      if(opts.onDone) opts.onDone();
       setTimeout(function(){ var p=document.getElementById('s-faceid-prompt'); if(p) p.style.display='none'; },2500);
     } else {
       _show('Registration failed: '+((r&&r.msg)||'unknown error'),false);
@@ -232,7 +292,7 @@ async function _setupFaceID(){
           e.name==='InvalidStateError'?'Passkey already exists — try logging in.':
           'Setup failed: '+(e.message||e.name), false);
   }finally{
-    if(btn){ btn.disabled=false; btn.textContent='Setup Face ID'; }
+    if(btn){ btn.disabled=false; btn.textContent=opts.btnLabel||'Setup Face ID'; }
   }
 }
 
@@ -263,7 +323,16 @@ const solflareDeepLink='https://solflare.com/ul/v1/browse/'+encodeURIComponent('
 /* Installed PWA (standalone display-mode): Phantom's connect deep link
    redirects back to the browser, not to the home-screen app icon, so the
    round trip never reaches us — must not even attempt it in this mode. */
-const isStandalonePWA=!!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+// navigator.standalone as well as the media query. On iOS — which is where
+// the home-screen app actually is — the media query has historically not been
+// reliable, while navigator.standalone is the property Safari has always set
+// for a page launched from the home screen. Missing this reads as "ordinary
+// browser tab", and the app then offers a wallet connection that cannot
+// complete.
+const isStandalonePWA=!!(
+  (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+  || window.navigator.standalone === true
+);
 
 function _copyOrcagentUrl(btn){
   var url='https://orcagent.fun';
@@ -3025,6 +3094,7 @@ function _inDappBrowser(){ return !!(window.solana||window.solflare); }
         _applySessionWallet(_me.wallet);
         if(_me.csrf_token) _csrfToken = _me.csrf_token;
       }
+      if(_me) _maybePromptPasskey(_me);
     }catch(e){}
   }
   // Checked AFTER that, so the server stays the authority: a real disconnect
