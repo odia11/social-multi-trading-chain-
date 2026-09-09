@@ -75,8 +75,20 @@ systemctl daemon-reload
 systemctl enable orcagent orcagent-monitor >/dev/null
 
 say "Installing the nginx site"
-cp "$REPO_DIR/deploy/nginx-orcagent.conf" /etc/nginx/sites-available/orcagent
-ln -sf /etc/nginx/sites-available/orcagent /etc/nginx/sites-enabled/orcagent
+NGINX_SITE=/etc/nginx/sites-available/orcagent
+# certbot rewrites this file IN PLACE to add the certificate and the HTTPS
+# redirect. Copying the template over it would throw all of that away and
+# reload nginx serving plain HTTP -- on a site whose session cookie is Secure,
+# that means nobody can log in. So once a certificate is in there, the file
+# belongs to certbot and this script leaves it alone.
+if [ -f "$NGINX_SITE" ] && grep -q 'ssl_certificate' "$NGINX_SITE"; then
+  echo "  already has a certificate — left untouched so certbot's config survives"
+  echo "  (if you need the template back: certbot delete, then re-run this)"
+else
+  cp "$REPO_DIR/deploy/nginx-orcagent.conf" "$NGINX_SITE"
+  echo "  installed (plain HTTP — run certbot afterwards)"
+fi
+ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/orcagent
 rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
 

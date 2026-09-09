@@ -151,5 +151,38 @@ check('the app still runs as a SINGLE worker. The sell lock and the repeat-buy '
       'anyone tunes gunicorn on the new host',
       '--workers 1' in start_sh)
 
+
+# ── the installer must survive being run twice ─────────────────────────────
+# It says so at the top: "safe to run again". That was true of every step
+# except the nginx one, which copied a plain-HTTP template over the file
+# certbot had already rewritten with the certificate, then reloaded. On a site
+# whose session cookie is Secure, dropping to HTTP means nobody can log in --
+# so a re-run to pick up a code change would have taken the site down.
+INSTALL = open(REPO + '/deploy/install.sh').read()
+
+check('the installer protects the environment file, which holds the key every '
+      'stored wallet depends on',
+      'left untouched so your secrets are not overwritten' in INSTALL)
+check("...and now protects certbot's nginx config the same way, instead of "
+      'copying a plain-HTTP template over a certificate',
+      "grep -q 'ssl_certificate'" in INSTALL
+      and 'left untouched so certbot' in INSTALL)
+check('...while still installing the template on a server that has no '
+      'certificate yet, so a first run works',
+      'nginx-orcagent.conf' in INSTALL and 'else' in INSTALL)
+check('the template it installs is plain HTTP, which is why overwriting a '
+      'certificate with it was destructive',
+      'ssl_certificate' not in open(REPO + '/deploy/nginx-orcagent.conf').read())
+check('rsync never reaches the data directory, so a deploy cannot touch the '
+      'database', "--exclude '*.db'" in INSTALL and 'DATA_DIR=/data' in INSTALL)
+
+README = open(REPO + '/deploy/README.md').read()
+check('the deploy instructions do not point at a path that only existed in an '
+      'example -- the clone lives wherever it was cloned, and /opt/orcagent is '
+      'a copy install.sh overwrites',
+      '/root/orcagent-src' not in README)
+check('...and tell you to back the database up before deploying',
+      '.backup /data/backups/pre-deploy-' in README)
+
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)

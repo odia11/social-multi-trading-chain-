@@ -25,9 +25,16 @@ as the new server answers (step 7).
 
 ```bash
 sudo apt-get update && sudo apt-get install -y git
-sudo git clone https://github.com/odia11/social-multi-trading-chain-.git /root/orcagent-src
-cd /root/orcagent-src
+git clone https://github.com/odia11/social-multi-trading-chain-.git ~/orcagent
+cd ~/orcagent
 ```
+
+Clone it as your own user, not root: you will be running `git pull` here on
+every deploy, and needing `sudo` for that is friction you would feel weekly.
+
+The location itself does not matter — only that it is **not** `/opt/orcagent`.
+That directory is a copy the installer overwrites from this clone, so edits
+made there are erased on the next deploy.
 
 ## 2. Run the installer
 
@@ -139,9 +146,13 @@ Developer Portal has to match your domain exactly.
 ## Check that the outside world is actually reachable
 
 ```bash
-cd /opt/orcagent && sudo -u orcagent \
-  env $(grep -v '^#' /etc/orcagent.env | xargs) venv/bin/python tools/verify_live.py
+sudo bash -c 'set -a; . /etc/orcagent.env; set +a; cd /opt/orcagent && \
+  PYTHONDONTWRITEBYTECODE=1 venv/bin/python tools/verify_live.py'
 ```
+
+(The whole thing runs under `sudo` because `/etc/orcagent.env` is readable
+only by root and the service user. Reading it in a `$( )` first would be
+expanded by your own shell, which cannot open it.)
 
 Run this after the first start, and after any change to keys or networking.
 It calls 0x, Jupiter, DexScreener and every chain's RPC with your real keys,
@@ -168,19 +179,26 @@ sudo journalctl -u orcagent --since "1 hour ago" | grep -i error
 Deploy a new version:
 
 ```bash
-cd /root/orcagent-src && sudo git pull
-sudo bash deploy/install.sh          # safe to re-run; leaves /etc/orcagent.env and /data alone
+cd ~/orcagent && git pull            # wherever you cloned it -- NOT /opt/orcagent,
+                                     # which install.sh overwrites from the clone
+sudo bash deploy/install.sh          # safe to re-run; leaves /etc/orcagent.env, /data
+                                     # and certbot's nginx config alone
 sudo systemctl restart orcagent orcagent-monitor
 ```
 
-Back up the database (do this on a schedule):
+Back up the database — on a schedule, and by hand before any deploy that
+touches storage:
 
 ```bash
-sudo sqlite3 /data/orcagent.db ".backup /data/backups/orcagent-$(date +%F).db"
+sudo sqlite3 /data/orcagent.db ".backup /data/backups/orcagent-$(date +%F-%H%M).db"
 ```
 
 `.backup` is used rather than `cp` because it takes a consistent snapshot
 while the app is still writing.
+
+The app keeps three compressed copies of its own in `/data/backups`. That
+protects you from a bad write. It does not protect you from losing the
+server, so copy that directory somewhere else too.
 
 ---
 
