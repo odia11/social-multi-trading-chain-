@@ -181,8 +181,9 @@ check('the deploy instructions do not point at a path that only existed in an '
       'example -- the clone lives wherever it was cloned, and /opt/orcagent is '
       'a copy install.sh overwrites',
       '/root/orcagent-src' not in README)
-check('...and tell you to back the database up before deploying',
-      '.backup /data/backups/pre-deploy-' in README)
+check('...and tell you to back the database up before deploying, not only on a '
+      'schedule — a deploy is exactly when you want yesterday\'s copy',
+      'before any deploy' in README and '.backup /data/backups/' in README)
 
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)
