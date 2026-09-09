@@ -24252,14 +24252,43 @@ def api_withdraw_evm():
 
         # An ERC20 transfer is paid for in the chain's NATIVE token, not in
         # the stablecoin being sent -- so a wallet holding only USDC cannot
-        # move it. Same machinery a buy uses, including the sponsor.
+        # move it. Same machinery a buy uses, including the sponsor, and the
+        # same thing it does when gas runs low: buy some with the user's own
+        # USDC (_execute_evm_gas_topup).
         with _use_key(enc_blob, wallet) as _pk:
             gas_ok, gas_msg, _bridge_id = _ensure_evm_gas(user_id, wallet, _pk, evm_address, chain)
             if not gas_ok:
                 return jsonify({'ok': False,
                                 'error': f'Cannot send from {chain_name} yet — {gas_msg}'}), 400
+
+            # ── the amount is a ceiling, not a promise ──
+            # The number typed in is the MOST that leaves the wallet, and the
+            # network fee comes out of it rather than on top -- the same shape
+            # as a trade, where every cost comes out of the maximum spend.
+            #
+            # This is why the balance is read again here rather than reused:
+            # arranging gas may have just spent some of that very USDC to buy
+            # the native token, so the figure checked a moment ago is stale by
+            # exactly the amount this is meant to account for.
             try:
-                tx_hash = _send_evm_usdc_fee(_pk, to_address, amount, chain)
+                spendable = get_evm_usdc_balance(evm_address, chain)
+            except Exception as e:
+                return jsonify({'ok': False,
+                                'error': f'Could not re-read your {chain_name} balance '
+                                         f'after arranging gas: {e}'}), 502
+            send_amount = min(amount, spendable)
+            # Floored, never rounded: rounding up asks for a fraction more than
+            # the wallet holds and the transfer reverts on-chain, having spent
+            # the gas anyway.
+            send_amount = math.floor(send_amount * 1_000_000) / 1_000_000
+            if send_amount <= 0:
+                return jsonify({'ok': False,
+                                'error': f'The network fee used up the whole amount. Try '
+                                         f'a larger one, or top up your {chain_name} '
+                                         f'balance.'}), 400
+
+            try:
+                tx_hash = _send_evm_usdc_fee(_pk, to_address, send_amount, chain)
             except Exception as e:
                 err = _redact_keys(str(e))
                 short = wallet[:6] + '...' + wallet[-4:]
@@ -24273,12 +24302,21 @@ def api_withdraw_evm():
     finally:
         lock.release()
 
+    # Sending less than was asked for is fine; doing it quietly is not. The
+    # response says what actually left, and what the difference was, so the
+    # number in the confirmation is the number on the explorer.
+    deducted = round(amount - send_amount, 6)
     short = wallet[:6] + '...' + wallet[-4:]
-    add_user_log(wallet, f'[{short}] WITHDRAW: {amount} {sym} on {chain_name} → '
-                         f'{to_address[:6]}...{to_address[-4:]}  TX:{tx_hash[:16]}...')
-    print(f'[withdraw-evm] {short} sent {amount} {sym} on {chain} to '
+    add_user_log(wallet, f'[{short}] WITHDRAW: {send_amount} {sym} on {chain_name} → '
+                         f'{to_address[:6]}...{to_address[-4:]}'
+                         + (f' (asked {amount}, {deducted} went to network fees)'
+                            if deducted > 0 else '')
+                         + f'  TX:{tx_hash[:16]}...')
+    print(f'[withdraw-evm] {short} sent {send_amount} {sym} on {chain} to '
           f'{to_address[:6]}...  TX:{tx_hash[:20]}...', flush=True)
     return jsonify({'ok': True, 'tx_hash': tx_hash, 'chain': chain,
+                    'amount_requested': amount, 'amount_sent': send_amount,
+                    'fee_deducted': deducted if deducted > 0 else 0,
                     'explorer': f'{EVM_CHAINS[chain].get("explorer", "")}/tx/{tx_hash}'})
 
 

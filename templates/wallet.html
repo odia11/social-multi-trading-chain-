@@ -1106,6 +1106,11 @@ function _sendSyncChain(){
     var b = c.evm ? _bridgeBalanceFor(c.v) : null
     bal.textContent = (b===null||b===undefined) ? '' : ('Balance: '+Number(b).toFixed(4)+' '+c.sym)
   }
+  // Stated up front, not discovered afterwards in the confirmation.
+  var fee=document.getElementById('send-fee-note')
+  if(fee) fee.textContent = c.evm
+    ? 'The network fee comes out of this amount, so a little less may arrive.'
+    : ''
 }
 function _modalSend(){
   _showModal(
@@ -1119,6 +1124,7 @@ function _modalSend(){
     +'<div class="w-modal-label">AMOUNT (<span id="send-sym">SOL</span>)</div>'
     +'<input class="w-modal-inp" id="send-amt" type="number" placeholder="0.00" min="0.000001" step="0.01">'
     +'<div class="w-modal-note" id="send-bal" style="margin-top:6px"></div>'
+    +'<div class="w-modal-note" id="send-fee-note" style="margin-top:4px"></div>'
     +'<div class="w-modal-btns">'
       +'<button class="w-modal-btn w-modal-secondary" onclick="_closeModal()">Cancel</button>'
       +'<button class="w-modal-btn w-modal-primary" id="send-btn" onclick="_execSend()">Send SOL</button>'
@@ -1157,7 +1163,13 @@ function _execSend(){
     if(btn) btn.disabled=false
     if(d.ok||d.success){
       _closeModal()
-      _wToast('Sent '+amt+' '+c.sym,true)
+      // The amount typed is a ceiling: the network fee comes out of it, so
+      // what actually left can be less. Report the real figure — it is the
+      // one on the explorer — and say where the difference went rather than
+      // quietly showing the number that was asked for.
+      var sent = (d.amount_sent!==undefined && d.amount_sent!==null) ? d.amount_sent : amt
+      var fee  = d.fee_deducted || 0
+      _wToast('Sent '+sent+' '+c.sym + (fee>0 ? ' ('+fee+' '+c.sym+' network fee)' : ''), true)
       setTimeout(function(){loadBalance();loadTokens(true)},1500)
     } else {
       _err(d.error||d.msg||'Send failed')

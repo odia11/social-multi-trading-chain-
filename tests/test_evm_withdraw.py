@@ -88,6 +88,40 @@ check('gas is arranged before the transfer, since an ERC20 send is paid in the '
 check('...and a wallet that cannot get gas is told so rather than left with a '
       'failed transaction', 'Cannot send from' in w)
 
+# ── the amount is a ceiling, and the fee comes out of it ──────────────────
+# Same shape as a trade: the number typed is the MOST that leaves the wallet.
+# Arranging gas can spend some of that very USDC to buy the native token, so
+# the figure checked a moment earlier is stale by exactly the amount this is
+# meant to account for.
+check('the balance is read again AFTER gas is arranged, because arranging it '
+      'may have just spent some of the USDC being sent',
+      w.index('_ensure_evm_gas(') < w.index('spendable = get_evm_usdc_balance')
+      and w.index('spendable = get_evm_usdc_balance') < w.index('_send_evm_usdc_fee'))
+check('...and the transfer is capped at what survived, so the fee comes out of '
+      'the amount rather than on top of it', 'send_amount = min(amount, spendable)' in w)
+check('...floored, never rounded — rounding up asks for a fraction more than '
+      'the wallet holds and reverts on-chain, having spent the gas anyway',
+      'math.floor(send_amount' in w)
+check('a fee that eats the whole amount is refused with a reason, not sent as '
+      'a zero transfer', 'send_amount <= 0' in w and 'used up the whole amount' in w)
+check('a failure to re-read the balance refuses rather than falling back to '
+      'the stale one', 'after arranging gas' in w)
+
+# Sending less than was asked for is fine. Doing it quietly is not.
+check('the response reports what actually left, not what was asked for',
+      "'amount_sent': send_amount" in w)
+check('...alongside the request and the difference, so the confirmation can be '
+      'reconciled against the explorer',
+      "'amount_requested': amount" in w and "'fee_deducted'" in w)
+check('...and the transfer itself uses the capped figure, not the requested one',
+      '_send_evm_usdc_fee(_pk, to_address, send_amount, chain)' in w)
+check('the activity log records the amount that left, and names the shortfall '
+      'when there was one',
+      'went to network fees' in w and '{send_amount} {sym}' in w)
+check('the repeat-guard still keys on what the USER asked for, or an identical '
+      'resubmission would look different every time the fee moved',
+      "round(amount, 6))" in w)
+
 # ── it costs the same budget as the Solana one ────────────────────────────
 check('it shares the Solana withdrawal budget of 3 per hour, so the limit is '
       'per user and not per chain — the point is how much leaves, not how',
@@ -117,6 +151,12 @@ check('...sending the field names each route actually reads',
       and "{to:to, amount_sol:amt}" in WAL)
 check('the button is disabled while a send is in flight, so a second tap '
       'cannot start a second one', 'btn.disabled=true' in WAL)
+check('the form says up front that the fee comes out of the amount, rather '
+      'than leaving it to be discovered in the confirmation',
+      'comes out of this amount' in WAL)
+check('...and the confirmation shows what actually left plus the fee, instead '
+      'of echoing the number that was typed',
+      'd.amount_sent' in WAL and 'd.fee_deducted' in WAL)
 
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)
