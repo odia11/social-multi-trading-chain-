@@ -270,24 +270,25 @@ def main():
                'sponsor wallets are meant to be empty — a low balance here is not '
                'a problem to fix')
 
-    # What counts as "enough" to keep fronting: a few dollars per chain, which
-    # is dozens of first transactions. Below it the next user to arrive with
-    # only USDC falls through to the slow bridge, which is the failure this is
-    # here to catch BEFORE a user hits it.
+    # What counts as "enough" is measured in GRANTS, not in tokens.
     #
-    # Per SYMBOL, not per bucket. Grouping BNB with POL was wrong in both
-    # directions at once: one BNB is worth hundreds of times one POL, so a
-    # single figure either nags forever about a BSC wallet holding plenty, or
-    # calls a Polygon wallet funded when it holds fifteen cents. These are
-    # each roughly the same few dollars in their own token.
-    SPONSOR_MIN = {
-        'ETH': 0.002,     # Base, Arbitrum, Robinhood Chain
-        'BNB': 0.01,
-        'POL': 20.0,
-        'MATIC': 20.0,
-    }
-    SPONSOR_MIN_DEFAULT = 0.002       # an unknown native token is priced like ETH
-    SPONSOR_LOW_SOL = 0.05
+    # The previous version picked a figure per token by hand -- 0.002 ETH,
+    # 0.01 BNB, 20 POL, 0.05 SOL -- and those numbers answered a different
+    # question from the one the app asks itself. The journal was saying
+    # "needs 0.0200" while this check said "below 0.05", so the operator had
+    # two numbers for "how much do I send" and neither was the app's own.
+    #
+    # A grant is what it costs to activate one user's wallet, and the app
+    # already knows it: on EVM it is the gas price of that chain times the
+    # units a top-up needs times the safety multiplier (see
+    # _gas_sponsor_needs_funding); on Solana it is a constant. Deriving from
+    # those means this stays right when a gas price moves or a constant is
+    # retuned, instead of quietly drifting into a threshold nobody rechecked.
+    WARN_BELOW_GRANTS = 5     # fewer than this many users could be activated
+    TARGET_GRANTS     = getattr(d, 'GAS_SPONSOR_TARGET_GRANTS', 30)
+
+    def _grants_left(bal, one_grant):
+        return int(bal // one_grant) if one_grant > 0 else 0
 
     def evm_sponsor():
         if not _fronting:
@@ -302,13 +303,20 @@ def main():
             try:
                 bal = d.get_evm_native_balance(addr, chain)
                 sym = d.EVM_CHAINS[chain]['native_symbol']
-                low = SPONSOR_MIN.get(sym, SPONSOR_MIN_DEFAULT)
-                out.append(f'{chain} {bal:.5f} {sym}' + ('  ← low' if bal < low else ''))
-                if bal < low:
-                    # Says how much, not just which: "send BNB" leaves the
-                    # person guessing at an amount, and guessing low is the
-                    # one that leaves the wallet still unable to do its job.
-                    empty.append(f'{chain} (send ~{low:g} {sym})')
+                # The same arithmetic the app uses to decide the sponsor needs
+                # funding, so this check and that decision cannot disagree.
+                w3 = d._get_web3(chain)
+                one_grant = (w3.eth.gas_price * d.GAS_TOPUP_TX_GAS_UNITS
+                             * d.GAS_SPONSOR_TX_MULTIPLIER) / 1e18
+                left = _grants_left(bal, one_grant)
+                out.append(f'{chain} {bal:.5f} {sym} ({left} users)'
+                           + ('  ← low' if left < WARN_BELOW_GRANTS else ''))
+                if left < WARN_BELOW_GRANTS:
+                    # The amount to reach the target, not the amount to clear
+                    # the warning: topping up to just above the line means
+                    # being back here after a handful of users.
+                    need = max(0.0, one_grant * TARGET_GRANTS - bal)
+                    empty.append(f'{chain} (send {need:.5f} {sym})')
             except Exception as e:
                 out.append(f'{chain} unreadable ({type(e).__name__})')
                 unreadable.append(chain)
@@ -328,10 +336,20 @@ def main():
             raise RuntimeError('SOL_GAS_SPONSOR_PRIVATE_KEY is not set — users need '
                                'their own SOL for network fees')
         bal = d._get_user_sol(addr)
-        line = f'{addr}  {bal:.5f} SOL'
-        if bal < SPONSOR_LOW_SOL:
-            raise RuntimeError(line + f'\n         below {SPONSOR_LOW_SOL} SOL — '
-                               f'send a little SOL to this address')
+        # Solana's grant is a constant plus the reserve the sponsor keeps for
+        # its own transfer fees -- exactly the sum _sponsor_solana_gas checks
+        # before it will hand anything out, which is where "needs 0.0200" in
+        # the journal comes from.
+        one_grant = d.SOL_GAS_SPONSOR_GRANT + d.SOL_GAS_SPONSOR_MIN_RESERVE
+        left = _grants_left(bal, one_grant)
+        target = (d.SOL_GAS_SPONSOR_GRANT
+                  * getattr(d, 'SOL_GAS_SPONSOR_TARGET_GRANTS', TARGET_GRANTS)
+                  + d.SOL_GAS_SPONSOR_MIN_RESERVE)
+        line = f'{addr}  {bal:.5f} SOL ({left} users)'
+        if left < WARN_BELOW_GRANTS:
+            raise RuntimeError(
+                line + f'\n         enough for {left} more users — '
+                       f'send {max(0.0, target - bal):.4f} SOL to this address')
         return line
     attempt('Solana gas sponsor is funded', sol_sponsor, essential=False)
 

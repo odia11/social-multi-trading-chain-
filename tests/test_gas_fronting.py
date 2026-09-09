@@ -180,16 +180,26 @@ check('...and still saying, when it is off, that empty wallets are the expected 
 check('an empty sponsor wallet is now a FINDING, because with fronting on it is '
       'the thing that silently breaks the first trade of every USDC-only user',
       'top these up' in V and 'raise RuntimeError(line' in V)
-check('...judged per NATIVE SYMBOL, so a BNB balance is not measured against an '
-      'ETH yardstick — nor POL against a BNB one, which a two-bucket split got '
-      'wrong in both directions at once',
-      'SPONSOR_MIN = {' in V and "'BNB'" in V and "'POL'" in V
-      and 'SPONSOR_MIN.get(sym, SPONSOR_MIN_DEFAULT)' in V)
-check('...and an unrecognised native token still gets a floor rather than '
-      'silently passing', 'SPONSOR_MIN_DEFAULT' in V)
-check('...with the shortfall naming an amount, since "send BNB" leaves the '
-      'person guessing and guessing low leaves the wallet still unable to work',
-      'send ~{low:g} {sym}' in V)
+# Measured in GRANTS, not in hand-picked token amounts. Those answered a
+# different question from the app's own: the journal said "needs 0.0200" while
+# this check said "below 0.05", so the operator had two numbers for "how much
+# do I send" and neither was the one the code uses.
+check('...measured in what a grant actually costs, so the check and the app '
+      'cannot disagree about when the sponsor is short',
+      'WARN_BELOW_GRANTS' in V and '_grants_left(' in V)
+check('...on EVM using the same arithmetic _gas_sponsor_needs_funding uses, so '
+      'it follows the gas price instead of a constant someone picked once',
+      'w3.eth.gas_price * d.GAS_TOPUP_TX_GAS_UNITS' in V
+      and 'd.GAS_SPONSOR_TX_MULTIPLIER' in V)
+check('...and on Solana the grant plus the reserve, which is exactly the sum '
+      '_sponsor_solana_gas requires before it hands anything out',
+      'd.SOL_GAS_SPONSOR_GRANT + d.SOL_GAS_SPONSOR_MIN_RESERVE' in V)
+check('the balance is reported as how many users it can still activate, which '
+      'is the thing the number is for', "({left} users)" in V)
+check('the shortfall names the amount to reach the TARGET, not the amount to '
+      'clear the warning — topping up to just above the line means being back '
+      'here after a handful of users',
+      'one_grant * TARGET_GRANTS - bal' in V and 'target - bal' in V)
 check('...and a missing key is called out as the contradiction it is when the '
       'deployment says it fronts',
       'is not set, but this ' in V and 'deployment fronts gas' in V)
