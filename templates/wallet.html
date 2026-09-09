@@ -702,7 +702,7 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
               <a class="dep-btn dep-scan" href="https://bscscan.com/address/{{ bsc_deposit_address }}" target="_blank" rel="noopener">View on BscScan ↗</a>
             </div>
             <div style="font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5">
-              This is one shared EVM wallet — the same address also receives deposits on Base, Arbitrum, Polygon and Robinhood Chain. Starting a new chain from a completely empty wallet needs a tiny bit of <em>that chain's own</em> native gas token sent here first (e.g. ETH for Base/Arbitrum/Robinhood, POL for Polygon) — after that, the bot tops up its own gas automatically from your USDC.
+              This is one shared EVM wallet — the same address also receives deposits on Base, Arbitrum, Polygon and Robinhood Chain. You only need USDC here: OrcAgent puts up the network fee for your first trade on a new chain, charges it to that trade, and after that the wallet tops up its own gas from your USDC. If it ever tells you it can't, sending a few cents of that chain's own gas token here (ETH for Base/Arbitrum/Robinhood, POL for Polygon, BNB for BSC) unblocks it immediately.
             </div>
           </div>
         </div>

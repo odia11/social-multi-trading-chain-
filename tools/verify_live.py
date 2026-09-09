@@ -255,37 +255,71 @@ def main():
     # ── the wallets that have to hold something ──
     section('sponsor wallets')
 
-    if not getattr(d, 'ORCAGENT_FRONTS_GAS', False):
-        report(OK, 'OrcAgent fronts nothing',
-               'users fund their own gas, so the sponsor wallets are meant to be '
-               'empty — a low balance here is not a problem to fix')
+    # Whether an empty sponsor wallet is a problem depends entirely on the
+    # rule, so the rule is reported first and the balance checks read it.
+    _fronting = bool(getattr(d, 'ORCAGENT_FRONTS_GAS', False))
+    if _fronting:
+        report(OK, 'OrcAgent fronts gas',
+               'a user holding only USDC can trade on an EVM chain without first '
+               'acquiring its gas token — the sponsor puts up the native token and '
+               'the trade\'s own quote charges the user for it. These wallets need '
+               'a few euros each; that is float, and it comes back.')
+    else:
+        report(OK, 'this deployment fronts nothing',
+               'ORCAGENT_FRONTS_GAS is off, so users fund their own gas and the '
+               'sponsor wallets are meant to be empty — a low balance here is not '
+               'a problem to fix')
+
+    # What counts as "enough" to keep fronting: roughly a handful of first
+    # transactions per chain. Below it the next user to arrive with only USDC
+    # falls through to the slow bridge, which is the failure this is here to
+    # catch BEFORE a user hits it.
+    SPONSOR_LOW_NATIVE = 0.002        # ETH-priced chains
+    SPONSOR_LOW_CHEAP = 0.5           # BNB/POL-priced chains
+    SPONSOR_LOW_SOL = 0.05
 
     def evm_sponsor():
-        if not d.ORCAGENT_FRONTS_GAS:
+        if not _fronting:
             return 'not used (ORCAGENT_FRONTS_GAS is off)'
         addr = d._gas_sponsor_address()
         if not addr:
-            raise RuntimeError('GAS_SPONSOR_PRIVATE_KEY is not set — an empty EVM '
-                               'wallet falls back to the slower SOL bootstrap bridge')
-        out = []
+            raise RuntimeError('GAS_SPONSOR_PRIVATE_KEY is not set, but this '
+                               'deployment fronts gas — every EVM wallet at zero '
+                               'falls through to the slower SOL bootstrap bridge')
+        out, empty, unreadable = [], [], []
         for chain in d.EVM_CHAINS:
             try:
                 bal = d.get_evm_native_balance(addr, chain)
-                out.append(f'{chain} {bal:.5f} {d.EVM_CHAINS[chain]["native_symbol"]}')
+                sym = d.EVM_CHAINS[chain]['native_symbol']
+                low = SPONSOR_LOW_CHEAP if sym in ('BNB', 'POL', 'MATIC') else SPONSOR_LOW_NATIVE
+                out.append(f'{chain} {bal:.5f} {sym}' + ('  ← low' if bal < low else ''))
+                if bal < low:
+                    empty.append(f'{chain} (send {sym})')
             except Exception as e:
                 out.append(f'{chain} unreadable ({type(e).__name__})')
-        return f'{addr[:10]}…  ' + ' · '.join(out)
-    attempt('EVM gas sponsor', evm_sponsor, essential=False)
+                unreadable.append(chain)
+        line = f'{addr}\n         ' + ' · '.join(out)
+        if empty:
+            # Raised, not returned: the wallet being readable is not the
+            # thing being checked — its being able to do its job is.
+            raise RuntimeError(line + '\n         top these up: ' + ', '.join(empty))
+        return line
+    attempt('EVM gas sponsor is funded', evm_sponsor, essential=False)
 
     def sol_sponsor():
-        if not d.ORCAGENT_FRONTS_GAS:
+        if not _fronting:
             return 'not used (ORCAGENT_FRONTS_GAS is off)'
         addr = d._sol_gas_sponsor_address()
         if not addr:
             raise RuntimeError('SOL_GAS_SPONSOR_PRIVATE_KEY is not set — users need '
                                'their own SOL for network fees')
-        return f'{addr[:10]}…  {d._get_user_sol(addr):.5f} SOL'
-    attempt('Solana gas sponsor', sol_sponsor, essential=False)
+        bal = d._get_user_sol(addr)
+        line = f'{addr}  {bal:.5f} SOL'
+        if bal < SPONSOR_LOW_SOL:
+            raise RuntimeError(line + f'\n         below {SPONSOR_LOW_SOL} SOL — '
+                               f'send a little SOL to this address')
+        return line
+    attempt('Solana gas sponsor is funded', sol_sponsor, essential=False)
 
     # ── what it all means ──
     section('summary')

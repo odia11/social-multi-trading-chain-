@@ -7431,10 +7431,10 @@ def _te_needs_sponsored_gas(chain: str, address: str) -> bool:
     """
     if te_registry.get_chain(chain).kind == 'svm':
         return False
-    # With fronting off, gas is never "sponsored" -- it is simply the user's
-    # cost, which is how the quote already prices it. The label only ever
-    # affected whether a cost was marked as fronted, never whether it was
-    # charged.
+    # Where a deployment has turned fronting off, nothing is ever labelled
+    # sponsored -- gas is simply the user's cost, which is how the quote
+    # already prices it. The label only ever affected whether a cost was
+    # marked as fronted, never whether it was charged.
     if not ORCAGENT_FRONTS_GAS:
         return False
     if not (GAS_SPONSOR_PRIVATE_KEY and address):
@@ -8365,11 +8365,12 @@ def _sponsor_evm_gas(user_id: int, wallet: str, evm_address: str, chain: str) ->
     key by the caller -- this function never accepts a user-supplied
     destination, so a grant can only ever land in a wallet the app itself
     controls the key for."""
-    # Refused before anything else, and regardless of whether a key exists:
-    # the platform does not front a user's costs. The caller falls back to
-    # funding it from the user's own balance.
+    # The rule is checked before anything else, and regardless of whether a
+    # key exists, so that a deployment which has turned fronting off refuses
+    # at the source rather than merely running out of money. The caller falls
+    # back to funding the wallet from the user's own balance.
     if not ORCAGENT_FRONTS_GAS:
-        return False, 'OrcAgent does not front gas — the user funds their own', ''
+        return False, 'this deployment does not front gas — the user funds their own', ''
     if not GAS_SPONSOR_PRIVATE_KEY:
         return False, 'gas sponsorship not configured', ''
     if chain not in EVM_CHAINS:
@@ -8586,9 +8587,9 @@ def _ensure_solana_gas(wallet: str, private_key: str) -> tuple:
     -- ok=True means go ahead (there was already enough SOL, or a grant just
     landed). A no-op returning True whenever sponsorship isn't configured,
     so behaviour without a sponsor key is exactly what it was before."""
-    # Same rule as the EVM side: no fronting. Returning True is not a claim
-    # that gas is present -- it never was -- it means "nothing to do here",
-    # and the swap itself reports a genuine shortfall.
+    # Same rule as the EVM side, and the same escape hatch. Returning True is
+    # not a claim that gas is present -- it never was -- it means "nothing to
+    # do here", and the swap itself reports a genuine shortfall.
     if not ORCAGENT_FRONTS_GAS or not SOL_GAS_SPONSOR_PRIVATE_KEY:
         return True, ''
     try:
@@ -8774,12 +8775,12 @@ def _bootstrap_evm_gas_via_bridge(user_id: int, wallet: str, evm_address: str, c
         # Worded as a concrete instruction (how much, and what happens next),
         # not "bootstrap"/"bridge" jargon -- this is what actually reaches
         # the Buy panel via "Cannot trade on {chain} yet -- {this message}".
-        # Two ways out, and the direct one first because it is the better
-        # one: a few cents of the chain's own gas token beats bridging $5 of
-        # SOL to enable a $1 trade. The bridge route stays because it works
-        # from capital the user already holds on Solana, which is the case it
-        # was built for -- but offering only that was advice from when the
-        # platform still fronted gas and the bridge was the rare fallback.
+        # Reaching this line means the sponsor already declined, so this is
+        # the rare case rather than the normal route. Two ways out, and the
+        # direct one first because it is the better one: a few cents of the
+        # chain's own gas token beats bridging $5 of SOL to enable a $1 trade.
+        # The bridge stays below it because it works from capital the user
+        # already holds on Solana, which is the case it was built for.
         _evm_addr_hint = evm_address or 'your wallet on this chain'
         add_user_log(wallet, f'[bot-{chain}] Cannot activate {chain} yet — send a little '
                              f'{native_symbol} to {_evm_addr_hint}, or deposit at least '
@@ -8869,15 +8870,16 @@ def _ensure_evm_gas_locked(user_id: int, wallet: str, private_key: str, evm_addr
     native_symbol = EVM_CHAINS[chain]['native_symbol']
     if native_bal_wei <= 0:
         # A wallet at literal zero cannot pay for its own first transaction,
-        # so something has to move value in. With ORCAGENT_FRONTS_GAS off --
-        # the default -- that is a bridge from the user's OWN SOL, and this
-        # sponsor call refuses immediately.
+        # so something has to move value in, and it cannot be the wallet's own
+        # stablecoin -- moving that is itself a transaction. The sponsor is
+        # the route that works here: it lands in seconds, on every chain, and
+        # the trade's own quote charges the user for it.
         #
-        # The sponsor path remains for a deployment that deliberately turns
-        # fronting on: it lands in seconds rather than minutes and works on
-        # every chain, which is worth having when the platform is willing to
-        # put up the float. It is off because it is the only path here that
-        # costs the platform anything.
+        # The bridge below is the fallback for when the sponsor declines --
+        # the rule is off, no key, the anti-farming gate, or an empty sponsor
+        # wallet. It works from capital the user already holds on Solana,
+        # which is worth having, but it is slower and needs several dollars of
+        # SOL to enable a one-dollar trade.
         _sp_ok, _sp_msg, _sp_tx = _sponsor_evm_gas(user_id, wallet, evm_address, chain)
         if _sp_ok:
             return True, '', None
@@ -13312,21 +13314,33 @@ SOLANA_BASE_CURRENCY = 'USDC'
 
 # Whether OrcAgent's own wallet ever fronts a user's gas.
 #
-# OFF, and off by default. The brief was that OrcAgent subsidises nothing,
-# and the first reading of that was "front it, then charge it back" -- net
-# zero, but it still means the platform parking real money on six chains and
-# carrying the risk of a grant that is never recovered. The plainer reading
-# is the right one: users fund their own gas, and OrcAgent puts up nothing.
+# ON, and on unless a deployment explicitly turns it off. Fronting and
+# subsidising stopped being the same thing in phase 4: the gas a trade needs
+# is priced into that trade's quote and charged to the user, so what the
+# sponsor wallet puts up comes straight back out of the USDC the user was
+# spending anyway. It is float, not cost -- working capital that goes out and
+# returns on the same trade.
 #
-# Nothing is lost by this. A wallet low on gas already tops itself up from
-# the user's OWN stablecoin on that chain, and a wallet at literal zero
-# bridges a little from the user's OWN SOL. Sponsorship was only ever a
-# faster route for the second case, and it is the only one that costs the
-# platform anything.
+# It is on because it is the only thing that makes the product's premise
+# work. A user holding nothing but USDC has no native token on Arbitrum,
+# Base, BSC or Polygon, and cannot pay for the very first transaction that
+# would get them one. Without a front, that user is told to go and acquire
+# gas somewhere else before they can trade -- which is exactly the errand
+# this platform exists to remove. The remaining routes are worse, not
+# equivalent: topping up from the user's own stablecoin needs a transaction
+# the wallet cannot yet pay for, and bridging their own SOL means moving
+# several dollars through a bridge to enable a one-dollar trade.
 #
-# The accounting from phase 4 stays: it reports what past grants cost and
-# whether they came back. With this off, no new ones are made.
-ORCAGENT_FRONTS_GAS = os.getenv('ORCAGENT_FRONTS_GAS', '').strip().lower() in ('1', 'true', 'yes', 'on')
+# What has to stay true, and is enforced by tests: the user is still CHARGED
+# for their gas -- the sponsor is a payment rail, never a discount -- and the
+# rule stays reversible, so a deployment unwilling to put up the float sets
+# ORCAGENT_FRONTS_GAS=0 and every sponsor path refuses at the source rather
+# than merely running dry.
+#
+# The accounting from phase 4 is what makes that checkable: it reports what
+# grants cost and whether they came back.
+ORCAGENT_FRONTS_GAS = os.getenv(
+    'ORCAGENT_FRONTS_GAS', '').strip().lower() not in ('0', 'false', 'no', 'off')
 # The smallest sensible USDC buy. Below this the network fee is a large share
 # of the trade.
 SOLANA_MIN_SPEND_USDC = 1.0
