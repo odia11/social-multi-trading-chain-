@@ -24139,6 +24139,145 @@ def api_withdraw():
     return jsonify({'ok': True, 'signature': sig})
 
 
+_evm_withdraw_locks: dict = {}
+_evm_withdraw_locks_guard = threading.Lock()
+_recent_evm_withdrawals: dict = {}
+EVM_WITHDRAW_REPEAT_WINDOW = 30   # seconds a repeat of the same withdrawal is treated as a double-tap
+
+def _get_evm_withdraw_lock(wallet: str, chain: str) -> threading.Lock:
+    """Serializes withdrawals from one wallet on one chain.
+
+    Two requests arriving together would each read the same balance, each
+    pass the check, and each broadcast -- sending the money twice. Same
+    reasoning as _get_sell_lock, and the same shape.
+    """
+    with _evm_withdraw_locks_guard:
+        lock = _evm_withdraw_locks.get((wallet, chain))
+        if lock is None:
+            lock = threading.Lock()
+            _evm_withdraw_locks[(wallet, chain)] = lock
+        return lock
+
+
+@app.route('/api/withdraw/evm', methods=['POST'])
+@rate_limit(10, 60)
+def api_withdraw_evm():
+    """Send this user's own stablecoin out to an address they name.
+
+    The EVM counterpart of /api/withdraw, which is Solana-only: it validates
+    a base58 address and signs with a Solana keypair, so an 0x destination
+    was simply rejected and there was no way to move USDC off an EVM chain
+    at all.
+
+    Everything that decides anything is read on the server. The amount is
+    checked against the balance this server reads, not one the page sent,
+    and the destination is validated here even though the form validates it
+    too -- the endpoint is reachable without the form.
+    """
+    ip     = request.remote_addr or '0.0.0.0'
+    wallet = _authenticated_wallet()
+    if not wallet:
+        _record_ip_failure(ip)
+        return jsonify({'ok': False, 'error': 'Connect a wallet first'}), 401
+
+    # Same budget as the Solana side: this moves real money out.
+    if not _rate_ok('withdraw_wallet:' + wallet, 3, 3600):
+        return jsonify({'ok': False, 'error': 'Max 3 withdrawals per hour'}), 429
+
+    body       = request.json or {}
+    chain      = str(body.get('chain', '')).strip().lower()
+    to_address = str(body.get('to_address', '')).strip()
+    try:
+        amount = float(body.get('amount', 0))
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'Invalid amount'}), 400
+
+    if chain not in EVM_CHAINS:
+        return jsonify({'ok': False, 'error': 'Unknown chain'}), 400
+    if not is_valid_evm_address(to_address):
+        return jsonify({'ok': False, 'error': 'Destination must be a 0x address'}), 400
+    if amount <= 0:
+        return jsonify({'ok': False, 'error': 'Amount must be greater than 0'}), 400
+
+    sym        = user_currency_label(chain)
+    chain_name = SURGE_ALERT_CHAIN_NAMES.get(chain, chain)
+
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        row = conn.execute(
+            'SELECT id, encrypted_private_key_bsc, bsc_wallet_address '
+            'FROM users WHERE wallet_address=?', (wallet,)).fetchone()
+    finally:
+        conn.close()
+    if not row or not row[1]:
+        return jsonify({'ok': False,
+                        'error': 'No EVM trading wallet configured — add it in Settings first'}), 400
+    user_id, enc_blob, evm_address = row[0], row[1], row[2]
+
+    # Sending to the wallet the money is already in is a mistake worth
+    # catching rather than a transaction worth paying for.
+    if evm_address and to_address.lower() == evm_address.lower():
+        return jsonify({'ok': False,
+                        'error': 'That is this wallet\'s own address — nothing to send'}), 400
+
+    lock = _get_evm_withdraw_lock(wallet, chain)
+    if not lock.acquire(blocking=False):
+        return jsonify({'ok': False,
+                        'error': 'A withdrawal from this chain is already in progress'}), 409
+    try:
+        # A double-tap, a retry after a timeout, a refresh mid-send: the
+        # request repeats, and a withdrawal that runs twice has sent the
+        # money twice. The lock covers concurrent requests; this covers
+        # sequential ones, where the first has already finished.
+        _key = (wallet, chain, to_address.lower(), round(amount, 6))
+        _last = _recent_evm_withdrawals.get(_key, 0)
+        if time.time() - _last < EVM_WITHDRAW_REPEAT_WINDOW:
+            return jsonify({'ok': False,
+                            'error': f'That exact withdrawal was just sent. Wait '
+                                     f'{EVM_WITHDRAW_REPEAT_WINDOW}s before repeating it.'}), 409
+
+        try:
+            balance = get_evm_usdc_balance(evm_address, chain)
+        except Exception as e:
+            return jsonify({'ok': False,
+                            'error': f'Could not read your {chain_name} balance: {e}'}), 502
+        if amount > balance:
+            return jsonify({'ok': False,
+                            'error': f'Insufficient balance. You have {balance:.4f} {sym} '
+                                     f'on {chain_name}.'}), 400
+
+        # An ERC20 transfer is paid for in the chain's NATIVE token, not in
+        # the stablecoin being sent -- so a wallet holding only USDC cannot
+        # move it. Same machinery a buy uses, including the sponsor.
+        with _use_key(enc_blob, wallet) as _pk:
+            gas_ok, gas_msg, _bridge_id = _ensure_evm_gas(user_id, wallet, _pk, evm_address, chain)
+            if not gas_ok:
+                return jsonify({'ok': False,
+                                'error': f'Cannot send from {chain_name} yet — {gas_msg}'}), 400
+            try:
+                tx_hash = _send_evm_usdc_fee(_pk, to_address, amount, chain)
+            except Exception as e:
+                err = _redact_keys(str(e))
+                short = wallet[:6] + '...' + wallet[-4:]
+                print(f'[withdraw-evm] {chain} TX failed for {short}: {err}', flush=True)
+                return jsonify({'ok': False, 'error': 'Transaction failed: ' + err}), 500
+
+        # Recorded only once it is actually on-chain -- _send_evm_usdc_fee
+        # waits for the receipt and raises on a revert, so reaching this line
+        # means it happened. A submitted transaction is not a completed one.
+        _recent_evm_withdrawals[_key] = time.time()
+    finally:
+        lock.release()
+
+    short = wallet[:6] + '...' + wallet[-4:]
+    add_user_log(wallet, f'[{short}] WITHDRAW: {amount} {sym} on {chain_name} → '
+                         f'{to_address[:6]}...{to_address[-4:]}  TX:{tx_hash[:16]}...')
+    print(f'[withdraw-evm] {short} sent {amount} {sym} on {chain} to '
+          f'{to_address[:6]}...  TX:{tx_hash[:20]}...', flush=True)
+    return jsonify({'ok': True, 'tx_hash': tx_hash, 'chain': chain,
+                    'explorer': f'{EVM_CHAINS[chain].get("explorer", "")}/tx/{tx_hash}'})
+
+
 # ── BALANCE ──
 @app.route('/api/balance')
 @rate_limit(30, 60)
