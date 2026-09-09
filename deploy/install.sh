@@ -43,9 +43,18 @@ mkdir -p "$APP_DIR"
 #     #!/home/<you>/orcagent/venv/bin/python3
 # and the service user cannot read another user's home, so it fails to exec
 # with "Permission denied" on a file that looks perfectly executable.
+#
+# .secret_key is excluded because --delete would remove it: it is gitignored,
+# so it does not exist in the clone, and rsync deletes anything in $APP_DIR
+# that the source does not have. That is exactly what happened -- every deploy
+# deleted the key that signs login sessions, the next start generated a fresh
+# one, and every user in every browser was logged out and had to reconnect
+# their wallet. The app now keeps the key in DATA_DIR instead, and this
+# exclusion protects any install that still has one here, including long
+# enough for that migration to run once.
 if command -v rsync >/dev/null 2>&1; then
   rsync -a --delete --exclude '.git' --exclude '__pycache__' --exclude '*.db' \
-        --exclude 'venv' "$REPO_DIR"/ "$APP_DIR"/
+        --exclude 'venv' --exclude '.secret_key' "$REPO_DIR"/ "$APP_DIR"/
 else
   # Without rsync there is no --delete, so removed files linger. Worth knowing
   # rather than silently getting a different deploy.

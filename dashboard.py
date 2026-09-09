@@ -311,21 +311,78 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000
 if _COMPRESS_OK:
     app.config['COMPRESS_MIMETYPES'] = ['text/html','text/css','text/xml','text/javascript','application/json','application/javascript']
     _Compress(app)
-def _load_secret_key() -> bytes:
+def _load_secret_key(data_dir: str) -> bytes:
+    """The key that signs login sessions. It has to survive a deploy.
+
+    It did not. The generated key was written next to dashboard.py -- inside
+    $APP_DIR -- and install.sh syncs that directory with `rsync --delete`
+    from a clone where .secret_key is gitignored and therefore absent. So
+    every single deploy deleted it, the next start generated a new one, and
+    every signed session in every browser became invalid at once. Everyone
+    was logged out and had to reconnect their wallet, every time, and nothing
+    anywhere said why.
+
+    Two changes, and both are needed. The key now lives in DATA_DIR, the one
+    directory a redeploy does not touch, and install.sh excludes it as a
+    belt-and-braces measure for any install that still has one in the old
+    place. That exclusion is also what makes the migration below possible:
+    without it the old key is deleted before this code ever runs, and moving
+    to the new location would itself log everyone out one final time.
+
+    SECRET_KEY in the environment still wins over all of it -- that is the
+    right way to run this, because it survives losing the disk as well.
+    """
     _env = os.getenv('SECRET_KEY')
     if _env:
         return _env.encode() if isinstance(_env, str) else _env
-    _key_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.secret_key')
+
+    _key_path = os.path.join(data_dir, '.secret_key')
+    _legacy   = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.secret_key')
+
     try:
         with open(_key_path, 'rb') as _f:
             return _f.read()
     except FileNotFoundError:
-        _key = os.urandom(32)
+        pass
+
+    # An existing key in the old location is MOVED, not regenerated. Its whole
+    # value is that it is the same key as yesterday.
+    try:
+        with open(_legacy, 'rb') as _f:
+            _key = _f.read()
+        if _key:
+            with open(_key_path, 'wb') as _f:
+                _f.write(_key)
+            os.chmod(_key_path, 0o600)
+            try:
+                os.remove(_legacy)
+            except OSError:
+                pass
+            print(f'[startup] moved the session key out of the app directory into '
+                  f'{data_dir} — deploys no longer log everyone out', flush=True)
+            return _key
+    except FileNotFoundError:
+        pass
+    except Exception as _e:
+        print(f'[startup] could not migrate the old session key ({_e}) — '
+              f'a new one will be generated and everyone will be logged out once',
+              flush=True)
+
+    _key = os.urandom(32)
+    try:
         with open(_key_path, 'wb') as _f:
             _f.write(_key)
-        return _key
+        os.chmod(_key_path, 0o600)
+        print(f'[startup] generated a new session key in {data_dir}. Everyone is '
+              f'logged out once; this should not happen again.', flush=True)
+    except Exception as _e:
+        # A key that cannot be stored is a key that changes on every restart.
+        # Say so loudly rather than looking like it worked.
+        print(f'[startup] ⚠ COULD NOT SAVE the session key to {data_dir} ({_e}). '
+              f'Every restart will log all users out until this is fixed — set '
+              f'SECRET_KEY in /etc/orcagent.env to stop it.', flush=True)
+    return _key
 
-app.secret_key = _load_secret_key()
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 app.config['SESSION_COOKIE_HTTPONLY']    = True
 app.config['SESSION_COOKIE_SAMESITE']   = 'Lax'
@@ -546,6 +603,12 @@ except Exception as _dd_err:
     print(f'[startup] DATA_DIR {_DATA_DIR!r} is not usable ({_dd_err}) — '
           f'falling back to the app directory', flush=True)
     _DATA_DIR = BASE
+# Set here, not up with the other app.config lines, because the key belongs in
+# DATA_DIR and that is only resolved above. Nothing between the two touches a
+# session -- route decorators only register -- so this still runs long before
+# the first request.
+app.secret_key = _load_secret_key(_DATA_DIR)
+
 LOG_FILE     = os.path.join(_DATA_DIR, 'trades.log')
 DB_FILE        = os.path.join(_DATA_DIR, 'orcagent.db')
 BACKUP_DIR     = os.path.join(_DATA_DIR, 'backups')
