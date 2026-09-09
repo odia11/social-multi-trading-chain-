@@ -44,7 +44,7 @@ trap '_rc=$?
         if [ "$PULLED" != 1 ]; then
           printf "\n  This stopped BEFORE the pull, so a newer version of this script\n"
           printf "  cannot reach you by running it again. Pull by hand first:\n\n"
-          printf "      sudo git -C %s pull --ff-only\n" "$REPO_DIR"
+          printf "      git -C %s pull --ff-only\n" "$REPO_DIR"
           printf "      sudo bash %s/deploy/update.sh\n" "$REPO_DIR"
         fi
       fi' EXIT
@@ -77,6 +77,41 @@ if [ ! -e "$REPO_DIR/.git" ]; then
   fi
   die "$REPO_DIR is not a git clone (no .git), and none was found in a home
     directory. Clone the repository first, then run deploy/update.sh from it."
+fi
+
+# ── git runs as the clone's owner, never as root ──
+#
+# This script needs sudo (systemctl, /opt, /data) but git MUST NOT inherit it.
+# A `git pull` run as root writes root-owned files into .git/objects, and from
+# then on the person who owns the clone cannot pull at all:
+#
+#     error: insufficient permission for adding an object to repository
+#     database .git/objects
+#
+# Which is exactly what happened: the deploy pulled as root, and every later
+# `git pull` from the normal account failed. The repository was left in a
+# state only sudo could write to -- caused entirely by this script.
+#
+# So: work out who owns the clone and drop back to them for anything git.
+REPO_OWNER="$(stat -c '%U' "$REPO_DIR/.git" 2>/dev/null || echo root)"
+REPO_GROUP="$(stat -c '%G' "$REPO_DIR/.git" 2>/dev/null || echo root)"
+git_repo(){
+  if [ "$REPO_OWNER" != root ] && id -u "$REPO_OWNER" >/dev/null 2>&1; then
+    runuser -u "$REPO_OWNER" -- git -C "$REPO_DIR" "$@"
+  else
+    git -C "$REPO_DIR" "$@"
+  fi
+}
+
+# And repair the damage already done, rather than only stopping it recurring.
+# Anyone whose clone was poisoned by an earlier version of this script is
+# locked out of pulling the version that fixes it, so the fix has to be able
+# to run without their help. Cheap: -quit stops at the first hit.
+if [ "$REPO_OWNER" != root ] && [ -n "$(find "$REPO_DIR/.git" -user root -print -quit 2>/dev/null)" ]; then
+  say "Repairing repository ownership"
+  echo "  parts of $REPO_DIR/.git are owned by root — an earlier deploy pulled"
+  echo "  as root. Giving them back to $REPO_OWNER so you can pull normally."
+  chown -R "$REPO_OWNER:$REPO_GROUP" "$REPO_DIR/.git"
 fi
 
 # ── 1. a backup you could actually restore from ──
@@ -136,14 +171,14 @@ fi
 
 # ── 2. the code ──
 say "Fetching the latest code"
-BEFORE="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-git -C "$REPO_DIR" pull --ff-only
-AFTER="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+BEFORE="$(git_repo rev-parse --short HEAD 2>/dev/null || echo unknown)"
+git_repo pull --ff-only
+AFTER="$(git_repo rev-parse --short HEAD 2>/dev/null || echo unknown)"
 if [ "$BEFORE" = "$AFTER" ]; then
   echo "  already at $AFTER — nothing new"
 else
   echo "  $BEFORE -> $AFTER"
-  git -C "$REPO_DIR" log --oneline "$BEFORE..$AFTER" | head -20 | sed 's/^/    /'
+  git_repo log --oneline "$BEFORE..$AFTER" | head -20 | sed 's/^/    /'
 fi
 
 PULLED=1
@@ -199,8 +234,10 @@ somewhere else and keeps the old absolute path. Rebuild it:
 
 To go back to the code that was working instead:
 
-    cd $REPO_DIR && sudo git checkout $BEFORE
-    sudo bash deploy/install.sh
+    git -C $REPO_DIR checkout $BEFORE
+        ^ without sudo: a git command run as root leaves root-owned
+          directories under .git and you will not be able to pull again.
+    sudo bash $REPO_DIR/deploy/install.sh
     sudo systemctl restart orcagent
 
 Your database was NOT touched by this script, and there is a

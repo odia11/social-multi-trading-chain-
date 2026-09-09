@@ -198,8 +198,10 @@ check('it does the whole deploy — backup, pull, install, restart, verify — s
 check('it backs the database up BEFORE anything else moves',
       # Anchored on the pull command itself, not on a bare 'git -C' — that
       # string also appears in the recovery advice the failure trap prints,
-      # which sits near the top of the file and is not a step at all.
-      UPDATE.index('.backup') < UPDATE.index('git -C "$REPO_DIR" pull'))
+      # which sits near the top of the file and is not a step at all. The pull
+      # now goes through git_repo, which runs it as the clone's owner instead
+      # of as root; see tests/test_deploy_git_owner.py for why.
+      UPDATE.index('.backup') < UPDATE.index('git_repo pull'))
 check('...with .backup rather than cp, since a plain copy of a database being '
       'written to can be a file that no longer opens', "sqlite3 \"$DB\" \".backup" in UPDATE)
 check('...and OPENS that backup to prove it is restorable. A backup nobody has '
@@ -216,7 +218,7 @@ check('...and prints the log when it does not come back, instead of leaving you 
       'to find it', 'journalctl -u orcagent' in UPDATE)
 check('...with the exact commands to go back to the commit that was working — '
       'the moment you need those is the moment you least want to compose them',
-      'git checkout $BEFORE' in UPDATE and 'ROLLBACK' in UPDATE)
+      'checkout $BEFORE' in UPDATE and 'ROLLBACK' in UPDATE)
 check('...and it names where the verified database copy is',
       '${BACKUP:-(none taken)}' in UPDATE)
 
@@ -297,10 +299,13 @@ check('a failure BEFORE the pull says the script cannot fix itself by being '
       'PULLED' in UPDATE and 'cannot reach you by running it again' in UPDATE)
 check('...and gives the two commands that break the deadlock, with the real '
       'clone path filled in rather than a placeholder',
-      'sudo git -C %s pull --ff-only' in UPDATE and '"$REPO_DIR"' in UPDATE)
+      'git -C %s pull --ff-only' in UPDATE and '"$REPO_DIR"' in UPDATE)
+check('...and that pull is NOT offered under sudo. It used to be, and a pull '
+      'run as root is precisely what leaves the clone unpullable afterwards',
+      'sudo git' not in UPDATE)
 check('...and stops offering that advice once the pull has happened, when it '
       'would be wrong', 'PULLED=1' in UPDATE
-      and UPDATE.index('PULLED=1') > UPDATE.index('git -C "$REPO_DIR" pull'))
+      and UPDATE.index('PULLED=1') > UPDATE.index('git_repo pull'))
 
 
 # ── the outage this actually caused ───────────────────────────────────────

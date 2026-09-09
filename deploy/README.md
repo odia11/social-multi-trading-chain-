@@ -186,6 +186,13 @@ That is the whole thing. It backs the database up and verifies the backup
 opens, pulls, reinstalls, restarts, waits until the app actually answers, and
 finishes by checking that the services it trades through are still reachable.
 
+It pulls for you — there is no need to run `git pull` first. And although the
+script needs `sudo`, it runs git as the account that owns the clone rather
+than as root. That matters: a `git pull` made as root leaves root-owned
+directories under `.git/objects`, and from then on the owner of the clone
+cannot pull at all (`insufficient permission for adding an object`). For the
+same reason, never run git here under `sudo` yourself.
+
 If the app does not come back it prints the log and the exact commands to
 return to the commit that was working — the moment you need those is the
 moment you least want to be composing them.
