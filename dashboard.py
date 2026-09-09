@@ -8538,6 +8538,14 @@ def _sponsor_solana_gas(user_id: int, wallet: str, trading_address: str) -> tupl
     trading_address must be derived by the caller from the user's stored
     trading key -- never a user-supplied destination, same rule as the EVM
     side, so a grant can only land in a wallet this app holds the key for."""
+    # The rule, checked here and before the key, exactly as _sponsor_evm_gas
+    # does it -- and for the same reason: a gate that lives in ONE caller only
+    # covers that caller. This had it in _ensure_solana_gas alone, so the
+    # background sweep in gas_manager.py, which calls this directly, would have
+    # gone on handing out SOL every 15 minutes for a deployment that had turned
+    # fronting off. A switch that only some paths respect is not a switch.
+    if not ORCAGENT_FRONTS_GAS:
+        return False, 'this deployment does not front gas — the user funds their own', ''
     if not SOL_GAS_SPONSOR_PRIVATE_KEY:
         return False, 'Solana gas sponsorship not configured', ''
     if not is_valid_solana_address(trading_address):

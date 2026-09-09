@@ -98,8 +98,30 @@ check('with the rule off, the EVM sponsor refuses BEFORE it looks at whether a '
 check('...and says why, so the fallback log reads as a choice rather than a '
       'failure', 'does not front gas' in evm)
 
-sol = fn('_ensure_solana_gas')
-check('the Solana side honours the same switch', 'not ORCAGENT_FRONTS_GAS' in sol)
+# The gate has to live in the function that MOVES the money, not in one of
+# its callers. It was in _ensure_solana_gas only, and gas_manager's background
+# sweep calls _sponsor_solana_gas directly — so a deployment with fronting off
+# would have gone on granting SOL every 15 minutes. A switch that only some
+# paths respect is not a switch.
+sol = fn('_sponsor_solana_gas')
+check('the Solana sponsor refuses at the source too, before the key, so every '
+      'caller is covered and not just the one that happened to check',
+      'if not ORCAGENT_FRONTS_GAS' in sol
+      and sol.index('ORCAGENT_FRONTS_GAS') < sol.index('SOL_GAS_SPONSOR_PRIVATE_KEY'))
+sol_caller = fn('_ensure_solana_gas')
+check('...and its caller still short-circuits as well, which saves the work '
+      'rather than being what makes the rule hold',
+      'not ORCAGENT_FRONTS_GAS' in sol_caller)
+
+GM = open(REPO + '/gas_manager.py').read()
+check('the background sweep that grants SOL checks the rule before it starts, '
+      'so it does not read every user\'s balance to reach a decision already '
+      'known', "getattr(_app, 'ORCAGENT_FRONTS_GAS', True)" in GM)
+check('...while the EVM sweep is deliberately NOT gated, because it tops wallets '
+      'up from the USER\'S own stablecoin — that is their money and must keep '
+      'working whatever the platform fronts',
+      '_ensure_evm_gas(' in GM
+      and 'ORCAGENT_FRONTS_GAS' not in GM.split('def _sweep_user_chain')[1])
 
 # ── the user pays, which is what makes this a rail and not a subsidy ───────
 q = fn('_te_needs_sponsored_gas')

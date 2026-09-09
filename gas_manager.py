@@ -91,7 +91,15 @@ def _sweep_solana():
     """Keeps Solana trading wallets able to pay their own network fees, the
     same way _sweep_user_chain does for the EVM chains -- so a wallet holding
     only USDC gets topped up before the user hits a failing trade, not at the
-    moment of one. A no-op unless a Solana gas sponsor is configured."""
+    moment of one. A no-op unless a Solana gas sponsor is configured, and
+    unless this deployment fronts gas at all.
+
+    _sponsor_solana_gas refuses on its own when fronting is off, so this check
+    is not what makes the rule hold -- it is what stops the sweep from reading
+    every user's balance and logging a refusal for each of them, every 15
+    minutes, to reach a decision already known before the loop starts."""
+    if not getattr(_app, 'ORCAGENT_FRONTS_GAS', True):
+        return
     if not getattr(_app, 'SOL_GAS_SPONSOR_PRIVATE_KEY', ''):
         return
     for user_id, wallet, enc_blob in _users_with_solana_key():
