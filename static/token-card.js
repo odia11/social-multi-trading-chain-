@@ -14,7 +14,12 @@
 var _TC_EVM_CHAINS = ['base', 'arbitrum', 'polygon'];
 var _TC_ALL_EVM    = ['bsc'].concat(_TC_EVM_CHAINS);
 function _tcIsEvm(chain){ return _TC_ALL_EVM.indexOf(chain) !== -1; }
-function _tcUnit(chain){ return _tcIsEvm(chain) ? 'USDC' : 'SOL'; }
+// One funding currency on every chain this card can trade. Solana used to be
+// the exception, spending SOL; it is funded with USDC now too, and SOL there
+// is only the network fee. Still a function because the caller reads like a
+// question about the chain, and because Robinhood (funded in USDG) is a chain
+// this card does not reach yet.
+function _tcUnit(chain){ return 'USDC'; }
 
 async function _doTrade(sym, pairAddr, side, amount, tokenAddr, chain){
   chain = chain || 'solana';
@@ -47,7 +52,10 @@ async function _doTrade(sym, pairAddr, side, amount, tokenAddr, chain){
       body = {chain: chain, token_address: tokenAddr, amount_usdc: amount};
     } else {
       url = '/api/instant-trade';
-      body = {symbol:sym, pair_address:pairAddr, side:side, amount_sol:amount, token_address:tokenAddr};
+      // amount_usdc is what the server reads; amount_sol rides along so an
+      // older deploy still receives the value under the name it knows.
+      body = {symbol:sym, pair_address:pairAddr, side:side,
+              amount_usdc:amount, amount_sol:amount, token_address:tokenAddr};
     }
 
     var r = await fetch(url, {

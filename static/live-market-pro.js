@@ -811,10 +811,12 @@ function openBuyPanel(idx){
   // the ceiling, and what is actually bought is what remains after the
   // network fee, the platform fee and the slippage reserve come out of it.
   // The breakdown below shows exactly that, before anything is signed.
+  // Every chain funds a trade in USDC now, Solana included -- SOL is only
+  // used there for network fees. The label follows what is actually spent.
   panel.innerHTML =
       '<label class="pt-buy-label" for="pt-buy-amt-'+idx+'">'
     +   (isEvm ? 'You spend at most' : 'You spend')
-    +   ' <span class="pt-buy-cur">'+esc(isEvm?evmCurrencyLabel(t.chain):'SOL')+'</span>'
+    +   ' <span class="pt-buy-cur">'+esc(isEvm?evmCurrencyLabel(t.chain):'USDC')+'</span>'
     + '</label>'
     + '<input class="pt-buy-input" id="pt-buy-amt-'+idx+'" type="number" min="0" step="any" '
     +   'inputmode="decimal" placeholder="0.00">'
@@ -962,7 +964,11 @@ function confirmBuy(idx){
   var url  = isBsc ? '/api/bsc/trade/buy' : (isEvm ? '/api/evm/trade/buy' : '/api/instant-trade');
   var body = isBsc ? {token_address:t.mint, amount_usdc:amt}
     : isEvm ? {chain:t.chain, token_address:t.mint, amount_usdc:amt}
-    : {symbol:t.symbol, token_address:t.mint, pair_address:t.pair_address, side:'buy', amount_sol:amt};
+    // amount_usdc is what the server reads; amount_sol is sent alongside it
+    // only so an older deploy that has not been updated still gets the value
+    // under the name it knows.
+    : {symbol:t.symbol, token_address:t.mint, pair_address:t.pair_address, side:'buy',
+       amount_usdc:amt, amount_sol:amt};
 
   // When a live quote for this exact amount is still good, execute THAT
   // quote rather than asking the buy route to price a fresh one. The
@@ -1001,7 +1007,7 @@ function confirmBuy(idx){
       // -- the costs came out of the ceiling. Saying "bought for $100" when
       // $97.43 of token was bought is the mismatch this whole change removes.
       var got = (d.amount_usdc != null) ? d.amount_usdc : amt;
-      var cur = isEvm ? evmCurrencyLabel(t.chain) : 'SOL';
+      var cur = isEvm ? evmCurrencyLabel(t.chain) : (d.currency || 'USDC');
       var line = 'Bought ' + got + ' ' + cur + ' of $' + t.symbol;
       if(d.max_spend_usd != null && Number(d.max_spend_usd) > Number(got)){
         line += ' (spent ' + d.max_spend_usd + ' ' + cur + ')';

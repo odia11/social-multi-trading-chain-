@@ -57,6 +57,12 @@ assert uid
 d._authenticated_wallet = lambda: WALLET
 d.fetch_user_balances = lambda w: None
 d.get_user_state = lambda w: {'sol': 1.0, 'positions': {}}
+# Solana trades are funded with USDC now, so the route reads a USDC balance on
+# the TRADING wallet -- which it derives from the stored key. Both are real
+# calls this probe has no network or key for.
+d._get_trading_wallet_address = lambda w: 'TrAdInG1111111111111111111111111111111111111'
+USDC_BAL = [500.0]
+d._get_solana_usdc_balance = lambda addr: USDC_BAL[0]
 d.add_user_log = lambda *a, **k: None
 d._dex_get = lambda *a, **k: None
 
@@ -153,12 +159,26 @@ SWAP_RESULT[0] = (True, '', '', 1234.5, 0.049)
 out['nosig_status'], out['nosig'] = post(BUY)
 SWAP_RESULT[0] = (True, '0xSIG', '', 1234.5, 0.049)
 
-# ── the reserve is the shared one ──
+# ── two balances, two jobs ──
+# SOL pays the network fee; USDC funds the trade. A check that conflates them
+# tells the user the wrong currency is short.
 reset()
-d.get_user_state = lambda w: {'sol': 0.052, 'positions': {}}
-out['thin_status'], out['thin'] = post(BUY)
-out['thin_swaps'] = len(SWAPS)
+d.get_user_state = lambda w: {'sol': 0.001, 'positions': {}}
+out['nofee_sol_status'], out['nofee_sol'] = post(BUY)
+out['nofee_sol_swaps'] = len(SWAPS)
 d.get_user_state = lambda w: {'sol': 1.0, 'positions': {}}
+
+reset()
+USDC_BAL[0] = 0.02          # plenty of SOL for fees, nothing to trade with
+out['nousdc_status'], out['nousdc'] = post(BUY)
+out['nousdc_swaps'] = len(SWAPS)
+USDC_BAL[0] = 500.0
+# Solana trades are funded with USDC now, so the route reads a USDC balance on
+# the TRADING wallet -- which it derives from the stored key. Both are real
+# calls this probe has no network or key for.
+d._get_trading_wallet_address = lambda w: 'TrAdInG1111111111111111111111111111111111111'
+USDC_BAL = [500.0]
+d._get_solana_usdc_balance = lambda addr: USDC_BAL[0]
 
 # ── a FULL sell zeroes the holding ──
 reset()
@@ -239,10 +259,16 @@ check('a buy that FAILED releases the repeat window, so a retry is not blocked '
 check('...and reports the real reason', 'Jupiter route' in R['fail']['error'])
 check('a swap with no signature is a failure, never a reported trade',
       R['nosig_status'] == 500 and 'no signature' in R['nosig']['error'])
-check('the SOL reserve is the shared constant, not a second 0.005 written out '
-      'here: 0.052 does not cover a 0.05 buy plus the reserve',
-      R['thin_status'] == 400 and R['thin_swaps'] == 0
-      and '0.0550' in R['thin']['error'])
+check('too little SOL is refused as a NETWORK FEE problem, and says so — the '
+      'trade itself is not funded in SOL any more, so naming SOL as the trading '
+      'currency would send the user to buy the wrong thing',
+      R['nofee_sol_status'] == 400 and R['nofee_sol_swaps'] == 0
+      and 'network fees' in R['nofee_sol']['error']
+      and 'funded with USDC' in R['nofee_sol']['error'])
+check('too little USDC is a separate refusal, naming USDC and what to send',
+      R['nousdc_status'] == 400 and R['nousdc_swaps'] == 0
+      and 'Not enough USDC' in R['nousdc']['error']
+      and 'SOL is only used for network fees' in R['nousdc']['error'])
 
 # ── sells ──
 s = R['sell']

@@ -9651,7 +9651,10 @@ def user_trader_loop(stop_event, config, wallet: str):
     # fees regardless (see _GAS_MIN below); this only changes what funds the
     # TRADE. Re-read fresh every loop start, never cached beyond that, so a
     # Settings change takes effect the next time the bot is (re)started.
-    _solana_base = 'USDC' if (len(row) > 14 and row[14] and str(row[14]).upper() == 'USDC') else 'SOL'
+    # One currency for every Solana trade -- see SOLANA_BASE_CURRENCY. The
+    # per-user column is left in the database rather than dropped, so nothing
+    # depends on a migration having run, but nothing reads it any more.
+    _solana_base = SOLANA_BASE_CURRENCY
 
     # Keep only the encrypted blob — never store decrypted key across loop iterations.
     # Each trade decrypts at the moment of signing and clears immediately after.
@@ -13262,6 +13265,22 @@ def _get_solana_buy_lock(wallet: str, mint: str) -> threading.Lock:
 # Both buy paths previously spent min(configured size, entire balance) and so
 # could land exactly there.
 SOL_NETWORK_RESERVE = 0.005
+
+# What a Solana trade is denominated in. One value, not a setting.
+#
+# It used to be a per-user preference, and the two halves of the app read it
+# differently: the autonomous bot honoured it, while every manual buy ignored
+# it and spent SOL. So the same user, on the same token, spent a different
+# currency depending on which button they pressed. USDC is what the setting
+# already defaulted to and what every EVM chain uses, so it is the one that
+# stays.
+#
+# SOL is still needed on Solana for network fees -- that is unavoidable and
+# separate from what a trade is funded with.
+SOLANA_BASE_CURRENCY = 'USDC'
+# The smallest sensible USDC buy. Below this the network fee is a large share
+# of the trade.
+SOLANA_MIN_SPEND_USDC = 1.0
 # The smallest buy worth making. Together these two define the minimum
 # balance, which is why that floor is not written as a bare 0.01 any more:
 # a floor that does not account for the reserve leaves a band where the
@@ -16420,7 +16439,9 @@ def settings_get():
         'bio': row[12] or '',
         'min_trade_size': row[13] if row[13] is not None else 1.0,
         'tiered_tp_enabled': bool(row[14] if row[14] is not None else 0),
-        'pref_solana_base_currency': (row[15] or 'USDC') if len(row) > 15 else 'USDC',
+        # Always the one currency, whatever the column happens to hold: an
+        # older page that still shows this field should show what is true.
+        'pref_solana_base_currency': SOLANA_BASE_CURRENCY,
         'pref_surge_alerts': bool(row[16]) if len(row) > 16 and row[16] is not None else False,
     })
 
@@ -16505,14 +16526,12 @@ def settings_save():
     if 'tiered_tp_enabled' in data:
         updates.append('tiered_tp_enabled=?')
         params.append(1 if data['tiered_tp_enabled'] else 0)
-    if 'pref_solana_base_currency' in data:
-        # Never trust the frontend value outright -- only these two literal
-        # strings are ever accepted, anything else silently falls back to
-        # 'SOL' rather than writing an unvalidated value user_trader_loop()
-        # would then have to re-guard against anyway.
-        _v = str(data['pref_solana_base_currency']).strip().upper()
-        updates.append('pref_solana_base_currency=?')
-        params.append('USDC' if _v == 'USDC' else 'SOL')
+    # pref_solana_base_currency is deliberately NOT written any more. Solana
+    # trades are funded with SOLANA_BASE_CURRENCY and nothing reads this
+    # column, so accepting a value would store a preference the app then
+    # ignores -- which is worse than not offering the choice at all. Older
+    # clients still sending the field are simply not honoured rather than
+    # rejected, so a stale page cannot fail to save its other settings.
     if not updates:
         return jsonify({'ok': True, 'msg': 'Nothing to update'})
     params.append(wallet)
@@ -18195,8 +18214,11 @@ def api_instant_trade():
         symbol        = str(data.get('symbol', '')).strip().upper()
         token_address = str(data.get('token_address', '')).strip()
         side          = str(data.get('side', '')).strip().lower()
+        # The field is still called amount_sol because that is what every
+        # existing caller sends. What it MEANS is now the funding currency --
+        # USDC -- so amount_usdc is accepted too and wins when both are sent.
         try:
-            amount_sol = float(data.get('amount_sol', 0))
+            amount_sol = float(data.get('amount_usdc', data.get('amount_sol', 0)) or 0)
         except (TypeError, ValueError):
             amount_sol = 0.0
         # Sell amount in the FROM token's own units (not a SOL-equivalent) --
@@ -18215,7 +18237,8 @@ def api_instant_trade():
         if not is_valid_solana_address(token_address):
             return jsonify({'error': 'Invalid token address'}), 400
         if side == 'buy' and amount_sol <= 0:
-            return jsonify({'error': 'amount_sol must be > 0 for buy'}), 400
+            return jsonify({'error': f'amount must be > 0 for a buy '
+                                     f'(in {SOLANA_BASE_CURRENCY})'}), 400
 
         conn = sqlite3.connect(DB_FILE)
         try:
@@ -18244,15 +18267,26 @@ def api_instant_trade():
                                              f'{SOLANA_BUY_REPEAT_WINDOW}s to buy more.',
                                     'duplicate': True}), 429
 
+                # Two balances, two jobs: the trade is funded with USDC, the
+                # network fee is paid in SOL. Checking only one of them is how
+                # a user gets a failure that names the wrong currency.
                 fetch_user_balances(wallet)
                 current_sol = get_user_state(wallet).get('sol', 0)
-                # The reserve is the same one the other Solana buys keep back,
-                # rather than a separate 0.005 written out here.
-                if current_sol < amount_sol + SOL_NETWORK_RESERVE:
+                if current_sol < SOL_NETWORK_RESERVE:
                     return jsonify({'error':
-                        f'Insufficient SOL balance. You have {current_sol:.4f} SOL, need at '
-                        f'least {amount_sol + SOL_NETWORK_RESERVE:.4f} SOL (includes network '
-                        f'fee).'}), 400
+                        f'Not enough SOL for network fees — you have {current_sol:.4f} '
+                        f'and about {SOL_NETWORK_RESERVE} is needed. Trades themselves '
+                        f'are funded with {SOLANA_BASE_CURRENCY}.'}), 400
+                # The trading wallet, not the session wallet: they are two
+                # different keypairs and the funds live on the first.
+                trading_wallet = _get_trading_wallet_address(wallet) or wallet
+                current_usdc = _get_solana_usdc_balance(trading_wallet)
+                if current_usdc < amount_sol:
+                    return jsonify({'error':
+                        f'Not enough {SOLANA_BASE_CURRENCY} — you have '
+                        f'{current_usdc:.2f} and this trade needs {amount_sol:.2f}. '
+                        f'Send {SOLANA_BASE_CURRENCY} to your trading wallet '
+                        f'(SOL is only used for network fees).'}), 400
                 _recent_solana_buys[(wallet, token_address)] = time.time()
 
             amount_str = (str(amount_sol) if side == 'buy'
@@ -18264,7 +18298,8 @@ def api_instant_trade():
                 # the realized fill, and reports whether the platform fee
                 # actually rode along.
                 ok, sig, err_msg, token_amount, sol_amount = _execute_user_swap_ex(
-                    wallet, pk, side, token_address, amount_str, capture=swap_info)
+                    wallet, pk, side, token_address, amount_str,
+                    base=SOLANA_BASE_CURRENCY, capture=swap_info)
 
             if not ok:
                 if side == 'buy':
@@ -18389,7 +18424,10 @@ def api_instant_trade():
             'side':           side,
             'symbol':         symbol,
             'token_amount':   round(token_amount, 6),
+            # Kept under this name for the callers that already read it; the
+            # figure is in the funding currency, which `currency` states.
             'sol_amount':     round(sol_recorded, 6),
+            'currency':       SOLANA_BASE_CURRENCY,
             'new_balance':    new_balance,
             # False means the swap went through without the platform fee, so
             # the fees table has no row for this trade.
@@ -23216,22 +23254,31 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
                             'msg': f'You just bought this token. Wait '
                                    f'{SOLANA_BUY_REPEAT_WINDOW}s to buy more of it.'}), 429
 
+        # Two different balances, for two different jobs. The trade is funded
+        # with USDC; the network fee is paid in SOL and always will be. A
+        # wallet needs both, and saying which one is short is the difference
+        # between a fixable message and a confusing one.
         us_sol = _get_user_sol(trading_wallet)
-        # One floor, derived from the reserve rather than a bare 0.01, so
-        # there is no band where the balance passes the check and there is
-        # nothing left to spend after keeping the reserve back.
-        if us_sol < SOL_NETWORK_RESERVE + SOL_MIN_SPEND:
+        if us_sol < SOL_NETWORK_RESERVE:
             return jsonify({
                 'ok': False, 'low_balance': True, 'trading_wallet': trading_wallet,
-                'msg': f'⚠️ Not enough SOL — you have {us_sol:.4f}, and '
-                       f'{SOL_NETWORK_RESERVE} is kept back for network fees so the '
-                       f'position can still be sold. Send SOL to your trading '
-                       f'wallet to start trading.'}), 400
+                'msg': f'⚠️ Not enough SOL for network fees — you have {us_sol:.4f} '
+                       f'and about {SOL_NETWORK_RESERVE} is needed to send a trade '
+                       f'and later close it. Trades themselves are funded with '
+                       f'{SOLANA_BASE_CURRENCY}; this is only the fee.'}), 400
 
-        # The configured trade size, capped by what can be spent while still
-        # leaving the wallet able to pay for this swap and the eventual sell.
-        spend = round(min(min_trade_usdc / _sol_price_usd if _sol_price_usd > 0 else 0.02,
-                          us_sol - SOL_NETWORK_RESERVE), 4)
+        us_usdc = _get_solana_usdc_balance(trading_wallet)
+        # The configured trade size is already USD-denominated, and USDC is a
+        # dollar, so it IS the spend -- no price conversion, and nothing to go
+        # wrong when the SOL price has not loaded yet.
+        spend = round(min(min_trade_usdc, us_usdc), 2)
+        if spend < SOLANA_MIN_SPEND_USDC:
+            return jsonify({
+                'ok': False, 'low_balance': True, 'trading_wallet': trading_wallet,
+                'msg': f'⚠️ Not enough {SOLANA_BASE_CURRENCY} — you have '
+                       f'{us_usdc:.2f} and at least {SOLANA_MIN_SPEND_USDC:.2f} is '
+                       f'needed. Send {SOLANA_BASE_CURRENCY} to your trading wallet '
+                       f'(SOL is only used for network fees).'}), 400
 
         swap_info = {}
         # Claimed before the swap, not after: a swap takes seconds, and the
@@ -23239,7 +23286,8 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
         _recent_solana_buys[(wallet, mint)] = time.time()
         with _use_key(enc_blob, wallet) as _pk:
             ok, entry_price, tok_amt = _buy_and_get_realized(
-                wallet, _pk, mint, spend, token_data['price'], capture=swap_info)
+                wallet, _pk, mint, spend, token_data['price'],
+                base=SOLANA_BASE_CURRENCY, capture=swap_info)
             if not ok:
                 # Nothing was bought, so nothing is being double-clicked.
                 # Holding the window here would make a user wait 15s to retry
@@ -23254,6 +23302,10 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
             pos['symbol']          = token_data['symbol'] or mint[:8]
             pos['opened_at']       = time.time()
             pos['entry_liquidity'] = float(token_data.get('liquidity', 0) or 0)
+            # Recorded so the SELL routes back into the same currency this buy
+            # spent. Without it the position defaults to SOL and would be sold
+            # into SOL, mis-stating the profit on every USDC trade.
+            pos['base']            = SOLANA_BASE_CURRENCY
             pos.update(_snapshot_entry_risk(wallet, entry_price))
             _upsert_open_position(user_id, wallet, mint, pos, source='manual')
 
@@ -23269,12 +23321,14 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
 
     short = wallet[:6] + '...' + wallet[-4:]
     add_user_log(wallet, '[' + short + '] ' + log_label + ': ' + pos['symbol'] +
-                 ' for ' + str(spend) + ' SOL @ $' + str(token_data['price']))
+                 ' for ' + str(spend) + ' ' + SOLANA_BASE_CURRENCY +
+                 ' @ $' + str(token_data['price']))
     _trigger_copy_buy(wallet, mint, token_data['price'], pos['symbol'],
                       float(token_data.get('liquidity', 0) or 0))
     note = '' if us.get('trader_running') else idle_note
     return jsonify({'ok': True, 'msg': 'Bought ' + pos['symbol'] + note,
                     'symbol': pos['symbol'], 'spend': spend,
+                    'currency': SOLANA_BASE_CURRENCY,
                     'entry_price': entry_price, 'amount': tok_amt,
                     # False means the swap went through without the platform
                     # fee -- surfaced rather than hidden, since the `fees`

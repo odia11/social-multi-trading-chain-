@@ -86,13 +86,17 @@ d._upsert_open_position = upsert
 
 SOL = [1.0]
 d._get_user_sol = lambda addr: SOL[0]
+# The trade is funded with USDC now; SOL is only the network fee. Two
+# balances, read separately, so a shortfall names the right currency.
+USDC = [500.0]
+d._get_solana_usdc_balance = lambda addr: USDC[0]
 
 BUYS, FEES = [], []
 BUY_OK = [True]
 FEE_BUNDLED = [True]
 BUY_DELAY = [0.0]
 def fake_buy(wallet, pk, mint, spend, price, base='SOL', capture=None):
-    BUYS.append({'spend': spend, 'mint': mint})
+    BUYS.append({'spend': spend, 'mint': mint, 'base': base})
     time.sleep(BUY_DELAY[0])
     if capture is not None:
         capture['fee_bundled'] = FEE_BUNDLED[0]
@@ -118,29 +122,30 @@ def buy(body=None, path='/api/manual_buy', keep_window=False):
     r = c.post(path, json=body if body is not None else {'mint_address': MINT})
     return r.status_code, r.get_json()
 
-# ── the happy path: 1 USDC / $100 per SOL = 0.01 SOL ──
+# ── the happy path: min_trade_size is 1 USDC, and USDC is a dollar ──
 reset()
 out['buy_status'], out['buy'] = buy()
 out['buys'] = list(BUYS)
 out['fees'] = list(FEES)
 
-# ── FIX 1: SOL is kept back for fees ──
+# ── two balances, two jobs ──
 reset()
-SOL[0] = 0.012          # less than the 0.01 wanted plus the 0.005 reserve
-out['tight_status'], out['tight'] = buy()
-out['tight_buys'] = list(BUYS)
-
-reset()
-SOL[0] = 0.011          # 0.011 - 0.005 = 0.006 spendable
-out['reserve_status'], out['reserve'] = buy()
-out['reserve_buys'] = list(BUYS)
-
-reset()
-SOL[0] = 0.009          # below reserve + minimum spend
-out['broke_status'], out['broke'] = buy()
-out['broke_buys'] = len(BUYS)
-
+SOL[0] = 0.001          # cannot pay the network fee
+out['lowsol_status'], out['lowsol'] = buy()
+out['lowsol_buys'] = len(BUYS)
 SOL[0] = 1.0
+
+reset()
+USDC[0] = 0.5           # plenty of SOL, nothing to trade with
+out['nousdc_status'], out['nousdc'] = buy()
+out['nousdc_buys'] = len(BUYS)
+
+reset()
+USDC[0] = 0.6           # capped by the balance, still under the minimum
+out['tiny_status'], out['tiny'] = buy()
+out['tiny_buys'] = len(BUYS)
+
+USDC[0] = 500.0
 
 # ── FIX 3: the fee is recorded only when it was taken ──
 reset()
@@ -227,28 +232,33 @@ R = json.loads(line[len('__RESULT__'):])
 # ── the buy works ──
 b = R['buy']
 check('the buy succeeds', R['buy_status'] == 200 and b['ok'])
-check('it spends the configured trade size — $1 at $100/SOL is 0.01 SOL',
-      len(R['buys']) == 1 and abs(R['buys'][0]['spend'] - 0.01) < 1e-9)
+check('it spends the configured trade size directly — $1 of USDC, with no '
+      'conversion through a SOL price that may not have loaded yet',
+      len(R['buys']) == 1 and abs(R['buys'][0]['spend'] - 1.0) < 1e-9)
+check('...and funds the swap in USDC rather than SOL',
+      R['buys'][0].get('base') == 'USDC')
 check('the fee is recorded as bundled, taken inside the swap rather than as a '
       'second transfer the user would see leave their wallet',
       len(R['fees']) == 1 and R['fees'][0]['bundled'] is True
-      and abs(R['fees'][0]['sol'] - 0.01) < 1e-9)
+      and abs(R['fees'][0]['sol'] - 1.0) < 1e-9)
 check('the response says the fee was collected', b['fee_collected'] is True)
 
 # ── FIX 1 ──
-check(f"a reserve of {R['reserve_const']} SOL is kept back", R['reserve_const'] == 0.005)
-check('with 0.011 SOL the buy is capped at 0.006, not the 0.01 asked for — the old '
-      'code spent min(size, whole balance) and could leave a wallet at zero, '
-      'holding tokens it had no SOL left to sell',
-      R['reserve_status'] == 200 and abs(R['reserve_buys'][0]['spend'] - 0.006) < 1e-9)
-check('with 0.012 SOL it is capped at 0.007 for the same reason',
-      abs(R['tight_buys'][0]['spend'] - 0.007) < 1e-9)
-check('a balance below the reserve plus a worthwhile trade is refused rather '
-      'than spent down to zero', R['broke_status'] == 400 and R['broke_buys'] == 0)
-check('...and the refusal explains the reserve instead of just saying no. The '
-      'floor is now derived from the reserve rather than a bare 0.01, so there '
-      'is no band where the balance passes and nothing is left to spend',
-      'kept back for network fees' in R['broke']['msg'])
+check(f"a reserve of {R['reserve_const']} SOL is still required, for fees only",
+      R['reserve_const'] == 0.005)
+check('a wallet that cannot pay the NETWORK FEE is refused, and the message says '
+      'that is what is short. The trade is not funded in SOL any more, so naming '
+      'SOL as the trading currency would send the user to buy the wrong thing',
+      R['lowsol_status'] == 400 and R['lowsol_buys'] == 0
+      and 'network fees' in R['lowsol']['msg'])
+check('a wallet with plenty of SOL but no USDC is a SEPARATE refusal, naming '
+      'USDC', R['nousdc_status'] == 400 and R['nousdc_buys'] == 0
+      and 'Not enough USDC' in R['nousdc']['msg'])
+check('...and saying SOL is only the fee, so the user sends the right thing',
+      'SOL is only used for network fees' in R['nousdc']['msg'])
+check('a balance below the minimum worth trading is refused rather than spending '
+      'a few cents on a trade the fee would dominate',
+      R['tiny_status'] == 400 and R['tiny_buys'] == 0)
 
 # ── FIX 3 ──
 check('a swap that went through WITHOUT the platform fee records no fee at all. '
@@ -263,8 +273,8 @@ check('two clicks at the same moment produce exactly ONE buy. A lock alone does 
       'not fix this the way it does for a sell: a sell finds the position gone '
       'and stops, but a buy is ADDITIVE, so serializing two clicks just makes '
       'both of them spend, in order', R['double_buys'] == 1)
-check('...so the wallet spends 0.01 SOL once, not twice',
-      abs(R['double_spend'] - 0.01) < 1e-9)
+check('...so the wallet spends 1 USDC once, not twice',
+      abs(R['double_spend'] - 1.0) < 1e-9)
 check('...and the loser is refused rather than being reported a second purchase',
       R['double_codes'] == [200, 429])
 check('a deliberate second buy AFTER the window still goes through — buying more '
@@ -282,7 +292,7 @@ check('a failed buy opens no position and records no fee',
 # ── both routes, one flow ──
 check('the pump scanner buy runs the same flow, so all three fixes land on it too',
       R['pump_status'] == 200 and R['pump']['ok']
-      and abs(R['pump_buys'][0]['spend'] - 0.01) < 1e-9
+      and abs(R['pump_buys'][0]['spend'] - 1.0) < 1e-9
       and R['pump']['fee_collected'] is True)
 check('the five-position cap still applies to the manual buy',
       R['cap_status'] == 400 and 'Max 5 positions' in R['cap']['msg']
