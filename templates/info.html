@@ -129,10 +129,15 @@ html,body{min-height:100vh;min-height:100dvh;background:var(--bg);font-family:va
   <section class="info-section" id="about">
     <div class="section-title"><span class="section-icon">◆</span> About</div>
     <div class="info-body">
-      <p>OrcAgent is a social trading platform for Solana meme coins. Connect a
+      <p>OrcAgent is a social trading platform for meme coins across Solana,
+      BNB Chain, Base, Arbitrum, Polygon and Robinhood Chain. Connect a
       dedicated wallet, follow traders you trust, and let a rules-based bot
       execute your strategy automatically — or trade manually whenever you want
       full control.</p>
+
+      <p>You fund it with <strong>USDC</strong>, and that is the only currency
+      you ever choose. Moving it to whichever chain a trade needs is handled
+      for you.</p>
 
       <h3>How it works</h3>
       <ol>
@@ -143,9 +148,10 @@ html,body{min-height:100vh;min-height:100dvh;background:var(--bg);font-family:va
         <li><strong>Set your rules.</strong> Choose a breakout trigger, take
         profit, stop loss, and how many positions the bot can hold at once.</li>
         <li><strong>The bot scans the market.</strong> It continuously checks
-        live Solana tokens against your rules, runs basic safety checks
-        (mint/freeze authority, rug-pull signals) before entering, and exits
-        automatically when your take-profit or stop-loss is hit.</li>
+        live tokens on every supported chain against your rules, runs basic
+        safety checks (mint/freeze authority, rug-pull signals) before
+        entering, and exits automatically when your take-profit or stop-loss
+        is hit.</li>
         <li><strong>Follow the social layer.</strong> See a live feed of trades
         and posts from traders you follow, message them directly, and
         optionally copy their trades at your own position size.</li>
@@ -210,10 +216,16 @@ html,body{min-height:100vh;min-height:100dvh;background:var(--bg);font-family:va
       <h3>Wallet</h3>
       <p>The <a href="/wallet">Wallet</a> page shows your dedicated trading
       wallet — a separate address from the one you connected with. Deposit
-      SOL to its address to fund trading and network fees, and withdraw back
-      to your own wallet at any time. Keeping trading funds in this dedicated
-      wallet (rather than your main wallet) limits what the bot can ever
-      touch.</p>
+      <strong>USDC</strong> to fund trading, and send it back to your own
+      wallet at any time from the same page. Keeping trading funds in this
+      dedicated wallet (rather than your main wallet) limits what the bot can
+      ever touch.</p>
+      <p>USDC is the one currency you deposit and spend, on every chain. A
+      trade on a chain where your balance is not yet sitting will bridge it
+      there first and then complete on its own — you do not have to move
+      anything by hand. Solana also needs a small amount of SOL for its own
+      network fees, which is why the Wallet page shows that separately from
+      what you have to trade with.</p>
 
       <h3>Copy trading</h3>
       <p>Enable copy trading on a trader's profile to automatically mirror
@@ -239,20 +251,29 @@ html,body{min-height:100vh;min-height:100dvh;background:var(--bg);font-family:va
         </div>
       </div>
       <p>OrcAgent charges a <strong>{{ fee_pct }}% transaction fee</strong> on
-      every buy and every sell, each calculated on the SOL amount of that
+      every buy and every sell, each calculated on the amount of that
       individual swap — not on the trade's profit. So a full round-trip
       (buy + sell) pays {{ fee_pct }}% twice, {{ (fee_pct * 2) | round(2) }}%
-      total. The fee is deducted as part of that same swap transaction —
-      there's no separate transfer out of your wallet afterward.</p>
+      total.</p>
+      <p><strong>The amount you enter is the most that leaves your wallet.</strong>
+      The fee, the network fee and the slippage reserve all come out of it,
+      and what remains is what buys the token — so the figure on the buy panel
+      is what you spend, not a figure other costs are added to. The breakdown
+      on that panel shows each of those lines before you confirm.</p>
       <p>The sell-side fee applies whether that trade closes at a profit, a
       loss, or break-even. Open (not-yet-closed) positions only pay the
       buy-side fee until they're closed.</p>
 
       <h3>Network fees</h3>
-      <p>Every on-chain trade also pays standard Solana network and
-      swap-routing fees, set by the network and the swap route, not by
-      OrcAgent. These apply on every trade regardless of whether it's
-      profitable.</p>
+      <p>Every on-chain trade also pays the network and swap-routing fees of
+      the chain it happens on, set by that network and that route, not by
+      OrcAgent. They apply on every trade, profitable or not, and they differ
+      per chain — a Base trade costs cents, a BNB Chain trade a little more.</p>
+      <p>You never have to hold a chain's own gas token to trade on it.
+      OrcAgent puts up the native token needed for the transaction and
+      recovers it from that trade's own quote, where you can see it as a line
+      before you confirm. It is charged to you, not subsidised — what OrcAgent
+      provides is the token, not the money.</p>
 
       <div class="callout"><strong>Fee rates are configurable and may
       change.</strong> The rate shown above is read live and is always the

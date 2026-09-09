@@ -12145,7 +12145,7 @@ def traders():
         client_secret=API_SHARED_SECRET,
     )
 
-_INFO_UPDATED = 'July 2026'
+_INFO_UPDATED = 'September 2026'
 
 @app.route('/info')
 def page_info():

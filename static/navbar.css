@@ -64,7 +64,10 @@
 .pt-nb-more-wrap{position:relative}
 .pt-nb-more-dd{display:none;position:absolute;top:calc(100% + 8px);right:0;background:#101216;border:1px solid #21252c;border-radius:13px;padding:6px;min-width:210px;max-height:calc(100vh - 90px);overflow-y:auto;z-index:280;box-shadow:0 16px 40px rgba(0,0,0,.5)}
 .pt-nb-more-dd.open{display:block}
-.pt-nb-more-item{display:flex;align-items:center;gap:6px;width:100%;padding:10px 12px;border-radius:9px;font-size:13px;font-weight:600;color:#c7ccd4;background:none;border:none;text-align:left;transition:background .15s,color .15s}
+/* gap was 6px, set when these rows were text only. Beside a 16px icon that
+   reads as no gap at all -- the glyph touches the first letter. 10px matches
+   the spacing the primary links use. */
+.pt-nb-more-item{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border-radius:9px;font-size:13px;font-weight:600;color:#c7ccd4;background:none;border:none;text-align:left;transition:background .15s,color .15s}
 .pt-nb-more-item:hover{background:#16191f;color:#eef1f5}
 .pt-nb-more-item .b{margin-left:auto;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:#f76b62;color:#fff;font-size:9.5px;font-weight:700;font-family:'JetBrains Mono',monospace;display:none;align-items:center;justify-content:center;line-height:1}
 .pt-nb-more-item .b.show{display:flex}
@@ -134,7 +137,12 @@
   .pt-nb-more-wrap{display:none}
   .pt-nb-mobile-only{display:block}
   .pt-nb-nav-sep,.pt-nb-nav .pt-nb-more-sep{grid-column:1/-1;height:1px;background:#1c2027;margin:5px 4px}
-  .pt-nb-nav .pt-nb-more-item{width:100%;text-align:left;font-size:13px;padding:10px 12px;color:#8a919c;background:none;border:none;font-family:inherit;cursor:pointer;border-radius:9px;transition:background .15s,color .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* display and gap are stated here too rather than left to the base rule.
+     This override already restates almost every other property, so leaving
+     two of them inherited is a trap: it reads as if the row's layout is
+     defined here, and it is not. The label's own span does the truncating --
+     doing it on the flex container clipped the icon instead. */
+  .pt-nb-nav .pt-nb-more-item{display:flex;align-items:center;gap:10px;width:100%;text-align:left;font-size:13px;padding:11px 12px;min-height:44px;color:#8a919c;background:none;border:none;font-family:inherit;cursor:pointer;border-radius:9px;transition:background .15s,color .15s}
   .pt-nb-nav .pt-nb-more-item:hover{background:#16191f;color:#eef1f5}
   /* Where you actually are, in the merged mobile menu. Marked from the real
      path (see navbar.js) rather than only for the five primary links, so a
