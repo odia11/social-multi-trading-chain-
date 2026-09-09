@@ -205,10 +205,15 @@ def main():
                'sponsor and no user wallet to use — so the ceiling check below '
                'is skipped rather than run against a made-up taker')
 
+    # Buy the chain's NATIVE token with the stable the trade is funded from.
+    # This used to quote the chain's own USDC -- which is what build_quote
+    # SELLS -- so every request asked 0x to route USDC into USDC and was
+    # refused, identically, on all five chains. A token cannot be routed to
+    # itself; native is the one pair guaranteed to exist everywhere.
     priced_any = False
     for chain, cfg_ in d.EVM_CHAINS.items():
-        token = cfg_.get('usdc')       # quoting the chain's own stable: always routable
-        if not token or not os.getenv('ZEROX_API_KEY') or not taker:
+        token = d.BNB_NATIVE_ADDR      # the native-token sentinel, valid as a BUY token
+        if not os.getenv('ZEROX_API_KEY') or not taker:
             continue
 
         def quote(chain=chain, token=token):
@@ -234,7 +239,8 @@ def main():
                     f'= ${total}, above the $100 the user entered')
             priced_any = True
             lines = ' · '.join(f'{k} ${v}' for k, v in b['costs_by_kind'].items())
-            return (f'$100 max -> buys ${purchase}   [{lines}]\n'
+            return (f'$100 max -> buys ${purchase} of '
+                    f'{d.EVM_CHAINS[chain]["native_symbol"]}   [{lines}]\n'
                     f'         total ${total} — within the ceiling'
                     + ('' if b['can_execute'] else
                        f"\n         NOT EXECUTABLE: {b['reject_reason']}"))

@@ -156,5 +156,16 @@ check('an unreachable RPC names the endpoint AND the variable to change, so it '
       'is one line in the env file rather than an afternoon of guessing',
       "_RPC_URL in /etc/orcagent.env" in SCRIPT and 'endpoint:' in SCRIPT)
 
+# build_quote SELLS the chain's stable. Asking it to buy that same stable is
+# a request to route USDC into USDC, which 0x refuses -- identically, on every
+# chain, which is what made it look like an outage rather than a typo.
+main_fn = next(n for n in ast.walk(tree)
+               if isinstance(n, ast.FunctionDef) and n.name == 'main')
+main_src = ast.get_source_segment(SCRIPT, main_fn) or ''
+check('the ceiling check buys the NATIVE token, not the stable the trade is '
+      'funded from — a token cannot be routed to itself',
+      "token = d.BNB_NATIVE_ADDR" in main_src
+      and "token = cfg_.get('usdc')" not in main_src)
+
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)
