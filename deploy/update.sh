@@ -37,14 +37,24 @@ if [ -f "$DB" ]; then
   sqlite3 "$BACKUP" 'PRAGMA integrity_check;' | grep -qx ok \
     || die "The backup did not verify. Nothing has been changed. Investigate before deploying."
   USERS=$(sqlite3 "$BACKUP" 'SELECT COUNT(*) FROM users;' 2>/dev/null || echo '?')
-  echo "  $BACKUP  ($(du -h "$BACKUP" | cut -f1), $USERS users) — verified"
+  RAW=$(du -h "$BACKUP" | cut -f1)
+
+  # Compressed only AFTER it has been verified, so the check runs on something
+  # sqlite can open. A database of mostly text and base64 images compresses to
+  # roughly a third, which is what the app's own backups have always done --
+  # these were the only ones left sitting there at full size.
+  gzip -f "$BACKUP" && BACKUP="$BACKUP.gz"
+  echo "  $BACKUP  ($RAW -> $(du -h "$BACKUP" | cut -f1), $USERS users) — verified"
 
   # Keep the last few and delete the rest. The app prunes its OWN backups,
   # but it matches them by an 'orcagent_' prefix, so these are invisible to
   # it -- they would sit there growing by one database per deploy until the
   # volume filled, which is exactly how the last disk problem started.
+  # Both shapes: the compressed ones written now, and any plain .db left by
+  # an earlier version of this script.
   KEEP=3
-  ls -1t "$DATA_DIR"/backups/pre-deploy-*.db 2>/dev/null | tail -n +$((KEEP + 1)) \
+  ls -1t "$DATA_DIR"/backups/pre-deploy-*.db "$DATA_DIR"/backups/pre-deploy-*.db.gz \
+     2>/dev/null | tail -n +$((KEEP + 1)) \
     | while read -r old_backup; do
         rm -f "$old_backup" && echo "  removed old $(basename "$old_backup")"
       done
@@ -122,6 +132,12 @@ To go back to the code that was working instead:
 Your database was NOT touched by this script, and there is a
 verified copy at:
     ${BACKUP:-(none taken)}
+
+To restore it:
+    sudo systemctl stop orcagent
+    sudo gunzip -c ${BACKUP:-BACKUP} > /data/orcagent.db
+    sudo chown orcagent:orcagent /data/orcagent.db
+    sudo systemctl start orcagent
 ────────────────────────────────────────────────────────────
 ROLLBACK
   exit 1

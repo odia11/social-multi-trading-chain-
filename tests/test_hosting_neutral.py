@@ -223,6 +223,18 @@ check('it prunes its own old backups. The app only prunes files it recognises '
       'pre-deploy-*.db' in UPDATE and 'tail -n +$((KEEP + 1))' in UPDATE)
 check('...keeping the most recent few, newest first, so the one it just took '
       'is never the one removed', 'ls -1t' in UPDATE and 'KEEP=3' in UPDATE)
+check('...matching both the compressed backups it writes now and any plain ones '
+      'an earlier version left behind, or the old ones would never be cleared',
+      'pre-deploy-*.db "$DATA_DIR"/backups/pre-deploy-*.db.gz' in UPDATE)
+check('the backup is compressed, like the app\'s own have always been — these '
+      'were the only ones sitting at full size, three times larger for the '
+      'same data', 'gzip -f "$BACKUP"' in UPDATE)
+check('...only AFTER the integrity check, so the check runs on something '
+      'sqlite can actually open',
+      UPDATE.index('PRAGMA integrity_check') < UPDATE.index('gzip -f'))
+check('and the rollback text says how to restore a compressed backup, rather '
+      'than naming a file and leaving you to work it out',
+      'gunzip -c' in UPDATE and 'systemctl stop orcagent' in UPDATE)
 
 check('it runs the live check at the end, so a deploy that quietly loses an API '
       'key is caught then rather than by a user', 'verify_live.py' in UPDATE)
