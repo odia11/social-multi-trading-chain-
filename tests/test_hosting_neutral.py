@@ -225,7 +225,8 @@ check('...keeping the most recent few, newest first, so the one it just took '
       'is never the one removed', 'ls -1t' in UPDATE and 'KEEP=3' in UPDATE)
 check('...matching both the compressed backups it writes now and any plain ones '
       'an earlier version left behind, or the old ones would never be cleared',
-      'pre-deploy-*.db "$DATA_DIR"/backups/pre-deploy-*.db.gz' in UPDATE)
+      'backups/pre-deploy-*.db ' in UPDATE.replace('\\\n', ' ')
+      and 'backups/pre-deploy-*.db.gz' in UPDATE)
 check('the backup is compressed, like the app\'s own have always been — these '
       'were the only ones sitting at full size, three times larger for the '
       'same data', 'gzip -f "$BACKUP"' in UPDATE)
@@ -259,6 +260,31 @@ check('...and says so plainly when there is no clone anywhere, instead of '
       'naming a path that does not exist', 'none was found' in UPDATE)
 check('it shows which commits are being deployed rather than just "done"',
       'log --oneline' in UPDATE)
+
+# ── the deploy that stopped after the backup and said nothing ─────────────
+# `ls a* b*` exits non-zero when EITHER pattern matches nothing. Under
+# `set -o pipefail` that became the pipeline's status, `set -e` killed the
+# script, and `2>/dev/null` hid the reason. Gzipping the backups armed it:
+# the run that removed the last plain .db left only .gz files, so every
+# deploy after that one died on the housekeeping step.
+check('pruning old backups cannot abort the deploy, whatever the glob matches '
+      '— it is housekeeping, not a step the deploy depends on',
+      'OLD_BACKUPS=' in UPDATE and '|| true)"' in UPDATE)
+check('...and the pipeline no longer decides the script\'s exit status, since '
+      'that is what turned a matched-nothing glob into a dead deploy',
+      'if [ -n "$OLD_BACKUPS" ]; then' in UPDATE)
+
+# Twice now the script has ended at a bare prompt with no indication of which
+# line gave up. `set -e` is right here, but silent is not.
+check('an unexplained stop says which line it stopped on, rather than leaving '
+      'a bare prompt', "trap 'FAILED_LINE=$LINENO' ERR" in UPDATE
+      and 'and not on purpose' in UPDATE)
+check('...and says the site is still on the old code, which is the question '
+      'anyone reading it actually has',
+      'still on the code it was already running' in UPDATE)
+check('...while staying quiet when the script already explained itself, so a '
+      'real reason is never buried under a generic one',
+      'die(){ EXPLAINED=1;' in UPDATE and UPDATE.count('EXPLAINED=1') >= 4)
 
 
 # ── the outage this actually caused ───────────────────────────────────────

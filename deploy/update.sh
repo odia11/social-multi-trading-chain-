@@ -19,7 +19,22 @@ STAMP="$(date +%F-%H%M%S)"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 say(){ printf '\n\033[1;33m▸ %s\033[0m\n' "$*"; }
-die(){ printf '\n\033[1;31m✗ %s\033[0m\n' "$*"; exit 1; }
+die(){ EXPLAINED=1; printf '\n\033[1;31m✗ %s\033[0m\n' "$*"; exit 1; }
+
+# `set -e` is right for a deploy script -- stopping early leaves the site on
+# the old code -- but on its own it stops SILENTLY, and this has now twice
+# ended with a bare prompt and no clue which line gave up. Every deliberate
+# exit sets EXPLAINED, so this only speaks when nothing else did.
+EXPLAINED=0
+FAILED_LINE=''
+trap 'FAILED_LINE=$LINENO' ERR
+trap '_rc=$?
+      if [ "$_rc" -ne 0 ] && [ "$EXPLAINED" != 1 ]; then
+        printf "\n\033[1;31m✗ Stopped at line %s (exit %s), and not on purpose.\033[0m\n" \
+               "${FAILED_LINE:-?}" "$_rc"
+        printf "  Nothing after that line ran. Your database was not touched and\n"
+        printf "  the site is still on the code it was already running.\n"
+      fi' EXIT
 
 [ "$(id -u)" -eq 0 ] || die "Run this with sudo."
 
@@ -79,12 +94,29 @@ if [ -f "$DB" ]; then
   # volume filled, which is exactly how the last disk problem started.
   # Both shapes: the compressed ones written now, and any plain .db left by
   # an earlier version of this script.
+  #
+  # The `|| true` is not decoration. `ls a* b*` exits non-zero when EITHER
+  # pattern matches nothing, `set -o pipefail` promotes that to the whole
+  # pipeline, and `set -e` then kills the script -- with 2>/dev/null hiding
+  # the reason, so the deploy simply stopped after the backup and said
+  # nothing at all.
+  #
+  # Gzipping these is what armed it: while one plain .db was still lying
+  # around the first pattern matched and ls exited 0. The run that deleted
+  # the last plain one left only .gz files, and every deploy after it died
+  # here. A bug that appears two deploys after the change that caused it.
+  #
+  # More generally: pruning old backups is housekeeping. It must not be able
+  # to stop a deploy, whatever it runs into.
   KEEP=3
-  ls -1t "$DATA_DIR"/backups/pre-deploy-*.db "$DATA_DIR"/backups/pre-deploy-*.db.gz \
-     2>/dev/null | tail -n +$((KEEP + 1)) \
-    | while read -r old_backup; do
-        rm -f "$old_backup" && echo "  removed old $(basename "$old_backup")"
-      done
+  OLD_BACKUPS="$(ls -1t "$DATA_DIR"/backups/pre-deploy-*.db \
+                          "$DATA_DIR"/backups/pre-deploy-*.db.gz 2>/dev/null \
+                 | tail -n +$((KEEP + 1)) || true)"
+  if [ -n "$OLD_BACKUPS" ]; then
+    printf '%s\n' "$OLD_BACKUPS" | while read -r old_backup; do
+      rm -f "$old_backup" && echo "  removed old $(basename "$old_backup")"
+    done
+  fi
 else
   echo "  no database at $DB yet — nothing to back up"
 fi
@@ -167,6 +199,7 @@ To restore it:
     sudo systemctl start orcagent
 ────────────────────────────────────────────────────────────
 ROLLBACK
+  EXPLAINED=1
   exit 1
 fi
 
@@ -187,7 +220,9 @@ if [ $VERIFY -ne 0 ]; then
 The site is up, but something it trades through is not reachable -- see the
 FAILED lines above. Trades that depend on it will fail for a real user.
 WARN
+  EXPLAINED=1
   exit 1
 fi
 
+EXPLAINED=1
 printf '\n\033[1;32m✓ Deployed and verified.\033[0m\n'
