@@ -15919,6 +15919,68 @@ def _inject_app_version():
 # is NOT rendered through Jinja at all (_get_index_base_html() below reads
 # it as a raw string and splices modal HTML into __PLACEHOLDER__ tokens) --
 # see the __NAVBAR__ splice further down for that side of it.
+# Icons, because a list of sixteen identical text rows is read rather than
+# scanned, and nothing in it says which destinations matter. Same line style
+# the /live-market drawer already uses (24x24, stroke, currentColor), so the
+# two menus look like one product.
+#
+# Kept as bare path data rather than whole <svg> elements: every icon shares
+# the same wrapper attributes, and repeating them sixteen times is sixteen
+# chances for one to drift.
+_NAV_ICONS = {
+    'live-market': '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
+    'feed':        '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'
+                   '<polyline points="9 22 9 12 15 12 15 22"/>',
+    'calls':       '<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>',
+    'leaderboard': '<path d="M18 2H6v7a6 6 0 0 0 12 0V2z"/><path d="M4 22h16"/>'
+                   '<path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/>'
+                   '<path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/>',
+    'wallet':      '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>'
+                   '<path d="M16 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z" fill="currentColor" stroke="none"/>',
+    'traders':     '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>'
+                   '<path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+    'groups':      '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'
+                   '<circle cx="8.5" cy="11.5" r="1"/><circle cx="12" cy="11.5" r="1"/>'
+                   '<circle cx="15.5" cy="11.5" r="1"/>',
+    'promote':     '<path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1z"/>'
+                   '<path d="M16 9a4 4 0 0 1 0 6"/>',
+    'referrals':   '<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/>'
+                   '<line x1="8" y1="12" x2="16" y2="12"/>',
+    'history':     '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>',
+    'bot':         '<rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4"/>'
+                   '<circle cx="12" cy="3" r="1"/><circle cx="9" cy="14" r="1"/>'
+                   '<circle cx="15" cy="14" r="1"/>',
+    'live-trades': '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>'
+                   '<polyline points="17 6 23 6 23 12"/>',
+    'profile':     '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+    'settings':    '<circle cx="12" cy="12" r="3"/>'
+                   '<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06'
+                   'a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09'
+                   'a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83'
+                   'l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09'
+                   'A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83'
+                   'l.06.06A1.65 1.65 0 0 0 9 4.6 1.65 1.65 0 0 0 10 3.09V3a2 2 0 0 1 4 0v.09'
+                   'a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83'
+                   'l-.06.06A1.65 1.65 0 0 0 19.4 9V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09'
+                   'a1.65 1.65 0 0 0-1.51 1z"/>',
+    'admin':       '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+    'about':       '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/>'
+                   '<line x1="12" y1="8" x2="12.01" y2="8"/>',
+    'disconnect':  '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>'
+                   '<polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+}
+
+def _nav_icon(key: str) -> str:
+    """One wrapper, sixteen bodies. An unknown key renders nothing rather
+    than a broken glyph -- a missing icon should cost a little alignment,
+    never a menu entry."""
+    body = _NAV_ICONS.get(key)
+    if not body:
+        return ''
+    return ('<svg class="pt-nb-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+            'aria-hidden="true">%s</svg>' % body)
+
 _NAVBAR_PRIMARY = [
     ('live-market', 'Live Market', '/live-market'),
     ('feed',        'Feed',        '/'),
@@ -15927,22 +15989,30 @@ _NAVBAR_PRIMARY = [
     ('wallet',      'Wallet',      '/wallet'),
 ]
 
+# (href, label, icon key, extra class, inline style)
+#
+# Bot is marked as a feature rather than a page. It is the autonomous trading
+# this product is named for, and it was sitting between History and Live
+# Trades looking exactly like them -- three plain rows, no way to tell that
+# one of them is the thing the platform does while the other two are records
+# of it having done it. The marker is a quiet accent, not a shout: it earns
+# a second of attention from someone scanning, which is all it needs.
 _NAVBAR_MORE_LINKS = [
-    ('/traders', 'Traders'),
-    ('/groups', 'Groups'),
-    ('/promote', 'Promote'),
-    ('/referrals', 'Referrals'),
-    ('/history', 'History'),
-    ('/bot', 'Bot'),
-    ('/live-trades', 'Live Trades'),
+    ('/traders', 'Traders', 'traders'),
+    ('/groups', 'Groups', 'groups'),
+    ('/promote', 'Promote', 'promote'),
+    ('/referrals', 'Referrals', 'referrals'),
+    ('/history', 'History', 'history'),
+    ('/bot', 'Bot', 'bot', 'pt-nb-feature'),
+    ('/live-trades', 'Live Trades', 'live-trades'),
     None,  # separator
     # Account/meta destinations in one group. About used to sit alone behind
     # its own separator, which put three divider lines within a few rows of
     # each other and made the menu look busier than it is.
-    ('/profile', 'Profile'),
-    ('/settings', 'Settings'),
-    ('/admin', 'Admin Console', 'pt-nb-admin-link', 'display:none'),
-    ('/info', 'About'),
+    ('/profile', 'Profile', 'profile'),
+    ('/settings', 'Settings', 'settings'),
+    ('/admin', 'Admin Console', 'admin', 'pt-nb-admin-link', 'display:none'),
+    ('/info', 'About', 'about'),
 ]
 
 def _navbar_more_items_html(extra_class: str = '') -> str:
@@ -15959,16 +16029,20 @@ def _navbar_more_items_html(extra_class: str = '') -> str:
             parts.append('<div class="pt-nb-more-sep%s"></div>' % cls_suffix)
             continue
         href, label = entry[0], entry[1]
-        extra_cls = (' ' + entry[2]) if len(entry) > 2 else ''
-        style = (' style="%s"' % entry[3]) if len(entry) > 3 else ''
-        parts.append('<a class="pt-nb-more-item%s%s" href="%s"%s>%s</a>' % (cls_suffix, extra_cls, href, style, label))
+        icon      = _nav_icon(entry[2]) if len(entry) > 2 else ''
+        extra_cls = (' ' + entry[3]) if len(entry) > 3 else ''
+        style     = (' style="%s"' % entry[4]) if len(entry) > 4 else ''
+        parts.append('<a class="pt-nb-more-item%s%s" href="%s"%s>%s<span>%s</span></a>'
+                     % (cls_suffix, extra_cls, href, style, icon, label))
     parts.append('<div class="pt-nb-more-sep%s"></div>' % cls_suffix)
-    parts.append('<button class="pt-nb-more-item%s danger pt-nb-disconnect-btn">Disconnect Wallet</button>' % cls_suffix)
+    parts.append('<button class="pt-nb-more-item%s danger pt-nb-disconnect-btn">%s<span>Disconnect Wallet</span></button>'
+                 % (cls_suffix, _nav_icon('disconnect')))
     return ''.join(parts)
 
 def _navbar_html(active_nav: str = '') -> Markup:
     nav_links = ''.join(
-        '<a href="%s"%s>%s</a>' % (href, ' class="active"' if key == active_nav else '', label)
+        '<a href="%s" class="%s">%s<span>%s</span></a>'
+        % (href, 'active' if key == active_nav else '', _nav_icon(key), label)
         for key, label, href in _NAVBAR_PRIMARY
     )
     more_items_desktop = _navbar_more_items_html()

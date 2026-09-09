@@ -26,7 +26,14 @@
 .pt-nb-wordmark{font-size:17px;font-weight:700;letter-spacing:-.02em;color:#eef1f5}
 .pt-nb-menu-btn{display:none;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;background:#101216;border:1px solid #21252c;color:#eef1f5;font-size:15px;flex-shrink:0}
 .pt-nb-nav{display:flex;align-items:center;gap:4px;flex-shrink:0}
-.pt-nb-nav a{font-size:13.5px;font-weight:600;color:#8a919c;padding:8px 13px;border-radius:9px;transition:color .15s,background .15s;white-space:nowrap}
+/* inline-flex, not flex: these are pills in a horizontal row on desktop and
+   must keep sizing to their own content rather than stretching. */
+.pt-nb-nav a{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;color:#8a919c;padding:8px 13px;border-radius:9px;transition:color .15s,background .15s;white-space:nowrap}
+/* The desktop row is tight on width, so the icons come back only once there
+   is room for them -- below this the labels alone say enough, and squeezing
+   both in would shrink the tap targets that matter more. */
+.pt-nb-nav a .pt-nb-ic{display:none}
+@media (min-width:1100px){ .pt-nb-nav a .pt-nb-ic{display:block} }
 .pt-nb-nav a:hover{color:#eef1f5;background:#16191f}
 .pt-nb-nav a.active{color:#f7b955;background:rgba(247,185,85,.12)}
 .pt-nb-search-wrap{flex:1;position:relative;max-width:380px;margin-left:4px;min-width:0}
@@ -62,6 +69,25 @@
 .pt-nb-more-item .b{margin-left:auto;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:#f76b62;color:#fff;font-size:9.5px;font-weight:700;font-family:'JetBrains Mono',monospace;display:none;align-items:center;justify-content:center;line-height:1}
 .pt-nb-more-item .b.show{display:flex}
 .pt-nb-more-sep{height:1px;background:#16191f;margin:6px 4px}
+
+/* ── icons ──
+   flex-shrink:0 because a long label must eat its own width, never the
+   icon's -- a squashed 14px glyph reads as a rendering fault, and the whole
+   point of the icon is that the row is recognisable at a glance.
+   stroke-width scales down from the source 2 so a 16px icon does not look
+   heavier than the 13px text beside it. */
+.pt-nb-ic{width:16px;height:16px;flex:0 0 16px;stroke-width:1.9;opacity:.85}
+.pt-nb-more-item:hover .pt-nb-ic,
+.pt-nb-more-item.current .pt-nb-ic{opacity:1}
+/* The label takes the slack, and truncates rather than wrapping to a second
+   line that would make one row taller than its neighbours. */
+.pt-nb-more-item > span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Bot is the autonomous trading this product is named for, and it sat
+   between History and Live Trades looking exactly like them. A quiet accent
+   on the icon only -- enough to be found while scanning, not enough to
+   compete with where you actually are. */
+.pt-nb-feature .pt-nb-ic{color:#f7b955;opacity:1}
 .pt-nb-more-item.danger{color:#f76b62}
 .pt-nb-more-item.danger:hover{background:rgba(247,107,98,.1)}
 .pt-nb-admin-link{color:#f7b955;font-weight:700}
@@ -93,7 +119,9 @@
      both columns without wrapping the markup in extra containers. */
   .pt-nb-nav{display:none;grid-template-columns:1fr 1fr;align-items:stretch;gap:2px 6px;position:absolute;top:52px;left:10px;right:10px;max-height:calc(100dvh - 72px);overflow-y:auto;background:#101216;border:1px solid #21252c;border-radius:14px;padding:8px;z-index:210;box-shadow:0 16px 40px rgba(0,0,0,.55)}
   .pt-nb-nav.mobile-open{display:grid}
-  .pt-nb-nav > a:not(.pt-nb-more-item){grid-column:1/-1;padding:11px 13px;text-align:left;font-size:14px}
+  .pt-nb-nav > a:not(.pt-nb-more-item){grid-column:1/-1;padding:11px 13px;text-align:left;font-size:14px;
+    display:flex;align-items:center;gap:9px}
+  .pt-nb-nav > a:not(.pt-nb-more-item) .pt-nb-ic{display:block;width:18px;height:18px;flex:0 0 18px}
   .pt-nb-nav > .pt-nb-more-item{grid-column:auto}
   /* Disconnect is destructive -- it gets its own full-width row rather than
      sitting half-width beside an ordinary destination. */
