@@ -519,13 +519,19 @@ function tfPill(tf, label, active){
    responses never render as blank/unlabeled. */
 var EVM_TRADE_CHAINS = {bsc:1, base:1, arbitrum:1, polygon:1, robinhood:1};
 var CHAIN_LABELS = {bsc:'BSC', base:'BASE', arbitrum:'ARB', polygon:'POLY', robinhood:'HOOD'};
-// Every EVM chain here trades against native USDC EXCEPT Robinhood Chain,
-// whose own stablecoin is USDG (Global Dollar) -- USDC bridged there
-// actually becomes USDG, there is no USDC on that chain at all. Getting
-// this label wrong would tell a user they're spending a currency that
-// doesn't exist on that chain.
-var EVM_CURRENCY_LABELS = {robinhood:'USDG'};
-function evmCurrencyLabel(chain){ return EVM_CURRENCY_LABELS[chain] || 'USDC'; }
+// What the user is told they are spending: USDC, on every chain.
+//
+// This used to name Robinhood Chain's USDG, on the reasoning that USDC does
+// not exist there and calling it USDC would be a lie. The reasoning was
+// right about the chain and wrong about the question. The user never holds,
+// picks, or deposits USDG -- they spend USDC, and the app bridges it there,
+// where it converts to USDG on arrival. Naming that intermediate token on
+// the Buy button described the plumbing instead of the payment.
+//
+// The on-chain symbol still exists server-side as usdc_symbol, and still
+// says USDG, because a log line or an explorer lookup needs the token that
+// actually moved. See user_currency_label() in dashboard.py.
+function evmCurrencyLabel(chain){ return 'USDC'; }
 function chainLabel(chain){ return CHAIN_LABELS[chain] || 'SOL'; }
 function shortAddr(addr){
   addr = addr || '';

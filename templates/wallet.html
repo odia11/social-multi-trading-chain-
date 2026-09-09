@@ -1135,7 +1135,7 @@ function _modalBridge(){
   if(_bridgeStatusTimer){clearInterval(_bridgeStatusTimer);_bridgeStatusTimer=null}
   _showModal(
     '<div class="w-modal-title">Bridge</div>'
-    +'<div class="w-modal-note" style="margin-top:0">Move USDC (USDG on Robinhood Chain) from one chain to another. Funds may leave your origin wallet before the bridge itself finishes -- the status view below tracks that separately.</div>'
+    +'<div class="w-modal-note" style="margin-top:0">Move USDC from one chain to another. Funds may leave your origin wallet before the bridge itself finishes -- the status view below tracks that separately.</div>'
     +'<div class="br-form-card">'
       +'<div class="br-form-box">'
         +'<div class="br-form-box-lbl">From</div>'
@@ -1179,7 +1179,10 @@ function _bridgeSwapChains(){
 function _bridgeSyncAmountSym(){
   var o=document.getElementById('br-origin-chain')
   var sym=document.getElementById('br-amount-sym')
-  if(o&&sym) sym.textContent = o.value==='robinhood' ? 'USDG' : 'USDC'
+  // USDC on every chain. Robinhood Chain settles in USDG underneath, but
+  // that conversion is the bridge's job, not something to put in front of
+  // someone choosing an amount -- see user_currency_label() in dashboard.py.
+  if(o&&sym) sym.textContent = 'USDC'
 }
 // Balance shown is always the ORIGIN chain's own token -- amount is what
 // you SEND, not what you receive, and every bridge chain's default token is
@@ -1194,7 +1197,7 @@ function _bridgeSyncBalance(){
   var o=document.getElementById('br-origin-chain')
   if(!txt||!o) return
   var bal=_bridgeBalanceFor(o.value)
-  var sym=o.value==='robinhood'?'USDG':'USDC'
+  var sym='USDC'
   txt.textContent = (bal==null) ? 'Balance: —' : 'Balance: '+parseFloat(bal).toFixed(4)+' '+sym
 }
 function _bridgeSetMax(){
@@ -1238,8 +1241,8 @@ function _bridgeGetQuote(){
       }
       _bridgeQuote={origin_chain:origin,dest_chain:dest,amount:amount}
       var destLabel=_BRIDGE_CHAINS.find(function(c){return c.v===dest}).label
-      var destSym=dest==='robinhood'?'USDG':'USDC'
-      var originSym=origin==='robinhood'?'USDG':'USDC'
+      var destSym='USDC'
+      var originSym='USDC'
       var receiveRaw=d.expected_amount_out
       var receive=receiveRaw!=null?(parseFloat(receiveRaw)/Math.pow(10, dest==='solana'?6:(dest==='bsc'?18:6))).toFixed(4):'—'
       var etaLabel=d.estimated_seconds?('~'+Math.round(d.estimated_seconds)+'s'):'seconds to minutes'

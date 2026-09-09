@@ -1053,6 +1053,38 @@ EVM_CHAINS = {
 }
 EVM_CHAIN_FEE_WALLET = BSC_FEE_WALLET  # same EVM address works as the fee recipient on every chain above
 
+# What a user is told they are spending. Always USDC, on every chain.
+#
+# This is NOT the same question as `usdc_symbol`, and conflating the two is
+# what put "YOU SPEND AT MOST USDG" on the buy panel. There are two different
+# facts here and they have different audiences:
+#
+#   usdc_symbol      the token that actually moves on that chain. On
+#                    Robinhood Chain that is USDG (Global Dollar), because no
+#                    USDC exists there at all. Logs, the swap routing and
+#                    anything you would take to a block explorer need this
+#                    one, or a transaction becomes impossible to find.
+#
+#   this function    the currency the USER put in and is spending. That is
+#                    USDC everywhere, including Robinhood Chain, because the
+#                    app bridges their USDC there and it converts to USDG on
+#                    arrival (see _maybe_start_auto_bridge_for_buy). They
+#                    never hold, choose, or deposit USDG -- it is an
+#                    implementation detail of one chain's plumbing.
+#
+# So this is not a relabelling of USDG as USDC. It is naming the thing the
+# person actually spent, and leaving the on-chain token named accurately
+# where the on-chain token is what matters.
+def user_currency_label(chain: str, base_currency: str = None) -> str:
+    """The currency to show a user for a trade on this chain.
+
+    Only Solana in SOL mode is not USDC, and that is a real user choice --
+    SOLANA_BASE_CURRENCY. Everything else is USDC, whatever token the chain
+    settles in underneath."""
+    if (chain or '').lower() == 'solana' and (base_currency or '').upper() == 'SOL':
+        return 'SOL'
+    return 'USDC'
+
 PROMOTION_PRICE_USD_DEFAULT = 70.0
 PROMOTION_PRICE_SOL_FALLBACK = 0.42  # used only if the SOL/USD rate isn't available yet
 PROMOTION_DURATION_HOURS_DEFAULT = 14
@@ -5631,7 +5663,7 @@ def _record_user_trade(user_id: int, us: dict, symbol: str, entry: float, exit_p
     loss-streak throttle, badges, and notifications are all already
     currency-agnostic (a USD-valued price ratio) and apply identically to
     both."""
-    currency_label = 'SOL' if chain == 'solana' else EVM_CHAINS[chain].get('usdc_symbol', 'USDC')
+    currency_label = 'SOL' if chain == 'solana' else user_currency_label(chain)
     check_daily_reset_user(us)
     now   = datetime.datetime.utcnow()
     today = now.strftime('%Y-%m-%d')
@@ -6638,7 +6670,7 @@ def _maybe_start_auto_bridge_for_buy(user_id: int, wallet: str, evm_address: str
     source = _find_bridge_source_chain(wallet, evm_address, dest_chain, amount_usdc)
     if not source:
         return {'started': False,
-                'msg': f'Insufficient {EVM_CHAINS[dest_chain].get("usdc_symbol", "USDC")} on {dest_chain}, '
+                'msg': f'Insufficient {user_currency_label(dest_chain)} on {dest_chain}, '
                        f'and no other chain has enough balance to bridge from automatically.'}
     source_chain, source_token, _source_balance = source
     bridge_amount = amount_usdc * (1 + _AUTO_BRIDGE_BUFFER_PCT)
@@ -6693,7 +6725,7 @@ def _execute_auto_buy_after_bridge(bridge_id: int, user_id: int, wallet: str, de
             available = get_evm_usdc_balance(evm_address, dest_chain)
             amount_usdc = min(requested_usdc, available)
             if amount_usdc <= 0:
-                _finish('failed', {'error': f'No {EVM_CHAINS[dest_chain].get("usdc_symbol","USDC")} arrived on {dest_chain} yet'})
+                _finish('failed', {'error': f'No {user_currency_label(dest_chain)} arrived on {dest_chain} yet'})
                 return
             # This buy fires right after USDC just landed via a bridge --
             # exactly the case where the destination wallet may never have
@@ -8165,7 +8197,7 @@ def _execute_evm_gas_topup(wallet: str, private_key: str, chain: str, usdc_amoun
         issues = quote.get('issues') or {}
         balance_issue = issues.get('balance')
         if balance_issue:
-            msg = f'Insufficient {usdc_symbol} balance for gas top-up'
+            msg = f'Insufficient {user_currency_label(chain)} balance for gas top-up'
             print(f'[{chain}-gas-topup] {msg}', flush=True)
             return False, msg, ''
 
@@ -8389,7 +8421,7 @@ def _sponsor_evm_gas(user_id: int, wallet: str, evm_address: str, chain: str) ->
     except Exception as e:
         return False, f'{chain} USDC balance check failed: {e}', ''
     if usdc_bal < GAS_SPONSOR_MIN_USDC and not _has_open_position_on_chain(user_id, chain):
-        _usdc_sym = EVM_CHAINS[chain].get('usdc_symbol', 'USDC')
+        _usdc_sym = user_currency_label(chain)
         return False, (f'no {_usdc_sym} on {chain} to trade with yet '
                        f'(holds {usdc_bal:.4f}, needs at least {GAS_SPONSOR_MIN_USDC:.0f}) and no open position there'), ''
 
@@ -8909,7 +8941,7 @@ def _ensure_evm_gas_locked(user_id: int, wallet: str, private_key: str, evm_addr
         # jargon, same reasoning as the bootstrap dead end above. This one
         # never gets a bridge_id -- it's a same-chain shortfall, not
         # something a bridge (pending) can fix.
-        _usdc_sym = EVM_CHAINS[chain].get('usdc_symbol', 'USDC')
+        _usdc_sym = user_currency_label(chain)
         add_user_log(wallet, f'[bot-{chain}] Cannot keep trading on {chain} — deposit a little {_usdc_sym} '
                               f'there to top up {native_symbol} gas automatically')
         return False, f'deposit a little {_usdc_sym} on {chain} — it tops up your {native_symbol} gas automatically', None
@@ -19429,7 +19461,7 @@ def _trade_currency_symbol(chain: str, base_currency: str) -> str:
     if chain == 'solana' and base_currency == 'SOL':
         return 'SOL'
     if chain in EVM_CHAINS:
-        return EVM_CHAINS[chain].get('usdc_symbol', 'USDC')
+        return user_currency_label(chain)
     return 'USDC'
 
 def _tc_lookup(id):
