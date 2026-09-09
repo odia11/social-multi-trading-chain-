@@ -25,6 +25,10 @@ REPO = '/home/user/Orc-agent-Solana-chain-'
 HTML = open(REPO + '/templates/live_market_pro.html').read()
 JS = open(REPO + '/static/live-market-pro.js').read()
 CSS = re.search(r'<style>(.*?)</style>', HTML, re.S).group(1)
+# Comments stripped before anything is matched. They quote the very values
+# they explain — "with top:0 the whole first section scrolled underneath" —
+# so a check reading the raw text finds the prose, not the rule.
+CSS = re.sub(r'/\*.*?\*/', '', CSS, flags=re.S)
 MOBILE = re.search(r'@media \(max-width: *900px\)(.*?)\n\}\n@media', CSS, re.S).group(1)
 
 checks = []
@@ -107,6 +111,46 @@ check('...refreshed by every control that can change it',
       JS.count('updateAdvCount()') >= 4)
 check('...and showing nothing at all when nothing is on, so an untouched rail '
       'stays quiet', '.pt-adv-count:empty{display:none}' in CSS)
+
+# ── the drawer has to start below the navbar ──────────────────────────────
+# It was pinned to the top of the screen while the navbar sits 105 z-index
+# levels above it, so the first section scrolled underneath: the topmost sort
+# row was cut in half and the row above it could not be reached at all.
+def top_of(sel):
+    m = re.search(re.escape(sel) + r'\{([^}]*)\}', CSS)
+    if not m: return None
+    v = re.search(r'(?:^|;)\s*top:\s*([^;]+)', m.group(1))
+    return v.group(1).strip() if v else None
+
+check('the drawer starts below the navbar rather than at the top of the screen',
+      (top_of('.pt-left.mobile-open') or '').startswith('var(--pt-nb-h'))
+check('...and so does the scrim, since dimming the bar you close it with reads '
+      'as the page having frozen',
+      (top_of('.pt-scrim') or '').startswith('var(--pt-nb-h'))
+check('...with a fallback, so the frame before the measurement lands is not '
+      'a drawer pinned to zero again',
+      '--pt-nb-h,104px' in CSS)
+
+check('the height is MEASURED, not assumed — the search field wraps onto a '
+      'second line at this width, so the bar has no one fixed height',
+      'getBoundingClientRect().height' in JS and "setProperty('--pt-nb-h'" in JS)
+check('...re-measured when the layout can have changed under it',
+      "addEventListener('resize', syncNavbarHeight)" in JS
+      and 'orientationchange' in JS)
+check('...after webfonts settle, which is how a bar ends up a few pixels '
+      'taller than it measured on first paint', 'document.fonts.ready' in JS)
+check('...and again on open, since the bar can have grown since startup',
+      'syncNavbarHeight(); leftEl.classList.add' in JS.replace('\n      ', ' ').replace('  ', ' ')
+      or re.search(r'opening\)\{\s*syncNavbarHeight\(\)', JS))
+check('a zero measurement is ignored rather than written, which would pin the '
+      'drawer back to the top', 'if(h > 0)' in JS)
+
+check('the feed behind the drawer cannot scroll while it is open',
+      "document.body.style.overflow = 'hidden'" in JS)
+check('...and that is released in closeMobileOverlays, so no path can leave '
+      'the page stuck',
+      "document.body.style.overflow = ''" in JS
+      and JS.index("document.body.style.overflow = ''") < JS.index('var ST = {'))
 
 check('the stylesheet still has balanced braces',
       CSS.count('{') == CSS.count('}'))

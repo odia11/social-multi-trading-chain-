@@ -330,7 +330,9 @@ input{font-family:inherit}
 
 /* ── mobile chrome (hidden on desktop) ── */
 .pt-mobile-filters-btn{display:none;align-items:center;gap:5px;background:var(--card2);border:1px solid var(--line2);color:var(--text);font-size:11px;font-weight:700;border-radius:9px;padding:7px 11px;flex-shrink:0;white-space:nowrap}
-.pt-scrim{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80}
+/* Stops at the navbar for the same reason the drawer does: dimming the bar
+   you need in order to close this again reads as the page having frozen. */
+.pt-scrim{display:none;position:fixed;top:var(--pt-nb-h,104px);right:0;bottom:0;left:0;background:rgba(0,0,0,.55);z-index:80}
 .pt-scrim.show{display:block}
 
 /* ── responsive: single-column layout, drawer filters (nav drawer is the
@@ -346,7 +348,16 @@ input{font-family:inherit}
   .pt-panel{grid-template-columns:1fr;border-radius:16px}
   .pt-left{display:none;max-height:none}
   .pt-left.mobile-open{
-    display:flex;position:fixed;top:0;bottom:0;left:0;width:88%;max-width:340px;z-index:95;
+    /* Starts BELOW the navbar, not at the top of the screen.
+       The navbar is sticky at z-index 200 and this drawer sits at 95, so with
+       top:0 the whole first section scrolled underneath it -- the topmost
+       sort row was cut in half and the one above it could not be reached at
+       all. The height is measured rather than guessed: on this breakpoint the
+       search field wraps onto a second line, so the bar is not one fixed
+       size, and a notch moves it again. --pt-nb-h is set in
+       live-market-pro.js; the fallback only matters for the frame before
+       that runs. */
+    display:flex;position:fixed;top:var(--pt-nb-h,104px);bottom:0;left:0;width:88%;max-width:340px;z-index:95;
     background:var(--panel);border-right:1px solid var(--panel-border);box-shadow:0 0 50px rgba(0,0,0,.6);
     max-height:none;padding:16px 14px calc(16px + env(safe-area-inset-bottom));
     /* Tighter between sections than on desktop, because the rows inside them

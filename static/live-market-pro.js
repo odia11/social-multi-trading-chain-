@@ -105,6 +105,9 @@ function closeMobileOverlays(){
   var scrim = document.getElementById('pt-scrim');
   if(left) left.classList.remove('mobile-open');
   if(scrim) scrim.classList.remove('show');
+  // Released here rather than at each call site, so no path can close the
+  // drawer and leave the page unable to scroll.
+  try{ document.body.style.overflow = ''; }catch(e){}
 }
 
 /* ── state ── */
@@ -1500,10 +1503,41 @@ document.addEventListener('DOMContentLoaded', function(){
   var filtersBtn = document.getElementById('pt-mobile-filters-btn');
   var leftEl     = document.getElementById('pt-left');
   var scrimEl    = document.getElementById('pt-scrim');
+
+  // How tall the navbar actually is, published as a CSS variable so the
+  // drawer and the scrim can start underneath it.
+  //
+  // Measured, not assumed: at this breakpoint the search field wraps onto a
+  // second line, so the bar is not one fixed height, and a notch or a font
+  // that loads late moves it again. Guessing produced the bug this fixes --
+  // the drawer began at the top of the screen, underneath a navbar sitting
+  // 105 z-index levels above it, so its first rows were simply not visible.
+  function syncNavbarHeight(){
+    var nb = document.querySelector('.pt-nb-topbar');
+    if(!nb) return;
+    var h = Math.round(nb.getBoundingClientRect().height);
+    if(h > 0) document.documentElement.style.setProperty('--pt-nb-h', h + 'px');
+  }
+  syncNavbarHeight();
+  // Again after webfonts settle, which is the common way the bar ends up a
+  // few pixels taller than it measured on first paint.
+  if(document.fonts && document.fonts.ready) document.fonts.ready.then(syncNavbarHeight);
+  window.addEventListener('resize', syncNavbarHeight);
+  window.addEventListener('orientationchange', syncNavbarHeight);
+
   if(filtersBtn) filtersBtn.addEventListener('click', function(){
     var opening = !leftEl.classList.contains('mobile-open');
     closeMobileOverlays();
-    if(opening){ leftEl.classList.add('mobile-open'); scrimEl.classList.add('show'); }
+    // Re-measured on open rather than only at startup: the bar can have
+    // grown or shrunk since (a wrapped search field, a badge appearing).
+    if(opening){
+      syncNavbarHeight();
+      leftEl.classList.add('mobile-open');
+      scrimEl.classList.add('show');
+      // The feed behind it must not scroll: scrolling it moves nothing the
+      // reader can see and takes the page somewhere else once they close it.
+      try{ document.body.style.overflow = 'hidden'; }catch(e){}
+    }
   });
   if(scrimEl) scrimEl.addEventListener('click', closeMobileOverlays);
 
