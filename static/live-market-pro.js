@@ -668,14 +668,34 @@ function setSort(s){ ST.sort = s; renderSortList(); loadFeed(); closeMobileOverl
 function setAge(a){
   ST.age = a;
   document.querySelectorAll('.pt-age-chip').forEach(function(c){ c.classList.toggle('active', c.dataset.age===a); });
+  updateAdvCount();
   loadFeed();
 }
 var _FILTER_KEYS = {lp_locked:'lpLocked', mint_revoked:'mintRevoked', hide_honeypots:'hideHoneypots', verified_socials:'verifiedSocials'};
-function toggleFilter(btn){
-  var stateKey = _FILTER_KEYS[btn.dataset.filter];
+function toggleFilter(row){
+  var stateKey = _FILTER_KEYS[row.dataset.filter];
   ST[stateKey] = !ST[stateKey];
-  btn.classList.toggle('on', ST[stateKey]);
+  // The row is the button now; the switch inside it is the picture of the
+  // state. Both are updated here so neither can be read as the truth alone.
+  var sw = row.querySelector('.pt-switch');
+  if(sw) sw.classList.toggle('on', ST[stateKey]);
+  row.setAttribute('aria-pressed', ST[stateKey] ? 'true' : 'false');
+  updateAdvCount();
   loadFeed();
+}
+
+// How many filters are actually doing something, shown on the collapsed row.
+// Without it, folding the block hides whether anything is on — which is worse
+// than the clutter it replaced, because a feed narrowed by a forgotten filter
+// looks like a feed with nothing in it.
+var _LIQ_DEFAULT = 25000;
+function updateAdvCount(){
+  var n = 0;
+  for(var k in _FILTER_KEYS){ if(ST[_FILTER_KEYS[k]]) n++; }
+  if(ST.age && ST.age !== 'any') n++;
+  if(Number(ST.minLiquidity) !== _LIQ_DEFAULT) n++;
+  var el = document.getElementById('pt-adv-count');
+  if(el) el.textContent = n ? (n + ' on') : '';
 }
 
 /* ── feed loading ── */
@@ -1448,7 +1468,7 @@ document.addEventListener('click', function(e){
   }
   if((el = e.target.closest('[data-sort]'))){ setSort(el.dataset.sort); return; }
   if((el = e.target.closest('.pt-age-chip'))){ setAge(el.dataset.age); return; }
-  if((el = e.target.closest('.pt-switch'))){ toggleFilter(el); return; }
+  if((el = e.target.closest('.pt-toggle-row'))){ toggleFilter(el); return; }
   if((el = e.target.closest('#pt-wl-edit-btn'))){ toggleWlEdit(); return; }
   if((el = e.target.closest('.pt-wl-remove'))){ removeWatchFromList(el.dataset.mint); return; }
 });
@@ -1461,9 +1481,19 @@ document.addEventListener('DOMContentLoaded', function(){
   liqSlider.addEventListener('input', function(){
     ST.minLiquidity = parseInt(liqSlider.value, 10);
     liqValueEl.textContent = '$'+fmtShort(ST.minLiquidity)+' of $500K';
+    updateAdvCount();
     clearTimeout(_liqDebounce);
     _liqDebounce = setTimeout(loadFeed, 350);
   });
+
+  // Folded by default on a phone, open on desktop. Set from JS rather than
+  // CSS because <details> is driven by an attribute, not a display property —
+  // and only at startup, so reopening it is not undone on the next resize.
+  var advEl = document.getElementById('pt-adv');
+  if(advEl && window.matchMedia && window.matchMedia('(max-width: 900px)').matches){
+    advEl.open = false;
+  }
+  updateAdvCount();
 
   /* mobile: left-rail filters drawer (the nav drawer is the shared navbar's
      own, see static/navbar.js) */

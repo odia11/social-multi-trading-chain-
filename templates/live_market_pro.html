@@ -57,8 +57,27 @@ input{font-family:inherit}
 .pt-sort-count{font-family:var(--mono);font-size:10.5px;font-weight:700;color:var(--muted2);background:var(--line);border-radius:999px;padding:2px 7px;flex-shrink:0}
 .pt-sort-row.active .pt-sort-count{color:var(--accent);background:rgba(247,185,85,.16)}
 
-.pt-toggle-row{display:flex;align-items:center;justify-content:space-between;padding:7px 2px;font-size:12.5px;color:var(--text)}
-.pt-switch{width:34px;height:19px;border-radius:999px;background:var(--line2);position:relative;flex-shrink:0;transition:background .18s;border:none}
+/* A button now, not a div wrapping one: the whole row is the target. */
+.pt-toggle-row{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  width:100%;padding:7px 2px;font-size:12.5px;color:var(--text);background:none;border:none;
+  text-align:left;cursor:pointer;border-radius:9px;transition:background .15s}
+.pt-toggle-row:hover{background:var(--line)}
+
+/* ── the collapsible block ── */
+.pt-adv{border-top:1px solid var(--line);padding-top:14px}
+.pt-adv-sum{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;
+  padding:6px 2px;font-size:10.5px;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted2)}
+.pt-adv-sum::-webkit-details-marker{display:none}
+.pt-adv-label{flex:1}
+/* Only rendered when something is on, so an untouched rail stays quiet. */
+.pt-adv-count{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--accent);
+  background:rgba(247,185,85,.16);border-radius:999px;padding:2px 7px;letter-spacing:0}
+.pt-adv-count:empty{display:none}
+.pt-adv-chev{width:15px;height:15px;flex:0 0 15px;transition:transform .18s}
+.pt-adv[open] .pt-adv-chev{transform:rotate(180deg)}
+.pt-adv-body{display:flex;flex-direction:column;gap:18px;padding-top:10px}
+.pt-switch{width:34px;height:19px;border-radius:999px;background:var(--line2);position:relative;flex-shrink:0;transition:background .18s;border:none;display:block;pointer-events:none}
 .pt-switch::after{content:'';position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:var(--muted2);transition:transform .18s,background .18s}
 .pt-switch.on{background:var(--accent-soft);border:1px solid var(--accent-border)}
 .pt-switch.on::after{transform:translateX(15px);background:#0a0b0e}
@@ -327,10 +346,40 @@ input{font-family:inherit}
   .pt-panel{grid-template-columns:1fr;border-radius:16px}
   .pt-left{display:none;max-height:none}
   .pt-left.mobile-open{
-    display:flex;position:fixed;top:0;bottom:0;left:0;width:84%;max-width:320px;z-index:95;
+    display:flex;position:fixed;top:0;bottom:0;left:0;width:88%;max-width:340px;z-index:95;
     background:var(--panel);border-right:1px solid var(--panel-border);box-shadow:0 0 50px rgba(0,0,0,.6);
-    max-height:none;padding:18px 16px;
+    max-height:none;padding:16px 14px calc(16px + env(safe-area-inset-bottom));
+    /* Tighter between sections than on desktop, because the rows inside them
+       are about to get taller -- the drawer ends up shorter overall, not
+       longer. */
+    gap:14px;
   }
+  /* ── thumb-sized targets ──
+     Every control in here was under 44px: the sort rows ~36, the toggle rows
+     ~33, the age chips ~27, and the switch itself 34x19. On a phone that is
+     a row of things you aim at rather than press. They are bigger here and
+     nowhere else -- a mouse does not need it and the desktop column is
+     narrow. */
+  .pt-sort-row{padding:12px 12px;font-size:14px;min-height:44px}
+  .pt-sort-count{font-size:11.5px;padding:3px 9px}
+  .pt-toggle-row{padding:12px 8px;font-size:14px;min-height:48px}
+  .pt-switch{width:44px;height:26px}
+  .pt-switch::after{width:20px;height:20px;top:3px;left:3px}
+  .pt-switch.on::after{transform:translateX(18px)}
+  .pt-age-chip{padding:11px 16px;font-size:12px;min-height:44px}
+  .pt-age-row{gap:8px}
+  /* A 4px rail is hard to grab; the thumb is what you actually aim for. */
+  .pt-liq-slider{height:6px}
+  .pt-liq-slider::-webkit-slider-thumb{width:22px;height:22px}
+  .pt-liq-slider::-moz-range-thumb{width:22px;height:22px}
+  .pt-liq-value{font-size:13px}
+  .pt-adv-sum{padding:12px 2px;min-height:44px;font-size:11.5px}
+  .pt-adv-chev{width:18px;height:18px;flex:0 0 18px}
+  /* The bot card is the last thing in a scrolling drawer, so it gives up the
+     room the controls above it just took. */
+  .pt-bot-card{padding:12px;border-radius:14px}
+  .pt-bot-sub{font-size:11px;margin-bottom:9px;line-height:1.45}
+  .pt-bot-btn{padding:11px;min-height:44px}
   .pt-mobile-filters-btn{display:flex}
   .pt-feed-hd{flex-wrap:wrap;row-gap:8px}
 
@@ -362,29 +411,48 @@ input{font-family:inherit}
         <div id="pt-sort-list"></div>
       </div>
 
-      <div>
-        <div class="pt-sec-title">Safety filter</div>
-        <div class="pt-toggle-row"><span>LP locked only</span><button class="pt-switch" data-filter="lp_locked"></button></div>
-        <div class="pt-toggle-row"><span>Mint revoked</span><button class="pt-switch" data-filter="mint_revoked"></button></div>
-        <div class="pt-toggle-row"><span>Hide honeypots</span><button class="pt-switch" data-filter="hide_honeypots"></button></div>
-        <div class="pt-toggle-row"><span>Verified socials</span><button class="pt-switch" data-filter="verified_socials"></button></div>
-      </div>
+      <!-- Safety, liquidity and age are the settings you change occasionally;
+           sort is the one you change constantly. On a phone all of it was
+           stacked open, so fifteen controls stood between opening the rail
+           and seeing which of them were even on. Folded behind one row that
+           says how many are active, and left open on desktop where the
+           column has room for it. -->
+      <details class="pt-adv" id="pt-adv" open>
+        <summary class="pt-adv-sum">
+          <span class="pt-adv-label">Filters</span>
+          <span class="pt-adv-count" id="pt-adv-count"></span>
+          <svg class="pt-adv-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"
+               aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+        </summary>
+        <div class="pt-adv-body">
+          <div>
+            <div class="pt-sec-title">Safety filter</div>
+            <!-- The whole row is the button. It used to be the 34x19 switch
+                 alone, which is well under any thumb-sized target. -->
+            <button class="pt-toggle-row" data-filter="lp_locked" aria-pressed="false"><span>LP locked only</span><span class="pt-switch"></span></button>
+            <button class="pt-toggle-row" data-filter="mint_revoked" aria-pressed="false"><span>Mint revoked</span><span class="pt-switch"></span></button>
+            <button class="pt-toggle-row" data-filter="hide_honeypots" aria-pressed="false"><span>Hide honeypots</span><span class="pt-switch"></span></button>
+            <button class="pt-toggle-row" data-filter="verified_socials" aria-pressed="false"><span>Verified socials</span><span class="pt-switch"></span></button>
+          </div>
 
-      <div>
-        <div class="pt-sec-title">Min liquidity</div>
-        <div class="pt-liq-value" id="pt-liq-value">$25K of $500K</div>
-        <input type="range" class="pt-liq-slider" id="pt-liq-slider" min="0" max="500000" step="5000" value="25000">
-      </div>
+          <div>
+            <div class="pt-sec-title">Min liquidity</div>
+            <div class="pt-liq-value" id="pt-liq-value">$25K of $500K</div>
+            <input type="range" class="pt-liq-slider" id="pt-liq-slider" min="0" max="500000" step="5000" value="25000">
+          </div>
 
-      <div>
-        <div class="pt-sec-title">Age</div>
-        <div class="pt-age-row" id="pt-age-row">
-          <button class="pt-age-chip" data-age="1h">&lt; 1H</button>
-          <button class="pt-age-chip" data-age="6h">&lt; 6H</button>
-          <button class="pt-age-chip" data-age="24h">&lt; 24H</button>
-          <button class="pt-age-chip active" data-age="any">ANY</button>
+          <div>
+            <div class="pt-sec-title">Age</div>
+            <div class="pt-age-row" id="pt-age-row">
+              <button class="pt-age-chip" data-age="1h">&lt; 1H</button>
+              <button class="pt-age-chip" data-age="6h">&lt; 6H</button>
+              <button class="pt-age-chip" data-age="24h">&lt; 24H</button>
+              <button class="pt-age-chip active" data-age="any">ANY</button>
+            </div>
+          </div>
         </div>
-      </div>
+      </details>
 
       <div class="pt-bot-card">
         <div class="pt-bot-title"><span class="pt-bot-dot"></span>Bot is scanning</div>
