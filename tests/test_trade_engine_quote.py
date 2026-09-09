@@ -289,5 +289,82 @@ check("an address that is not the chain's native or stable asset is refused, "
       'rather than silently recording decimals for something the registry '
       'does not track', ok)
 
+# ── gas priced for the route, not for topping a wallet up ──────────────────
+# Pass one has no route yet, so it uses a constant sized to FUND a wallet for
+# a worst-case approve-plus-swap. That is the right number to top someone up
+# with and far too large to price a trade with: on a $1 trade on Robinhood it
+# showed $0.27 of network fee, leaving $0.71 of a dollar. The swap quote knows
+# what this route actually costs, and pass two now uses it.
+from trade_engine.quote import build_quote as _bq, QuoteRequest as _QR   # noqa: E402
+from trade_engine.providers import ZeroExProvider as _ZX                # noqa: E402
+from decimal import Decimal as _D                                       # noqa: E402
+
+
+def _route(gas_units, gas_price):
+    def f(sell, buy, amount, taker, chain):
+        return {'buyAmount': '1000000000000000000',
+                'minBuyAmount': '990000000000000000',
+                'transaction': {'gas': str(gas_units), 'gasPrice': str(gas_price)}}
+    return f
+
+
+def _price(gas_units, **kw):
+    return _bq(_QR(user_id=1, wallet='W', source_chain='base', destination_chain='base',
+                   token_address='0xTOKEN', max_spend_usd=_D('100'), taker_address='0xT'),
+               swap_provider=_ZX(_route(gas_units, 10 ** 9)),
+               gas_estimator=lambda c: _D('0.50'),      # the conservative one
+               fee_rate=_D('0.0075'), **kw)
+
+
+conservative = _price(200000).to_dict()
+check('without a converter the pre-swap estimate stands, so nothing changes for '
+      'a caller that does not supply one',
+      conservative['costs_by_kind']['source_gas'] == '0.50')
+
+# 200000 units at 1 gwei = 0.0002 ETH; at $2000 that is $0.40.
+real = _price(200000, gas_from_native=lambda c, n: n * _D('2000')).to_dict()
+check("the route's own gas estimate replaces the conservative one",
+      real['costs_by_kind']['source_gas'] == '0.40')
+check('...leaving MORE to buy with, which on a small trade is the difference '
+      'between a sensible cost and half the order',
+      _D(real['token_purchase_usd']) > _D(conservative['token_purchase_usd']))
+check('...and the ceiling still holds exactly',
+      _D(real['token_purchase_usd'])
+      + sum(_D(v) for v in real['costs_by_kind'].values()) == _D('100'))
+check('...recorded as coming from the route, not from a constant',
+      any(c['source'] == '0x' for c in real['costs'] if c['kind'] == 'source_gas'))
+check('...and reads as a currency figure. A native amount times a price has as '
+      'many decimals as it likes; "0.4000" is not an amount of money',
+      len(real['costs_by_kind']['source_gas'].split('.')[1]) == 2)
+
+cheap = _price(80000, gas_from_native=lambda c, n: n * _D('2000')).to_dict()
+check('a cheaper route prices cheaper — the figure tracks the actual estimate '
+      'rather than a fixed headroom',
+      _D(cheap['costs_by_kind']['source_gas']) < _D(real['costs_by_kind']['source_gas']))
+
+
+def _no_gas(sell, buy, amount, taker, chain):
+    return {'buyAmount': '1000000000000000000', 'minBuyAmount': '990000000000000000'}
+
+
+unknown = _bq(_QR(user_id=1, wallet='W', source_chain='base', destination_chain='base',
+                  token_address='0xTOKEN', max_spend_usd=_D('100'), taker_address='0xT'),
+              swap_provider=_ZX(_no_gas), gas_estimator=lambda c: _D('0.50'),
+              fee_rate=_D('0.0075'),
+              gas_from_native=lambda c, n: n * _D('2000')).to_dict()
+check('a provider that reports no gas keeps the conservative figure — an '
+      'unreadable estimate is unknown, never a cheaper guess',
+      unknown['costs_by_kind']['source_gas'] == '0.50')
+
+
+def _boom(c, n):
+    raise RuntimeError('no price feed')
+
+broken = _price(200000, gas_from_native=_boom).to_dict()
+check('a converter that fails keeps the conservative figure and says so, rather '
+      'than dropping a real cost out of the ceiling',
+      broken['costs_by_kind']['source_gas'] == '0.50'
+      and any('conservative' in w for w in broken['warnings']))
+
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)

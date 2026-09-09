@@ -39,7 +39,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Decimal, ROUND_UP
 from typing import Callable, Optional
 
 from . import registry as R
@@ -136,6 +136,7 @@ def build_quote(
     fee_rate,
     bridge_quoter: Optional[Callable] = None,   # (src, dst, usd) -> dict
     gas_is_sponsored: Callable = lambda chain: False,
+    gas_from_native: Optional[Callable] = None,   # (chain, native amount) -> USD
     clock: Callable = time.time,
 ) -> PricedQuote:
     """Price a trade end to end. Raises rather than returning a half-quote."""
@@ -234,6 +235,38 @@ def build_quote(
         reserve_lines = costs_from_swap_quote(swap)
     except ProviderError as e:
         raise QuoteError(str(e)) from e
+
+    # The swap quote knows what THIS route costs in gas. The estimate used in
+    # pass one could not -- there was no route yet -- so it comes from a
+    # conservative constant sized to fund a wallet for a worst-case
+    # approve-plus-swap, which is the right number to top someone up with and
+    # far too large to price a trade with. On a small trade the difference is
+    # the difference between a sensible cost and half the order.
+    #
+    # Only ever replaces the source-gas line, and only when the provider
+    # actually reported one; an unreadable figure stays unknown rather than
+    # becoming a cheaper guess.
+    if gas_from_native is not None and getattr(swap, 'estimated_gas_native', None):
+        try:
+            # Quantised to the cent, rounding UP: a cost is never understated,
+            # and a breakdown that reads "0.4000" is not a currency figure.
+            real_gas = money(gas_from_native(src.name, swap.estimated_gas_native)
+                             ).quantize(Decimal('0.01'), rounding=ROUND_UP)
+        except Exception as e:
+            real_gas = None
+            warnings.append(f'could not price the route\'s own gas estimate ({e}); '
+                            f'using the conservative one')
+        if real_gas is not None and real_gas > ZERO:
+            upfront = [c for c in upfront if c.kind != KIND_SOURCE_GAS] + [
+                sponsored_gas(real_gas, recovered=True,
+                              detail=f'{src.native.symbol} on {src.display_name}, '
+                                     f'fronted by the sponsor wallet')
+                if gas_is_sponsored(src.name) else
+                CostLine(KIND_SOURCE_GAS, real_gas, source='0x',
+                         detail=f'{src.native.symbol} on {src.display_name}, '
+                                f'estimated for this route')
+            ]
+
     final = price_trade(ceiling, fee_rate, upfront + reserve_lines, same_chain=same_chain)
 
     if final.token_purchase_usd < provisional.token_purchase_usd:

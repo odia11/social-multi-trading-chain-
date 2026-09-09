@@ -7481,6 +7481,9 @@ def _te_build_and_store_quote(*, uid, wallet, source_chain, dest_chain, token_ad
         gas_estimator=_te_gas_usd,
         fee_rate=Decimal(str(FEE_RATE_TXN)),
         gas_is_sponsored=lambda c: _te_needs_sponsored_gas(c, taker),
+        # Lets the quote replace its conservative pre-swap gas figure with the
+        # one 0x reports for the actual route.
+        gas_from_native=lambda c, native: native * _te_native_price_usd(c),
     )
     conn = sqlite3.connect(DB_FILE)
     try:
