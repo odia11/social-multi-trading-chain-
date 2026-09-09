@@ -228,5 +228,40 @@ check('it refuses to run from /opt/orcagent, which install.sh overwrites from '
 check('it shows which commits are being deployed rather than just "done"',
       'log --oneline' in UPDATE)
 
+
+# ── the outage this actually caused ───────────────────────────────────────
+# A virtualenv records the ABSOLUTE path of its own python inside every
+# script it installs. One built in ~/orcagent and then copied to
+# /opt/orcagent leaves gunicorn starting with
+#     #!/home/<user>/orcagent/venv/bin/python3
+# and the service user cannot read another user's home. systemd reports
+# "Failed to execute .../venv/bin/gunicorn: Permission denied" on a file
+# that is owned by the right user and marked executable, which sends you
+# looking at the wrong thing entirely.
+check('the installer does not copy a venv out of the clone',
+      "--exclude 'venv'" in INSTALL and "! -name venv" in INSTALL)
+check('...and rebuilds one whose scripts point outside the install directory, '
+      'because `python3 -m venv` on an existing directory does NOT rewrite '
+      'those paths',
+      'points outside $APP_DIR' in INSTALL and 'rm -rf "$APP_DIR/venv"' in INSTALL)
+check('...then PROVES the service user can actually run it, rather than '
+      'assuming a successful pip install means a working venv',
+      'sudo -u "$APP_USER" "$APP_DIR/venv/bin/gunicorn" --version' in INSTALL)
+check('...and stops with the interpreter path in the message if it cannot, so '
+      'the next person is not left reading file permissions',
+      'Its interpreter is:' in INSTALL)
+check('rsync is installed rather than silently falling back to a copy that '
+      'never deletes removed files', 'ca-certificates rsync' in INSTALL)
+check('...and the fallback says so instead of quietly deploying differently',
+      'stale files will remain' in INSTALL)
+
+check('a failed restart no longer kills the deploy script before it can report '
+      'anything. `set -e` meant systemctl failing skipped the journal and the '
+      'rollback instructions — the one moment they are worth having',
+      'RESTART_OK=0' in UPDATE and 'NOT under `set -e`' in UPDATE)
+check('...and the guidance names the venv shebang first, since a permission '
+      'error there points at the file rather than at the cause',
+      'is almost never the file' in UPDATE and 'head -1 $APP_DIR/venv/bin/gunicorn' in UPDATE)
+
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)

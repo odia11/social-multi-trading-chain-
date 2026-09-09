@@ -61,18 +61,27 @@ echo "  done (full log: /tmp/orcagent-install-$STAMP.log)"
 
 # ── 3. restart, then prove it came back ──
 say "Restarting"
-systemctl restart orcagent orcagent-monitor
+# NOT under `set -e`. When systemctl restart failed, the script died on this
+# line -- before the block below that prints the journal and the rollback
+# commands. The one moment those are worth having is the moment they were
+# skipped, so the failure is captured and handled rather than fatal.
+RESTART_OK=1
+systemctl restart orcagent orcagent-monitor || RESTART_OK=0
 
-printf '  waiting for the app to answer'
-for i in $(seq 1 30); do
-  if curl -fsS --max-time 3 localhost:8080/health >/dev/null 2>&1; then
-    printf '\n  it answers\n'
-    HEALTHY=1
-    break
-  fi
-  printf '.'
-  sleep 2
-done
+if [ "$RESTART_OK" = "1" ]; then
+  printf '  waiting for the app to answer'
+  for i in $(seq 1 30); do
+    if curl -fsS --max-time 3 localhost:8080/health >/dev/null 2>&1; then
+      printf '\n  it answers\n'
+      HEALTHY=1
+      break
+    fi
+    printf '.'
+    sleep 2
+  done
+else
+  echo "  systemctl could not start it"
+fi
 
 if [ "${HEALTHY:-0}" != "1" ]; then
   printf '\n'
@@ -83,7 +92,18 @@ if [ "${HEALTHY:-0}" != "1" ]; then
 The app did not come back. The log above says why -- usually a
 missing variable in /etc/orcagent.env, or a syntax error.
 
-To go back to the code that was working:
+A "Permission denied" on venv/bin/gunicorn is almost never the file's
+own permissions -- check what its first line points at:
+
+    head -1 $APP_DIR/venv/bin/gunicorn
+
+If that path is not inside $APP_DIR, the virtualenv was copied from
+somewhere else and keeps the old absolute path. Rebuild it:
+
+    sudo rm -rf $APP_DIR/venv
+    sudo bash $REPO_DIR/deploy/install.sh
+
+To go back to the code that was working instead:
 
     cd $REPO_DIR && sudo git checkout $BEFORE
     sudo bash deploy/install.sh
