@@ -179,12 +179,19 @@ sudo journalctl -u orcagent --since "1 hour ago" | grep -i error
 Deploy a new version:
 
 ```bash
-cd ~/orcagent && git pull            # wherever you cloned it -- NOT /opt/orcagent,
-                                     # which install.sh overwrites from the clone
-sudo bash deploy/install.sh          # safe to re-run; leaves /etc/orcagent.env, /data
-                                     # and certbot's nginx config alone
-sudo systemctl restart orcagent orcagent-monitor
+sudo bash ~/orcagent/deploy/update.sh
 ```
+
+That is the whole thing. It backs the database up and verifies the backup
+opens, pulls, reinstalls, restarts, waits until the app actually answers, and
+finishes by checking that the services it trades through are still reachable.
+
+If the app does not come back it prints the log and the exact commands to
+return to the commit that was working — the moment you need those is the
+moment you least want to be composing them.
+
+Run it from your clone, not from `/opt/orcagent`; that directory is a copy
+the installer overwrites.
 
 Back up the database — on a schedule, and by hand before any deploy that
 touches storage:

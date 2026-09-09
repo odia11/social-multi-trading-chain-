@@ -185,5 +185,48 @@ check('...and tell you to back the database up before deploying, not only on a '
       'schedule — a deploy is exactly when you want yesterday\'s copy',
       'before any deploy' in README and '.backup /data/backups/' in README)
 
+
+# ── deploying, from a phone ────────────────────────────────────────────────
+# The person running this is doing it on a phone keyboard, so the number of
+# things they have to paste correctly is itself a reliability problem.
+UPDATE = open(REPO + '/deploy/update.sh').read()
+
+check('it does the whole deploy — backup, pull, install, restart, verify — so '
+      'there is one thing to paste rather than four to get right in order',
+      all(k in UPDATE for k in ('.backup', 'git -C', 'install.sh',
+                                'systemctl restart', 'verify_live.py')))
+check('it backs the database up BEFORE anything else moves',
+      UPDATE.index('.backup') < UPDATE.index('git -C'))
+check('...with .backup rather than cp, since a plain copy of a database being '
+      'written to can be a file that no longer opens', "sqlite3 \"$DB\" \".backup" in UPDATE)
+check('...and OPENS that backup to prove it is restorable. A backup nobody has '
+      'read is a guess, and this is the one moment it matters',
+      'PRAGMA integrity_check' in UPDATE and 'The backup did not verify' in UPDATE)
+check('...refusing to go on if it does not verify, with nothing yet changed',
+      'Nothing has been changed' in UPDATE)
+
+check('a failed install stops before the restart, so the old code keeps serving',
+      'nothing was restarted' in UPDATE)
+check('it waits for the app to actually ANSWER after restarting, rather than '
+      'assuming a restart worked', 'localhost:8080/health' in UPDATE)
+check('...and prints the log when it does not come back, instead of leaving you '
+      'to find it', 'journalctl -u orcagent' in UPDATE)
+check('...with the exact commands to go back to the commit that was working — '
+      'the moment you need those is the moment you least want to compose them',
+      'git checkout $BEFORE' in UPDATE and 'ROLLBACK' in UPDATE)
+check('...and it names where the verified database copy is',
+      '${BACKUP:-(none taken)}' in UPDATE)
+
+check('it runs the live check at the end, so a deploy that quietly loses an API '
+      'key is caught then rather than by a user', 'verify_live.py' in UPDATE)
+check('...and exits non-zero if the app is up but cannot reach what it trades '
+      'through, because "the site loads" is not the same as "trades work"',
+      'exit 1' in UPDATE and 'not reachable' in UPDATE)
+
+check('it refuses to run from /opt/orcagent, which install.sh overwrites from '
+      'the clone', 'not from $APP_DIR' in UPDATE)
+check('it shows which commits are being deployed rather than just "done"',
+      'log --oneline' in UPDATE)
+
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)
