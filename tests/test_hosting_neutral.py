@@ -242,8 +242,21 @@ check('...and exits non-zero if the app is up but cannot reach what it trades '
       'through, because "the site loads" is not the same as "trades work"',
       'exit 1' in UPDATE and 'not reachable' in UPDATE)
 
-check('it refuses to run from /opt/orcagent, which install.sh overwrites from '
-      'the clone', 'not from $APP_DIR' in UPDATE)
+# The guard existed and still let the mistake through. It tested for
+# dashboard.py, which install.sh copies to $APP_DIR -- so running it from
+# there passed, and the script died six steps later on "fatal: not a git
+# repository", after it had already taken and pruned backups. The one file
+# that tells a clone apart from a deploy is the one install.sh excludes.
+check('it refuses to run from /opt/orcagent by testing for .git — the thing '
+      'install.sh excludes — rather than for a file install.sh copies there',
+      '"$REPO_DIR/.git"' in UPDATE and 'REPO_DIR/dashboard.py' not in UPDATE)
+check('...and hands over the command to run instead, since whoever is deploying '
+      'is usually on a phone and cannot paste a description',
+      'sudo bash $CLONE/deploy/update.sh' in UPDATE)
+check('...found by looking for the clone rather than assuming a username',
+      '/home/*/orcagent' in UPDATE)
+check('...and says so plainly when there is no clone anywhere, instead of '
+      'naming a path that does not exist', 'none was found' in UPDATE)
 check('it shows which commits are being deployed rather than just "done"',
       'log --oneline' in UPDATE)
 

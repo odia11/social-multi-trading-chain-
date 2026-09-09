@@ -22,7 +22,34 @@ say(){ printf '\n\033[1;33m▸ %s\033[0m\n' "$*"; }
 die(){ printf '\n\033[1;31m✗ %s\033[0m\n' "$*"; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "Run this with sudo."
-[ -f "$REPO_DIR/dashboard.py" ] || die "Run this from your git clone, not from $APP_DIR."
+
+# This script pulls, so it has to run from the git clone. The deployed copy at
+# $APP_DIR is not one: install.sh rsyncs the files across with --exclude '.git'.
+#
+# The check used to be for dashboard.py, which install.sh copies -- so running
+# it from $APP_DIR passed the guard and then died several steps later on
+# "fatal: not a git repository", after the backup had already been taken. The
+# thing that distinguishes a clone from a deploy is the .git directory, so
+# that is what is tested.
+#
+# And the error hands over a command rather than a description of one: whoever
+# is running this is usually on a phone, and "run it from your clone" is not
+# something you can paste.
+if [ ! -e "$REPO_DIR/.git" ]; then
+  CLONE=""
+  for c in /home/*/orcagent /root/orcagent; do
+    [ -e "$c/.git" ] && [ -f "$c/deploy/update.sh" ] && { CLONE="$c"; break; }
+  done
+  if [ -n "$CLONE" ]; then
+    die "$REPO_DIR is the deployed copy, not the git clone — it has no .git to pull into.
+
+    Run this instead:
+
+        sudo bash $CLONE/deploy/update.sh"
+  fi
+  die "$REPO_DIR is not a git clone (no .git), and none was found in a home
+    directory. Clone the repository first, then run deploy/update.sh from it."
+fi
 
 # ── 1. a backup you could actually restore from ──
 # Taken with .backup rather than cp: a plain copy of a database that is being
