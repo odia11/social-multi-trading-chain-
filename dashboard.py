@@ -11469,7 +11469,7 @@ def api_my_trades():
             return jsonify({'trades': []})
         user_id = row['id']
         trades = conn.execute(
-            'SELECT token, entry_price, exit_price, amount, pnl, timestamp, opened_at, mint_address, chain, base_currency '
+            'SELECT token, entry_price, exit_price, amount, pnl, timestamp, opened_at, mint_address, chain, base_currency, side '
             'FROM trades WHERE user_id=? AND exit_price IS NOT NULL AND exit_price != 0 '
             'ORDER BY timestamp DESC LIMIT 5',
             (user_id,)
@@ -11479,9 +11479,26 @@ def api_my_trades():
             entry  = t['entry_price'] or 0
             exit_p = t['exit_price']  or 0
             pnl_pct = round(((exit_p - entry) / entry * 100), 2) if entry else 0
+            # `side` was never returned here, so the composer's share picker
+            # (_attachTradeEmbed in dashboard.js) always fell back to its own
+            # default of 'BUY' -- meaning EVERY shared trade, bot or manual,
+            # posted as a green BUY card. Nothing to do with which one closed
+            # it: every row this query can return already has an exit_price
+            # (see the WHERE clause), so it is a closed position regardless.
+            #
+            # `side` is only ever populated as lowercase 'buy'/'sell' by the
+            # Live Market instant-trade endpoint, which can legitimately
+            # record either leg on its own. Anything else -- NULL, in
+            # particular, which is everything _record_user_trade() and the
+            # EVM manual-sell path write -- is always a close. Same fallback
+            # wallet_manual_trades() already uses, and the same reasoning:
+            # "there's no manual buy without a side" there.
+            _raw_side = (t['side'] or '').lower()
+            side = _raw_side.upper() if _raw_side in ('buy', 'sell') else 'SELL'
             result.append({
                 'symbol':        t['token'],
                 'token':         t['token'],
+                'side':          side,
                 'entry_price':   entry,
                 'exit_price':    exit_p,
                 'amount':        float(t['amount'] or 0),
