@@ -11,7 +11,7 @@ Link 3 is where it was broken, and in a way no error would ever reveal.
 
 The service worker is executed in node against a fake `clients` registry, so
 these drive the real handler rather than reading it."""
-import json, re, subprocess, sys
+import json, os, re, subprocess, sys, tempfile
 
 REPO = '/home/user/Orc-agent-Solana-chain-'
 SW   = open(REPO + '/static/sw.js').read()
@@ -138,8 +138,16 @@ Promise.resolve()
  .then(function(){reset([mkClient('https://orcagent.fun/home',true)]);return click(null);}).then(function(r){out.no_url=r;})
  .then(function(){console.log(JSON.stringify(out));});
 '''
-open('_sw.js', 'w').write(src)
-res = subprocess.run(['node', '_sw.js'], capture_output=True, text=True)
+# Into a temp directory, not the repo. This used to write _sw.js next to
+# dashboard.py, which left the working tree dirty after every single test
+# run -- and the file had been committed once by accident, so it also sat in
+# git as a stale half-copy of sw.js glued to this harness, looking for all
+# the world like source.
+with tempfile.TemporaryDirectory() as _tmp:
+    _harness_path = os.path.join(_tmp, 'sw_harness.js')
+    with open(_harness_path, 'w', encoding='utf-8') as _f:
+        _f.write(src)
+    res = subprocess.run(['node', _harness_path], capture_output=True, text=True)
 assert res.returncode == 0, res.stderr
 R = json.loads(res.stdout)
 print(json.dumps(R, indent=2) + '\n')

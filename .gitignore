@@ -40,3 +40,7 @@ fix_*.py
 files/
 proxy/.wrangler/
 node_modules/
+
+# Written by tests/test_push_deeplink.py before it used a temp dir; kept
+# ignored so an older checkout cannot re-commit it.
+_sw.js
