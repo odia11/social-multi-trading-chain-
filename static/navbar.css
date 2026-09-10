@@ -104,8 +104,22 @@
    ones (hamburger for the primary 5, a separate "..." for the rest). Hidden
    here by default (desktop: #pt-nb-nav is the inline pill row, this content
    would look like a stray list bolted onto it); shown below only inside the
-   mobile breakpoint, where #pt-nb-nav becomes a dropdown panel anyway. */
-.pt-nb-mobile-only{display:none}
+   mobile breakpoint, where #pt-nb-nav becomes a dropdown panel anyway.
+
+   Scoped to #pt-nb-nav (an id, not just the .pt-nb-mobile-only class) on
+   purpose: a bare `.pt-nb-mobile-only{display:none}` has specificity (0,1,0),
+   and every one of these <a> items is ALSO matched by `.pt-nb-nav a{display:
+   inline-flex}` at (0,1,1) -- one more type selector, which beats an equal
+   class count regardless of source order. That rule silently won on every
+   desktop browser: ten "mobile-only" links (Traders, Groups, Promote,
+   History, Bot, ...) rendered inline in the primary row all the time,
+   pushing the nav more than 700px past a 1440px viewport -- and with it the
+   search bar, the balance chip and the avatar, off the right edge of the
+   screen entirely. The id lifts this rule to (1,1,0), which beats (0,1,1)
+   outright, the same way it already correctly did for the plain <button>
+   and <div> items in this same list (no `.pt-nb-nav button`/`.pt-nb-nav div`
+   rule exists to out-specify them, so they were never affected). */
+#pt-nb-nav .pt-nb-mobile-only{display:none}
 
 @media (max-width: 900px){
   /* Stays sticky here too. This used to be position:relative purely so the
@@ -135,7 +149,8 @@
   /* The separate "More" (⋮) button is now redundant -- its destinations are
      merged into the hamburger menu above. */
   .pt-nb-more-wrap{display:none}
-  .pt-nb-mobile-only{display:block}
+  /* Matches the base rule's specificity (see its comment) so this override actually wins at this breakpoint -- a bare .pt-nb-mobile-only{display:block} here ties the base rule's OLD (0,1,0) and would have needed to, but now loses outright to the base rule's (1,1,0) once that was raised to beat .pt-nb-nav a. */
+  #pt-nb-nav .pt-nb-mobile-only{display:block}
   .pt-nb-nav-sep,.pt-nb-nav .pt-nb-more-sep{grid-column:1/-1;height:1px;background:#1c2027;margin:5px 4px}
   /* display and gap are stated here too rather than left to the base rule.
      This override already restates almost every other property, so leaving

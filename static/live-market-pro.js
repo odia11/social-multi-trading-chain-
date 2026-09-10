@@ -785,6 +785,58 @@ function renderStoryRail(){
   el.innerHTML = list.map(function(t,i){ return storyHtml(t,i); }).join('');
 }
 
+// Horizontal rails (surge strip, story rail, trader rail) only ever got
+// native overflow-x:auto. That works fine for a touch swipe on its own --
+// what made it feel broken was two separate things layered on top:
+//
+// 1. Nothing on desktop could scroll them at all. There's no drag gesture
+//    without a touchscreen, and no visible scrollbar (deliberately hidden
+//    for the mobile look), so a mouse user just saw a dead strip cut off
+//    mid-card with no way to reach the rest.
+// 2. On mobile, loadSurges() rebuilds pt-surge-rail's innerHTML wholesale
+//    every 12s. A full innerHTML replace mid-swipe kills the browser's
+//    momentum/inertia scrolling outright and snaps scrollLeft back to 0 --
+//    exactly what "swiping isn't smooth" looks like from the user's thumb,
+//    especially since the strip is small enough that a 12s cadence has a
+//    real chance of landing mid-gesture.
+//
+// This adds plain click-and-drag panning for a mouse (part 1), used below
+// on all three rails. Part 2 is fixed at the loadSurges() call site by
+// preserving scrollLeft across the rebuild and skipping it entirely while
+// the user's mouse or finger is still down on the rail.
+var _railsBeingTouched = {};
+function enableDragScroll(el){
+  if(!el || el._dragScrollBound) return;
+  el._dragScrollBound = true;
+  var down = false, moved = false, startX = 0, startScroll = 0;
+  el.addEventListener('mousedown', function(e){
+    down = true; moved = false;
+    startX = e.pageX; startScroll = el.scrollLeft;
+    el.classList.add('pt-rail-dragging');
+  });
+  window.addEventListener('mousemove', function(e){
+    if(!down) return;
+    var dx = e.pageX - startX;
+    if(Math.abs(dx) > 3) moved = true;
+    el.scrollLeft = startScroll - dx;
+  });
+  window.addEventListener('mouseup', function(){
+    if(!down) return;
+    down = false;
+    el.classList.remove('pt-rail-dragging');
+    // Swallow the click that a real drag would otherwise fire on whatever
+    // card the mouse happens to be over on release -- a deliberate pan
+    // must never also open a token.
+    if(moved){
+      var suppress = function(e){ e.stopPropagation(); e.preventDefault(); el.removeEventListener('click', suppress, true); };
+      el.addEventListener('click', suppress, true);
+    }
+  });
+  el.addEventListener('touchstart', function(){ _railsBeingTouched[el.id] = true; }, {passive:true});
+  el.addEventListener('touchend', function(){ _railsBeingTouched[el.id] = false; }, {passive:true});
+  el.addEventListener('touchcancel', function(){ _railsBeingTouched[el.id] = false; }, {passive:true});
+}
+
 function renderFeedList(){
   resetCardState();
   var el = document.getElementById('pt-feed-list');
@@ -1348,12 +1400,19 @@ function loadSurges(){
       var wrap = document.getElementById('pt-surge-wrap');
       var rail = document.getElementById('pt-surge-rail');
       if(!wrap || !rail) return;
+      // A full rebuild mid-swipe cancels the browser's own momentum
+      // scrolling and snaps the strip back to its start -- defer this
+      // tick rather than yank the rail out from under an active gesture.
+      // The next poll (12s later) picks it up once the finger lifts.
+      if(_railsBeingTouched['pt-surge-rail']) return;
       var list = (d && d.surges) || [];
       // Hidden entirely when nothing is surging -- an empty "SURGING NOW"
       // strip would read as a broken feature rather than a quiet market.
       if(!list.length){ wrap.style.display = 'none'; return; }
       wrap.style.display = '';
+      var keepScroll = rail.scrollLeft;
       rail.innerHTML = list.map(surgeCardHtml).join('');
+      rail.scrollLeft = keepScroll;
       var sub = document.getElementById('pt-surge-sub');
       if(sub) sub.textContent = list.length + (list.length === 1 ? ' token' : ' tokens')
         + ' · vs their own 5m average';
@@ -1620,6 +1679,10 @@ document.addEventListener('DOMContentLoaded', function(){
       Object.keys(_chartTimers).forEach(function(idx){ chartTick(idx); });
     }, 200);
   });
+
+  enableDragScroll(document.getElementById('pt-story-rail'));
+  enableDragScroll(document.getElementById('pt-surge-rail'));
+  enableDragScroll(document.getElementById('pt-trader-rail'));
 
   renderSortList();
   loadWatchlistSet().then(function(){ loadFeed(); });

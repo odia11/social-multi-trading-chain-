@@ -110,7 +110,7 @@ input{font-family:inherit}
 .pt-scan-dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:ptPulse 1.4s ease-in-out infinite}
 
 /* ── story rail ── */
-.pt-story-rail{display:flex;gap:16px;padding:16px 22px;overflow-x:auto;overflow-y:hidden;border-bottom:1px solid var(--line);scrollbar-width:none}
+.pt-story-rail{display:flex;gap:16px;padding:16px 22px;overflow-x:auto;overflow-y:hidden;border-bottom:1px solid var(--line);scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;cursor:grab}
 .pt-story-rail::-webkit-scrollbar{display:none}
 .pt-story{flex-shrink:0;width:66px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer}
 .pt-story-ring{width:62px;height:62px;border-radius:50%;padding:2.5px;background:linear-gradient(135deg,var(--accent),var(--green))}
@@ -132,7 +132,7 @@ input{font-family:inherit}
 .pt-trader-rail-hd{display:flex;align-items:center;justify-content:space-between;padding:14px 22px 0}
 .pt-trader-rail-title{font-size:12.5px;font-weight:700;color:var(--text)}
 .pt-trader-rail-link{font-size:11px;font-weight:600;color:var(--accent);text-decoration:none}
-.pt-trader-rail{display:flex;gap:16px;padding:10px 22px 16px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.pt-trader-rail{display:flex;gap:16px;padding:10px 22px 16px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;cursor:grab}
 .pt-trader-rail::-webkit-scrollbar{display:none}
 .pt-trader-story{position:relative}
 .pt-trader-rank-badge{position:absolute;top:-2px;right:2px;z-index:1;width:17px;height:17px;border-radius:50%;background:var(--panel);border:1.5px solid var(--bg);color:var(--text);font-family:var(--mono);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center}
@@ -148,8 +148,14 @@ input{font-family:inherit}
 .pt-surge-dot{width:7px;height:7px;border-radius:50%;background:#ff6b5e;animation:pt-surge-pulse 1.1s infinite}
 @keyframes pt-surge-pulse{0%{box-shadow:0 0 0 0 rgba(255,107,94,.6)}70%{box-shadow:0 0 0 7px rgba(255,107,94,0)}100%{box-shadow:0 0 0 0 rgba(255,107,94,0)}}
 .pt-surge-sub{font-size:10.5px;color:var(--muted2);font-family:var(--mono);white-space:nowrap}
-.pt-surge-rail{display:flex;gap:10px;padding:11px 22px 14px;overflow-x:auto;scrollbar-width:none}
+.pt-surge-rail{display:flex;gap:10px;padding:11px 22px 14px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;cursor:grab}
 .pt-surge-rail::-webkit-scrollbar{display:none}
+/* Set by enableDragScroll() in live-market-pro.js while a mouse-drag pan is
+   in progress. grabbing cursor + no text/card selection while panning; the
+   click that a real drag would otherwise fire on release is swallowed in
+   JS, not here. */
+.pt-story-rail.pt-rail-dragging,.pt-surge-rail.pt-rail-dragging,.pt-trader-rail.pt-rail-dragging{cursor:grabbing;user-select:none}
+.pt-story-rail.pt-rail-dragging *,.pt-surge-rail.pt-rail-dragging *,.pt-trader-rail.pt-rail-dragging *{pointer-events:none}
 .pt-surge-card{flex:0 0 auto;width:196px;background:var(--card);border:1px solid rgba(255,107,94,.32);border-radius:12px;padding:10px 12px;cursor:pointer;transition:border-color .12s,transform .12s}
 .pt-surge-card:hover{border-color:rgba(255,107,94,.6);transform:translateY(-1px)}
 .pt-surge-card.cooling{border-color:var(--line);opacity:.62}
