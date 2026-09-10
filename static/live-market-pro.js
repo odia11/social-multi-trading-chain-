@@ -1017,6 +1017,17 @@ function _sheetUnbindIds(idx){
 // Spendable balance is per chain, never a pooled total: buying on BSC spends
 // the BSC balance and nothing else. Cached briefly so reopening the sheet
 // does not re-read every chain.
+// Fetched once when the page loads, not when the sheet opens. Opening used
+// to start the request, so the first buy of a session sat on "Checking
+// balance…" for ~290ms with the 10/25/50/Max buttons inert -- measured on a
+// throttled phone. By the time anyone taps Buy this has long since landed.
+function _prefetchBalances(){
+  fetch('/api/wallet/usdc-summary', {credentials:'include'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if(d && d.ok) _availCache = {t: Date.now(), data: d}; })
+    .catch(function(){});
+}
+
 function _loadSheetBalance(chain){
   var now = Date.now();
   var use = function(d){
@@ -1103,15 +1114,19 @@ function closeBuySheet(){
   _sheetUnbindIds(idx);
   clearTimeout(_quoteTimers[idx]);
   delete _quotes[idx];
+  delete _quoteRenewals[idx];
 }
 
-function _sheetSetAmount(next){
+// `settled` means the amount is final rather than mid-typing -- a tap on
+// 25% or Max. There is nothing to debounce there: the number will not
+// change in 450ms, and waiting is 450ms of "Pricing…" for no reason.
+function _sheetSetAmount(next, settled){
   _sheetAmt = next;
   var hidden = document.getElementById('pt-buy-amt-'+_sheetIdx);
   if(hidden) hidden.value = next;
   _paintSheet();
   var t = ST.tokens[Number(_sheetIdx)];
-  if(t && EVM_TRADE_CHAINS[t.chain]) scheduleQuote(_sheetIdx);
+  if(t && EVM_TRADE_CHAINS[t.chain]) scheduleQuote(_sheetIdx, settled ? 0 : 250);
 }
 
 function _paintSheet(){
@@ -1344,7 +1359,7 @@ document.addEventListener('click', function(e){
     var part = _sheetAvail * (Number(p.dataset.pct) / 100);
     // Floored to the cent: rounding up on Max would ask to spend more than
     // the wallet holds, and the server would refuse it.
-    _sheetSetAmount(String(Math.floor(part * 100) / 100));
+    _sheetSetAmount(String(Math.floor(part * 100) / 100), true);
   }
 });
 
@@ -1382,8 +1397,9 @@ var _quotes      = {};
 
 function _quoteCurrency(t){ return evmCurrencyLabel(t.chain); }
 
-function scheduleQuote(idx){
+function scheduleQuote(idx, delayMs){
   clearTimeout(_quoteTimers[idx]);
+  _quoteRenewals[idx] = 0;   // a new amount starts its own renewal budget
   delete _quotes[idx];
   var box = document.getElementById('pt-quote-'+idx);
   var input = document.getElementById('pt-buy-amt-'+idx);
@@ -1394,8 +1410,12 @@ function scheduleQuote(idx){
     box.innerHTML = '<div class="pt-quote-wait">Pricing…</div>';
   }
   // Debounced: a quote is a live route lookup, and firing one per keystroke
-  // would spend the rate limit on numbers the user is still typing.
-  _quoteTimers[idx] = setTimeout(function(){ fetchQuote(idx, amt); }, 450);
+  // would spend the rate limit on numbers the user is still typing. But a
+  // settled amount -- a tap on 25% or Max -- passes 0 and goes straight out,
+  // because there is no further keystroke coming to wait for.
+  var wait = (delayMs == null) ? 450 : delayMs;
+  if(wait <= 0){ fetchQuote(idx, amt); return; }
+  _quoteTimers[idx] = setTimeout(function(){ fetchQuote(idx, amt); }, wait);
 }
 
 function fetchQuote(idx, amt){
@@ -1468,11 +1488,30 @@ function renderQuote(idx, d, t){
   tickQuoteExpiry(idx);
 }
 
+// While the sheet is open, a price about to lapse is renewed rather than
+// declared stale. A quote is held for ~6 seconds; sliding to confirm is a
+// deliberate gesture that takes longer than that, plus however long someone
+// spends reading the breakdown. So the old behaviour -- "This price has
+// expired, edit the amount to get a new one" -- was what most people met
+// when they finally slid, and the confirm then had to re-price on the spot,
+// paying for a round trip at the one moment nobody wants to wait. Renewing
+// in the background keeps the fast execute-this-exact-quote path available
+// the whole time the screen is up.
+var _quoteRenewals = {};
+var QUOTE_MAX_RENEWALS = 20;   // ~2 minutes; a sheet left open stops asking
+
 function tickQuoteExpiry(idx){
   var q = _quotes[idx];
   var el = document.getElementById('pt-quote-exp-'+idx);
   if(!q || !el) return;
   var left = Math.max(0, Math.round((q.expiresAt - Date.now())/1000));
+  if(left <= 1 && _sheetIdx === String(idx) && _sheetMode === 'buy'
+     && parseFloat(_sheetAmt) === q.amt
+     && (_quoteRenewals[idx] || 0) < QUOTE_MAX_RENEWALS){
+    _quoteRenewals[idx] = (_quoteRenewals[idx] || 0) + 1;
+    fetchQuote(idx, q.amt);
+    return;
+  }
   if(left <= 0){
     el.textContent = 'This price has expired — edit the amount to get a new one.';
     el.className = 'pt-quote-note pt-quote-stale';
@@ -2085,6 +2124,7 @@ document.addEventListener('DOMContentLoaded', function(){
   enableDragScroll(document.getElementById('pt-surge-rail'));
   enableDragScroll(document.getElementById('pt-trader-rail'));
 
+  _prefetchBalances();
   renderSortList();
   loadWatchlistSet().then(function(){ loadFeed(); });
   loadSurges();

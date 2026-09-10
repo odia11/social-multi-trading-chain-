@@ -148,6 +148,38 @@ check('the keypad gives way first, since it is the part nobody is reading',
 check('a long breakdown scrolls instead of pushing the amount off the top',
       re.search(r'\.pt-sheet-ft \.pt-quote\{[^}]*max-height', HTML_NC) is not None)
 
+# ── 3d. it has to be there the moment it opens ───────────────────────────
+# Measured on a throttled phone: the sheet opened in 88ms but sat on
+# "Checking balance…" until 379ms, with 10/25/50/Max inert the whole time,
+# because opening it was what STARTED the balance request.
+check('the balance is fetched when the page loads, not when the sheet opens',
+      '_prefetchBalances' in JS
+      and re.search(r'_prefetchBalances\(\);[\s\S]{0,200}renderSortList\(\)', JS))
+
+# The quote is a live route lookup, so typing is debounced. A tap on 25% or
+# Max is not typing -- the number is final, and waiting 450ms for a further
+# keystroke that is never coming was 450ms of "Pricing…" for nothing.
+check('a settled amount prices immediately instead of waiting out the '
+      'keystroke debounce',
+      re.search(r'_sheetSetAmount\(next, settled\)', JS)
+      and 'settled ? 0 : 250' in JS)
+check('...and typing is still debounced, so a quote is not fired per digit',
+      re.search(r'delayMs == null\) \? 450', JS) is not None)
+
+# A quote is held ~6s. Sliding to confirm is deliberate and takes longer than
+# that, plus reading the breakdown -- so most slides used to land on an
+# expired price, and confirmBuy then had to re-price on the spot: a round
+# trip at the one moment nobody wants to wait.
+check('a price about to lapse is renewed while the sheet is open, so the '
+      'slide keeps hitting the execute-this-exact-quote path',
+      '_quoteRenewals' in JS and 'QUOTE_MAX_RENEWALS' in JS)
+check('...bounded, so a sheet left open does not ask forever',
+      re.search(r'QUOTE_MAX_RENEWALS\s*=\s*\d+', JS) is not None)
+check('...only for the amount actually on screen, in buy mode',
+      re.search(r'parseFloat\(_sheetAmt\) === q\.amt', JS) is not None)
+check('...and the budget resets when the amount changes',
+      re.search(r'scheduleQuote\(idx, delayMs\)\s*\{[\s\S]{0,160}_quoteRenewals\[idx\] = 0', JS))
+
 # ── 4. the whole thing, in a real browser ────────────────────────────────
 PORT = 5091
 DATA = tempfile.mkdtemp()
@@ -194,6 +226,10 @@ async def main():
         g = "i => document.getElementById(i)"
         out['opened'] = await page.evaluate(
             "document.getElementById('pt-sheet').classList.contains('open')")
+        # The balance must already be there. Read immediately after opening,
+        # with no wait: anything fetched on open would still say "Checking…".
+        out['balance_instant'] = await page.evaluate(
+            "document.getElementById('pt-sheet-avail').textContent")
         # the close button must actually be reachable, not under the navbar
         out['no_close_btn'] = not await page.evaluate(
             "!!document.querySelector('.pt-sheet-close')")
@@ -343,6 +379,9 @@ finally:
     server.terminate()
 
 check('BROWSER: pressing Buy on a card opens the sheet', B.get('opened'))
+check('BROWSER: the balance is already on screen when it opens, rather than '
+      'the sheet starting the request and showing "Checking balance…"',
+      'available' in (B.get('balance_instant') or ''))
 check('BROWSER: no ✕ is rendered', B.get('no_close_btn'))
 check('BROWSER: the slider label is readable — it also carries '
       '.pt-buy-confirm, the old button style, which painted amber text on '

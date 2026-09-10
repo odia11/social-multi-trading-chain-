@@ -63,7 +63,7 @@ check('a breakdown area is rendered with it', 'pt-quote-' in panel)
 # The keypad re-prices instead of an input's "input" event, since there is
 # no text field to type into any more.
 check('entering an amount re-prices, so the breakdown follows the amount',
-      'scheduleQuote(_sheetIdx)' in JS)
+      re.search(r'scheduleQuote\(_sheetIdx,', JS) is not None)
 check('...on the EVM chains only — Solana would have nothing truthful to show '
       'there', 'EVM_TRADE_CHAINS[t.chain]) scheduleQuote' in JS)
 
