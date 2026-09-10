@@ -151,11 +151,20 @@ input{font-family:inherit}
 .pt-surge-rail{display:flex;gap:10px;padding:11px 22px 14px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;cursor:grab}
 .pt-surge-rail::-webkit-scrollbar{display:none}
 /* Set by enableDragScroll() in live-market-pro.js while a mouse-drag pan is
-   in progress. grabbing cursor + no text/card selection while panning; the
-   click that a real drag would otherwise fire on release is swallowed in
-   JS, not here. */
+   in progress: a grabbing cursor, and no text selection dragged out of the
+   cards as the rail moves.
+
+   It must NOT also set pointer-events:none on the children. That was here,
+   and it silently killed tapping a token: the browser hit-tests for mouseup
+   BEFORE the mouseup handler removes the class, so with the cards
+   unhittable the mouseup landed on the rail itself. A click's target is the
+   common ancestor of its mousedown and mouseup targets, so every click
+   arrived as the rail -- and the delegated handler, which looks for
+   .closest('[data-action="open-surge"]'), matched nothing. Surge cards,
+   story circles and trader circles all stopped opening.
+   Suppressing the click that a REAL drag ends with is done in JS instead,
+   where it can tell a drag from a tap. */
 .pt-story-rail.pt-rail-dragging,.pt-surge-rail.pt-rail-dragging,.pt-trader-rail.pt-rail-dragging{cursor:grabbing;user-select:none}
-.pt-story-rail.pt-rail-dragging *,.pt-surge-rail.pt-rail-dragging *,.pt-trader-rail.pt-rail-dragging *{pointer-events:none}
 .pt-surge-card{flex:0 0 auto;width:196px;background:var(--card);border:1px solid rgba(255,107,94,.32);border-radius:12px;padding:10px 12px;cursor:pointer;transition:border-color .12s,transform .12s}
 .pt-surge-card:hover{border-color:rgba(255,107,94,.6);transform:translateY(-1px)}
 .pt-surge-card.cooling{border-color:var(--line);opacity:.62}

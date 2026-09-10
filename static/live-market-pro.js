@@ -809,8 +809,21 @@ function enableDragScroll(el){
   if(!el || el._dragScrollBound) return;
   el._dragScrollBound = true;
   var down = false, moved = false, startX = 0, startScroll = 0;
+  // Set on release after a real drag, consumed by the click that follows.
+  // A plain flag rather than a listener added on the fly: a drag that ends
+  // with the cursor off the rail fires no click at all, and a one-shot
+  // listener waiting for one it never gets would sit there and eat the
+  // NEXT genuine tap instead. mousedown clears it, so it can never outlive
+  // the gesture that set it.
+  var swallowClick = false;
+  el.addEventListener('click', function(e){
+    if(!swallowClick) return;
+    swallowClick = false;
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
   el.addEventListener('mousedown', function(e){
-    down = true; moved = false;
+    down = true; moved = false; swallowClick = false;
     startX = e.pageX; startScroll = el.scrollLeft;
     el.classList.add('pt-rail-dragging');
   });
@@ -824,13 +837,9 @@ function enableDragScroll(el){
     if(!down) return;
     down = false;
     el.classList.remove('pt-rail-dragging');
-    // Swallow the click that a real drag would otherwise fire on whatever
-    // card the mouse happens to be over on release -- a deliberate pan
-    // must never also open a token.
-    if(moved){
-      var suppress = function(e){ e.stopPropagation(); e.preventDefault(); el.removeEventListener('click', suppress, true); };
-      el.addEventListener('click', suppress, true);
-    }
+    // A deliberate pan must never also open whatever card the cursor
+    // happens to be over on release. A tap that never moved must.
+    swallowClick = moved;
   });
   el.addEventListener('touchstart', function(){ _railsBeingTouched[el.id] = true; }, {passive:true});
   el.addEventListener('touchend', function(){ _railsBeingTouched[el.id] = false; }, {passive:true});
