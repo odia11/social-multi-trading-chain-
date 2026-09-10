@@ -90,28 +90,45 @@ check('the only calls that clear the wallet server-side by posting an empty '
       'address sit in deliberate user actions, not in any timer or watcher',
       len(empties) == 2)      # doLogout, and stepping back in onboarding
 
-# ── 3. the account-mismatch guard clears, it does not revoke ──────────────
-mismatch = JSC[JSC.index('_extPk !== phantomKey'):][:900]
-check('the account-mismatch guard signs this browser out without revoking '
-      'remembered logins — nobody pressed Disconnect, somebody switched '
-      'accounts, and that must not sign them out on every other device',
-      'api/session/clear' in mismatch and 'api/logout' not in mismatch)
+# ── 3. a different account in the wallet is not a logout ──────────────────
+# This guard used to clear the session and reload when the extension sat on a
+# different account than the session. Nobody pressed anything: opening the app
+# inside Phantom's own browser with a second account selected was enough to be
+# thrown out. And it guarded almost nothing -- the extension signs only the
+# login message and a promotion payment; trades are signed server-side by the
+# trading wallet, which has nothing to do with the account the extension shows.
+mismatch = JSC[JSC.index('_extPk !== phantomKey'):][:1100]
+check('a mismatched account in the wallet does NOT end the session — it was '
+      'the last thing left that signed somebody out without being asked',
+      'api/session/clear' not in mismatch
+      and 'api/logout' not in mismatch
+      and 'location.reload' not in mismatch)
+check('...it is said out loud instead, so the person is not left wondering '
+      'why the header shows another address',
+      'wallet-install-msg' in mismatch and 'still signed in' in JS)
+# Read from the comment-stripped source. The comment here says "Deliberately
+# no return", so searching the raw text finds the word `return` in the
+# sentence explaining that there isn't one. Fifth time this suite has read its
+# own prose; it will not be the last, so: strip first, then match.
+# Bounded by where the block actually ends -- the next statement is the
+# ordinary `if(phantomKey){ await launchApp(); return; }`, whose return is
+# correct and has nothing to do with this guard. A fixed character window ran
+# straight past the closing brace and read it.
+_mm_code = JSC[JSC.index('_extPk !== phantomKey'):]
+_mm_code = _mm_code[:_mm_code.index('await launchApp()')]
+check('...and the app carries on rather than stopping there',
+      'return' not in _mm_code)
 
-check('that endpoint exists on the server', "'/api/session/clear'" in SRC)
-clear_fn = fn('api_session_clear')
-check('...and it clears the session', 'session.clear()' in clear_fn)
-check('...while leaving every remembered login alone, which is the entire '
-      'difference between it and logout',
-      '_revoke_device_tokens' not in clear_fn)
-check('...whereas Disconnect DOES revoke them, on every device',
-      '_revoke_device_tokens' in fn('logout'))
+check('the endpoint that existed only for that guard is gone with it, rather '
+      'than sitting there unused with the power to end a session',
+      '/api/session/clear' not in SRC)
 
-# The distinction has to be structural. A single endpoint taking "revoke:
-# false" from the page would be a page that can be made to ask for that.
 logout_fn = fn('logout')
-check('neither endpoint takes the decision from the page — no flag in the '
+check('Disconnect revokes every remembered login, on every device',
+      '_revoke_device_tokens' in logout_fn)
+check('...and does not take that decision from the page — no flag in the '
       'request body decides whether remembered logins survive',
-      not re.search(r'request\.(json|form|args)', logout_fn + clear_fn))
+      not re.search(r'request\.(json|form|args)', logout_fn))
 
 # ── 4. the cookie itself outlives the visit ───────────────────────────────
 check('every login makes the session cookie permanent, so closing the tab is '

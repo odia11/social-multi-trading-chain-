@@ -11214,8 +11214,25 @@ def api_phantom_init():
 
 
 @app.route('/api/phantom/sign-init', methods=['POST'])
+@csrf_exempt
 @rate_limit(10, 60)
 def api_phantom_sign_init():
+    # Exempt for the same reason /api/phantom/init and /api/wallet/set are:
+    # this is a step of LOGGING IN. The Phantom deeplink round trip runs in
+    # whatever browser Phantom hands back to, which has no session and so no
+    # CSRF token to send -- and requiring one from a page whose whole purpose
+    # is to establish a session is a contradiction.
+    #
+    # Steps 1 and 3 of that round trip were exempt. Steps 2 and 4 were not,
+    # which nobody noticed while the CSRF check only bites when a session
+    # ALREADY has a wallet. Reconnecting from a browser that still had one --
+    # exactly what someone does after being signed out of the app but not the
+    # browser -- hit "CSRF validation failed" and could never complete.
+    #
+    # Nothing here acts on who the session says you are. It works from a
+    # server-generated token held in _phantom_sessions for ten minutes, and
+    # the Origin check above still applies to every one of these.
+    #
     """Build the encrypted payload for a Phantom v1 signMessage deep-link,
     reusing the same dapp keypair and Phantom's own public key/session from
     the connect step (see api_phantom_decrypt(), which now persists both
@@ -11331,8 +11348,12 @@ def api_phantom_decrypt():
 
 
 @app.route('/api/phantom/decrypt-signature', methods=['POST'])
+@csrf_exempt
 @rate_limit(10, 60)
 def api_phantom_decrypt_signature():
+    # The last step of the deeplink login, and exempt for the same reason as
+    # the other three -- see api_phantom_sign_init above.
+    #
     """Decrypt a Phantom v1 signMessage callback payload.
     Body: {token, nonce, data} — all b58-encoded strings. phantom_pk comes
     from _phantom_sessions[token] (set by api_phantom_decrypt() during
@@ -17233,26 +17254,6 @@ def set_wallet():
         if prev:
             add_user_log(prev, 'Wallet disconnected')
     return jsonify({'ok': True, 'wallet': session.get('wallet', '')})
-
-@app.route('/api/session/clear', methods=['POST'])
-@csrf_exempt
-def api_session_clear():
-    """End this browser's session WITHOUT touching remembered logins.
-
-    Not the same thing as Disconnect, and the difference matters. The page
-    clears the session by itself in one case: the wallet extension is on a
-    different account than the one this session belongs to. Nothing has been
-    stolen there -- somebody switched accounts -- so signing this browser out
-    is right and revoking every remembered login on every device they own is
-    not.
-
-    Two endpoints rather than one flag on /api/logout: which one revokes is
-    then decided here, by which URL was called, instead of by a value the
-    page sends. A page that could ask not to revoke could also be made to ask
-    that by someone else.
-    """
-    session.clear()
-    return jsonify({'status': 'ok'})
 
 @app.route('/api/logout', methods=['POST'])
 @csrf_exempt

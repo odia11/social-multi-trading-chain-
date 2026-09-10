@@ -3239,39 +3239,37 @@ function _inDappBrowser(){ return !!(window.solana||window.solflare); }
   // really succeeded, and this is the first time we have tried it in this tab.
   // A mismatch that survives a successful clear is not something another
   // reload can fix, so it is explained to the person instead of being retried.
+  // ── A DIFFERENT ACCOUNT IN THE WALLET IS NOT A LOGOUT ──
+  // This used to clear the session and reload when the wallet extension was
+  // sitting on a different account than the one signed in here. Nobody
+  // pressed anything: opening the app inside Phantom's own browser, with a
+  // second account selected, was enough to be thrown out.
+  //
+  // And it was guarding almost nothing. The extension signs exactly two
+  // things in this app: the message that proves who you are at login, and a
+  // promotion payment. Trades are signed server-side by the trading wallet,
+  // which has no connection to whichever account the extension happens to be
+  // showing. So a mismatch made the header look wrong -- it did not make
+  // anything unsafe.
+  //
+  // Weighed against being silently signed out, that is not close. The session
+  // was established by a signature and stands until Disconnect is pressed.
+  // The mismatch is now said out loud and the app carries on.
   if(phantomKey && _p){
     const _extPk = _p.publicKey.toString();
     if(_extPk !== phantomKey){
-      let _tried=false;
-      try{ _tried = sessionStorage.getItem('orca_wallet_mismatch_reload')==='1'; }catch(e){}
-      let _cleared=false;
-      // /api/session/clear, NOT /api/logout. This is the page signing itself
-      // out because the extension is on another account -- nobody pressed
-      // Disconnect. Logout revokes every remembered login on every device,
-      // which would turn "you switched account" into "you are signed out
-      // everywhere, forever".
-      try{ _cleared = (await fetch('/api/session/clear',{method:'POST',credentials:'include'})).ok; }
-      catch(e){ _cleared=false; }
-      if(_cleared && !_tried){
-        try{ sessionStorage.setItem('orca_wallet_mismatch_reload','1'); }catch(e){}
-        window.location.reload();
-        return;
-      }
-      console.warn('[auth] wallet mismatch persists (logout ok:'+_cleared+', already reloaded:'+_tried+') — not reloading again');
+      console.warn('[auth] extension is on '+_extPk.slice(0,6)+'…, session is '
+                   +phantomKey.slice(0,6)+'… — keeping the session');
       const _mm=document.getElementById('wallet-install-msg');
       if(_mm){
-        _mm.textContent='Your wallet extension is on a different account than the one you are '
-                      + 'signed in with here. Switch to the right account in the extension, '
-                      + 'or disconnect there, and reload this page.';
+        _mm.textContent='Your wallet app is on a different account than the one you are '
+                      + 'signed in with. You are still signed in here — switch account in '
+                      + 'your wallet if you meant to use the other one.';
         _mm.style.display='block';
       }
-      return;
+      // Deliberately no return: signed in is signed in.
     }
   }
-  // Past the check without a mismatch: forget the one-shot marker, so a real
-  // mismatch later in this tab can still fix itself the quick way.
-  try{ sessionStorage.removeItem('orca_wallet_mismatch_reload'); }catch(e){}
-
   // If Flask session pre-populated phantomKey, go straight to launchApp — no extension
   // re-detection needed, and avoids a redundant /api/wallet/set round-trip.
   if(phantomKey){ await launchApp(); return; }

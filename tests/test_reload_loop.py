@@ -19,6 +19,18 @@ A reload may only be used to recover when the thing it depends on actually
 happened, and it may only be tried once. A condition that survives a
 successful fix is not something repetition can solve, so it is explained to
 the person instead.
+
+WHAT HAPPENED SINCE
+The loop was first made safe -- read the logout result, reload at most once.
+Then the mismatch stopped ending the session at all: opening the app inside
+Phantom's own browser with a second account selected was enough to be signed
+out, and the extension's current account has no bearing on anything, since
+trades are signed server-side by the trading wallet.
+
+With nothing to clear, there is nothing to reload for. So the loop is now
+impossible by construction rather than by guard, which is the stronger
+result, and this file checks for that instead -- plus the rule itself, which
+still applies to every other reload in the app.
 """
 import re
 import sys
@@ -38,37 +50,25 @@ branch = m.group(1) if m else ''
 check('the wallet-mismatch branch is still there — the loop is fixed, not '
       'deleted, because a stale session really does need clearing', bool(branch))
 
-check('the logout result is read rather than discarded, since it is the only '
-      'thing that makes reloading worth doing',
-      '.ok' in branch and 'catch(()=>{})' not in branch)
-check('...and a failed logout does not reload, because the next load would hit '
-      'the same failure', '_cleared && !_tried' in branch)
-check('the reload can happen at most once per tab, so even a mismatch that '
-      'somehow survives a successful logout cannot spin',
-      'sessionStorage.setItem' in branch
-      and 'orca_wallet_mismatch_reload' in branch)
-check('...and the marker is set BEFORE the reload, or it would never be read',
-      branch.index('setItem') < branch.index('location.reload'))
-check('storage is wrapped, since it throws outright in some private-browsing '
-      'modes — a diagnostic must not become the fault',
-      branch.count('try{') >= 2 and 'catch(e){}' in branch)
+# The loop cannot happen because the reload is gone, not because a marker
+# stops the second one. Nothing here reloads, and nothing here ends a session,
+# so there is no failed step for a reload to repeat.
+check('the branch does not reload at all — the strongest form of "cannot '
+      'loop" is having nothing to loop on', 'location.reload' not in branch)
+check('...and does not end the session either, which is what the reload used '
+      'to be for', 'api/logout' not in branch and 'api/session/clear' not in branch)
+check('the one-shot marker is gone with the reload it guarded, rather than '
+      'being left behind to be read by something later',
+      'orca_wallet_mismatch_reload' not in JS)
 
 check('when it stops, it says why on screen rather than leaving a page that '
       'looks stuck', 'wallet-install-msg' in branch and 'textContent' in branch)
-check('...naming what the person has to do, in the extension, not what the app '
-      'saw',
-      # Matched on the Dutch words until the app was translated. The check was
-      # never about the language -- it is that the message names the extension
-      # and asks for a reload, rather than reporting what the code noticed.
-      'extension' in branch and 'reload this page' in branch)
-check('...and leaves a console line with both facts, so the next person '
-      'debugging this does not have to guess which half failed',
-      'console.warn' in branch and 'logout ok:' in branch)
-
-check('a clean load forgets the marker, so a genuine mismatch later in the '
-      'same tab can still fix itself the quick way',
-      "removeItem('orca_wallet_mismatch_reload')" in JS
-      and JS.index("removeItem('orca_wallet_mismatch_reload')") > JS.index('_extPk !== phantomKey'))
+check('...saying they are still signed in, since that is the part that would '
+      'otherwise be guessed from a header showing another address',
+      'still signed in' in branch)
+check('...and leaves a console line naming both accounts, so the next person '
+      'debugging this does not have to guess which is which',
+      'console.warn' in branch and 'keeping the session' in branch)
 
 # ── the same shape must not come back elsewhere ───────────────────────────
 # Every other reload in this file is either user-initiated or guarded by the
