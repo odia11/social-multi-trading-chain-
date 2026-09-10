@@ -309,7 +309,7 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
       </div>
     </div>
     <div class="modal-field">
-      <label class="modal-label" for="cg-chain">Chain</label>
+      <label class="modal-label" for="cg-chain">Chain <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— groups work on all of them</span></label>
       <div class="modal-inp-wrap">
         <select class="modal-inp" id="cg-chain" onchange="_cgChainChanged()" style="font-family:var(--ui);padding-right:14px">
           {% for c in token_chains %}
@@ -319,11 +319,12 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
       </div>
     </div>
     <div class="modal-field">
-      <label class="modal-label" for="cg-address">Token address <span style="color:#ff4d6a">*</span></label>
+      <label class="modal-label" for="cg-address">Token address <span style="color:#ff4d6a">*</span>
+        <span id="cg-addr-chain" style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0"></span></label>
       <div class="modal-inp-wrap">
         <input class="modal-inp" id="cg-address" type="text" placeholder="Solana mint address" style="font-family:var(--mono);font-size:12px;padding-right:14px">
       </div>
-      <div style="font-size:11px;color:var(--muted);margin-top:5px">Required — lets members verify this group is really about that token before joining.</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:5px">Required — lets members verify this group is really about that token before joining. It has to be the address <b id="cg-addr-hint">on Solana</b>, since the same address means a different token on each chain.</div>
     </div>
     <div class="modal-field">
       <label class="modal-label" for="cg-name">Group name</label>
@@ -486,8 +487,21 @@ function _closeCreateGroupModal(ev){
 function _cgChainChanged(){
   var sel = document.getElementById('cg-chain');
   var opt = sel.options[sel.selectedIndex];
+  var label = opt ? opt.textContent.trim() : '';
   document.getElementById('cg-address').placeholder = (opt && opt.dataset.placeholder) || '';
+  // The chain's name is repeated next to the address field and in its hint,
+  // and both follow the dropdown. Without that, the screen opened on
+  // "Solana" above "Solana mint address" and read as a statement rather than
+  // a choice -- people concluded groups were Solana-only and never touched
+  // the dropdown, which is exactly the complaint this answers.
+  var onChain = document.getElementById('cg-addr-chain');
+  if(onChain) onChain.textContent = label ? '· on ' + label : '';
+  var hint = document.getElementById('cg-addr-hint');
+  if(hint) hint.textContent = 'on ' + label;
 }
+// Run once so the labels match the dropdown's initial selection rather than
+// whatever the markup happened to be written with.
+document.addEventListener('DOMContentLoaded', _cgChainChanged);
 function _submitCreateGroup(){
   var errEl = document.getElementById('cg-error');
   errEl.style.display = 'none';

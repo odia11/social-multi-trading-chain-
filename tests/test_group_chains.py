@@ -137,6 +137,24 @@ check('each chain carries its own address hint, so the field stops telling '
       'data-placeholder="Solana mint address"' in html
       and html.count('data-placeholder="0x') == len(m.TOKEN_CHAINS) - 1)
 
+# The form worked on every chain from the day it shipped, and was still read
+# as Solana-only: it opened on "Solana" above "Solana mint address", which
+# states a fact rather than offering a choice, so the dropdown went untouched.
+check('the chain field says out loud that every chain is available',
+      'groups work on all of them' in html)
+check('the address field names the chain it wants, next to its own label',
+      'id="cg-addr-chain"' in html)
+check('...and its hint says why the two are tied together, rather than '
+      'leaving the reader to guess',
+      'id="cg-addr-hint"' in html
+      and 'a different token on each chain' in html)
+check('both follow the dropdown rather than being written once in the markup',
+      "getElementById('cg-addr-chain')" in html
+      and "getElementById('cg-addr-hint')" in html)
+check('...and are set once on load, so they match the initial selection '
+      'instead of whatever the markup happened to say',
+      "addEventListener('DOMContentLoaded', _cgChainChanged)" in html)
+
 # ── 6. the migration, against a database built with the OLD schema ───────
 old_dir = tempfile.mkdtemp()
 old_db = os.path.join(old_dir, 'orcagent.db')
