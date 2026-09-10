@@ -26661,6 +26661,96 @@ _live_price_lock = threading.Lock()
 _live_price_cache: dict = {}   # (chain, pair_lower) -> (fetched_at, price)
 
 
+# Token prices by MINT, cached per token. Same shape as the pool-price cache
+# below and for the same reason: overlapping screens share what they have in
+# common instead of each paying for a whole list.
+_token_price_lock = threading.Lock()
+_token_price_cache: dict = {}
+_TOKEN_PRICE_TTL = 20
+
+
+@app.route('/api/market/token-prices')
+@rate_limit(120, 60)
+def api_market_token_prices():
+    """Current price and market cap for several tokens at once.
+
+    Exists for the "what would it be worth now" line on a closed trade. The
+    card already knows what was sold and at what price -- the only missing
+    number is today's, and asking for it per card would be one request per
+    post in the feed.
+
+    Nothing here is private: a token's price is a public fact. The trade it
+    gets compared against never leaves the page.
+    """
+    wanted, seen = [], set()
+    for raw in (request.args.get('mints', '') or '').split(','):
+        a = raw.strip()
+        if not a or a.lower() in seen:
+            continue
+        # Validated for shape before it is pasted into an outbound URL: this
+        # builds a request out of something a caller controls.
+        if not (_SOLANA_ADDR_RE.match(a) or is_valid_evm_address(a)):
+            continue
+        seen.add(a.lower())
+        wanted.append(a)
+        if len(wanted) >= 30:      # DexScreener's own limit for one call
+            break
+    if not wanted:
+        return jsonify({'ok': True, 'tokens': {}})
+
+    now = time.time()
+    out, stale = {}, []
+    with _token_price_lock:
+        for a in wanted:
+            hit = _token_price_cache.get(a.lower())
+            if hit and now - hit[0] < _TOKEN_PRICE_TTL:
+                out[a.lower()] = hit[1]
+            else:
+                stale.append(a)
+
+    if stale:
+        try:
+            r = _dex_get('https://api.dexscreener.com/latest/dex/tokens/'
+                         + ','.join(stale), timeout=8, ttl_override=0)
+            data = r.json() if (r and r.status_code == 200) else {}
+            # Deepest pool per token, not whichever DexScreener listed first --
+            # a dead pool would quote a price this token does not really have.
+            best = {}
+            for p in (data.get('pairs') or []):
+                addr = ((p.get('baseToken') or {}).get('address') or '').lower()
+                if not addr:
+                    continue
+                liq = float((p.get('liquidity') or {}).get('usd') or 0)
+                if addr not in best or liq > best[addr][0]:
+                    best[addr] = (liq, p)
+            fresh = {}
+            for addr, (_liq, p) in best.items():
+                try:
+                    px = float(p.get('priceUsd') or 0)
+                except (TypeError, ValueError):
+                    px = 0.0
+                if px <= 0:
+                    continue
+                fresh[addr] = {
+                    'price': px,
+                    'market_cap': float(p.get('marketCap') or p.get('fdv') or 0),
+                }
+            out.update(fresh)
+            with _token_price_lock:
+                for k, v in fresh.items():
+                    _token_price_cache[k] = (now, v)
+                if len(_token_price_cache) > 3000:
+                    cutoff = now - 300
+                    for k in [k for k, v in _token_price_cache.items() if v[0] < cutoff]:
+                        del _token_price_cache[k]
+        except Exception as e:
+            # A price we could not fetch simply is not in the answer, and the
+            # card leaves its line out. Better a missing line than a wrong one.
+            print(f'[token-prices] batch fetch failed: {e}', flush=True)
+
+    return jsonify({'ok': True, 'tokens': out})
+
+
 @app.route('/api/market/prices')
 @rate_limit(240, 60)
 def api_market_prices():
