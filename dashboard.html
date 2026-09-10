@@ -3554,7 +3554,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
   <div class="ob-box">
     <div class="ob-logo-tile"></div>
     <div class="ob-title">OrcAgent</div>
-    <div class="ob-sub">Connect your wallet to start trading Solana meme coins automatically.</div>
+    <div class="ob-sub">Trade meme coins across Solana, BNB Chain, Base, Arbitrum, Polygon and Robinhood Chain — by hand or on autopilot. Follow other traders, copy their trades, and fund everything in USDC.</div>
     <div class="ob-progress"><div class="ob-dot active"></div><div class="ob-dot"></div></div>
     <div class="ob-step active" id="step-0">
       <!-- Post-connect success row (shown by connectWalletOnboard) -->
@@ -3607,13 +3607,15 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
     </div>
 
     <div class="ob-step" id="step-1">
-      <div style="font-size:18px;font-weight:700;color:var(--text);margin-bottom:.5rem;letter-spacing:-.02em">Enable Bot Trading</div>
-      <p style="font-size:12px;color:var(--muted);margin-bottom:1rem;line-height:1.65;text-align:left">Paste your <strong style="color:var(--text)">dedicated trading wallet's</strong> private key so the bot can execute trades. It is double-encrypted and never exposed in logs or API responses.</p>
-      <div class="sg-warn" style="font-size:12px;border-radius:10px;margin-bottom:1rem;display:flex;align-items:flex-start;gap:6px"><span style="flex-shrink:0;margin-top:1px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span><span>Never use your main wallet — create a separate wallet just for the bot.</div>
+      <div style="font-size:18px;font-weight:700;color:var(--text);margin-bottom:.5rem;letter-spacing:-.02em">Add a trading wallet</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:1rem;line-height:1.65;text-align:left">Paste the private key of a <strong style="color:var(--text)">separate wallet you keep for trading</strong>. It is what buys and sells — for the bot, for copy-trading, and for one-tap buys in Live Market, with no wallet pop-up each time. It is stored double-encrypted and never appears in logs or API responses.</p>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:1rem;line-height:1.65;text-align:left">Fund it with <strong style="color:var(--text)">USDC</strong> — that is what every trade spends, on every chain. Network fees are handled for you.</p>
+      <div class="sg-warn" style="font-size:12px;border-radius:10px;margin-bottom:1rem;display:flex;align-items:flex-start;gap:6px"><span style="flex-shrink:0;margin-top:1px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span><span>Never use your main wallet — create a separate one just for trading here.</div>
       <textarea id="ob-privkey" rows="3" placeholder="Paste base58 private key…" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:10px;padding:11px 14px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);outline:none;resize:none;margin-bottom:4px;box-sizing:border-box;line-height:1.5;transition:border-color .15s" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border2)'"></textarea>
       <div id="ob-key-err" style="font-size:11px;color:var(--red);min-height:14px;margin-bottom:8px;text-align:left"></div>
-      <button class="ob-btn" id="ob-save-key-btn" onclick="_obSaveKey()" style="background:var(--accent);color:#0a0b0e;font-weight:700">Save Key &amp; Start Trading ▶</button>
-      <button class="ob-btn btn-skip" onclick="_obSkipKey()">Skip — I'll add it later in Settings</button>
+      <button class="ob-btn" id="ob-save-key-btn" onclick="_obSaveKey()" style="background:var(--accent);color:#0a0b0e;font-weight:700">Save key &amp; start trading ▶</button>
+      <button class="ob-btn btn-skip" onclick="_obSkipKey()">Skip — look around first</button>
+      <div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.6;text-align:left">You can browse the market, the feed and other traders without this. You only need a trading wallet when you want to buy or sell.</div>
     </div>
 
   </div>
