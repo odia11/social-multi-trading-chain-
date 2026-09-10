@@ -15634,7 +15634,7 @@ def notifications_mark_read():
         conn.close()
     return jsonify({'ok': True})
 
-def _send_push_notification_sync(user_id, title, body, url='/'):
+def _send_push_notification_sync(user_id, title, body, url='/', icon=''):
     if not _PYWEBPUSH_OK or not VAPID_PRIVATE_KEY:
         return
     try:
@@ -15650,7 +15650,9 @@ def _send_push_notification_sync(user_id, title, body, url='/'):
         try:
             webpush(
                 subscription_info={'endpoint': endpoint, 'keys': {'p256dh': p256dh, 'auth': auth}},
-                data=json.dumps({'title': title, 'body': body, 'url': url}),
+                data=json.dumps({'title': title, 'body': body, 'url': url,
+                                 'icon': icon} if icon else
+                                {'title': title, 'body': body, 'url': url}),
                 vapid_private_key=VAPID_PRIVATE_KEY,
                 vapid_claims=dict(VAPID_CLAIMS),
                 timeout=5
@@ -15678,7 +15680,7 @@ def _send_push_notification(user_id, title, body, url='/'):
         daemon=True
     ).start()
 
-def _send_push_notifications_bulk(user_ids, title, body, url='/'):
+def _send_push_notifications_bulk(user_ids, title, body, url='/', icon=''):
     """Same as _send_push_notification but for many recipients at once, run
     from a single background thread instead of spawning one OS thread per
     recipient -- a popular account's follower fan-out could otherwise spawn
@@ -15686,7 +15688,7 @@ def _send_push_notifications_bulk(user_ids, title, body, url='/'):
     request."""
     def _run():
         for uid in user_ids:
-            _send_push_notification_sync(uid, title, body, url)
+            _send_push_notification_sync(uid, title, body, url, icon)
     threading.Thread(target=_run, daemon=True).start()
 
 # ── SURGE ALERTS ──
@@ -15858,34 +15860,49 @@ def _surge_alert_text(surge: dict, decision: dict = None) -> tuple:
         # read. That is the only reason this second buzz was allowed at all.
         title = f"${ticker} +{(decision or {}).get('gain', 0):.0f}% more"
     elif abs(change) >= 0.05:
-        title = f"${ticker} {change:+.1f}% ({window})"
+        # The window is only worth its characters when it is NOT the usual
+        # five minutes. "$KIRKINATORX +21.7% (5m)" was truncated to
+        # "$KIRKINATORX +21.7..." on a real iPhone -- the parenthesis pushed
+        # the line over and took the % sign with it, so the alert lost the
+        # one figure it exists to show. A nine-minute move still says so,
+        # because reading it as a five-minute move would be wrong.
+        suffix = '' if window == '5m' else f" ({window})"
+        title = f"${ticker} {change:+.1f}%{suffix}"
     else:
         title = f"${ticker} surge"
 
-    # BODY: identity first, then the two figures that answer "is this real or
-    # is this dust", then the evidence that it is surging at all. Ordered so
-    # that if a phone truncates the tail, what it drops is the least load-
-    # bearing field.
+    # BODY: three fields, and the question they answer together is the only
+    # one a notification can settle -- "is this worth opening?" Not "should I
+    # buy this", which nobody should decide from a lock screen anyway.
+    #
+    # It used to carry seven: name, chain, mcap, liquidity, the volume
+    # multiple, the absolute 5m volume, the trade count and the buy share.
+    # A phone gives roughly two lines, so most of that was either cut off
+    # mid-word or skimmed past, and the fields that survived were the ones
+    # that happened to come first rather than the ones that mattered. What
+    # is left:
+    #
+    #   why now      the volume multiple IS the trigger -- it is what makes
+    #                this token different from the thousands that did not
+    #                alert. The absolute 5m figure said the same thing twice.
+    #   can I exit   liquidity, not market cap. Market cap is the number a
+    #                launch markets itself with; liquidity is what decides
+    #                whether you can actually get back out, which is the
+    #                real "is this dust" test.
+    #   where        the chain, because it decides whether the reader even
+    #                has funds there.
+    #
+    # Dropped on purpose: the trade count (supporting detail, never the
+    # reason anyone opened it) and the buy share (a subtle signal that needs
+    # context a lock screen cannot give).
     parts = []
     if followup:
         parts.append('Still climbing')
-    name = (surge.get('name') or '').strip()
-    # DexScreener falls back to the ticker when a pair has no name, and
-    # "STONKCAT · Solana" under a title already reading "$STONKCAT" wastes a
-    # line saying nothing.
-    if name and name.upper() != symbol:
-        parts.append(name if len(name) <= 26 else name[:25] + '…')
-    parts.append(chain_name)
-    mcap = _f('market_cap')
-    if mcap:
-        parts.append(f"{_surge_fmt_usd(mcap)} mcap")
+    parts.append(f"{vol_ratio:.1f}× volume")
     liq = _f('liquidity_usd')
     if liq:
         parts.append(f"{_surge_fmt_usd(liq)} liquidity")
-    parts.append(f"{vol_ratio:.1f}x volume · {_surge_fmt_usd(_f('volume_5m'))} (5m)")
-    txns = int(_f('txns_5m'))
-    if txns:
-        parts.append(f"{txns} trades · {_f('buy_pct'):.0f}% buys")
+    parts.append(chain_name)
     return title, ' · '.join(parts)
 
 def notify_surge(surge: dict):
@@ -15912,7 +15929,30 @@ def notify_surge(surge: dict):
         # safe='' because quote() leaves "/" alone by default, which is right
         # for a path and wrong for a query value.
         push_url = f"/live-market?mint={urllib.parse.quote(mint, safe='')}" if mint else '/live-market'
-        _send_push_notifications_bulk(user_ids, title, body, push_url)
+        # The token's own logo in place of the OrcAgent triangle, so the
+        # alert is recognisable as THAT token before a word is read. It is
+        # the icon slot, not a banner: iOS renders no rich media in a web
+        # push at all, so a big picture would simply not appear on the phones
+        # most of these alerts land on.
+        #
+        # https only. The URL comes from DexScreener and is therefore
+        # settable by whoever minted the token, so it is checked before we
+        # hand it to anybody -- but NOT with _safe_external_image_url(),
+        # despite that being the obvious reuse. That function answers "is
+        # this safe for the SERVER to fetch", and it answers it with a DNS
+        # lookup. Nothing here is fetched by the server: the icon is
+        # rendered by the recipient's phone. All that check would add is a
+        # blocking resolution on the radar thread, in front of every alert,
+        # for a question nobody asked.
+        #
+        # What does matter is the scheme. A plain-http icon is blocked as
+        # mixed content and leaves the notification with NO icon rather than
+        # falling back to ours, so http is dropped here and the OrcAgent
+        # mark is used instead.
+        icon = (surge.get('image_url') or '').strip()
+        if not icon.startswith('https://') or len(icon) > 500:
+            icon = ''
+        _send_push_notifications_bulk(user_ids, title, body, push_url, icon)
         print(f'[surge-alert] pushed {decision["kind"]} ${symbol} '
               f'({surge.get("vol_ratio")}x) to {len(user_ids)} user(s)', flush=True)
     except Exception as e:

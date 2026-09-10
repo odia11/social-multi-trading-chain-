@@ -13,9 +13,17 @@ self.addEventListener('push', function(event) {
   var body  = data.body  || '';
   var url   = data.url   || '/';
   event.waitUntil(
+    // icon: the token's own logo when the sender supplied one, so a surge
+    // alert is recognisable as THAT token at a glance. Falls back to the
+    // OrcAgent mark for every other kind of notification, and for a token
+    // with no logo.
+    //
+    // badge deliberately stays ours: it is the tiny monochrome glyph the
+    // system stamps to say WHICH APP buzzed, and a token logo there would
+    // be both unreadable at that size and a lie about the sender.
     self.registration.showNotification(title, {
       body: body,
-      icon: '/favicon.svg?v=2',
+      icon: data.icon || '/favicon.svg?v=2',
       badge: '/favicon.svg?v=2',
       data: { url: url }
     })

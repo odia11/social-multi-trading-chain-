@@ -25,8 +25,13 @@ def check(name, cond):
 
 # ── 1. the server ──
 ns = re.search(r'def notify_surge\(surge: dict\):.*?\n(?=def )', PY_, re.S).group(0)
+# Matched on the url ARGUMENT rather than the whole call text. Pinning the
+# full argument list made this fail the day an icon was added alongside it --
+# a change that has nothing to do with deep-linking, which is what this
+# check is about.
 check('the push carries a url built from the surge mint',
-      "urllib.parse.quote(mint, safe='')" in ns and '_send_push_notifications_bulk(user_ids, title, body, push_url)' in ns)
+      "urllib.parse.quote(mint, safe='')" in ns
+      and re.search(r'_send_push_notifications_bulk\([^)]*\bpush_url\b', ns))
 snd = re.search(r'def _send_push_notification_sync\(.*?\n(?=def )', PY_, re.S).group(0)
 check('...and that url reaches the payload the browser receives',
       "'url': url" in snd)

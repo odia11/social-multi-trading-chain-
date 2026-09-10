@@ -46,7 +46,7 @@ def build():
           'SURGE_ALERT_MIN_GAP': 180, 'SURGE_ALERT_MAX_FOLLOWUPS_PER_HOUR': 8,
           '_surge_alert_lock': threading.Lock(),
           '_surge_alerts_sent': [], '_surge_followups_sent': [], '_surge_alerted_mints': {},
-          '_send_push_notifications_bulk': lambda ids, t, b, u: pushed.append((sorted(ids), t, b, u)),
+          '_send_push_notifications_bulk': lambda ids, t, b, u, ic='': pushed.append((sorted(ids), t, b, u, ic)),
           'print': lambda *a, **k: None}
     exec(extract_func('_surge_price'), ns)
     exec(extract_func('_surge_alert_allowed'), ns)
@@ -78,22 +78,42 @@ check('a user with two devices is listed once, not twice', pushed and pushed[0][
 title, body = pushed[0][1], pushed[0][2]
 check('the title is the ticker and the price move, nothing else — a phone truncates '
       'a title from the right, so a third field is a field thrown away',
-      title == '$FSD +18.2% (5m)')
+      title == '$FSD +18.2%')
 check('the title leads with the price move, not a verb',
       'surging' not in title and 'usual' not in title)
-check('the price move names the period it covers', '(5m)' in title)
+# "(5m)" used to sit here and it is what pushed a real alert past the cut:
+# "$KIRKINATORX +21.7% (5m)" arrived on an iPhone as "$KIRKINATORX +21.7...",
+# losing the % sign and with it the one figure the alert exists to show. Five
+# minutes is the ordinary case and saying so bought nothing.
+check('the usual five-minute window is not spelled out — it is the default, and '
+      'the characters are worth more to the ticker and the move',
+      '(5m)' not in title)
 check('the title fits in the ~25 characters a phone banner shows', len(title) <= 25)
-check("the body opens with the token's full name, not just the ticker again",
-      body.startswith('Fast Sad Dog · '))
+check('the body opens with WHY this buzzed — the volume multiple is the trigger, '
+      'and the one thing separating this token from the thousands that did not alert',
+      body.startswith('19.0× volume · '))
+check("the token's name is gone: the title already carries the ticker, and a "
+      'lock screen has no room for the same identity twice',
+      'Fast Sad Dog' not in body)
 check('the body names the chain the way the platform does, not as a raw key',
       'Robinhood Chain' in body and 'robinhood' not in body)
-check('market cap and liquidity come before the surge evidence — they answer '
-      '"is this real or is this dust", which is asked first',
-      body.index('$2.4M mcap') < body.index('$128K liquidity') < body.index('19.0x volume'))
-check('the body still carries the surge evidence: ratio, volume, trades, buy share',
-      '19.0x volume · $19K (5m)' in body and '237 trades' in body and '62% buys' in body)
-check('the fields are separated so the eye can jump, not written as a sentence',
-      body.count(' · ') >= 6 and ',' not in body)
+check('liquidity comes next: it answers "can I get back out", which is the real '
+      'test of whether a surge is worth anything',
+      body.index('19.0× volume') < body.index('$128K liquidity'))
+check('the chain comes last — it decides whether the reader even has funds there, '
+      'but it is context, not the news',
+      body.endswith('Robinhood Chain'))
+check('market cap is gone: it is the number a launch markets itself with, while '
+      'liquidity is what decides whether the money can come back out',
+      'mcap' not in body)
+check('the absolute 5m volume is gone: the multiple already said it, and said it '
+      'better', '(5m)' not in body)
+check('the trade count and buy share are gone — supporting detail that was never '
+      'why anyone opened the alert',
+      'trades' not in body and 'buys' not in body)
+check('what is left is three fields, not seven: a phone shows about two lines '
+      'and the rest was being cut off mid-word',
+      body.count(' · ') == 2 and ',' not in body)
 check('it links to Live Market rather than straight into a buy screen — this reports '
       'activity, it does not recommend a trade', pushed[0][3].startswith('/live-market'))
 check('...and deep-links to the token itself, so the alert is one tap from the card '
@@ -104,6 +124,53 @@ check('...and deep-links to the token itself, so the alert is one tap from the c
 # ?mint= (live-market-pro.js), and so do the navbar search, the wallet, the
 # calls page and the trade notifications. Any other name lands on the page
 # and silently does nothing.
+# ════════════════════════════════════════════════════════════════
+# 1b. The token's own logo on the notification
+#
+# A "banner" was asked for, and on the phones these alerts mostly land on
+# there is no such thing: iOS renders no rich media in a web push, only the
+# icon. So the icon slot carries the token's logo instead of the OrcAgent
+# triangle -- the alert is recognisable as THAT token before a word is read,
+# and it degrades to our own mark whenever there is no usable logo.
+# ════════════════════════════════════════════════════════════════
+ns2 = build(); pushed.clear()
+ns2['notify_surge'](surge(image_url='https://dd.dexscreener.com/ds-data/tokens/x.png'))
+check("the token's own logo is sent as the notification icon",
+      pushed[0][4] == 'https://dd.dexscreener.com/ds-data/tokens/x.png')
+
+ns2 = build(); pushed.clear()
+ns2['notify_surge'](surge(image_url='http://dd.dexscreener.com/x.png'))
+check('a plain-http logo is dropped rather than sent — it is blocked as mixed '
+      'content, which would leave the alert with NO icon instead of ours',
+      pushed[0][4] == '')
+
+ns2 = build(); pushed.clear()
+ns2['notify_surge'](surge(image_url='javascript:alert(1)'))
+check('a logo URL that is not https at all is dropped', pushed[0][4] == '')
+
+ns2 = build(); pushed.clear()
+ns2['notify_surge'](surge(image_url='https://x.example/' + 'a' * 600))
+check('an absurdly long URL is dropped rather than padded into every push',
+      pushed[0][4] == '')
+
+ns2 = build(); pushed.clear()
+ns2['notify_surge'](surge())
+check('a token with no logo still alerts, with no icon set, so the service '
+      'worker falls back to the OrcAgent mark',
+      len(pushed) == 1 and pushed[0][4] == '')
+
+# The URL is settable by whoever minted the token, so it must not be trusted
+# further than being handed to a browser as an image source.
+check('the logo is validated in notify_surge before it is sent, not on the way out',
+      "image_url" in extract_func('notify_surge'))
+
+SW = open('/home/user/Orc-agent-Solana-chain-/static/sw.js', encoding='utf-8').read()
+check('the service worker uses the sent icon when there is one',
+      "data.icon || '/favicon.svg" in SW)
+check("...and keeps OUR mark as the badge — the glyph saying which app buzzed "
+      'must not become a token logo',
+      "badge: '/favicon.svg" in SW)
+
 check('the deep-link uses the parameter Live Market actually reads',
       "/live-market?mint={urllib.parse.quote" in SRC and 'live-market?addr=' not in SRC)
 check('every deep link in the app agrees on that name',
@@ -173,23 +240,25 @@ check('an unmeasured price move is left out, not printed as +0.0%', '%' not in t
 check('unmeasured liquidity and market cap are left out, not printed as $0',
       'liquidity' not in b and 'mcap' not in b)
 check('...and the title still says what happened rather than trailing off', t == '$WIF surge')
-check('what IS measured still shows', '$3.1K (5m)' in b and '26 trades' in b)
+check('what IS measured still shows', '3.1× volume' in b and 'Solana' in b)
 
-# ── the name: shown when it adds something, dropped when it does not ──
+# ── the name is no longer carried at all ──
+# It used to lead the body, trimmed to 26 characters, and dropped when it
+# merely repeated the ticker. Both of those rules are gone with the field:
+# the title already says which token this is, and on two lines the same
+# identity twice costs a fact that is not there twice.
 _, b = text({'symbol': 'STONKCAT', 'name': 'STONKCAT', 'chain': 'solana', 'vol_ratio': 7.4})
-check('a name that only repeats the ticker is dropped — DexScreener falls back to the '
-      'ticker when a pair has no name, and a line saying nothing costs a real one',
-      b.startswith('Solana'))
+check('a name identical to the ticker never reaches the body', 'STONKCAT' not in b)
 
 _, b = text({'symbol': 'X', 'name': 'A Very Long Community Token Name Indeed',
              'chain': 'solana', 'vol_ratio': 3.0})
-check('a very long name is trimmed rather than eating the whole body',
-      b.startswith('A Very Long Community Tok… · Solana'))
+check('nor does a long one — there is no name field left for it to overflow',
+      'Very Long' not in b and b == '3.0× volume · Solana')
 
 t, _ = text({'symbol': 'VERYLONGTICKERNAME', 'chain': 'solana', 'vol_ratio': 3.0,
              'price_change_5m': -8.2})
 check('an over-long ticker is trimmed in the title so the percentage still fits',
-      t == '$VERYLONGTIC… -8.2% (5m)' and len(t) <= 25)
+      t == '$VERYLONGTIC… -8.2%' and len(t) <= 25)
 
 t, _ = text({'symbol': 'X', 'chain': 'base', 'vol_ratio': 5.0, 'price_change_5m': 0.04})
 check('a move that rounds to zero is dropped rather than shown as +0.0%', '%' not in t)
@@ -208,7 +277,7 @@ check('...and it is labelled with the period it actually covers, never borrowed 
 t, _ = text({'symbol': 'X', 'chain': 'base', 'vol_ratio': 5.0, 'price_change_5m': 12.0,
              'price_change_obs': 99.9, 'obs_seconds': 540})
 check('DexScreener\'s figure wins when it exists, so the alert agrees with the site',
-      '+12.0% (5m)' in t and '99.9' not in t)
+      '+12.0%' in t and '99.9' not in t)
 
 t, _ = text({'symbol': 'X', 'chain': 'base', 'vol_ratio': 5.0,
              'price_change_obs': 8.0, 'obs_seconds': 20})
@@ -221,11 +290,11 @@ check('with no price move measurable from either source, no percentage is invent
 
 for key, label in CHAIN_NAMES.items():
     _, b = text({'symbol': 'X', 'chain': key, 'vol_ratio': 3.0})
-    check(f'{key} is written as "{label}"', b.startswith(label))
+    check(f'{key} is written as "{label}"', b.endswith(label))
 
 _, b = text({'symbol': 'X', 'chain': 'somenewchain', 'vol_ratio': 3.0})
 check('a chain nobody has mapped yet still reads as a name, not a crash',
-      b.startswith('Somenewchain'))
+      b.endswith('Somenewchain'))
 
 t, b = text({})
 check('a surge dict with nothing in it produces text rather than an exception',
