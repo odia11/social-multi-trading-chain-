@@ -309,6 +309,16 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
       </div>
     </div>
     <div class="modal-field">
+      <label class="modal-label" for="cg-chain">Chain</label>
+      <div class="modal-inp-wrap">
+        <select class="modal-inp" id="cg-chain" onchange="_cgChainChanged()" style="font-family:var(--ui);padding-right:14px">
+          {% for c in token_chains %}
+          <option value="{{ c.id }}" data-placeholder="{{ c.placeholder }}">{{ c.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="modal-field">
       <label class="modal-label" for="cg-address">Token address <span style="color:#ff4d6a">*</span></label>
       <div class="modal-inp-wrap">
         <input class="modal-inp" id="cg-address" type="text" placeholder="Solana mint address" style="font-family:var(--mono);font-size:12px;padding-right:14px">
@@ -470,12 +480,23 @@ function _closeCreateGroupModal(ev){
   if(ev && ev.target !== ev.currentTarget) return;
   document.getElementById('create-group-backdrop').classList.remove('open');
 }
+// The address field says what it wants for the chain that is actually
+// selected -- "Solana mint address" sitting above a Base group was the whole
+// reason only Solana groups got made.
+function _cgChainChanged(){
+  var sel = document.getElementById('cg-chain');
+  var opt = sel.options[sel.selectedIndex];
+  document.getElementById('cg-address').placeholder = (opt && opt.dataset.placeholder) || '';
+}
 function _submitCreateGroup(){
   var errEl = document.getElementById('cg-error');
   errEl.style.display = 'none';
+  var chainSel = document.getElementById('cg-chain');
+  var chainLabel = chainSel.options[chainSel.selectedIndex].textContent.trim();
   var body = {
     token_symbol: document.getElementById('cg-token').value.trim(),
     token_address: document.getElementById('cg-address').value.trim(),
+    chain: chainSel.value,
     name: document.getElementById('cg-name').value.trim(),
     description: document.getElementById('cg-desc').value.trim(),
     is_private: document.getElementById('cg-private').checked,
@@ -486,12 +507,17 @@ function _submitCreateGroup(){
     return;
   }
   if(!body.token_address){
-    errEl.textContent = 'A Solana mint address is required so members can verify this group matches the real token.';
+    errEl.textContent = 'A token address is required so members can verify this group matches the real token.';
     errEl.style.display = '';
     return;
   }
-  if(!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(body.token_address)){
-    errEl.textContent = 'That doesn\'t look like a valid Solana mint address.';
+  // Only to say so before a round trip -- the server checks this again, and
+  // its answer is the one that decides.
+  var looksRight = body.chain === 'solana'
+    ? /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(body.token_address)
+    : /^0x[0-9a-fA-F]{40}$/.test(body.token_address);
+  if(!looksRight){
+    errEl.textContent = 'That doesn\'t look like a valid ' + chainLabel + ' token address.';
     errEl.style.display = '';
     return;
   }

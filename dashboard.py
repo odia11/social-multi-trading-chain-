@@ -1450,6 +1450,42 @@ def is_valid_solana_address(addr: str) -> bool:
 def is_valid_evm_address(addr: str) -> bool:
     return bool(_EVM_ADDR_RE.match(addr or ''))
 
+# ── the chains a token can live on ───────────────────────────────────────
+# Built from EVM_CHAINS rather than typed out a second time: a chain added
+# there then shows up everywhere this list is offered, instead of quietly
+# going missing. This codebase has twice been bitten by a second copy of a
+# chain/rule list drifting out of step with the first.
+TOKEN_CHAINS = ('solana',) + tuple(EVM_CHAINS.keys())
+
+CHAIN_DISPLAY_NAMES = {
+    'solana':    'Solana',
+    'bsc':       'BNB Chain',
+    'base':      'Base',
+    'arbitrum':  'Arbitrum',
+    'polygon':   'Polygon',
+    'robinhood': 'Robinhood Chain',
+}
+
+def chain_display_name(chain: str) -> str:
+    return CHAIN_DISPLAY_NAMES.get(chain, (chain or '').replace('_', ' ').title())
+
+def token_address_placeholder(chain: str) -> str:
+    return 'Solana mint address' if chain == 'solana' else '0x…'
+
+def is_valid_token_address(addr: str, chain: str) -> bool:
+    """Whether an address is well-formed FOR A GIVEN CHAIN.
+
+    The chain is not optional context here. Every EVM chain shares one
+    address format, so "is this a valid token address" has no answer on its
+    own -- 0x… is equally well-formed on BNB Chain and on Base, and only the
+    chain says which token a member would actually be verifying.
+    """
+    if chain == 'solana':
+        return is_valid_solana_address(addr)
+    if chain in EVM_CHAINS:
+        return is_valid_evm_address(addr)
+    return False
+
 def is_valid_solana_private_key(key: str) -> bool:
     key = (key or '').strip()
     if _SOLANA_KEY_RE.match(key):
@@ -2260,6 +2296,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS groups (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
         token_address TEXT,
+        chain         TEXT NOT NULL DEFAULT 'solana',
         token_symbol  TEXT NOT NULL,
         name          TEXT NOT NULL,
         description   TEXT,
@@ -2868,6 +2905,10 @@ def run_migrations():
         "ALTER TABLE bridge_transactions ADD COLUMN auto_buy_requested_usdc REAL DEFAULT NULL",
         "ALTER TABLE bridge_transactions ADD COLUMN auto_buy_status TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE bridge_transactions ADD COLUMN auto_buy_result TEXT DEFAULT ''",
+        # Groups used to be Solana-only, so every row that predates this
+        # column really is a Solana group -- the default states a fact about
+        # those rows rather than guessing at one.
+        "ALTER TABLE groups ADD COLUMN chain TEXT NOT NULL DEFAULT 'solana'",
     ]:
         try:
             con.execute(sql)
@@ -14306,6 +14347,12 @@ def groups_page():
         is_admin=_is_owner(wallet),
         csrf_token=_get_csrf_token(),
         client_secret=API_SHARED_SECRET,
+        # Handed to the page rather than written out again in its JS, so the
+        # chains offered here are always the ones the server will accept.
+        token_chains=[{'id': c,
+                       'label': chain_display_name(c),
+                       'placeholder': token_address_placeholder(c)}
+                      for c in TOKEN_CHAINS],
     )
 
 
@@ -14348,7 +14395,8 @@ def api_groups_mine():
         uid = _get_uid(conn, wallet)
         rows = conn.execute('''
             SELECT g.id, g.token_symbol, g.name, g.description, g.is_private,
-                   (SELECT COUNT(*) FROM group_members WHERE group_id=g.id) as member_count
+                   (SELECT COUNT(*) FROM group_members WHERE group_id=g.id) as member_count,
+                   g.chain
             FROM groups g
             JOIN group_members gm ON gm.group_id = g.id
             WHERE gm.user_id = ? AND g.is_official = 0
@@ -14357,6 +14405,7 @@ def api_groups_mine():
         groups = [{
             'id': r[0], 'token_symbol': r[1], 'name': r[2], 'description': r[3] or '',
             'is_private': bool(r[4]), 'member_count': r[5],
+            'chain': r[6] or 'solana', 'chain_label': chain_display_name(r[6] or 'solana'),
         } for r in rows]
         return jsonify({'ok': True, 'groups': groups})
     finally:
@@ -14372,7 +14421,8 @@ def api_groups_discover():
         uid = _get_uid(conn, wallet) if wallet else None
         sql = '''
             SELECT g.id, g.token_symbol, g.name, g.description,
-                   (SELECT COUNT(*) FROM group_members WHERE group_id=g.id) as member_count
+                   (SELECT COUNT(*) FROM group_members WHERE group_id=g.id) as member_count,
+                   g.chain
             FROM groups g
             WHERE g.is_private = 0 AND g.is_official = 0
         '''
@@ -14388,6 +14438,7 @@ def api_groups_discover():
         groups = [{
             'id': r[0], 'token_symbol': r[1], 'name': r[2], 'description': r[3] or '',
             'member_count': r[4],
+            'chain': r[5] or 'solana', 'chain_label': chain_display_name(r[5] or 'solana'),
         } for r in rows]
         return jsonify({'ok': True, 'groups': groups})
     finally:
@@ -14412,17 +14463,24 @@ def api_groups_create():
         return jsonify({'ok': False, 'msg': 'Token symbol is required'}), 400
     if len(description) > 300:
         return jsonify({'ok': False, 'msg': 'Description too long'}), 400
+    # The chain is validated against the server's own list, never trusted
+    # from the form: it decides which address format is accepted below, so a
+    # made-up value would be a way to store an address nothing can verify.
+    chain = (body.get('chain') or 'solana').strip().lower()
+    if chain not in TOKEN_CHAINS:
+        return jsonify({'ok': False, 'msg': 'Unsupported chain'}), 400
     if not token_address:
-        return jsonify({'ok': False, 'msg': 'A Solana mint address is required so members can verify this group matches the real token'}), 400
-    if not is_valid_solana_address(token_address):
-        return jsonify({'ok': False, 'msg': 'Invalid token address'}), 400
+        return jsonify({'ok': False, 'msg': 'A token address is required so members can verify this group matches the real token'}), 400
+    if not is_valid_token_address(token_address, chain):
+        return jsonify({'ok': False,
+                        'msg': f'That does not look like a valid {chain_display_name(chain)} token address'}), 400
     conn = sqlite3.connect(DB_FILE)
     try:
         uid = _get_uid(conn, wallet)
         cur = conn.execute(
-            'INSERT INTO groups (token_address, token_symbol, name, description, is_private, created_by, invite_token) '
-            'VALUES (?,?,?,?,?,?,?)',
-            (token_address or None, token_symbol, name, description, is_private, uid, secrets.token_urlsafe(16)))
+            'INSERT INTO groups (token_address, chain, token_symbol, name, description, is_private, created_by, invite_token) '
+            'VALUES (?,?,?,?,?,?,?,?)',
+            (token_address or None, chain, token_symbol, name, description, is_private, uid, secrets.token_urlsafe(16)))
         group_id = cur.lastrowid
         conn.execute('INSERT INTO group_members (group_id, user_id, role) VALUES (?,?,?)',
                      (group_id, uid, 'owner'))
@@ -14579,8 +14637,8 @@ def api_group_detail(group_id):
         _process_expired_claims(conn, group_id)
         row = conn.execute(
             'SELECT id, token_address, token_symbol, name, description, is_private, created_by, '
-            'avatar_url, banner_url, rules, announcement_only, pinned_post_id, is_official, invite_token '
-            'FROM groups WHERE id=?', (group_id,)).fetchone()
+            'avatar_url, banner_url, rules, announcement_only, pinned_post_id, is_official, invite_token, '
+            'chain FROM groups WHERE id=?', (group_id,)).fetchone()
         if not row:
             return jsonify({'ok': False, 'msg': 'Group not found'}), 404
         uid = _get_uid(conn, wallet) if wallet else None
@@ -14597,6 +14655,8 @@ def api_group_detail(group_id):
             is_muted = bool(mrow and mrow[0] and mrow[0] > datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
         group = {
             'id': row[0], 'token_address': row[1], 'token_symbol': row[2], 'name': row[3],
+            'chain': row[14] or 'solana',
+            'chain_label': chain_display_name(row[14] or 'solana'),
             'description': row[4] or '', 'is_private': bool(row[5]),
             'is_owner': bool(uid and row[6] == uid),
             'is_member': role is not None,
