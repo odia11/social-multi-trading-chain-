@@ -3551,6 +3551,26 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
 
 <!-- ONBOARDING -->
 <div id="onboard">
+<script>
+// Set and checked here -- the FIRST thing inside #onboard, before any of its
+// own markup (wallet-connect buttons, the private-key form, the terms modal)
+// is parsed -- so a signed-in visitor's browser never paints this screen,
+// not even for one frame.
+//
+// This used to run in a script near the very end of the document, after
+// #onboard's entire ~1150-line subtree had already been parsed. On a real
+// network, where the page streams in and the browser paints incrementally,
+// that left a window where #onboard -- full-screen, no display:none of its
+// own -- was on screen before this script caught up and hid it again. Every
+// click on a nav link like Feed does a full page reload, so a signed-in
+// visitor hit that flash on every navigation, not just their first login.
+window.__API_SHARED_SECRET = '__API_SHARED_SECRET__';
+window.__SESSION_WALLET = '__SESSION_WALLET__';
+window.__SESSION_SHORT = '__SESSION_SHORT__';
+if (window.__SESSION_WALLET) {
+  document.getElementById('onboard').style.display = 'none';
+}
+</script>
   <div class="ob-box">
     <div class="ob-logo-tile"></div>
     <div class="ob-title">OrcAgent</div>
@@ -4706,12 +4726,12 @@ __IMAGE_LIGHTBOX__
 
 
 <script>
-window.__API_SHARED_SECRET = '__API_SHARED_SECRET__';
-window.__SESSION_WALLET = '__SESSION_WALLET__';
-window.__SESSION_SHORT = '__SESSION_SHORT__';
+// The onboard-hide moved to be the very first thing inside #onboard (see
+// there for why) -- window.__SESSION_WALLET is already set by now. This is
+// only the one thing that genuinely has to wait: #sb-bottom lives inside
+// #app, which launchApp() reveals explicitly, so there is no flash risk in
+// leaving its own reveal here.
 if (window.__SESSION_WALLET) {
-  var _ob = document.getElementById('onboard');
-  if (_ob) _ob.style.display = 'none';
   var _sbb = document.getElementById('sb-bottom');
   if (_sbb) _sbb.style.display = '';
 }
