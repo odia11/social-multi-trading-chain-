@@ -24308,6 +24308,30 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
         # between a fixable message and a confusing one.
         us_sol = _get_user_sol(trading_wallet)
         if us_sol < SOL_NETWORK_RESERVE:
+            # ASK THE SPONSOR FIRST, then refuse.
+            #
+            # This path refused outright, which is the whole promise of
+            # "fund everything in USDC, fees are handled" broken at the one
+            # moment it matters: a wallet holding only USDC could not make a
+            # single Solana trade, and was told to go and buy SOL.
+            #
+            # The EVM side has called _ensure_evm_gas before every buy from
+            # the start. Solana had the identical helper -- it tops the
+            # trading wallet up from the platform sponsor -- and simply never
+            # called it here. It is a no-op when sponsorship is switched off,
+            # so behaviour without a sponsor key is exactly what it was.
+            try:
+                with _use_key(enc_blob, wallet) as _gas_pk:
+                    _gas_ok, _gas_msg = _ensure_solana_gas(wallet, _gas_pk)
+            except Exception as e:
+                print(f'[solana-buy] gas top-up failed for {wallet[:6]}...: '
+                      f'{type(e).__name__}: {e}', flush=True)
+                _gas_ok, _gas_msg = False, ''
+            # Re-read rather than trust the return: a grant that landed is
+            # only real once the balance says so, and this is money.
+            us_sol = _get_user_sol(trading_wallet)
+
+        if us_sol < SOL_NETWORK_RESERVE:
             return jsonify({
                 'ok': False, 'low_balance': True, 'trading_wallet': trading_wallet,
                 'msg': f'⚠️ Not enough SOL for network fees — you have {us_sol:.4f} '

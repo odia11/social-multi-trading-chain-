@@ -1911,13 +1911,16 @@ function renderPumpScanner(tokens){
 
 async function manualBuy(mint,symbol,btn){
   if(!btn) return;
-  const solBal=parseFloat(document.getElementById('s-sol').textContent)||0;
-  if(solBal<0.01){
-    showLfToast('⚠️','Insufficient SOL balance — deposit SOL to trade','warn');
-    const depBtn=document.getElementById('deposit-sol-btn');
-    if(depBtn){depBtn.classList.add('dep-btn-pulse');setTimeout(()=>depBtn.classList.remove('dep-btn-pulse'),2000);}
-    return;
-  }
+  // No SOL pre-check here. It refused the buy when the wallet held less than
+  // 0.01 SOL, which predates trades being funded in USDC: a wallet holding
+  // nothing but USDC was stopped by this page before the server was ever
+  // asked, and told to go and deposit SOL to trade -- for a trade that does
+  // not spend SOL at all.
+  //
+  // The server has the facts the page was guessing at. It tops the wallet up
+  // from the gas sponsor first, and if it still cannot, says which balance is
+  // short and that the trade itself is funded in USDC. manualSell has always
+  // worked this way; this is buy catching up.
   btn.disabled=true; btn.textContent='BUYING'; btn.classList.add('ps-btn-loading');
   try{
     const r=await fetch('/api/manual_buy',{
@@ -3121,13 +3124,10 @@ async function toggleTrader(){
     openSettings();
     return;
   }
-  if(!traderOn){
-    const sol=parseFloat(document.getElementById('s-sol').textContent)||0;
-    if(sol < 0.02){
-      showTradeWarn('⚠️ Low SOL balance — you need at least 0.02 SOL to trade');
-      return;
-    }
-  }
+  // Starting the bot no longer requires SOL in the wallet either -- same
+  // reason as manualBuy above. The bot arranges gas per trade, and refusing
+  // to even start on a balance the page happened to have rendered blocked
+  // every USDC-only user from switching it on.
   hideTradeWarn();
   const starting=!traderOn;
   const tb=document.getElementById('trade-btn');
