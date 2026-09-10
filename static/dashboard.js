@@ -7312,6 +7312,26 @@ function _renderTradeTerminalCard(t){
     var _amt = parseFloat(t.amount);
     amtStr = '<div style="color:#565d68;font-size:11px;margin-top:3px">'+(_amt>=1000?_amt.toLocaleString('en-US',{maximumFractionDigits:0}):_amt.toFixed(4))+' tokens</div>';
   }
+
+  /* ── "what would it be worth now" ──────────────────────────────────────
+     Only on a SELL, and only when the three numbers the sum needs are all
+     really recorded: which token, how many, and the price they went for.
+     Anything missing and the line is simply absent -- a card with no line
+     says nothing, a card with a guessed line says something false.
+
+     Left empty here and filled in by _hydrateFumbles(), which batches every
+     visible card into one price request rather than one per post. */
+  var fumbleSlot = '';
+  var _fbTokens  = parseFloat(t.amount || 0);
+  var _fbExit    = exitN;
+  var _fbMint    = t.token_address || '';
+  if(!isBuy && _fbMint && _fbTokens > 0 && _fbExit > 0){
+    fumbleSlot = '<div class="tc-fumble" data-fb-mint="'+esc(_fbMint)+'"'
+      + ' data-fb-tokens="'+esc(String(_fbTokens))+'"'
+      + ' data-fb-exit="'+esc(String(_fbExit))+'"'
+      + ' style="display:none;font-size:11px;margin-top:6px;padding-top:6px;'
+      + 'border-top:1px solid #1a1f2e;line-height:1.5"></div>';
+  }
   return '<div data-mint="'+esc(t.token_address||'')+'" style="position:relative;overflow:hidden;background:#0d1117;border:1px solid #1a1f2e;border-radius:10px;padding:14px 16px;margin:8px 0 10px;font-family:\'JetBrains Mono\',monospace;cursor:pointer" onclick="event.stopPropagation();showTokenCard('+symJs+','+mintJs+')">'
     +'<div data-cc="banner" class="tc-banner" style="position:absolute;inset:0;background-size:cover;background-position:center"></div>'
     +'<div style="position:absolute;inset:0;background:linear-gradient(to bottom,rgba(13,17,23,0.55),rgba(13,17,23,0.92))"></div>'
@@ -7326,6 +7346,7 @@ function _renderTradeTerminalCard(t){
     +'<div style="color:#8a919c;font-size:11px;margin-bottom:5px">$'+esc(String(t.entry_price||entryN||'—'))+' → $'+esc(String(t.exit_price||exitN||'—'))+'</div>'
     +'<div style="color:#f7b955;font-size:12px;font-weight:600">'+solStr+'</div>'
     +amtStr
+    +fumbleSlot
     +'</div>'
     +'<div style="font-size:26px;font-weight:700;color:'+pctCol+';line-height:1;text-align:right;padding-left:14px;align-self:center">'+pctStr+'</div>'
     +'</div>'
@@ -8314,6 +8335,85 @@ function _initLiveCharts(){
   });
 }
 
+/* ── WHAT IT WOULD BE WORTH NOW ────────────────────────────────────────────
+   A closed trade card shows what happened. This adds the other half: what
+   those same tokens would be worth today.
+
+   It is a hypothetical and is written as one. It is the notional value of the
+   tokens that were actually sold -- the number the app recorded, not an
+   estimate -- at today's price, before whatever a sale today would cost. It
+   is never presented as profit, because none of it was made.
+
+   And it cuts both ways deliberately. Showing only the ones that ran up would
+   be a machine for making people feel stupid; when the price fell after the
+   sale, selling was the right call and the card says so. */
+var _fumbleCache = {};   // mint -> {price, market_cap}
+
+function _fumbleLine(tokens, exitPrice, now){
+  var soldFor = tokens * exitPrice;
+  var worthNow = tokens * now.price;
+  if(!(soldFor > 0) || !(worthNow > 0)) return '';
+  var delta = worthNow - soldFor;
+  var pct   = (now.price / exitPrice - 1) * 100;
+  var money = function(v){
+    v = Math.abs(v);
+    if(v >= 1000000) return '$' + (v/1000000).toFixed(2) + 'M';
+    if(v >= 1000)    return '$' + (v/1000).toFixed(1) + 'K';
+    return '$' + v.toFixed(2);
+  };
+  // Under a couple of percent either way is noise, not a story.
+  if(Math.abs(pct) < 2){
+    return '<span style="color:#565d68">Worth about the same today ('
+         + money(worthNow) + ')</span>';
+  }
+  if(delta > 0){
+    return '<span style="color:#565d68">Held instead, today: </span>'
+         + '<span style="color:#00d084;font-weight:700">' + money(worthNow) + '</span>'
+         + '<span style="color:#00d084"> (+' + pct.toFixed(0) + '%)</span>'
+         + '<span style="color:#565d68"> — left on the table, not earned</span>';
+  }
+  return '<span style="color:#565d68">Selling saved </span>'
+       + '<span style="color:#f7b955;font-weight:700">' + money(delta) + '</span>'
+       + '<span style="color:#565d68"> — worth ' + money(worthNow) + ' today</span>';
+}
+
+function _paintFumble(el){
+  var mint = (el.dataset.fbMint || '').toLowerCase();
+  var now  = _fumbleCache[mint];
+  if(!now || !(now.price > 0)) return;          // no price, no line
+  var html = _fumbleLine(parseFloat(el.dataset.fbTokens || 0),
+                         parseFloat(el.dataset.fbExit || 0), now);
+  if(!html) return;
+  el.innerHTML = html;
+  el.style.display = 'block';
+}
+
+async function _hydrateFumbles(){
+  var els = Array.prototype.slice.call(document.querySelectorAll('.tc-fumble'))
+              .filter(function(el){ return el.dataset.fbMint && !el.dataset.fbDone; });
+  if(!els.length) return;
+  var need = [];
+  els.forEach(function(el){
+    el.dataset.fbDone = '1';
+    var m = (el.dataset.fbMint || '').toLowerCase();
+    if(_fumbleCache[m]) { _paintFumble(el); return; }
+    if(need.indexOf(el.dataset.fbMint) === -1) need.push(el.dataset.fbMint);
+  });
+  // 30 per request is the server's cap; a long feed becomes a few requests
+  // rather than one per card.
+  for(var i = 0; i < need.length; i += 30){
+    var batch = need.slice(i, i + 30);
+    try{
+      var r = await fetch('/api/market/token-prices?mints=' + encodeURIComponent(batch.join(',')))
+                .then(function(x){ return x.json(); }).catch(function(){ return null; });
+      if(r && r.tokens){
+        Object.keys(r.tokens).forEach(function(k){ _fumbleCache[k] = r.tokens[k]; });
+      }
+    }catch(e){}
+  }
+  els.forEach(_paintFumble);
+}
+
 function _initTradeBanners(){
   document.querySelectorAll('[data-mint]').forEach(function(el){
     if(!el.dataset.mint) return;
@@ -8377,6 +8477,7 @@ function renderHomeFeed(appendItems){
   else el.innerHTML = html;
   _initLiveCharts();
   _initTradeBanners();
+  _hydrateFumbles();
   el.querySelectorAll('.fc-card[id^="fc-card-"]').forEach(function(card){
     _feedViewObserver.observe(card);
     _onScreenCardObserver.observe(card);

@@ -24497,6 +24497,204 @@ _GECKOTERMINAL_NETWORK = {
     'solana': 'solana', 'bsc': 'bsc', 'base': 'base', 'arbitrum': 'arbitrum', 'polygon': 'polygon_pos',
 }
 
+# How long a live price may be reused. Short, because this is the number that
+# makes a chart look alive -- but not zero: one window still collapses every
+# viewer of the same token into a single upstream request.
+_LIVE_PRICE_TTL = 2
+
+# Cached per POOL, not per request.
+#
+# The first version leaned on _dex_get's cache, which is keyed on the whole
+# URL -- so the cache entry was the exact list of pools one page happened to
+# be showing. Two people looking at almost the same screen shared nothing, and
+# one card scrolling in or out invalidated the lot. At a four-second tick that
+# was survivable. At two it is the difference between one upstream request per
+# window and one per viewer per window.
+#
+# Keyed per pool, a page fetches only the pools whose own price has gone
+# stale, and everything anyone else already asked for in this window comes
+# back free.
+_live_price_lock = threading.Lock()
+_live_price_cache: dict = {}   # (chain, pair_lower) -> (fetched_at, price)
+
+
+# Token prices by MINT, cached per token. Same shape as the pool-price cache
+# below and for the same reason: overlapping screens share what they have in
+# common instead of each paying for a whole list.
+_token_price_lock = threading.Lock()
+_token_price_cache: dict = {}
+_TOKEN_PRICE_TTL = 20
+
+
+@app.route('/api/market/token-prices')
+@rate_limit(120, 60)
+def api_market_token_prices():
+    """Current price and market cap for several tokens at once.
+
+    Exists for the "what would it be worth now" line on a closed trade. The
+    card already knows what was sold and at what price -- the only missing
+    number is today's, and asking for it per card would be one request per
+    post in the feed.
+
+    Nothing here is private: a token's price is a public fact. The trade it
+    gets compared against never leaves the page.
+    """
+    wanted, seen = [], set()
+    for raw in (request.args.get('mints', '') or '').split(','):
+        a = raw.strip()
+        if not a or a.lower() in seen:
+            continue
+        # Validated for shape before it is pasted into an outbound URL: this
+        # builds a request out of something a caller controls.
+        if not (_SOLANA_ADDR_RE.match(a) or is_valid_evm_address(a)):
+            continue
+        seen.add(a.lower())
+        wanted.append(a)
+        if len(wanted) >= 30:      # DexScreener's own limit for one call
+            break
+    if not wanted:
+        return jsonify({'ok': True, 'tokens': {}})
+
+    now = time.time()
+    out, stale = {}, []
+    with _token_price_lock:
+        for a in wanted:
+            hit = _token_price_cache.get(a.lower())
+            if hit and now - hit[0] < _TOKEN_PRICE_TTL:
+                out[a.lower()] = hit[1]
+            else:
+                stale.append(a)
+
+    if stale:
+        try:
+            r = _dex_get('https://api.dexscreener.com/latest/dex/tokens/'
+                         + ','.join(stale), timeout=8, ttl_override=0)
+            data = r.json() if (r and r.status_code == 200) else {}
+            # Deepest pool per token, not whichever DexScreener listed first --
+            # a dead pool would quote a price this token does not really have.
+            best = {}
+            for p in (data.get('pairs') or []):
+                addr = ((p.get('baseToken') or {}).get('address') or '').lower()
+                if not addr:
+                    continue
+                liq = float((p.get('liquidity') or {}).get('usd') or 0)
+                if addr not in best or liq > best[addr][0]:
+                    best[addr] = (liq, p)
+            fresh = {}
+            for addr, (_liq, p) in best.items():
+                try:
+                    px = float(p.get('priceUsd') or 0)
+                except (TypeError, ValueError):
+                    px = 0.0
+                if px <= 0:
+                    continue
+                fresh[addr] = {
+                    'price': px,
+                    'market_cap': float(p.get('marketCap') or p.get('fdv') or 0),
+                }
+            out.update(fresh)
+            with _token_price_lock:
+                for k, v in fresh.items():
+                    _token_price_cache[k] = (now, v)
+                if len(_token_price_cache) > 3000:
+                    cutoff = now - 300
+                    for k in [k for k, v in _token_price_cache.items() if v[0] < cutoff]:
+                        del _token_price_cache[k]
+        except Exception as e:
+            # A price we could not fetch simply is not in the answer, and the
+            # card leaves its line out. Better a missing line than a wrong one.
+            print(f'[token-prices] batch fetch failed: {e}', flush=True)
+
+    return jsonify({'ok': True, 'tokens': out})
+
+
+@app.route('/api/market/prices')
+@rate_limit(240, 60)
+def api_market_prices():
+    """Current price for many pools at once.
+
+    Why this exists: the chart is drawn from 5-minute candles, so between
+    candles there is nothing new to draw and it sits perfectly still. The
+    missing piece is the price right now.
+
+    Fetching that per card would be one upstream request per card per tick.
+    DexScreener will take up to 30 pair addresses in a single call, so a page
+    showing thirty tokens costs ONE request -- fewer than the chart polling it
+    replaces, not more.
+
+    Addresses are validated for the chain they claim to be on and the list is
+    capped, rather than being pasted into a URL as sent. A caller cannot use
+    this to make the server fetch something else.
+    """
+    chain = request.args.get('chain', 'solana').strip().lower()
+    if chain not in EVM_CHAINS and chain != 'solana':
+        return jsonify({'ok': False, 'prices': {}})
+    dex_chain_id = EVM_CHAINS[chain]['dex_chain'] if chain in EVM_CHAINS else 'solana'
+
+    def _addr_ok(a):
+        return is_valid_evm_address(a) if chain in EVM_CHAINS else bool(_SOLANA_ADDR_RE.match(a))
+
+    wanted, seen = [], set()
+    for raw in (request.args.get('pairs', '') or '').split(','):
+        a = raw.strip()
+        if a and _addr_ok(a) and a.lower() not in seen:
+            seen.add(a.lower())
+            wanted.append(a)
+        if len(wanted) >= 30:      # DexScreener's own limit for one call
+            break
+    if not wanted:
+        return jsonify({'ok': True, 'prices': {}})
+
+    now = time.time()
+    prices, stale = {}, []
+    with _live_price_lock:
+        for a in wanted:
+            hit = _live_price_cache.get((chain, a.lower()))
+            if hit and now - hit[0] < _LIVE_PRICE_TTL:
+                prices[a.lower()] = hit[1]
+            else:
+                stale.append(a)
+    if not stale:
+        # Everything on this screen was already fetched for somebody else
+        # inside this window. No upstream request at all.
+        return jsonify({'ok': True, 'prices': prices})
+
+    try:
+        # ttl_override=0 because the per-pool cache above is now the cache;
+        # leaving _dex_get's URL-keyed one in the way would only re-introduce
+        # the whole-list keying this replaced.
+        r = _dex_get('https://api.dexscreener.com/latest/dex/pairs/'
+                     + dex_chain_id + '/' + ','.join(stale),
+                     timeout=8, ttl_override=0)
+        data = r.json() if (r and r.status_code == 200) else {}
+        rows = data.get('pairs') or ([data['pair']] if data.get('pair') else [])
+        fresh = {}
+        for row in (rows or []):
+            addr = (row or {}).get('pairAddress') or ''
+            try:
+                px = float((row or {}).get('priceUsd') or 0)
+            except (TypeError, ValueError):
+                px = 0.0
+            if addr and px > 0:
+                fresh[addr.lower()] = px
+        prices.update(fresh)
+        with _live_price_lock:
+            for k, v in fresh.items():
+                _live_price_cache[(chain, k)] = (now, v)
+            if len(_live_price_cache) > 2000:
+                cutoff = now - 60
+                for k in [k for k, v in _live_price_cache.items() if v[0] < cutoff]:
+                    del _live_price_cache[k]
+    except Exception as e:
+        # A price tick is decoration on top of the candles. If it fails the
+        # chart keeps drawing exactly what it drew before, so this is a quiet
+        # answer -- and whatever WAS cached still goes back, rather than
+        # throwing away good prices because one fetch failed.
+        print(f'[prices] batch fetch failed: {e}', flush=True)
+
+    return jsonify({'ok': True, 'prices': prices})
+
+
 @app.route('/api/chart/<mint>')
 @rate_limit(60, 60)
 def api_chart(mint):
