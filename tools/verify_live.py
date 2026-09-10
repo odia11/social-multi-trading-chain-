@@ -25,7 +25,44 @@ import sys
 import time
 import traceback
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, APP_ROOT)
+
+
+def _reexec_in_venv():
+    """Re-run this script under the app's own interpreter.
+
+    The app's dependencies live in APP_ROOT/venv, not in the system python,
+    so `python3 tools/verify_live.py` -- the obvious thing to type, and what
+    the line above this docstring says -- died on `No module named 'PIL'`
+    before a single check had run. The whole point of this tool is to be run
+    by someone who is trying to find out what is wrong, often from a phone;
+    handing them an import error about an imaging library, from a script
+    that checks RPCs and sponsor wallets, sends them looking in entirely the
+    wrong place.
+
+    So it just switches interpreters. Only when the venv python exists, is
+    not already the one running, and can be executed -- otherwise this falls
+    through and the run continues exactly as before.
+    """
+    if os.environ.get('_VERIFY_LIVE_REEXEC'):
+        return
+    venv_py = os.path.join(APP_ROOT, 'venv', 'bin', 'python')
+    if not os.path.isfile(venv_py) or not os.access(venv_py, os.X_OK):
+        return
+    if os.path.realpath(venv_py) == os.path.realpath(sys.executable):
+        return
+    print(f'(running under {venv_py} — the app\'s own interpreter)', flush=True)
+    os.environ['_VERIFY_LIVE_REEXEC'] = '1'
+    try:
+        os.execv(venv_py, [venv_py, os.path.abspath(__file__), *sys.argv[1:]])
+    except OSError:
+        # Could not switch; carry on with what we have rather than refusing
+        # to run at all.
+        os.environ.pop('_VERIFY_LIVE_REEXEC', None)
+
+
+_reexec_in_venv()
 
 OK, BAD, WARN = '  OK  ', ' FAIL ', ' WARN '
 results = []
@@ -405,6 +442,21 @@ def main():
 if __name__ == '__main__':
     try:
         sys.exit(main())
+    except ModuleNotFoundError as e:
+        # Named separately because the generic advice below sent someone
+        # hunting through /etc/orcagent.env for a key that was set all along.
+        # A missing third-party module is not a configuration problem: it is
+        # this script running under an interpreter that is not the app's.
+        _venv_py = os.path.join(APP_ROOT, 'venv', 'bin', 'python')
+        print(f'\nThis needs the app\'s own interpreter, and did not get it: '
+              f'{e}.')
+        if os.path.isfile(_venv_py):
+            print(f'Run it as:\n\n    cd {APP_ROOT} && venv/bin/python tools/verify_live.py\n')
+        else:
+            print(f'There is no virtualenv at {_venv_py}. On a deployed server '
+                  f'install.sh creates one; run this from the directory the '
+                  f'service actually runs from.')
+        sys.exit(1)
     except Exception:
         traceback.print_exc()
         print('\nThe check itself could not run. That is usually a missing '
