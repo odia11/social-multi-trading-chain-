@@ -15885,10 +15885,12 @@ def _surge_alert_text(surge: dict, decision: dict = None) -> tuple:
     #   why now      the volume multiple IS the trigger -- it is what makes
     #                this token different from the thousands that did not
     #                alert. The absolute 5m figure said the same thing twice.
-    #   can I exit   liquidity, not market cap. Market cap is the number a
-    #                launch markets itself with; liquidity is what decides
-    #                whether you can actually get back out, which is the
-    #                real "is this dust" test.
+    #   how big      market cap: the size of the thing, and the number people
+    #                actually think in for a meme coin ("a $250K coin"). It
+    #                sits here instead of liquidity by an explicit product
+    #                call. Liquidity is the better answer to "can I get back
+    #                out" and that argument was made and heard; size is what
+    #                was chosen for the glance.
     #   where        the chain, because it decides whether the reader even
     #                has funds there.
     #
@@ -15899,9 +15901,9 @@ def _surge_alert_text(surge: dict, decision: dict = None) -> tuple:
     if followup:
         parts.append('Still climbing')
     parts.append(f"{vol_ratio:.1f}× volume")
-    liq = _f('liquidity_usd')
-    if liq:
-        parts.append(f"{_surge_fmt_usd(liq)} liquidity")
+    mcap = _f('market_cap')
+    if mcap:
+        parts.append(f"{_surge_fmt_usd(mcap)} mcap")
     parts.append(chain_name)
     return title, ' · '.join(parts)
 

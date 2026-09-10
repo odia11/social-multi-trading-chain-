@@ -97,15 +97,17 @@ check("the token's name is gone: the title already carries the ticker, and a "
       'Fast Sad Dog' not in body)
 check('the body names the chain the way the platform does, not as a raw key',
       'Robinhood Chain' in body and 'robinhood' not in body)
-check('liquidity comes next: it answers "can I get back out", which is the real '
-      'test of whether a surge is worth anything',
-      body.index('19.0× volume') < body.index('$128K liquidity'))
+check('market cap comes next: the size of the thing, and the number people '
+      'actually think in for a meme coin',
+      body.index('19.0× volume') < body.index('$2.4M mcap'))
 check('the chain comes last — it decides whether the reader even has funds there, '
       'but it is context, not the news',
       body.endswith('Robinhood Chain'))
-check('market cap is gone: it is the number a launch markets itself with, while '
-      'liquidity is what decides whether the money can come back out',
-      'mcap' not in body)
+# Liquidity is the better answer to "can I get back out", and that case was
+# made. Size was chosen instead, deliberately -- this records the choice so
+# a later reader does not "restore" it as an oversight.
+check('liquidity is not carried: one size figure, not two',
+      'liquidity' not in body)
 check('the absolute 5m volume is gone: the multiple already said it, and said it '
       'better', '(5m)' not in body)
 check('the trade count and buy share are gone — supporting detail that was never '
