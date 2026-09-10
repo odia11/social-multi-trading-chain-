@@ -83,6 +83,19 @@ def section(title):
     print(f'\n── {title} ' + '─' * max(0, 60 - len(title)), flush=True)
 
 
+class Blocking(Exception):
+    """Something that stops real users dead, raised from a check that is
+    otherwise allowed to merely warn.
+
+    The gas sponsors are the case this exists for. "Low" and "empty" were
+    both warnings, and the difference between them is the difference between
+    a float to top up soon and a chain where nobody can trade OR withdraw
+    right now. A deploy printed "26 passed, 2 warnings", the operator read
+    that as fine, and a chain stayed dead for days while users sat on money
+    they could not move. A warning that is scrolled past is not a warning.
+    """
+
+
 def attempt(name, fn, essential=True):
     """Run one check. A raised exception is a failure with its reason, never a
     traceback that stops the rest of the report."""
@@ -94,8 +107,10 @@ def attempt(name, fn, essential=True):
         return True
     except Exception as e:
         ms = int((time.time() - t0) * 1000)
-        report(BAD if essential else WARN, f'{name} ({ms} ms)',
-               f'{type(e).__name__}: {e}', key=name)
+        # Blocking outranks essential=False: a check may be allowed to warn
+        # about degradation and still have to fail about an outage.
+        status = BAD if (essential or isinstance(e, Blocking)) else WARN
+        report(status, f'{name} ({ms} ms)', f'{type(e).__name__}: {e}', key=name)
         return False
 
 
@@ -335,10 +350,14 @@ def main():
             return 'not used (ORCAGENT_FRONTS_GAS is off)'
         addr = d._gas_sponsor_address()
         if not addr:
-            raise RuntimeError('GAS_SPONSOR_PRIVATE_KEY is not set, but this '
-                               'deployment fronts gas — every EVM wallet at zero '
-                               'falls through to the slower SOL bootstrap bridge')
-        out, empty, unreadable = [], [], []
+            raise Blocking('GAS_SPONSOR_PRIVATE_KEY is not set, but this '
+                           'deployment fronts gas — so on EVERY EVM chain, a '
+                           'user holding only USDC can neither trade nor send '
+                           'their own money out. The SOL bootstrap bridge is '
+                           'the only way through and it needs SOL they may not '
+                           'have. Set the key, or set ORCAGENT_FRONTS_GAS=0 if '
+                           'users really are meant to fund their own gas')
+        out, empty, dead, unreadable = [], [], [], []
         for chain in d.EVM_CHAINS:
             try:
                 bal = d.get_evm_native_balance(addr, chain)
@@ -349,18 +368,29 @@ def main():
                 one_grant = (w3.eth.gas_price * d.GAS_TOPUP_TX_GAS_UNITS
                              * d.GAS_SPONSOR_TX_MULTIPLIER) / 1e18
                 left = _grants_left(bal, one_grant)
-                out.append(f'{chain} {bal:.5f} {sym} ({left} users)'
-                           + ('  ← low' if left < WARN_BELOW_GRANTS else ''))
+                # Zero grants is not "very low". It is a chain where a
+                # USDC-only user can neither trade nor withdraw, right now.
+                mark = '  ← BLOCKED' if left < 1 else ('  ← low' if left < WARN_BELOW_GRANTS else '')
+                out.append(f'{chain} {bal:.5f} {sym} ({left} users){mark}')
                 if left < WARN_BELOW_GRANTS:
                     # The amount to reach the target, not the amount to clear
                     # the warning: topping up to just above the line means
                     # being back here after a handful of users.
                     need = max(0.0, one_grant * TARGET_GRANTS - bal)
-                    empty.append(f'{chain} (send {need:.5f} {sym})')
+                    (dead if left < 1 else empty).append(
+                        f'{chain} (send {need:.5f} {sym})')
             except Exception as e:
                 out.append(f'{chain} unreadable ({type(e).__name__})')
                 unreadable.append(chain)
         line = f'{addr}\n         ' + ' · '.join(out)
+        # A chain that cannot fund a single user is an outage on that chain,
+        # not a low balance: every USDC-only user there is stuck, unable to
+        # trade and unable to get their own money out. It fails the run so
+        # the deploy cannot end on a green tick while that is true.
+        if dead:
+            raise Blocking(
+                line + '\n         NOBODY can trade or withdraw on: '
+                + ', '.join(dead))
         if empty:
             # Raised, not returned: the wallet being readable is not the
             # thing being checked — its being able to do its job is.
@@ -373,8 +403,12 @@ def main():
             return 'not used (ORCAGENT_FRONTS_GAS is off)'
         addr = d._sol_gas_sponsor_address()
         if not addr:
-            raise RuntimeError('SOL_GAS_SPONSOR_PRIVATE_KEY is not set — users need '
-                               'their own SOL for network fees')
+            raise Blocking('SOL_GAS_SPONSOR_PRIVATE_KEY is not set, but this '
+                           'deployment fronts gas — a Solana wallet holding only '
+                           'USDC cannot pay for its own first transaction, so it '
+                           'can neither trade nor send anything out. Set the key, '
+                           'or set ORCAGENT_FRONTS_GAS=0 if users really are meant '
+                           'to fund their own gas')
         bal = d._get_user_sol(addr)
         # Solana's grant is a constant plus the reserve the sponsor keeps for
         # its own transfer fees -- exactly the sum _sponsor_solana_gas checks
@@ -386,10 +420,17 @@ def main():
                   * getattr(d, 'SOL_GAS_SPONSOR_TARGET_GRANTS', TARGET_GRANTS)
                   + d.SOL_GAS_SPONSOR_MIN_RESERVE)
         line = f'{addr}  {bal:.5f} SOL ({left} users)'
+        _send = f'send {max(0.0, target - bal):.4f} SOL to this address'
+        # Same line as the EVM sponsors: nothing left to grant is an outage,
+        # not a low balance. A Solana wallet at zero SOL cannot pay for its
+        # own first transaction, so its holder can neither trade nor move
+        # anything out until this wallet can pay for them.
+        if left < 1:
+            raise Blocking(line + '\n         NOBODY without their own SOL can '
+                                  f'trade or withdraw on Solana — {_send}')
         if left < WARN_BELOW_GRANTS:
             raise RuntimeError(
-                line + f'\n         enough for {left} more users — '
-                       f'send {max(0.0, target - bal):.4f} SOL to this address')
+                line + f'\n         enough for {left} more users — {_send}')
         return line
     attempt('Solana gas sponsor funding', sol_sponsor, essential=False)
 
