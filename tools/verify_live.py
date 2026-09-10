@@ -374,7 +374,13 @@ def main():
         tail = lines[-1]
         return tail if ('send ' in tail or 'top these up' in tail) else lines[0]
 
-    for label, group in (('FAILED: ', failed), ('warning:', warned)):
+    # Warnings first, failures LAST -- deliberately the opposite of severity
+    # order. This is read on a phone at the end of a deploy, where only the
+    # tail of the output is on screen, so the most important lines have to be
+    # the closest ones to the prompt. Printing failures first put them above
+    # the fold and left the reader with "see the FAILED lines above" and
+    # several screens of scrolling to find them.
+    for label, group in (('warning:', warned), ('FAILED: ', failed)):
         for n, d in group:
             why = _why(d)
             print(f'  {label} {n}' + (f'\n             {why}' if why else ''))

@@ -189,6 +189,12 @@ check('...preferring the line that says what to send, since on a warning that '
       'is the thing being looked for', "'send ' in tail" in SCRIPT)
 check('...and dropping the timing, the one number nobody needs twice',
       'key=name' in SCRIPT and 'key or name' in SCRIPT)
+check('the summary prints failures LAST, closest to the prompt. It is read '
+      'on a phone at the end of a deploy, where only the tail is on screen — '
+      'putting failures first left the reader with "see the FAILED lines '
+      'above" and screens of scrolling to find them',
+      re.search(r"for label, group in \(\('warning:', warned\), \('FAILED: ', failed\)\)", SCRIPT))
+
 check('a run with warnings no longer signs off with the all-clear. It printed '
       '"everything the app trades through is reachable" with both gas '
       'sponsors empty — true, and beside the point, since an empty sponsor '
