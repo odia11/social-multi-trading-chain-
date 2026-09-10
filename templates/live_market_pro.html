@@ -278,10 +278,7 @@ input{font-family:inherit}
 .pt-sheet.open{display:flex}
 .pt-sheet-grab{width:38px;height:4px;border-radius:99px;background:var(--line2);margin:8px auto 0;flex:0 0 auto}
 
-/* padding-right clears the close button, which is absolutely positioned in
-   the same corner -- without it the price rendered underneath it and read
-   as "$0.001..." with the digits that matter hidden. */
-.pt-sheet-hd{display:flex;align-items:center;gap:11px;padding:14px 18px 16px;padding-right:56px;flex:0 0 auto}
+.pt-sheet-hd{display:flex;align-items:center;gap:11px;padding:14px 18px 16px;flex:0 0 auto}
 .pt-sheet-img,.pt-sheet-img-ph{width:44px;height:44px;border-radius:50%;background:var(--line);object-fit:cover;flex:0 0 auto}
 /* Same fallback the cards use: a token with no logo shows its initials
    rather than a 44px hole where a picture should be. */
@@ -294,8 +291,6 @@ input{font-family:inherit}
 .pt-sheet-px{text-align:right;flex:0 0 auto}
 .pt-sheet-price{font-family:var(--mono);font-size:15px;font-weight:700}
 .pt-sheet-chg{font-family:var(--mono);font-size:12.5px;font-weight:700;margin-top:3px}
-.pt-sheet-close{position:absolute;top:12px;right:14px;width:32px;height:32px;border-radius:50%;
-  background:var(--card2);border:1px solid var(--line2);color:var(--muted);font-size:15px;line-height:1}
 
 /* The amount owns the middle of the screen. It is the one thing being
    decided, and it grows and shrinks so a long figure never wraps. */
@@ -327,6 +322,50 @@ input{font-family:inherit}
 /* The EVM cost breakdown renders between the balance and the button, and
    without a gap it sat clamped against both. */
 .pt-sheet-ft .pt-quote{margin:0 0 11px}
+/* ── slide to confirm ──
+   The knob is dragged the width of the track. Nothing happens until it gets
+   there, and letting go early snaps it back -- so buying and selling both
+   take a deliberate gesture rather than a tap that a pocket or a scroll can
+   produce by accident. */
+.pt-slide{position:relative;height:56px;border-radius:16px;background:var(--card2);
+  border:1px solid var(--line2);overflow:hidden;touch-action:none;user-select:none}
+.pt-slide.ready{background:rgba(247,185,85,.10);border-color:var(--accent-border)}
+.pt-slide.sell.ready{background:rgba(247,107,98,.10);border-color:rgba(247,107,98,.45)}
+.pt-slide-fill{position:absolute;inset:0;width:0;background:var(--accent);opacity:.22;
+  border-radius:16px;pointer-events:none}
+.pt-slide.sell .pt-slide-fill{background:var(--red)}
+/* Scoped to beat .pt-buy-confirm, which this element also carries so
+   confirmBuy() can write "Buying…" into it. That class is the OLD in-card
+   button's styling -- solid amber background AND amber text -- so unscoped
+   the label was amber on amber and simply could not be read. */
+.pt-slide .pt-slide-label{position:absolute;inset:0;display:flex;align-items:center;
+  justify-content:center;font-size:14.5px;font-weight:700;color:var(--muted2);
+  pointer-events:none;padding:0 60px;text-align:center;background:none;border:none;
+  border-radius:0}
+.pt-slide.ready .pt-slide-label{color:var(--accent)}
+.pt-slide.sell.ready .pt-slide-label{color:var(--red)}
+.pt-slide-knob{position:absolute;top:5px;left:5px;width:46px;height:46px;border-radius:12px;
+  background:var(--line2);color:var(--muted2);display:flex;align-items:center;justify-content:center;
+  cursor:grab;transition:background .12s,color .12s}
+.pt-slide.ready .pt-slide-knob{background:var(--accent);color:#0a0b0e}
+.pt-slide.sell.ready .pt-slide-knob{background:var(--red);color:#0a0b0e}
+.pt-slide-knob svg{width:22px;height:22px}
+.pt-slide.dragging .pt-slide-knob{cursor:grabbing;transition:none}
+.pt-slide.dragging .pt-slide-fill{transition:none}
+
+/* Dragging the sheet itself downwards dismisses it -- the gesture that
+   replaced the close button in the corner. */
+.pt-sheet.dragging{transition:none}
+.pt-sheet{transition:transform .22s cubic-bezier(.2,.8,.2,1)}
+
+/* Selling has no amount to enter: the server closes the whole tracked
+   position, so a keypad and percentage buttons would be asking a question
+   with only one answer. */
+.pt-sheet.sell-mode .pt-keys,
+.pt-sheet.sell-mode .pt-sheet-pcts,
+.pt-sheet.sell-mode .pt-sheet-cap{display:none}
+.pt-sheet.sell-mode .pt-sheet-mid{gap:12px}
+
 .pt-sheet-go{width:100%;background:var(--accent);color:#0a0b0e;border:none;border-radius:14px;
   padding:16px;font-size:15px;font-weight:700;transition:opacity .12s}
 .pt-sheet-go:disabled{background:var(--card2);color:var(--muted2);cursor:default}
@@ -651,7 +690,6 @@ input{font-family:inherit}
 <div class="pt-sheet-scrim" id="pt-sheet-scrim" data-action="close-sheet"></div>
 <div class="pt-sheet" id="pt-sheet" role="dialog" aria-modal="true" aria-label="Buy token">
   <div class="pt-sheet-grab"></div>
-  <button class="pt-sheet-close" data-action="close-sheet" aria-label="Close">✕</button>
   <div class="pt-sheet-hd">
     <img class="pt-sheet-img" id="pt-sheet-img" alt="">
     <div class="pt-sheet-img-ph" id="pt-sheet-img-ph" style="display:none"></div>
@@ -715,7 +753,22 @@ input{font-family:inherit}
          id shape, so scheduleQuote() needs to know nothing about the sheet. -->
     <div class="pt-quote" id="pt-quote-sheet" style="display:none"></div>
     <input type="hidden" id="pt-buy-amt-sheet" value="">
-    <button class="pt-sheet-go pt-buy-confirm" id="pt-sheet-go" data-action="confirm-buy" data-idx="">Buy</button>
+    <!-- Slide, not tap. A tap is one accident away from spending money, and
+         these are irreversible. The label carries .pt-buy-confirm because
+         confirmBuy() writes its progress there ("Buying…") -- keeping that on
+         the LABEL rather than the whole control means its textContent writes
+         cannot wipe the knob and the fill out of the DOM. -->
+    <div class="pt-slide" id="pt-slide">
+      <div class="pt-slide-fill" id="pt-slide-fill"></div>
+      <div class="pt-slide-label pt-buy-confirm" id="pt-sheet-go">Enter an amount</div>
+      <div class="pt-slide-knob" id="pt-slide-knob" role="button" tabindex="0"
+           aria-label="Slide to confirm">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="9 6 15 12 9 18"></polyline>
+        </svg>
+      </div>
+    </div>
     <div class="pt-sheet-msg pt-buy-msg" id="pt-buy-msg-sheet" style="display:none"></div>
   </div>
 </div>

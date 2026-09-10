@@ -64,9 +64,19 @@ check('the sheet carries the ids confirmBuy() already reaches for, so the '
 check('...handed over on open and given back on close, so the next token '
       'reuses the same sheet',
       '_sheetBindIds' in JS and '_sheetUnbindIds' in JS)
-check('the confirm button still carries data-action="confirm-buy", the hook '
-      'the existing delegated handler dispatches on',
-      'data-action="confirm-buy"' in HTML_NC)
+# The tap hook is gone on purpose. A tap is what a pocket, a mis-scroll or
+# a fat thumb produces by accident, and these spends are irreversible.
+check('a TAP cannot buy any more — the control carries no '
+      'data-action="confirm-buy", so only a completed slide reaches '
+      'confirmBuy()',
+      'data-action="confirm-buy"' not in HTML_NC)
+check('...and a completed slide is what calls it',
+      re.search(r'_slideRelease[\s\S]*?confirmBuy\(idx\)', JS) is not None)
+check('letting go before the end snaps back instead of confirming',
+      '_slideReset();' in JS and '0.85' in JS)
+check('selling goes through the same gesture, not the old two-tap arm whose '
+      '3-second window made a stray tap sell',
+      '_sellArmed' not in JS and 'handleSell(idx)' in JS)
 check('openBuyPanel still exists as the name every card Buy button calls',
       re.search(r'function openBuyPanel\(idx\)\s*\{', JS) is not None)
 check('...and it opens the sheet rather than building the old in-card panel',
@@ -83,15 +93,23 @@ check('the scrim sits just under the sheet, not over it',
       re.search(r'\.pt-sheet-scrim\{[^}]*z-index:(\d+)', HTML_NC)
       and int(re.search(r'\.pt-sheet-scrim\{[^}]*z-index:(\d+)', HTML_NC).group(1))
           < int(re.search(r'\.pt-sheet\{[^}]*z-index:(\d+)', HTML_NC).group(1)))
+check('there is no ✕ in the corner any more — a downward swipe dismisses it, '
+      'which is both what every other sheet on the device answers to and '
+      'reachable with the thumb already holding the phone',
+      'pt-sheet-close' not in HTML)
+check('the scrim still closes it, so a mouse has a way out too',
+      'data-action="close-sheet"' in HTML_NC and '[data-action="close-sheet"]' in JS)
 check('closing is wired through the delegated handler, not an inline onclick '
       '— this file is an IIFE, so closeBuySheet is not a global and an '
       'inline onclick threw ReferenceError',
-      'onclick="closeBuySheet' not in HTML
-      and 'data-action="close-sheet"' in HTML_NC
-      and '[data-action="close-sheet"]' in JS)
-check('the header leaves room for the close button, which is positioned in '
-      'the same corner and rendered on top of the price',
-      re.search(r'\.pt-sheet-hd\{[^}]*padding-right:\d+px', HTML_NC) is not None)
+      'onclick="closeBuySheet' not in HTML)
+check('a downward drag only counts past a threshold, so a scroll or a stray '
+      'touch does not dismiss a screen someone is using',
+      'window.innerHeight * 0.25' in JS)
+check('an upward drag does nothing', 'if(dy < 0) dy = 0;' in JS)
+check('a drag that starts on the keypad, the slider or the percentages '
+      'belongs to those, not to the sheet',
+      "closest('#pt-keys, .pt-slide, .pt-sheet-pcts')" in JS)
 
 # ── 3. the minimum comes from the server ─────────────────────────────────
 check('the minimum spend is handed to the page by the server rather than '
@@ -149,17 +167,14 @@ async def main():
         out['opened'] = await page.evaluate(
             "document.getElementById('pt-sheet').classList.contains('open')")
         # the close button must actually be reachable, not under the navbar
-        out['close_hittable'] = await page.evaluate("""() => {
-            const b = document.querySelector('.pt-sheet-close');
-            const r = b.getBoundingClientRect();
-            const hit = document.elementFromPoint(r.x+r.width/2, r.y+r.height/2);
-            return !!(hit && hit.closest('[data-action="close-sheet"]'));
-        }""")
-        # the price must not be hidden under it either
-        out['price_clear'] = await page.evaluate("""() => {
-            const p = document.getElementById('pt-sheet-price').getBoundingClientRect();
-            const c = document.querySelector('.pt-sheet-close').getBoundingClientRect();
-            return p.right <= c.left + 1;
+        out['no_close_btn'] = not await page.evaluate(
+            "!!document.querySelector('.pt-sheet-close')")
+        # the label must be readable: it also carries .pt-buy-confirm, whose
+        # old button styling painted amber text on an amber ground
+        out['label_readable'] = await page.evaluate("""() => {
+            const l = document.getElementById('pt-sheet-go');
+            const s = getComputedStyle(l);
+            return s.backgroundColor === 'rgba(0, 0, 0, 0)' && s.color !== s.backgroundColor;
         }""")
         for k in ['0','.','1','5']:
             await page.click('#pt-keys .pt-key[data-k="%%s"]' %% k)
@@ -168,14 +183,72 @@ async def main():
             shown: document.getElementById('pt-sheet-amt').textContent,
             hidden: document.querySelector('#pt-sheet input[type=hidden]').value,
             label: document.getElementById('pt-sheet-go').textContent,
-            disabled: document.getElementById('pt-sheet-go').disabled })""")
+            ready: document.getElementById('pt-slide').classList.contains('ready') })""")
         await page.click('.pt-pct[data-pct="100"]')
         await page.wait_for_timeout(300)
         out['max'] = await page.evaluate("""() => ({
             hidden: document.querySelector('#pt-sheet input[type=hidden]').value,
-            disabled: document.getElementById('pt-sheet-go').disabled,
+            ready: document.getElementById('pt-slide').classList.contains('ready'),
             avail: document.getElementById('pt-sheet-avail').textContent })""")
-        await page.click('.pt-sheet-close')
+        # A half slide must buy nothing. This is the property the whole
+        # gesture exists for.
+        out['traded'] = []
+        async def rec(route):
+            out['traded'].append(route.request.url.split('/api')[1])
+            await route.fulfill(status=200, content_type='application/json',
+                                body=json.dumps({"ok":True,"success":True,"sell_executed":True}))
+        await page.route('**/api/bsc/trade/**', rec)
+        async def slide(frac):
+            box = await page.evaluate("""() => {
+                const k=document.getElementById('pt-slide-knob').getBoundingClientRect();
+                const w=document.getElementById('pt-slide').getBoundingClientRect();
+                return {kx:k.x+k.width/2, ky:k.y+k.height/2, travel:w.width-k.width-10}; }""")
+            await page.mouse.move(box['kx'], box['ky']); await page.mouse.down()
+            for i in range(12):
+                await page.mouse.move(box['kx']+box['travel']*frac*(i+1)/12, box['ky'])
+                await page.wait_for_timeout(15)
+            await page.mouse.up(); await page.wait_for_timeout(350)
+        await slide(0.4)
+        out['half_slide_traded'] = list(out['traded'])
+        out['knob_snapped_back'] = await page.evaluate(
+            "!document.getElementById('pt-slide-knob').style.transform")
+        await slide(1.0)
+        out['full_slide_traded'] = list(out['traded'])
+
+        # a downward swipe dismisses it; a short one does not
+        async def swipe(dy):
+            await page.evaluate("""dy => {
+                const el=document.getElementById('pt-sheet');
+                const mk=(n,cy)=>new TouchEvent(n,{bubbles:true,cancelable:true,
+                  touches:n==='touchend'?[]:[new Touch({identifier:1,target:el,clientX:195,clientY:cy})],
+                  changedTouches:[new Touch({identifier:1,target:el,clientX:195,clientY:cy})]});
+                el.dispatchEvent(mk('touchstart',300));
+                for(let i=1;i<=8;i++) el.dispatchEvent(mk('touchmove',300+dy*i/8));
+                el.dispatchEvent(mk('touchend',300+dy));
+            }""", dy)
+            await page.wait_for_timeout(400)
+        await page.evaluate("document.getElementById('pt-sheet').classList.add('open')")
+        await swipe(60)
+        out['short_swipe_kept_open'] = await page.evaluate(
+            "document.getElementById('pt-sheet').classList.contains('open')")
+        await swipe(240)
+        out['long_swipe_closed'] = not await page.evaluate(
+            "document.getElementById('pt-sheet').classList.contains('open')")
+
+        # selling opens the same sheet, in sell mode
+        await page.click('[data-action="sell"]')
+        await page.wait_for_timeout(700)
+        out['sell'] = await page.evaluate("""() => ({
+            mode: document.getElementById('pt-sheet').classList.contains('sell-mode'),
+            keypadHidden: getComputedStyle(document.getElementById('pt-keys')).display === 'none',
+            amt: document.getElementById('pt-sheet-amt').textContent,
+            label: document.getElementById('pt-sheet-go').textContent,
+            red: document.getElementById('pt-slide').classList.contains('sell') })""")
+        out['traded'].clear()
+        await slide(1.0)
+        out['sell_traded'] = list(out['traded'])
+
+        await page.evaluate("document.getElementById('pt-sheet-scrim').click()")
         await page.wait_for_timeout(400)
         out['closed'] = not await page.evaluate(
             "document.getElementById('pt-sheet').classList.contains('open')")
@@ -205,23 +278,41 @@ finally:
     server.terminate()
 
 check('BROWSER: pressing Buy on a card opens the sheet', B.get('opened'))
-check('BROWSER: the close button is actually clickable — not covered by the '
-      'navbar, which is how it shipped the first time', B.get('close_hittable'))
-check('BROWSER: the price is not hidden under the close button',
-      B.get('price_clear'))
+check('BROWSER: no ✕ is rendered', B.get('no_close_btn'))
+check('BROWSER: the slider label is readable — it also carries '
+      '.pt-buy-confirm, the old button style, which painted amber text on '
+      'an amber ground until that was scoped away',
+      B.get('label_readable'))
 check('BROWSER: the keypad types into the amount', B['typed']['shown'] == '$0.15')
 check('BROWSER: ...and into the hidden field confirmBuy() reads, so what is '
       'on screen is what gets bought', B['typed']['hidden'] == '0.15')
-check('BROWSER: below the minimum the button says so instead of failing '
-      'after a round trip',
-      B['typed']['disabled'] and 'minimum' in B['typed']['label'])
+check('BROWSER: below the minimum the control says so instead of failing '
+      'after a round trip', 'minimum' in B['typed']['label'])
+check('BROWSER: ...and is not armed, so it cannot be slid', not B['typed']['ready'])
 check('BROWSER: Max fills in the whole balance and never more',
-      float(B['max']['hidden']) == 12.4 and not B['max']['disabled'])
+      float(B['max']['hidden']) == 12.4 and B['max']['ready'])
 check('BROWSER: the balance is shown to the cent, not rounded to "$12" while '
       'Max fills in 12.40', '$12.40' in B['max']['avail'])
 check('BROWSER: it closes', B.get('closed'))
 check('BROWSER: ...and gives the ids back, so the next token can use it',
       B.get('ids_returned'))
+check('BROWSER: a HALF slide buys nothing — the point of the gesture',
+      B.get('half_slide_traded') == [])
+check('BROWSER: ...and the knob snaps back rather than sitting half-way',
+      B.get('knob_snapped_back'))
+check('BROWSER: a COMPLETED slide buys, once',
+      B.get('full_slide_traded') == ['/bsc/trade/buy'])
+check('BROWSER: a short downward drag does not dismiss the sheet',
+      B.get('short_swipe_kept_open'))
+check('BROWSER: a real downward swipe does, returning to Live Market',
+      B.get('long_swipe_closed'))
+check('BROWSER: Sell opens the same sheet in sell mode', B['sell']['mode'])
+check('BROWSER: ...with no keypad, since the server closes the whole tracked '
+      'position and there is no amount to ask for', B['sell']['keypadHidden'])
+check('BROWSER: ...saying so plainly', B['sell']['amt'] == 'Sell all')
+check('BROWSER: ...in red, and asking for the same gesture',
+      B['sell']['red'] and 'Slide to sell' in B['sell']['label'])
+check('BROWSER: a completed slide sells', B.get('sell_traded') == ['/bsc/trade/sell'])
 check('BROWSER: no JavaScript errors on the whole journey',
       not B.get('errors'))
 

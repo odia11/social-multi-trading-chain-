@@ -130,7 +130,6 @@ var ST = {
 var watchSet = new Set();
 var _copyStatus = {copying:false, target:null};
 var _wlEditMode = false;
-var _sellArmed = {};
 var _feedInFlight = false;
 
 var SORT_DEFS = [
@@ -569,7 +568,6 @@ function observeCards(){
 function resetCardState(){
   Object.keys(_chartTimers).forEach(unmountChart);
   _lazyDone = {};
-  _sellArmed = {};
 }
 
 /* ── markup builders ── */
@@ -989,7 +987,8 @@ function closeBuyPanel(idx){
    button, so the existing buy path -- quotes, the EVM routes, the auto-
    bridge polling -- runs byte for byte as it did before. This is a change
    of what somebody looks at, not of what happens when they press Buy. */
-var _sheetIdx = null;       // index of the token being bought, '' when closed
+var _sheetIdx = null;       // index of the token being traded, null when closed
+var _sheetMode = 'buy';     // 'buy' or 'sell'
 var _sheetAmt = '';         // what the keypad has typed, as a string
 var _sheetAvail = null;     // spendable USDC on THIS token's chain
 var _availCache = {t: 0, data: null};
@@ -1036,13 +1035,19 @@ function _loadSheetBalance(chain){
     .catch(function(){});
 }
 
-function openBuySheet(idx){
+function openBuySheet(idx){ _openSheet(idx, 'buy'); }
+function openSellSheet(idx){ _openSheet(idx, 'sell'); }
+
+function _openSheet(idx, mode){
   var t = ST.tokens[Number(idx)];
   if(!t) return;
   _sheetIdx = idx;
+  _sheetMode = mode;
   _sheetAmt = '';
   _sheetAvail = null;
   _sheetBindIds(idx);
+  _sheetEl('pt-sheet').classList.toggle('sell-mode', mode === 'sell');
+  _slideReset();
 
   // Logo, or the token's initials when it has none / the image 404s --
   // an invisible image left a 44px hole in the header.
@@ -1071,19 +1076,20 @@ function openBuySheet(idx){
   var isEvm = !!EVM_TRADE_CHAINS[t.chain];
   _sheetEl('pt-sheet-cap-txt').textContent = isEvm ? 'You spend at most' : 'You spend';
   _sheetEl('pt-sheet-cur').textContent = isEvm ? evmCurrencyLabel(t.chain) : 'USDC';
+  _sheetEl('pt-slide').classList.toggle('sell', mode === 'sell');
 
   var msg = document.getElementById('pt-buy-msg-'+idx);
   if(msg){ msg.style.display = 'none'; msg.textContent = ''; }
-  var go = _sheetEl('pt-sheet-go');
-  go.dataset.idx = idx;
-  go.disabled = true;
+  _sheetEl('pt-sheet-go').dataset.idx = idx;
   _sheetEl('pt-sheet-quote').textContent = '';
 
   _sheetEl('pt-sheet').classList.add('open');
   _sheetEl('pt-sheet-scrim').classList.add('open');
   try{ document.body.style.overflow = 'hidden'; }catch(e){}
   _paintSheet();
-  _loadSheetBalance(t.chain);
+  // A sell closes the whole tracked position server-side, so there is no
+  // balance to divide up and nothing to price -- only a confirmation.
+  if(mode === 'buy') _loadSheetBalance(t.chain);
 }
 
 function closeBuySheet(){
@@ -1111,6 +1117,19 @@ function _sheetSetAmount(next){
 function _paintSheet(){
   if(_sheetIdx === null) return;
   var t = ST.tokens[Number(_sheetIdx)];
+  if(_sheetMode === 'sell'){
+    // No amount to show: the sell routes close the entire tracked position
+    // (that is what they have always done -- the client has never been able
+    // to name a sell amount, which is what stops a caller selling more than
+    // was bought).
+    _sheetEl('pt-sheet-amt').textContent = 'Sell all';
+    _sheetEl('pt-sheet-amt').classList.remove('dim');
+    _sheetEl('pt-sheet-get').textContent = 'Your whole $' + (t && t.symbol || '') + ' position';
+    _sheetEl('pt-sheet-avail').innerHTML = 'Closes the position at the current price';
+    _slideSetLabel('Slide to sell $' + (t && t.symbol || ''));
+    _slideEnable(true);
+    return;
+  }
   var amt = parseFloat(_sheetAmt);
   var el = _sheetEl('pt-sheet-amt');
   el.textContent = '$' + (_sheetAmt === '' ? '0' : _sheetAmt);
@@ -1134,18 +1153,154 @@ function _paintSheet(){
 
   // The button says why it cannot be pressed, rather than sitting greyed out
   // with no reason -- "nothing happens" is the worst state a Buy can be in.
-  var go = _sheetEl('pt-sheet-go');
   var min = PT_MIN_BUY_USDC;
   if(!(amt > 0)){
-    go.disabled = true; go.textContent = 'Enter an amount';
+    _slideSetLabel('Enter an amount'); _slideEnable(false);
   } else if(amt < min){
-    go.disabled = true; go.textContent = '$' + min + ' minimum';
+    _slideSetLabel('$' + min + ' minimum'); _slideEnable(false);
   } else if(_sheetAvail !== null && amt > _sheetAvail + 1e-9){
-    go.disabled = true; go.textContent = 'More than you have';
+    _slideSetLabel('More than you have'); _slideEnable(false);
   } else {
-    go.disabled = false; go.textContent = 'Buy $' + (t && t.symbol || '');
+    _slideSetLabel('Slide to buy $' + (t && t.symbol || '')); _slideEnable(true);
   }
 }
+
+/* ── slide to confirm ───────────────────────────────────────────────────────
+   Both Buy and Sell are irreversible and both used to be one tap away: Buy a
+   single press, Sell a press-then-press-again with a 3-second window. A tap
+   is what a pocket, a mis-scroll or a fat thumb produces by accident, and
+   the 3-second arm made a Sell either too easy (inside the window) or
+   confusing (outside it, where the second tap silently re-armed instead of
+   selling). Dragging the knob the width of the track cannot happen by
+   accident, and letting go early simply snaps back.
+
+   The label is a separate element from the control on purpose: confirmBuy()
+   writes "Buying…" into .pt-buy-confirm, and if that were the whole slider
+   its textContent write would delete the knob and the fill. */
+var _slideAt = 0, _slideOn = false, _sliding = false;
+
+function _slideEls(){
+  return {wrap: _sheetEl('pt-slide'), knob: _sheetEl('pt-slide-knob'),
+          fill: _sheetEl('pt-slide-fill'), label: _sheetEl('pt-sheet-go')};
+}
+function _slideSetLabel(txt){
+  var e = _slideEls(); if(e.label) e.label.textContent = txt;
+}
+function _slideEnable(on){
+  _slideOn = on;
+  var e = _slideEls(); if(e.wrap) e.wrap.classList.toggle('ready', !!on);
+  if(!on) _slideReset();
+}
+function _slideReset(){
+  _slideAt = 0;
+  var e = _slideEls();
+  if(e.knob){ e.knob.style.transform = ''; }
+  if(e.fill){ e.fill.style.width = '0'; }
+  if(e.wrap){ e.wrap.classList.remove('dragging'); }
+}
+function _slideTravel(){
+  var e = _slideEls();
+  if(!e.wrap || !e.knob) return 1;
+  return Math.max(1, e.wrap.clientWidth - e.knob.offsetWidth - 10);
+}
+function _slideMove(px){
+  var max = _slideTravel();
+  _slideAt = Math.max(0, Math.min(max, px));
+  var e = _slideEls();
+  if(e.knob) e.knob.style.transform = 'translateX(' + _slideAt + 'px)';
+  if(e.fill) e.fill.style.width = (_slideAt + 46) + 'px';
+}
+function _slideRelease(){
+  var e = _slideEls();
+  if(e.wrap) e.wrap.classList.remove('dragging');
+  // Most of the way is enough: asking for the last few pixels turns a
+  // deliberate gesture into a dexterity test.
+  if(_slideAt >= _slideTravel() * 0.85){
+    _slideMove(_slideTravel());
+    var idx = _sheetIdx;
+    if(idx === null) return;
+    _slideEnable(false);
+    if(_sheetMode === 'sell') handleSell(idx);
+    else confirmBuy(idx);
+  } else {
+    _slideReset();
+  }
+}
+
+(function bindSlide(){
+  function down(e){
+    if(!_slideOn || _sheetIdx === null) return;
+    var els = _slideEls();
+    if(!els.knob || !els.knob.contains(e.target)) return;
+    _sliding = true;
+    els.wrap.classList.add('dragging');
+    els.wrap._x0 = (e.touches ? e.touches[0].clientX : e.clientX) - _slideAt;
+    e.preventDefault();
+  }
+  function move(e){
+    if(!_sliding) return;
+    var els = _slideEls();
+    var x = (e.touches ? e.touches[0].clientX : e.clientX) - els.wrap._x0;
+    _slideMove(x);
+    e.preventDefault();
+  }
+  function up(){ if(!_sliding) return; _sliding = false; _slideRelease(); }
+  document.addEventListener('touchstart', down, {passive:false});
+  document.addEventListener('touchmove',  move, {passive:false});
+  document.addEventListener('touchend',   up);
+  document.addEventListener('touchcancel',up);
+  document.addEventListener('mousedown',  down);
+  document.addEventListener('mousemove',  move);
+  document.addEventListener('mouseup',    up);
+  // A keyboard has no gesture to make, so the knob confirms on Enter/Space.
+  document.addEventListener('keydown', function(e){
+    if(_sheetIdx === null || !_slideOn) return;
+    if(document.activeElement !== _sheetEl('pt-slide-knob')) return;
+    if(e.key === 'Enter' || e.key === ' '){
+      e.preventDefault();
+      _slideMove(_slideTravel());
+      _slideRelease();
+    }
+  });
+})();
+
+/* ── swipe the sheet down to dismiss ──
+   Replaces the ✕ that sat in the top-right corner: on a phone that corner is
+   the hardest place on the screen to reach, and a downward flick is what
+   every other sheet on the device already answers to. Closing returns to
+   Live Market, which is simply the page underneath -- nothing is navigated. */
+(function bindSheetDrag(){
+  var y0 = null, dy = 0, dragging = false;
+  function start(e){
+    if(_sheetIdx === null || _sliding) return;
+    var sheet = _sheetEl('pt-sheet');
+    // Not from the keypad or the slider: a drag that starts there is aimed
+    // at those, not at the sheet.
+    if(e.target.closest('#pt-keys, .pt-slide, .pt-sheet-pcts')) return;
+    y0 = e.touches[0].clientY; dy = 0; dragging = true;
+    sheet.classList.add('dragging');
+  }
+  function move(e){
+    if(!dragging) return;
+    dy = e.touches[0].clientY - y0;
+    if(dy < 0) dy = 0;                       // upward does nothing
+    _sheetEl('pt-sheet').style.transform = 'translateY(' + dy + 'px)';
+  }
+  function end(){
+    if(!dragging) return;
+    dragging = false;
+    var sheet = _sheetEl('pt-sheet');
+    sheet.classList.remove('dragging');
+    sheet.style.transform = '';
+    // A quarter of the screen, or 140px, whichever is smaller -- far enough
+    // to be deliberate, near enough not to be a workout.
+    if(dy > Math.min(140, window.innerHeight * 0.25)) closeBuySheet();
+  }
+  document.addEventListener('touchstart', start, {passive:true});
+  document.addEventListener('touchmove',  move,  {passive:true});
+  document.addEventListener('touchend',   end);
+  document.addEventListener('touchcancel',end);
+})();
 
 // Keypad and the percentage row. Delegated, so the buttons themselves carry
 // no handlers and the markup stays in the template.
@@ -1459,15 +1614,13 @@ function _pollAutoBuyBridge(bridgeId, idx, t, amt, msgEl, input){
 function handleSell(idx, btn){
   var t = ST.tokens[Number(idx)];
   if(!t) return;
-  if(!_sellArmed[idx]){
-    _sellArmed[idx] = true;
-    var orig = btn.textContent;
-    btn.textContent = 'Confirm?';
-    setTimeout(function(){ if(_sellArmed[idx]){ _sellArmed[idx]=false; btn.textContent = orig; } }, 3000);
-    return;
-  }
-  _sellArmed[idx] = false;
-  btn.disabled = true; btn.textContent = '…';
+  // The confirmation is the slide in the sheet now, not a second tap here.
+  // The old arm was a 3-second window: inside it a stray tap sold, outside
+  // it the second tap silently re-armed instead of selling. `btn` is only
+  // passed by the card's own button, which now just opens the sheet.
+  if(btn){ openSellSheet(idx); return; }
+  var msgEl = document.getElementById('pt-buy-msg-'+idx);
+  _slideSetLabel('Selling…');
   // Same chain-based routing as confirmBuy() -- an EVM position can only ever
   // be closed through its own chain's endpoint (it sells the exact tracked
   // position server-side, same as the Solana endpoint does for amount_sol:0).
@@ -1495,8 +1648,15 @@ function handleSell(idx, btn){
     var got = (sold && d && d.proceeds_usdc != null && d.exit_price_estimated === false)
       ? (' for $' + Number(d.proceeds_usdc).toFixed(2)) : '';
     toast(sold ? ('Sold $'+t.symbol+got) : ((d && (d.error||d.msg)) || 'Sell failed'));
-  }).catch(function(){ toast('Network error — sell not sent'); })
-    .finally(function(){ btn.disabled=false; btn.textContent='Sell'; });
+    // A sold position is gone, so there is nothing left for this sheet to
+    // act on -- it closes rather than offering to sell it again. A failure
+    // keeps it open with the slider armed, so the person can retry without
+    // finding the card again.
+    if(sold) closeBuySheet(); else { _slideEnable(true); _slideReset(); }
+  }).catch(function(){
+    toast('Network error — sell not sent');
+    _slideEnable(true); _slideReset();
+  });
 }
 
 /* ── watchlist ── */
