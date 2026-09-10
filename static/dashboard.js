@@ -279,26 +279,59 @@ document.addEventListener('visibilitychange', function(){
 });
 
 // Returns the wallet if a session was restored, '' otherwise.
+//
+// Throwing the remembered login away is PERMANENT -- it is the only thing
+// standing between a user and the connect screen -- so it happens on exactly
+// one signal: the server itself answering 401, which is the only answer that
+// means "this token is dead". Everything else keeps it.
+//
+// It used to be the opposite. Any falsy result cleared the token, and the
+// fetch's own .catch() turned every failure into one, so a request that never
+// reached the server at all counted as a refusal:
+//
+//   · the seconds a deploy takes to restart the app -- every deploy silently
+//     signed out whoever happened to open the app in that window, which is
+//     why this kept coming back right after a release
+//   · any flaky mobile moment: a lift, a tunnel, a dead spot
+//   · a 502/503 from nginx, or a 429 from the rate limiter
+//
+// None of those say anything about the token, and the next load would have
+// worked -- but by then the token was already gone.
 async function _resumeFromDeviceToken(){
   var t = _deviceToken();
   if(!t) return '';
+  var res;
   try{
-    var r = await fetch('/api/session/resume', {
+    res = await fetch('/api/session/resume', {
       method: 'POST', credentials: 'include',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({token: t})
-    }).then(function(x){ return x.json(); }).catch(function(){ return null; });
-    if(r && r.ok && r.wallet){
-      // The presented token is spent. Keeping it would sign this browser out
-      // on its next attempt.
-      _storeDeviceToken(r.token);
-      if(r.csrf_token) _csrfToken = r.csrf_token;
-      return r.wallet;
-    }
-    // Refused means revoked, expired, or already spent. Dropping it stops
-    // every later load retrying something that can never work again.
-    _clearDeviceToken();
-  }catch(e){}
+    });
+  }catch(e){
+    // Never reached the server. The token is almost certainly still good --
+    // keep it and let the next page load try again.
+    return '';
+  }
+  var r = null;
+  try{ r = await res.json(); }catch(e){}
+  if(res.ok && r && r.ok && r.wallet){
+    // The presented token is spent. Keeping it would sign this browser out
+    // on its next attempt.
+    _storeDeviceToken(r.token);
+    if(r.csrf_token) _csrfToken = r.csrf_token;
+    return r.wallet;
+  }
+  // A 401 is the server saying the token is revoked, expired, unknown or
+  // already spent -- then dropping it stops every later load retrying
+  // something that can never work again.
+  //
+  // Unless another tab got there first. The server rotates on every redeem,
+  // so two tabs opening together both present the same token: one is served
+  // and stores the replacement, the other is told 401 for a token that was
+  // valid a moment ago. Clearing then would delete the good replacement the
+  // first tab just stored. If what is in storage is no longer what we sent,
+  // someone else has already moved this on -- leave it alone.
+  if(res.status === 401 && _deviceToken() === t) _clearDeviceToken();
   return '';
 }
 

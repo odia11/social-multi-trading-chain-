@@ -210,8 +210,23 @@ check('...only when the server said there was no session, so a normal load '
       and '_resumeFromDeviceToken' not in _branch.split('} else {')[0])
 check('a spent token is replaced immediately, or the next load would present '
       'a dead one', '_storeDeviceToken(r.token)' in JS)
-check('a refused token is dropped rather than retried forever',
-      '_clearDeviceToken();' in JS.split('async function _resumeFromDeviceToken')[1][:1400])
+# A token the SERVER refuses is still dropped -- retrying it forever would
+# be its own bug. What changed is that "refused" now means the server said
+# so (401), not merely that the call did not come back with a session: that
+# earlier reading counted a request which never reached the server at all,
+# so a deploy restart, a tunnel, a 503 from nginx or a 429 all silently
+# deleted the one credential the user had left. See
+# tests/test_remembered_login_survives.py, which owns that rule in full.
+_resume_fn = JS.split('async function _resumeFromDeviceToken')[1]
+_resume_fn = _resume_fn[:_resume_fn.index('\n}')]
+_resume_fn = re.sub(r'(?m)^\s*//.*$', '', _resume_fn)   # never match the prose
+_clear_line = [l for l in _resume_fn.split('\n') if '_clearDeviceToken()' in l]
+check('a token the server actually refuses is dropped rather than retried '
+      'forever',
+      len(_clear_line) == 1)
+check('...but only on that refusal — a request that never reached the server '
+      'must never cost someone their remembered login',
+      len(_clear_line) == 1 and re.search(r'status\s*===?\s*401', _clear_line[0]))
 check('disconnecting clears it here too, or the next page load would sign the '
       'browser straight back in',
       '_clearDeviceToken();' in JS.split('function disconnectWallet')[1][:800])
