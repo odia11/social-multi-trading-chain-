@@ -105,6 +105,29 @@ check('a failure inside the top-up does not take the buy down with it — it '
       'falls through to the same refusal',
       re.search(r'except Exception[\s\S]{0,260}?_gas_ok, _gas_msg = False', flow))
 
+# ── 3. and the BOT, which kept its own copy of the old rule ───────────────
+# Found in a live deploy log: two running bots printing "SKIPPING BUYS --
+# insufficient SOL (0.0)" every cycle. The manual path had been fixed; the
+# bot loop had a separate gate that never asked the sponsor, so their owners
+# were stuck with a bot that scanned forever and bought nothing.
+loop = fn('user_trader_loop')
+check('the bot asks the gas sponsor before skipping a cycle for lack of SOL, '
+      'instead of writing the same refusal into the log forever',
+      '_ensure_solana_gas(' in loop)
+check('...only when the wallet has something to trade with. Granting SOL to a '
+      'wallet holding no USDC spends float on a bot that still cannot buy — '
+      'the same judgement gas_manager already makes',
+      'us_solana_avail >= 1' in loop
+      and loop.index('us_solana_avail >= 1') < loop.index('_ensure_solana_gas('))
+check('...and re-reads the balance before deciding, so the skip reflects what '
+      'the wallet has after the grant rather than before',
+      re.search(r'_ensure_solana_gas\([\s\S]{0,200}?us_sol = _get_user_sol', loop))
+check('...with the skip still there for a wallet the sponsor could not help — '
+      'the gate is not removed, it is asked later',
+      'SKIPPING BUYS' in loop)
+check('...and a failure in the top-up does not kill the trading loop',
+      re.search(r'except Exception as _e[\s\S]{0,160}?gas top-up failed', loop))
+
 # ── 3. this is what the EVM side already did ──────────────────────────────
 check('the EVM buy has always done this, which is why only Solana was broken',
       '_ensure_evm_gas(' in fn('_evm_buy_flow'))

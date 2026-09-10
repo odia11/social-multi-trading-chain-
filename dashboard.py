@@ -10147,6 +10147,29 @@ def user_trader_loop(stop_event, config, wallet: str):
                       f'{_solana_base.lower()}_avail={round(us_solana_avail,4)} scanning...', flush=True)
 
                 _GAS_MIN = 0.005  # minimum SOL needed to pay transaction fees
+
+                # ── ask the sponsor before skipping the cycle ──
+                # This gate is why two running bots sat there logging
+                # "SKIPPING BUYS — insufficient SOL (0.0)" every cycle while
+                # their owners had done nothing wrong: trades are funded in
+                # USDC, and the wallet is supposed to be given its fee money
+                # by the sponsor. The manual buy path was fixed to ask first;
+                # the bot kept its own copy of the old rule and never did.
+                #
+                # Only when there is something to trade WITH, though. Granting
+                # SOL to a wallet holding no USDC spends float on a bot that
+                # still cannot buy anything -- which is the same judgement
+                # gas_manager already makes ("not topped up this cycle: no
+                # USDC on Solana to trade with yet").
+                if us_sol < _GAS_MIN and us_solana_avail >= 1:
+                    try:
+                        with _use_key(_enc_blob, wallet) as _bot_gas_pk:
+                            _ensure_solana_gas(wallet, _bot_gas_pk)
+                        us_sol = _get_user_sol(_trading_wallet)
+                    except Exception as _e:
+                        print(f'[bot] {short} gas top-up failed: '
+                              f'{type(_e).__name__}: {_e}', flush=True)
+
                 if us_sol < _GAS_MIN:
                     _gas_msg = (f'[{short}] ⚠ LOW SOL — trading wallet has {round(us_sol, 6)} SOL '
                                 f'(need ≥{_GAS_MIN} for gas). Buys skipped. '
