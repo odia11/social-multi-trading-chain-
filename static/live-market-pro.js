@@ -38,6 +38,17 @@ function fmtShort(n){
   if(n>=1000) return (n/1000)+'K';
   return String(n);
 }
+// A token amount, not a price: meme-coin quantities run from fractions to
+// billions, so this scales rather than printing 1234567890.0000.
+function fmtAmount(n){
+  n = Number(n);
+  if(!isFinite(n) || n <= 0) return '0';
+  if(n >= 1e9) return (n/1e9).toFixed(2)+'B';
+  if(n >= 1e6) return (n/1e6).toFixed(2)+'M';
+  if(n >= 1e3) return Math.round(n).toLocaleString('en-US');
+  if(n >= 1)   return n.toFixed(2);
+  return n.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+}
 function fmtPrice(n){
   n = Number(n);
   if(n==null || isNaN(n)) return '—';
@@ -955,37 +966,241 @@ function loadFeed(isPoll){
 // Shared close path so every way a buy panel can close (manual toggle, or
 // auto-hide after a completed buy below) keeps _openBuyPanelCount accurate.
 function closeBuyPanel(idx){
+  // The buy screen is the full sheet now, and its footer is what carries
+  // #pt-buy-panel-<idx>. Wiping that innerHTML -- which is what this used to
+  // do to the in-card panel -- would tear the confirm button and the message
+  // line out of a sheet that is still open, so this closes the sheet whole.
+  // Reached from _pollAutoBuyBridge() after a successful auto-bridged buy.
   var p = document.getElementById('pt-buy-panel-'+idx);
+  if(p && p.closest('#pt-sheet')){ closeBuySheet(); return; }
   if(p){ p.style.display = 'none'; p.innerHTML = ''; }
 }
 
-function openBuyPanel(idx){
-  var panel = document.getElementById('pt-buy-panel-'+idx);
-  if(!panel) return;
-  if(panel.style.display === 'flex'){ closeBuyPanel(idx); return; }
+/* ── THE BUY SHEET ─────────────────────────────────────────────────────────
+   A full screen: the token at the top, the amount enormous in the middle, a
+   keypad underneath. It exists because the old buy box was a number input
+   inside the card, so on a phone the OS keyboard slid up and covered the
+   price, the move and the balance -- every figure the person was deciding
+   on -- at the exact moment they were deciding.
+
+   What it deliberately does NOT do is touch the trade. On open it renames
+   its own footer's ids to the ones confirmBuy() already looks for
+   (pt-buy-panel-N / pt-buy-amt-N / pt-buy-msg-N) and puts the index on the
+   button, so the existing buy path -- quotes, the EVM routes, the auto-
+   bridge polling -- runs byte for byte as it did before. This is a change
+   of what somebody looks at, not of what happens when they press Buy. */
+var _sheetIdx = null;       // index of the token being bought, '' when closed
+var _sheetAmt = '';         // what the keypad has typed, as a string
+var _sheetAvail = null;     // spendable USDC on THIS token's chain
+var _availCache = {t: 0, data: null};
+
+function _sheetEl(id){ return document.getElementById(id); }
+
+// The ids confirmBuy() reaches for are handed to the footer on open and
+// taken back on close, so the sheet can be reused by the next token.
+function _sheetBindIds(idx){
+  _sheetEl('pt-buy-panel-sheet') && (_sheetEl('pt-buy-panel-sheet').id = 'pt-buy-panel-'+idx);
+  _sheetEl('pt-buy-amt-sheet')   && (_sheetEl('pt-buy-amt-sheet').id   = 'pt-buy-amt-'+idx);
+  _sheetEl('pt-buy-msg-sheet')   && (_sheetEl('pt-buy-msg-sheet').id   = 'pt-buy-msg-'+idx);
+  _sheetEl('pt-quote-sheet')     && (_sheetEl('pt-quote-sheet').id     = 'pt-quote-'+idx);
+}
+function _sheetUnbindIds(idx){
+  var a = document.getElementById('pt-buy-panel-'+idx);
+  var b = document.getElementById('pt-buy-amt-'+idx);
+  var c = document.getElementById('pt-buy-msg-'+idx);
+  var q = document.getElementById('pt-quote-'+idx);
+  if(a) a.id = 'pt-buy-panel-sheet';
+  if(b) b.id = 'pt-buy-amt-sheet';
+  if(c) c.id = 'pt-buy-msg-sheet';
+  if(q){ q.id = 'pt-quote-sheet'; q.style.display = 'none'; q.innerHTML = ''; }
+}
+
+// Spendable balance is per chain, never a pooled total: buying on BSC spends
+// the BSC balance and nothing else. Cached briefly so reopening the sheet
+// does not re-read every chain.
+function _loadSheetBalance(chain){
+  var now = Date.now();
+  var use = function(d){
+    var v = (chain === 'solana') ? d.solana_usdc : ((d.evm_chains || {})[chain]);
+    _sheetAvail = Number(v || 0);
+    _paintSheet();
+  };
+  if(_availCache.data && now - _availCache.t < 12000){ use(_availCache.data); return; }
+  fetch('/api/wallet/usdc-summary', {credentials:'include'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d || !d.ok) return;
+      _availCache = {t: Date.now(), data: d};
+      use(d);
+    })
+    .catch(function(){});
+}
+
+function openBuySheet(idx){
   var t = ST.tokens[Number(idx)];
-  var isEvm = t && !!EVM_TRADE_CHAINS[t.chain];
-  panel.style.display = 'flex';
-  // "You spend (max)" rather than "Amount": on an EVM chain this number is
-  // the ceiling, and what is actually bought is what remains after the
-  // network fee, the platform fee and the slippage reserve come out of it.
-  // The breakdown below shows exactly that, before anything is signed.
-  // Every chain funds a trade in USDC now, Solana included -- SOL is only
-  // used there for network fees. The label follows what is actually spent.
-  panel.innerHTML =
-      '<label class="pt-buy-label" for="pt-buy-amt-'+idx+'">'
-    +   (isEvm ? 'You spend at most' : 'You spend')
-    +   ' <span class="pt-buy-cur">'+esc(isEvm?evmCurrencyLabel(t.chain):'USDC')+'</span>'
-    + '</label>'
-    + '<input class="pt-buy-input" id="pt-buy-amt-'+idx+'" type="number" min="0" step="any" '
-    +   'inputmode="decimal" placeholder="0.00">'
-    + '<div class="pt-quote" id="pt-quote-'+idx+'" style="display:none"></div>'
-    + '<button class="pt-buy-confirm" data-action="confirm-buy" data-idx="'+idx+'">Confirm Buy</button>'
-    + '<div class="pt-buy-msg" id="pt-buy-msg-'+idx+'" style="display:none"></div>';
-  if(isEvm){
-    var input = document.getElementById('pt-buy-amt-'+idx);
-    if(input) input.addEventListener('input', function(){ scheduleQuote(idx); });
+  if(!t) return;
+  _sheetIdx = idx;
+  _sheetAmt = '';
+  _sheetAvail = null;
+  _sheetBindIds(idx);
+
+  // Logo, or the token's initials when it has none / the image 404s --
+  // an invisible image left a 44px hole in the header.
+  var img = _sheetEl('pt-sheet-img'), ph = _sheetEl('pt-sheet-img-ph');
+  ph.textContent = (t.symbol || '?').slice(0, 2).toUpperCase();
+  if(t.image_url){
+    img.src = t.image_url; img.style.display = ''; ph.style.display = 'none';
+    img.onerror = function(){ img.style.display = 'none'; ph.style.display = 'flex'; };
+  } else {
+    img.removeAttribute('src'); img.style.display = 'none'; ph.style.display = 'flex';
   }
+  _sheetEl('pt-sheet-sym').textContent = '$' + (t.symbol || '?');
+  _sheetEl('pt-sheet-chain').textContent = CHAIN_LABELS[t.chain] || (t.chain || '').toUpperCase();
+  _sheetEl('pt-sheet-mc').textContent = t.market_cap ? fmtUsd(t.market_cap) + ' MC' : '';
+  _sheetEl('pt-sheet-price').textContent = fmtPrice(t.price_usd);
+  var chg = Number(t.price_change_24h || 0);
+  var chgEl = _sheetEl('pt-sheet-chg');
+  chgEl.textContent = (chg >= 0 ? '▲ ' : '▼ ') + Math.abs(chg).toFixed(2) + '%';
+  chgEl.className = 'pt-sheet-chg ' + (chg < 0 ? 'down' : 'up');
+
+  // On the EVM chains the amount is a CEILING -- the fees and the slippage
+  // reserve come out of it, so what is bought is what remains, and the
+  // breakdown below prices exactly that. On Solana it is simply what is
+  // spent. Every chain funds a buy in USDC; the label names what actually
+  // moves, which on Robinhood Chain is USDG.
+  var isEvm = !!EVM_TRADE_CHAINS[t.chain];
+  _sheetEl('pt-sheet-cap-txt').textContent = isEvm ? 'You spend at most' : 'You spend';
+  _sheetEl('pt-sheet-cur').textContent = isEvm ? evmCurrencyLabel(t.chain) : 'USDC';
+
+  var msg = document.getElementById('pt-buy-msg-'+idx);
+  if(msg){ msg.style.display = 'none'; msg.textContent = ''; }
+  var go = _sheetEl('pt-sheet-go');
+  go.dataset.idx = idx;
+  go.disabled = true;
+  _sheetEl('pt-sheet-quote').textContent = '';
+
+  _sheetEl('pt-sheet').classList.add('open');
+  _sheetEl('pt-sheet-scrim').classList.add('open');
+  try{ document.body.style.overflow = 'hidden'; }catch(e){}
+  _paintSheet();
+  _loadSheetBalance(t.chain);
+}
+
+function closeBuySheet(){
+  if(_sheetIdx === null) return;
+  var idx = _sheetIdx;
+  _sheetIdx = null;
+  _sheetAmt = '';
+  _sheetEl('pt-sheet').classList.remove('open');
+  _sheetEl('pt-sheet-scrim').classList.remove('open');
+  try{ document.body.style.overflow = ''; }catch(e){}
+  _sheetUnbindIds(idx);
+  clearTimeout(_quoteTimers[idx]);
+  delete _quotes[idx];
+}
+
+function _sheetSetAmount(next){
+  _sheetAmt = next;
+  var hidden = document.getElementById('pt-buy-amt-'+_sheetIdx);
+  if(hidden) hidden.value = next;
+  _paintSheet();
+  var t = ST.tokens[Number(_sheetIdx)];
+  if(t && EVM_TRADE_CHAINS[t.chain]) scheduleQuote(_sheetIdx);
+}
+
+function _paintSheet(){
+  if(_sheetIdx === null) return;
+  var t = ST.tokens[Number(_sheetIdx)];
+  var amt = parseFloat(_sheetAmt);
+  var el = _sheetEl('pt-sheet-amt');
+  el.textContent = '$' + (_sheetAmt === '' ? '0' : _sheetAmt);
+  el.classList.toggle('dim', !(amt > 0));
+
+  // What that money buys, at the price on screen. An estimate, and labelled
+  // as one -- the executed price is whatever the swap returns.
+  var get = _sheetEl('pt-sheet-get');
+  var px = Number(t && t.price_usd || 0);
+  get.textContent = (amt > 0 && px > 0)
+    ? '≈ ' + fmtAmount(amt / px) + ' ' + (t.symbol || '')
+    : '';
+
+  // Cents, not fmtUsd's compact form: a balance of 12.40 shown as "$12"
+  // contradicts the 12.40 that Max then fills in, and a person reading a
+  // number about their own money should see the actual number.
+  var availEl = _sheetEl('pt-sheet-avail');
+  availEl.innerHTML = (_sheetAvail === null)
+    ? 'Checking balance…'
+    : '<b>$' + _sheetAvail.toFixed(2) + '</b> available';
+
+  // The button says why it cannot be pressed, rather than sitting greyed out
+  // with no reason -- "nothing happens" is the worst state a Buy can be in.
+  var go = _sheetEl('pt-sheet-go');
+  var min = PT_MIN_BUY_USDC;
+  if(!(amt > 0)){
+    go.disabled = true; go.textContent = 'Enter an amount';
+  } else if(amt < min){
+    go.disabled = true; go.textContent = '$' + min + ' minimum';
+  } else if(_sheetAvail !== null && amt > _sheetAvail + 1e-9){
+    go.disabled = true; go.textContent = 'More than you have';
+  } else {
+    go.disabled = false; go.textContent = 'Buy $' + (t && t.symbol || '');
+  }
+}
+
+// Keypad and the percentage row. Delegated, so the buttons themselves carry
+// no handlers and the markup stays in the template.
+document.addEventListener('click', function(e){
+  // The close button and the scrim are wired here rather than with an inline
+  // onclick in the template: everything in this file lives inside an IIFE,
+  // so closeBuySheet() is not a global and `onclick="closeBuySheet()"` threw
+  // ReferenceError -- the sheet simply would not close.
+  if(e.target.closest('[data-action="close-sheet"]')){ closeBuySheet(); return; }
+  var k = e.target.closest('#pt-keys .pt-key');
+  if(k && _sheetIdx !== null){
+    var v = k.dataset.k;
+    if(v === 'del'){
+      _sheetSetAmount(_sheetAmt.slice(0, -1));
+    } else if(v === '.'){
+      if(_sheetAmt.indexOf('.') === -1) _sheetSetAmount((_sheetAmt || '0') + '.');
+    } else {
+      // No leading zeros ("05"), and two decimals is as fine as money gets.
+      var next = (_sheetAmt === '0') ? v : _sheetAmt + v;
+      var dot = next.indexOf('.');
+      if(dot !== -1 && next.length - dot > 3) return;
+      if(next.replace('.', '').length > 12) return;
+      _sheetSetAmount(next);
+    }
+    return;
+  }
+  var p = e.target.closest('.pt-sheet-pcts .pt-pct');
+  if(p && _sheetIdx !== null){
+    if(_sheetAvail === null) return;
+    var part = _sheetAvail * (Number(p.dataset.pct) / 100);
+    // Floored to the cent: rounding up on Max would ask to spend more than
+    // the wallet holds, and the server would refuse it.
+    _sheetSetAmount(String(Math.floor(part * 100) / 100));
+  }
+});
+
+document.addEventListener('keydown', function(e){
+  if(_sheetIdx === null) return;
+  if(e.key === 'Escape'){ closeBuySheet(); return; }
+  if(e.key === 'Backspace'){ _sheetSetAmount(_sheetAmt.slice(0, -1)); e.preventDefault(); return; }
+  if(e.key === '.' && _sheetAmt.indexOf('.') === -1){ _sheetSetAmount((_sheetAmt || '0') + '.'); return; }
+  if(e.key >= '0' && e.key <= '9'){
+    var next = (_sheetAmt === '0') ? e.key : _sheetAmt + e.key;
+    var dot = next.indexOf('.');
+    if(dot !== -1 && next.length - dot > 3) return;
+    _sheetSetAmount(next);
+  }
+});
+
+function openBuyPanel(idx){
+  // Kept as the name every card's Buy button already calls. The in-card
+  // panel it used to build is gone: on a phone the OS keyboard covered the
+  // price, the move and the balance -- the figures being decided on -- the
+  // moment the field was focused. See openBuySheet().
+  openBuySheet(idx);
 }
 
 /* ── live cost breakdown ───────────────────────────────────────────────────

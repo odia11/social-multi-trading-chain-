@@ -90,8 +90,11 @@ check('a SELL still routes back into whatever the position was opened with. '
 # ── the screens ──
 LM = open(REPO + '/static/live-market-pro.js').read()
 TC = open(REPO + '/static/token-card.js').read()
+# The buy screen is the full sheet now; the label moved with it, from the
+# in-card panel's markup into openBuySheet(). Same statement, same currency,
+# read where it is actually written today.
 check('Live Market labels a Solana buy in USDC, not SOL',
-      "isEvm?evmCurrencyLabel(t.chain):'USDC'" in LM)
+      "isEvm ? evmCurrencyLabel(t.chain) : 'USDC'" in LM)
 check('...and sends amount_usdc, with amount_sol alongside for an older deploy',
       'amount_usdc:amt, amount_sol:amt' in LM)
 check('...and reports back in the currency the server names',

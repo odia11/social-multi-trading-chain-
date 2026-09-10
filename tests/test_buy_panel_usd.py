@@ -47,19 +47,25 @@ node = subprocess.run(['node', '--check', REPO + '/static/live-market-pro.js'],
                       capture_output=True, text=True)
 check('live-market-pro.js parses', node.returncode == 0)
 
-# ── the input asks for a ceiling ──
-panel = fn('openBuyPanel')
+# ── the amount is presented as a ceiling ──
+# The buy screen is the full sheet now (see tests/test_buy_sheet.py); the
+# in-card panel openBuyPanel used to build is gone. What that panel had to
+# SAY has not changed at all, so these checks follow the wording to where it
+# now lives rather than being dropped with the markup that carried it.
+panel = fn('openBuySheet') + HTML
 check('the EVM input asks what the user will spend AT MOST, not an unqualified '
       '"Amount" — on these chains that number is the ceiling and the purchase '
       'is what remains', 'You spend at most' in panel)
 check('...and Solana, which has no ceiling to price against, is not given the '
       'same wording', "'You spend'" in panel)
-check('the currency is still named next to the field', 'pt-buy-cur' in panel)
-check('a breakdown area is rendered with the input', 'pt-quote-' in panel)
-check('typing re-prices, so the breakdown follows the amount',
-      'scheduleQuote' in panel and "addEventListener('input'" in panel)
+check('the currency is still named next to the amount', 'pt-buy-cur' in panel)
+check('a breakdown area is rendered with it', 'pt-quote-' in panel)
+# The keypad re-prices instead of an input's "input" event, since there is
+# no text field to type into any more.
+check('entering an amount re-prices, so the breakdown follows the amount',
+      'scheduleQuote(_sheetIdx)' in JS)
 check('...on the EVM chains only — Solana would have nothing truthful to show '
-      'there', 'if(isEvm){' in panel)
+      'there', 'EVM_TRADE_CHAINS[t.chain]) scheduleQuote' in JS)
 
 # ── pricing ──
 sched = fn('scheduleQuote')

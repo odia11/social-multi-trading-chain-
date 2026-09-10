@@ -12789,7 +12789,12 @@ def live_market():
     return _render_no_cache('live_market_pro.html',
                            wallet_short=wallet_short,
                            csrf_token=_get_csrf_token(),
-                           client_secret=API_SHARED_SECRET)
+                           client_secret=API_SHARED_SECRET,
+                           # The buy sheet greys its own button out below this
+                           # and says why. Handed over rather than written in
+                           # the JS again, so the figure the page enforces is
+                           # the one the server enforces.
+                           min_buy_usdc=SOLANA_MIN_SPEND_USDC)
 
 
 @app.route('/live-market/pro')

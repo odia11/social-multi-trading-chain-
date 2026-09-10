@@ -257,6 +257,94 @@ input{font-family:inherit}
    it belongs to the input above it, so it shares that edge rather than
    floating as a separate object. */
 .pt-buy-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted2)}
+
+/* ── BUY SHEET ──
+   Buying used to be a small number field tucked inside the card, which on a
+   phone meant the OS keyboard sliding up over the very figures you were
+   deciding on -- the price, the move, what you hold. This is the whole
+   screen instead: the token at the top, the amount enormous in the middle,
+   and a keypad that belongs to the page, so nothing is ever covered.
+
+   The trade itself is untouched. The sheet still carries #pt-buy-panel-N,
+   .pt-buy-confirm, #pt-buy-amt-N and #pt-buy-msg-N, so confirmBuy() and the
+   auto-bridge polling run exactly as before -- this replaces what a person
+   looks at, not what happens when they press the button. */
+/* Above the navbar (200) and its dropdowns (280): this is a modal that owns
+   the screen while it is open. At 120 it sat UNDER the sticky navbar, whose
+   avatar swallowed the clicks meant for the sheet's own close button --
+   found by clicking it in a real browser, not by reading the stylesheet. */
+.pt-sheet{position:fixed;inset:0;z-index:300;background:var(--bg);
+  display:none;flex-direction:column;overscroll-behavior:contain}
+.pt-sheet.open{display:flex}
+.pt-sheet-grab{width:38px;height:4px;border-radius:99px;background:var(--line2);margin:8px auto 0;flex:0 0 auto}
+
+/* padding-right clears the close button, which is absolutely positioned in
+   the same corner -- without it the price rendered underneath it and read
+   as "$0.001..." with the digits that matter hidden. */
+.pt-sheet-hd{display:flex;align-items:center;gap:11px;padding:14px 18px 16px;padding-right:56px;flex:0 0 auto}
+.pt-sheet-img,.pt-sheet-img-ph{width:44px;height:44px;border-radius:50%;background:var(--line);object-fit:cover;flex:0 0 auto}
+/* Same fallback the cards use: a token with no logo shows its initials
+   rather than a 44px hole where a picture should be. */
+.pt-sheet-img-ph{display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--muted)}
+.pt-sheet-id{min-width:0;flex:1}
+.pt-sheet-sym{display:flex;align-items:center;gap:7px;font-size:17px;font-weight:700;letter-spacing:-.01em}
+.pt-sheet-chain{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.06em;
+  color:var(--muted2);border:1px solid var(--line2);border-radius:5px;padding:2px 5px}
+.pt-sheet-mc{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:3px}
+.pt-sheet-px{text-align:right;flex:0 0 auto}
+.pt-sheet-price{font-family:var(--mono);font-size:15px;font-weight:700}
+.pt-sheet-chg{font-family:var(--mono);font-size:12.5px;font-weight:700;margin-top:3px}
+.pt-sheet-close{position:absolute;top:12px;right:14px;width:32px;height:32px;border-radius:50%;
+  background:var(--card2);border:1px solid var(--line2);color:var(--muted);font-size:15px;line-height:1}
+
+/* The amount owns the middle of the screen. It is the one thing being
+   decided, and it grows and shrinks so a long figure never wraps. */
+.pt-sheet-mid{flex:1 1 auto;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:8px;padding:4px 18px;min-height:0}
+.pt-sheet-cap{font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--muted2);display:flex;align-items:center;gap:6px}
+.pt-sheet-cap .pt-buy-cur{color:var(--accent);letter-spacing:.06em}
+.pt-sheet-amt{font-size:clamp(38px,13vw,62px);font-weight:700;letter-spacing:-.03em;line-height:1;
+  font-family:var(--ui);white-space:nowrap}
+.pt-sheet-amt.dim{color:var(--muted2)}
+.pt-sheet-get{font-family:var(--mono);font-size:12px;color:var(--muted2);min-height:15px}
+
+.pt-sheet-pcts{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;padding:0 18px 14px;flex:0 0 auto}
+.pt-pct{background:var(--card2);border:1px solid var(--line2);color:var(--text);
+  border-radius:12px;padding:12px 0;font-size:13.5px;font-weight:700;transition:background .12s,border-color .12s}
+.pt-pct:active{background:var(--line);border-color:var(--accent-border)}
+
+.pt-keys{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;padding:0 10px;flex:0 0 auto}
+.pt-key{background:none;border:none;color:var(--text);font-size:26px;font-weight:500;
+  padding:15px 0;border-radius:12px;font-family:var(--ui);transition:background .1s}
+.pt-key:active{background:var(--line)}
+.pt-key svg{width:26px;height:26px;vertical-align:middle}
+
+.pt-sheet-ft{padding:12px 18px calc(16px + env(safe-area-inset-bottom,0px));flex:0 0 auto}
+.pt-sheet-avail{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  font-family:var(--mono);font-size:12.5px;color:var(--muted);margin-bottom:11px}
+.pt-sheet-avail b{color:var(--text);font-weight:700}
+/* The EVM cost breakdown renders between the balance and the button, and
+   without a gap it sat clamped against both. */
+.pt-sheet-ft .pt-quote{margin:0 0 11px}
+.pt-sheet-go{width:100%;background:var(--accent);color:#0a0b0e;border:none;border-radius:14px;
+  padding:16px;font-size:15px;font-weight:700;transition:opacity .12s}
+.pt-sheet-go:disabled{background:var(--card2);color:var(--muted2);cursor:default}
+.pt-sheet-msg{font-size:12px;margin-top:9px;text-align:center}
+.pt-sheet-msg.ok{color:var(--green)}
+.pt-sheet-msg.err{color:var(--red)}
+
+/* On a wide screen it stops being a phone sheet and becomes a centred
+   dialog -- the same markup, so there is only ever one buy screen to
+   maintain. */
+@media (min-width: 720px){
+  .pt-sheet{inset:50% auto auto 50%;transform:translate(-50%,-50%);
+    width:420px;max-height:92vh;border:1px solid var(--panel-border);border-radius:22px}
+  .pt-sheet-scrim{position:fixed;inset:0;z-index:299;background:rgba(0,0,0,.62);display:none}
+  .pt-sheet-scrim.open{display:block}
+  .pt-key{font-size:23px;padding:12px 0}
+  .pt-sheet-amt{font-size:48px}
+}
 .pt-buy-cur{color:var(--muted)}
 .pt-quote{border-top:1px solid var(--line2);padding-top:7px;display:flex;flex-direction:column;gap:3px;font-family:var(--mono);font-size:11px;color:var(--muted)}
 .pt-quote-row{display:flex;justify-content:space-between;gap:10px;font-variant-numeric:tabular-nums}
@@ -555,8 +643,91 @@ input{font-family:inherit}
 </div>
 
 <div class="pt-scrim" id="pt-scrim"></div>
+
+<!-- BUY SHEET — one instance for the whole page, filled in on open.
+     One rather than one-per-card on purpose: only one token can be being
+     bought at a time, and a keypad per card would put hundreds of them in
+     the document. -->
+<div class="pt-sheet-scrim" id="pt-sheet-scrim" data-action="close-sheet"></div>
+<div class="pt-sheet" id="pt-sheet" role="dialog" aria-modal="true" aria-label="Buy token">
+  <div class="pt-sheet-grab"></div>
+  <button class="pt-sheet-close" data-action="close-sheet" aria-label="Close">✕</button>
+  <div class="pt-sheet-hd">
+    <img class="pt-sheet-img" id="pt-sheet-img" alt="">
+    <div class="pt-sheet-img-ph" id="pt-sheet-img-ph" style="display:none"></div>
+    <div class="pt-sheet-id">
+      <div class="pt-sheet-sym"><span id="pt-sheet-sym"></span><span class="pt-sheet-chain" id="pt-sheet-chain"></span></div>
+      <div class="pt-sheet-mc" id="pt-sheet-mc"></div>
+    </div>
+    <div class="pt-sheet-px">
+      <div class="pt-sheet-price" id="pt-sheet-price"></div>
+      <div class="pt-sheet-chg" id="pt-sheet-chg"></div>
+    </div>
+  </div>
+
+  <div class="pt-sheet-mid">
+    <!-- What the big number MEANS. On an EVM chain it is a ceiling: the
+         network fee, the platform fee and the slippage reserve come out of
+         it, so what is bought is what remains. On Solana it is simply what
+         is spent. And the currency is named because on Robinhood Chain it
+         is USDG that actually moves. -->
+    <div class="pt-sheet-cap"><span id="pt-sheet-cap-txt"></span>
+      <span class="pt-buy-cur" id="pt-sheet-cur"></span></div>
+    <div class="pt-sheet-amt dim" id="pt-sheet-amt">$0</div>
+    <div class="pt-sheet-get" id="pt-sheet-get"></div>
+  </div>
+
+  <div class="pt-sheet-pcts">
+    <button class="pt-pct" data-pct="10">10%</button>
+    <button class="pt-pct" data-pct="25">25%</button>
+    <button class="pt-pct" data-pct="50">50%</button>
+    <button class="pt-pct" data-pct="100">Max</button>
+  </div>
+
+  <div class="pt-keys" id="pt-keys">
+    <button class="pt-key" data-k="1">1</button>
+    <button class="pt-key" data-k="2">2</button>
+    <button class="pt-key" data-k="3">3</button>
+    <button class="pt-key" data-k="4">4</button>
+    <button class="pt-key" data-k="5">5</button>
+    <button class="pt-key" data-k="6">6</button>
+    <button class="pt-key" data-k="7">7</button>
+    <button class="pt-key" data-k="8">8</button>
+    <button class="pt-key" data-k="9">9</button>
+    <button class="pt-key" data-k=".">.</button>
+    <button class="pt-key" data-k="0">0</button>
+    <button class="pt-key" data-k="del" aria-label="Delete">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 6H9L3 12l6 6h11a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1z"></path>
+        <line x1="17" y1="9" x2="12" y2="15"></line><line x1="12" y1="9" x2="17" y2="15"></line>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Everything confirmBuy() reaches for lives inside here, under the ids
+       it already uses, so the buy path is entirely unchanged. -->
+  <div class="pt-sheet-ft" id="pt-buy-panel-sheet">
+    <div class="pt-sheet-avail">
+      <span id="pt-sheet-avail">—</span>
+      <span id="pt-sheet-quote"></span>
+    </div>
+    <!-- The EVM cost breakdown renders in here, unchanged: same class, same
+         id shape, so scheduleQuote() needs to know nothing about the sheet. -->
+    <div class="pt-quote" id="pt-quote-sheet" style="display:none"></div>
+    <input type="hidden" id="pt-buy-amt-sheet" value="">
+    <button class="pt-sheet-go pt-buy-confirm" id="pt-sheet-go" data-action="confirm-buy" data-idx="">Buy</button>
+    <div class="pt-sheet-msg pt-buy-msg" id="pt-buy-msg-sheet" style="display:none"></div>
+  </div>
+</div>
+
 <div class="pt-toast" id="pt-toast"></div>
 
+<script>
+// Read by the buy sheet. Set before the deferred script so it is there the
+// first time anything paints, and taken from the server so the minimum the
+// button enforces cannot drift from the one the trade routes enforce.
+var PT_MIN_BUY_USDC = {{ min_buy_usdc|default(1) }};
+</script>
 <script src="/static/live-market-pro.js?v={{ app_version }}" defer></script>
 <script src="/static/pull-to-refresh.js?v={{ app_version }}"></script>
 <script>
