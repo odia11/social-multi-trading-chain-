@@ -68,10 +68,17 @@ with tempfile.TemporaryDirectory() as tmp:
     # These functions swallow their exceptions and print. Keep the messages
     # instead of discarding them -- a no-op print here once hid a NameError
     # for the whole run and left the failure looking like a logic bug.
+    # Only FAILURES count. These functions also log ordinary progress now
+    # ("issued a remembered login", "resumed ... from a remembered login"),
+    # which is the point of that logging -- treating any output at all as a
+    # complaint made this check fail for the code doing its job.
+    _noise = ('issued', 'resumed', 'refused')
     complaints = []
     ns = {'sqlite3': sqlite3, 'hashlib': hashlib, 'secrets': secrets,
           'time': time, 'DB_FILE': db, 'DEVICE_TOKEN_DAYS': days,
-          'print': lambda *a, **k: complaints.append(' '.join(str(x) for x in a))}
+          'print': lambda *a, **k: (lambda line: complaints.append(line)
+                                    if not any(w in line for w in _noise) else None
+                                    )(' '.join(str(x) for x in a))}
     for name in ('_hash_device_token', '_issue_device_token',
                  '_redeem_device_token', '_revoke_device_tokens'):
         exec(fn(name), ns)
@@ -80,7 +87,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check('issuing returns a token', bool(tok) and len(tok) > 20)
     if complaints:
         print('   the code complained: ' + ' | '.join(complaints))
-    check('...without the storage layer complaining about anything',
+    check('...without the storage layer reporting a failure — its ordinary '
+          'progress logging is expected and is not one',
           not complaints)
 
     check('the remembered login lasts months, not a browser session -- the '

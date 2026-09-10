@@ -55,6 +55,15 @@ mkdir -p "$APP_DIR"
 if command -v rsync >/dev/null 2>&1; then
   rsync -a --delete --exclude '.git' --exclude '__pycache__' --exclude '*.db' \
         --exclude 'venv' --exclude '.secret_key' "$REPO_DIR"/ "$APP_DIR"/
+
+# ── stamp which commit this is ──
+# .git is deliberately excluded above, so the deployed copy cannot ask git
+# what it is -- and _app_version() fell back to the time the process started.
+# That is a fine cache-buster and useless as an answer to "which code is
+# actually running", which is the first question in every support round.
+if [ -e "$REPO_DIR/.git" ]; then
+  git -C "$REPO_DIR" rev-parse --short HEAD > "$APP_DIR/VERSION" 2>/dev/null || true
+fi
 else
   # Without rsync there is no --delete, so removed files linger. Worth knowing
   # rather than silently getting a different deploy.

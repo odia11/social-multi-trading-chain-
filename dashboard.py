@@ -16099,6 +16099,26 @@ a:hover{opacity:.88}
 import subprocess as _subprocess, time as _time
 
 def _app_version() -> str:
+    """Which commit is running.
+
+    A VERSION file first, because the DEPLOYED copy has no .git -- install.sh
+    excludes it -- so asking git there always failed and fell through to a
+    timestamp. That still busted caches, and answered "which code is live?"
+    with a number that means nothing, which is the first question every time
+    something behaves unexpectedly.
+
+    git second, for running straight out of a clone in development. A
+    timestamp last, so a missing stamp still produces a distinct value per
+    restart rather than pinning every browser to one cached copy.
+    """
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'VERSION')) as f:
+            v = f.read().strip()
+        if v:
+            return v
+    except Exception:
+        pass
     try:
         h = _subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'],
                                       stderr=_subprocess.DEVNULL, timeout=2).decode().strip()
@@ -16735,6 +16755,7 @@ def _issue_device_token(user_id: int, wallet: str) -> str:
     except Exception as e:
         print(f'[device-session] could not store a remembered login: {e}', flush=True)
         return ''
+    print(f'[device-session] issued a remembered login for {wallet[:6]}…', flush=True)
     return token
 
 
@@ -16759,10 +16780,24 @@ def _redeem_device_token(token: str) -> tuple:
             row = conn.execute(
                 'SELECT id, user_id, wallet, expires_at, revoked FROM device_sessions '
                 'WHERE token_hash=?', (h,)).fetchone()
+            # The ANSWER stays uniform -- a guesser must not learn which of
+            # these it was. The LOG does not: when somebody says "I was signed
+            # out again", the one thing worth knowing is which of these four
+            # happened, and until now this returned the same silence to the
+            # operator as to the caller. Nothing identifying is printed.
             if not row:
+                print('[device-session] refused: no such token', flush=True)
                 return '', ''
             row_id, user_id, wallet, expires_at, revoked = row
-            if revoked or float(expires_at) < now:
+            if revoked:
+                print(f'[device-session] refused: token was revoked '
+                      f'(wallet {wallet[:6]}…) — a Disconnect, or already spent '
+                      f'by a redeem', flush=True)
+                return '', ''
+            if float(expires_at) < now:
+                age_days = (now - float(expires_at)) / 86400 + DEVICE_TOKEN_DAYS
+                print(f'[device-session] refused: expired {age_days:.1f} days after '
+                      f'issue (wallet {wallet[:6]}…)', flush=True)
                 return '', ''
             # Spend it before issuing the replacement, so a crash in between
             # costs one login rather than leaving two valid tokens.
@@ -16774,6 +16809,8 @@ def _redeem_device_token(token: str) -> tuple:
                 (user_id, wallet, _hash_device_token(new_token), now, now,
                  now + DEVICE_TOKEN_DAYS * 86400))
             conn.commit()
+            print(f'[device-session] resumed {wallet[:6]}… from a remembered '
+                  f'login', flush=True)
             return wallet, new_token
         finally:
             conn.close()
@@ -16791,8 +16828,17 @@ def _revoke_device_tokens(wallet: str) -> None:
     try:
         conn = sqlite3.connect(DB_FILE)
         try:
-            conn.execute('UPDATE device_sessions SET revoked=1 WHERE wallet=?', (wallet,))
+            cur = conn.execute(
+                'UPDATE device_sessions SET revoked=1 WHERE wallet=? AND revoked=0',
+                (wallet,))
             conn.commit()
+            # The loudest line in this file. This is the only thing that ends a
+            # session on devices other than the one asking, so if somebody is
+            # signed out everywhere, the answer is whether this ran and what
+            # called it.
+            print(f'[device-session] REVOKED {cur.rowcount} remembered login(s) '
+                  f'for {wallet[:6]}… — this signs that wallet out on every '
+                  f'device', flush=True)
         finally:
             conn.close()
     except Exception as e:
@@ -17069,6 +17115,12 @@ def api_session_resume():
     """
     body = request.json or {}
     token = str(body.get('token', '')).strip()
+    if not token:
+        # Worth its own line: "the browser had nothing to offer" and "what it
+        # offered was refused" are different problems with the same symptom,
+        # and telling them apart is most of the work.
+        print('[device-session] a browser asked to resume with no remembered '
+              'login stored', flush=True)
     wallet, new_token = _redeem_device_token(token)
     if not wallet:
         # Deliberately one answer for expired, revoked, unknown and malformed.
