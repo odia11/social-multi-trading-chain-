@@ -294,8 +294,15 @@ input{font-family:inherit}
 
 /* The amount owns the middle of the screen. It is the one thing being
    decided, and it grows and shrinks so a long figure never wraps. */
+/* This is the only part of the sheet that flexes, so when the cost
+   breakdown appears in the footer everything else holds its size and THIS
+   shrinks. Squeezed below its own content and left to overflow, the
+   "≈ 9,716 KEKIUS" line spilled out and painted itself across the 10/25/50
+   row -- ghost text sitting on top of the buttons. It clips instead now,
+   and the breakdown below is capped so it cannot squeeze this far in the
+   first place. */
 .pt-sheet-mid{flex:1 1 auto;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;gap:8px;padding:4px 18px;min-height:0}
+  justify-content:center;gap:8px;padding:4px 18px;min-height:118px;overflow:hidden}
 .pt-sheet-cap{font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
   color:var(--muted2);display:flex;align-items:center;gap:6px}
 .pt-sheet-cap .pt-buy-cur{color:var(--accent);letter-spacing:.06em}
@@ -309,7 +316,13 @@ input{font-family:inherit}
   border-radius:12px;padding:12px 0;font-size:13.5px;font-weight:700;transition:background .12s,border-color .12s}
 .pt-pct:active{background:var(--line);border-color:var(--accent-border)}
 
-.pt-keys{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;padding:0 10px;flex:0 0 auto}
+/* The keypad gives way before the amount does. When the breakdown makes the
+   footer tall, something has to shrink, and it must not be the figure the
+   person is deciding on -- squeezed the other way round, the middle
+   collapsed to 8px and "$3.01" disappeared entirely off the screen. */
+.pt-keys{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;padding:0 10px;
+  flex:0 1 auto;min-height:0;overflow:hidden}
+.pt-keys .pt-key{min-height:0}
 .pt-key{background:none;border:none;color:var(--text);font-size:26px;font-weight:500;
   padding:15px 0;border-radius:12px;font-family:var(--ui);transition:background .1s}
 .pt-key:active{background:var(--line)}
@@ -321,7 +334,9 @@ input{font-family:inherit}
 .pt-sheet-avail b{color:var(--text);font-weight:700}
 /* The EVM cost breakdown renders between the balance and the button, and
    without a gap it sat clamped against both. */
-.pt-sheet-ft .pt-quote{margin:0 0 11px}
+/* Capped so a long breakdown scrolls rather than pushing the amount off
+   the screen above it. */
+.pt-sheet-ft .pt-quote{margin:0 0 11px;max-height:32vh;overflow-y:auto}
 /* ── slide to confirm ──
    The knob is dragged the width of the track. Nothing happens until it gets
    there, and letting go early snaps it back -- so buying and selling both

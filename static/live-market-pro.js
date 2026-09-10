@@ -1191,6 +1191,17 @@ function _slideEnable(on){
   var e = _slideEls(); if(e.wrap) e.wrap.classList.toggle('ready', !!on);
   if(!on) _slideReset();
 }
+// After a buy attempt ends -- succeeded, refused, or the network died --
+// the slider has to become usable again. It used to be reset with
+// btn.textContent='Confirm Buy', which wrote the OLD button's wording into
+// the slider's label and left it disarmed: the sheet showed "Confirm Buy"
+// over a dead grey knob, and a refused buy could not be retried at all
+// without closing the sheet and finding the token again.
+function _restoreSlide(){
+  if(_sheetIdx === null) return;
+  _slideReset();
+  _paintSheet();
+}
 function _slideReset(){
   _slideAt = 0;
   var e = _slideEls();
@@ -1554,10 +1565,12 @@ function confirmBuy(idx){
     } else {
       showMsg(msgEl, (d && (d.error||d.msg)) || 'Buy failed', false);
     }
-    if(btn){ btn.disabled=false; btn.textContent='Confirm Buy'; }
+    if(btn){ btn.disabled=false; }
+    _restoreSlide();
   }).catch(function(){
     showMsg(msgEl, 'Network error — buy not sent', false);
-    if(btn){ btn.disabled=false; btn.textContent='Confirm Buy'; }
+    if(btn){ btn.disabled=false; }
+    _restoreSlide();
   });
 }
 
@@ -1581,19 +1594,22 @@ function _pollAutoBuyBridge(bridgeId, idx, t, amt, msgEl, input){
           var res = d.auto_buy_result || {};
           showMsg(msgEl, 'Bought $'+(res.symbol||t.symbol)+' for '+(res.amount_usdc!=null?res.amount_usdc:amt)+' '+evmCurrencyLabel(t.chain), true);
           if(input) input.value = '';
-          if(btn){ btn.disabled=false; btn.textContent='Confirm Buy'; }
+          if(btn){ btn.disabled=false; }
+    _restoreSlide();
           setTimeout(function(){ closeBuyPanel(idx); }, 2200);
           return;
         }
         if(d.auto_buy_status === 'failed'){
           var err = (d.auto_buy_result && d.auto_buy_result.error) || 'Buy failed after funds arrived — your balance is safe, try again';
           showMsg(msgEl, err, false);
-          if(btn){ btn.disabled=false; btn.textContent='Confirm Buy'; }
+          if(btn){ btn.disabled=false; }
+    _restoreSlide();
           return;
         }
         if(d.status === 'bridge_failed' || d.status === 'origin_tx_reverted' || d.status === 'timed_out'){
           showMsg(msgEl, 'Buy failed — could not move funds to this chain', false);
-          if(btn){ btn.disabled=false; btn.textContent='Confirm Buy'; }
+          if(btn){ btn.disabled=false; }
+    _restoreSlide();
           return;
         }
         scheduleNext();
@@ -1603,7 +1619,8 @@ function _pollAutoBuyBridge(bridgeId, idx, t, amt, msgEl, input){
   function scheduleNext(){
     if(attempts >= maxAttempts){
       showMsg(msgEl, 'Still buying… check your Wallet page shortly', true);
-      if(btn){ btn.disabled=false; btn.textContent='Confirm Buy'; }
+      if(btn){ btn.disabled=false; }
+    _restoreSlide();
       return;
     }
     setTimeout(tick, 8000);

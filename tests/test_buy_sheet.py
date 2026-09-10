@@ -120,6 +120,34 @@ check('the minimum spend is handed to the page by the server rather than '
 check('the sheet reads that value rather than a literal of its own',
       'PT_MIN_BUY_USDC' in JS and not re.search(r'amt\s*<\s*[12](\.0)?\b', JS))
 
+# ── 3b. a refused buy must leave a usable screen ─────────────────────────
+# confirmBuy() used to reset with btn.textContent='Confirm Buy'. Pointed at
+# the slider's label that wrote the OLD button's wording into it AND left the
+# slider disarmed: a refused buy showed "Confirm Buy" over a dead grey knob
+# and could not be retried without closing the sheet and finding the token
+# again. Seen on a real phone, on a real refusal.
+check("no code path writes the old button's wording into the slider label",
+      "textContent='Confirm Buy'" not in re.sub(r'(?m)^\s*//.*$', '', JS))
+check('every buy attempt ends by restoring the slider instead',
+      JS.count('_restoreSlide();') >= 6)
+check('...and restoring means re-arming it, not just clearing it',
+      re.search(r'function _restoreSlide\(\)\s*\{[^}]*_paintSheet\(\)', JS, re.DOTALL))
+
+# ── 3c. the amount can never be squeezed off the screen ──────────────────
+# The middle is the only part that flexes, so a tall cost breakdown shrinks
+# it. Unbounded, it collapsed to 8px: "$3.01" vanished and the "≈ 9,716
+# KEKIUS" line spilled out over the 10/25/50 row as ghost text.
+check('the middle keeps a floor, so the figure being decided on cannot be '
+      'squeezed away',
+      re.search(r'\.pt-sheet-mid\{[^}]*min-height:(\d+)px', HTML_NC)
+      and int(re.search(r'\.pt-sheet-mid\{[^}]*min-height:(\d+)px', HTML_NC).group(1)) >= 100)
+check('...and clips rather than painting over the buttons below it',
+      re.search(r'\.pt-sheet-mid\{[^}]*overflow:hidden', HTML_NC) is not None)
+check('the keypad gives way first, since it is the part nobody is reading',
+      re.search(r'\.pt-keys\{[^}]*flex:0 1 auto', HTML_NC) is not None)
+check('a long breakdown scrolls instead of pushing the amount off the top',
+      re.search(r'\.pt-sheet-ft \.pt-quote\{[^}]*max-height', HTML_NC) is not None)
+
 # ── 4. the whole thing, in a real browser ────────────────────────────────
 PORT = 5091
 DATA = tempfile.mkdtemp()
@@ -248,6 +276,43 @@ async def main():
         await slide(1.0)
         out['sell_traded'] = list(out['traded'])
 
+        # A REFUSED buy must leave a screen you can try again on.
+        await page.unroute('**/api/bsc/trade/**')
+        await page.route('**/api/bsc/trade/buy', lambda r: r.fulfill(
+            status=400, content_type='application/json',
+            body=json.dumps({"ok":False,"msg":"Trading is temporarily unavailable."})))
+        # Reopen in BUY mode: the sell sheet hides the percentage row, so
+        # clicking one there would simply never resolve.
+        await page.evaluate("document.getElementById('pt-sheet-scrim').click()")
+        await page.wait_for_timeout(300)
+        await page.click('[data-action="buy-open"]')
+        await page.wait_for_timeout(600)
+        await page.click('.pt-pct[data-pct="50"]')
+        await page.wait_for_timeout(300)
+        await slide(1.0)
+        await page.wait_for_timeout(600)
+        out['after_refusal'] = await page.evaluate("""() => ({
+            label: document.getElementById('pt-sheet-go').textContent,
+            ready: document.getElementById('pt-slide').classList.contains('ready'),
+            knobBack: !document.getElementById('pt-slide-knob').style.transform })""")
+
+        # The amount must survive a tall cost breakdown squeezing the middle.
+        out['squeeze'] = await page.evaluate("""() => {
+            const ft = document.querySelector('.pt-sheet-ft');
+            const s = document.createElement('div'); s.style.height = '500px';
+            ft.prepend(s);
+            const R = e => e.getBoundingClientRect();
+            const mid = R(document.querySelector('.pt-sheet-mid'));
+            const amt = R(document.getElementById('pt-sheet-amt'));
+            const get = R(document.getElementById('pt-sheet-get'));
+            const pcts = R(document.querySelector('.pt-sheet-pcts'));
+            const r = {midH: Math.round(mid.height),
+                       amountVisible: amt.top >= mid.top - 1 && amt.bottom <= mid.bottom + 1,
+                       overlapsButtons: get.bottom > pcts.top + 1};
+            s.remove();
+            return r;
+        }""")
+
         await page.evaluate("document.getElementById('pt-sheet-scrim').click()")
         await page.wait_for_timeout(400)
         out['closed'] = not await page.evaluate(
@@ -313,6 +378,16 @@ check('BROWSER: ...saying so plainly', B['sell']['amt'] == 'Sell all')
 check('BROWSER: ...in red, and asking for the same gesture',
       B['sell']['red'] and 'Slide to sell' in B['sell']['label'])
 check('BROWSER: a completed slide sells', B.get('sell_traded') == ['/bsc/trade/sell'])
+check('BROWSER: a refused buy leaves the slider armed again, so it can be '
+      'retried without closing the sheet and hunting for the token again',
+      B['after_refusal']['ready'])
+check("BROWSER: ...with its own wording, not the old button's \"Confirm Buy\"",
+      'Slide to' in B['after_refusal']['label'])
+check('BROWSER: ...and the knob back at the start', B['after_refusal']['knobBack'])
+check('BROWSER: a tall cost breakdown cannot squeeze the amount off the '
+      'screen', B['squeeze']['amountVisible'] and B['squeeze']['midH'] >= 100)
+check('BROWSER: ...nor make the "you get" line paint over the percentage '
+      'buttons', not B['squeeze']['overlapsButtons'])
 check('BROWSER: no JavaScript errors on the whole journey',
       not B.get('errors'))
 
