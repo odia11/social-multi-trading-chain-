@@ -47,20 +47,69 @@ check('the message describing our own plumbing is gone, not reworded',
       and 'Nothing to do on your side' not in SRC)
 
 # ── 2. and what it became ─────────────────────────────────────────────────
+# Checked by CALLING it, not by reading its source. An earlier version of
+# this file matched text between the first two `return`s, and when a second
+# branch was added it went on passing while silently covering only half of
+# what it claimed.
+import os
+import tempfile
+os.environ.setdefault('DATA_DIR', tempfile.mkdtemp())
+os.environ.setdefault('SECRET_KEY', 'x' * 32)
+os.environ.setdefault('ENCRYPTION_KEY', 'K' * 43 + '=')
+os.environ.setdefault('DEV', '1')
+sys.path.insert(0, REPO)
+import dashboard as d  # noqa: E402
+
 translate = fn('_gas_refusal_message')
-check('a refusal that is OUR fault becomes a plain "temporarily unavailable"',
-      'temporarily unavailable' in translate and 'GAS_UNAVAILABLE' in translate)
+
+
+def say(action='send', chain='Robinhood Chain', self_heals=True):
+    """The sentence a user gets for an outage that is OURS, with the sponsor
+    either able to refill itself or not configured at all."""
+    _keep_key, _keep_rule = d.GAS_SPONSOR_PRIVATE_KEY, d.ORCAGENT_FRONTS_GAS
+    try:
+        d.ORCAGENT_FRONTS_GAS = True
+        d.GAS_SPONSOR_PRIVATE_KEY = ('0x' + '11' * 32) if self_heals else ''
+        return d._gas_refusal_message(d.GAS_UNAVAILABLE, action, chain)
+    finally:
+        d.GAS_SPONSOR_PRIVATE_KEY, d.ORCAGENT_FRONTS_GAS = _keep_key, _keep_rule
+
+
+healing = say(self_heals=True)
+stuck = say(self_heals=False)
+
+check('a refusal that is OUR fault, while the sponsor can still refill '
+      'itself, becomes a plain "temporarily unavailable"',
+      'temporarily unavailable' in healing)
 check('...phrased as whatever the person was actually doing, so a Sell does '
       'not say "Trading"',
-      "'sell': 'Selling'" in translate and "'send': 'Sending'" in translate)
+      say('sell', self_heals=True).startswith('Selling')
+      and say('send', self_heals=True).startswith('Sending'))
 check('...naming no chain, since there is nothing about the chain they could '
       'act on',
-      not re.search(r'chain_label', translate.split('if gas_msg ==')[1].split('return')[1]))
+      'Robinhood' not in healing)
+
+# The outage that will NOT clear on its own. "Try again shortly" there is a
+# promise nothing keeps: the person taps Send at their own money forever.
+check('an outage that cannot fix itself does NOT tell the user to wait',
+      'try again' not in stuck.lower() and 'shortly' not in stuck.lower())
+check('...it points them somewhere that can actually help, and says plainly '
+      'that retrying is not it',
+      'support' in stuck.lower() and 'not clear this' in stuck.lower())
+check('...and names the chain, so they can see it is that one chain rather '
+      'than their whole wallet',
+      'Robinhood Chain' in stuck)
+check('...while still describing none of our plumbing',
+      not any(w in stuck.lower() for w in
+              ('sponsor', 'float', 'network fee', 'gas', 'top up', 'top-up')))
 
 check('the other branch survives intact — a wallet genuinely short of gas '
       'gets a real instruction, with the chain named, because they need to '
       'know which one',
       'chain_label' in translate.rsplit('return', 1)[1])
+own = d._gas_refusal_message('send a little ETH to it', 'send', 'Base')
+check('...and that instruction reaches the user unchanged',
+      'send a little ETH to it' in own and 'Base' in own)
 
 # ── 3. it cannot leak by accident ─────────────────────────────────────────
 # A sentinel rather than a sentence: a caller that forgets to translate shows

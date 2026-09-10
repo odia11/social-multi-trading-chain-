@@ -8945,6 +8945,18 @@ GAS_BOOTSTRAP_SOL_USD = 5.0  # small, fixed USD-equivalent amount of the user's 
 GAS_UNAVAILABLE = '__gas_unavailable__'
 
 
+def _gas_outage_self_heals() -> bool:
+    """Whether waiting could actually fix an outage that is ours.
+
+    A sponsor wallet that is merely empty is refilled by the background
+    sweep, so "try again shortly" is a real promise there. A deployment with
+    no sponsor key at all fronts nothing and never will until someone
+    changes that, so the same sentence becomes a lie that keeps a user
+    tapping Send at money they cannot move.
+    """
+    return bool(ORCAGENT_FRONTS_GAS and GAS_SPONSOR_PRIVATE_KEY)
+
+
 def _gas_refusal_message(gas_msg: str, action: str, chain_label: str) -> str:
     """The sentence a person actually sees when gas blocks them.
 
@@ -8954,11 +8966,21 @@ def _gas_refusal_message(gas_msg: str, action: str, chain_label: str) -> str:
     is nothing for them to do. If it is genuinely their wallet that is short,
     the message from the gas check is a real instruction and is passed through
     with the chain named, since they need to know which one.
+
+    "Ours" is not one situation, though, and the difference is the whole
+    value of the sentence: whether waiting helps. An empty sponsor wallet
+    refills on its own, so "try again shortly" is true. A deployment that
+    fronts no gas at all never resolves by itself, and telling someone to
+    wait for it is how a person ends up retrying a Send forever, on their
+    own money, with nothing on screen ever changing.
     """
     verb = {'trade': 'Trading', 'sell': 'Selling', 'send': 'Sending',
             'buy': 'Buying'}.get(action, 'This')
     if gas_msg == GAS_UNAVAILABLE:
-        return f'{verb} is temporarily unavailable. Please try again shortly.'
+        if _gas_outage_self_heals():
+            return f'{verb} is temporarily unavailable. Please try again shortly.'
+        return (f'{verb} from {chain_label} is not available at the moment. '
+                f'Please contact support — retrying will not clear this.')
     return f'Cannot {action} on {chain_label} yet — {gas_msg}'
 
 
