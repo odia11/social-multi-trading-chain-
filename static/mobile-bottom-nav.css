@@ -1,16 +1,42 @@
 /* Shared OrcAgent mobile bottom navigation */
 @media(max-width:767px){
-  body{padding-bottom:calc(94px + env(safe-area-inset-bottom,0px))!important}
+  body{padding-bottom:calc(118px + env(safe-area-inset-bottom,0px))!important}
   #mobile-nav{display:none!important}
   .oa-bottom-nav{position:fixed;left:0;right:0;bottom:0;z-index:1200;height:82px;padding:8px 16px calc(8px + env(safe-area-inset-bottom,0px));background:#080d12;border-top:1px solid #17202a;display:grid;grid-template-columns:1fr 1fr 82px 1fr 1fr;align-items:end;gap:6px;box-sizing:content-box}
   .oa-bottom-nav a,.oa-bottom-nav button{appearance:none;-webkit-appearance:none;border:0;background:none;color:#8b95a3;text-decoration:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-width:0;height:62px;font:600 11px/1.1 Geist,system-ui,sans-serif;letter-spacing:-.01em;padding:0;cursor:pointer}
   .oa-bottom-nav svg{width:27px;height:27px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
   .oa-bottom-nav .active{color:#f7b955}
-  .oa-bottom-nav .oa-trade-main{align-self:start;width:76px;height:76px;margin-top:-26px;border-radius:50%;background:#f7b955;color:#11161b;border:4px solid #080d12;box-shadow:0 0 0 1px rgba(247,185,85,.14),0 10px 26px rgba(0,0,0,.36);display:flex;align-items:center;justify-content:center;padding:0}
+  .oa-bottom-nav .oa-trade-main{position:relative;align-self:start;width:76px;height:76px;margin-top:-26px;border-radius:50%;background:#f7b955;color:#11161b;border:4px solid #080d12;box-shadow:0 0 0 1px rgba(247,185,85,.14),0 10px 26px rgba(0,0,0,.36);display:flex;align-items:center;justify-content:center;padding:0}
   .oa-bottom-nav .oa-trade-main svg{width:35px;height:35px;stroke-width:1.8}
-  .oa-bottom-nav .oa-trade-main span{position:absolute;top:69px;color:#8b95a3;font-size:11px;font-weight:600}
+  .oa-bottom-nav .oa-trade-main span{position:absolute;top:69px;color:#8b95a3;font-size:11px;font-weight:600;white-space:nowrap}
   .oa-bottom-nav .oa-trade-main.active span{color:#f7b955}
+  .oa-bottom-nav .oa-wallet-main{background:#f7b955;color:#11161b}
   .oa-bottom-nav .oa-nav-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
   .oa-bottom-nav .oa-menu-btn{font:600 11px/1.1 Geist,system-ui,sans-serif}
+
+  /* Never let fixed navigation cover the last primary action on full-screen sheets. */
+  body.oa-live-v2 .pt-sheet{padding-bottom:calc(126px + env(safe-area-inset-bottom,0px))!important}
+  body.oa-portfolio .wlt-center{padding-bottom:calc(132px + env(safe-area-inset-bottom,0px))!important}
+
+  /* Portfolio-specific action sheet opened by the large center button. */
+  .oa-wallet-actions{position:fixed;inset:0;z-index:1400;pointer-events:none;visibility:hidden}
+  .oa-wallet-actions.open{pointer-events:auto;visibility:visible}
+  .oa-wallet-scrim{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;background:rgba(0,0,0,.62)!important;border:0!important;padding:0!important;opacity:0;transition:opacity .18s ease;display:block!important}
+  .oa-wallet-actions.open .oa-wallet-scrim{opacity:1}
+  .oa-wallet-sheet{position:absolute;left:0;right:0;bottom:0;background:#0b1117;border:1px solid #1a232d;border-bottom:0;border-radius:24px 24px 0 0;padding:9px 18px calc(28px + env(safe-area-inset-bottom,0px));transform:translateY(104%);transition:transform .24s cubic-bezier(.2,.8,.2,1);box-shadow:0 -18px 50px rgba(0,0,0,.38)}
+  .oa-wallet-actions.open .oa-wallet-sheet{transform:translateY(0)}
+  .oa-wallet-grab{width:42px;height:4px;border-radius:999px;background:#26313d;margin:1px auto 17px}
+  .oa-wallet-sheet-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:18px}
+  .oa-wallet-sheet-head>div{display:flex;flex-direction:column;gap:4px}
+  .oa-wallet-sheet-head strong{font:750 20px/1.1 Geist,system-ui,sans-serif;color:#eef1f5;letter-spacing:-.025em}
+  .oa-wallet-sheet-head span{font:500 12px/1.3 Geist,system-ui,sans-serif;color:#77808e}
+  .oa-wallet-close{width:36px!important;height:36px!important;border:1px solid #202a35!important;border-radius:11px!important;background:#0d141c!important;color:#a7b0bc!important;font:400 26px/1 Geist,system-ui,sans-serif!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:0!important}
+  .oa-wallet-action-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .oa-wallet-action-grid button{min-height:112px;border:1px solid #1d2834;border-radius:17px;background:#0d141c;color:#eef1f5;padding:16px;display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:5px;text-align:left;font-family:Geist,system-ui,sans-serif}
+  .oa-wallet-action-grid button:active{transform:scale(.985);background:#101923}
+  .oa-wallet-action-grid svg{width:29px;height:29px;stroke:#f7b955;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;margin-bottom:7px}
+  .oa-wallet-action-grid strong{font-size:15px;line-height:1.1;color:#eef1f5}
+  .oa-wallet-action-grid span{font-size:11px;line-height:1.2;color:#77808e}
+  html.oa-wallet-actions-open,html.oa-wallet-actions-open body{overflow:hidden!important}
 }
-@media(min-width:768px){.oa-bottom-nav{display:none!important}}
+@media(min-width:768px){.oa-bottom-nav,.oa-wallet-actions{display:none!important}}
