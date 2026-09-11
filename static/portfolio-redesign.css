@@ -9,72 +9,30 @@ body.oa-portfolio .wlt-sub{color:#77808e;font-size:12px;margin-top:2px}
 body.oa-portfolio .net-pill{display:none}
 body.oa-portfolio .wlt-content{max-width:none;width:100%;padding:8px 22px 70px;gap:14px;overflow:visible!important;height:auto!important}
 body.oa-portfolio .wlt-hero{display:none}
-
 .pf-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;padding:6px;background:#0d1219;border:1px solid var(--pf-line);border-radius:16px;margin:2px 22px 12px}
 .pf-tab{border:1px solid transparent;background:transparent;color:#a1a9b6;border-radius:12px;min-height:42px;font:650 13px var(--ui,system-ui);cursor:pointer;transition:.18s ease}
 .pf-tab.active{color:var(--pf-yellow);border-color:rgba(247,185,85,.55);background:linear-gradient(180deg,rgba(247,185,85,.10),rgba(247,185,85,.035));box-shadow:0 0 0 1px rgba(247,185,85,.05) inset,0 0 22px rgba(247,185,85,.05)}
 .pf-tab:hover{color:#fff}
-
 .pf-balance-card{position:relative;overflow:hidden;background:radial-gradient(circle at 0 0,rgba(247,185,85,.10),transparent 44%),linear-gradient(145deg,#101722,#0b1017 68%);border:1px solid var(--pf-line);border-radius:24px;padding:22px 22px 18px;box-shadow:0 24px 60px -38px #000,0 1px 0 rgba(255,255,255,.04) inset}
 .pf-balance-card:after{content:"";position:absolute;width:170px;height:170px;border-radius:50%;right:-75px;top:-82px;background:rgba(247,185,85,.06);filter:blur(4px);pointer-events:none}
 .pf-kicker{font-size:11px;color:#77808e;font-weight:650;letter-spacing:.06em;text-transform:uppercase}
 .pf-balance{font:750 clamp(34px,8vw,48px)/1.08 var(--mono,monospace);letter-spacing:-.045em;margin-top:10px;color:#f6f8fb;font-variant-numeric:tabular-nums}
-.pf-change{display:flex;gap:7px;align-items:center;color:#3ad29b;font:650 12px var(--mono,monospace);margin-top:7px;min-height:18px}
-.pf-change .muted{color:#77808e;font-family:var(--ui,system-ui);font-weight:500}
-.pf-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:19px}
-.pf-action{min-height:50px;border-radius:15px;border:1px solid var(--pf-line);font:750 14px var(--ui,system-ui);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;transition:.18s ease}
-.pf-action.deposit{background:linear-gradient(180deg,#ffd164,#f7b955);color:#111318;border-color:#ffd164;box-shadow:0 10px 24px rgba(247,185,85,.12)}
-.pf-action.withdraw{background:#0d141d;color:#eef1f5}
-.pf-action:hover{transform:translateY(-1px)}
-
-.pf-allocation{background:linear-gradient(160deg,#101721,#0b1017);border:1px solid var(--pf-line);border-radius:22px;padding:18px;display:grid;grid-template-columns:168px 1fr;gap:20px;align-items:center}
-.pf-donut{width:146px;height:146px;border-radius:50%;margin:auto;position:relative;background:conic-gradient(var(--pf-yellow) 0 55%,#7ed797 55% 80%,#7b8ca6 80% 100%);box-shadow:0 0 0 1px rgba(255,255,255,.04)}
-.pf-donut:after{content:"";position:absolute;inset:27px;border-radius:50%;background:#0d131b;border:1px solid rgba(255,255,255,.04)}
-.pf-donut-center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2;font:750 14px var(--mono,monospace);color:#f1f4f7;text-align:center;padding:40px;white-space:nowrap}
-.pf-legend{display:flex;flex-direction:column;gap:14px}
-.pf-leg-row{display:grid;grid-template-columns:12px 1fr auto;gap:9px;align-items:center;font-size:13px}
-.pf-dot{width:10px;height:10px;border-radius:50%}.pf-dot.a{background:var(--pf-yellow)}.pf-dot.b{background:#7ed797}.pf-dot.c{background:#7b8ca6}
-.pf-leg-name{color:#aeb5c0}.pf-leg-val{font:650 12px var(--mono,monospace);color:#e9edf2}
-
-body.oa-portfolio .dep-card,body.oa-portfolio .holdings,body.oa-portfolio .act-card{background:linear-gradient(160deg,#101721,#0b1017);border-color:var(--pf-line);border-radius:20px;box-shadow:0 1px 0 rgba(255,255,255,.035) inset}
-body.oa-portfolio .holdings-hdr,body.oa-portfolio .act-hdr{border-bottom-color:var(--pf-line);padding:16px 18px}
-body.oa-portfolio .holdings-title,body.oa-portfolio .act-title{font-size:16px;font-weight:720}
-body.oa-portfolio .tok-row{padding:14px 0}
-body.oa-portfolio .tok-row-block{border-bottom-color:var(--pf-line)}
-body.oa-portfolio .tok-logo,body.oa-portfolio .tok-init{width:42px;height:42px}
-body.oa-portfolio .tok-name{font-size:15px}
-body.oa-portfolio .tok-usd{font-size:14px}
-body.oa-portfolio .tok-pct{font-size:11px}
-body.oa-portfolio .dep-card{padding:18px}
-
-body.oa-portfolio.pf-view-overview .dep-card{display:none}
-body.oa-portfolio.pf-view-overview .act-card[data-pf-extra="1"]{display:none}
-body.oa-portfolio.pf-view-deposit .pf-balance-card,body.oa-portfolio.pf-view-deposit .pf-allocation,body.oa-portfolio.pf-view-deposit .holdings,body.oa-portfolio.pf-view-deposit .act-card{display:none}
-body.oa-portfolio.pf-view-deposit .dep-card{display:block}
-
-@media(max-width:600px){
- body.oa-portfolio{overflow-y:auto!important;position:static!important;touch-action:pan-y!important}
- body.oa-portfolio #app{display:block!important;overflow:visible!important;height:auto!important;min-height:100dvh!important}
- body.oa-portfolio .wlt-center{max-height:none!important;height:auto!important;overflow:visible!important}
- body.oa-portfolio .wlt-hdr{padding:14px 16px 4px}
- body.oa-portfolio .wlt-title{font-size:27px}
- body.oa-portfolio .wlt-sub{font-size:11.5px;line-height:1.35}
- body.oa-portfolio .wlt-content{padding:6px 14px 92px;gap:12px;overflow:visible!important}
- .pf-tabs{margin:2px 14px 10px;padding:5px;gap:5px;border-radius:15px}
- .pf-tab{min-height:40px;font-size:12.5px}
- .pf-balance-card{border-radius:20px;padding:19px 17px 16px}
- .pf-kicker{font-size:10px}
- .pf-balance{font-size:35px;margin-top:8px}
- .pf-change{font-size:11.5px;margin-top:6px}
- .pf-actions{margin-top:16px;gap:8px}
- .pf-action{min-height:48px;font-size:13.5px;border-radius:14px}
- .pf-allocation{grid-template-columns:128px 1fr;gap:12px;padding:15px 14px;border-radius:20px}
- .pf-donut{width:116px;height:116px}.pf-donut:after{inset:22px}.pf-donut-center{font-size:11.5px;padding:30px}
- .pf-leg-row{grid-template-columns:10px 1fr auto;gap:7px;font-size:12px}.pf-leg-val{font-size:11px}
- body.oa-portfolio .holdings,body.oa-portfolio .act-card,body.oa-portfolio .dep-card{border-radius:18px}
- body.oa-portfolio .holdings-hdr,body.oa-portfolio .act-hdr{padding:15px 16px}
- body.oa-portfolio .tok-list{padding:0 16px}
- body.oa-portfolio .tok-row{padding:13px 0}
- body.oa-portfolio .tok-logo,body.oa-portfolio .tok-init{width:40px;height:40px}
-}
+.pf-change{display:flex;gap:7px;align-items:center;color:#3ad29b;font:650 12px var(--mono,monospace);margin-top:7px;min-height:18px}.pf-change .muted{color:#77808e;font-family:var(--ui,system-ui);font-weight:500}
+.pf-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:19px}.pf-action{min-height:50px;border-radius:15px;border:1px solid var(--pf-line);font:750 14px var(--ui,system-ui);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;transition:.18s ease}.pf-action.deposit{background:linear-gradient(180deg,#ffd164,#f7b955);color:#111318;border-color:#ffd164;box-shadow:0 10px 24px rgba(247,185,85,.12)}.pf-action.withdraw{background:#0d141d;color:#eef1f5}.pf-action:hover{transform:translateY(-1px)}
+.pf-allocation{background:linear-gradient(160deg,#101721,#0b1017);border:1px solid var(--pf-line);border-radius:22px;padding:18px;display:grid;grid-template-columns:168px 1fr;gap:20px;align-items:center}.pf-donut{width:146px;height:146px;border-radius:50%;margin:auto;position:relative;background:conic-gradient(var(--pf-yellow) 0 55%,#7ed797 55% 80%,#7b8ca6 80% 100%);box-shadow:0 0 0 1px rgba(255,255,255,.04)}.pf-donut:after{content:"";position:absolute;inset:27px;border-radius:50%;background:#0d131b;border:1px solid rgba(255,255,255,.04)}.pf-donut-center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2;font:750 14px var(--mono,monospace);color:#f1f4f7;text-align:center;padding:40px;white-space:nowrap}.pf-legend{display:flex;flex-direction:column;gap:14px}.pf-leg-row{display:grid;grid-template-columns:12px 1fr auto;gap:9px;align-items:center;font-size:13px}.pf-dot{width:10px;height:10px;border-radius:50%}.pf-dot.a{background:var(--pf-yellow)}.pf-dot.b{background:#7ed797}.pf-dot.c{background:#7b8ca6}.pf-leg-name{color:#aeb5c0}.pf-leg-val{font:650 12px var(--mono,monospace);color:#e9edf2}
+body.oa-portfolio .dep-card,body.oa-portfolio .holdings,body.oa-portfolio .act-card{background:linear-gradient(160deg,#101721,#0b1017);border-color:var(--pf-line);border-radius:20px;box-shadow:0 1px 0 rgba(255,255,255,.035) inset}body.oa-portfolio .holdings-hdr,body.oa-portfolio .act-hdr{border-bottom-color:var(--pf-line);padding:16px 18px}body.oa-portfolio .holdings-title,body.oa-portfolio .act-title{font-size:16px;font-weight:720}body.oa-portfolio .tok-row{padding:14px 0}body.oa-portfolio .tok-row-block{border-bottom-color:var(--pf-line)}body.oa-portfolio .tok-logo,body.oa-portfolio .tok-init{width:42px;height:42px}body.oa-portfolio .tok-name{font-size:15px}body.oa-portfolio .tok-usd{font-size:14px}body.oa-portfolio .tok-pct{font-size:11px}body.oa-portfolio .dep-card{padding:18px}
+/* Recent Activity: keep the existing /api/wallet/activity data and renderer, but present it as a clean Portfolio timeline. */
+body.oa-portfolio .act-card:first-of-type .act-hdr{background:rgba(255,255,255,.012)}
+body.oa-portfolio .act-card:first-of-type .act-viewall{color:var(--pf-yellow);font-size:12px;font-weight:650;text-decoration:none}
+body.oa-portfolio #activity-list{padding:0 18px}
+body.oa-portfolio #activity-list .act-row{padding:14px 0;border-bottom:1px solid var(--pf-line);gap:12px;min-height:68px}
+body.oa-portfolio #activity-list .act-row:last-child{border-bottom:0}
+body.oa-portfolio #activity-list .act-tile{width:40px;height:40px;border-radius:13px;font-size:16px;flex-shrink:0}
+body.oa-portfolio #activity-list .act-type{font-size:14px;font-weight:700;color:#eef1f5}
+body.oa-portfolio #activity-list .act-sub{font-size:11px;color:#77808e;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:310px}
+body.oa-portfolio #activity-list .act-right{min-width:94px}
+body.oa-portfolio #activity-list .act-amt{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
+body.oa-portfolio #activity-list .act-time{font-size:10.5px;color:#697280;margin-top:4px}
+body.oa-portfolio.pf-view-overview .dep-card{display:none}body.oa-portfolio.pf-view-overview .act-card[data-pf-extra="1"]{display:none}body.oa-portfolio.pf-view-deposit .pf-balance-card,body.oa-portfolio.pf-view-deposit .pf-allocation,body.oa-portfolio.pf-view-deposit .holdings,body.oa-portfolio.pf-view-deposit .act-card{display:none}body.oa-portfolio.pf-view-deposit .dep-card{display:block}
+@media(max-width:600px){body.oa-portfolio{overflow-y:auto!important;position:static!important;touch-action:pan-y!important}body.oa-portfolio #app{display:block!important;overflow:visible!important;height:auto!important;min-height:100dvh!important}body.oa-portfolio .wlt-center{max-height:none!important;height:auto!important;overflow:visible!important}body.oa-portfolio .wlt-hdr{padding:14px 16px 4px}body.oa-portfolio .wlt-title{font-size:27px}body.oa-portfolio .wlt-sub{font-size:11.5px;line-height:1.35}body.oa-portfolio .wlt-content{padding:6px 14px 92px;gap:12px;overflow:visible!important}.pf-tabs{margin:2px 14px 10px;padding:5px;gap:5px;border-radius:15px}.pf-tab{min-height:40px;font-size:12.5px}.pf-balance-card{border-radius:20px;padding:19px 17px 16px}.pf-kicker{font-size:10px}.pf-balance{font-size:35px;margin-top:8px}.pf-change{font-size:11.5px;margin-top:6px}.pf-actions{margin-top:16px;gap:8px}.pf-action{min-height:48px;font-size:13.5px;border-radius:14px}.pf-allocation{grid-template-columns:128px 1fr;gap:12px;padding:15px 14px;border-radius:20px}.pf-donut{width:116px;height:116px}.pf-donut:after{inset:22px}.pf-donut-center{font-size:11.5px;padding:30px}.pf-leg-row{grid-template-columns:10px 1fr auto;gap:7px;font-size:12px}.pf-leg-val{font-size:11px}body.oa-portfolio .holdings,body.oa-portfolio .act-card,body.oa-portfolio .dep-card{border-radius:18px}body.oa-portfolio .holdings-hdr,body.oa-portfolio .act-hdr{padding:15px 16px}body.oa-portfolio .tok-list{padding:0 16px}body.oa-portfolio .tok-row{padding:13px 0}body.oa-portfolio .tok-logo,body.oa-portfolio .tok-init{width:40px;height:40px}body.oa-portfolio #activity-list{padding:0 15px}body.oa-portfolio #activity-list .act-row{padding:13px 0;gap:10px}body.oa-portfolio #activity-list .act-tile{width:38px;height:38px;border-radius:12px}body.oa-portfolio #activity-list .act-sub{max-width:42vw}body.oa-portfolio #activity-list .act-right{min-width:82px}body.oa-portfolio #activity-list .act-amt{font-size:11.5px}}
 @media(max-width:380px){.pf-allocation{grid-template-columns:1fr}.pf-donut{width:132px;height:132px}.pf-legend{padding:0 6px}}
