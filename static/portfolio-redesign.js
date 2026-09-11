@@ -6,12 +6,23 @@
 'use strict';
 function money(v){
   var n=Number(v||0); if(!isFinite(n)) n=0;
-  return '$'+n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2}).format(n);
 }
 function num(v){ var n=Number(v||0); return isFinite(n)?n:0; }
 function call(name){
   var fn=window[name];
   if(typeof fn==='function') return fn.apply(window,Array.prototype.slice.call(arguments,1));
+}
+function sanitizeAssetPercentages(root){
+  (root||document).querySelectorAll('.tok-pct').forEach(function(el){
+    var raw=(el.textContent||'').replace(/,/g,'').replace(/[^0-9+\-.]/g,'');
+    var n=parseFloat(raw);
+    if(!isFinite(n) || Math.abs(n)>1000){
+      el.textContent='—';
+      el.style.color='var(--muted,#6f7885)';
+      el.title='24h change unavailable';
+    }
+  });
 }
 function boot(){
   if(location.pathname.replace(/\/+$/,'')!=='/wallet') return;
@@ -24,8 +35,6 @@ function boot(){
   if(title) title.textContent='Portfolio';
   if(sub) sub.textContent='Your complete multi-chain trading portfolio';
 
-  /* Name this destination Portfolio everywhere on the current page, while
-     retaining /wallet as the stable backwards-compatible URL. */
   document.querySelectorAll('a[href="/wallet"],a[href^="/wallet?"]').forEach(function(a){
     var text=(a.textContent||'').trim();
     if(/wallet/i.test(text)) a.textContent=text.replace(/wallet/ig,'Portfolio');
@@ -57,7 +66,7 @@ function boot(){
 
   var allocation=document.createElement('section');
   allocation.className='pf-allocation';
-  allocation.innerHTML='<div class="pf-donut" id="pf-donut"><div class="pf-donut-center" id="pf-donut-total">$0</div></div>'+
+  allocation.innerHTML='<div class="pf-donut" id="pf-donut"><div class="pf-donut-center" id="pf-donut-total">$0.00</div></div>'+
     '<div class="pf-legend">'+
       '<div class="pf-leg-row"><span class="pf-dot a"></span><span class="pf-leg-name" id="pf-a-name">USDC</span><span class="pf-leg-val" id="pf-a-val">—</span></div>'+
       '<div class="pf-leg-row"><span class="pf-dot b"></span><span class="pf-leg-name" id="pf-b-name">SOL</span><span class="pf-leg-val" id="pf-b-val">—</span></div>'+
@@ -66,13 +75,7 @@ function boot(){
   hero.insertAdjacentElement('afterend',allocation);
 
   var holdings=document.querySelector('.holdings');
-  if(holdings){
-    var ht=holdings.querySelector('.holdings-title'); if(ht) ht.textContent='Assets';
-    var lab=document.createElement('div'); lab.className='pf-section-label';
-    lab.innerHTML='<span>Assets</span><small>Balance · Value · 24h</small>';
-    /* Keep one visible heading only: the card's own heading remains functional
-       for its refresh/hide-small controls, so the extra label is not inserted. */
-  }
+  if(holdings){ var ht=holdings.querySelector('.holdings-title'); if(ht) ht.textContent='Assets'; }
   document.querySelectorAll('.act-card').forEach(function(el,i){ if(i>0) el.dataset.pfExtra='1'; });
 
   function showView(view){
@@ -95,14 +98,17 @@ function boot(){
   });
   document.getElementById('pf-withdraw').addEventListener('click',function(){showView('withdraw');});
 
-  /* Keep the new headline synced to the existing, already-tested balance
-     loader as well as the direct summary call below. */
   var oldAvail=document.getElementById('avail');
   if(oldAvail && window.MutationObserver){
     new MutationObserver(function(){
-      var raw=(oldAvail.textContent||'').replace(/[^0-9.\-]/g,'');
+      var raw=(oldAvail.textContent||'').replace(/,/g,'').replace(/[^0-9.\-]/g,'');
       if(raw) document.getElementById('pf-total').textContent=money(raw);
     }).observe(oldAvail,{childList:true,characterData:true,subtree:true});
+  }
+
+  if(holdings && window.MutationObserver){
+    new MutationObserver(function(){sanitizeAssetPercentages(holdings);}).observe(holdings,{childList:true,subtree:true,characterData:true});
+    sanitizeAssetPercentages(holdings);
   }
 
   Promise.allSettled([
@@ -121,8 +127,6 @@ function boot(){
     },0);
     var solPrice=num(b.sol_price||s.sol_price||0);
     var solValue=num(b.sol)*solPrice;
-    /* Token endpoint may include USDC itself; avoid obviously double-counting
-       it when the endpoint labels symbols. */
     var otherValue=tokens.reduce(function(sum,x){
       var sym=String(x.symbol||x.ticker||'').toUpperCase(); if(sym==='USDC'||sym==='USDT'||sym==='SOL') return sum;
       var v=x.usd_value; if(v==null)v=x.value_usd; if(v==null)v=num(x.balance||x.amount)*num(x.price_usd||x.price);
@@ -141,6 +145,7 @@ function boot(){
       document.getElementById(prefix+'-val').textContent=(value/sum*100).toFixed(1)+'%';
     }
     setRow('pf-a','USDC',usdc);setRow('pf-b','SOL',solValue);setRow('pf-c','Other',otherValue);
+    sanitizeAssetPercentages(document);
   }).catch(function(){});
 }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot();
