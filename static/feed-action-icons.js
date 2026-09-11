@@ -1,12 +1,11 @@
 /* Upgrades feed action glyphs without touching existing button listeners.
-   This file is already loaded by the shared navbar on OrcAgent pages, so it
-   also boots the app-wide UX/performance layer exactly once. */
+   page-loader.js is the primary shared UX boot path; this remains a guarded
+   fallback for navbar pages that do not include page-loader.js. */
 (function(){
 'use strict';
-(function bootSharedUx(){
-  if(document.getElementById('oa-app-ux-css'))return;
-  var css=document.createElement('link');css.id='oa-app-ux-css';css.rel='stylesheet';css.href='/static/app-ux.css?v=1';document.head.appendChild(css);
-  var js=document.createElement('script');js.id='oa-app-ux-js';js.src='/static/app-ux.js?v=1';js.defer=true;document.head.appendChild(js);
+(function bootSharedUxFallback(){
+  if(!document.getElementById('oa-app-ux-css')){var css=document.createElement('link');css.id='oa-app-ux-css';css.rel='stylesheet';css.href='/static/app-ux.css?v=2';document.head.appendChild(css)}
+  if(!document.getElementById('oa-app-ux-js')){var js=document.createElement('script');js.id='oa-app-ux-js';js.src='/static/app-ux.js?v=2';js.defer=true;document.head.appendChild(js)}
 })();
 function svg(type){var p={reply:'<path d="M21 15a4 4 0 0 1-4 4H8l-5 3 1.5-4.5A8 8 0 1 1 21 15Z"/>',repost:'<path d="M17 3l4 4-4 4"/><path d="M3 7h18"/><path d="M7 21l-4-4 4-4"/><path d="M21 17H3"/>',like:'<path d="M20.8 4.6a5.4 5.4 0 0 0-7.6 0L12 5.8l-1.2-1.2a5.4 5.4 0 0 0-7.6 7.6L12 21l8.8-8.8a5.4 5.4 0 0 0 0-7.6Z"/>',bookmark:'<path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"/>'};return '<svg class="oa-feed-action-icon" viewBox="0 0 24 24" aria-hidden="true">'+p[type]+'</svg>'}
 function classify(btn,index){var s=((btn.className||'')+' '+(btn.getAttribute('aria-label')||'')+' '+(btn.getAttribute('title')||'')+' '+(btn.getAttribute('onclick')||'')).toLowerCase();if(s.indexOf('like')>-1||s.indexOf('heart')>-1)return'like';if(s.indexOf('repost')>-1||s.indexOf('retweet')>-1||s.indexOf('share')>-1)return'repost';if(s.indexOf('bookmark')>-1||s.indexOf('save')>-1)return'bookmark';if(s.indexOf('reply')>-1||s.indexOf('comment')>-1)return'reply';return['reply','repost','like','bookmark'][index]||null}
