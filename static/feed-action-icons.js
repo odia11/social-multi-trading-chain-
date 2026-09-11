@@ -1,0 +1,10 @@
+/* Upgrades feed action glyphs without touching existing button listeners. */
+(function(){
+'use strict';
+function svg(type){var p={reply:'<path d="M21 15a4 4 0 0 1-4 4H8l-5 3 1.5-4.5A8 8 0 1 1 21 15Z"/>',repost:'<path d="M17 3l4 4-4 4"/><path d="M3 7h18"/><path d="M7 21l-4-4 4-4"/><path d="M21 17H3"/>',like:'<path d="M20.8 4.6a5.4 5.4 0 0 0-7.6 0L12 5.8l-1.2-1.2a5.4 5.4 0 0 0-7.6 7.6L12 21l8.8-8.8a5.4 5.4 0 0 0 0-7.6Z"/>',bookmark:'<path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"/>'};return '<svg class="oa-feed-action-icon" viewBox="0 0 24 24" aria-hidden="true">'+p[type]+'</svg>'}
+function classify(btn,index){var s=((btn.className||'')+' '+(btn.getAttribute('aria-label')||'')+' '+(btn.getAttribute('title')||'')+' '+(btn.getAttribute('onclick')||'')).toLowerCase();if(s.indexOf('like')>-1||s.indexOf('heart')>-1)return'like';if(s.indexOf('repost')>-1||s.indexOf('retweet')>-1||s.indexOf('share')>-1)return'repost';if(s.indexOf('bookmark')>-1||s.indexOf('save')>-1)return'bookmark';if(s.indexOf('reply')>-1||s.indexOf('comment')>-1)return'reply';return['reply','repost','like','bookmark'][index]||null}
+function upgrade(row){var btns=Array.prototype.slice.call(row.querySelectorAll('.fc-action'));btns.forEach(function(btn,i){if(btn.dataset.oaIcon==='1')return;var type=classify(btn,i);if(!type)return;var oldIcon=btn.querySelector('svg,img,.fc-action-icon');if(oldIcon)oldIcon.style.display='none';btn.classList.add('oa-action-'+type);btn.insertAdjacentHTML('afterbegin',svg(type));btn.dataset.oaIcon='1'});}
+function scan(root){(root||document).querySelectorAll('.fc-actions').forEach(upgrade)}
+function ready(){scan(document);if(window.MutationObserver)new MutationObserver(function(muts){muts.forEach(function(m){m.addedNodes.forEach(function(n){if(n.nodeType!==1)return;if(n.matches&&n.matches('.fc-actions'))upgrade(n);scan(n)})})}).observe(document.body,{childList:true,subtree:true})}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ready);else ready();
+})();
