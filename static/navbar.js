@@ -7,12 +7,19 @@
 'use strict';
 
 /* /wallet is now presented as Portfolio. Keep the URL stable so every old
-   link, test and server route keeps working; load the presentation layer
-   before DOMContentLoaded so it can enhance the existing, tested wallet UI. */
+   link, test and server route keeps working. Hide the legacy Wallet render
+   immediately so users never see a flash of the old page while the Portfolio
+   presentation layer is loading. portfolio-redesign.js removes this boot
+   class as soon as the new layout has been constructed. */
 (function(){
   if(location.pathname.replace(/\/+$/,'')!=='/wallet') return;
-  var css=document.createElement('link'); css.rel='stylesheet'; css.href='/static/portfolio-redesign.css?v=3'; document.head.appendChild(css);
-  var js=document.createElement('script'); js.src='/static/portfolio-redesign.js?v=3'; js.defer=true; document.head.appendChild(js);
+  document.documentElement.classList.add('oa-pf-boot');
+  var boot=document.createElement('style');
+  boot.id='oa-pf-boot-style';
+  boot.textContent='html.oa-pf-boot,html.oa-pf-boot body{background:#080d12!important}html.oa-pf-boot body{visibility:hidden!important}';
+  document.head.appendChild(boot);
+  var css=document.createElement('link'); css.rel='stylesheet'; css.href='/static/portfolio-redesign.css?v=4'; document.head.appendChild(css);
+  var js=document.createElement('script'); js.src='/static/portfolio-redesign.js?v=4'; js.defer=true; document.head.appendChild(js);
   var assets=document.createElement('script'); assets.src='/static/portfolio-assets.js?v=1'; assets.defer=true; document.head.appendChild(assets);
 })();
 
