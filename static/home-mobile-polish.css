@@ -19,7 +19,7 @@ body.oa-home-mobile .pt-nb-avatar{width:39px!important;height:39px!important}
 .oa-m-values>span{font-size:15px!important}.oa-m-values small{font-size:6.8px!important}
 .oa-m-primary{min-height:41px!important;padding:0 17px!important;border-radius:10px!important;font-size:12px!important}
 .oa-m-hero-art{position:absolute!important;right:0!important;top:0!important;bottom:0!important;width:48%!important;background:none!important;opacity:.96!important}
-.oa-m-hero-art img{position:absolute;width:118%!important;height:112%!important;right:-16%!important;bottom:-8%!important;object-fit:contain!important;object-position:center bottom!important;filter:drop-shadow(0 18px 28px rgba(0,0,0,.48))}
+.oa-m-hero-art img{position:absolute;width:118%!important;height:112%!important;right:-16%!important;bottom:-8%!important;object-fit:contain!important;object-position:center bottom!important;filter:none!important}
 .oa-m-bot{grid-template-columns:48px minmax(0,1fr) 34px auto!important;gap:8px!important;padding:10px 11px!important;border-radius:14px!important;margin-bottom:9px!important;min-height:73px!important}
 .oa-m-bot-avatar{width:46px!important;height:46px!important;font-size:14px!important}.oa-m-bot-title{font-size:13px!important}.oa-m-bot-status{font-size:9.5px!important}.oa-m-bot-meta{font-size:8.4px!important;gap:4px!important}.oa-m-bot-settings{width:32px!important;height:32px!important;font-size:14px!important}.oa-m-bot-btn{height:38px!important;border-radius:10px!important;padding:0 10px!important;font-size:9.7px!important}
 .oa-m-portfolio{grid-template-columns:38px minmax(0,1fr) 88px auto!important;gap:7px!important;padding:9px 11px!important;border-radius:14px!important;margin-bottom:9px!important;min-height:66px!important}.oa-m-pf-icon{width:37px!important;height:37px!important;font-size:17px!important}.oa-m-pf-label{font-size:9.5px!important}.oa-m-pf-row strong{font-size:18px!important}.oa-m-pf-row span{font-size:9.5px!important}.oa-m-pf-btn{padding:8px 9px!important;font-size:9px!important}.oa-m-pf-chart .oa-m-spark{height:29px!important}
@@ -28,5 +28,22 @@ body.oa-home-mobile .pt-nb-avatar{width:39px!important;height:39px!important}
 body.oa-home-mobile #feed-composer{padding:9px 10px!important;border-radius:14px!important}.oa-home-mobile .feed-composer-avatar{width:36px!important;height:36px!important}.oa-home-mobile .feed-composer-input{font-size:11px!important;min-height:36px!important}.oa-m-feed-label{height:40px!important;margin-bottom:7px!important}.oa-m-feed-label button{font-size:11px!important}
 body.oa-home-mobile #center-feed{gap:0!important}body.oa-home-mobile .feed-card{margin-left:0!important;margin-right:0!important;border-radius:14px!important}body.oa-home-mobile .feed-card+ .feed-card{margin-top:8px!important}
 body.oa-home-mobile #mobile-nav{height:calc(72px + env(safe-area-inset-bottom,0px))!important}
+
+/* X/Twitter-style unified canvas: one stable dark surface everywhere. */
+html:has(body.oa-home-mobile),body.oa-home-mobile,body.oa-home-mobile #app,body.oa-home-mobile .app-body,body.oa-home-mobile .wrap{background:#080d12!important;background-image:none!important}
+body.oa-home-mobile .pt-nb-topbar{background:#080d12!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;box-shadow:none!important}
+body.oa-home-mobile #mobile-nav{background:#080d12!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;box-shadow:0 -1px 0 rgba(255,255,255,.06)!important}
+.oa-m-hero{background:#0a1016!important;border-color:rgba(247,185,85,.18)!important;box-shadow:none!important}
+.oa-m-hero:before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 12% 8%,rgba(247,185,85,.10),transparent 32%);pointer-events:none}
+.oa-m-hero-art{mix-blend-mode:normal!important}
+.oa-m-bot,.oa-m-portfolio,.oa-m-coin,.oa-m-view-market,.oa-m-shortcuts a,body.oa-home-mobile #feed-composer,body.oa-home-mobile .feed-card,body.oa-home-mobile .post-card{background:#0b1117!important;background-image:none!important;box-shadow:none!important}
+body.oa-home-mobile #center-feed{background:#080d12!important}
+body.oa-home-mobile .feed-card,body.oa-home-mobile .post-card{border-color:rgba(255,255,255,.055)!important}
+body.oa-home-mobile .feed-card img,body.oa-home-mobile .post-card img{background:#080d12}
+/* Keep scrolling on the document only; avoid nested scroll/repaint layers on iOS. */
+html:has(body.oa-home-mobile),body.oa-home-mobile{overflow-y:auto!important;-webkit-overflow-scrolling:touch!important}
+body.oa-home-mobile #app,body.oa-home-mobile .app-body,body.oa-home-mobile .wrap{overflow:visible!important;height:auto!important;max-height:none!important}
+body.oa-home-mobile .pt-nb-topbar{contain:layout paint;transform:translateZ(0)}
+body.oa-home-mobile #mobile-nav{transform:translateZ(0)}
 }
 @media(max-width:390px){.oa-m-hero{min-height:292px!important}.oa-m-hero-copy h1{font-size:20px!important}.oa-m-hero-copy p{font-size:9.7px!important}.oa-m-values{width:calc(100% + 96px)!important}.oa-m-bot-meta{max-width:150px}.oa-m-pf-chart{display:none!important}.oa-m-portfolio{grid-template-columns:36px minmax(0,1fr) auto!important}.oa-m-market-strip{grid-template-columns:repeat(3,1fr) .8fr!important}.oa-m-shortcuts a{font-size:8px!important}}
