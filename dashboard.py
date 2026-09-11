@@ -5686,6 +5686,74 @@ def _upsert_open_position(user_id: int, wallet: str, mint: str, pos: dict, sourc
     except Exception as e:
         print(f'[open_positions] upsert failed for user_id={user_id} mint={mint[:8]}: {e}', flush=True)
 
+def _sell_fraction(data: dict) -> tuple:
+    """How much of a holding a sell request is asking for.
+
+    Returns (fraction, is_full). The CLIENT never names a quantity of
+    tokens: it names a share, and the quantity is worked out on this side
+    from what the server can see is actually held. A number from the
+    browser decides how much of your own position to sell, so it is checked
+    here rather than trusted -- anything that is not a real number above 0
+    and at most 100 is refused rather than clamped, because a request to
+    sell "-5%" or "nan%" is a broken caller, not a small one.
+
+    Absent means the whole position, so every caller that predates this --
+    the bot's own exits, the wallet page, the older routes -- keeps meaning
+    exactly what it always meant.
+    """
+    raw = data.get('sell_pct', None)
+    if raw is None or raw == '':
+        return 1.0, True
+    try:
+        pct = float(raw)
+    except (TypeError, ValueError):
+        raise ValueError('How much to sell must be a number')
+    # NaN fails both comparisons, which is the point: it must not slip past
+    # a one-sided check the way it would past `pct > 100`.
+    if not (pct > 0) or not (pct <= 100):
+        raise ValueError('How much to sell must be above 0% and at most 100%')
+    frac = pct / 100.0
+    # From 99.5% up this is a full close. Half a percent of a position left
+    # behind is dust: on most chains it costs more in gas to sell than it is
+    # worth, so it would sit there forever looking like a holding.
+    return (1.0, True) if frac >= 0.995 else (frac, False)
+
+
+def _reduce_open_position(user_id: int, wallet: str, mint: str, sold: float,
+                          chain: str = 'solana'):
+    """Take a sold slice off a position that stays open.
+
+    The entry price does not move -- the tokens still held were bought at
+    the price they were always bought at -- but the amount and the money
+    that went into it both shrink by the share that was sold, so what is
+    left still reports what it actually cost. Selling the rest (or more
+    than the rest) closes it, rather than leaving a row with nothing in it.
+    """
+    pos = get_user_state(wallet)['positions'].get(mint, {})
+    have = float(pos.get('amount', 0.0) or 0.0)
+    left = have - float(sold or 0.0)
+    if not left > 0:
+        _close_open_position(user_id, wallet, mint, chain=chain)
+        return
+    kept = left / have if have > 0 else 0.0
+    pos['amount'] = left
+    pos['spend'] = round(float(pos.get('spend', 0.0) or 0.0) * kept, 8)
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            conn.execute('PRAGMA busy_timeout=3000')
+            conn.execute('UPDATE open_positions SET amount=?, spend=?, '
+                         'updated_at=CURRENT_TIMESTAMP '
+                         'WHERE user_id=? AND mint_address=?',
+                         (pos['amount'], pos['spend'], user_id, mint))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f'[open_positions] reduce failed for user_id={user_id} '
+              f'mint={mint[:8]}: {e}', flush=True)
+
+
 def _close_open_position(user_id: int, wallet: str, mint: str, chain: str = 'solana'):
     """Closes ONE position -- clears it from the in-memory positions dict and
     deletes its open_positions row. Nothing more: this used to also stop the
@@ -12803,6 +12871,11 @@ def live_market():
                            # A chain with no explorer configured is simply
                            # absent, so it shows the transaction as plain
                            # text rather than taking the page down with it.
+                           # The platform fee the sell leg actually charges.
+                           # Handed over rather than written into the JS, so
+                           # the rate the fee box quotes is the rate the fee
+                           # code charges.
+                           fee_rate_txn=FEE_RATE_TXN,
                            tx_explorers={
                                **{c: EVM_CHAINS[c]['explorer'] + '/tx/'
                                   for c in EVM_CHAINS
@@ -13906,6 +13979,11 @@ def _evm_sell_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM
     token_address = _sanitize(str(data.get('token_address', '')).strip())
     if not is_valid_evm_address(token_address):
         return jsonify({'ok': False, 'msg': 'Invalid token address'}), 400
+    # A share, never a quantity -- see _sell_fraction().
+    try:
+        frac, full_close = _sell_fraction(data)
+    except ValueError as e:
+        return jsonify({'ok': False, 'msg': str(e)}), 400
 
     conn = sqlite3.connect(DB_FILE)
     try:
@@ -13924,9 +14002,14 @@ def _evm_sell_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM
         # the tracked position and never from the client, so a caller cannot
         # ask to sell more than was bought.
         pos = get_user_state(wallet)['positions'].get(token_address, {})
-        amount = pos.get('amount', 0.0)
-        if not amount > 0:
+        held = pos.get('amount', 0.0)
+        if not held > 0:
             return jsonify({'ok': False, 'msg': 'No open position for this token'}), 400
+        # The quantity is a share OF the tracked holding, worked out here.
+        # A partial is always smaller than the full close this route already
+        # did, and the swap itself still refuses to sell more than the wallet
+        # actually holds, so this cannot oversell by either route.
+        amount = held if full_close else held * frac
 
         td        = get_token_data(token_address)
         quoted_px = float(td['price']) if td and td.get('price') else 0.0
@@ -13997,10 +14080,21 @@ def _evm_sell_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM
         except Exception as e:
             print(f'[{chain}-trade_record] DB write failed: {e}', flush=True)
         _recalculate_badges(wallet)
-        _close_open_position(user_id, wallet, token_address, chain=chain)
+        # Only a full close empties the position. A partial one takes the
+        # sold slice off it and leaves the rest open -- closing it would
+        # make tokens the user still holds disappear from their portfolio.
+        if full_close:
+            _close_open_position(user_id, wallet, token_address, chain=chain)
+        else:
+            _reduce_open_position(user_id, wallet, token_address, amount, chain=chain)
 
     return jsonify({'ok': True, 'chain': chain, 'pnl': pnl, 'pnl_pct': pnl_pct,
                     'exit_price': exit_price, 'proceeds_usdc': proceeds_usdc,
+                    # What was actually sold, and whether anything is left --
+                    # a caller that asked for half should not have to infer it.
+                    'sold_amount': amount,
+                    'sold_pct': round(amount / held * 100, 2) if held > 0 else 0,
+                    'position_closed': full_close,
                     # True means the exit price is a market quote rather than
                     # what this sell actually returned, so a caller can tell a
                     # measured number from an estimated one.
@@ -19473,6 +19567,14 @@ def api_instant_trade():
         except (TypeError, ValueError):
             amount_token = 0.0
 
+        # A share of the holding, never a quantity from the browser.
+        sell_frac, sell_full = 1.0, True
+        if str(data.get('side', '')).strip().lower() == 'sell':
+            try:
+                sell_frac, sell_full = _sell_fraction(data)
+            except ValueError as e:
+                return jsonify({'error': str(e)}), 400
+
         if side not in ('buy', 'sell'):
             return jsonify({'error': 'side must be buy or sell'}), 400
         if not token_address:
@@ -19532,8 +19634,17 @@ def api_instant_trade():
                         f'(SOL is only used for network fees).'}), 400
                 _recent_solana_buys[(wallet, token_address)] = time.time()
 
-            amount_str = (str(amount_sol) if side == 'buy'
-                          else (str(amount_token) if amount_token > 0 else '0'))
+            # A sell can name a share ("50%") instead of a quantity. The
+            # share travels down to where the on-chain balance is known and
+            # is resolved against the RAW integer there, so the remainder is
+            # exact; 100% stays '0' ("everything held"), which is the branch
+            # that already avoids leaving dust behind.
+            if side == 'buy':
+                amount_str = str(amount_sol)
+            elif not sell_full:
+                amount_str = f'{sell_frac * 100:g}%'
+            else:
+                amount_str = str(amount_token) if amount_token > 0 else '0'
             swap_info = {}
             with _use_key(enc_blob, wallet) as pk:
                 # One wrapper for every Solana swap in the app: it guarantees
@@ -19606,11 +19717,15 @@ def api_instant_trade():
                                    END,
                                    updated_at = excluded.updated_at''',
                             (uid, token_address, symbol, amount_sol, buy_price_usd, now))
-                    elif amount_token <= 0:
+                    elif sell_full and amount_token <= 0:
                         # Only a SELL-EVERYTHING zeroes the holding. A partial
                         # sell used to zero it too, so selling a slice made the
                         # rest of the position vanish from the portfolio while
-                        # the tokens were still in the wallet.
+                        # the tokens were still in the wallet. A share ("50%")
+                        # is a partial by the same rule: it leaves amount_token
+                        # at 0 and would have walked straight into this branch,
+                        # so sell_full is what decides it now rather than the
+                        # quantity field being empty.
                         #
                         # A partial sell deliberately writes nothing here rather
                         # than subtracting: this column holds the SOL SPENT for a

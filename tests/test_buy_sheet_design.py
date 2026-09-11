@@ -128,9 +128,15 @@ check('the sell ticket sits within reach of the thumb rather than floating '
 check('focus is visible on every control in the sheet, so it can be used '
       'without a touchscreen at all',
       ':focus-visible' in CSS and 'outline:2px solid var(--accent)' in CSS)
+# The row means two different things now -- shares of your balance to
+# spend, shares of your position to close -- so the label is written when
+# the sheet opens rather than sitting in the markup saying one of them.
 check('the percentage buttons say what they do, not just what they read',
-      'aria-label="Spend 25% of your balance"' in HTML
-      and 'aria-label="Spend your whole balance"' in HTML)
+      "'Spend ' + pct + '% of your balance'" in JS
+      and "'Spend your whole balance'" in JS)
+check('...in whichever of the two things the row currently means',
+      "'Sell ' + pct + '% of your position'" in JS
+      and "'Sell your whole position'" in JS)
 check('the keypad and the quick amounts are named groups',
       'aria-label="Amount keypad"' in HTML and 'aria-label="Quick amounts"' in HTML)
 check('the result of a trade is announced rather than only drawn',

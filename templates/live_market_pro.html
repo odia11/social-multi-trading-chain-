@@ -399,8 +399,28 @@ input{font-family:inherit}
 .pt-sheet-ft{padding:clamp(9px,1.6vh,14px) 16px calc(14px + env(safe-area-inset-bottom,0px));
   flex:0 0 auto}
 /* Capped so a long breakdown scrolls rather than pushing the amount off
-   the screen above it. */
+   the screen above it. It is folded away by default now as well, but the
+   cap stays: an opened box must not be able to squeeze the amount either. */
 .pt-sheet-ft .pt-quote{margin:0 0 11px;max-height:32vh;overflow-y:auto}
+
+/* ── what it costs, folded away ── */
+.pt-fees{margin:0 0 10px;background:var(--sheet-tile);border:1px solid var(--sheet-line);
+  border-radius:13px;overflow:hidden}
+.pt-fees-sum{display:flex;align-items:center;gap:9px;padding:10px 13px;cursor:pointer;
+  list-style:none;font-size:12px;color:var(--muted);transition:background .12s}
+.pt-fees-sum::-webkit-details-marker{display:none}
+.pt-fees-sum:active{background:var(--sheet-key)}
+.pt-fees-lbl{font-weight:700;letter-spacing:.01em}
+.pt-fees-amt{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--text);
+  font-variant-numeric:tabular-nums;text-align:right}
+.pt-fees-chev{width:15px;height:15px;flex:0 0 auto;transition:transform .16s}
+.pt-fees[open] .pt-fees-chev{transform:rotate(180deg)}
+.pt-fees>*:not(summary){padding:0 13px 12px}
+.pt-fees-sell{display:none;flex-direction:column;gap:5px;font-family:var(--mono);
+  font-size:11px;color:var(--muted)}
+.pt-sheet.sell-mode .pt-fees-sell{display:flex}
+/* The breakdown is the only thing in here that can run long. */
+.pt-sheet-ft .pt-fees .pt-quote{margin:0;max-height:30vh;overflow-y:auto;border-top:none;padding-top:0}
 
 /* ── slide to confirm ──
    The knob is dragged the width of the track. Nothing happens until it gets
@@ -469,9 +489,16 @@ input{font-family:inherit}
 /* Selling has no amount to enter: the server closes the whole tracked
    position, so a keypad and percentage buttons would be asking a question
    with only one answer. */
+/* The percentage row STAYS in sell mode: it is how much of the position to
+   close. Only the keypad goes, because a sell names a share and not a
+   figure you type. */
 .pt-sheet.sell-mode .pt-keys,
-.pt-sheet.sell-mode .pt-sheet-pcts,
 .pt-sheet.sell-mode .pt-sheet-cap{display:none}
+/* Selling, one of the four is the current choice and says so. Buying they
+   are one-shot fills of the amount, so none of them is ever "on". */
+.pt-pct.on{background:var(--accent-soft);color:var(--accent)}
+.pt-sheet.sell-mode .pt-pct.on{background:rgba(247,107,98,.14);color:var(--red)}
+.pt-sheet.sell-mode .pt-pct:active{background:rgba(247,107,98,.10);color:var(--red)}
 .pt-sheet.sell-mode .pt-sheet-mid{gap:12px;justify-content:flex-end;
   padding-bottom:clamp(10px,2.2vh,18px)}
 /* With the caption gone the balance line has the top row to itself, and it
@@ -869,11 +896,15 @@ input{font-family:inherit}
 
   <!-- One segmented track rather than four detached pills: they are four
        answers to a single question, and reading as one control says so. -->
+  <!-- One row, two readings. Buying, these are shares of your balance to
+       spend; selling, they are shares of the position to close. The same
+       control either way, because it is the same question -- how much --
+       and a second row that only appears in one mode would be two. -->
   <div class="pt-sheet-pcts" role="group" aria-label="Quick amounts">
-    <button class="pt-pct" data-pct="10" aria-label="Spend 10% of your balance">10%</button>
-    <button class="pt-pct" data-pct="25" aria-label="Spend 25% of your balance">25%</button>
-    <button class="pt-pct" data-pct="50" aria-label="Spend 50% of your balance">50%</button>
-    <button class="pt-pct" data-pct="100" aria-label="Spend your whole balance">Max</button>
+    <button class="pt-pct" data-pct="10" data-spct="25">10%</button>
+    <button class="pt-pct" data-pct="25" data-spct="50">25%</button>
+    <button class="pt-pct" data-pct="50" data-spct="75">50%</button>
+    <button class="pt-pct" data-pct="100" data-spct="100">Max</button>
   </div>
 
   <div class="pt-keys" id="pt-keys" role="group" aria-label="Amount keypad">
@@ -899,9 +930,28 @@ input{font-family:inherit}
   <!-- Everything confirmBuy() reaches for lives inside here, under the ids
        it already uses, so the buy path is entirely unchanged. -->
   <div class="pt-sheet-ft" id="pt-buy-panel-sheet">
-    <!-- The EVM cost breakdown renders in here, unchanged: same class, same
-         id shape, so scheduleQuote() needs to know nothing about the sheet. -->
-    <div class="pt-quote" id="pt-quote-sheet" style="display:none"></div>
+    <!-- What a trade costs, folded away. It used to be either absent (sell)
+         or unfolded and tall enough to squeeze the amount off the screen
+         (buy). A <details> rather than a hand-rolled toggle, so it opens
+         with a keyboard and announces itself without any code of ours.
+         The EVM cost breakdown still renders into #pt-quote-sheet
+         unchanged: same class, same id shape, so scheduleQuote() needs to
+         know nothing about any of this. -->
+    <details class="pt-fees" id="pt-fees">
+      <summary class="pt-fees-sum">
+        <span class="pt-fees-lbl">Fees &amp; costs</span>
+        <span class="pt-fees-amt" id="pt-fees-amt"></span>
+        <svg class="pt-fees-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </summary>
+      <div class="pt-quote" id="pt-quote-sheet" style="display:none"></div>
+      <!-- Selling is not quoted: what it returns is known when it settles,
+           so this states the rates that apply rather than inventing a total
+           for a swap that has not happened. -->
+      <div class="pt-fees-sell" id="pt-fees-sell"></div>
+    </details>
     <input type="hidden" id="pt-buy-amt-sheet" value="">
     <!-- Slide, not tap. A tap is one accident away from spending money, and
          these are irreversible. The label carries .pt-buy-confirm because
@@ -934,6 +984,9 @@ var PT_MIN_BUY_USDC = {{ min_buy_usdc|default(1) }};
 // Where a completed trade can be looked up, per chain. From the server so
 // there is no second list of explorers to drift.
 var PT_TX_EXPLORERS = {{ tx_explorers|default({})|tojson }};
+// The platform fee on a sale, from the server so the fee box cannot quote a
+// rate the fee code does not charge.
+var PT_FEE_RATE_TXN = {{ fee_rate_txn|default(0.0075) }};
 </script>
 <script src="/static/live-market-pro.js?v={{ app_version }}" defer></script>
 <script src="/static/pull-to-refresh.js?v={{ app_version }}"></script>

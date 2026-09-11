@@ -934,8 +934,31 @@ def execute_single_swap(action: str, mint: str, amount_str: str, base: str = 'SO
     carries no platform fee yet (see _execute_swap_inner's fee guard) -- a
     disclosed v1 limitation, not a bug, since bundling a fee into a USDC buy
     would need a new raw SPL-token-transfer instruction this file doesn't
-    build yet."""
-    amount = float(amount_str)
+    build yet.
+
+    A SELL may name a SHARE of the balance instead of a quantity: "50%".
+    It is resolved here rather than by the caller because this is the only
+    place the true balance is known, and because the arithmetic is done on
+    the RAW integer the RPC reports -- a percentage computed from the
+    decimal-divided float and multiplied back up undershoots, which is the
+    same precision loss that used to leave dust behind on a full close."""
+    sell_pct = None
+    _raw_amt = str(amount_str).strip()
+    if _raw_amt.endswith('%'):
+        if action != 'sell':
+            print(f'ERROR: a percentage amount is only meaningful for a sell, got {action!r}', flush=True)
+            sys.exit(1)
+        try:
+            sell_pct = float(_raw_amt[:-1])
+        except ValueError:
+            print(f'ERROR: {_raw_amt!r} is not a percentage', flush=True)
+            sys.exit(1)
+        if not (sell_pct > 0) or sell_pct > 100:
+            print(f'ERROR: sell percentage must be above 0 and at most 100, got {sell_pct}', flush=True)
+            sys.exit(1)
+        amount = 0.0
+    else:
+        amount = float(amount_str)
     base_mint     = USDC_MINT if base.upper() == 'USDC' else SOL_MINT
     base_decimals = BASE_MINT_DECIMALS[base_mint]
     base_label    = 'USDC' if base_mint == USDC_MINT else 'SOL'
@@ -970,7 +993,14 @@ def execute_single_swap(action: str, mint: str, amount_str: str, base: str = 'SO
             # oversell -- previously this branch ignored `amount` entirely and
             # always sold 100%, so a partial sell request (e.g. the wallet
             # Swap modal) silently liquidated the whole balance instead.
-            if amount <= 0:
+            # A share of what is actually held, taken off the raw integer so
+            # the remainder is exact. 100% falls through to the full-balance
+            # branch below rather than being computed, because raw_balance
+            # IS the answer there and computing it could only lose a unit.
+            if sell_pct is not None and sell_pct < 100:
+                lamports    = int(raw_balance * sell_pct / 100)
+                sell_amount = lamports / (10 ** decimals)
+            elif amount <= 0:
                 lamports    = raw_balance
                 sell_amount = actual_balance
             else:
@@ -986,7 +1016,8 @@ def execute_single_swap(action: str, mint: str, amount_str: str, base: str = 'SO
                 base_received = int(out_amount_raw) / (10 ** base_decimals)
             except Exception:
                 base_received = 0
-            requested = 'ALL' if amount <= 0 else round(amount, 6)
+            requested = (f'{sell_pct:g}%' if sell_pct is not None and sell_pct < 100
+                         else ('ALL' if amount <= 0 else round(amount, 6)))
             # 'sol:' key kept literal even for a USDC sell -- dashboard.py's
             # stdout parser (_parse_swap_realized_amounts) matches on that
             # exact substring; a ' base:USDC' suffix (only added when it's

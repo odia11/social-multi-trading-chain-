@@ -1032,6 +1032,47 @@ function _sheetUnbindIds(idx){
   if(q){ q.style.display = 'none'; q.innerHTML = ''; }
 }
 
+// The same four buttons, relabelled. Buying they are shares of the balance
+// to spend; selling, shares of the position to close -- and the sell set
+// starts at a quarter rather than a tenth, because a tenth of a position is
+// rarely what anyone means and the row only has four slots.
+function _paintPcts(mode){
+  var sell = mode === 'sell';
+  document.querySelectorAll('#pt-sheet .pt-pct').forEach(function(b){
+    var pct = sell ? b.dataset.spct : b.dataset.pct;
+    var last = pct === '100';
+    b.textContent = last ? (sell ? 'All' : 'Max') : (pct + '%');
+    b.setAttribute('aria-label', sell
+      ? (last ? 'Sell your whole position' : 'Sell ' + pct + '% of your position')
+      : (last ? 'Spend your whole balance' : 'Spend ' + pct + '% of your balance'));
+    b.classList.toggle('on', sell && Number(pct) === _sellPct);
+  });
+}
+
+// What the trade costs. Buying, the breakdown is quoted and rendered by
+// renderQuote() as it always was. Selling is not quoted -- what a sale
+// returns is known when it settles -- so this states the rates that apply
+// rather than inventing a total for a swap that has not happened.
+function _paintFees(t, mode){
+  var box = document.getElementById('pt-fees');
+  var amtEl = document.getElementById('pt-fees-amt');
+  var sellEl = document.getElementById('pt-fees-sell');
+  if(box) box.open = false;      // folded away again for the next token
+  if(mode !== 'sell'){ if(amtEl) amtEl.textContent = ''; return; }
+  var pct = (PT_FEE_RATE_TXN * 100).toFixed(2).replace(/\.?0+$/, '');
+  var gas = (CHAIN_LABELS[t.chain] || (t.chain || '').toUpperCase());
+  if(amtEl) amtEl.textContent = pct + '% + network fee';
+  if(sellEl){
+    sellEl.innerHTML =
+        '<div class="pt-quote-row"><span>OrcAgent fee</span><span>'
+      +   esc(pct) + '% of what the sale returns</span></div>'
+      + '<div class="pt-quote-row"><span>Network fee</span><span>paid in '
+      +   esc(gas) + ' gas</span></div>'
+      + '<div class="pt-quote-note">Both are taken when the sale settles, so '
+      + 'the amounts follow whatever it actually returns.</div>';
+  }
+}
+
 // Spendable balance is per chain, never a pooled total: buying on BSC spends
 // the BSC balance and nothing else. Cached briefly so reopening the sheet
 // does not re-read every chain.
@@ -1067,6 +1108,13 @@ function _loadSheetBalance(chain){
 function openBuySheet(idx){ _openSheet(idx, 'buy'); }
 function openSellSheet(idx){ _openSheet(idx, 'sell'); }
 
+// How much of the position a sell is for, as a percentage. Buying has an
+// amount; selling used to have nothing to say -- the routes closed the whole
+// position and the client could not ask for anything else. It can now, and
+// 100 stays the default, so opening the sheet and sliding does exactly what
+// it always did.
+var _sellPct = 100;
+
 function _openSheet(idx, mode){
   var t = ST.tokens[Number(idx)];
   if(!t) return;
@@ -1074,6 +1122,9 @@ function _openSheet(idx, mode){
   _sheetMode = mode;
   _sheetAmt = '';
   _sheetAvail = null;
+  _sellPct = 100;
+  _paintPcts(mode);
+  _paintFees(t, mode);
   _sheetBindIds(idx);
   _sheetEl('pt-sheet').classList.toggle('sell-mode', mode === 'sell');
   _slideReset();
@@ -1160,10 +1211,14 @@ function _paintSheet(){
     // (that is what they have always done -- the client has never been able
     // to name a sell amount, which is what stops a caller selling more than
     // was bought).
-    _sheetEl('pt-sheet-amt').textContent = 'Sell all';
+    var whole = _sellPct >= 100;
+    _sheetEl('pt-sheet-amt').textContent = whole ? 'Sell all' : ('Sell ' + _sellPct + '%');
     _sheetEl('pt-sheet-amt').classList.remove('dim');
-    _sheetEl('pt-sheet-get').textContent = 'Your whole $' + (t && t.symbol || '') + ' position';
-    _sheetEl('pt-sheet-avail').innerHTML = 'Closes the position at the current price';
+    _sheetEl('pt-sheet-get').textContent = (whole ? 'Your whole $' : _sellPct + '% of your $')
+      + (t && t.symbol || '') + ' position';
+    _sheetEl('pt-sheet-avail').innerHTML = whole
+      ? 'Closes the position at the current price'
+      : 'Sells that share now, keeps the rest';
     // The three readings a sell decision actually turns on, from the same
     // token object the card reads -- not a second lookup that could disagree
     // with what the person just tapped.
@@ -1176,7 +1231,8 @@ function _paintSheet(){
       return '<div><div class="pt-tstat-k">' + esc(r[0]) + '</div>'
            + '<div class="pt-tstat-v ' + r[2] + '">' + esc(r[1]) + '</div></div>';
     }).join('');
-    _slideSetLabel('Slide to sell $' + (t && t.symbol || ''));
+    _slideSetLabel(whole ? ('Slide to sell $' + (t && t.symbol || ''))
+                         : ('Slide to sell ' + _sellPct + '%'));
     _slideEnable(true);
     return;
   }
@@ -1442,6 +1498,12 @@ document.addEventListener('click', function(e){
   }
   var p = e.target.closest('.pt-sheet-pcts .pt-pct');
   if(p && _sheetIdx !== null){
+    if(_sheetMode === 'sell'){
+      _sellPct = Number(p.dataset.spct) || 100;
+      _paintPcts('sell');
+      _paintSheet();
+      return;
+    }
     if(_sheetAvail === null) return;
     var part = _sheetAvail * (Number(p.dataset.pct) / 100);
     // Floored to the cent: rounding up on Max would ask to spend more than
@@ -1496,6 +1558,9 @@ function scheduleQuote(idx, delayMs){
     box.style.display = 'block';
     box.innerHTML = '<div class="pt-quote-wait">Pricing…</div>';
   }
+  // The previous amount's total is not this amount's total.
+  var feeAmt = document.getElementById('pt-fees-amt');
+  if(feeAmt && _sheetMode !== 'sell') feeAmt.textContent = '';
   // Debounced: a quote is a live route lookup, and firing one per keystroke
   // would spend the rate limit on numbers the user is still typing. But a
   // settled amount -- a tap on 25% or Max -- passes 0 and goes straight out,
@@ -1572,6 +1637,14 @@ function renderQuote(idx, d, t){
           + 'price movement, not charged. Anything unused stays yours.</div>'
         : '')
     + '<div class="pt-quote-note" id="pt-quote-exp-'+idx+'"></div>';
+  // The folded summary carries the total, so the box says what it costs
+  // without having to be opened at all.
+  var amtEl = document.getElementById('pt-fees-amt');
+  if(amtEl){
+    var spend = Number(d.max_spend_usd), gets = Number(d.token_purchase_usd);
+    amtEl.textContent = (isFinite(spend) && isFinite(gets) && spend > gets)
+      ? ('-' + (spend - gets).toFixed(2) + ' ' + cur) : '';
+  }
   tickQuoteExpiry(idx);
 }
 
@@ -1795,9 +1868,15 @@ function handleSell(idx, btn){
   var isBsc = t.chain === 'bsc';
   var isEvm = !!EVM_TRADE_CHAINS[t.chain];
   var url  = isBsc ? '/api/bsc/trade/sell' : (isEvm ? '/api/evm/trade/sell' : '/api/instant-trade');
-  var body = isBsc ? {token_address:t.mint}
-    : isEvm ? {chain:t.chain, token_address:t.mint}
-    : {symbol:t.symbol, token_address:t.mint, pair_address:t.pair_address, side:'sell', amount_sol:0};
+  // A SHARE, never a quantity. The server works out how many tokens that is
+  // from what it can see is held -- so a tampered number can only ever ask
+  // for a different slice of your own position, never for more of it than
+  // exists, and never for somebody else's.
+  var pct = Math.min(100, Math.max(1, Number(_sellPct) || 100));
+  var body = isBsc ? {token_address:t.mint, sell_pct:pct}
+    : isEvm ? {chain:t.chain, token_address:t.mint, sell_pct:pct}
+    : {symbol:t.symbol, token_address:t.mint, pair_address:t.pair_address, side:'sell',
+       amount_sol:0, sell_pct:pct};
   fetch(url, {
     method:'POST', credentials:'include', headers: authHeaders(),
     body: JSON.stringify(body)
@@ -1815,7 +1894,10 @@ function handleSell(idx, btn){
     // fallback is a market quote rather than the realised amount.
     var got = (sold && d && d.proceeds_usdc != null && d.exit_price_estimated === false)
       ? (' for $' + Number(d.proceeds_usdc).toFixed(2)) : '';
-    toast(sold ? ('Sold $'+t.symbol+got) : ((d && (d.error||d.msg)) || 'Sell failed'));
+    var partial = sold && (d && d.position_closed === false);
+    toast(sold ? ((partial ? 'Sold ' + (d.sold_pct != null ? d.sold_pct + '% of $' : 'part of $')
+                           : 'Sold $') + t.symbol + got)
+               : ((d && (d.error||d.msg)) || 'Sell failed'));
     // A sold position is gone, so there is nothing left for this sheet to
     // act on -- it closes rather than offering to sell it again. A failure
     // keeps it open with the slider armed, so the person can retry without
