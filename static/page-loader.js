@@ -40,5 +40,18 @@
     if(validLink(a))start();
   },true);
   addEventListener('beforeunload',start);
-  addEventListener('pageshow',finish);
+
+  /* Several older standalone templates register a bubble-phase pageshow
+     handler that calls location.reload() whenever Safari restores them from
+     bfcache. That makes Back/Forward needlessly re-download and rebuild the
+     whole page. Capture-phase handling runs first and stops only those
+     persisted restores; normal pageshow events still flow as before. Existing
+     page polling resumes from the preserved JS state. */
+  addEventListener('pageshow',function(e){
+    finish();
+    if(e.persisted){
+      try{e.stopImmediatePropagation()}catch(_){ }
+      document.dispatchEvent(new CustomEvent('oa:bfcache-restore'));
+    }
+  },true);
 })();
