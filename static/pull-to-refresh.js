@@ -22,6 +22,14 @@
 
   window.initPullToRefresh = function(opts){
     opts = opts || {};
+
+    // Mobile Home is a continuous social feed. Pull-to-refresh conflicts with
+    // ordinary vertical scrolling on iOS/Phantom and can also wipe an active
+    // composer draft. Keep scrolling native on this route and refresh only by
+    // explicit navigation/reload.
+    var path = location.pathname.replace(/\/+$/, '') || '/';
+    if(path === '/' && window.matchMedia('(max-width:767px)').matches) return;
+
     var PTR_THRESHOLD = 70;
     var touchTarget = _resolve(opts.touchTarget) || document.body;
     var onRefresh   = opts.onRefresh || function(){ location.reload(); };
