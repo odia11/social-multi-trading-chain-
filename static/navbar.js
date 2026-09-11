@@ -16,13 +16,21 @@
   var assets=document.createElement('script'); assets.src='/static/portfolio-assets.js?v=1'; assets.defer=true; document.head.appendChild(assets);
 })();
 
-/* Desktop home redesign: presentation-only layer for the dashboard root.
-   Mobile/tablet keep the existing UI untouched. */
+/* Desktop home redesign: presentation-only layer for the dashboard root. */
 (function(){
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/' || !window.matchMedia('(min-width:1025px)').matches) return;
   var css=document.createElement('link'); css.rel='stylesheet'; css.href='/static/home-desktop.css?v=1'; document.head.appendChild(css);
   var js=document.createElement('script'); js.src='/static/home-desktop.js?v=1'; js.defer=true; document.head.appendChild(js);
+})();
+
+/* Mobile home redesign. It only changes presentation on the dashboard root;
+   the existing composer/feed/mobile-nav stay responsible for the actions. */
+(function(){
+  var here=location.pathname.replace(/\/+$/,'')||'/';
+  if(here!=='/' || !window.matchMedia('(max-width:767px)').matches) return;
+  var css=document.createElement('link'); css.rel='stylesheet'; css.href='/static/home-mobile.css?v=1'; document.head.appendChild(css);
+  var js=document.createElement('script'); js.src='/static/home-mobile.js?v=1'; js.defer=true; document.head.appendChild(js);
 })();
 
 var _NB_LIVE_CHAINS = ['solana', 'bsc', 'base', 'arbitrum', 'polygon', 'robinhood'];
