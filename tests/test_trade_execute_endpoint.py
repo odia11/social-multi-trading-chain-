@@ -316,6 +316,15 @@ def _calls_in(name):
             if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)}
 
 
+# Copying is somebody ELSE'S trade, on their money and possibly on another
+# chain, fired off in a background thread after this one is already done. It
+# is not a path this trade takes, so the walk stops there -- otherwise every
+# route that can be copied would read as "on the engine" the moment a copier
+# somewhere is on an EVM chain, which says nothing about how THIS trade was
+# priced.
+NOT_THIS_TRADE = {'_trigger_copy_buy', '_trigger_copy_buy_evm'}
+
+
 def reaches_engine(name, seen=None):
     """Whether this endpoint runs a trade through the engine, directly or
     through one of the app's own helpers.
@@ -326,7 +335,7 @@ def reaches_engine(name, seen=None):
     untouched no matter what it had been wired to.
     """
     seen = seen or set()
-    if name in seen or name not in funcs:
+    if name in seen or name not in funcs or name in NOT_THIS_TRADE:
         return False
     seen.add(name)
     for sub in ast.walk(funcs[name]):
@@ -371,6 +380,14 @@ check('the Solana buys are deliberately NOT on the engine — they already spend
 # its own defects are covered in tests/test_instant_trade.py.
 check('the Solana one-click route is not on the engine either, for the same '
       'reason as the other two', not reaches_engine('api_instant_trade'))
+# Stated separately so the exclusion above is a recorded decision rather
+# than a hole: these routes DO reach the engine when you follow the copy
+# trigger, and that is correct -- it is a copier's EVM buy, which belongs on
+# the engine, not this Solana trade.
+check('...and the copy it fires for other people is what the exclusion is '
+      'about, not a back door for this trade onto the engine',
+      '_trigger_copy_buy' in _calls_in('api_instant_trade')
+      and reaches_engine('_evm_buy_flow'))
 check('...but it no longer runs its own swap subprocess: every Solana trade in '
       'the app now funnels through one wrapper, which is what guarantees the '
       'network-fee top-up',

@@ -11040,8 +11040,122 @@ def user_trader_loop(stop_event, config, wallet: str):
 
 
 # ── COPY TRADING ──────────────────────────────────────
-def _trigger_copy_buy(buyer_wallet: str, mint: str, price: float, symbol: str, liquidity: float):
+def _copy_followers(leader_wallet: str):
+    """Everyone copying this wallet, with the settings a copy must respect.
+
+    The key columns are NOT filtered here the way they used to be: which key
+    a copy needs depends on the chain it is copying onto, and the flow that
+    does the buying already refuses with a clear message when the one it
+    needs is missing. Filtering on the Solana key alone silently dropped
+    every copier from an EVM trade.
+    """
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            return conn.execute(
+                'SELECT id, wallet_address, encrypted_private_key, min_trade_size, '
+                'copy_amount, max_positions, daily_loss_limit, max_trade_size '
+                'FROM users WHERE copy_source=? AND wallet_address != ?',
+                (leader_wallet, leader_wallet)).fetchall()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f'[copy-trade] DB error: {e}', flush=True)
+        return []
+
+
+def _copy_guards_pass(c_wallet: str, c_max_positions, c_daily_loss_limit,
+                      mint: str, symbol: str, chain: str) -> bool:
+    """The copier's own risk limits, which a copy does not get to override.
+
+    A copier who has hit their daily loss limit -- and whose own bot has
+    therefore paused -- must not still be bought into new positions every
+    time the trader they follow makes a move. Same for their position
+    ceiling. These are the guards the copy path has always applied on
+    Solana; they apply on every chain now, counted per chain, because a
+    ceiling of five positions means five on the chain being traded.
+    """
+    c_us = get_user_state(c_wallet)
+    c_loss_limit = abs(float(c_daily_loss_limit)) if c_daily_loss_limit is not None else 50.0
+    if c_us['daily_stats'].get('total_pnl', 0) < -c_loss_limit:
+        add_user_log(c_wallet, f'[copy] Skip {symbol}: daily loss limit hit')
+        return False
+    c_max_pos = int(c_max_positions) if c_max_positions is not None else 5
+    open_pos = sum(1 for p in c_us['positions'].values()
+                   if p.get('amount', 0) > 0 and p.get('chain', 'solana') == chain)
+    if open_pos >= c_max_pos:
+        add_user_log(c_wallet, f'[copy] Skip {symbol}: max positions reached')
+        return False
+    if c_us['positions'].get(mint, {}).get('amount', 0) > 0:
+        return False   # already holding it
+    return True
+
+
+def _trigger_copy_buy_evm(leader_wallet: str, token_address: str, symbol: str, chain: str):
+    """Fire-and-forget: buy `token_address` on `chain` for this wallet's copiers.
+
+    Copying was Solana-only, so a trader followed for their BNB Chain or
+    Base calls was followed in name only -- nothing happened when they
+    traded. This runs the copier's buy through the very same flow their own
+    Buy button runs through, rather than a second implementation of an EVM
+    buy: same quote, same ceiling, same gas handling, same fee. What this
+    adds around it is the copier's own risk limits and the mark that says
+    whose trade this was.
+    """
+    def _run():
+        with app.app_context():
+            for (c_uid, c_wallet, _c_enc, c_min_usdc, c_copy_amount,
+                 c_max_positions, c_daily_loss_limit, c_max_size) in _copy_followers(leader_wallet):
+                try:
+                    if not _copy_guards_pass(c_wallet, c_max_positions, c_daily_loss_limit,
+                                             token_address, symbol, chain):
+                        continue
+                    # What they set aside for a copy, else the trade size they
+                    # already use by hand. Never the leader's amount: a copier
+                    # following a whale would otherwise spend like one.
+                    spend = float(c_copy_amount) if c_copy_amount and float(c_copy_amount) > 0 \
+                        else float(c_max_size if c_max_size is not None else 10.0)
+                    if not spend > 0:
+                        continue
+                    resp = _evm_buy_flow(c_wallet, {'token_address': token_address,
+                                                    'amount_usdc': spend}, chain,
+                                         is_copy=True)
+                    body = (resp[0] if isinstance(resp, tuple) else resp).get_json() or {}
+                    if not body.get('ok'):
+                        add_user_log(c_wallet, f'[copy] {symbol} on {chain} not copied — '
+                                               f'{body.get("msg") or "buy failed"}')
+                        continue
+                    if body.get('pending'):
+                        # Gas is being bridged in; the buy completes itself when
+                        # it lands. It arrives unmarked, which is worth saying
+                        # rather than pretending the copy is recorded.
+                        add_user_log(c_wallet, f'[copy] {symbol} on {chain} queued behind '
+                                               f'a gas top-up')
+                        continue
+                    # Mark it as a copy. The buy flow records an ordinary
+                    # manual position; this is what says whose trade it was,
+                    # which is what a profile counts and what an exit would
+                    # need to find.
+                    pos = get_user_state(c_wallet)['positions'].get(token_address, {})
+                    if pos.get('amount', 0) > 0:
+                        _upsert_open_position(c_uid, c_wallet, token_address, pos,
+                                              source='copy', copy_of_wallet=leader_wallet,
+                                              chain=chain)
+                    add_user_log(c_wallet, f'[copy] COPY BUY {symbol} on {chain} for {spend} '
+                                           f'(copying {leader_wallet[:6]}…{leader_wallet[-4:]})')
+                except Exception as e:
+                    print(f'[copy-trade] {chain} error for {c_wallet[:6]}: {e}', flush=True)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _trigger_copy_buy(buyer_wallet: str, mint: str, price: float, symbol: str,
+                      liquidity: float, chain: str = 'solana'):
     """Fire-and-forget: buy `mint` for every user whose copy_source = buyer_wallet."""
+    if chain and chain != 'solana':
+        _trigger_copy_buy_evm(buyer_wallet, mint, symbol, chain)
+        return
+
     def _run():
         try:
             conn = sqlite3.connect(DB_FILE)
@@ -13653,7 +13767,8 @@ def api_bsc_trade_buy():
                          wallet_label='BSC')
 
 
-def _evm_buy_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM'):
+def _evm_buy_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM',
+                  is_copy: bool = False):
     """One manual buy on one EVM chain, for both /api/evm/trade/buy and
     /api/bsc/trade/buy.
 
@@ -13773,7 +13888,8 @@ def _evm_buy_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM'
     # real money moves, not because the old path is preferred.
     if not TRADE_ENGINE_MANUAL_EVM:
         return _legacy_evm_trade_buy(wallet, enc_blob, user_id, evm_address,
-                                     chain, token_address, amount_usdc)
+                                     chain, token_address, amount_usdc,
+                                     is_copy=is_copy)
 
     td          = get_token_data(token_address)
     entry_price = float(td['price']) if td and td.get('price') else 0.0
@@ -13808,6 +13924,18 @@ def _evm_buy_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM'
         return jsonify({'ok': False, 'msg': result.failure_reason or 'Swap failed',
                         'tx_hash': result.tx_hash, 'trade_id': result.trade_id,
                         'needs_investigation': result.needs_investigation}), 502
+    # Whoever copies this wallet copies THIS, the moment it lands. Copying
+    # used to fire from the bot loop and two older Solana routes only, so a
+    # trader followed for the calls they make by hand was followed in name
+    # only. A copy of a copy is not propagated: that is what stops two people
+    # who follow each other from trading each other in a circle.
+    # is_copy is what stops this from running away: this flow is what a copy
+    # itself is executed through, so without it a copied buy would copy
+    # onward, and two people who follow each other would trade each other in
+    # a circle until one of them ran out of money.
+    if not is_copy and not get_user_state(wallet)['positions'].get(
+            token_address, {}).get('copy_of_wallet'):
+        _trigger_copy_buy(wallet, token_address, entry_price, symbol, 0.0, chain=chain)
     return jsonify({'ok': True, 'chain': chain,
                     # What was actually bought, which is now less than the
                     # amount entered because the costs came out of it.
@@ -13820,7 +13948,7 @@ def _evm_buy_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM'
 
 
 def _legacy_evm_trade_buy(wallet, enc_blob, user_id, evm_address, chain,
-                          token_address, amount_usdc):
+                          token_address, amount_usdc, is_copy: bool = False):
     """The pre-engine buy, kept behind TRADE_ENGINE_MANUAL_EVM=0.
 
     It swaps the FULL amount and then charges 0.75% of it on top, so the
@@ -13845,6 +13973,10 @@ def _legacy_evm_trade_buy(wallet, enc_blob, user_id, evm_address, chain,
             'opened_at': time.time(),
         }, source='manual', chain=chain)
         _charge_evm_txn_fee(pk, wallet, user_id, symbol, amount_usdc, 'buy', chain)
+    # Same as the engine path above, including why is_copy has to be there.
+    if not is_copy and not get_user_state(wallet)['positions'].get(
+            token_address, {}).get('copy_of_wallet'):
+        _trigger_copy_buy(wallet, token_address, entry_price, symbol, 0.0, chain=chain)
     return jsonify({'ok': True, 'chain': chain, 'amount_usdc': amount_usdc,
                     'token_address': token_address, 'entry_price': entry_price,
                     'symbol': symbol, 'tx_hash': buy_tx_hash})
@@ -19831,6 +19963,19 @@ def api_instant_trade():
                 print(f'[fee] {wallet[:6]}... {symbol} {side}: the platform fee was NOT '
                       f'collected inside the swap, so nothing is recorded for it',
                       flush=True)
+
+            # Whoever copies this wallet copies THIS. Live Market's own Solana
+            # buy has never told the copy path anything, so a trader followed
+            # for the calls they make here was followed in name only: copying
+            # fired from the bot loop and two older routes and from nowhere
+            # else. Inside the lock, so a double-click that the repeat window
+            # already refuses cannot get a second copy out either.
+            # A copy of a copy is not propagated -- that is what stops two
+            # people who follow each other from trading each other in a circle.
+            if side == 'buy' and not get_user_state(wallet)['positions'].get(
+                    token_address, {}).get('copy_of_wallet'):
+                _trigger_copy_buy(wallet, token_address,
+                                  buy_price_usd or 0.0, symbol, 0.0, chain='solana')
 
         # Best-effort balance refresh, outside the lock -- it is display only.
         new_balance = None
