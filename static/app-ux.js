@@ -22,15 +22,29 @@ function tuneTree(root){if(root&&root.matches&&root.matches('img'))tuneImage(roo
 /* Generic mobile modal lock. Old pages use several modal conventions: some
    toggle .open, others set display:flex directly. They now all freeze the
    document behind them and return to the exact same scroll position. */
+var MODAL_SEL='.s-modal,.modal-backdrop,.gd-modal-backdrop,[class*="modal-backdrop"],.modal-back,.w-modal-back';
 var modalLocked=false,modalY=0;
+function isModalNode(el){return !!(el&&el.matches&&el.matches(MODAL_SEL))}
+function subtreeHasModal(el){return !!(el&&el.querySelector&&el.querySelector(MODAL_SEL))}
 function isVisible(el){if(!el)return false;if(el.classList.contains('open'))return true;var st=el.style&&el.style.display;if(st&&st!=='none')return true;try{return getComputedStyle(el).display!=='none'}catch(e){return false}}
-function anyOpenModal(){var list=document.querySelectorAll('.s-modal,.modal-backdrop,.gd-modal-backdrop,[class*="modal-backdrop"],.modal-back,.w-modal-back');for(var i=0;i<list.length;i++){if(isVisible(list[i]))return true}return false}
+function anyOpenModal(){var list=document.querySelectorAll(MODAL_SEL);for(var i=0;i<list.length;i++){if(isVisible(list[i]))return true}return false}
 function syncModalLock(){if(!window.matchMedia('(max-width:767px)').matches)return;if(document.documentElement.classList.contains('oa-groups-modal-open'))return;var open=anyOpenModal();if(open&&!modalLocked){modalLocked=true;modalY=window.scrollY||document.documentElement.scrollTop||0;document.documentElement.classList.add('oa-modal-open');document.body.style.position='fixed';document.body.style.top=(-modalY)+'px';document.body.style.left='0';document.body.style.right='0';document.body.style.width='100%'}else if(!open&&modalLocked){modalLocked=false;document.documentElement.classList.remove('oa-modal-open');document.body.style.position='';document.body.style.top='';document.body.style.left='';document.body.style.right='';document.body.style.width='';window.scrollTo(0,modalY)}}
 
 /* Keep Messages' fullscreen thread truly fullscreen even though every normal
    page gets the shared bottom navigation. */
 function watchThread(){var main=document.querySelector('.msgs-main');if(!main)return;function sync(){document.body.classList.toggle('oa-thread-open',main.classList.contains('thread-open'))}sync();if(window.MutationObserver)new MutationObserver(sync).observe(main,{attributes:true,attributeFilter:['class']})}
 
-function ready(){document.body.classList.add('oa-shared-ux');tuneTree(document);syncModalLock();if(window.MutationObserver)new MutationObserver(function(ms){var modalMayHaveChanged=false;ms.forEach(function(m){if(m.type==='attributes')modalMayHaveChanged=true;m.addedNodes.forEach(function(n){if(n.nodeType===1){tuneTree(n);modalMayHaveChanged=true}})});if(modalMayHaveChanged)syncModalLock()}).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style']});watchThread()}
+function ready(){
+  document.body.classList.add('oa-shared-ux');tuneTree(document);syncModalLock();
+  if(window.MutationObserver)new MutationObserver(function(ms){
+    var modalMayHaveChanged=false;
+    ms.forEach(function(m){
+      if(m.type==='attributes'&&isModalNode(m.target))modalMayHaveChanged=true;
+      m.addedNodes.forEach(function(n){if(n.nodeType!==1)return;tuneTree(n);if(isModalNode(n)||subtreeHasModal(n))modalMayHaveChanged=true});
+    });
+    if(modalMayHaveChanged)syncModalLock();
+  }).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style']});
+  watchThread();
+}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ready);else ready();
 })();
