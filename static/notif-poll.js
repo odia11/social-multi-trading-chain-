@@ -1,15 +1,18 @@
 function _pushNotif(title, body){
   if(!document.hidden) return;
-  if(Notification.permission !== 'granted') return;
+  if(!('Notification' in window) || Notification.permission !== 'granted') return;
   try{ new Notification(title, {body, icon:'/favicon.ico?v=2'}); }catch(e){}
 }
 
 function _setNotifBadge(n){
   [document.getElementById('sb-notif-badge'),
-   document.getElementById('mn-notif-badge')].forEach(el=>{
+   document.getElementById('mn-notif-badge'),
+   document.getElementById('pt-nb-notif-badge'),
+   document.getElementById('pt-nb-more-notif-badge')].forEach(function(el){
     if(!el) return;
-    el.textContent=n>99?'99+':n||'';
-    el.style.display=n>0?'inline-block':'none';
+    el.textContent=n>99?'99+':String(n||'');
+    if(el.classList && (el.id||'').indexOf('pt-nb-')===0) el.classList.toggle('show',n>0);
+    else el.style.display=n>0?'inline-block':'none';
   });
 }
 
@@ -34,8 +37,19 @@ async function _pollNotifCount(){
   }catch(_){}
 }
 
-if('Notification' in window) Notification.requestPermission();
-setInterval(_pollNotifCount,15000);
+/* Do not request browser notification permission just because a page loaded.
+   Modern social apps ask from an explicit user action/settings flow. The
+   service worker subscription check below only runs when permission was
+   already granted. */
+function _shouldLegacyPoll(){
+  /* Shared navbar already refreshes its badge in the foreground. Keep this
+     legacy poller only for pages without it, or while hidden for notification
+     fallback behaviour. */
+  return document.hidden || !document.getElementById('pt-nb-notif-badge');
+}
+setInterval(function(){if(_shouldLegacyPoll())_pollNotifCount()},30000);
+if(!document.getElementById('pt-nb-notif-badge'))_pollNotifCount();
+
 async function _silentPushResubscribeCheck(){
   if(!('serviceWorker' in navigator) || !('PushManager' in window)) return;
   if(!('Notification' in window) || Notification.permission !== 'granted') return;
