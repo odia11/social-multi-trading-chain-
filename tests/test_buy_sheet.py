@@ -153,8 +153,17 @@ check('the middle keeps a floor, so the figure being decided on cannot be '
       and int(re.search(r'\.pt-sheet-mid\{[^}]*min-height:(\d+)px', HTML_NC).group(1)) >= 100)
 check('...and clips rather than painting over the buttons below it',
       re.search(r'\.pt-sheet-mid\{[^}]*overflow:hidden', HTML_NC) is not None)
-check('the keypad gives way first, since it is the part nobody is reading',
-      re.search(r'\.pt-keys\{[^}]*flex:0 1 auto', HTML_NC) is not None)
+# The keypad is the part that gives way. What makes that true is not its
+# flex-grow -- the keypad now takes the spare height on a tall phone, which
+# is what turned the old screen into a number floating in a void -- but the
+# floor and ceiling either side of it: the middle cannot go below its
+# min-height, and the keypad can go all the way to zero.
+check('the keypad can shrink to nothing, so it is what gives way when the '
+      'column is squeezed',
+      re.search(r'\.pt-keys\{[^}]*min-height:0', HTML_NC) is not None)
+check('...and cannot grow without limit either, so spare height on a tall '
+      'phone becomes bigger keys rather than four enormous rows',
+      re.search(r'\.pt-keys\{[^}]*max-height:', HTML_NC) is not None)
 check('a long breakdown scrolls instead of pushing the amount off the top',
       re.search(r'\.pt-sheet-ft \.pt-quote\{[^}]*max-height', HTML_NC) is not None)
 
@@ -351,10 +360,24 @@ async def main():
             const mid = R(document.querySelector('.pt-sheet-mid'));
             const amt = R(document.getElementById('pt-sheet-amt'));
             const get = R(document.getElementById('pt-sheet-get'));
-            const pcts = R(document.querySelector('.pt-sheet-pcts'));
+            const pctEl = document.querySelector('.pt-sheet-pcts');
+            const pcts = R(pctEl);
+            // The bug this guards against was GHOST TEXT painted across the
+            // percentage buttons. Ask the page what is actually on top of
+            // them rather than comparing rectangles: the middle clips, so a
+            // box that overhangs is invisible, and only what paints counts.
+            const pts = [[pcts.left+30, pcts.top+8],
+                         [pcts.left+pcts.width/2, pcts.top+pcts.height/2],
+                         [pcts.right-30, pcts.bottom-8]];
+            const onTop = pts.map(([x,y]) => {
+                const e = document.elementFromPoint(x,y);
+                return e ? (e.className || e.tagName) : 'nothing';
+            });
             const r = {midH: Math.round(mid.height),
+                       keysH: Math.round(R(document.querySelector('.pt-keys')).height),
                        amountVisible: amt.top >= mid.top - 1 && amt.bottom <= mid.bottom + 1,
-                       overlapsButtons: get.bottom > pcts.top + 1};
+                       getVisible: get.height > 0,
+                       onTopOfButtons: onTop};
             s.remove();
             return r;
         }""")
@@ -435,8 +458,12 @@ check("BROWSER: ...with its own wording, not the old button's \"Confirm Buy\"",
 check('BROWSER: ...and the knob back at the start', B['after_refusal']['knobBack'])
 check('BROWSER: a tall cost breakdown cannot squeeze the amount off the '
       'screen', B['squeeze']['amountVisible'] and B['squeeze']['midH'] >= 100)
-check('BROWSER: ...nor make the "you get" line paint over the percentage '
-      'buttons', not B['squeeze']['overlapsButtons'])
+check('BROWSER: ...nor paint anything over the percentage buttons — every '
+      'probe on that row lands on a button, so the "you get" line is '
+      'clipped rather than ghosted across them',
+      all('pt-pct' in str(x) for x in B['squeeze']['onTopOfButtons']))
+check('BROWSER: ...and it is the keypad that gave way, not the amount',
+      B['squeeze']['keysH'] < 40)
 check('BROWSER: no JavaScript errors on the whole journey',
       not B.get('errors'))
 

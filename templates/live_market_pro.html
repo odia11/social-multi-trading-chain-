@@ -273,80 +273,147 @@ input{font-family:inherit}
    the screen while it is open. At 120 it sat UNDER the sticky navbar, whose
    avatar swallowed the clicks meant for the sheet's own close button --
    found by clicking it in a real browser, not by reading the stylesheet. */
-.pt-sheet{position:fixed;inset:0;z-index:300;background:var(--bg);
-  display:none;flex-direction:column;overscroll-behavior:contain}
+.pt-sheet{position:fixed;inset:0;z-index:300;
+  /* Not a flat black void. A faint cool wash at the top gives the screen a
+     horizon, so the ticket below reads as sitting ON something rather than
+     floating in nothing -- which is what made the old one feel like an
+     empty page with a number in it. */
+  background:radial-gradient(135% 58% at 50% -8%, #141821 0%, rgba(20,24,33,0) 64%), var(--sheet-bg);
+  display:none;flex-direction:column;overscroll-behavior:contain;
+  --sheet-bg:#08090c;      /* one step darker than the page, so the sheet reads as nearer */
+  --sheet-tile:#101319;    /* the ticket and the quick-amount track */
+  --sheet-key:#0e1116;     /* key faces: lifted off the ground, not painted on it */
+  --sheet-line:#1f242d}
 .pt-sheet.open{display:flex}
-.pt-sheet-grab{width:38px;height:4px;border-radius:99px;background:var(--line2);margin:8px auto 0;flex:0 0 auto}
+.pt-sheet-grab{width:36px;height:4px;border-radius:99px;background:var(--line2);
+  margin:8px auto 0;flex:0 0 auto}
 
-.pt-sheet-hd{display:flex;align-items:center;gap:11px;padding:14px 18px 16px;flex:0 0 auto}
-.pt-sheet-img,.pt-sheet-img-ph{width:44px;height:44px;border-radius:50%;background:var(--line);object-fit:cover;flex:0 0 auto}
+/* ── who you are buying ── */
+.pt-sheet-hd{display:flex;align-items:center;gap:12px;
+  padding:12px 16px 14px;border-bottom:1px solid var(--sheet-line);flex:0 0 auto}
+/* A rounded square, not a circle: token art is square everywhere it comes
+   from, and a circle crops the corners off half of it. */
+.pt-sheet-img,.pt-sheet-img-ph{width:42px;height:42px;border-radius:13px;
+  background:var(--line);object-fit:cover;flex:0 0 auto;border:1px solid var(--sheet-line)}
 /* Same fallback the cards use: a token with no logo shows its initials
-   rather than a 44px hole where a picture should be. */
-.pt-sheet-img-ph{display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--muted)}
+   rather than a 42px hole where a picture should be. */
+.pt-sheet-img-ph{display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:700;color:var(--muted)}
 .pt-sheet-id{min-width:0;flex:1}
-.pt-sheet-sym{display:flex;align-items:center;gap:7px;font-size:17px;font-weight:700;letter-spacing:-.01em}
-.pt-sheet-chain{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.06em;
-  color:var(--muted2);border:1px solid var(--line2);border-radius:5px;padding:2px 5px}
-.pt-sheet-mc{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:3px}
+.pt-sheet-sym{display:flex;align-items:center;gap:7px;font-size:16.5px;
+  font-weight:700;letter-spacing:-.012em}
+.pt-sheet-chain{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.07em;
+  color:var(--muted);background:var(--sheet-tile);border:1px solid var(--sheet-line);
+  border-radius:5px;padding:2px 5px}
+.pt-sheet-mc{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-top:3px}
 .pt-sheet-px{text-align:right;flex:0 0 auto}
-.pt-sheet-price{font-family:var(--mono);font-size:15px;font-weight:700}
-.pt-sheet-chg{font-family:var(--mono);font-size:12.5px;font-weight:700;margin-top:3px}
+.pt-sheet-price{font-family:var(--mono);font-size:15px;font-weight:700;
+  font-variant-numeric:tabular-nums}
+/* The move is a chip rather than loose coloured text -- it is a reading,
+   and giving it an edge stops it competing with the price above it. */
+.pt-sheet-chg{display:inline-block;font-family:var(--mono);font-size:11.5px;font-weight:700;
+  margin-top:4px;padding:2px 6px;border-radius:6px;font-variant-numeric:tabular-nums}
+.pt-sheet-chg.up{color:var(--green);background:rgba(58,210,155,.10)}
+.pt-sheet-chg.down{color:var(--red);background:rgba(247,107,98,.10)}
 
-/* The amount owns the middle of the screen. It is the one thing being
-   decided, and it grows and shrinks so a long figure never wraps. */
-/* This is the only part of the sheet that flexes, so when the cost
+/* ── the ticket ──
+   One surface carrying the whole decision: what the number means, the
+   number, the balance it is measured against, and what it converts into.
+   This is the only part of the sheet that flexes, so when the cost
    breakdown appears in the footer everything else holds its size and THIS
    shrinks. Squeezed below its own content and left to overflow, the
    "≈ 9,716 KEKIUS" line spilled out and painted itself across the 10/25/50
    row -- ghost text sitting on top of the buttons. It clips instead now,
    and the breakdown below is capped so it cannot squeeze this far in the
    first place. */
-.pt-sheet-mid{flex:1 1 auto;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;gap:8px;padding:4px 18px;min-height:118px;overflow:hidden}
+.pt-sheet-mid{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;
+  padding:clamp(10px,2.2vh,20px) 16px;min-height:118px;overflow:hidden}
+.pt-ticket{background:var(--sheet-tile);border:1px solid var(--sheet-line);
+  border-radius:18px;padding:clamp(13px,3.2vh,26px) 17px clamp(11px,2.6vh,20px);
+  display:flex;flex-direction:column;gap:clamp(6px,1.8vh,15px)}
+.pt-ticket-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
 .pt-sheet-cap{font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
-  color:var(--muted2);display:flex;align-items:center;gap:6px}
+  color:var(--muted);display:flex;align-items:center;gap:6px;min-width:0}
 .pt-sheet-cap .pt-buy-cur{color:var(--accent);letter-spacing:.06em}
-.pt-sheet-amt{font-size:clamp(38px,13vw,62px);font-weight:700;letter-spacing:-.03em;line-height:1;
-  font-family:var(--ui);white-space:nowrap}
+.pt-ticket-bal{font-family:var(--mono);font-size:11.5px;color:var(--muted);
+  text-align:right;font-variant-numeric:tabular-nums}
+.pt-ticket-bal b{color:var(--text);font-weight:700}
+/* Left-aligned against the ticket's own edge, so the figure has something
+   to sit on. Centred in open space it read as decoration; here it reads as
+   an entry in a field. */
+.pt-sheet-amt{font-size:clamp(36px,12.5vw,56px);font-weight:700;letter-spacing:-.035em;
+  line-height:1.04;font-family:var(--ui);white-space:nowrap;
+  font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis}
 .pt-sheet-amt.dim{color:var(--muted2)}
-.pt-sheet-get{font-family:var(--mono);font-size:12px;color:var(--muted2);min-height:15px}
+/* What you get, on its own rule under the amount: a conversion, not a
+   caption. The arrow says which way it runs. */
+.pt-ticket-get{display:flex;align-items:center;gap:7px;min-height:20px;
+  border-top:1px solid var(--sheet-line);padding-top:clamp(7px,1.4vh,11px)}
+.pt-ticket-arrow{display:flex;color:var(--muted2);flex:0 0 auto}
+.pt-ticket-arrow svg{width:13px;height:13px}
+.pt-sheet-get{font-family:var(--mono);font-size:12.5px;color:var(--green);font-weight:600;
+  font-variant-numeric:tabular-nums;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
 
-.pt-sheet-pcts{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;padding:0 18px 14px;flex:0 0 auto}
-.pt-pct{background:var(--card2);border:1px solid var(--line2);color:var(--text);
-  border-radius:12px;padding:12px 0;font-size:13.5px;font-weight:700;transition:background .12s,border-color .12s}
-.pt-pct:active{background:var(--line);border-color:var(--accent-border)}
+/* ── quick amounts: one segmented track, not four loose pills ── */
+.pt-sheet-pcts{display:grid;grid-template-columns:repeat(4,1fr);
+  margin:0 16px clamp(9px,1.6vh,14px);background:var(--sheet-tile);
+  border:1px solid var(--sheet-line);border-radius:13px;overflow:hidden;flex:0 0 auto}
+.pt-pct{background:none;border:none;border-left:1px solid var(--sheet-line);
+  color:var(--text);padding:12px 0;font-size:13px;font-weight:700;
+  transition:background .12s,color .12s}
+.pt-pct:first-child{border-left:none}
+.pt-pct:active{background:var(--accent-soft);color:var(--accent)}
 
-/* The keypad gives way before the amount does. When the breakdown makes the
-   footer tall, something has to shrink, and it must not be the figure the
-   person is deciding on -- squeezed the other way round, the middle
+/* ── the keypad ──
+   Keys have faces. Bare glyphs on black are the cheapest thing a buy screen
+   can do and the hardest to aim at: nothing tells you where the target ends.
+   The keypad still gives way before the amount does -- when the breakdown
+   makes the footer tall something has to shrink, and it must not be the
+   figure the person is deciding on. Squeezed the other way round, the middle
    collapsed to 8px and "$3.01" disappeared entirely off the screen. */
-.pt-keys{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;padding:0 10px;
-  flex:0 1 auto;min-height:0;overflow:hidden}
+/* On a tall phone the slack has to go somewhere, and a keypad that takes
+   some of it is a keypad with bigger targets. Capped, so it cannot turn
+   into four enormous rows on a very tall screen, and min-height:0 is what
+   makes it the part that gives way when the breakdown squeezes the column
+   -- the amount has a floor, this does not. */
+.pt-keys{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;padding:0 16px;
+  flex:1 1 auto;min-height:0;max-height:min(46vh,352px);overflow:hidden}
 .pt-keys .pt-key{min-height:0}
-.pt-key{background:none;border:none;color:var(--text);font-size:26px;font-weight:500;
-  padding:15px 0;border-radius:12px;font-family:var(--ui);transition:background .1s}
-.pt-key:active{background:var(--line)}
-.pt-key svg{width:26px;height:26px;vertical-align:middle}
+.pt-key{background:var(--sheet-key);border:1px solid var(--sheet-line);color:var(--text);
+  font-family:var(--mono);font-size:21px;font-weight:600;font-variant-numeric:tabular-nums;
+  padding:clamp(11px,1.9vh,17px) 0;border-radius:14px;
+  transition:background .1s,border-color .1s,transform .06s}
+.pt-key:active{background:var(--accent-soft);border-color:var(--accent-border);
+  color:var(--accent);transform:scale(.97)}
+.pt-key svg{width:23px;height:23px;vertical-align:middle}
+/* A full stop set at digit size is four pixels of ink in a 100px box. */
+.pt-key[data-k="."]{font-size:30px;line-height:.7}
+.pt-key[data-k="del"]{color:var(--muted)}
+.pt-key[data-k="del"]:active{color:var(--accent)}
 
-.pt-sheet-ft{padding:12px 18px calc(16px + env(safe-area-inset-bottom,0px));flex:0 0 auto}
-.pt-sheet-avail{display:flex;align-items:center;justify-content:space-between;gap:10px;
-  font-family:var(--mono);font-size:12.5px;color:var(--muted);margin-bottom:11px}
-.pt-sheet-avail b{color:var(--text);font-weight:700}
-/* The EVM cost breakdown renders between the balance and the button, and
-   without a gap it sat clamped against both. */
+/* Every control on this screen can be reached without a touchscreen, and
+   says where it is when it is. */
+.pt-sheet :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:12px}
+
+.pt-sheet-ft{padding:clamp(9px,1.6vh,14px) 16px calc(14px + env(safe-area-inset-bottom,0px));
+  flex:0 0 auto}
 /* Capped so a long breakdown scrolls rather than pushing the amount off
    the screen above it. */
 .pt-sheet-ft .pt-quote{margin:0 0 11px;max-height:32vh;overflow-y:auto}
+
 /* ── slide to confirm ──
    The knob is dragged the width of the track. Nothing happens until it gets
    there, and letting go early snaps it back -- so buying and selling both
    take a deliberate gesture rather than a tap that a pocket or a scroll can
-   produce by accident. */
-.pt-slide{position:relative;height:56px;border-radius:16px;background:var(--card2);
-  border:1px solid var(--line2);overflow:hidden;touch-action:none;user-select:none}
-.pt-slide.ready{background:rgba(247,185,85,.10);border-color:var(--accent-border)}
-.pt-slide.sell.ready{background:rgba(247,107,98,.10);border-color:rgba(247,107,98,.45)}
-.pt-slide-fill{position:absolute;inset:0;width:0;background:var(--accent);opacity:.22;
+   produce by accident. The track is recessed rather than raised: it is a
+   groove the knob travels along, which is what the gesture actually is. */
+.pt-slide{position:relative;height:58px;border-radius:16px;background:var(--sheet-key);
+  border:1px solid var(--sheet-line);box-shadow:inset 0 2px 6px rgba(0,0,0,.45);
+  overflow:hidden;touch-action:none;user-select:none}
+.pt-slide.ready{border-color:var(--accent-border)}
+.pt-slide.sell.ready{border-color:rgba(247,107,98,.45)}
+.pt-slide-fill{position:absolute;inset:0;width:0;background:var(--accent);opacity:.20;
   border-radius:16px;pointer-events:none}
 .pt-slide.sell .pt-slide-fill{background:var(--red)}
 /* Scoped to beat .pt-buy-confirm, which this element also carries so
@@ -354,16 +421,19 @@ input{font-family:inherit}
    button's styling -- solid amber background AND amber text -- so unscoped
    the label was amber on amber and simply could not be read. */
 .pt-slide .pt-slide-label{position:absolute;inset:0;display:flex;align-items:center;
-  justify-content:center;font-size:14.5px;font-weight:700;color:var(--muted2);
-  pointer-events:none;padding:0 60px;text-align:center;background:none;border:none;
+  justify-content:center;font-size:14.5px;font-weight:700;color:var(--muted);
+  pointer-events:none;padding:0 62px;text-align:center;background:none;border:none;
   border-radius:0}
 .pt-slide.ready .pt-slide-label{color:var(--accent)}
 .pt-slide.sell.ready .pt-slide-label{color:var(--red)}
-.pt-slide-knob{position:absolute;top:5px;left:5px;width:46px;height:46px;border-radius:12px;
-  background:var(--line2);color:var(--muted2);display:flex;align-items:center;justify-content:center;
-  cursor:grab;transition:background .12s,color .12s}
-.pt-slide.ready .pt-slide-knob{background:var(--accent);color:#0a0b0e}
-.pt-slide.sell.ready .pt-slide-knob{background:var(--red);color:#0a0b0e}
+/* A disc, and it travels. */
+.pt-slide-knob{position:absolute;top:5px;left:5px;width:46px;height:46px;border-radius:50%;
+  background:var(--line2);color:var(--muted2);display:flex;align-items:center;
+  justify-content:center;cursor:grab;transition:background .12s,color .12s}
+.pt-slide.ready .pt-slide-knob{background:var(--accent);color:#0a0b0e;
+  box-shadow:0 2px 10px rgba(247,185,85,.28)}
+.pt-slide.sell.ready .pt-slide-knob{background:var(--red);color:#0a0b0e;
+  box-shadow:0 2px 10px rgba(247,107,98,.28)}
 .pt-slide-knob svg{width:22px;height:22px}
 .pt-slide.dragging .pt-slide-knob{cursor:grabbing;transition:none}
 .pt-slide.dragging .pt-slide-fill{transition:none}
@@ -372,18 +442,24 @@ input{font-family:inherit}
    -- the server has submitted and is holding for the chain to confirm --
    and a control that simply freezes reads as a hang. Nothing here invents
    time: the sweep stops the instant the answer arrives. */
-.pt-slide.working{background:var(--card2);border-color:var(--line2)}
+.pt-slide.working{border-color:var(--sheet-line)}
 .pt-slide.working .pt-slide-knob{display:none}
 .pt-slide.working .pt-slide-label{color:var(--muted);padding:0 18px}
 .pt-slide.working .pt-slide-fill{width:38%;opacity:.16;border-radius:0;
   animation:ptSweep 1.15s cubic-bezier(.4,0,.2,1) infinite}
 @keyframes ptSweep{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
+/* Someone who has asked for less motion still gets to see that it is
+   working -- a steady bar rather than a moving one. */
+@media (prefers-reduced-motion: reduce){
+  .pt-slide.working .pt-slide-fill{animation:none;width:100%;opacity:.10}
+  .pt-key,.pt-pct,.pt-slide-knob,.pt-sheet{transition:none}
+}
 
 /* The receipt: what a person can take to a block explorer. */
 .pt-txline{display:flex;align-items:center;justify-content:center;gap:8px;
   font-family:var(--mono);font-size:11.5px;margin-top:9px}
 .pt-txline a{color:var(--accent);text-decoration:underline;text-underline-offset:2px}
-.pt-txline .pt-txms{color:var(--muted2)}
+.pt-txline .pt-txms{color:var(--muted)}
 
 /* Dragging the sheet itself downwards dismisses it -- the gesture that
    replaced the close button in the corner. */
@@ -396,11 +472,26 @@ input{font-family:inherit}
 .pt-sheet.sell-mode .pt-keys,
 .pt-sheet.sell-mode .pt-sheet-pcts,
 .pt-sheet.sell-mode .pt-sheet-cap{display:none}
-.pt-sheet.sell-mode .pt-sheet-mid{gap:12px}
+.pt-sheet.sell-mode .pt-sheet-mid{gap:12px;justify-content:flex-end;
+  padding-bottom:clamp(10px,2.2vh,18px)}
+/* With the caption gone the balance line has the top row to itself, and it
+   is a sentence there rather than a figure. */
+.pt-sheet.sell-mode .pt-ticket-bal{text-align:left;font-size:12px}
+.pt-sheet.sell-mode .pt-sheet-amt{font-size:clamp(30px,9vw,42px)}
+.pt-sheet.sell-mode .pt-sheet-get{color:var(--muted);white-space:normal}
+.pt-ticket-stats{display:none}
+.pt-sheet.sell-mode .pt-ticket-stats{display:grid;grid-template-columns:repeat(3,1fr);
+  gap:10px;border-top:1px solid var(--sheet-line);padding-top:clamp(10px,2vh,16px)}
+.pt-tstat-k{font-size:9.5px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--muted)}
+.pt-tstat-v{font-family:var(--mono);font-size:13.5px;font-weight:700;margin-top:4px;
+  font-variant-numeric:tabular-nums}
+.pt-tstat-v.up{color:var(--green)}
+.pt-tstat-v.down{color:var(--red)}
 
 .pt-sheet-go{width:100%;background:var(--accent);color:#0a0b0e;border:none;border-radius:14px;
   padding:16px;font-size:15px;font-weight:700;transition:opacity .12s}
-.pt-sheet-go:disabled{background:var(--card2);color:var(--muted2);cursor:default}
+.pt-sheet-go:disabled{background:var(--sheet-key);color:var(--muted);cursor:default}
 .pt-sheet-msg{font-size:12px;margin-top:9px;text-align:center}
 .pt-sheet-msg.ok{color:var(--green)}
 .pt-sheet-msg.err{color:var(--red)}
@@ -410,11 +501,12 @@ input{font-family:inherit}
    maintain. */
 @media (min-width: 720px){
   .pt-sheet{inset:50% auto auto 50%;transform:translate(-50%,-50%);
-    width:420px;max-height:92vh;border:1px solid var(--panel-border);border-radius:22px}
+    width:404px;max-height:92vh;border:1px solid var(--sheet-line);border-radius:24px;
+    box-shadow:0 24px 70px rgba(0,0,0,.6)}
   .pt-sheet-scrim{position:fixed;inset:0;z-index:299;background:rgba(0,0,0,.62);display:none}
   .pt-sheet-scrim.open{display:block}
-  .pt-key{font-size:23px;padding:12px 0}
-  .pt-sheet-amt{font-size:48px}
+  .pt-key{font-size:19px;padding:11px 0}
+  .pt-sheet-amt{font-size:44px}
 }
 .pt-buy-cur{color:var(--muted)}
 .pt-quote{border-top:1px solid var(--line2);padding-top:7px;display:flex;flex-direction:column;gap:3px;font-family:var(--mono);font-size:11px;color:var(--muted)}
@@ -735,26 +827,56 @@ input{font-family:inherit}
     </div>
   </div>
 
+  <!-- The ticket. Everything being decided lives on ONE surface: what the
+       number means, the number, the balance it is measured against, and
+       what it converts into. It used to be three pieces of text floating
+       separately down the middle of an empty screen, which is both the
+       generic shape every meme-coin buy screen has and the reason the
+       balance -- the figure that decides whether the amount is even
+       possible -- was stranded at the far bottom in grey. -->
   <div class="pt-sheet-mid">
-    <!-- What the big number MEANS. On an EVM chain it is a ceiling: the
-         network fee, the platform fee and the slippage reserve come out of
-         it, so what is bought is what remains. On Solana it is simply what
-         is spent. And the currency is named because on Robinhood Chain it
-         is USDG that actually moves. -->
-    <div class="pt-sheet-cap"><span id="pt-sheet-cap-txt"></span>
-      <span class="pt-buy-cur" id="pt-sheet-cur"></span></div>
-    <div class="pt-sheet-amt dim" id="pt-sheet-amt">$0</div>
-    <div class="pt-sheet-get" id="pt-sheet-get"></div>
+    <div class="pt-ticket">
+      <div class="pt-ticket-top">
+        <!-- What the big number MEANS. On an EVM chain it is a ceiling: the
+             network fee, the platform fee and the slippage reserve come out
+             of it, so what is bought is what remains. On Solana it is simply
+             what is spent. And the currency is named because on Robinhood
+             Chain it is USDG that actually moves. -->
+        <div class="pt-sheet-cap"><span id="pt-sheet-cap-txt"></span>
+          <span class="pt-buy-cur" id="pt-sheet-cur"></span></div>
+        <!-- The balance belongs HERE, level with the amount it constrains,
+             not in the footer. -->
+        <div class="pt-ticket-bal" id="pt-sheet-avail">—</div>
+      </div>
+      <div class="pt-sheet-amt dim" id="pt-sheet-amt">$0</div>
+      <div class="pt-ticket-get">
+        <span class="pt-ticket-arrow" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+               stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"></line><polyline points="18 13 12 19 6 13"></polyline>
+          </svg>
+        </span>
+        <span class="pt-sheet-get" id="pt-sheet-get"></span>
+        <span id="pt-sheet-quote"></span>
+      </div>
+      <!-- Selling asks a question buying does not: is now the moment? The
+           keypad is gone in that mode, so the room it leaves goes to the
+           three readings that answer it -- the same ones the card shows,
+           read from the same token, not a second source. -->
+      <div class="pt-ticket-stats" id="pt-sheet-stats"></div>
+    </div>
   </div>
 
-  <div class="pt-sheet-pcts">
-    <button class="pt-pct" data-pct="10">10%</button>
-    <button class="pt-pct" data-pct="25">25%</button>
-    <button class="pt-pct" data-pct="50">50%</button>
-    <button class="pt-pct" data-pct="100">Max</button>
+  <!-- One segmented track rather than four detached pills: they are four
+       answers to a single question, and reading as one control says so. -->
+  <div class="pt-sheet-pcts" role="group" aria-label="Quick amounts">
+    <button class="pt-pct" data-pct="10" aria-label="Spend 10% of your balance">10%</button>
+    <button class="pt-pct" data-pct="25" aria-label="Spend 25% of your balance">25%</button>
+    <button class="pt-pct" data-pct="50" aria-label="Spend 50% of your balance">50%</button>
+    <button class="pt-pct" data-pct="100" aria-label="Spend your whole balance">Max</button>
   </div>
 
-  <div class="pt-keys" id="pt-keys">
+  <div class="pt-keys" id="pt-keys" role="group" aria-label="Amount keypad">
     <button class="pt-key" data-k="1">1</button>
     <button class="pt-key" data-k="2">2</button>
     <button class="pt-key" data-k="3">3</button>
@@ -777,10 +899,6 @@ input{font-family:inherit}
   <!-- Everything confirmBuy() reaches for lives inside here, under the ids
        it already uses, so the buy path is entirely unchanged. -->
   <div class="pt-sheet-ft" id="pt-buy-panel-sheet">
-    <div class="pt-sheet-avail">
-      <span id="pt-sheet-avail">—</span>
-      <span id="pt-sheet-quote"></span>
-    </div>
     <!-- The EVM cost breakdown renders in here, unchanged: same class, same
          id shape, so scheduleQuote() needs to know nothing about the sheet. -->
     <div class="pt-quote" id="pt-quote-sheet" style="display:none"></div>
@@ -794,14 +912,15 @@ input{font-family:inherit}
       <div class="pt-slide-fill" id="pt-slide-fill"></div>
       <div class="pt-slide-label pt-buy-confirm" id="pt-sheet-go">Enter an amount</div>
       <div class="pt-slide-knob" id="pt-slide-knob" role="button" tabindex="0"
-           aria-label="Slide to confirm">
+           aria-label="Slide to confirm. With a keyboard, press the right arrow key repeatedly.">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
              stroke-linecap="round" stroke-linejoin="round">
           <polyline points="9 6 15 12 9 18"></polyline>
         </svg>
       </div>
     </div>
-    <div class="pt-sheet-msg pt-buy-msg" id="pt-buy-msg-sheet" style="display:none"></div>
+    <div class="pt-sheet-msg pt-buy-msg" id="pt-buy-msg-sheet" role="status"
+         aria-live="polite" style="display:none"></div>
   </div>
 </div>
 

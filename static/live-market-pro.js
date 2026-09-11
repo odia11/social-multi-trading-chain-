@@ -1164,6 +1164,18 @@ function _paintSheet(){
     _sheetEl('pt-sheet-amt').classList.remove('dim');
     _sheetEl('pt-sheet-get').textContent = 'Your whole $' + (t && t.symbol || '') + ' position';
     _sheetEl('pt-sheet-avail').innerHTML = 'Closes the position at the current price';
+    // The three readings a sell decision actually turns on, from the same
+    // token object the card reads -- not a second lookup that could disagree
+    // with what the person just tapped.
+    var sc = Number(t && t.price_change_24h || 0);
+    _sheetEl('pt-sheet-stats').innerHTML = [
+      ['24h move', (sc >= 0 ? '+' : '') + sc.toFixed(2) + '%', sc < 0 ? 'down' : 'up'],
+      ['Liquidity', fmtUsd(t && t.liquidity_usd || 0), ''],
+      ['Volume 24h', fmtUsd(t && t.volume_24h || 0), '']
+    ].map(function(r){
+      return '<div><div class="pt-tstat-k">' + esc(r[0]) + '</div>'
+           + '<div class="pt-tstat-v ' + r[2] + '">' + esc(r[1]) + '</div></div>';
+    }).join('');
     _slideSetLabel('Slide to sell $' + (t && t.symbol || ''));
     _slideEnable(true);
     return;
@@ -1340,14 +1352,27 @@ function _slideRelease(){
   document.addEventListener('mousedown',  down);
   document.addEventListener('mousemove',  move);
   document.addEventListener('mouseup',    up);
-  // A keyboard has no gesture to make, so the knob confirms on Enter/Space.
+  // A keyboard has no gesture to make, and Enter used to confirm in one
+  // press -- which is the single accidental keystroke this whole control
+  // exists to prevent, just moved off the touchscreen. The arrow keys walk
+  // the knob the same distance a thumb would: eight presses to the end,
+  // where it confirms, and Escape or Home puts it back. Deliberate by the
+  // same measure, reachable without a touchscreen.
+  var KEY_STEPS = 8;
   document.addEventListener('keydown', function(e){
     if(_sheetIdx === null || !_slideOn) return;
     if(document.activeElement !== _sheetEl('pt-slide-knob')) return;
-    if(e.key === 'Enter' || e.key === ' '){
+    var max = _slideTravel();
+    if(e.key === 'ArrowRight'){
       e.preventDefault();
-      _slideMove(_slideTravel());
-      _slideRelease();
+      _slideMove(_slideAt + max / KEY_STEPS);
+      if(_slideAt >= max - 0.5) _slideRelease();
+    } else if(e.key === 'ArrowLeft'){
+      e.preventDefault();
+      _slideMove(_slideAt - max / KEY_STEPS);
+    } else if(e.key === 'Home' || e.key === 'Escape'){
+      e.preventDefault();
+      _slideReset();
     }
   });
 })();
