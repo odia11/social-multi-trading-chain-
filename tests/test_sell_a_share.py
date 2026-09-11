@@ -102,6 +102,55 @@ check('the share is read from the request rather than a token amount, so the '
       'client never names a quantity',
       "data.get('sell_pct'" in frac_src and 'amount_token' not in frac_src)
 
+# ── 1b. a dollar figure, turned into tokens on this side ─────────────────
+# 2,340 tokens at $0.0442 is $103.43 of position.
+HELD, PX = 2340.0, 0.0442
+check('a dollar figure is priced into a share against the holding and the '
+      'price the SERVER has, not a token count from the browser',
+      abs(m._sell_share({'sell_usd': 25}, HELD, PX)[0] - (25 / PX / HELD)) < 1e-12)
+check('...and that share is a partial, so the rest stays open',
+      m._sell_share({'sell_usd': 25}, HELD, PX)[1] is False)
+check('asking for more dollars than the position is worth is a full close, '
+      'not an error -- "$200 of a $103 holding" means all of it, and the '
+      'price moves between the screen and the server anyway',
+      m._sell_share({'sell_usd': 200}, HELD, PX) == (1.0, True))
+check('...and so is a figure within half a percent of the whole, by the same '
+      'dust rule a percentage uses',
+      m._sell_share({'sell_usd': HELD * PX * 0.997}, HELD, PX) == (1.0, True))
+check('a dollar figure wins over a percentage when both are sent, the same '
+      'precedence amount_usdc already has over amount_sol',
+      m._sell_share({'sell_pct': 100, 'sell_usd': 25}, HELD, PX)[1] is False)
+check('no dollar figure falls through to the percentage, so every caller '
+      'that predates this is untouched',
+      m._sell_share({}, HELD, PX) == (1.0, True)
+      and m._sell_share({'sell_pct': 50}, HELD, PX) == (0.5, False))
+
+for bad, label in [(-5, 'a negative figure'), (0, 'zero dollars'),
+                   (float('nan'), 'not a number'), (float('inf'), 'infinity'),
+                   ('abc', 'letters'), ([25], 'a list')]:
+    try:
+        m._sell_share({'sell_usd': bad}, HELD, PX)
+        ok = False
+    except ValueError:
+        ok = True
+    except Exception:
+        ok = False
+    check(f'refused: {label} of dollars', ok)
+
+for held, px, label in [(0.0, PX, 'a token with no position to price against'),
+                        (HELD, 0.0, 'a token with no price right now')]:
+    try:
+        m._sell_share({'sell_usd': 25}, held, px)
+        ok = False
+    except ValueError:
+        ok = True
+    check(f'refused, rather than guessed at: {label}', ok)
+check('...and the no-price refusal says what to do instead rather than just '
+      'failing',
+      'sell by percentage instead' in str(sys.exc_info()[1] or '')
+      or 'sell by percentage instead' in open(REPO + '/dashboard.py',
+                                               encoding='utf-8').read())
+
 # ── 2. what a partial sale leaves behind ─────────────────────────────────
 WALLET = 'Cdn8WftaYycdudV9yeeQPY1A1Tgo1bMa9eV4Tv9SeAM9'
 MINT = 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'
@@ -193,6 +242,46 @@ check('...and an out-of-range share is refused there too, so the check does '
       'not live only in the web layer',
       'sell percentage must be above 0 and at most 100' in sol)
 
+# ── 3b. what there is to sell ────────────────────────────────────────────
+hold_src = src.split('def api_trade_holding')[1].split('\ndef ')[0]
+check('the sell screen can ask what is actually held, on any chain the '
+      'platform trades', "@app.route('/api/trade/holding'" in src
+      and 'chain not in TOKEN_CHAINS' in hold_src)
+check('...validating the address against the chain it was sent for, rather '
+      'than assuming Solana the way the older position route does',
+      'is_valid_token_address(addr, chain)' in hold_src)
+check('...reporting the TRACKED position first, which is what the sell '
+      'routes actually close, so the screen and the trade agree',
+      "get_user_state(wallet)['positions']" in hold_src
+      and "source = 'position'" in hold_src)
+# Live Market's own Solana buy route has never written to open_positions,
+# so a tracked amount of 0 there does not mean an empty wallet.
+check('...falling back to what the chain itself reports on Solana, rather '
+      'than telling somebody they hold nothing while their wallet says '
+      'otherwise',
+      "chain == 'solana'" in hold_src and '_fetch_wallet_tokens' in hold_src)
+check('...and saying which of the two answered, so the caller is not '
+      'guessing', "'source': source" in hold_src)
+check('...behind the same login every other trade route is behind',
+      '_authenticated_wallet()' in hold_src and 'No wallet connected' in hold_src)
+check('...and rate limited, since it prices a token on every call',
+      '@rate_limit' in src.split("@app.route('/api/trade/holding'")[1][:120])
+
+# The EVM sell decides the share where the holding and the price are both
+# known, not before -- the dollar conversion needs them.
+check('the EVM sell prices the dollar figure inside the lock, against the '
+      'position it is about to sell',
+      re.search(r'quoted_px = [\s\S]{0,700}_sell_share\(data, held, quoted_px\)',
+                evm) is not None)
+check('...while the shape of the request is still refused up front, before '
+      'any work is done',
+      re.search(r'_sell_fraction\(data\)[\s\S]{0,200}400', evm) is not None)
+check('the Solana sell prices it here and lets the swap clamp it to the real '
+      'balance', 'sell_usd_tokens = _usd / _px' in inst
+      and "f'{sell_usd_tokens:.9f}'" in inst)
+check('...and refuses a token with no price rather than dividing by it',
+      'No price for this token right now' in inst)
+
 # ── 4. the screen ────────────────────────────────────────────────────────
 JS = open(REPO + '/static/live-market-pro.js', encoding='utf-8').read()
 HTML = open(REPO + '/templates/live_market_pro.html', encoding='utf-8').read()
@@ -206,17 +295,58 @@ check('...starting at the whole position, so opening the sheet and sliding '
       'does what it always did', 'var _sellPct = 100;' in JS
       and '_sellPct = 100;' in JS.split('function _openSheet')[1][:400])
 check('...saying which share is selected', ".pt-pct.on{" in HTML)
-check('the screen says what it is about to do',
-      "'Sell ' + _sellPct + '%'" in JS and "'Slide to sell ' + _sellPct + '%'" in JS)
-check('...and that the rest is kept', 'keeps the rest' in JS)
-check('the request carries a share and no quantity',
-      'sell_pct:pct' in JS
-      and re.search(r"amount_token", JS.split('function handleSell')[1]) is None)
+check('the screen says what it is about to do, in the figure being sold',
+      "'Slide to sell $' + _sheetAmt" in JS)
+check('...and says "all" out loud when it is all, because trimming a '
+      'position and closing it are different decisions',
+      "'Slide to sell all $'" in JS)
+check('a tapped share travels as a share, so "All" closes the position '
+      'exactly rather than to the nearest cent',
+      re.search(r"if\(_sellPct != null\)\{\s*\n\s*how = \{sell_pct:", JS)
+      is not None)
+check('a typed figure travels as dollars, so what is sold is what was typed',
+      'how = {sell_usd: usd}' in JS)
+check('...and typing clears the tapped share, so the two can never disagree '
+      'about which one the screen means',
+      re.search(r"function _sheetTypeAmount[\s\S]{0,200}_sellPct = null", JS)
+      is not None)
+check('neither carries a quantity of tokens',
+      re.search(r"amount_token", JS.split('function handleSell')[1]) is None)
 check('...bounded on this side as well, so a broken screen cannot send '
       'nonsense in the first place',
       'Math.min(100, Math.max(1, Number(_sellPct) || 100))' in JS)
 check('a partial sale is reported as one rather than as "Sold $X"',
       "d.position_closed === false" in JS and 'sold_pct' in JS)
+
+# ── 4b. the figure, and the tokens it comes to ───────────────────────────
+check('the sell screen takes a figure in dollars, on the same keypad the '
+      'buy screen uses', '.pt-sheet.sell-mode .pt-keys' not in HTML)
+check('...and shows what it comes to in tokens, the same conversion the buy '
+      'screen does the other way',
+      re.search(r"_sheetMode === 'sell'[\s\S]{0,2200}fmtAmount\(sAmt / px\)", JS)
+      is not None)
+check('...at the price the SERVER quoted, so the number on the screen is the '
+      'one that trades', '_sheetHold ? _sheetHold.price : 0' in JS
+      and '/api/trade/holding' in JS)
+check('...measured against what is held, said in the same place the buy '
+      'screen says what is spendable', "'</b> held'" in JS)
+check('...and refusing to arm for more than that',
+      "'More than you hold'" in JS)
+check('the quick shares fill the figure in rather than replacing it, so one '
+      'row drives one number in both modes',
+      re.search(r"var part = _sheetAvail \* \(pct / 100\);", JS) is not None)
+check('a sale is not sent to the quote route, which prices a purchase',
+      re.search(r"_sheetMode !== 'sell' && t && EVM_TRADE_CHAINS", JS) is not None)
+# Closing a position is how a loss gets cut.
+check('a holding lookup that cannot be reached still leaves the whole '
+      'position sellable, because that is how somebody cuts a loss',
+      '_holdErr' in JS
+      and re.search(r"if\(_holdErr\)\{[\s\S]{0,420}_slideEnable\(true\)", JS)
+      is not None)
+check('...and says so rather than pretending it read something',
+      'Could not read your position' in JS)
+check('a token with nothing in it says so instead of arming a sell that '
+      'would fail', "'Nothing to sell'" in JS)
 
 # ── 5. the fee box ───────────────────────────────────────────────────────
 check('what a trade costs is on the screen, folded away',

@@ -489,23 +489,25 @@ input{font-family:inherit}
 /* Selling has no amount to enter: the server closes the whole tracked
    position, so a keypad and percentage buttons would be asking a question
    with only one answer. */
-/* The percentage row STAYS in sell mode: it is how much of the position to
-   close. Only the keypad goes, because a sell names a share and not a
-   figure you type. */
-.pt-sheet.sell-mode .pt-keys,
-.pt-sheet.sell-mode .pt-sheet-cap{display:none}
+/* Both rows stay in sell mode now. A sale names a figure in dollars, the
+   same as a purchase, and the percentages fill that figure in -- so the
+   keypad has something to do and the screen asks its question the same way
+   in both directions. Only the caption goes, because the sell sheet writes
+   its own. */
+/* The caption stays too: it names the unit being typed, which a sale needs
+   to say as much as a purchase does. */
 /* Selling, one of the four is the current choice and says so. Buying they
    are one-shot fills of the amount, so none of them is ever "on". */
 .pt-pct.on{background:var(--accent-soft);color:var(--accent)}
 .pt-sheet.sell-mode .pt-pct.on{background:rgba(247,107,98,.14);color:var(--red)}
 .pt-sheet.sell-mode .pt-pct:active{background:rgba(247,107,98,.10);color:var(--red)}
-.pt-sheet.sell-mode .pt-sheet-mid{gap:12px;justify-content:flex-end;
-  padding-bottom:clamp(10px,2.2vh,18px)}
+.pt-sheet.sell-mode .pt-sheet-mid{gap:12px}
 /* With the caption gone the balance line has the top row to itself, and it
    is a sentence there rather than a figure. */
-.pt-sheet.sell-mode .pt-ticket-bal{text-align:left;font-size:12px}
-.pt-sheet.sell-mode .pt-sheet-amt{font-size:clamp(30px,9vw,42px)}
-.pt-sheet.sell-mode .pt-sheet-get{color:var(--muted);white-space:normal}
+
+/* What a sale converts into is a token amount, same as a purchase, so it
+   reads in the same colour rather than as grey prose. */
+.pt-sheet.sell-mode .pt-ticket-bal{text-align:right}
 .pt-ticket-stats{display:none}
 .pt-sheet.sell-mode .pt-ticket-stats{display:grid;grid-template-columns:repeat(3,1fr);
   gap:10px;border-top:1px solid var(--sheet-line);padding-top:clamp(10px,2vh,16px)}

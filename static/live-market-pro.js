@@ -1087,6 +1087,40 @@ function _prefetchBalances(){
     .catch(function(){});
 }
 
+// What there is to sell. The amount and the price both come from the
+// server, because the server is what decides how many tokens a dollar
+// figure turns into when the sell actually runs -- a price of the page's
+// own would put a different number on the screen than the one that trades.
+function _loadSheetHolding(t){
+  var idx = _sheetIdx;
+  var failed = function(){
+    if(_sheetIdx !== idx || _sheetMode !== 'sell') return;
+    _holdErr = true;
+    _paintSheet();
+  };
+  fetch('/api/trade/holding?chain=' + encodeURIComponent(t.chain)
+        + '&token_address=' + encodeURIComponent(t.mint),
+        {credentials:'include', headers: authHeaders()})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(_sheetIdx !== idx || _sheetMode !== 'sell') return;
+      if(!d || !d.ok){ failed(); return; }
+      _sheetHold = {amount: Number(d.amount || 0), price: Number(d.price_usd || 0),
+                    value: Number(d.value_usd || 0)};
+      _sheetAvail = _sheetHold.value;
+      // Open on the whole position, which is what the button used to do and
+      // is still the common case -- now with the figure filled in, so it can
+      // be edited down instead of retyped from nothing.
+      if(_sellPct >= 100 && _sheetAmt === '' && _sheetHold.value > 0){
+        _sheetAmt = String(Math.floor(_sheetHold.value * 100) / 100);
+        var hidden = document.getElementById('pt-buy-amt-'+idx);
+        if(hidden) hidden.value = _sheetAmt;
+      }
+      _paintSheet();
+    })
+    .catch(failed);
+}
+
 function _loadSheetBalance(chain){
   var now = Date.now();
   var use = function(d){
@@ -1114,6 +1148,14 @@ function openSellSheet(idx){ _openSheet(idx, 'sell'); }
 // 100 stays the default, so opening the sheet and sliding does exactly what
 // it always did.
 var _sellPct = 100;
+// What the sell screen is measuring against: how many tokens are held, what
+// they are worth each, and what that comes to. Null until it is known --
+// the screen says "Checking…" rather than showing a figure it has not got.
+var _sheetHold = null;
+// Set when the lookup itself failed, as opposed to answering "you hold
+// nothing". Closing a position is how somebody cuts a loss, so a lookup
+// that cannot be reached must never be what stops them.
+var _holdErr = false;
 
 function _openSheet(idx, mode){
   var t = ST.tokens[Number(idx)];
@@ -1122,6 +1164,8 @@ function _openSheet(idx, mode){
   _sheetMode = mode;
   _sheetAmt = '';
   _sheetAvail = null;
+  _sheetHold = null;
+  _holdErr = false;
   _sellPct = 100;
   _paintPcts(mode);
   _paintFees(t, mode);
@@ -1159,8 +1203,16 @@ function _openSheet(idx, mode){
   // spent. Every chain funds a buy in USDC; the label names what actually
   // moves, which on Robinhood Chain is USDG.
   var isEvm = !!EVM_TRADE_CHAINS[t.chain];
-  _sheetEl('pt-sheet-cap-txt').textContent = isEvm ? 'You spend at most' : 'You spend';
-  _sheetEl('pt-sheet-cur').textContent = isEvm ? evmCurrencyLabel(t.chain) : 'USDC';
+  if(mode === 'sell'){
+    // A sale is entered in dollars and settles in the chain's own dollar
+    // token, so the caption names the unit being typed rather than the one
+    // that arrives -- what lands is in the fee box, where it belongs.
+    _sheetEl('pt-sheet-cap-txt').textContent = 'You sell';
+    _sheetEl('pt-sheet-cur').textContent = 'USD';
+  } else {
+    _sheetEl('pt-sheet-cap-txt').textContent = isEvm ? 'You spend at most' : 'You spend';
+    _sheetEl('pt-sheet-cur').textContent = isEvm ? evmCurrencyLabel(t.chain) : 'USDC';
+  }
   _sheetEl('pt-slide').classList.toggle('sell', mode === 'sell');
 
   var msg = document.getElementById('pt-buy-msg-'+idx);
@@ -1175,6 +1227,7 @@ function _openSheet(idx, mode){
   // A sell closes the whole tracked position server-side, so there is no
   // balance to divide up and nothing to price -- only a confirmation.
   if(mode === 'buy') _loadSheetBalance(t.chain);
+  else _loadSheetHolding(t);
 }
 
 function closeBuySheet(){
@@ -1200,28 +1253,33 @@ function _sheetSetAmount(next, settled){
   if(hidden) hidden.value = next;
   _paintSheet();
   var t = ST.tokens[Number(_sheetIdx)];
-  if(t && EVM_TRADE_CHAINS[t.chain]) scheduleQuote(_sheetIdx, settled ? 0 : 250);
+  // Only a buy is quoted. A sale is priced when it settles, so asking the
+  // quote route about one would be asking a buy-shaped question.
+  if(_sheetMode !== 'sell' && t && EVM_TRADE_CHAINS[t.chain]) scheduleQuote(_sheetIdx, settled ? 0 : 250);
+}
+
+// Typing a figure means it is no longer "a share of the position" -- it is
+// that figure. The request then carries the dollars rather than the
+// percentage, so what is sold is what the screen says.
+function _sheetTypeAmount(next){
+  if(_sheetMode === 'sell'){ _sellPct = null; _paintPcts('sell'); }
+  _sheetSetAmount(next);
 }
 
 function _paintSheet(){
   if(_sheetIdx === null) return;
   var t = ST.tokens[Number(_sheetIdx)];
   if(_sheetMode === 'sell'){
-    // No amount to show: the sell routes close the entire tracked position
-    // (that is what they have always done -- the client has never been able
-    // to name a sell amount, which is what stops a caller selling more than
-    // was bought).
-    var whole = _sellPct >= 100;
-    _sheetEl('pt-sheet-amt').textContent = whole ? 'Sell all' : ('Sell ' + _sellPct + '%');
-    _sheetEl('pt-sheet-amt').classList.remove('dim');
-    _sheetEl('pt-sheet-get').textContent = (whole ? 'Your whole $' : _sellPct + '% of your $')
-      + (t && t.symbol || '') + ' position';
-    _sheetEl('pt-sheet-avail').innerHTML = whole
-      ? 'Closes the position at the current price'
-      : 'Sells that share now, keeps the rest';
+    // Selling is the same question as buying, asked in the same unit: a
+    // figure in dollars, converted to tokens. It used to be a percentage
+    // and nothing else -- "Sell all" with no way to say how much -- which
+    // meant the one screen in the app that spends money had two completely
+    // different ways of naming an amount depending on which direction you
+    // were going.
+    //
     // The three readings a sell decision actually turns on, from the same
-    // token object the card reads -- not a second lookup that could disagree
-    // with what the person just tapped.
+    // token object the card reads -- not a second lookup that could
+    // disagree with what the person just tapped.
     var sc = Number(t && t.price_change_24h || 0);
     _sheetEl('pt-sheet-stats').innerHTML = [
       ['24h move', (sc >= 0 ? '+' : '') + sc.toFixed(2) + '%', sc < 0 ? 'down' : 'up'],
@@ -1231,9 +1289,56 @@ function _paintSheet(){
       return '<div><div class="pt-tstat-k">' + esc(r[0]) + '</div>'
            + '<div class="pt-tstat-v ' + r[2] + '">' + esc(r[1]) + '</div></div>';
     }).join('');
-    _slideSetLabel(whole ? ('Slide to sell $' + (t && t.symbol || ''))
-                         : ('Slide to sell ' + _sellPct + '%'));
-    _slideEnable(true);
+
+    var sAmt = parseFloat(_sheetAmt);
+    var sEl  = _sheetEl('pt-sheet-amt');
+    sEl.textContent = '$' + (_sheetAmt === '' ? '0' : _sheetAmt);
+    sEl.classList.toggle('dim', !(sAmt > 0));
+
+    // What that sells, in tokens -- the same conversion the buy screen
+    // does, run the other way, at the price the server quoted.
+    var px = _sheetHold ? _sheetHold.price : 0;
+    _sheetEl('pt-sheet-get').textContent = (sAmt > 0 && px > 0)
+      ? ('≈ ' + fmtAmount(sAmt / px) + ' ' + (t && t.symbol || ''))
+      : '';
+
+    _sheetEl('pt-sheet-avail').innerHTML = _holdErr
+      ? 'Could not read your position — you can still sell all of it'
+      : ((_sheetAvail === null)
+          ? 'Checking your position…'
+          : ('<b>$' + _sheetAvail.toFixed(2) + '</b> held'));
+
+    // Selling is how a loss gets cut. A lookup that could not be reached is
+    // not a reason to leave somebody holding a position they are trying to
+    // get out of -- the whole-position sell needs no figure and no price, so
+    // that one stays available whatever the lookup did.
+    if(_holdErr){
+      _sellPct = 100;
+      sEl.textContent = 'Sell all';
+      sEl.classList.remove('dim');
+      _sheetEl('pt-sheet-get').textContent = 'Your whole $' + (t && t.symbol || '') + ' position';
+      _slideSetLabel('Slide to sell all $' + (t && t.symbol || ''));
+      _slideEnable(true);
+      return;
+    }
+
+    if(_sheetAvail !== null && !(_sheetAvail > 0)){
+      _slideSetLabel('Nothing to sell'); _slideEnable(false);
+    } else if(!(sAmt > 0)){
+      _slideSetLabel('Enter an amount'); _slideEnable(false);
+    } else if(_sheetAvail !== null && sAmt > _sheetAvail + 0.01){
+      // A cent of slack: "Max" floors to the cent, and a price that ticks
+      // between the fill and the tap must not disarm the control someone
+      // just used.
+      _slideSetLabel('More than you hold'); _slideEnable(false);
+    } else {
+      // Saying "all" out loud when it IS all: the difference between
+      // trimming a position and closing it is the whole decision.
+      _slideSetLabel(_sellPct >= 100
+        ? ('Slide to sell all $' + (t && t.symbol || ''))
+        : ('Slide to sell $' + _sheetAmt));
+      _slideEnable(true);
+    }
     return;
   }
   var amt = parseFloat(_sheetAmt);
@@ -1483,29 +1588,31 @@ document.addEventListener('click', function(e){
   if(k && _sheetIdx !== null){
     var v = k.dataset.k;
     if(v === 'del'){
-      _sheetSetAmount(_sheetAmt.slice(0, -1));
+      _sheetTypeAmount(_sheetAmt.slice(0, -1));
     } else if(v === '.'){
-      if(_sheetAmt.indexOf('.') === -1) _sheetSetAmount((_sheetAmt || '0') + '.');
+      if(_sheetAmt.indexOf('.') === -1) _sheetTypeAmount((_sheetAmt || '0') + '.');
     } else {
       // No leading zeros ("05"), and two decimals is as fine as money gets.
       var next = (_sheetAmt === '0') ? v : _sheetAmt + v;
       var dot = next.indexOf('.');
       if(dot !== -1 && next.length - dot > 3) return;
       if(next.replace('.', '').length > 12) return;
-      _sheetSetAmount(next);
+      _sheetTypeAmount(next);
     }
     return;
   }
   var p = e.target.closest('.pt-sheet-pcts .pt-pct');
   if(p && _sheetIdx !== null){
-    if(_sheetMode === 'sell'){
-      _sellPct = Number(p.dataset.spct) || 100;
-      _paintPcts('sell');
-      _paintSheet();
-      return;
-    }
     if(_sheetAvail === null) return;
-    var part = _sheetAvail * (Number(p.dataset.pct) / 100);
+    var sell = _sheetMode === 'sell';
+    var pct = Number(sell ? p.dataset.spct : p.dataset.pct);
+    // Selling, the share is remembered as WELL as being filled in: a tap on
+    // "All" must close the position exactly, and a dollar figure rounded to
+    // the cent at a price that moves would leave a sliver behind. The
+    // request carries the share; the figure is there so the screen can say
+    // what that share comes to.
+    if(sell){ _sellPct = pct || 100; _paintPcts('sell'); }
+    var part = _sheetAvail * (pct / 100);
     // Floored to the cent: rounding up on Max would ask to spend more than
     // the wallet holds, and the server would refuse it.
     _sheetSetAmount(String(Math.floor(part * 100) / 100), true);
@@ -1515,13 +1622,13 @@ document.addEventListener('click', function(e){
 document.addEventListener('keydown', function(e){
   if(_sheetIdx === null) return;
   if(e.key === 'Escape'){ closeBuySheet(); return; }
-  if(e.key === 'Backspace'){ _sheetSetAmount(_sheetAmt.slice(0, -1)); e.preventDefault(); return; }
-  if(e.key === '.' && _sheetAmt.indexOf('.') === -1){ _sheetSetAmount((_sheetAmt || '0') + '.'); return; }
+  if(e.key === 'Backspace'){ _sheetTypeAmount(_sheetAmt.slice(0, -1)); e.preventDefault(); return; }
+  if(e.key === '.' && _sheetAmt.indexOf('.') === -1){ _sheetTypeAmount((_sheetAmt || '0') + '.'); return; }
   if(e.key >= '0' && e.key <= '9'){
     var next = (_sheetAmt === '0') ? e.key : _sheetAmt + e.key;
     var dot = next.indexOf('.');
     if(dot !== -1 && next.length - dot > 3) return;
-    _sheetSetAmount(next);
+    _sheetTypeAmount(next);
   }
 });
 
@@ -1872,11 +1979,22 @@ function handleSell(idx, btn){
   // from what it can see is held -- so a tampered number can only ever ask
   // for a different slice of your own position, never for more of it than
   // exists, and never for somebody else's.
-  var pct = Math.min(100, Math.max(1, Number(_sellPct) || 100));
-  var body = isBsc ? {token_address:t.mint, sell_pct:pct}
-    : isEvm ? {chain:t.chain, token_address:t.mint, sell_pct:pct}
-    : {symbol:t.symbol, token_address:t.mint, pair_address:t.pair_address, side:'sell',
-       amount_sol:0, sell_pct:pct};
+  // Which of the two the screen was last driven by. A tapped share travels
+  // as a share, so "All" closes the position exactly rather than to the
+  // nearest cent; a typed figure travels as dollars, so what is sold is
+  // what was typed. Either way the server does the converting.
+  var how;
+  if(_sellPct != null){
+    how = {sell_pct: Math.min(100, Math.max(1, Number(_sellPct) || 100))};
+  } else {
+    var usd = parseFloat(_sheetAmt);
+    if(!(usd > 0)){ toast('Enter an amount to sell'); _slideEnable(true); _slideReset(); return; }
+    how = {sell_usd: usd};
+  }
+  var body = isBsc ? Object.assign({token_address:t.mint}, how)
+    : isEvm ? Object.assign({chain:t.chain, token_address:t.mint}, how)
+    : Object.assign({symbol:t.symbol, token_address:t.mint,
+                     pair_address:t.pair_address, side:'sell', amount_sol:0}, how);
   fetch(url, {
     method:'POST', credentials:'include', headers: authHeaders(),
     body: JSON.stringify(body)

@@ -5719,6 +5719,47 @@ def _sell_fraction(data: dict) -> tuple:
     return (1.0, True) if frac >= 0.995 else (frac, False)
 
 
+def _sell_share(data: dict, held: float, price_usd: float) -> tuple:
+    """How much of a holding to sell, as (fraction, is_full).
+
+    Two ways of saying it, and NEITHER of them is a number of tokens. A
+    share ("sell_pct": 50) or a dollar figure ("sell_usd": 25). The dollar
+    figure is turned into a share HERE, against this server's own price and
+    the holding this server can see -- so what the browser sends decides how
+    much of your own position to sell and nothing else. It cannot name a
+    quantity, cannot reach past what is held, and cannot reach anyone
+    else's.
+
+    sell_usd wins when both are sent, the same precedence
+    /api/instant-trade already uses for amount_usdc over amount_sol.
+
+    A dollar figure larger than the position is a full close rather than an
+    error: asking to sell $100 of a $90 holding means "all of it", and
+    refusing it would be pedantry about a price that moves between the
+    screen and the server anyway.
+    """
+    frac, full = _sell_fraction(data)
+    raw = data.get('sell_usd', None)
+    if raw is None or raw == '':
+        return frac, full
+    try:
+        usd = float(raw)
+    except (TypeError, ValueError):
+        raise ValueError('How much to sell must be a number')
+    # Both ends, so NaN -- which fails every comparison -- cannot slip past.
+    if not (usd > 0) or not (usd < 1e12):
+        raise ValueError('How much to sell must be above 0')
+    if not held > 0:
+        raise ValueError('No open position for this token')
+    if not price_usd > 0:
+        raise ValueError('No price for this token right now — '
+                         'sell by percentage instead')
+    want = usd / price_usd
+    share = want / held
+    # Same dust rule as a percentage: from 99.5% up this is a full close.
+    return (1.0, True) if share >= 0.995 else (share, False)
+
+
 def _reduce_open_position(user_id: int, wallet: str, mint: str, sold: float,
                           chain: str = 'solana'):
     """Take a sold slice off a position that stays open.
@@ -13979,9 +14020,12 @@ def _evm_sell_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM
     token_address = _sanitize(str(data.get('token_address', '')).strip())
     if not is_valid_evm_address(token_address):
         return jsonify({'ok': False, 'msg': 'Invalid token address'}), 400
-    # A share, never a quantity -- see _sell_fraction().
+    # A share or a dollar figure, never a quantity -- see _sell_share(). The
+    # shape is checked here so a malformed request is refused before any
+    # work is done; the share itself is worked out inside the lock below,
+    # where the holding and the price are known.
     try:
-        frac, full_close = _sell_fraction(data)
+        _sell_fraction(data)
     except ValueError as e:
         return jsonify({'ok': False, 'msg': str(e)}), 400
 
@@ -14005,14 +14049,19 @@ def _evm_sell_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM
         held = pos.get('amount', 0.0)
         if not held > 0:
             return jsonify({'ok': False, 'msg': 'No open position for this token'}), 400
-        # The quantity is a share OF the tracked holding, worked out here.
-        # A partial is always smaller than the full close this route already
-        # did, and the swap itself still refuses to sell more than the wallet
-        # actually holds, so this cannot oversell by either route.
-        amount = held if full_close else held * frac
 
         td        = get_token_data(token_address)
         quoted_px = float(td['price']) if td and td.get('price') else 0.0
+        # The quantity is a share OF the tracked holding, worked out here --
+        # from a percentage, or from a dollar figure priced against this
+        # server's own quote. A partial is always smaller than the full
+        # close this route already did, and the swap itself still refuses to
+        # sell more than the wallet holds, so neither can oversell.
+        try:
+            frac, full_close = _sell_share(data, held, quoted_px)
+        except ValueError as e:
+            return jsonify({'ok': False, 'msg': str(e)}), 400
+        amount = held if full_close else held * frac
         symbol    = pos.get('symbol') or (td.get('symbol', token_address[:8]) if td else token_address[:8])
 
         with _use_key(enc_blob, wallet) as pk:
@@ -19567,13 +19616,32 @@ def api_instant_trade():
         except (TypeError, ValueError):
             amount_token = 0.0
 
-        # A share of the holding, never a quantity from the browser.
-        sell_frac, sell_full = 1.0, True
+        # A share of the holding, or a dollar figure -- never a quantity from
+        # the browser. A dollar figure is priced against this server's own
+        # quote into a token amount, which the swap then clamps to what the
+        # wallet actually holds; a percentage travels down as a percentage,
+        # because the exact balance is only known further down.
+        sell_frac, sell_full, sell_usd_tokens = 1.0, True, 0.0
         if str(data.get('side', '')).strip().lower() == 'sell':
             try:
                 sell_frac, sell_full = _sell_fraction(data)
             except ValueError as e:
                 return jsonify({'error': str(e)}), 400
+            _usd_raw = data.get('sell_usd', None)
+            if _usd_raw is not None and _usd_raw != '':
+                try:
+                    _usd = float(_usd_raw)
+                except (TypeError, ValueError):
+                    return jsonify({'error': 'How much to sell must be a number'}), 400
+                if not (_usd > 0) or not (_usd < 1e12):
+                    return jsonify({'error': 'How much to sell must be above 0'}), 400
+                _td = get_token_data(token_address)
+                _px = float(_td['price']) if _td and _td.get('price') else 0.0
+                if not _px > 0:
+                    return jsonify({'error': 'No price for this token right now — '
+                                             'sell by percentage instead'}), 400
+                sell_usd_tokens = _usd / _px
+                sell_full = False
 
         if side not in ('buy', 'sell'):
             return jsonify({'error': 'side must be buy or sell'}), 400
@@ -19641,6 +19709,9 @@ def api_instant_trade():
             # that already avoids leaving dust behind.
             if side == 'buy':
                 amount_str = str(amount_sol)
+            elif sell_usd_tokens > 0:
+                # Priced here, clamped to the real balance down there.
+                amount_str = f'{sell_usd_tokens:.9f}'
             elif not sell_full:
                 amount_str = f'{sell_frac * 100:g}%'
             else:
@@ -22584,6 +22655,58 @@ def api_trade_sell():
                                base=pos.get('base', 'SOL'))
         _close_open_position(user_id, wallet, mint)
     return jsonify({'ok': True, 'pnl': pnl, 'exit_price': exit_price, 'sell_executed': sell_ok})
+
+
+@app.route('/api/trade/holding', methods=['GET'])
+@rate_limit(60, 60)
+def api_trade_holding():
+    """How much of one token this user holds, and what it is worth.
+
+    The sell screen needs this to turn a dollar figure into a number of
+    tokens on the way in -- and to say "$103.40 held" next to the amount
+    being decided on, the same way the buy screen says what is spendable.
+
+    It reports the TRACKED position first, which is what the sell routes
+    actually close, so the screen and the trade agree about what is there.
+    On Solana a position can be held without being tracked (Live Market's
+    own buy route has never written to open_positions), so that falls back
+    to what the chain itself reports rather than telling someone they hold
+    nothing while their wallet says otherwise. Which of the two answered is
+    reported, so the caller is never guessing.
+    """
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'msg': 'No wallet connected'}), 401
+    chain = _sanitize(str(request.args.get('chain', 'solana')).strip().lower())
+    addr  = _sanitize(str(request.args.get('token_address', '')).strip())
+    if chain not in TOKEN_CHAINS:
+        return jsonify({'ok': False, 'msg': 'Unknown chain'}), 400
+    if not is_valid_token_address(addr, chain):
+        return jsonify({'ok': False, 'msg': 'Invalid token address'}), 400
+
+    pos    = get_user_state(wallet)['positions'].get(addr, {})
+    amount = float(pos.get('amount', 0.0) or 0.0)
+    source = 'position' if amount > 0 else ''
+
+    if amount <= 0 and chain == 'solana':
+        try:
+            onchain = _get_trading_wallet_address(wallet) or wallet
+            for t in (_fetch_wallet_tokens(wallet, onchain).get('tokens') or []):
+                if t.get('mint') == addr:
+                    amount = float(t.get('amount', 0.0) or 0.0)
+                    source = 'wallet' if amount > 0 else ''
+                    break
+        except Exception as e:
+            print(f'[holding] on-chain lookup failed: {e}', flush=True)
+
+    td    = get_token_data(addr)
+    price = float(td['price']) if td and td.get('price') else 0.0
+    return jsonify({
+        'ok': True, 'chain': chain, 'amount': amount, 'price_usd': price,
+        'value_usd': round(amount * price, 6) if price > 0 else 0.0,
+        'symbol': pos.get('symbol') or (td.get('symbol', '') if td else ''),
+        'source': source,
+    })
 
 
 @app.route('/api/trade/position/<token_address>', methods=['GET'])

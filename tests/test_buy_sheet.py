@@ -221,6 +221,8 @@ TOK = {"mint":"M"+"1"*39,"symbol":"UPONLY","name":"Up Only","chain":"bsc",
   "price_change_24h":180.51,"pair_created_at":None,"verified_socials":False,"score":4}
 BAL = {"ok":True,"solana_usdc":0.0,"total_usdc":12.4,
        "evm_chains":{"bsc":12.4,"base":0,"arbitrum":0,"polygon":0,"robinhood":0}}
+HOLD = {"ok":True,"chain":"bsc","amount":8000.0,"price_usd":0.0013,
+        "value_usd":10.4,"symbol":"UPONLY","source":"position"}
 async def main():
     out = {}
     async with async_playwright() as p:
@@ -237,6 +239,10 @@ async def main():
             body=json.dumps({"ok":True,"counts":{},"tokens":[TOK]})))
         await page.route('**/api/wallet/usdc-summary*', lambda r: r.fulfill(
             status=200, content_type='application/json', body=json.dumps(BAL)))
+        # Selling now asks what there is to sell, and converts a dollar
+        # figure into tokens against the price this answers with.
+        await page.route('**/api/trade/holding*', lambda r: r.fulfill(
+            status=200, content_type='application/json', body=json.dumps(HOLD)))
         await page.goto('http://127.0.0.1:%%d/live-market' %% PORT,
                         wait_until='domcontentloaded')
         await page.wait_for_selector('.pt-card', timeout=15000)
@@ -323,8 +329,10 @@ async def main():
         await page.wait_for_timeout(700)
         out['sell'] = await page.evaluate("""() => ({
             mode: document.getElementById('pt-sheet').classList.contains('sell-mode'),
-            keypadHidden: getComputedStyle(document.getElementById('pt-keys')).display === 'none',
+            keypad: getComputedStyle(document.getElementById('pt-keys')).display,
             amt: document.getElementById('pt-sheet-amt').textContent,
+            get: document.getElementById('pt-sheet-get').textContent,
+            held: document.getElementById('pt-sheet-avail').textContent,
             label: document.getElementById('pt-sheet-go').textContent,
             red: document.getElementById('pt-slide').classList.contains('sell') })""")
         out['traded'].clear()
@@ -444,9 +452,21 @@ check('BROWSER: a short downward drag does not dismiss the sheet',
 check('BROWSER: a real downward swipe does, returning to Live Market',
       B.get('long_swipe_closed'))
 check('BROWSER: Sell opens the same sheet in sell mode', B['sell']['mode'])
-check('BROWSER: ...with no keypad, since the server closes the whole tracked '
-      'position and there is no amount to ask for', B['sell']['keypadHidden'])
-check('BROWSER: ...saying so plainly', B['sell']['amt'] == 'Sell all')
+# This used to assert the opposite -- no keypad, "Sell all", nothing to
+# name -- because the sell routes could only close the whole position. They
+# take a share or a dollar figure now, so the screen asks its question the
+# same way in both directions and the old assertion is no longer true of
+# anything.
+check('BROWSER: ...with the same keypad, because a sale names a figure now '
+      'rather than being all-or-nothing', B['sell']['keypad'] == 'grid')
+check('BROWSER: ...opening on the whole position, which is what the button '
+      'always did — now filled in, so it can be edited down',
+      B['sell']['amt'] == '$10.4')
+check('BROWSER: ...converted to tokens at the price the server quoted, the '
+      'same conversion the buy screen does the other way',
+      '8,000' in B['sell']['get'] and 'UPONLY' in B['sell']['get'])
+check('BROWSER: ...measured against what is actually held',
+      '$10.40' in B['sell']['held'] and 'held' in B['sell']['held'])
 check('BROWSER: ...in red, and asking for the same gesture',
       B['sell']['red'] and 'Slide to sell' in B['sell']['label'])
 check('BROWSER: a completed slide sells', B.get('sell_traded') == ['/bsc/trade/sell'])

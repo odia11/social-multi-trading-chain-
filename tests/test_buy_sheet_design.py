@@ -120,9 +120,15 @@ check('...read from the same token the card shows, not a second lookup that '
 check('...and they are only there in sell mode, where there is room',
       '.pt-ticket-stats{display:none}' in CSS
       and '.pt-sheet.sell-mode .pt-ticket-stats{display:grid' in CSS)
-check('the sell ticket sits within reach of the thumb rather than floating '
-      'in the middle of an empty screen',
-      'justify-content:flex-end' in rule('.pt-sheet.sell-mode .pt-sheet-mid'))
+# The sell screen no longer HAS an empty screen to float in: it carries the
+# amount, the conversion, the readings, the quick shares, the keypad and
+# the fee box, same as the buy screen. So this asserts that it is the same
+# screen rather than that it was pushed to the bottom of a bare one.
+check('the sell screen asks its question the same way the buy screen does, '
+      'rather than being a different shape with the middle left empty',
+      '.pt-sheet.sell-mode .pt-keys' not in CSS
+      and '.pt-sheet.sell-mode .pt-sheet-pcts' not in CSS
+      and '.pt-sheet.sell-mode .pt-sheet-cap{display:none}' not in CSS)
 
 # ── 4. accessibility, on a screen that spends money ──────────────────────
 check('focus is visible on every control in the sheet, so it can be used '
