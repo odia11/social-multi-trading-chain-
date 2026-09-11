@@ -43,3 +43,16 @@
  body.oa-home-mobile #mobile-nav a,body.oa-home-mobile #mobile-nav button{border-radius:14px}
 }
 @media(max-width:390px){.oa-m-shortcuts{gap:5px}.oa-m-shortcut{font-size:9.5px;min-height:68px}.oa-m-bot-btn{padding:9px 9px;font-size:10.5px}.oa-m-hero h1{font-size:26px}}
+
+/* v3 hierarchy polish */
+@media(max-width:767px){
+ body.oa-home-mobile .botbar{display:none!important}
+ .oa-m-hero{min-height:0;padding:18px;display:grid;grid-template-columns:72px 1fr;gap:15px;align-items:start;margin-bottom:10px}
+ .oa-m-icon{width:64px;height:64px;margin:0;border-radius:18px}.oa-m-hero-copy{min-width:0}.oa-m-hero h1{font-size:24px;margin:2px 0 8px}.oa-m-hero p{font-size:12px;margin-bottom:13px}.oa-m-primary{min-height:40px;padding:0 15px;font-size:12px;border-radius:11px}
+ .oa-m-bot{margin-bottom:10px;padding:12px 13px}.oa-m-bot-title{font-size:14px}.oa-m-bot-state-line{font-size:11px;color:#77808e;margin-top:1px}.oa-m-bot-meta{font-size:9.5px}.oa-m-bot-btn{white-space:nowrap}
+ .oa-m-portfolio{margin:0 0 10px;padding:13px 14px}.oa-m-pf-main{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center}.oa-m-pf-kicker{font-size:10px}.oa-m-pf-value{font-size:25px;margin:2px 0 0}.oa-m-pf-spark{font-size:32px;line-height:1;color:#3ad29b;transform:rotate(-12deg)}.oa-m-pf-open{grid-column:2;color:#f7b955!important;text-decoration:none;font-size:10.5px;font-weight:700}.oa-m-pf-split{margin-top:10px}
+ .oa-m-market{margin:0 0 10px;padding-bottom:12px}.oa-m-card-head{padding:12px 14px 9px}.oa-m-market-list{padding:0 12px;display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.oa-m-market-tile{appearance:none;border:1px solid rgba(255,255,255,.07);background:#0a1016;border-radius:12px;min-width:0;padding:10px;text-align:left;color:#eef1f5;text-decoration:none;display:flex;flex-direction:column;gap:2px}.oa-m-market-tile b{font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.oa-m-market-tile span{font-size:8.5px;color:#68717e}.oa-m-market-tile strong{font:700 10px 'JetBrains Mono',monospace;margin-top:4px}
+ .oa-m-shortcuts{margin-bottom:10px}.oa-m-shortcut{min-height:66px}.oa-m-feed-label{margin-top:0}
+ body.oa-home-mobile #feed-composer{margin-bottom:0!important}
+}
+@media(max-width:390px){.oa-m-hero{grid-template-columns:60px 1fr;gap:12px;padding:15px}.oa-m-icon{width:56px;height:56px}.oa-m-hero h1{font-size:21px}.oa-m-pf-open{font-size:9.5px}.oa-m-market-list{gap:5px}.oa-m-market-tile{padding:8px}}
