@@ -380,15 +380,46 @@ input{font-family:inherit}
 .pt-keys{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;padding:0 16px;
   flex:1 1 auto;min-height:0;max-height:min(46vh,352px);overflow:hidden}
 .pt-keys .pt-key{min-height:0}
-.pt-key{background:var(--sheet-key);border:1px solid var(--sheet-line);color:var(--text);
-  font-family:var(--mono);font-size:21px;font-weight:600;font-variant-numeric:tabular-nums;
-  padding:clamp(11px,1.9vh,17px) 0;border-radius:14px;
-  transition:background .1s,border-color .1s,transform .06s}
+/* Centred by the INK, not by the line box. A line box carries descender
+   space under the baseline that digits never use, so centring the box
+   leaves every digit sitting in the top half of its key with a gap
+   underneath -- which is exactly how this looked on a real phone.
+   line-height:1 collapses that empty space and the flex centring then puts
+   the glyph where the eye expects it. */
+.pt-key{display:flex;align-items:center;justify-content:center;
+  background:var(--sheet-key);border:1px solid var(--sheet-line);color:var(--text);
+  /* The UI face, not the mono one: JetBrains Mono draws a DOTTED ZERO, which
+     is a legibility feature in a column of figures and reads as a mistake on
+     a single key. Digits on a keypad do not need to align in columns -- the
+     figures they produce, which are still mono, do. */
+  font-family:var(--ui);font-size:23px;font-weight:600;line-height:1;
+  padding:calc(var(--kpad) + var(--kink)) 0 calc(var(--kpad) - var(--kink));
+  border-radius:14px;
+  transition:background .1s,border-color .1s,transform .06s;
+  --kpad:clamp(13px,2vh,18px);
+  /* Centring the BOX is not centring the DIGIT, and that gap is what made
+     every key look like its number had floated to the top.
+     In a line box of 1em the baseline sits about 0.76em down and a digit
+     reaches about 0.70em above it, so the ink runs 0.06em–0.76em and its
+     middle lands at 0.41em against a box middle of 0.50em -- about 0.09em
+     high. That is a property of how sans faces are drawn rather than of one
+     face, which is what this can be sized from: the fonts here come from
+     Google Fonts, and this sandbox cannot reach them, so a figure tuned
+     against whatever face it falls back to would be a guess wearing a
+     measurement's clothes.
+     The two paddings move by the same amount in opposite directions, so the
+     key keeps its height and only what is drawn inside it moves. */
+  --kink:0.085em}
+/* Both of these are drawn shapes rather than type: no baseline to be off,
+   so the correction above would push them off instead. */
+.pt-key[data-k="."],.pt-key[data-k="del"]{--kink:0px}
 .pt-key:active{background:var(--accent-soft);border-color:var(--accent-border);
   color:var(--accent);transform:scale(.97)}
-.pt-key svg{width:23px;height:23px;vertical-align:middle}
-/* A full stop set at digit size is four pixels of ink in a 100px box. */
-.pt-key[data-k="."]{font-size:30px;line-height:.7}
+.pt-key svg{width:26px;height:26px;display:block}
+/* A full stop is ink on the baseline, so it sits at the bottom of its line
+   however the box is centred -- it read as a stray pixel in the corner of
+   the key. Drawn instead, it is a dot that is actually in the middle. */
+.pt-key-dot{width:7px;height:7px;border-radius:50%;background:currentColor}
 .pt-key[data-k="del"]{color:var(--muted)}
 .pt-key[data-k="del"]:active{color:var(--accent)}
 
@@ -534,7 +565,7 @@ input{font-family:inherit}
     box-shadow:0 24px 70px rgba(0,0,0,.6)}
   .pt-sheet-scrim{position:fixed;inset:0;z-index:299;background:rgba(0,0,0,.62);display:none}
   .pt-sheet-scrim.open{display:block}
-  .pt-key{font-size:19px;padding:11px 0}
+  .pt-key{font-size:20px;padding:12px 0}
   .pt-sheet-amt{font-size:44px}
 }
 .pt-buy-cur{color:var(--muted)}
@@ -919,7 +950,7 @@ input{font-family:inherit}
     <button class="pt-key" data-k="7">7</button>
     <button class="pt-key" data-k="8">8</button>
     <button class="pt-key" data-k="9">9</button>
-    <button class="pt-key" data-k=".">.</button>
+    <button class="pt-key" data-k="." aria-label="Decimal point"><span class="pt-key-dot"></span></button>
     <button class="pt-key" data-k="0">0</button>
     <button class="pt-key" data-k="del" aria-label="Delete">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">

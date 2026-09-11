@@ -91,6 +91,31 @@ check('the keys have faces, so there is something to aim at instead of a '
       'glyph painted on the background',
       'background:var(--sheet-key)' in rule('.pt-key')
       and 'border:1px solid var(--sheet-line)' in rule('.pt-key'))
+# Both of these were visible on a real phone and invisible in the source:
+# the keypad borrowed the figure face, which draws a dotted zero, and every
+# digit sat in the top of its key because a line box is centred by its box
+# and a digit is drawn from the cap height down to the baseline.
+check('the keypad is set in the UI face, not the one that draws a dotted '
+      'zero — that is a legibility feature in a column of figures and a '
+      'mistake on a single key',
+      'font-family:var(--ui)' in rule('.pt-key'))
+check('...with the line box collapsed to the type size, so the descender '
+      'space a digit never uses is not part of what gets centred',
+      'line-height:1' in rule('.pt-key'))
+check('...and the glyph nudged down off the baseline, by the same amount '
+      'taken off the other side so the key keeps its height',
+      'calc(var(--kpad) + var(--kink))' in rule('.pt-key')
+      and 'calc(var(--kpad) - var(--kink))' in rule('.pt-key'))
+check('...sized from how sans faces are drawn rather than tuned to one of '
+      'them, since the faces here are fetched at run time',
+      re.search(r'--kink:0\.0\d+em', rule('.pt-key')) is not None)
+check('the decimal point is drawn rather than typed, because a full stop is '
+      'ink on the baseline and sits at the bottom of the key however the '
+      'box is centred',
+      '<span class="pt-key-dot">' in HTML
+      and 'border-radius:50%' in rule('.pt-key-dot'))
+check('...and says what it is, having no text of its own',
+      'aria-label="Decimal point"' in HTML)
 check('the slide track is recessed -- a groove the knob travels along, '
       'which is what the gesture is',
       'inset' in rule('.pt-slide'))

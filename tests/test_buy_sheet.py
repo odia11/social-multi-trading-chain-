@@ -50,6 +50,13 @@ def check(name, cond):
     print(('PASS ' if cond else 'FAIL ') + name)
 
 
+def parseF(v):
+    try:
+        return float(str(v).replace('px', ''))
+    except ValueError:
+        return 0.0
+
+
 def no_comments(css):
     return re.sub(r'/\*.*?\*/', '', css, flags=re.DOTALL)
 
@@ -265,6 +272,32 @@ async def main():
             const s = getComputedStyle(l);
             return s.backgroundColor === 'rgba(0, 0, 0, 0)' && s.color !== s.backgroundColor;
         }""")
+        # THE KEYPAD, AS THE BROWSER RESOLVES IT. A digit is drawn from the
+        # cap height down to the baseline, and the baseline is not the
+        # middle of its line box -- so centring the box left every number
+        # sitting in the top of its key with a gap underneath. The fix
+        # moves the two paddings by the same amount in opposite directions;
+        # this reads back what the browser actually computed, which is the
+        # part a stylesheet grep cannot tell you (a later rule could undo
+        # it and the source would still look right).
+        out['keys'] = await page.evaluate("""() => {
+            const o = {};
+            document.querySelectorAll('#pt-keys .pt-key').forEach(b => {
+                const cs = getComputedStyle(b);
+                const kid = b.firstElementChild;
+                o[b.dataset.k] = {
+                    padT: parseFloat(cs.paddingTop),
+                    padB: parseFloat(cs.paddingBottom),
+                    h: b.getBoundingClientRect().height,
+                    font: cs.fontFamily,
+                    lineHeight: cs.lineHeight,
+                    display: cs.display,
+                    align: cs.alignItems,
+                    drawn: !b.textContent.trim() && !!kid};
+            });
+            return o;
+        }""")
+
         for k in ['0','.','1','5']:
             await page.click('#pt-keys .pt-key[data-k="%%s"]' %% k)
             await page.wait_for_timeout(90)
@@ -396,6 +429,9 @@ async def main():
             "document.getElementById('pt-sheet').classList.contains('open')")
         out['ids_returned'] = await page.evaluate(
             "!!document.getElementById('pt-buy-amt-sheet')")
+        out['dot_label'] = await page.evaluate(
+            "document.querySelector('#pt-keys .pt-key[data-k=\".\"]')"
+            ".getAttribute('aria-label')")
         out['errors'] = errs[:3]
         await b.close()
     print('@@' + json.dumps(out))
@@ -484,6 +520,43 @@ check('BROWSER: ...nor paint anything over the percentage buttons — every '
       all('pt-pct' in str(x) for x in B['squeeze']['onTopOfButtons']))
 check('BROWSER: ...and it is the keypad that gave way, not the amount',
       B['squeeze']['keysH'] < 40)
+# ── the keypad ──────────────────────────────────────────────────────────
+K = B.get('keys') or {}
+DIGITS = [k for k in K if k.isdigit()]
+DRAWN = ['.', 'del']
+check('BROWSER: every key is there', len(K) == 12 and len(DIGITS) == 10)
+check('BROWSER: the glyph is centred by the flex, not left to sit on a '
+      'baseline',
+      all(K[k]['display'] == 'flex' and K[k]['align'] == 'center' for k in K))
+check('BROWSER: ...in a line box collapsed to the type size, so the empty '
+      'descender space under a digit is not part of what gets centred',
+      all(K[k]['lineHeight'] == K[k].get('fontSize', K[k]['lineHeight'])
+          or abs(parseF(K[k]['lineHeight']) - 23) < 4 for k in DIGITS))
+# The correction the digits need, read back from the browser rather than
+# from the source: a later rule could undo it and the stylesheet would
+# still look right.
+gap = {k: round(K[k]['padT'] - K[k]['padB'], 2) for k in DIGITS}
+check(f'BROWSER: ...and nudged down off the baseline so the digit, not the '
+      f'box, is what sits in the middle — {sorted(set(gap.values()))}',
+      all(2.5 <= v <= 6 for v in gap.values()))
+check('BROWSER: ...by the same amount on every key, so the row does not '
+      'ripple', len(set(gap.values())) == 1)
+check('BROWSER: ...without changing the size of the key, since the two '
+      'paddings move in opposite directions',
+      len(set(round(K[k]['padT'] + K[k]['padB'], 2) for k in K)) == 1)
+check('BROWSER: the drawn keys get no nudge — they have no baseline to be '
+      'off, so it would push them off instead',
+      all(round(K[k]['padT'] - K[k]['padB'], 2) == 0 for k in DRAWN))
+check('BROWSER: the digits are not set in the mono face, which draws a '
+      'DOTTED ZERO — a legibility feature in a column of figures and a '
+      'mistake on a single key',
+      all('Mono' not in (K[k].get('font') or '') for k in K))
+check('BROWSER: the decimal point is a drawn shape, not a full stop sitting '
+      'on a baseline at the bottom of its key',
+      K.get('.', {}).get('drawn') is True)
+check('BROWSER: ...and it still says what it is, having no text of its own',
+      B.get('dot_label') == 'Decimal point')
+
 check('BROWSER: no JavaScript errors on the whole journey',
       not B.get('errors'))
 
