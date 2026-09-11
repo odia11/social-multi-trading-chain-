@@ -1,0 +1,147 @@
+/* Portfolio presentation layer for /wallet.
+   It deliberately reuses the wallet page's existing functions/endpoints so
+   Deposit, Withdraw/Send, Swap, holdings, bridge history and trade history
+   keep the same server-side routes and safety checks. */
+(function(){
+'use strict';
+function money(v){
+  var n=Number(v||0); if(!isFinite(n)) n=0;
+  return '$'+n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function num(v){ var n=Number(v||0); return isFinite(n)?n:0; }
+function call(name){
+  var fn=window[name];
+  if(typeof fn==='function') return fn.apply(window,Array.prototype.slice.call(arguments,1));
+}
+function boot(){
+  if(location.pathname.replace(/\/+$/,'')!=='/wallet') return;
+  if(document.body.classList.contains('oa-portfolio')) return;
+  document.body.classList.add('oa-portfolio','pf-view-overview');
+  document.title='Portfolio — OrcAgent';
+
+  var title=document.querySelector('.wlt-title');
+  var sub=document.querySelector('.wlt-sub');
+  if(title) title.textContent='Portfolio';
+  if(sub) sub.textContent='Your complete multi-chain trading portfolio';
+
+  /* Name this destination Portfolio everywhere on the current page, while
+     retaining /wallet as the stable backwards-compatible URL. */
+  document.querySelectorAll('a[href="/wallet"],a[href^="/wallet?"]').forEach(function(a){
+    var text=(a.textContent||'').trim();
+    if(/wallet/i.test(text)) a.textContent=text.replace(/wallet/ig,'Portfolio');
+    a.setAttribute('aria-label','Portfolio');
+  });
+
+  var center=document.querySelector('.wlt-center');
+  var hdr=document.querySelector('.wlt-hdr');
+  var content=document.querySelector('.wlt-content');
+  if(!center||!hdr||!content) return;
+
+  var tabs=document.createElement('div');
+  tabs.className='pf-tabs';
+  tabs.innerHTML='<button class="pf-tab active" data-pf-view="overview">Overview</button>'+
+    '<button class="pf-tab" data-pf-view="deposit">Deposit</button>'+
+    '<button class="pf-tab" data-pf-view="withdraw">Withdraw</button>';
+  hdr.insertAdjacentElement('afterend',tabs);
+
+  var hero=document.createElement('section');
+  hero.className='pf-balance-card';
+  hero.innerHTML='<div class="pf-kicker">Total portfolio value</div>'+
+    '<div class="pf-balance" id="pf-total">$0.00</div>'+
+    '<div class="pf-change" id="pf-change"><span>Multi-chain</span><span class="muted">live balances</span></div>'+
+    '<div class="pf-actions">'+
+      '<button class="pf-action deposit" id="pf-deposit">↓ <span>Deposit</span></button>'+
+      '<button class="pf-action withdraw" id="pf-withdraw">⇧ <span>Withdraw</span></button>'+
+    '</div>';
+  content.insertBefore(hero,content.firstChild);
+
+  var allocation=document.createElement('section');
+  allocation.className='pf-allocation';
+  allocation.innerHTML='<div class="pf-donut" id="pf-donut"><div class="pf-donut-center" id="pf-donut-total">$0</div></div>'+
+    '<div class="pf-legend">'+
+      '<div class="pf-leg-row"><span class="pf-dot a"></span><span class="pf-leg-name" id="pf-a-name">USDC</span><span class="pf-leg-val" id="pf-a-val">—</span></div>'+
+      '<div class="pf-leg-row"><span class="pf-dot b"></span><span class="pf-leg-name" id="pf-b-name">SOL</span><span class="pf-leg-val" id="pf-b-val">—</span></div>'+
+      '<div class="pf-leg-row"><span class="pf-dot c"></span><span class="pf-leg-name" id="pf-c-name">Other</span><span class="pf-leg-val" id="pf-c-val">—</span></div>'+
+    '</div>';
+  hero.insertAdjacentElement('afterend',allocation);
+
+  var holdings=document.querySelector('.holdings');
+  if(holdings){
+    var ht=holdings.querySelector('.holdings-title'); if(ht) ht.textContent='Assets';
+    var lab=document.createElement('div'); lab.className='pf-section-label';
+    lab.innerHTML='<span>Assets</span><small>Balance · Value · 24h</small>';
+    /* Keep one visible heading only: the card's own heading remains functional
+       for its refresh/hide-small controls, so the extra label is not inserted. */
+  }
+  document.querySelectorAll('.act-card').forEach(function(el,i){ if(i>0) el.dataset.pfExtra='1'; });
+
+  function showView(view){
+    document.body.classList.remove('pf-view-overview','pf-view-deposit','pf-view-withdraw');
+    if(view==='withdraw'){
+      document.body.classList.add('pf-view-overview');
+      tabs.querySelectorAll('.pf-tab').forEach(function(b){b.classList.toggle('active',b.dataset.pfView==='withdraw');});
+      call('_modalSend');
+      return;
+    }
+    document.body.classList.add('pf-view-'+view);
+    tabs.querySelectorAll('.pf-tab').forEach(function(b){b.classList.toggle('active',b.dataset.pfView===view);});
+    if(view==='deposit'){
+      setTimeout(function(){ var d=document.querySelector('.dep-card'); if(d) d.scrollIntoView({behavior:'smooth',block:'start'}); },30);
+    } else window.scrollTo({top:0,behavior:'smooth'});
+  }
+  tabs.addEventListener('click',function(e){var b=e.target.closest('[data-pf-view]');if(b)showView(b.dataset.pfView);});
+  document.getElementById('pf-deposit').addEventListener('click',function(){
+    if(typeof window._modalDeposit==='function') window._modalDeposit(); else showView('deposit');
+  });
+  document.getElementById('pf-withdraw').addEventListener('click',function(){showView('withdraw');});
+
+  /* Keep the new headline synced to the existing, already-tested balance
+     loader as well as the direct summary call below. */
+  var oldAvail=document.getElementById('avail');
+  if(oldAvail && window.MutationObserver){
+    new MutationObserver(function(){
+      var raw=(oldAvail.textContent||'').replace(/[^0-9.\-]/g,'');
+      if(raw) document.getElementById('pf-total').textContent=money(raw);
+    }).observe(oldAvail,{childList:true,characterData:true,subtree:true});
+  }
+
+  Promise.allSettled([
+    fetch('/api/wallet/usdc-summary',{credentials:'include'}).then(function(r){return r.json();}),
+    fetch('/api/wallet/tokens',{credentials:'include'}).then(function(r){return r.json();}),
+    fetch('/api/wallet/balance',{credentials:'include'}).then(function(r){return r.json();})
+  ]).then(function(res){
+    var s=res[0].status==='fulfilled'?res[0].value||{}:{};
+    var t=res[1].status==='fulfilled'?res[1].value||{}:{};
+    var b=res[2].status==='fulfilled'?res[2].value||{}:{};
+    var usdc=num(s.total_usdc!=null?s.total_usdc:(s.total!=null?s.total:0));
+    var tokens=Array.isArray(t.tokens)?t.tokens:[];
+    var tokenValue=tokens.reduce(function(sum,x){
+      var v=x.usd_value; if(v==null)v=x.value_usd; if(v==null)v=num(x.balance||x.amount)*num(x.price_usd||x.price);
+      return sum+num(v);
+    },0);
+    var solPrice=num(b.sol_price||s.sol_price||0);
+    var solValue=num(b.sol)*solPrice;
+    /* Token endpoint may include USDC itself; avoid obviously double-counting
+       it when the endpoint labels symbols. */
+    var otherValue=tokens.reduce(function(sum,x){
+      var sym=String(x.symbol||x.ticker||'').toUpperCase(); if(sym==='USDC'||sym==='USDT'||sym==='SOL') return sum;
+      var v=x.usd_value; if(v==null)v=x.value_usd; if(v==null)v=num(x.balance||x.amount)*num(x.price_usd||x.price);
+      return sum+num(v);
+    },0);
+    if(!otherValue && tokenValue>usdc) otherValue=Math.max(0,tokenValue-usdc-solValue);
+    var total=Math.max(usdc+solValue+otherValue,usdc,tokenValue);
+    document.getElementById('pf-total').textContent=money(total);
+    document.getElementById('pf-donut-total').textContent=total>=1000?'$'+(total/1000).toFixed(total>=10000?0:1)+'k':money(total);
+    var vals=[usdc,solValue,otherValue],sum=vals.reduce(function(a,c){return a+c;},0)||1;
+    var p1=Math.max(0,Math.min(100,vals[0]/sum*100));
+    var p2=Math.max(0,Math.min(100-p1,vals[1]/sum*100));
+    document.getElementById('pf-donut').style.background='conic-gradient(var(--pf-yellow) 0 '+p1.toFixed(1)+'%,#7ed797 '+p1.toFixed(1)+'% '+(p1+p2).toFixed(1)+'%,#7b8ca6 '+(p1+p2).toFixed(1)+'% 100%)';
+    function setRow(prefix,name,value){
+      document.getElementById(prefix+'-name').textContent=name;
+      document.getElementById(prefix+'-val').textContent=(value/sum*100).toFixed(1)+'%';
+    }
+    setRow('pf-a','USDC',usdc);setRow('pf-b','SOL',solValue);setRow('pf-c','Other',otherValue);
+  }).catch(function(){});
+}
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot();
+})();
