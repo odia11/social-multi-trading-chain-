@@ -1,0 +1,64 @@
+/* OrcAgent Portfolio redesign — loaded only on /wallet by navbar.js. */
+body.oa-portfolio{--pf-card:#10141c;--pf-card2:#0c1118;--pf-line:rgba(255,255,255,.065);--pf-yellow:var(--accent,#f7b955);background:#080b10}
+body.oa-portfolio .wlt-center{max-width:760px;margin:0 auto;max-height:none;overflow:visible;padding-bottom:90px}
+body.oa-portfolio .wlt-hdr{padding:28px 22px 8px;align-items:center}
+body.oa-portfolio .wlt-title{font-size:30px;font-weight:750;letter-spacing:-.03em}
+body.oa-portfolio .wlt-sub{color:#77808e;font-size:12px;margin-top:3px}
+body.oa-portfolio .net-pill{display:none}
+body.oa-portfolio .wlt-content{max-width:none;width:100%;padding:10px 22px 70px;gap:14px}
+body.oa-portfolio .wlt-hero{display:none}
+
+.pf-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;padding:6px;background:#0d1219;border:1px solid var(--pf-line);border-radius:16px;margin:2px 22px 16px}
+.pf-tab{border:1px solid transparent;background:transparent;color:#a1a9b6;border-radius:12px;min-height:44px;font:650 13px var(--ui,system-ui);cursor:pointer;transition:.18s ease}
+.pf-tab.active{color:var(--pf-yellow);border-color:rgba(247,185,85,.55);background:linear-gradient(180deg,rgba(247,185,85,.10),rgba(247,185,85,.035));box-shadow:0 0 0 1px rgba(247,185,85,.05) inset,0 0 22px rgba(247,185,85,.05)}
+.pf-tab:hover{color:#fff}
+
+.pf-balance-card{position:relative;overflow:hidden;background:radial-gradient(circle at 0 0,rgba(247,185,85,.10),transparent 44%),linear-gradient(145deg,#101722,#0b1017 68%);border:1px solid var(--pf-line);border-radius:24px;padding:24px 22px 20px;box-shadow:0 24px 60px -38px #000,0 1px 0 rgba(255,255,255,.04) inset}
+.pf-balance-card:after{content:"";position:absolute;width:170px;height:170px;border-radius:50%;right:-75px;top:-82px;background:rgba(247,185,85,.06);filter:blur(4px);pointer-events:none}
+.pf-kicker{font-size:11px;color:#77808e;font-weight:650;letter-spacing:.06em;text-transform:uppercase}
+.pf-balance{font:750 clamp(34px,8vw,48px)/1.08 var(--mono,monospace);letter-spacing:-.045em;margin-top:12px;color:#f6f8fb;font-variant-numeric:tabular-nums}
+.pf-change{display:flex;gap:7px;align-items:center;color:#3ad29b;font:650 12px var(--mono,monospace);margin-top:8px;min-height:18px}
+.pf-change .muted{color:#77808e;font-family:var(--ui,system-ui);font-weight:500}
+.pf-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:23px}
+.pf-action{min-height:52px;border-radius:15px;border:1px solid var(--pf-line);font:750 14px var(--ui,system-ui);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;transition:.18s ease}
+.pf-action.deposit{background:linear-gradient(180deg,#ffd164,#f7b955);color:#111318;border-color:#ffd164;box-shadow:0 10px 24px rgba(247,185,85,.12)}
+.pf-action.withdraw{background:#0d141d;color:#eef1f5}
+.pf-action:hover{transform:translateY(-1px)}
+
+.pf-allocation{background:linear-gradient(160deg,#101721,#0b1017);border:1px solid var(--pf-line);border-radius:22px;padding:20px;display:grid;grid-template-columns:168px 1fr;gap:22px;align-items:center}
+.pf-donut{width:148px;height:148px;border-radius:50%;margin:auto;position:relative;background:conic-gradient(var(--pf-yellow) 0 55%,#7ed797 55% 80%,#7b8ca6 80% 100%);box-shadow:0 0 0 1px rgba(255,255,255,.04)}
+.pf-donut:after{content:"";position:absolute;inset:27px;border-radius:50%;background:#0d131b;border:1px solid rgba(255,255,255,.04)}
+.pf-donut-center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2;font:750 14px var(--mono,monospace);color:#f1f4f7;text-align:center;padding:40px}
+.pf-legend{display:flex;flex-direction:column;gap:14px}
+.pf-leg-row{display:grid;grid-template-columns:12px 1fr auto;gap:9px;align-items:center;font-size:13px}
+.pf-dot{width:10px;height:10px;border-radius:50%}.pf-dot.a{background:var(--pf-yellow)}.pf-dot.b{background:#7ed797}.pf-dot.c{background:#7b8ca6}
+.pf-leg-name{color:#aeb5c0}.pf-leg-val{font:650 12px var(--mono,monospace);color:#e9edf2}
+
+body.oa-portfolio .dep-card,body.oa-portfolio .holdings,body.oa-portfolio .act-card{background:linear-gradient(160deg,#101721,#0b1017);border-color:var(--pf-line);border-radius:20px;box-shadow:0 1px 0 rgba(255,255,255,.035) inset}
+body.oa-portfolio .holdings-hdr,body.oa-portfolio .act-hdr{border-bottom-color:var(--pf-line);padding:17px 18px}
+body.oa-portfolio .holdings-title,body.oa-portfolio .act-title{font-size:16px;font-weight:720}
+body.oa-portfolio .tok-row{padding:15px 0}
+body.oa-portfolio .tok-row-block{border-bottom-color:var(--pf-line)}
+body.oa-portfolio .tok-logo,body.oa-portfolio .tok-init{width:44px;height:44px}
+body.oa-portfolio .tok-name{font-size:15px}
+body.oa-portfolio .tok-usd{font-size:14px}
+body.oa-portfolio .dep-card{padding:18px}
+
+/* Overview keeps the page intentionally calm; operational plumbing remains available through tabs/history. */
+body.oa-portfolio.pf-view-overview .dep-card{display:none}
+body.oa-portfolio.pf-view-overview .act-card[data-pf-extra="1"]{display:none}
+body.oa-portfolio.pf-view-deposit .pf-balance-card,body.oa-portfolio.pf-view-deposit .pf-allocation,body.oa-portfolio.pf-view-deposit .holdings,body.oa-portfolio.pf-view-deposit .act-card{display:none}
+body.oa-portfolio.pf-view-deposit .dep-card{display:block}
+
+.pf-section-label{display:flex;align-items:center;justify-content:space-between;margin:4px 2px -4px;font-size:18px;font-weight:750;color:#f1f4f7}
+.pf-section-label small{font-size:11px;color:#6f7885;font-weight:550}
+
+@media(max-width:600px){
+ body.oa-portfolio .wlt-hdr{padding:18px 16px 6px}body.oa-portfolio .wlt-title{font-size:28px}
+ body.oa-portfolio .wlt-content{padding:8px 14px 92px}.pf-tabs{margin:4px 14px 14px}
+ .pf-balance-card{border-radius:21px;padding:22px 18px 18px}.pf-balance{font-size:36px}
+ .pf-allocation{grid-template-columns:132px 1fr;gap:13px;padding:17px 15px}.pf-donut{width:122px;height:122px}.pf-donut:after{inset:23px}.pf-donut-center{font-size:12px;padding:33px}
+ .pf-leg-row{grid-template-columns:10px 1fr auto;gap:7px;font-size:12px}.pf-leg-val{font-size:11px}
+ body.oa-portfolio .holdings,body.oa-portfolio .act-card,body.oa-portfolio .dep-card{border-radius:18px}
+}
+@media(max-width:380px){.pf-allocation{grid-template-columns:1fr}.pf-donut{width:136px;height:136px}.pf-legend{padding:0 6px}}
