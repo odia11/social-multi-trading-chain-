@@ -40,10 +40,18 @@ body.oa-home-mobile #mobile-nav{background:#080d12!important;backdrop-filter:non
 body.oa-home-mobile #center-feed{background:#080d12!important}
 body.oa-home-mobile .feed-card,body.oa-home-mobile .post-card{border-color:rgba(255,255,255,.055)!important}
 body.oa-home-mobile .feed-card img,body.oa-home-mobile .post-card img{background:#080d12}
-/* Keep scrolling on the document only; avoid nested scroll/repaint layers on iOS. */
-html:has(body.oa-home-mobile),body.oa-home-mobile{overflow-y:auto!important;-webkit-overflow-scrolling:touch!important}
-body.oa-home-mobile #app,body.oa-home-mobile .app-body,body.oa-home-mobile .wrap{overflow:visible!important;height:auto!important;max-height:none!important}
+
+/* Native document scrolling only. No iOS pull/bounce should compete with a feed swipe. */
+html:has(body.oa-home-mobile),body.oa-home-mobile{overflow-y:auto!important;-webkit-overflow-scrolling:touch!important;overscroll-behavior-y:none!important}
+body.oa-home-mobile{touch-action:pan-y!important}
+body.oa-home-mobile #app,body.oa-home-mobile .app-body,body.oa-home-mobile .wrap{overflow:visible!important;height:auto!important;max-height:none!important;overscroll-behavior:none!important}
 body.oa-home-mobile .pt-nb-topbar{contain:layout paint;transform:translateZ(0)}
 body.oa-home-mobile #mobile-nav{transform:translateZ(0)}
+
+/* iOS keyboard Done/✓ is only allowed to dismiss the keyboard. It must not
+   visually collapse the composer or hide the post controls/draft. */
+body.oa-home-mobile #feed-composer{display:block!important;visibility:visible!important;height:auto!important;min-height:0!important}
+body.oa-home-mobile #feed-composer .feed-composer-actions{display:flex!important;visibility:visible!important}
+body.oa-home-mobile #feed-composer #postText,body.oa-home-mobile #feed-composer textarea{display:block!important;visibility:visible!important;opacity:1!important}
 }
 @media(max-width:390px){.oa-m-hero{min-height:292px!important}.oa-m-hero-copy h1{font-size:20px!important}.oa-m-hero-copy p{font-size:9.7px!important}.oa-m-values{width:calc(100% + 96px)!important}.oa-m-bot-meta{max-width:150px}.oa-m-pf-chart{display:none!important}.oa-m-portfolio{grid-template-columns:36px minmax(0,1fr) auto!important}.oa-m-market-strip{grid-template-columns:repeat(3,1fr) .8fr!important}.oa-m-shortcuts a{font-size:8px!important}}
