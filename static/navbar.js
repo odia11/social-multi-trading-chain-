@@ -29,7 +29,7 @@
 (function(){
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/' || !window.matchMedia('(max-width:767px)').matches) return;
-  var css=document.createElement('link'); css.rel='stylesheet'; css.href='/static/home-mobile.css?v=1'; document.head.appendChild(css);
+  var css=document.createElement('link'); css.rel='stylesheet'; css.href='/static/home-mobile.css?v=2'; document.head.appendChild(css);
   var js=document.createElement('script'); js.src='/static/home-mobile.js?v=1'; js.defer=true; document.head.appendChild(js);
 })();
 
