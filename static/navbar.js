@@ -33,16 +33,23 @@
   var js=document.createElement('script');js.src='/static/live-market-redesign.js?v=2';js.defer=true;document.head.appendChild(js);
 })();
 
+(function(){
+  var here=location.pathname.replace(/\/+$/,'')||'/';
+  if(here!=='/groups')return;
+  var css=document.createElement('link');css.rel='stylesheet';css.href='/static/groups-redesign.css?v=1';document.head.appendChild(css);
+  var js=document.createElement('script');js.src='/static/groups-redesign.js?v=1';js.defer=true;document.head.appendChild(js);
+})();
+
 /* Shared premium mobile bottom nav across OrcAgent. */
 (function(){
   if(!window.matchMedia('(max-width:767px)').matches)return;
   var css=document.createElement('link');css.rel='stylesheet';css.href='/static/mobile-bottom-nav.css?v=2';document.head.appendChild(css);
-  var js=document.createElement('script');js.src='/static/mobile-bottom-nav.js?v=2';js.defer=true;document.head.appendChild(js);
+  var js=document.createElement('script');js.src='/static/mobile-bottom-nav.js?v=3';js.defer=true;document.head.appendChild(js);
 })();
 
 /* Consistent reply/repost/like/bookmark SVGs wherever feed actions exist. */
 (function(){
-  var css=document.createElement('link');css.rel='stylesheet';css.href='/static/feed-action-icons.css?v=1';document.head.appendChild(css);
+  var css=document.createElement('link');css.rel='stylesheet';css.href='/static/feed-action-icons.css?v=2';document.head.appendChild(css);
   var js=document.createElement('script');js.src='/static/feed-action-icons.js?v=1';js.defer=true;document.head.appendChild(js);
 })();
 
