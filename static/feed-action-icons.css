@@ -1,0 +1,12 @@
+/* OrcAgent feed action icons — reply / repost / like / bookmark */
+.fc-actions .fc-action{min-height:36px;padding:6px 8px!important;margin:0!important;border-radius:10px;gap:7px!important;color:#707b89!important;transition:color .15s,background-color .15s,transform .12s}
+.fc-actions .fc-action:active{transform:scale(.96)}
+.fc-actions .oa-feed-action-icon{width:21px;height:21px;flex:0 0 21px;display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.fc-actions .oa-feed-action-count{font:500 12px/1 'JetBrains Mono',monospace;color:inherit;min-width:8px}
+.fc-actions .oa-action-reply:hover{color:#f7b955!important;background:rgba(247,185,85,.08)!important}
+.fc-actions .oa-action-repost:hover,.fc-actions .oa-action-repost.reposted{color:#3ad29b!important;background:rgba(58,210,155,.08)!important}
+.fc-actions .oa-action-like:hover,.fc-actions .oa-action-like.liked{color:#ff6075!important;background:rgba(255,96,117,.08)!important}
+.fc-actions .oa-action-like.liked .oa-feed-action-icon{fill:currentColor}
+.fc-actions .oa-action-bookmark:hover,.fc-actions .oa-action-bookmark.active{color:#f7b955!important;background:rgba(247,185,85,.08)!important}
+.fc-actions .oa-action-bookmark.active .oa-feed-action-icon{fill:currentColor}
+@media(max-width:767px){.fc-actions{gap:8px!important;justify-content:space-between}.fc-actions .fc-action{padding:7px!important}.fc-actions .oa-feed-action-icon{width:22px;height:22px;flex-basis:22px}.fc-actions .oa-feed-action-count{font-size:11.5px}}
