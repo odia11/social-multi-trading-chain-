@@ -1,9 +1,10 @@
 /* OrcAgent mobile Home presentation layer. Root dashboard only. Existing logo, feed, composer and mobile nav remain the functional components. */
 @media(max-width:767px){
- body.oa-home-mobile{background:#080b10!important;color:#eef1f5}
- body.oa-home-mobile #app{background:#080b10!important;height:auto!important;min-height:100dvh!important;overflow:visible!important;padding-bottom:calc(88px + env(safe-area-inset-bottom,0px))}
- body.oa-home-mobile .app-body{display:block!important;overflow:visible!important;min-height:100dvh!important}
- body.oa-home-mobile .wrap{height:auto!important;max-height:none!important;overflow:visible!important;width:100%!important;max-width:100%!important;padding:10px 12px 28px!important;border:0!important;background:#080b10}
+ html:has(body.oa-home-mobile){height:auto!important;min-height:100%!important;overflow-y:auto!important;overflow-x:hidden!important;-webkit-overflow-scrolling:touch!important}
+ body.oa-home-mobile{background:#080b10!important;color:#eef1f5;height:auto!important;min-height:100dvh!important;overflow-y:auto!important;overflow-x:hidden!important;position:static!important;touch-action:pan-y!important;-webkit-overflow-scrolling:touch!important;overscroll-behavior-y:auto!important}
+ body.oa-home-mobile #app{background:#080b10!important;height:auto!important;min-height:100dvh!important;max-height:none!important;overflow:visible!important;position:static!important;padding-bottom:calc(88px + env(safe-area-inset-bottom,0px))}
+ body.oa-home-mobile .app-body{display:block!important;overflow:visible!important;height:auto!important;max-height:none!important;min-height:100dvh!important;position:static!important}
+ body.oa-home-mobile .wrap{height:auto!important;max-height:none!important;min-height:0!important;overflow:visible!important;position:static!important;touch-action:pan-y!important;width:100%!important;max-width:100%!important;padding:10px 12px 28px!important;border:0!important;background:#080b10}
  body.oa-home-mobile #right-rail{display:none!important}
 
  .oa-m-hero{position:relative;overflow:hidden;border:1px solid rgba(247,185,85,.24);border-radius:20px;min-height:214px;padding:22px 19px;background:radial-gradient(circle at 92% 20%,rgba(247,185,85,.14),transparent 35%),linear-gradient(135deg,#12151a,#090d12 68%);box-shadow:0 20px 50px -34px #000;margin:2px 0 12px}
