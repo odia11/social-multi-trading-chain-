@@ -13,17 +13,31 @@ function call(name){
   var fn=window[name];
   if(typeof fn==='function') return fn.apply(window,Array.prototype.slice.call(arguments,1));
 }
+
+/* IMPORTANT: this function must be idempotent. The previous implementation
+   rewrote an already-sanitised em dash on every MutationObserver callback.
+   Setting textContent itself creates another mutation, which produced an
+   endless observer loop and could peg iOS Safari's main thread at 100%.
+   We now mark sanitised nodes and never write the same value twice. */
 function sanitizeAssetPercentages(root){
   (root||document).querySelectorAll('.tok-pct').forEach(function(el){
-    var raw=(el.textContent||'').replace(/,/g,'').replace(/[^0-9+\-.]/g,'');
+    if(el.dataset.pfSanitized==='1') return;
+    var text=(el.textContent||'').trim();
+    if(text==='—'){
+      el.dataset.pfSanitized='1';
+      return;
+    }
+    var raw=text.replace(/,/g,'').replace(/[^0-9+\-.]/g,'');
     var n=parseFloat(raw);
     if(!isFinite(n) || Math.abs(n)>1000){
-      el.textContent='—';
+      el.dataset.pfSanitized='1';
+      if(el.textContent!=='—') el.textContent='—';
       el.style.color='var(--muted,#6f7885)';
       el.title='24h change unavailable';
     }
   });
 }
+
 function boot(){
   if(location.pathname.replace(/\/+$/,'')!=='/wallet') return;
   if(document.body.classList.contains('oa-portfolio')) return;
@@ -90,7 +104,13 @@ function boot(){
     tabs.querySelectorAll('.pf-tab').forEach(function(b){b.classList.toggle('active',b.dataset.pfView===view);});
     if(view==='deposit'){
       setTimeout(function(){ var d=document.querySelector('.dep-card'); if(d) d.scrollIntoView({behavior:'smooth',block:'start'}); },30);
-    } else window.scrollTo({top:0,behavior:'smooth'});
+    } else {
+      /* The original wallet uses .wlt-center as its scroll container on
+         desktop. On mobile our CSS may hand scrolling back to the document.
+         Reset whichever one is actually scrollable without forcing layout. */
+      try{ center.scrollTop=0; }catch(e){}
+      try{ window.scrollTo(0,0); }catch(e){}
+    }
   }
   tabs.addEventListener('click',function(e){var b=e.target.closest('[data-pf-view]');if(b)showView(b.dataset.pfView);});
   document.getElementById('pf-deposit').addEventListener('click',function(){
@@ -106,8 +126,16 @@ function boot(){
     }).observe(oldAvail,{childList:true,characterData:true,subtree:true});
   }
 
+  /* Observe only structural updates from the wallet token loader. We do NOT
+     observe characterData: sanitising text is itself a text mutation and was
+     the source of the recursive freeze. A small debounce also coalesces a
+     batch of token rows into one pass. */
   if(holdings && window.MutationObserver){
-    new MutationObserver(function(){sanitizeAssetPercentages(holdings);}).observe(holdings,{childList:true,subtree:true,characterData:true});
+    var pctTimer=null;
+    new MutationObserver(function(){
+      clearTimeout(pctTimer);
+      pctTimer=setTimeout(function(){sanitizeAssetPercentages(holdings);},0);
+    }).observe(holdings,{childList:true,subtree:true});
     sanitizeAssetPercentages(holdings);
   }
 
