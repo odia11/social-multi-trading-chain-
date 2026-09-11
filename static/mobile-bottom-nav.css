@@ -2,6 +2,7 @@
 @media(max-width:767px){
   body{padding-bottom:calc(118px + env(safe-area-inset-bottom,0px))!important}
   #mobile-nav{display:none!important}
+  .pt-nb-menu-btn{display:none!important}
   .oa-bottom-nav{position:fixed;left:0;right:0;bottom:0;z-index:1200;height:82px;padding:8px 16px calc(8px + env(safe-area-inset-bottom,0px));background:#080d12;border-top:1px solid #17202a;display:grid;grid-template-columns:1fr 1fr 82px 1fr 1fr;align-items:end;gap:6px;box-sizing:content-box}
   .oa-bottom-nav a,.oa-bottom-nav button{appearance:none;-webkit-appearance:none;border:0;background:none;color:#8b95a3;text-decoration:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-width:0;height:62px;font:600 11px/1.1 Geist,system-ui,sans-serif;letter-spacing:-.01em;padding:0;cursor:pointer}
   .oa-bottom-nav svg{width:27px;height:27px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
