@@ -41,13 +41,13 @@
   var js=document.createElement('script'); js.src='/static/home-mobile.js?v=3'; js.defer=true; document.head.appendChild(js);
 })();
 
-/* Live Market v2: same scanner/trading backend, new Home-matched visual layer
-   plus swipe Buy/Sell interaction in the trade sheet. */
+/* Live Market v3: same scanner/trading backend, new Home-matched surface
+   and a fully re-composed mobile swap sheet. */
 (function(){
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/live-market') return;
-  var css=document.createElement('link'); css.rel='stylesheet'; css.href='/static/live-market-redesign.css?v=1'; document.head.appendChild(css);
-  var js=document.createElement('script'); js.src='/static/live-market-redesign.js?v=1'; js.defer=true; document.head.appendChild(js);
+  var css=document.createElement('link'); css.rel='stylesheet'; css.href='/static/live-market-redesign.css?v=2'; document.head.appendChild(css);
+  var js=document.createElement('script'); js.src='/static/live-market-redesign.js?v=2'; js.defer=true; document.head.appendChild(js);
 })();
 
 var _NB_LIVE_CHAINS = ['solana', 'bsc', 'base', 'arbitrum', 'polygon', 'robinhood'];
@@ -91,7 +91,6 @@ function markCurrentNavItem(){var here=location.pathname.replace(/\/+$/,'')||'/'
 
 document.addEventListener('DOMContentLoaded',function(){
   var root=document.querySelector('.pt-nb-topbar');if(!root)return;markCurrentNavItem();
-  /* Rename the product destination without changing the stable /wallet route. */
   if(location.pathname.replace(/\/+$/,'')==='/wallet') document.querySelectorAll('a[href="/wallet"],a[href^="/wallet?"]').forEach(function(a){if(/wallet/i.test(a.textContent||''))a.textContent=(a.textContent||'').replace(/wallet/ig,'Portfolio');});
   var menuBtn=document.getElementById('pt-nb-menu-btn'),navEl=document.getElementById('pt-nb-nav'),moreBtn=document.getElementById('pt-nb-more-btn'),moreDd=document.getElementById('pt-nb-more-dd'),scrimEl=document.getElementById('pt-nb-scrim'),searchIn=document.getElementById('pt-nb-search-input'),searchRes=document.getElementById('pt-nb-search-results');
   if(menuBtn)menuBtn.addEventListener('click',function(e){e.stopPropagation();var opening=!navEl.classList.contains('mobile-open');closeAllOverlays();if(opening){navEl.classList.add('mobile-open');if(scrimEl)scrimEl.classList.add('show');}});
