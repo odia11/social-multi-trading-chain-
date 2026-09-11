@@ -1,4 +1,14 @@
 (function(){
+  /* page-loader.js is already present on the main OrcAgent screens, so it is
+     the stable place to boot the shared UX layer without editing every
+     server-rendered template separately. Guards keep fallback loaders safe. */
+  if(!document.getElementById('oa-app-ux-css')){
+    var uxCss=document.createElement('link');uxCss.id='oa-app-ux-css';uxCss.rel='stylesheet';uxCss.href='/static/app-ux.css?v=2';document.head.appendChild(uxCss);
+  }
+  if(!document.getElementById('oa-app-ux-js')){
+    var uxJs=document.createElement('script');uxJs.id='oa-app-ux-js';uxJs.src='/static/app-ux.js?v=2';uxJs.defer=true;document.head.appendChild(uxJs);
+  }
+
   var b=document.createElement('div');
   b.id='pgl-bar';
   b.style.cssText='position:fixed;top:0;left:0;height:2px;width:0;background:#f7b955;z-index:99999;transition:width .18s ease,opacity .22s ease;box-shadow:0 0 8px rgba(247,185,85,.35);pointer-events:none';
