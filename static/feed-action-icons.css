@@ -9,4 +9,12 @@
 .fc-actions .oa-action-like.liked .oa-feed-action-icon{fill:currentColor}
 .fc-actions .oa-action-bookmark:hover,.fc-actions .oa-action-bookmark.active{color:#f7b955!important;background:rgba(247,185,85,.08)!important}
 .fc-actions .oa-action-bookmark.active .oa-feed-action-icon{fill:currentColor}
-@media(max-width:767px){.fc-actions{gap:8px!important;justify-content:space-between}.fc-actions .fc-action{padding:7px!important}.fc-actions .oa-feed-action-icon{width:22px;height:22px;flex-basis:22px}.fc-actions .oa-feed-action-count{font-size:11.5px}}
+.fc-actions .fc-view-count{flex:0 0 auto;white-space:nowrap;line-height:1.2;min-width:max-content;padding:6px 2px;margin-left:auto!important;overflow:visible!important}
+@media(max-width:767px){
+ .fc-actions{display:grid!important;grid-template-columns:repeat(4,minmax(38px,auto)) minmax(48px,1fr);align-items:center!important;gap:3px!important;width:100%!important;overflow:visible!important}
+ .fc-actions .fc-action{padding:7px 5px!important;min-width:0!important;justify-content:center}
+ .fc-actions .oa-feed-action-icon{width:22px;height:22px;flex-basis:22px}
+ .fc-actions .oa-feed-action-count{font-size:11.5px}
+ .fc-actions .fc-view-count{justify-self:end!important;margin-left:0!important;padding:7px 3px!important;font-size:10.5px!important;text-align:right!important;max-width:none!important;overflow:visible!important}
+ .feed-card,.fc-card,.fc-inner{overflow:visible}
+}
