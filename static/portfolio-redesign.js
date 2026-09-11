@@ -103,19 +103,21 @@ function boot(){
     document.body.classList.add('pf-view-'+view);
     tabs.querySelectorAll('.pf-tab').forEach(function(b){b.classList.toggle('active',b.dataset.pfView===view);});
     if(view==='deposit'){
-      setTimeout(function(){ var d=document.querySelector('.dep-card'); if(d) d.scrollIntoView({behavior:'smooth',block:'start'}); },30);
+      /* Portfolio deposit is a dedicated multi-chain view. The underlying
+         .dep-card already owns Solana + EVM address selection, copy and
+         explorer behaviour. Do not open the legacy Solana-only modal. */
+      setTimeout(function(){
+        var d=document.querySelector('.dep-card');
+        if(!d) return;
+        try{ d.scrollIntoView({behavior:'smooth',block:'start'}); }catch(e){ try{ d.scrollIntoView(); }catch(_e){} }
+      },30);
     } else {
-      /* The original wallet uses .wlt-center as its scroll container on
-         desktop. On mobile our CSS may hand scrolling back to the document.
-         Reset whichever one is actually scrollable without forcing layout. */
       try{ center.scrollTop=0; }catch(e){}
       try{ window.scrollTo(0,0); }catch(e){}
     }
   }
   tabs.addEventListener('click',function(e){var b=e.target.closest('[data-pf-view]');if(b)showView(b.dataset.pfView);});
-  document.getElementById('pf-deposit').addEventListener('click',function(){
-    if(typeof window._modalDeposit==='function') window._modalDeposit(); else showView('deposit');
-  });
+  document.getElementById('pf-deposit').addEventListener('click',function(){ showView('deposit'); });
   document.getElementById('pf-withdraw').addEventListener('click',function(){showView('withdraw');});
 
   var oldAvail=document.getElementById('avail');
