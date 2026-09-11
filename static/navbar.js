@@ -41,6 +41,15 @@
   var js=document.createElement('script'); js.src='/static/home-mobile.js?v=3'; js.defer=true; document.head.appendChild(js);
 })();
 
+/* Live Market v2: same scanner/trading backend, new Home-matched visual layer
+   plus swipe Buy/Sell interaction in the trade sheet. */
+(function(){
+  var here=location.pathname.replace(/\/+$/,'')||'/';
+  if(here!=='/live-market') return;
+  var css=document.createElement('link'); css.rel='stylesheet'; css.href='/static/live-market-redesign.css?v=1'; document.head.appendChild(css);
+  var js=document.createElement('script'); js.src='/static/live-market-redesign.js?v=1'; js.defer=true; document.head.appendChild(js);
+})();
+
 var _NB_LIVE_CHAINS = ['solana', 'bsc', 'base', 'arbitrum', 'polygon', 'robinhood'];
 var _NB_CHAIN_LABELS = {solana:'SOL', bsc:'BSC', base:'BASE', arbitrum:'ARB', polygon:'POLY', robinhood:'HOOD'};
 
