@@ -212,7 +212,8 @@ check('...so nothing the client sends is ever used as a token amount',
 check('...a full sell still closes the position', '_close_open_position(' in evm)
 check('...and a partial one reduces it instead',
       '_reduce_open_position(' in evm
-      and re.search(r'if full_close:\s*\n\s*_close_open_position', evm) is not None)
+      and re.search(r'if full_close:[\s\S]{0,300}?_close_open_position\(', evm)
+      is not None)
 check('...the caller is told what was actually sold and whether anything is '
       'left', "'sold_pct'" in evm and "'position_closed': full_close" in evm)
 
@@ -256,10 +257,19 @@ check('...reporting the TRACKED position first, which is what the sell '
       and "source = 'position'" in hold_src)
 # Live Market's own Solana buy route has never written to open_positions,
 # so a tracked amount of 0 there does not mean an empty wallet.
+# The fallback moved into a helper the copy path shares, so the screen and
+# the trade cannot disagree about what is there. Asserted where it lives
+# now, plus that the route still reaches it.
+held_src = src.split('def _solana_token_amount')[1].split('\ndef ')[0]
 check('...falling back to what the chain itself reports on Solana, rather '
       'than telling somebody they hold nothing while their wallet says '
       'otherwise',
-      "chain == 'solana'" in hold_src and '_fetch_wallet_tokens' in hold_src)
+      "chain == 'solana'" in hold_src
+      and '_solana_token_amount(wallet, addr)' in hold_src
+      and '_fetch_wallet_tokens' in held_src)
+check('...through one lookup, shared with the copy path, so a sale and the '
+      'copy of it cannot disagree about how much was there',
+      src.count('_solana_token_amount(') >= 3)
 check('...and saying which of the two answered, so the caller is not '
       'guessing', "'source': source" in hold_src)
 check('...behind the same login every other trade route is behind',

@@ -30,10 +30,20 @@ WHAT MUST NOT BREAK
 3. A copier spends THEIR amount, never the leader's. Following a whale must
    not spend like one.
 
-WHAT THIS DOES NOT DO, said out loud because it matters: there is still no
-copy SELL anywhere in this app, and there never was. A copier is bought in
-and gets out on their own -- by hand, or through their own bot's take-profit
-and stop-loss. Widening the buy side without saying so would be the trap.
+GETTING OUT IS HALF OF IT
+There was no copy SELL anywhere in this app, and there never had been: a
+copier was bought in and left there, getting out by hand or through their
+own bot's take-profit and stop-loss while the trader they followed had
+already gone. Following someone now follows them out as well.
+
+The SHARE travels, not the amount. A leader who sells half sells half of
+each copier's position, so a copier's position stays their own size
+throughout -- the same rule as the buy side, where a copier spends their
+amount and not the leader's.
+
+And only what was bought FOR them is sold. A copier may hold the same token
+from a buy of their own; selling that because somebody else sold theirs
+would be reaching into a position they never asked anyone to manage.
 """
 import os
 import re
@@ -68,8 +78,12 @@ inst = SRC.split('def api_instant_trade')[1].split('\ndef ')[0]
 check('Live Market\'s Solana buy triggers copying — the screen people '
       'actually press Buy on told the copy path nothing at all',
       '_trigger_copy_buy(' in inst)
-check('...for a buy only, since a sale is not a position to copy into',
-      re.search(r"if side == 'buy' and not get_user_state\(wallet\)", inst) is not None)
+check('...as a buy, with the sale handled as its own thing rather than '
+      'copied into a position',
+      re.search(r"if side == 'buy' and not _is_copy_pos:", inst) is not None
+      and re.search(r"elif side == 'sell' and not _is_copy_pos:", inst) is not None)
+check('...and neither direction propagates from a position that is itself a '
+      'copy', "_is_copy_pos = bool(" in inst)
 check('...inside the lock, so a double-click the repeat window already '
       'refuses cannot get a second copy out either',
       inst.index('_trigger_copy_buy(') > inst.index('with lock:'))
@@ -217,6 +231,91 @@ finally:
 check('a copier past their daily loss limit is not bought into anything, '
       'however often the trader they follow moves', calls == [])
 
+# ── 4b. the exit, with the sell flow stood in for ────────────────────────
+sells = []
+
+
+def _fake_sell(w, data, chain, wallet_label='EVM', is_copy=False):
+    sells.append({'wallet': w, 'chain': chain, 'is_copy': is_copy,
+                  'pct': data.get('sell_pct'), 'token': data.get('token_address')})
+    return _Resp({'ok': True, 'sell_executed': True, 'chain': chain})
+
+
+def _hold_copy(mint, leader=LEADER, chain='base'):
+    m.get_user_state(FOLLOW)['positions'][mint] = {
+        'amount': 100.0, 'buy_price': 0.25, 'spend': 10.0, 'symbol': 'TKN',
+        'chain': chain, 'copy_of_wallet': leader, 'opened_at': time.time()}
+
+
+def _run_sell(fn):
+    sells.clear()
+    real = m._evm_sell_flow
+    m._evm_sell_flow = _fake_sell
+    try:
+        fn()
+        for _ in range(60):
+            if sells:
+                break
+            time.sleep(0.05)
+        time.sleep(0.3)
+    finally:
+        m._evm_sell_flow = real
+
+
+_hold_copy(MINT)
+_run_sell(lambda: m._trigger_copy_sell(LEADER, MINT, chain='base', fraction=1.0))
+check('a leader getting out of a position gets their copiers out of it too',
+      len(sells) == 1 and sells[0]['wallet'] == FOLLOW)
+check('...on the chain the position is on', sells and sells[0]['chain'] == 'base')
+check('...all of it, when the leader sold all of theirs',
+      sells and sells[0]['pct'] == 100.0)
+check('...told it IS a copy, so the copier\'s own followers are not sold out '
+      'behind it', sells and sells[0]['is_copy'] is True)
+
+_hold_copy(MINT)
+_run_sell(lambda: m._trigger_copy_sell(LEADER, MINT, chain='base', fraction=0.5))
+check('a leader selling HALF sells half of the copier\'s, so a copier\'s '
+      'position stays their own size rather than being closed out by '
+      'somebody trimming theirs',
+      len(sells) == 1 and sells[0]['pct'] == 50.0)
+
+# A token the copier bought for themselves is not somebody else's to sell.
+m.get_user_state(FOLLOW)['positions'][MINT] = {
+    'amount': 100.0, 'buy_price': 0.25, 'spend': 10.0, 'symbol': 'TKN',
+    'chain': 'base', 'opened_at': time.time()}          # no copy_of_wallet
+_run_sell(lambda: m._trigger_copy_sell(LEADER, MINT, chain='base', fraction=1.0))
+check('a position the copier opened THEMSELVES is not sold because somebody '
+      'they follow sold theirs — that would be reaching into a position they '
+      'never asked anyone to manage', sells == [])
+
+# A copy of another leader is that leader's to close, not this one's.
+_hold_copy(MINT, leader='SomeOtherWallet111111111111111111111111111')
+_run_sell(lambda: m._trigger_copy_sell(LEADER, MINT, chain='base', fraction=1.0))
+check('...and neither is a copy of somebody else', sells == [])
+
+m.get_user_state(FOLLOW)['positions'].clear()
+_run_sell(lambda: m._trigger_copy_sell(LEADER, MINT, chain='base', fraction=1.0))
+check('a copier who no longer holds it is left alone rather than sent a sell '
+      'that would fail', sells == [])
+
+# The hook itself: closing a leader's position reaches the copiers, and
+# closing a COPY does not reach anyone.
+_hold_copy(MINT)
+lead_uid = m.get_or_create_user(LEADER)
+m.get_user_state(LEADER)['positions'][MINT] = {
+    'amount': 40.0, 'buy_price': 0.2, 'spend': 8.0, 'symbol': 'TKN', 'chain': 'base'}
+_run_sell(lambda: m._close_open_position(lead_uid, LEADER, MINT, chain='base'))
+check('closing a leader\'s position is itself what tells the copiers, so '
+      'every full exit in the app is covered by one hook',
+      len(sells) == 1 and sells[0]['pct'] == 100.0)
+
+_hold_copy(MINT)
+f_pos_uid = m.get_or_create_user(FOLLOW)
+_run_sell(lambda: m._close_open_position(f_pos_uid, FOLLOW, MINT, chain='base'))
+check('...and closing a position that is itself a copy tells nobody, which '
+      'is what stops a chain of them', sells == [])
+m.get_user_state(FOLLOW)['positions'].clear()
+
 # ── 5. Solana copying is untouched ───────────────────────────────────────
 sol = SRC.split('def _trigger_copy_buy(')[1].split('\ndef ')[0]
 check('the Solana copy path still runs when no chain is named, so every '
@@ -226,10 +325,51 @@ check('...and still checks price impact before spending a copier\'s money',
       '_check_price_impact' in SRC.split('def _trigger_copy_buy(')[1].split('\ndef _copy')[0]
       or '_check_price_impact' in SRC)
 
-# ── 6. what is NOT here ──────────────────────────────────────────────────
-check('there is still no copy SELL, and this change does not pretend '
-      'otherwise — a copier gets out by hand or through their own bot',
-      '_trigger_copy_sell' not in SRC)
+# ── 6. getting out ───────────────────────────────────────────────────────
+close = SRC.split('def _close_open_position')[1].split('\ndef ')[0]
+check('a leader getting out reaches the people copying them',
+      '_trigger_copy_sell' in SRC)
+check('...from the one place every full exit in the app comes through, so '
+      'the bot\'s stop loss, take profit, crash and rug exits and the manual '
+      'sells on every chain are all covered without a trigger bolted onto '
+      'each', '_trigger_copy_sell(wallet, mint' in close)
+check('...but never for a position that is ITSELF a copy, which is what '
+      'stops a chain of them and stops two people who follow each other '
+      'selling each other out in a circle',
+      re.search(r'if not _was_copy:\s*\n\s*_trigger_copy_sell', close) is not None)
+check('...reading that off the position BEFORE it is cleared, since clearing '
+      'it is what this function does',
+      close.index('_was_copy = bool') < close.index("['positions'][mint] = {'amount': 0.0"))
+
+check('Live Market\'s Solana sale tells them too — that route keeps no '
+      'position of its own, so nothing downstream would ever have',
+      "elif side == 'sell' and not _is_copy_pos:" in inst)
+check('...with the share of the holding it actually was, measured rather '
+      'than assumed, because a dollar figure is a share of whatever they '
+      'happen to hold',
+      'copy_share = (min(1.0, sell_usd_tokens / _held_now)' in inst)
+check('...and says so rather than guessing when it cannot tell what share '
+      'a sale was', 'cannot tell what' in inst)
+
+esell = SRC.split('def _evm_sell_flow')[1].split('\ndef ')[0]
+check('a PARTIAL EVM sale is copied as a partial, at the share that was '
+      'sold — it never reaches the full-exit hook',
+      re.search(r'fraction=\(amount / held\)', esell) is not None)
+check('...and the flow a copy is executed through knows it is one, so a '
+      'copied sale does not sell onward',
+      'is_copy: bool = False' in esell and 'if not is_copy and not pos.get' in esell)
+
+sell = SRC.split('def _trigger_copy_sell')[1].split('\ndef ')[0]
+check('the share travels, not the amount, so a copier\'s position stays '
+      'their own size', 'fraction' in sell and 'pct = max(1.0, min(100.0' in sell)
+check('...and is clamped on this side too, so nothing downstream is asked '
+      'to sell more than all of it', 'min(100.0' in sell)
+
+holders = SRC.split('def _copy_holders')[1].split('\ndef ')[0]
+check('only what was bought FOR a copier is sold — a token they bought '
+      'themselves is not touched because somebody else sold theirs',
+      "pos.get('copy_of_wallet') == leader_wallet" in holders)
+check('...and only while they still hold it', "pos.get('amount', 0) > 0" in holders)
 
 passed = sum(1 for _, ok in checks if ok)
 print(f'\n{passed}/{len(checks)} checks passed')

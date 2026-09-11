@@ -5806,7 +5806,18 @@ def _close_open_position(user_id: int, wallet: str, mint: str, chain: str = 'sol
     manually selling one token -- having zero open positions for a moment is
     completely normal while Auto Trading stays on, and silently disabling
     the bot every time a user's only position closed made auto-trading look
-    like it stopped after a single trade even though the toggle was still on."""
+    like it stopped after a single trade even though the toggle was still on.
+
+    This is also where a leader getting OUT reaches the people copying them.
+    Every full exit in the app comes through here -- the bot's stop loss,
+    take profit, crash and rug exits, and the manual sells on every chain --
+    so one hook covers all of them rather than a trigger bolted onto each.
+    A position that is ITSELF a copy does not propagate: that is what stops
+    a chain of copies, and two people who follow each other from selling
+    each other out in a circle."""
+    _pos_was = get_user_state(wallet)['positions'].get(mint) or {}
+    _was_copy = bool(_pos_was.get('copy_of_wallet'))
+    _pos_chain = _pos_was.get('chain', chain)
     get_user_state(wallet)['positions'][mint] = {'amount': 0.0, 'buy_price': 0.0, 'spend': 0.0}
     try:
         conn = sqlite3.connect(DB_FILE)
@@ -5818,6 +5829,8 @@ def _close_open_position(user_id: int, wallet: str, mint: str, chain: str = 'sol
             conn.close()
     except Exception as e:
         print(f'[open_positions] close failed for user_id={user_id} mint={mint[:8]}: {e}', flush=True)
+    if not _was_copy:
+        _trigger_copy_sell(wallet, mint, chain=_pos_chain, fraction=1.0)
 
 def _charge_txn_fee(private_key: str, wallet: str, user_id: int, symbol: str,
                      sol_amount: float, kind: str, trade_ts: str = None, gross_profit: float = 0.0,
@@ -11149,6 +11162,123 @@ def _trigger_copy_buy_evm(leader_wallet: str, token_address: str, symbol: str, c
     threading.Thread(target=_run, daemon=True).start()
 
 
+def _solana_token_amount(wallet: str, mint: str) -> float:
+    """How many of `mint` this wallet holds.
+
+    The tracked position first, because that is what the sell routes act on,
+    and then what the chain itself reports -- Live Market's own Solana buy
+    has never written to open_positions, so a tracked zero there does not
+    mean an empty wallet.
+    """
+    amount = float((get_user_state(wallet)['positions'].get(mint) or {})
+                   .get('amount', 0.0) or 0.0)
+    if amount > 0:
+        return amount
+    try:
+        onchain = _get_trading_wallet_address(wallet) or wallet
+        for t in (_fetch_wallet_tokens(wallet, onchain).get('tokens') or []):
+            if t.get('mint') == mint:
+                return float(t.get('amount', 0.0) or 0.0)
+    except Exception as e:
+        print(f'[holding] on-chain lookup failed: {e}', flush=True)
+    return 0.0
+
+
+def _copy_holders(leader_wallet: str, mint: str):
+    """Followers holding a position in `mint` that THIS leader's trade opened.
+
+    Not merely everyone copying them: a follower may hold the same token
+    from a buy of their own, and selling that because somebody else sold
+    theirs would be reaching into a position they never asked anyone to
+    manage. Only what was bought FOR them, as a copy of this wallet, is
+    sold when this wallet gets out.
+    """
+    out = []
+    for row in _copy_followers(leader_wallet):
+        c_uid, c_wallet = row[0], row[1]
+        pos = get_user_state(c_wallet)['positions'].get(mint) or {}
+        if pos.get('amount', 0) > 0 and pos.get('copy_of_wallet') == leader_wallet:
+            out.append((c_uid, c_wallet, pos))
+    return out
+
+
+def _copy_sell_solana(c_uid: int, c_wallet: str, mint: str, pct: float, pos: dict):
+    """Close a copier's Solana copy, in the same way their own Sell does."""
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        row = conn.execute('SELECT encrypted_private_key FROM users WHERE wallet_address=?',
+                           (c_wallet,)).fetchone()
+    finally:
+        conn.close()
+    if not row or not row[0]:
+        return False, 'no trading key configured'
+    td         = get_token_data(mint)
+    exit_price = float(td['price']) if td and td.get('price') else 0.0
+    symbol     = pos.get('symbol') or (td.get('symbol', mint[:8]) if td else mint[:8])
+    full       = pct >= 99.5
+    # '0' means the exact on-chain balance, which is what leaves no dust on a
+    # full close; a share is resolved against the raw integer further down.
+    amount_str = '0' if full else f'{pct:g}%'
+    with _use_key(row[0], c_wallet) as pk:
+        ok, exit_price, sold = _sell_and_get_realized(
+            c_wallet, pk, mint, amount_str, exit_price, pos.get('amount', 0.0),
+            base=pos.get('base', 'SOL'))
+        if not ok:
+            return False, 'sell failed'
+        entry = pos.get('buy_price', 0.0)
+        _record_user_trade(c_uid, get_user_state(c_wallet), symbol, entry, exit_price,
+                           sold, pos.get('spend', 0.0), wallet=c_wallet, private_key=pk,
+                           mint=mint, exit_reason='COPY SELL',
+                           opened_at=pos.get('opened_at', 0.0), source='copy',
+                           entry_liquidity=pos.get('entry_liquidity'),
+                           base=pos.get('base', 'SOL'))
+    if full:
+        _close_open_position(c_uid, c_wallet, mint)
+    else:
+        _reduce_open_position(c_uid, c_wallet, mint, sold)
+    return True, ''
+
+
+def _trigger_copy_sell(leader_wallet: str, mint: str, chain: str = 'solana',
+                       fraction: float = 1.0):
+    """Fire-and-forget: sell this token for everyone copying `leader_wallet`.
+
+    Copying somebody means copying what they do, and getting out is half of
+    what they do. Until this existed a copier was bought in and left there:
+    they got out by hand, or through their own bot's take-profit and
+    stop-loss, while the person they were following had already gone.
+
+    The SHARE travels, not the amount. A leader who sells half their
+    position sells half of each copier's, so a copier's position stays their
+    own size throughout -- the same rule as the buy side, where a copier
+    spends their amount rather than the leader's.
+    """
+    def _run():
+        with app.app_context():
+            pct = max(1.0, min(100.0, round(float(fraction) * 100, 4)))
+            for c_uid, c_wallet, pos in _copy_holders(leader_wallet, mint):
+                try:
+                    sym = pos.get('symbol') or mint[:8]
+                    if chain and chain != 'solana':
+                        resp = _evm_sell_flow(c_wallet, {'token_address': mint,
+                                                         'sell_pct': pct},
+                                              chain, is_copy=True)
+                        body = (resp[0] if isinstance(resp, tuple) else resp).get_json() or {}
+                        ok = bool(body.get('ok') and body.get('sell_executed'))
+                        why = body.get('msg') or 'sell failed'
+                    else:
+                        ok, why = _copy_sell_solana(c_uid, c_wallet, mint, pct, pos)
+                    if ok:
+                        add_user_log(c_wallet, f'[copy] COPY SELL {sym} {pct:g}% '
+                                               f'(copying {leader_wallet[:6]}…{leader_wallet[-4:]})')
+                    else:
+                        add_user_log(c_wallet, f'[copy] {sym} not sold — {why}')
+                except Exception as e:
+                    print(f'[copy-trade] sell error for {c_wallet[:6]}: {e}', flush=True)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def _trigger_copy_buy(buyer_wallet: str, mint: str, price: float, symbol: str,
                       liquidity: float, chain: str = 'solana'):
     """Fire-and-forget: buy `mint` for every user whose copy_source = buyer_wallet."""
@@ -14123,7 +14253,8 @@ def _get_sell_lock(wallet: str, token: str, chain: str) -> threading.Lock:
         return lock
 
 
-def _evm_sell_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM'):
+def _evm_sell_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM',
+                   is_copy: bool = False):
     """Close a position on one EVM chain, for both sell routes.
 
     THREE THINGS THAT WERE WRONG IN BOTH COPIES
@@ -14265,9 +14396,17 @@ def _evm_sell_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM
         # sold slice off it and leaves the rest open -- closing it would
         # make tokens the user still holds disappear from their portfolio.
         if full_close:
+            # The copiers are told from inside _close_open_position(), which
+            # every full exit in the app comes through.
             _close_open_position(user_id, wallet, token_address, chain=chain)
         else:
             _reduce_open_position(user_id, wallet, token_address, amount, chain=chain)
+            # A partial exit never reaches that hook, so it says so here --
+            # with the SHARE that was sold, so a copier sells the same share
+            # of their own position rather than all of it.
+            if not is_copy and not pos.get('copy_of_wallet'):
+                _trigger_copy_sell(wallet, token_address, chain=chain,
+                                   fraction=(amount / held) if held > 0 else 1.0)
 
     return jsonify({'ok': True, 'chain': chain, 'pnl': pnl, 'pnl_pct': pnl_pct,
                     'exit_price': exit_price, 'proceeds_usdc': proceeds_usdc,
@@ -19748,6 +19887,11 @@ def api_instant_trade():
         except (TypeError, ValueError):
             amount_token = 0.0
 
+        # What share of the seller's own holding this sale is. Copiers sell
+        # the same SHARE of theirs, so it has to be known here -- a dollar
+        # figure is a share of whatever they happen to hold, which is why
+        # this is measured rather than assumed.
+        copy_share = None
         # A share of the holding, or a dollar figure -- never a quantity from
         # the browser. A dollar figure is priced against this server's own
         # quote into a token amount, which the swap then clamps to what the
@@ -19774,6 +19918,9 @@ def api_instant_trade():
                                              'sell by percentage instead'}), 400
                 sell_usd_tokens = _usd / _px
                 sell_full = False
+                _held_now = _solana_token_amount(wallet, token_address)
+                copy_share = (min(1.0, sell_usd_tokens / _held_now)
+                              if _held_now > 0 else None)
 
         if side not in ('buy', 'sell'):
             return jsonify({'error': 'side must be buy or sell'}), 400
@@ -19972,10 +20119,23 @@ def api_instant_trade():
             # already refuses cannot get a second copy out either.
             # A copy of a copy is not propagated -- that is what stops two
             # people who follow each other from trading each other in a circle.
-            if side == 'buy' and not get_user_state(wallet)['positions'].get(
-                    token_address, {}).get('copy_of_wallet'):
+            _is_copy_pos = bool(get_user_state(wallet)['positions'].get(
+                token_address, {}).get('copy_of_wallet'))
+            if side == 'buy' and not _is_copy_pos:
                 _trigger_copy_buy(wallet, token_address,
                                   buy_price_usd or 0.0, symbol, 0.0, chain='solana')
+            # Getting out is half of what copying somebody means. This route
+            # keeps no position of its own, so nothing downstream would ever
+            # have told the copiers -- it says so here, with the share.
+            elif side == 'sell' and not _is_copy_pos:
+                _share = 1.0 if sell_full else (copy_share if copy_share is not None
+                                                else sell_frac)
+                if _share is None:
+                    print(f'[copy-trade] {symbol} sale not copied: cannot tell what '
+                          f'share of the holding it was', flush=True)
+                else:
+                    _trigger_copy_sell(wallet, token_address, chain='solana',
+                                       fraction=_share)
 
         # Best-effort balance refresh, outside the lock -- it is display only.
         new_balance = None
@@ -22834,15 +22994,10 @@ def api_trade_holding():
     source = 'position' if amount > 0 else ''
 
     if amount <= 0 and chain == 'solana':
-        try:
-            onchain = _get_trading_wallet_address(wallet) or wallet
-            for t in (_fetch_wallet_tokens(wallet, onchain).get('tokens') or []):
-                if t.get('mint') == addr:
-                    amount = float(t.get('amount', 0.0) or 0.0)
-                    source = 'wallet' if amount > 0 else ''
-                    break
-        except Exception as e:
-            print(f'[holding] on-chain lookup failed: {e}', flush=True)
+        # Same lookup the copy path uses, so the screen and the trade cannot
+        # disagree about what is there.
+        amount = _solana_token_amount(wallet, addr)
+        source = 'wallet' if amount > 0 else ''
 
     td    = get_token_data(addr)
     price = float(td['price']) if td and td.get('price') else 0.0
