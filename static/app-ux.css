@@ -1,0 +1,52 @@
+/* OrcAgent shared UX/performance layer.
+   Keeps every server-rendered page on one mobile canvas and prevents fixed UI
+   from covering content. Page-specific redesigns remain authoritative. */
+html,body{background:#080d12}
+a,button,[role="button"]{-webkit-tap-highlight-color:transparent}
+img{max-width:100%}
+.oa-route-progress{position:fixed;top:0;left:0;height:2px;width:0;z-index:10000;background:#f7b955;opacity:0;pointer-events:none;transition:width .18s ease,opacity .15s ease}
+.oa-route-progress.show{width:72%;opacity:1}
+.oa-route-progress.done{width:100%;opacity:0;transition:width .12s ease,opacity .18s ease .08s}
+
+@media(max-width:767px){
+  html,body{max-width:100%;overflow-x:hidden;background:#080d12!important}
+  body{min-height:100dvh}
+
+  /* One X/Instagram-style solid app chrome. Blur on fixed/sticky layers is
+     expensive in iOS/Phantom and causes visible repaint/jank while scrolling. */
+  .pt-nb-topbar,.oa-bottom-nav{background:#080d12!important;background-image:none!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+
+  /* Shared modal behaviour: modal stays above the persistent bottom nav and
+     the modal itself owns vertical scrolling rather than the page underneath. */
+  .s-modal.open,.modal-backdrop.open,.gd-modal-backdrop.open,
+  [class*="modal-backdrop"].open{z-index:1500!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important;overscroll-behavior:contain}
+  .s-card,.modal,.gd-modal{
+    max-height:calc(100dvh - 32px);
+    overflow-y:auto;
+    overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch
+  }
+
+  /* Fixed bottom nav needs a real content safe-zone on ordinary document
+     pages. Fullscreen/workspace pages opt out below. */
+  body:not(.oa-home-mobile):not(.oa-portfolio):not(.oa-live-v2) .page,
+  body:not(.oa-home-mobile):not(.oa-portfolio):not(.oa-live-v2) .page-wrap,
+  body:not(.oa-home-mobile):not(.oa-portfolio):not(.oa-live-v2) .pr-wrap,
+  body:not(.oa-home-mobile):not(.oa-portfolio):not(.oa-live-v2) .content{
+    padding-bottom:calc(132px + env(safe-area-inset-bottom,0px))!important
+  }
+
+  /* Messages is a fullscreen workspace. Once a thread is open its composer
+     must own the bottom edge; the global nav must not cover it. */
+  body.oa-thread-open{padding-bottom:0!important;overflow:hidden!important}
+  body.oa-thread-open .oa-bottom-nav{display:none!important}
+  body.oa-thread-open .pt-nb-topbar{display:none!important}
+
+  /* Prevent generic horizontal clipping caused by desktop-width children. */
+  #app,.main,.page,.page-wrap{max-width:100vw}
+  input,textarea,select{max-width:100%}
+}
+
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}
