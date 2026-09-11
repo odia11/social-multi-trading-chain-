@@ -30,6 +30,7 @@
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/' || !window.matchMedia('(max-width:767px)').matches) return;
   var css=document.createElement('link'); css.rel='stylesheet'; css.href='/static/home-mobile.css?v=3'; document.head.appendChild(css);
+  var guard=document.createElement('script'); guard.src='/static/mobile-overscroll-guard.js?v=1'; guard.defer=true; document.head.appendChild(guard);
   var js=document.createElement('script'); js.src='/static/home-mobile.js?v=3'; js.defer=true; document.head.appendChild(js);
 })();
 
