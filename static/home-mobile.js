@@ -3,6 +3,7 @@
 'use strict';
 var path=location.pathname.replace(/\/+$/,'')||'/';
 if(path!=='/' || !window.matchMedia('(max-width:767px)').matches) return;
+var polish=document.createElement('link');polish.rel='stylesheet';polish.href='/static/home-mobile-polish.css?v=1';document.head.appendChild(polish);
 function money(v){var n=Number(v||0);if(!isFinite(n))n=0;return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:n>=1000?0:2,maximumFractionDigits:n>=1000?0:2}).format(n)}
 function num(v){var n=Number(v||0);return isFinite(n)?n:0}
 function ready(fn){if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fn);else fn()}
