@@ -4,9 +4,6 @@
 html,body{background:#080d12}
 a,button,[role="button"]{-webkit-tap-highlight-color:transparent}
 img{max-width:100%}
-.oa-route-progress{position:fixed;top:0;left:0;height:2px;width:0;z-index:10000;background:#f7b955;opacity:0;pointer-events:none;transition:width .18s ease,opacity .15s ease}
-.oa-route-progress.show{width:72%;opacity:1}
-.oa-route-progress.done{width:100%;opacity:0;transition:width .12s ease,opacity .18s ease .08s}
 
 @media(max-width:767px){
   html,body{max-width:100%;overflow-x:hidden;background:#080d12!important}
