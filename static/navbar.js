@@ -48,7 +48,7 @@ var _NB_CHAIN_LABELS = {solana:'SOL', bsc:'BSC', base:'BASE', arbitrum:'ARB', po
   window.addEventListener('pageshow', function(e){ if(e.persisted) _forceRepaint(); });
 })();
 
-function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[c];});}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function fmtPrice(n){n=Number(n);if(n==null||isNaN(n))return '—';if(n===0)return '$0.00';if(n>=1)return '$'+n.toFixed(2);if(n>=.01)return '$'+n.toFixed(4);if(n>=.0001)return '$'+n.toFixed(6);return '$'+n.toFixed(8);}
 function logoTile(imgUrl,label,cls,phCls){var initials=esc((label||'?').slice(0,2).toUpperCase());if(!imgUrl)return '<div class="'+phCls+'">'+initials+'</div>';return '<img class="'+cls+'" src="'+esc(imgUrl)+'" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">'+'<div class="'+phCls+'" style="display:none">'+initials+'</div>';}
 function closeAllOverlays(){var nav=document.getElementById('pt-nb-nav'),more=document.getElementById('pt-nb-more-dd'),scrim=document.getElementById('pt-nb-scrim'),results=document.getElementById('pt-nb-search-results');if(nav)nav.classList.remove('mobile-open');if(more)more.classList.remove('open');if(scrim)scrim.classList.remove('show');if(results)results.classList.remove('open');}
