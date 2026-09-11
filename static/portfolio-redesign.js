@@ -4,6 +4,23 @@
    keep the same server-side routes and safety checks. */
 (function(){
 'use strict';
+var _revealed=false;
+function revealPortfolio(){
+  if(_revealed) return;
+  _revealed=true;
+  document.documentElement.classList.remove('oa-pf-boot');
+  var boot=document.getElementById('oa-pf-boot-style');
+  if(boot) boot.remove();
+}
+function revealWhenStyled(){
+  var css=document.querySelector('link[href*="portfolio-redesign.css"]');
+  function done(){ requestAnimationFrame(function(){ requestAnimationFrame(revealPortfolio); }); }
+  if(css && !css.sheet){
+    css.addEventListener('load',done,{once:true});
+    css.addEventListener('error',done,{once:true});
+    setTimeout(done,1500);
+  } else done();
+}
 function money(v){
   var n=Number(v||0); if(!isFinite(n)) n=0;
   return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2}).format(n);
@@ -54,8 +71,8 @@ function polishWithdrawModal(){
 }
 
 function boot(){
-  if(location.pathname.replace(/\/+$/,'')!=='/wallet') return;
-  if(document.body.classList.contains('oa-portfolio')) return;
+  if(location.pathname.replace(/\/+$/,'')!=='/wallet'){ revealPortfolio(); return; }
+  if(document.body.classList.contains('oa-portfolio')){ revealWhenStyled(); return; }
   document.body.classList.add('oa-portfolio','pf-view-overview');
   document.title='Portfolio — OrcAgent';
 
@@ -73,7 +90,7 @@ function boot(){
   var center=document.querySelector('.wlt-center');
   var hdr=document.querySelector('.wlt-hdr');
   var content=document.querySelector('.wlt-content');
-  if(!center||!hdr||!content) return;
+  if(!center||!hdr||!content){ revealPortfolio(); return; }
 
   var tabs=document.createElement('div');
   tabs.className='pf-tabs';
@@ -163,6 +180,10 @@ function boot(){
     }).observe(holdings,{childList:true,subtree:true});
     sanitizeAssetPercentages(holdings);
   }
+
+  /* The Portfolio shell is now fully built. Reveal only after its stylesheet
+     is actually applied, so the legacy Wallet markup can never flash first. */
+  revealWhenStyled();
 
   Promise.allSettled([
     fetch('/api/wallet/usdc-summary',{credentials:'include'}).then(function(r){return r.json();}),
