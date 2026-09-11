@@ -38,6 +38,21 @@ function sanitizeAssetPercentages(root){
   });
 }
 
+/* The wallet transaction code still uses the historical Send naming.
+   Portfolio presents the same tested flow as Withdraw without touching the
+   routing, validation, fee reserve or MAX calculations underneath. */
+function polishWithdrawModal(){
+  var modal=document.getElementById('w-modal');
+  if(!modal || modal.style.display==='none') return;
+  var title=modal.querySelector('.w-modal-title');
+  if(title && /^\s*Send\s*$/i.test(title.textContent||'')) title.textContent='Withdraw';
+  var btn=document.getElementById('send-btn');
+  if(btn){
+    var text=(btn.textContent||'').trim();
+    if(/^Send\b/i.test(text)) btn.textContent=text.replace(/^Send\b/i,'Withdraw');
+  }
+}
+
 function boot(){
   if(location.pathname.replace(/\/+$/,'')!=='/wallet') return;
   if(document.body.classList.contains('oa-portfolio')) return;
@@ -98,6 +113,7 @@ function boot(){
       document.body.classList.add('pf-view-overview');
       tabs.querySelectorAll('.pf-tab').forEach(function(b){b.classList.toggle('active',b.dataset.pfView==='withdraw');});
       call('_modalSend');
+      setTimeout(polishWithdrawModal,0);
       return;
     }
     document.body.classList.add('pf-view-'+view);
@@ -119,6 +135,13 @@ function boot(){
   tabs.addEventListener('click',function(e){var b=e.target.closest('[data-pf-view]');if(b)showView(b.dataset.pfView);});
   document.getElementById('pf-deposit').addEventListener('click',function(){ showView('deposit'); });
   document.getElementById('pf-withdraw').addEventListener('click',function(){showView('withdraw');});
+
+  /* The legacy chain sync function rewrites the primary button back to
+     "Send <asset>" after a network change. Let it finish, then restore the
+     Portfolio wording. This does not alter the selected chain or payload. */
+  document.addEventListener('change',function(e){
+    if(e.target && e.target.id==='send-chain') setTimeout(polishWithdrawModal,0);
+  });
 
   var oldAvail=document.getElementById('avail');
   if(oldAvail && window.MutationObserver){
