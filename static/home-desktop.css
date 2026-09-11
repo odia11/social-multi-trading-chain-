@@ -1,0 +1,52 @@
+/* OrcAgent desktop home presentation layer. Loaded only for dashboard root. */
+@media (min-width:1025px){
+  body.oa-home-desktop{background:#080b10}
+  body.oa-home-desktop .app-body{max-width:1440px!important;gap:0}
+  body.oa-home-desktop .wrap{max-width:720px!important;padding:18px 20px 40px!important;border-right:1px solid #16191f;background:#090c11}
+  body.oa-home-desktop #right-rail{width:360px!important;padding:16px 18px 40px!important;background:#090c11}
+  body.oa-home-desktop .rr-search{background:#0d1219;border-color:#1d2430;height:42px}
+  body.oa-home-desktop .rr-card{background:linear-gradient(160deg,#101721,#0b1017);border-color:#1b2230;border-radius:16px;box-shadow:0 1px 0 rgba(255,255,255,.025) inset}
+  body.oa-home-desktop .rr-card-title{font-size:14px;font-weight:700}
+  body.oa-home-desktop .rr-market-row,body.oa-home-desktop .rr-trader-row{padding-top:8px;padding-bottom:8px}
+  body.oa-home-desktop .rr-card-link{color:#f7b955;font-weight:650;padding-bottom:12px}
+
+  .oa-home-hero{position:relative;overflow:hidden;min-height:220px;border-radius:20px;border:1px solid #1d2430;background:radial-gradient(circle at 22% 50%,rgba(247,185,85,.18),transparent 28%),linear-gradient(120deg,#121925 0%,#0d131b 56%,#111824 100%);padding:28px 28px 26px;margin-bottom:14px;box-shadow:0 24px 50px -38px #000}
+  .oa-home-hero:before{content:"";position:absolute;right:38px;top:28px;width:152px;height:152px;border-radius:50%;background:radial-gradient(circle at 36% 30%,#2c3543 0 14%,#111823 15% 54%,#06090d 55% 100%);border:8px solid rgba(247,185,85,.18);box-shadow:0 0 0 1px rgba(255,255,255,.05),0 0 54px rgba(247,185,85,.10)}
+  .oa-home-hero:after{content:"";position:absolute;right:-30px;bottom:-55px;width:310px;height:120px;transform:rotate(-7deg);background:linear-gradient(90deg,transparent 0 9%,rgba(58,210,155,.16) 10% 11%,transparent 12% 24%,rgba(58,210,155,.32) 25% 26%,transparent 27% 43%,rgba(247,185,85,.34) 44% 45%,transparent 46% 60%,rgba(58,210,155,.25) 61% 63%,transparent 64%);opacity:.8;pointer-events:none}
+  .oa-home-hero-copy{position:relative;z-index:2;max-width:390px}
+  .oa-home-eyebrow{font-size:11px;font-weight:700;letter-spacing:.11em;color:#f7b955;text-transform:uppercase;margin-bottom:8px}
+  .oa-home-hero h1{font-size:31px;line-height:1.05;letter-spacing:-.035em;margin:0;color:#f3f5f8;font-weight:750}
+  .oa-home-hero h1 span{color:#f7b955}
+  .oa-home-hero p{font-size:13px;line-height:1.55;color:#8a919c;margin:12px 0 18px;max-width:360px}
+  .oa-home-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:0 16px;border-radius:10px;background:#f7b955;color:#0a0b0e!important;font-size:12px;font-weight:750;text-decoration:none;border:1px solid #ffd173;box-shadow:0 10px 20px rgba(247,185,85,.12)}
+  .oa-home-primary:hover{filter:brightness(1.05);transform:translateY(-1px)}
+
+  .oa-home-bot{display:flex;align-items:center;gap:12px;background:linear-gradient(160deg,#101721,#0b1017);border:1px solid #1b2230;border-radius:16px;padding:13px 14px;margin-bottom:14px}
+  .oa-home-bot-icon{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#0b1119;border:1px solid rgba(247,185,85,.25);color:#f7b955;font-size:18px;flex-shrink:0}
+  .oa-home-bot-main{flex:1;min-width:0}
+  .oa-home-bot-title{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700;color:#eef1f5}
+  .oa-home-bot-dot{width:7px;height:7px;border-radius:50%;background:#565d68;box-shadow:0 0 0 3px rgba(86,93,104,.08)}
+  .oa-home-bot-dot.running{background:#3ad29b;box-shadow:0 0 0 3px rgba(58,210,155,.08)}
+  .oa-home-bot-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;color:#6e7784;font:10.5px 'JetBrains Mono',monospace}
+  .oa-home-bot-btn{display:inline-flex;align-items:center;justify-content:center;min-width:106px;height:36px;border-radius:10px;background:#f7b955;color:#0a0b0e!important;text-decoration:none;font-size:12px;font-weight:750}
+
+  .oa-home-section-label{font-size:12px;color:#7c8591;font-weight:650;margin:6px 0 10px}
+  .oa-home-section-label span{color:#eef1f5}
+
+  .oa-portfolio-card{background:linear-gradient(160deg,#101721,#0b1017);border:1px solid #1b2230;border-radius:16px;overflow:hidden;margin-bottom:16px}
+  .oa-pf-head{display:flex;justify-content:space-between;align-items:center;padding:14px 15px 9px}
+  .oa-pf-title{font-size:14px;font-weight:700;color:#eef1f5}
+  .oa-pf-link{font-size:11px;font-weight:650;color:#f7b955;text-decoration:none}
+  .oa-pf-body{padding:0 15px 14px}
+  .oa-pf-kicker{font-size:10px;color:#666f7c;text-transform:uppercase;letter-spacing:.08em}
+  .oa-pf-value{font:700 22px 'JetBrains Mono',monospace;color:#f3f5f8;margin-top:3px}
+  .oa-pf-meta{display:flex;align-items:center;gap:7px;margin-top:5px;font-size:10.5px;color:#3ad29b}
+  .oa-pf-line{height:44px;margin-top:10px;position:relative;overflow:hidden}
+  .oa-pf-line:before{content:"";position:absolute;inset:9px 0 0;background:linear-gradient(160deg,transparent 0 8%,#3ad29b 9% 10%,transparent 11% 18%,#3ad29b 19% 20%,transparent 21% 31%,#3ad29b 32% 33%,transparent 34% 48%,#3ad29b 49% 50%,transparent 51% 63%,#3ad29b 64% 66%,transparent 67% 78%,#3ad29b 79% 80%,transparent 81%);transform:skewY(-8deg);opacity:.8}
+  .oa-pf-split{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:9px}
+  .oa-pf-chip{background:#0a0f16;border:1px solid #171e29;border-radius:9px;padding:7px 8px}
+  .oa-pf-chip b{display:block;color:#eef1f5;font-size:10px;margin-bottom:2px}.oa-pf-chip span{font:10px 'JetBrains Mono',monospace;color:#697280}
+
+  body.oa-home-desktop .wrap>*:not(.oa-home-hero):not(.oa-home-bot):not(.oa-home-section-label){border-radius:16px}
+}
+@media(max-width:1024px){.oa-home-hero,.oa-home-bot,.oa-home-section-label,.oa-portfolio-card{display:none!important}}
