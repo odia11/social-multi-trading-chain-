@@ -8,18 +8,11 @@ function prefetch(a){var u=navCandidate(a);if(!u)return;var key=u.pathname+u.sea
 function closestLink(e){var n=e.target;return n&&n.closest?n.closest('a[href]'):null}
 ['pointerover','touchstart','focusin'].forEach(function(type){document.addEventListener(type,function(e){prefetch(closestLink(e))},{passive:true,capture:true})});
 
+/* Warm the pages users are most likely to open next. Slow/data-saver
+   connections are deliberately excluded. Existing page-loader.js remains the
+   only navigation progress UI, so there is no duplicate loader. */
 function idlePrefetch(){var c=navigator.connection||navigator.mozConnection||navigator.webkitConnection;if(c&&(c.saveData||/2g/.test(c.effectiveType||'')))return;['/','/live-market','/wallet','/groups','/bot','/messages','/notifications'].forEach(function(h){var a=document.createElement('a');a.href=h;prefetch(a)})}
 if('requestIdleCallback'in window)requestIdleCallback(idlePrefetch,{timeout:2400});else setTimeout(idlePrefetch,1600);
-
-/* Lightweight navigation feedback, like native social apps. This does not
-   hijack routing; it only covers the server roundtrip visually. */
-var bar=document.createElement('div');bar.className='oa-route-progress';bar.setAttribute('aria-hidden','true');
-function mountBar(){if(!bar.isConnected)document.body.appendChild(bar)}
-function showBar(){mountBar();bar.classList.remove('done');requestAnimationFrame(function(){bar.classList.add('show')})}
-function doneBar(){if(!bar.isConnected)return;bar.classList.add('done');bar.classList.remove('show');setTimeout(function(){bar.classList.remove('done')},350)}
-document.addEventListener('click',function(e){if(e.defaultPrevented||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;var a=closestLink(e),u=navCandidate(a);if(!u)return;if(a&&a.dataset&&a.dataset.noProgress)return;showBar()},true);
-window.addEventListener('pageshow',doneBar);
-window.addEventListener('pagehide',function(){if(bar.isConnected)bar.classList.remove('done')});
 
 /* Images below the first viewport should not delay initial rendering. Keep
    explicitly eager images (logo/hero/token immediately visible) untouched. */
