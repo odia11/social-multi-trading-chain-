@@ -1,11 +1,13 @@
 /* OrcAgent Portfolio redesign — loaded only on /wallet by navbar.js. */
-body.oa-portfolio{--pf-card:#10141c;--pf-card2:#0c1118;--pf-line:rgba(255,255,255,.065);--pf-yellow:var(--accent,#f7b955);background:#080b10}
-body.oa-portfolio .wlt-center{max-width:760px;margin:0 auto;max-height:none;overflow:visible;padding-bottom:90px}
+html:has(body.oa-portfolio){height:auto!important;min-height:100%;overflow-y:auto!important;overflow-x:clip!important;-webkit-overflow-scrolling:touch}
+body.oa-portfolio{--pf-card:#10141c;--pf-card2:#0c1118;--pf-line:rgba(255,255,255,.065);--pf-yellow:var(--accent,#f7b955);background:#080b10;height:auto!important;min-height:100vh!important;overflow-y:auto!important;overflow-x:clip!important;position:static!important;touch-action:pan-y;-webkit-overflow-scrolling:touch}
+body.oa-portfolio #app{height:auto!important;min-height:100vh!important;overflow:visible!important;display:block!important}
+body.oa-portfolio .wlt-center{max-width:760px;margin:0 auto;max-height:none!important;height:auto!important;overflow:visible!important;padding-bottom:90px;overscroll-behavior:auto}
 body.oa-portfolio .wlt-hdr{padding:22px 22px 6px;align-items:center}
 body.oa-portfolio .wlt-title{font-size:30px;font-weight:750;letter-spacing:-.03em}
 body.oa-portfolio .wlt-sub{color:#77808e;font-size:12px;margin-top:2px}
 body.oa-portfolio .net-pill{display:none}
-body.oa-portfolio .wlt-content{max-width:none;width:100%;padding:8px 22px 70px;gap:14px}
+body.oa-portfolio .wlt-content{max-width:none;width:100%;padding:8px 22px 70px;gap:14px;overflow:visible!important;height:auto!important}
 body.oa-portfolio .wlt-hero{display:none}
 
 .pf-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;padding:6px;background:#0d1219;border:1px solid var(--pf-line);border-radius:16px;margin:2px 22px 12px}
@@ -51,10 +53,13 @@ body.oa-portfolio.pf-view-deposit .pf-balance-card,body.oa-portfolio.pf-view-dep
 body.oa-portfolio.pf-view-deposit .dep-card{display:block}
 
 @media(max-width:600px){
+ body.oa-portfolio{overflow-y:auto!important;position:static!important;touch-action:pan-y!important}
+ body.oa-portfolio #app{display:block!important;overflow:visible!important;height:auto!important;min-height:100dvh!important}
+ body.oa-portfolio .wlt-center{max-height:none!important;height:auto!important;overflow:visible!important}
  body.oa-portfolio .wlt-hdr{padding:14px 16px 4px}
  body.oa-portfolio .wlt-title{font-size:27px}
  body.oa-portfolio .wlt-sub{font-size:11.5px;line-height:1.35}
- body.oa-portfolio .wlt-content{padding:6px 14px 92px;gap:12px}
+ body.oa-portfolio .wlt-content{padding:6px 14px 92px;gap:12px;overflow:visible!important}
  .pf-tabs{margin:2px 14px 10px;padding:5px;gap:5px;border-radius:15px}
  .pf-tab{min-height:40px;font-size:12.5px}
  .pf-balance-card{border-radius:20px;padding:19px 17px 16px}
