@@ -1,0 +1,63 @@
+/* OrcAgent Groups redesign. Existing group endpoints/actions remain unchanged. */
+body.oa-groups-v2{background:#080d12!important;color:#eef1f5}
+body.oa-groups-v2 #app,body.oa-groups-v2 .main{background:#080d12!important}
+body.oa-groups-v2 .page{max-width:1180px;margin:0 auto;padding:28px 24px 150px}
+body.oa-groups-v2 .toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px;padding:24px;margin-bottom:20px;background:#0b1117;border:1px solid #1a232d;border-radius:20px}
+body.oa-groups-v2 .toolbar-left{display:block}
+body.oa-groups-v2 .page-title{display:block;font-size:30px;font-weight:750;line-height:1.05;letter-spacing:-.04em;margin:0;color:#eef1f5}
+body.oa-groups-v2 .page-title:after{content:'Find your people. Share trades, ideas and market insights together.';display:block;margin-top:10px;max-width:560px;font-size:13px;line-height:1.45;font-weight:500;letter-spacing:0;color:#77808e}
+body.oa-groups-v2 .toolbar-right{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+body.oa-groups-v2 .search-wrap{width:min(360px,100%)}
+body.oa-groups-v2 .search-inp{height:46px;background:#0d141c;border:1px solid #202a35;border-radius:13px;padding-left:40px;font-size:14px;color:#eef1f5}
+body.oa-groups-v2 .toolbar .modal-btn.primary{height:46px;padding:0 20px!important;background:#f7b955!important;color:#11161b!important;border:0!important;border-radius:13px!important;font-weight:750!important;white-space:nowrap}
+body.oa-groups-v2 .tabs{background:#0d141c;border:1px solid #202a35;border-radius:12px;padding:4px}
+body.oa-groups-v2 .tab{padding:8px 14px;border-radius:9px}
+body.oa-groups-v2 .tab.active{background:#f7b955;color:#11161b}
+body.oa-groups-v2 .section-label{display:flex;align-items:center;margin:26px 0 12px;color:#8b95a3;font-size:11px;font-weight:750;letter-spacing:.12em}
+body.oa-groups-v2 .section-label:after{content:'';height:1px;flex:1;background:#17202a;margin-left:14px}
+body.oa-groups-v2 #official-group-wrap{margin-bottom:18px}
+body.oa-groups-v2 .official-banner{position:relative;overflow:hidden;min-height:112px;margin:0;padding:20px;background:#0b1117!important;border:1px solid rgba(247,185,85,.28)!important;border-radius:18px;box-shadow:none!important}
+body.oa-groups-v2 .official-banner:before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 8% 10%,rgba(247,185,85,.12),transparent 38%);pointer-events:none}
+body.oa-groups-v2 .official-tile{width:58px;height:58px;border-radius:16px;background:#f7b955;color:#11161b}
+body.oa-groups-v2 .official-name{font-size:18px;font-weight:750;letter-spacing:-.02em}
+body.oa-groups-v2 .official-sub{font-size:12px;line-height:1.45;color:#77808e}
+body.oa-groups-v2 .official-badge{background:rgba(247,185,85,.12);border:1px solid rgba(247,185,85,.25);color:#f7b955}
+body.oa-groups-v2 .official-join-btn button,body.oa-groups-v2 .official-join-btn .modal-btn{min-width:116px;background:#f7b955!important;color:#11161b!important;border:0!important;border-radius:12px!important;font-weight:750!important}
+body.oa-groups-v2 .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+body.oa-groups-v2 .card{background:#0b1117;border:1px solid #1a232d;border-radius:18px;padding:18px;min-height:178px;box-shadow:none}
+body.oa-groups-v2 .card:hover{border-color:#293543;box-shadow:none}
+body.oa-groups-v2 .card-body{gap:14px}
+body.oa-groups-v2 .avatar{width:52px;height:52px;border-radius:15px;border:1px solid #273442;background:#111923}
+body.oa-groups-v2 .avatar img{border-radius:15px}
+body.oa-groups-v2 .username{font-size:15px;color:#eef1f5}
+body.oa-groups-v2 .wallet-addr,body.oa-groups-v2 .trader-bio{color:#77808e}
+body.oa-groups-v2 .stats{gap:6px}
+body.oa-groups-v2 .stat{background:#0d141c;border:1px solid #17202a;border-radius:11px;padding:9px 10px}
+body.oa-groups-v2 .stat-value{font-size:14px}
+body.oa-groups-v2 .card-actions{border-color:#17202a;padding-top:12px}
+body.oa-groups-v2 .modal-btn.primary,body.oa-groups-v2 .btn-copy-full{background:#f7b955!important;color:#11161b!important;border:0!important}
+body.oa-groups-v2 .btn-follow-outline,body.oa-groups-v2 .btn-my-profile,body.oa-groups-v2 .modal-btn{border-radius:11px!important}
+body.oa-groups-v2 .empty{background:#0b1117;border:1px dashed #26313d;border-radius:18px;padding:52px 20px}
+body.oa-groups-v2 .empty-icon{font-size:34px;opacity:.9}
+body.oa-groups-v2 .empty-title{font-size:16px}
+body.oa-groups-v2 .empty-sub{color:#77808e}
+body.oa-groups-v2 .modal-backdrop{background:rgba(0,0,0,.68);backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+body.oa-groups-v2 .modal{background:#0b1117;border-color:#202a35;border-radius:20px}
+body.oa-groups-v2 .modal-inp{background:#0d141c;border-color:#202a35}
+@media(max-width:900px){body.oa-groups-v2 .grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:767px){
+ body.oa-groups-v2 .page{padding:22px 20px 150px}
+ body.oa-groups-v2 .toolbar{display:block;padding:0;margin-bottom:22px;background:transparent;border:0;border-radius:0}
+ body.oa-groups-v2 .page-title{font-size:28px}
+ body.oa-groups-v2 .page-title:after{font-size:12px;margin-bottom:18px}
+ body.oa-groups-v2 .toolbar-right{display:grid;grid-template-columns:1fr;gap:10px}
+ body.oa-groups-v2 .search-wrap{width:100%}
+ body.oa-groups-v2 .toolbar .modal-btn.primary{width:100%;height:50px}
+ body.oa-groups-v2 .tabs{width:100%;display:grid;grid-template-columns:repeat(3,1fr)}
+ body.oa-groups-v2 .tab{padding:9px 6px}
+ body.oa-groups-v2 .grid{grid-template-columns:1fr}
+ body.oa-groups-v2 .official-banner{display:grid;grid-template-columns:58px 1fr;gap:14px;align-items:center;padding:17px}
+ body.oa-groups-v2 .official-join-btn{grid-column:1/-1;margin-left:0;width:100%}
+ body.oa-groups-v2 .official-join-btn button,body.oa-groups-v2 .official-join-btn .modal-btn{width:100%;height:44px}
+ body.oa-groups-v2 .card{min-height:0}
+}
