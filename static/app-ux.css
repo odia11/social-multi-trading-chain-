@@ -6,8 +6,14 @@ a,button,[role="button"]{-webkit-tap-highlight-color:transparent}
 img{max-width:100%}
 
 @media(max-width:767px){
-  html,body{max-width:100%;overflow-x:hidden;background:#080d12!important}
+  html,body{max-width:100%;overflow-x:hidden;background:#080d12!important;-webkit-text-size-adjust:100%}
   body{min-height:100dvh}
+  a,button,[role="button"]{touch-action:manipulation}
+
+  /* iOS zooms the viewport when a focused form control is below 16px. That
+     creates the apparent page jump seen in in-app browsers, so text controls
+     use a native-app-safe minimum without changing toggles/ranges. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),textarea,select{font-size:16px!important;max-width:100%}
 
   /* One X/Instagram-style solid app chrome. Blur on fixed/sticky layers is
      expensive in iOS/Phantom and causes visible repaint/jank while scrolling. */
@@ -47,7 +53,6 @@ img{max-width:100%}
 
   /* Prevent generic horizontal clipping caused by desktop-width children. */
   #app,.main,.page,.page-wrap{max-width:100vw}
-  input,textarea,select{max-width:100%}
 }
 
 @media(prefers-reduced-motion:reduce){
