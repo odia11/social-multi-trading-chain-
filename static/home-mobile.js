@@ -35,7 +35,7 @@ function shortcuts(){
  el.innerHTML='<a class="oa-m-shortcut" href="/live-market"><span>🔥</span><span>Live Market</span></a>'
  +'<a class="oa-m-shortcut" href="/live-market"><span>⇄</span><span>Trade</span></a>'
  +'<a class="oa-m-shortcut" href="/wallet"><span>▣</span><span>Portfolio</span></a>'
- +'<a class="oa-m-shortcut" href="/social"><span>◎</span><span>Social</span></a>'
+ +'<a class="oa-m-shortcut" href="/"><span>◎</span><span>Social</span></a>'
  +'<a class="oa-m-shortcut" href="/groups"><span>♙</span><span>Groups</span></a>';
  composer.insertAdjacentElement('afterend',el);
  var lab=document.createElement('div');lab.className='oa-m-feed-label';lab.innerHTML='<b>For You</b><span>Following</span><span>Trends</span>';el.insertAdjacentElement('afterend',lab);
