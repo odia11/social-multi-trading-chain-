@@ -39,5 +39,25 @@
   .oa-wallet-action-grid strong{font-size:15px;line-height:1.1;color:#eef1f5}
   .oa-wallet-action-grid span{font-size:11px;line-height:1.2;color:#77808e}
   html.oa-wallet-actions-open,html.oa-wallet-actions-open body{overflow:hidden!important}
+
+  /* Standalone app menu. It replaces the hidden legacy top hamburger instead
+     of asking the bottom button to click a control the user cannot see. */
+  .oa-app-menu{position:fixed;inset:0;z-index:1450;visibility:hidden;pointer-events:none}
+  .oa-app-menu.open{visibility:visible;pointer-events:auto}
+  .oa-app-menu-scrim{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;border:0!important;background:rgba(0,0,0,.66)!important;display:block!important;padding:0!important;opacity:0;transition:opacity .16s ease}
+  .oa-app-menu.open .oa-app-menu-scrim{opacity:1}
+  .oa-app-menu-sheet{position:absolute;left:0;right:0;bottom:0;max-height:min(72dvh,620px);overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;background:#0b1117;border:1px solid #1a232d;border-bottom:0;border-radius:24px 24px 0 0;padding:9px 16px calc(24px + env(safe-area-inset-bottom,0px));transform:translateY(102%);transition:transform .22s cubic-bezier(.2,.8,.2,1)}
+  .oa-app-menu.open .oa-app-menu-sheet{transform:translateY(0)}
+  .oa-app-menu-grab{width:42px;height:4px;border-radius:999px;background:#26313d;margin:1px auto 15px}
+  .oa-app-menu-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:13px;padding:0 2px}
+  .oa-app-menu-head strong{font:750 20px/1 Geist,system-ui,sans-serif;color:#eef1f5;letter-spacing:-.025em}
+  .oa-app-menu-close{appearance:none!important;width:36px!important;height:36px!important;border:1px solid #202a35!important;border-radius:11px!important;background:#0d141c!important;color:#a7b0bc!important;font:400 25px/1 Geist,system-ui,sans-serif!important;padding:0!important;display:flex!important;align-items:center!important;justify-content:center!important}
+  .oa-app-menu-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .oa-app-menu-item{min-height:52px!important;width:100%!important;display:flex!important;flex-direction:row!important;align-items:center!important;justify-content:flex-start!important;gap:10px!important;padding:0 13px!important;border:1px solid #1a232d!important;border-radius:13px!important;background:#0d141c!important;color:#b8c0cb!important;text-decoration:none!important;font:650 13px/1.2 Geist,system-ui,sans-serif!important;text-align:left!important}
+  .oa-app-menu-item.current{border-color:rgba(247,185,85,.32)!important;color:#f7b955!important;background:rgba(247,185,85,.07)!important}
+  .oa-app-menu-item.danger{grid-column:1/-1;color:#ff6b78!important;border-color:rgba(255,107,120,.18)!important}
+  .oa-app-menu-item svg{width:19px!important;height:19px!important;flex:0 0 19px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .oa-app-menu-sep{grid-column:1/-1;height:1px;background:#17202a;margin:3px 0}
+  html.oa-app-menu-open,html.oa-app-menu-open body{overflow:hidden!important;overscroll-behavior:none!important}
 }
-@media(min-width:768px){.oa-bottom-nav,.oa-wallet-actions{display:none!important}}
+@media(min-width:768px){.oa-bottom-nav,.oa-wallet-actions,.oa-app-menu{display:none!important}}
