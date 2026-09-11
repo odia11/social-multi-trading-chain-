@@ -13,6 +13,7 @@
   if(location.pathname.replace(/\/+$/,'')!=='/wallet') return;
   var css=document.createElement('link'); css.rel='stylesheet'; css.href='/static/portfolio-redesign.css?v=2'; document.head.appendChild(css);
   var js=document.createElement('script'); js.src='/static/portfolio-redesign.js?v=3'; js.defer=true; document.head.appendChild(js);
+  var assets=document.createElement('script'); assets.src='/static/portfolio-assets.js?v=1'; assets.defer=true; document.head.appendChild(assets);
 })();
 
 var _NB_LIVE_CHAINS = ['solana', 'bsc', 'base', 'arbitrum', 'polygon', 'robinhood'];
