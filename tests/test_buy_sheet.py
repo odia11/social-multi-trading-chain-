@@ -128,8 +128,18 @@ check('the sheet reads that value rather than a literal of its own',
 # again. Seen on a real phone, on a real refusal.
 check("no code path writes the old button's wording into the slider label",
       "textContent='Confirm Buy'" not in re.sub(r'(?m)^\s*//.*$', '', JS))
-check('every buy attempt ends by restoring the slider instead',
-      JS.count('_restoreSlide();') >= 6)
+# A buy now ends in one of TWO usable states, never in the in-flight one it
+# was left in: a purchase disarms the slider and says what happened, and
+# anything else re-arms it so the attempt can be retried without closing the
+# sheet and finding the token again.
+check('every buy attempt ends in a usable screen rather than the in-flight '
+      'state it was left in',
+      JS.count('_restoreSlide();') + JS.count("_slideSetLabel('Bought')") >= 6)
+check('...re-armed when nothing was bought, so a refusal can be retried',
+      JS.count('_restoreSlide();') >= 4)
+check('...and disarmed when something was, so "Bought" never sits above a '
+      'live "Slide to buy" while the sheet lingers on the receipt',
+      "_slideSetLabel('Bought')" in JS and 'var bought = false;' in JS)
 check('...and restoring means re-arming it, not just clearing it',
       re.search(r'function _restoreSlide\(\)\s*\{[^}]*_paintSheet\(\)', JS, re.DOTALL))
 

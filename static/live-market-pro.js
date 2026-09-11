@@ -963,15 +963,28 @@ function loadFeed(isPoll){
 /* ── trade actions ── */
 // Shared close path so every way a buy panel can close (manual toggle, or
 // auto-hide after a completed buy below) keeps _openBuyPanelCount accurate.
+// The card still renders an empty #pt-buy-panel-<idx> of its own, left over
+// from the in-card buy screen, and the sheet's footer BORROWS that same id
+// while it is open. Two elements, one id: getElementById answers with
+// whichever comes first in the document, which is the card's. So this asked
+// the card whether it was in the sheet, got "no", and hid an already-hidden
+// empty div -- leaving the sheet open forever after a successful buy. The
+// sheet is asked first now, by where it actually is rather than by an id it
+// shares.
 function closeBuyPanel(idx){
-  // The buy screen is the full sheet now, and its footer is what carries
-  // #pt-buy-panel-<idx>. Wiping that innerHTML -- which is what this used to
-  // do to the in-card panel -- would tear the confirm button and the message
-  // line out of a sheet that is still open, so this closes the sheet whole.
-  // Reached from _pollAutoBuyBridge() after a successful auto-bridged buy.
+  if(_sheetIdx !== null && String(_sheetIdx) === String(idx) && _sheetFooter()){
+    closeBuySheet();
+    return;
+  }
   var p = document.getElementById('pt-buy-panel-'+idx);
   if(p && p.closest('#pt-sheet')){ closeBuySheet(); return; }
   if(p){ p.style.display = 'none'; p.innerHTML = ''; }
+}
+
+// The sheet's footer, found by where it is rather than by the id it borrows
+// -- see closeBuyPanel() above for why the id alone is not enough.
+function _sheetFooter(){
+  return document.querySelector('#pt-sheet .pt-sheet-ft');
 }
 
 /* ── THE BUY SHEET ─────────────────────────────────────────────────────────
@@ -997,21 +1010,26 @@ function _sheetEl(id){ return document.getElementById(id); }
 
 // The ids confirmBuy() reaches for are handed to the footer on open and
 // taken back on close, so the sheet can be reused by the next token.
+// Borrowed ids are looked up INSIDE the sheet, never document-wide. The card
+// still renders an empty #pt-buy-panel-<idx> of its own, so a document-wide
+// getElementById can answer with the card's element instead of the sheet's --
+// and then the swap hands the borrowed id to the wrong element and every
+// later lookup drifts. Scoping to #pt-sheet makes the match unambiguous.
+var _SHEET_IDS = ['pt-buy-panel', 'pt-buy-amt', 'pt-buy-msg', 'pt-quote'];
+function _sheetOwn(id){ return document.querySelector('#pt-sheet [id="' + id + '"]'); }
 function _sheetBindIds(idx){
-  _sheetEl('pt-buy-panel-sheet') && (_sheetEl('pt-buy-panel-sheet').id = 'pt-buy-panel-'+idx);
-  _sheetEl('pt-buy-amt-sheet')   && (_sheetEl('pt-buy-amt-sheet').id   = 'pt-buy-amt-'+idx);
-  _sheetEl('pt-buy-msg-sheet')   && (_sheetEl('pt-buy-msg-sheet').id   = 'pt-buy-msg-'+idx);
-  _sheetEl('pt-quote-sheet')     && (_sheetEl('pt-quote-sheet').id     = 'pt-quote-'+idx);
+  _SHEET_IDS.forEach(function(base){
+    var el = _sheetOwn(base + '-sheet');
+    if(el) el.id = base + '-' + idx;
+  });
 }
 function _sheetUnbindIds(idx){
-  var a = document.getElementById('pt-buy-panel-'+idx);
-  var b = document.getElementById('pt-buy-amt-'+idx);
-  var c = document.getElementById('pt-buy-msg-'+idx);
-  var q = document.getElementById('pt-quote-'+idx);
-  if(a) a.id = 'pt-buy-panel-sheet';
-  if(b) b.id = 'pt-buy-amt-sheet';
-  if(c) c.id = 'pt-buy-msg-sheet';
-  if(q){ q.id = 'pt-quote-sheet'; q.style.display = 'none'; q.innerHTML = ''; }
+  _SHEET_IDS.forEach(function(base){
+    var el = _sheetOwn(base + '-' + idx);
+    if(el) el.id = base + '-sheet';
+  });
+  var q = _sheetOwn('pt-quote-sheet');
+  if(q){ q.style.display = 'none'; q.innerHTML = ''; }
 }
 
 // Spendable balance is per chain, never a pooled total: buying on BSC spends
@@ -1059,6 +1077,11 @@ function _openSheet(idx, mode){
   _sheetBindIds(idx);
   _sheetEl('pt-sheet').classList.toggle('sell-mode', mode === 'sell');
   _slideReset();
+  // The previous trade's receipt belongs to the previous trade. Leaving it
+  // up would show one token's transaction under another token's name.
+  var stale = document.getElementById('pt-txline');
+  if(stale) stale.remove();
+  _tradeStartedAt = 0;
 
   // Logo, or the token's initials when it has none / the image 404s --
   // an invisible image left a 44px hole in the header.
@@ -1206,20 +1229,58 @@ function _slideEnable(on){
   var e = _slideEls(); if(e.wrap) e.wrap.classList.toggle('ready', !!on);
   if(!on) _slideReset();
 }
-// After a buy attempt ends -- succeeded, refused, or the network died --
-// the slider has to become usable again. It used to be reset with
-// btn.textContent='Confirm Buy', which wrote the OLD button's wording into
-// the slider's label and left it disarmed: the sheet showed "Confirm Buy"
-// over a dead grey knob, and a refused buy could not be retried at all
-// without closing the sheet and finding the token again.
+// What makes a fast trade believable is not a longer wait -- it is being
+// able to check it. This prints the transaction the chain accepted, how long
+// it took, and a link straight to that chain's explorer.
+function _showTxReceipt(idx, t, d){
+  // The sheet's footer, not the card's empty panel of the same id -- the
+  // receipt was being appended to a hidden leftover and never seen.
+  var ft = _sheetFooter() || document.getElementById('pt-buy-panel-'+idx);
+  if(!ft) return;
+  var hash = d && (d.tx_hash || d.tx || d.sig || d.signature);
+  var old = document.getElementById('pt-txline');
+  if(old) old.remove();
+  if(!hash) return;
+  var base = (typeof PT_TX_EXPLORERS !== 'undefined' && PT_TX_EXPLORERS[t.chain]) || '';
+  var secs = _tradeStartedAt ? ((Date.now() - _tradeStartedAt) / 1000).toFixed(1) : '';
+  var short = String(hash).slice(0, 6) + '…' + String(hash).slice(-4);
+  var el = document.createElement('div');
+  el.className = 'pt-txline';
+  el.id = 'pt-txline';
+  el.innerHTML = (secs ? '<span class="pt-txms">confirmed in ' + secs + 's</span>' : '')
+    + (base ? '<a href="' + esc(base + hash) + '" target="_blank" rel="noopener">' + esc(short) + '</a>'
+            : '<span>' + esc(short) + '</span>');
+  ft.appendChild(el);
+}
+
+// After a buy attempt ends WITHOUT a purchase -- refused, repriced, or the
+// network died -- the slider has to become usable again. It used to be reset
+// with btn.textContent='Confirm Buy', which wrote the OLD button's wording
+// into the slider's label and left it disarmed: the sheet showed "Confirm
+// Buy" over a dead grey knob, and a refused buy could not be retried at all
+// without closing the sheet and finding the token again. A buy that DID go
+// through does not come here -- it stays disarmed and says "Bought".
 function _restoreSlide(){
   if(_sheetIdx === null) return;
   _slideReset();
   _paintSheet();
 }
+// The in-flight state. The wait is the chain confirming -- the server has
+// already submitted by this point and is holding for a receipt -- so this
+// says so and keeps moving. It is not a delay: nothing is held back, and it
+// ends the moment the server answers.
+var _tradeStartedAt = 0;
+function _slideWorking(text){
+  _tradeStartedAt = Date.now();
+  var e = _slideEls();
+  if(e.wrap){ e.wrap.classList.add('working'); e.wrap.classList.remove('ready'); }
+  if(e.fill){ e.fill.style.width = ''; }
+  if(e.label) e.label.textContent = text;
+}
 function _slideReset(){
   _slideAt = 0;
   var e = _slideEls();
+  if(e.wrap) e.wrap.classList.remove('working');
   if(e.knob){ e.knob.style.transform = ''; }
   if(e.fill){ e.fill.style.width = '0'; }
   if(e.wrap){ e.wrap.classList.remove('dragging'); }
@@ -1246,6 +1307,7 @@ function _slideRelease(){
     var idx = _sheetIdx;
     if(idx === null) return;
     _slideEnable(false);
+    _slideWorking(_sheetMode === 'sell' ? 'Selling…' : 'Confirming on chain…');
     if(_sheetMode === 'sell') handleSell(idx);
     else confirmBuy(idx);
   } else {
@@ -1531,7 +1593,13 @@ function confirmBuy(idx){
   var msgEl = document.getElementById('pt-buy-msg-'+idx);
   if(!amt || amt<=0){ showMsg(msgEl, 'Enter a valid amount', false); return; }
   var btn = document.querySelector('#pt-buy-panel-'+idx+' .pt-buy-confirm');
-  if(btn){ btn.disabled = true; btn.textContent = 'Buying…'; }
+  // When the sheet is driving, it has already said what is being waited on
+  // ("Confirming on chain…"), which is more than "Buying…" says. Writing
+  // over it would replace the specific with the vague.
+  if(btn){
+    btn.disabled = true;
+    if(_sheetIdx === null) btn.textContent = 'Buying…';
+  }
   // Which chain this token lives on decides both the endpoint and the
   // currency the entered amount is denominated in: BSC keeps its own
   // dedicated route, Base/Arbitrum/Polygon share the generic /api/evm/*
@@ -1560,6 +1628,11 @@ function confirmBuy(idx){
     url  = '/api/trade/execute';
     body = {quote_id: q.id};
   }
+  // Whether this attempt ended in a purchase. A bought trade must NOT leave
+  // the slider armed again: the sheet would then read "Bought ..." above a
+  // live "Slide to buy" for the seconds before it closes, which is an
+  // invitation to buy the same token twice by accident.
+  var bought = false;
   fetch(url, {
     method:'POST', credentials:'include', headers: authHeaders(),
     body: JSON.stringify(body)
@@ -1591,10 +1664,17 @@ function confirmBuy(idx){
       if(d.max_spend_usd != null && Number(d.max_spend_usd) > Number(got)){
         line += ' (spent ' + d.max_spend_usd + ' ' + cur + ')';
       }
+      bought = true;
       showMsg(msgEl, line, true);
       if(input) input.value = '';
       delete _quotes[idx];
-      setTimeout(function(){ closeBuyPanel(idx); }, 2600);
+      // The receipt is the whole point of the wait: it names the transaction
+      // the chain accepted and links to it. A sheet that closes in 2.6s takes
+      // that away before it can be read, so a buy that produced a hash holds
+      // the sheet open longer -- long enough to read it and tap through.
+      _showTxReceipt(idx, t, d);
+      setTimeout(function(){ closeBuyPanel(idx); },
+                 document.getElementById('pt-txline') ? 7000 : 2600);
     } else if(d && d.requote){
       // The quote expired between being shown and being confirmed. Re-price
       // rather than executing at a number the user never saw.
@@ -1604,8 +1684,13 @@ function confirmBuy(idx){
     } else {
       showMsg(msgEl, (d && (d.error||d.msg)) || 'Buy failed', false);
     }
-    if(btn){ btn.disabled=false; }
-    _restoreSlide();
+    if(bought){
+      _slideEnable(false);          // also clears the in-flight sweep
+      _slideSetLabel('Bought');
+    } else {
+      if(btn){ btn.disabled=false; }
+      _restoreSlide();
+    }
   }).catch(function(){
     showMsg(msgEl, 'Network error — buy not sent', false);
     if(btn){ btn.disabled=false; }
@@ -1633,9 +1718,11 @@ function _pollAutoBuyBridge(bridgeId, idx, t, amt, msgEl, input){
           var res = d.auto_buy_result || {};
           showMsg(msgEl, 'Bought $'+(res.symbol||t.symbol)+' for '+(res.amount_usdc!=null?res.amount_usdc:amt)+' '+evmCurrencyLabel(t.chain), true);
           if(input) input.value = '';
-          if(btn){ btn.disabled=false; }
-    _restoreSlide();
-          setTimeout(function(){ closeBuyPanel(idx); }, 2200);
+          _slideEnable(false);
+          _slideSetLabel('Bought');
+          _showTxReceipt(idx, t, res);
+          setTimeout(function(){ closeBuyPanel(idx); },
+                     document.getElementById('pt-txline') ? 7000 : 2200);
           return;
         }
         if(d.auto_buy_status === 'failed'){
@@ -1708,7 +1795,21 @@ function handleSell(idx, btn){
     // act on -- it closes rather than offering to sell it again. A failure
     // keeps it open with the slider armed, so the person can retry without
     // finding the card again.
-    if(sold) closeBuySheet(); else { _slideEnable(true); _slideReset(); }
+    if(sold){
+      // Same as a buy: show what the chain accepted before the sheet goes.
+      _showTxReceipt(idx, t, d);
+      if(document.getElementById('pt-txline')){
+        _slideEnable(false);        // also clears the in-flight sweep
+        _slideSetLabel('Sold');
+        // Only if this is still the same sheet: opening another token inside
+        // those seconds must not have its screen closed out from under it.
+        setTimeout(function(){
+          if(String(_sheetIdx) === String(idx)) closeBuySheet();
+        }, 7000);
+      } else {
+        closeBuySheet();
+      }
+    } else { _slideEnable(true); _slideReset(); }
   }).catch(function(){
     toast('Network error — sell not sent');
     _slideEnable(true); _slideReset();

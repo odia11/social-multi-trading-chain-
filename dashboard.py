@@ -12794,7 +12794,21 @@ def live_market():
                            # and says why. Handed over rather than written in
                            # the JS again, so the figure the page enforces is
                            # the one the server enforces.
-                           min_buy_usdc=SOLANA_MIN_SPEND_USDC)
+                           min_buy_usdc=SOLANA_MIN_SPEND_USDC,
+                           # Where a finished trade can be looked up. Taken
+                           # from each chain's own entry rather than a second
+                           # list in the JS, so a wrong explorer cannot send
+                           # somebody hunting for their transaction on the
+                           # wrong network.
+                           # A chain with no explorer configured is simply
+                           # absent, so it shows the transaction as plain
+                           # text rather than taking the page down with it.
+                           tx_explorers={
+                               **{c: EVM_CHAINS[c]['explorer'] + '/tx/'
+                                  for c in EVM_CHAINS
+                                  if EVM_CHAINS[c].get('explorer')},
+                               'solana': 'https://solscan.io/tx/',
+                           })
 
 
 @app.route('/live-market/pro')
