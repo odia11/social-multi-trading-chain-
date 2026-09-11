@@ -16,16 +16,22 @@ img{max-width:100%}
      expensive in iOS/Phantom and causes visible repaint/jank while scrolling. */
   .pt-nb-topbar,.oa-bottom-nav{background:#080d12!important;background-image:none!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
 
-  /* Shared modal behaviour: modal stays above the persistent bottom nav and
-     the modal itself owns vertical scrolling rather than the page underneath. */
-  .s-modal.open,.modal-backdrop.open,.gd-modal-backdrop.open,
-  [class*="modal-backdrop"].open{z-index:1500!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important;overscroll-behavior:contain}
-  .s-card,.modal,.gd-modal{
+  /* Shared modal behaviour: all old and new modal shells stay above the
+     persistent bottom nav, with scrolling contained inside the modal. */
+  .s-modal,.modal-backdrop,.gd-modal-backdrop,.modal-back,.w-modal-back,
+  [class*="modal-backdrop"]{
+    z-index:1500!important;
+    -webkit-backdrop-filter:none!important;
+    backdrop-filter:none!important;
+    overscroll-behavior:contain
+  }
+  .s-card,.modal,.gd-modal,.modal-box,.w-modal-box{
     max-height:calc(100dvh - 32px);
     overflow-y:auto;
     overscroll-behavior:contain;
     -webkit-overflow-scrolling:touch
   }
+  html.oa-modal-open,html.oa-modal-open body{overflow:hidden!important;overscroll-behavior:none!important}
 
   /* Fixed bottom nav needs a real content safe-zone on ordinary document
      pages. Fullscreen/workspace pages opt out below. */
