@@ -2624,6 +2624,22 @@ def init_db():
         UNIQUE(user_id, token_address)
     )''')
     c.execute('CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlist(user_id)')
+    # Free, first-party market history. Every real price observed by the
+    # existing batched DexScreener feed is folded into a durable 1-minute
+    # OHLC candle. Higher timeframes are derived from these rows on read.
+    c.execute('''CREATE TABLE IF NOT EXISTS market_candles_1m (
+        chain        TEXT NOT NULL,
+        pair_address TEXT NOT NULL,
+        bucket_ts    INTEGER NOT NULL,
+        open          REAL NOT NULL,
+        high          REAL NOT NULL,
+        low           REAL NOT NULL,
+        close         REAL NOT NULL,
+        samples       INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY(chain, pair_address, bucket_ts)
+    )''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_market_candles_pair_time '
+              'ON market_candles_1m(chain, pair_address, bucket_ts)')
     # Trade-engine tables: quotes, executions, per-cost drift and balance
     # reservations. Owned by trade_engine/ledger.py so the schema lives with
     # the code that reads it and can be tested standalone; created here so it
@@ -27357,6 +27373,72 @@ _LIVE_PRICE_TTL = 2
 _live_price_lock = threading.Lock()
 _live_price_cache: dict = {}   # (chain, pair_lower) -> (fetched_at, price)
 
+_MARKET_TF_SECONDS = {'1m': 60, '5m': 300, '15m': 900,
+                      '1h': 3600, '4h': 14400, 'D': 86400}
+
+
+def _store_observed_market_prices(chain: str, prices: dict, observed_at: float) -> None:
+    """Persist real observed prices as one-minute OHLC candles.
+
+    This intentionally stores no synthetic backfill. It gives unsupported or
+    brand-new pools durable history from the first moment OrcAgent sees them.
+    One transaction stores the whole <=30-pair batch to keep SQLite cheap.
+    """
+    if not prices:
+        return
+    bucket = int(observed_at) // 60 * 60
+    rows = [(chain, pair.lower(), bucket, float(price), float(price),
+             float(price), float(price))
+            for pair, price in prices.items() if float(price or 0) > 0]
+    if not rows:
+        return
+    try:
+        conn = sqlite3.connect(DB_FILE, timeout=5)
+        conn.execute('PRAGMA busy_timeout=5000')
+        conn.executemany('''INSERT INTO market_candles_1m
+            (chain,pair_address,bucket_ts,open,high,low,close)
+            VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(chain,pair_address,bucket_ts) DO UPDATE SET
+              high=MAX(high,excluded.high), low=MIN(low,excluded.low),
+              close=excluded.close, samples=samples+1''', rows)
+        # Keep 30 days; enough for the 1D view without unbounded growth.
+        conn.execute('DELETE FROM market_candles_1m WHERE bucket_ts < ?',
+                     (bucket - 30 * 86400,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f'[chart-store] write failed: {e}', flush=True)
+
+
+def _stored_market_candles(chain: str, pair_address: str, tf: str,
+                           limit: int = 60) -> list:
+    """Read durable 1m candles and aggregate them to the requested timeframe."""
+    seconds = _MARKET_TF_SECONDS.get(tf, 300)
+    try:
+        conn = sqlite3.connect(DB_FILE, timeout=5)
+        rows = conn.execute('''SELECT bucket_ts,open,high,low,close,samples
+            FROM market_candles_1m
+            WHERE chain=? AND pair_address=?
+            ORDER BY bucket_ts DESC LIMIT ?''',
+            (chain, pair_address.lower(), max(limit * (seconds // 60), limit))).fetchall()
+        conn.close()
+    except Exception as e:
+        print(f'[chart-store] read failed: {e}', flush=True)
+        return []
+    grouped = {}
+    for ts, op, hi, lo, cl, samples in reversed(rows):
+        bucket = int(ts) // seconds * seconds
+        cur = grouped.get(bucket)
+        if cur is None:
+            grouped[bucket] = {'t': bucket, 'o': op, 'h': hi, 'l': lo,
+                               'c': cl, 'v': 0, 'samples': samples}
+        else:
+            cur['h'] = max(cur['h'], hi)
+            cur['l'] = min(cur['l'], lo)
+            cur['c'] = cl
+            cur['samples'] += samples
+    return list(grouped.values())[-limit:]
+
 
 # Token prices by MINT, cached per token. Same shape as the pool-price cache
 # below and for the same reason: overlapping screens share what they have in
@@ -27518,6 +27600,7 @@ def api_market_prices():
             if addr and px > 0:
                 fresh[addr.lower()] = px
         prices.update(fresh)
+        _store_observed_market_prices(chain, fresh, now)
         with _live_price_lock:
             for k, v in fresh.items():
                 _live_price_cache[(chain, k)] = (now, v)
@@ -27687,6 +27770,21 @@ def api_chart(mint):
             tf_used = tf_key
             if len(candles) >= 5 or i == len(tf_fallback_list) - 1:
                 break
+
+        # Extend provider history with OrcAgent's own durable observations.
+        # When the provider has no coverage (notably Robinhood Chain), this is
+        # the primary history. Never fabricate bars for time ranges unseen by
+        # either source.
+        stored = _stored_market_candles(chain, pair_address, tf)
+        if stored:
+            if candles and tf_used == tf:
+                by_time = {int(c['t']): c for c in candles}
+                for c in stored:
+                    by_time[int(c['t'])] = c
+                candles = [by_time[k] for k in sorted(by_time)][-60:]
+            elif not candles:
+                candles = stored
+                tf_used = tf
 
         current_price = candles[-1]['c'] if candles else _fetch_current_price()
         if candles:

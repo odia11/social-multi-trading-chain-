@@ -1,4 +1,4 @@
-/* OrcAgent Live Market — compact mobile token card + gold line/area chart. */
+/* OrcAgent Live Market — compact mobile token card + candlestick chart. */
 :root{--oa-gold:#f7b955;--oa-gold2:#ffd36a;--oa-green:#3ad29b;--oa-red:#ff5368;--oa-canvas:#071019;--oa-panel:#0a131c;--oa-panel2:#0c1620;--oa-border:#20303d;--oa-soft:#8d9bad;--oa-text:#f4f6f8}
 
 @media(max-width:767px){
@@ -52,8 +52,7 @@
   body.oa-live-v2 .pt-stat-val{font:650 15px/1.1 'JetBrains Mono',monospace!important;color:#f5f6f8!important;max-width:100%!important;overflow:hidden!important;text-overflow:ellipsis!important}
 
   body.oa-live-v2 .pt-chart-wrap{grid-column:1/-1!important;order:5!important;position:relative!important;height:286px!important;margin:3px 14px 12px!important;border:1px solid rgba(247,185,85,.24)!important;border-radius:17px!important;background:linear-gradient(180deg,#07111a,#061018)!important;overflow:hidden!important}
-  body.oa-live-v2 .pt-chart-svg{opacity:0!important;pointer-events:none!important}
-  body.oa-live-v2 .oa-goldline-svg{position:absolute!important;left:0;top:0;width:100%;height:100%;display:block;z-index:2;touch-action:pan-y}
+  body.oa-live-v2 .pt-chart-svg{opacity:1!important;pointer-events:auto!important;height:252px!important;margin-top:34px!important;touch-action:pan-y!important}
   body.oa-live-v2 .pt-chart-live{top:13px!important;left:14px!important;z-index:5!important;color:#31dfa0!important;font:800 10px/1 Geist,system-ui,sans-serif!important;letter-spacing:.03em!important}
   body.oa-live-v2 .pt-chart-live-dot{width:7px!important;height:7px!important;background:#31dfa0!important;box-shadow:0 0 9px rgba(49,223,160,.35)!important}
   body.oa-live-v2 .pt-chart-tfs{top:8px!important;right:8px!important;z-index:6!important;gap:4px!important}
