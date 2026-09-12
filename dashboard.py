@@ -17341,6 +17341,40 @@ def webauthn_login():
 # it. What is stored is a hash, what is handed out rotates on every use, and
 # a disconnect ends it everywhere.
 DEVICE_TOKEN_DAYS = 3650
+DEVICE_COOKIE_NAME = 'orca_device'
+
+
+def _set_device_cookie(response, token: str):
+    """Keep the recovery credential outside JavaScript-managed storage too.
+
+    Safari can evict localStorage independently of cookies, and storage writes
+    can fail in private/restricted contexts.  An HttpOnly cookie gives the
+    server a second, deploy-independent recovery path.  It is cleared only by
+    the explicit logout endpoint.
+    """
+    if token:
+        response.set_cookie(
+            DEVICE_COOKIE_NAME, token,
+            max_age=DEVICE_TOKEN_DAYS * 86400,
+            secure=bool(app.config.get('SESSION_COOKIE_SECURE')),
+            httponly=True,
+            samesite='Lax',
+            path='/',
+            domain=app.config.get('SESSION_COOKIE_DOMAIN'),
+        )
+    return response
+
+
+def _clear_device_cookie(response):
+    response.delete_cookie(
+        DEVICE_COOKIE_NAME,
+        secure=bool(app.config.get('SESSION_COOKIE_SECURE')),
+        httponly=True,
+        samesite='Lax',
+        path='/',
+        domain=app.config.get('SESSION_COOKIE_DOMAIN'),
+    )
+    return response
 
 def _hash_device_token(token: str) -> str:
     return hashlib.sha256((token or '').encode()).hexdigest()
@@ -17641,8 +17675,9 @@ def api_pair_claim():
         device_token = _issue_device_token(session['user_id'], wallet)
     except Exception:
         pass
-    return jsonify({'ok': True, 'wallet': wallet, 'device_token': device_token,
-                    'csrf_token': _get_csrf_token()})
+    response = jsonify({'ok': True, 'wallet': wallet, 'device_token': device_token,
+                        'csrf_token': _get_csrf_token()})
+    return _set_device_cookie(response, device_token)
 
 
 @app.route('/api/session/remember', methods=['POST'])
@@ -17672,7 +17707,7 @@ def api_session_remember():
     token = _issue_device_token(uid, wallet)
     if not token:
         return jsonify({'ok': False}), 500
-    return jsonify({'ok': True, 'token': token})
+    return _set_device_cookie(jsonify({'ok': True, 'token': token}), token)
 
 
 @app.route('/app.webmanifest')
@@ -17726,7 +17761,10 @@ def api_session_resume():
     token itself is the credential.
     """
     body = request.json or {}
-    token = str(body.get('token', '')).strip()
+    # Prefer the explicit legacy/localStorage credential, then fall back to
+    # the HttpOnly recovery cookie.  This lets existing users migrate without
+    # reconnecting and keeps recovery working when Safari evicts localStorage.
+    token = str(body.get('token', '')).strip() or request.cookies.get(DEVICE_COOKIE_NAME, '').strip()
     if not token:
         # Worth its own line: "the browser had nothing to offer" and "what it
         # offered was refused" are different problems with the same symptom,
@@ -17745,8 +17783,9 @@ def api_session_resume():
         session['user_id'] = get_or_create_user(wallet)
     except Exception:
         pass
-    return jsonify({'ok': True, 'wallet': wallet, 'token': new_token,
-                    'csrf_token': _get_csrf_token()})
+    response = jsonify({'ok': True, 'wallet': wallet, 'token': new_token,
+                        'csrf_token': _get_csrf_token()})
+    return _set_device_cookie(response, new_token)
 
 
 @app.route('/api/session', methods=['GET'])
@@ -17907,11 +17946,12 @@ def set_wallet():
         us = get_user_state(address)
         us['has_trading_key'] = has_trading_key
         user_status = 'new_user' if is_new_user else 'existing'
-        return jsonify({'ok': True, 'success': True, 'redirect': '/dashboard',
-                        'wallet': address, 'has_trading_key': has_trading_key,
-                        'is_admin': _is_owner(address), 'csrf_token': csrf_tok,
-                        'device_token': _device_token,
-                        'status': user_status})
+        response = jsonify({'ok': True, 'success': True, 'redirect': '/dashboard',
+                            'wallet': address, 'has_trading_key': has_trading_key,
+                            'is_admin': _is_owner(address), 'csrf_token': csrf_tok,
+                            'device_token': _device_token,
+                            'status': user_status})
+        return _set_device_cookie(response, _device_token)
     else:
         prev = _current_wallet()
         session.pop('wallet', None)
@@ -17928,7 +17968,7 @@ def logout():
     # opposite of what the button says.
     _revoke_device_tokens(session.get('wallet', ''))
     session.clear()
-    return jsonify({'status': 'ok'})
+    return _clear_device_cookie(jsonify({'status': 'ok'}))
 
 # ── SETTINGS ──
 @app.route('/api/settings', methods=['GET'])
