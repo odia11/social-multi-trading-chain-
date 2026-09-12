@@ -3,10 +3,10 @@
      the stable place to boot the shared UX layer without editing every
      server-rendered template separately. Guards keep fallback loaders safe. */
   if(!document.getElementById('oa-app-ux-css')){
-    var uxCss=document.createElement('link');uxCss.id='oa-app-ux-css';uxCss.rel='stylesheet';uxCss.href='/static/app-ux.css?v=2';document.head.appendChild(uxCss);
+    var uxCss=document.createElement('link');uxCss.id='oa-app-ux-css';uxCss.rel='stylesheet';uxCss.href='/static/app-ux.css?v=3';document.head.appendChild(uxCss);
   }
   if(!document.getElementById('oa-app-ux-js')){
-    var uxJs=document.createElement('script');uxJs.id='oa-app-ux-js';uxJs.src='/static/app-ux.js?v=2';uxJs.defer=true;document.head.appendChild(uxJs);
+    var uxJs=document.createElement('script');uxJs.id='oa-app-ux-js';uxJs.src='/static/app-ux.js?v=3';uxJs.defer=true;document.head.appendChild(uxJs);
   }
 
   var b=document.createElement('div');
