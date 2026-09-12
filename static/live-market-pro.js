@@ -147,21 +147,9 @@ var SORT_DEFS = [
   {key:'friends',  label:'Friends buying'}
 ];
 
-/* ── chart (custom SVG: smooth cubic-bezier line, gradient fill, dotted
+/* ── chart (custom SVG: candlesticks, volume, dotted
    current-price line, price pill, timeframe pills, time axis) ── */
 var _chartTimers = {}; // idx -> {destroyed, mint, pair, tf, timer}
-
-function buildSmoothPath(pts){
-  if(pts.length<2) return '';
-  var d = 'M'+pts[0].x.toFixed(2)+','+pts[0].y.toFixed(2);
-  for(var i=0;i<pts.length-1;i++){
-    var p0 = pts[i===0?0:i-1], p1 = pts[i], p2 = pts[i+1], p3 = pts[i+2]||p2;
-    var c1x = p1.x+(p2.x-p0.x)/6, c1y = p1.y+(p2.y-p0.y)/6;
-    var c2x = p2.x-(p3.x-p1.x)/6, c2y = p2.y-(p3.y-p1.y)/6;
-    d += ' C'+c1x.toFixed(2)+','+c1y.toFixed(2)+' '+c2x.toFixed(2)+','+c2y.toFixed(2)+' '+p2.x.toFixed(2)+','+p2.y.toFixed(2);
-  }
-  return d;
-}
 
 function updateAxis(idx, candles){
   var axisEl = document.getElementById('pt-chart-axis-'+idx);
@@ -188,7 +176,7 @@ function renderChartSvg(idx, candles, currentPrice){
   var h = svg.clientHeight || 200;
   svg.setAttribute('viewBox', '0 0 '+w+' '+h);
 
-  if(!candles || candles.length<2){
+  if(!candles || !candles.length){
     var oldPill0 = wrap.querySelector('.pt-price-pill');
     if(oldPill0) oldPill0.remove();
     svg.innerHTML = '';
@@ -214,7 +202,7 @@ function renderChartSvg(idx, candles, currentPrice){
 
   var n = candles.length, priceH = h*.77, volTop = h*.79, volH = h*.18;
   var pts = candles.map(function(c,i){
-    var x = n===1 ? 0 : (i/(n-1))*(w-46);
+    var x = n===1 ? (w-46)/2 : (i/(n-1))*(w-46);
     var y = priceH - ((c.c-min)/(max-min))*priceH;
     return {x:x, y:y};
   });
@@ -229,9 +217,7 @@ function renderChartSvg(idx, candles, currentPrice){
   // pointer position maps straight to "nearest x" -> "that candle's price
   // and time" with no unit conversion.
   var st = _chartTimers[idx];
-  var realVolume=candles.some(function(c){return Number(c.v)>0;});
-  var sparse=candles.length<12||!realVolume;
-  if(st){ st.pts = pts; st.candles = candles; st.min = min; st.max = max; st.h = h; st.w = w; st.priceH = priceH; st.plotW = w-46; st.sparse=sparse; }
+  if(st){ st.pts = pts; st.candles = candles; st.min = min; st.max = max; st.h = h; st.w = w; st.priceH = priceH; st.plotW = w-46; }
 
   var maxVol = Math.max.apply(null,candles.map(function(c){return Number(c.v)||0;}))||1;
   var plotW=w-46, step=plotW/Math.max(n,1), bodyW=Math.max(2,Math.min(7,step*.62)), chartHtml='';
@@ -240,14 +226,7 @@ function renderChartSvg(idx, candles, currentPrice){
     chartHtml+='<line x1="0" y1="'+yy.toFixed(2)+'" x2="'+plotW.toFixed(2)+'" y2="'+yy.toFixed(2)+'" stroke="#1a2530" stroke-width="1" vector-effect="non-scaling-stroke"></line>';
     chartHtml+='<text x="'+(plotW+5).toFixed(2)+'" y="'+Math.max(10,yy+4).toFixed(2)+'" fill="#657180" font-size="9" font-family="monospace">'+fmtPrice(label).replace('$','')+'</text>';
   }
-  if(sparse){
-    var path=buildSmoothPath(pts),grad='pt-line-grad-'+idx;
-    var area=path+' L'+pts[pts.length-1].x.toFixed(2)+','+priceH.toFixed(2)+' L'+pts[0].x.toFixed(2)+','+priceH.toFixed(2)+' Z';
-    chartHtml+='<defs><linearGradient id="'+grad+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#f7b955" stop-opacity=".30"></stop><stop offset="100%" stop-color="#f7b955" stop-opacity=".02"></stop></linearGradient></defs>';
-    chartHtml+='<path id="pt-live-area-'+idx+'" d="'+area+'" fill="url(#'+grad+')"></path>';
-    chartHtml+='<path id="pt-live-path-'+idx+'" d="'+path+'" fill="none" stroke="#f7b955" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path>';
-    pts.forEach(function(p,i){chartHtml+='<circle'+(i===pts.length-1?' id="pt-live-dot-'+idx+'"':'')+' cx="'+p.x.toFixed(2)+'" cy="'+p.y.toFixed(2)+'" r="2.2" fill="#ffd36a"></circle>';});
-  }else candles.forEach(function(c,i){
+  candles.forEach(function(c,i){
     var x=pts[i].x, open=Number(c.o!=null?c.o:c.c)||0, close=Number(c.c)||0, high=Number(c.h!=null?c.h:c.c)||0, low=Number(c.l!=null?c.l:c.c)||0;
     var yo=priceH-((open-min)/(max-min))*priceH, yc=priceH-((close-min)/(max-min))*priceH, yh=priceH-((high-min)/(max-min))*priceH, yl=priceH-((low-min)/(max-min))*priceH;
     var color=close>=open?'#3ad29b':'#f76b62', top=Math.min(yo,yc), bh=Math.max(1.5,Math.abs(yc-yo));
@@ -288,22 +267,6 @@ function updateLiveChartPrice(idx, nextPrice){
   if(nextPrice<=st.min || nextPrice>=st.max){ renderChartSvg(idx,st.candles,nextPrice); return; }
   var body=document.getElementById('pt-live-body-'+idx), wick=document.getElementById('pt-live-wick-'+idx), guide=document.getElementById('pt-live-guide-'+idx);
   var pill=wrap.querySelector('.pt-price-pill');
-  if(st.sparse){
-    var livePath=document.getElementById('pt-live-path-'+idx),liveArea=document.getElementById('pt-live-area-'+idx),liveDot=document.getElementById('pt-live-dot-'+idx);
-    if(!livePath||!liveArea||!guide){renderChartSvg(idx,st.candles,nextPrice);return;}
-    if(st.liveRaf)cancelAnimationFrame(st.liveRaf);
-    var sparseStart=performance.now(),sparseDuration=220;
-    function sparseFrame(now){
-      var q=Math.min(1,(now-sparseStart)/sparseDuration),eased=1-Math.pow(1-q,3),p=previous+(nextPrice-previous)*eased;
-      var y=st.priceH-((p-st.min)/(st.max-st.min))*st.priceH,points=st.pts.slice();
-      points[points.length-1]={x:points[points.length-1].x,y:y};
-      var d=buildSmoothPath(points),area=d+' L'+points[points.length-1].x.toFixed(2)+','+st.priceH.toFixed(2)+' L'+points[0].x.toFixed(2)+','+st.priceH.toFixed(2)+' Z';
-      livePath.setAttribute('d',d);liveArea.setAttribute('d',area);if(liveDot)liveDot.setAttribute('cy',y.toFixed(2));guide.setAttribute('y1',y.toFixed(2));guide.setAttribute('y2',y.toFixed(2));
-      if(pill){pill.style.top=y+'px';pill.textContent=fmtPrice(p);}
-      if(q<1)st.liveRaf=requestAnimationFrame(sparseFrame);else{st.liveRaf=null;st.renderedPrice=nextPrice;st.pts=points;}
-    }
-    st.liveRaf=requestAnimationFrame(sparseFrame);return;
-  }
   if(!body || !wick || !guide){ renderChartSvg(idx,st.candles,nextPrice); return; }
   if(st.liveRaf) cancelAnimationFrame(st.liveRaf);
   var started=performance.now(), duration=220;
@@ -435,26 +398,33 @@ function fetchChart(mint, tf, pairAddr, chain){
   return fetch(url).then(function(r){ return r.json(); }).catch(function(){ return null; });
 }
 
+function chartBucketSeconds(tf){
+  return ({'1m':60,'5m':300,'15m':900,'1h':3600,'4h':14400,'D':86400})[tf] || 300;
+}
+
+function startObservedCandle(st, price){
+  var seconds=chartBucketSeconds(st.tf), now=Math.floor(Date.now()/1000);
+  return {t:Math.floor(now/seconds)*seconds,o:price,h:price,l:price,c:price,v:0};
+}
+
 function chartTick(idx){
   var st = _chartTimers[idx];
   if(!st || st.destroyed) return;
   fetchChart(st.mint, st.tf, st.pair, st.chain).then(function(r){
     if(!st || st.destroyed) return;
-    if(r && r.candles && r.candles.length>=2){
+    if(r && r.candles && r.candles.length){
       // Kept so a live price can redraw this chart without fetching the
       // candles again -- the candles are the shape, the price is the movement.
       st.candles = r.candles;
       st.price   = r.current_price;
       renderChartSvg(idx, st.candles, st.price);
-    } else if(!st.candles || st.candles.length<2){
-      // Some new/EVM pools expose a real current price but no OHLC history.
-      // Start an honest flat live session immediately; subsequent real ticks
-      // form the candle instead of leaving a permanently empty chart.
+    } else if(!st.candles || !st.candles.length){
+      // Some new/EVM pools expose a current price but no OHLC history.
+      // Start one honest observed candle; subsequent real ticks form it.
       var px=Number((r&&r.current_price)||st.seedPrice||0);
       if(px>0){
-        var now=Math.floor(Date.now()/1000);
         st.price=px;
-        st.candles=[{t:now-2,o:px,h:px,l:px,c:px,v:0},{t:now,o:px,h:px,l:px,c:px,v:0}];
+        st.candles=[startObservedCandle(st,px)];
         renderChartSvg(idx,st.candles,px);
       }
     }
@@ -498,6 +468,15 @@ function tickLivePrices(){
           // current price -- move it, and stretch its high/low to match, or
           // the wick would end up outside its own candle.
           var last = st.candles[st.candles.length - 1];
+          var seconds=chartBucketSeconds(st.tf), now=Math.floor(Date.now()/1000);
+          var bucket=Math.floor(now/seconds)*seconds;
+          if(bucket>last.t){
+            last=startObservedCandle(st,px);
+            st.candles.push(last);
+            if(st.candles.length>60) st.candles.shift();
+            renderChartSvg(i,st.candles,px);
+            return;
+          }
           last.c = px;
           if(px > last.h) last.h = px;
           if(px < last.l) last.l = px;
@@ -527,17 +506,11 @@ function primeChart(idx, mint, pairAddr, chain, seedPrice){
   if(_chartTimers[idx]) return _chartTimers[idx];
   var st = {destroyed:false, mint:mint, pair:pairAddr, chain:(chain||'solana'), seedPrice:Number(seedPrice)||0, tf:'5m', timer:null};
   _chartTimers[idx] = st;
-  // Paint immediately from the real scanner price. On production, opening
-  // thirty cards can queue the history requests long enough that every chart
-  // looks blank until its timeframe is tapped. History replaces this seed as
-  // soon as it arrives; live ticks can already move it in the meantime.
+  // Paint one still-forming candle from the scanner's observed real price.
+  // Provider history replaces it as soon as it arrives.
   if(st.seedPrice>0){
-    var now=Math.floor(Date.now()/1000);
     st.price=st.seedPrice;
-    st.candles=[
-      {t:now-300,o:st.seedPrice,h:st.seedPrice,l:st.seedPrice,c:st.seedPrice,v:0},
-      {t:now,o:st.seedPrice,h:st.seedPrice,l:st.seedPrice,c:st.seedPrice,v:0}
-    ];
+    st.candles=[startObservedCandle(st,st.seedPrice)];
     renderChartSvg(idx,st.candles,st.seedPrice);
   }
   return st;
@@ -566,6 +539,10 @@ function setChartTf(idx, tf){
   var st = _chartTimers[idx];
   if(!st) return;
   st.tf = tf;
+  if(st.price>0){
+    st.candles=[startObservedCandle(st,st.price)];
+    renderChartSvg(idx,st.candles,st.price);
+  }
   chartTick(idx);
 }
 
