@@ -23,11 +23,16 @@ Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 # wallet, two bridges for one shortfall. Concurrency comes from threads
 # instead, which share that single set of loops.
 #
+# app_entry imports dashboard first, then installs small production adapters
+# (currently the EVM -> Solana auto-bridge continuation) before Gunicorn starts
+# accepting requests. The background loops remain the single dashboard-owned
+# copies above; the adapter only replaces their callback/function reference.
+#
 # start.sh does the same thing (and also launches monitor.py) but is written
 # for a container where the process IS the container. Here systemd is the
 # supervisor, so the two are started as separate units rather than one
 # backgrounding the other.
-ExecStart=/opt/orcagent/venv/bin/gunicorn dashboard:app \
+ExecStart=/opt/orcagent/venv/bin/gunicorn app_entry:app \
     --bind 127.0.0.1:8080 \
     --workers 1 \
     --threads 4 \
