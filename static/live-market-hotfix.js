@@ -13,9 +13,10 @@ function installFixStyles(){
  var s=document.createElement('style');s.id='oa-live-authoritative-fix';
  s.textContent='\
 body.oa-live-v2 .pt-chart-wrap{position:relative!important;overflow:hidden!important}\
-body.oa-live-v2 .pt-chart-svg{opacity:0!important;pointer-events:none!important}\
-body.oa-live-v2 .pt-chart-axis,body.oa-live-v2 .pt-price-pill{display:none!important}\
-body.oa-live-v2 .oa-gold-v2{position:absolute!important;inset:0!important;display:block!important;visibility:visible!important;opacity:1!important;width:100%!important;height:100%!important;z-index:5!important;pointer-events:auto!important}\
+body.oa-live-v2 .pt-chart-svg{opacity:1!important;visibility:visible!important;pointer-events:auto!important}\
+body.oa-live-v2 .pt-chart-axis{display:flex!important}\
+body.oa-live-v2 .pt-price-pill{display:block!important}\
+body.oa-live-v2 .oa-gold-v2,body.oa-live-v2 .oa-critical-chart,body.oa-live-v2 .oa-critical-status{display:none!important}\
 @media(max-width:767px){\
  body.oa-live-v2 .pt-search{min-height:50px!important;border-radius:14px!important;font-size:14px!important}\
  body.oa-live-v2 .pt-nb-search{height:44px!important;min-height:44px!important;font-size:16px!important;border-radius:12px!important;padding:0 42px 0 36px!important}\
