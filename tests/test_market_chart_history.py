@@ -10,6 +10,18 @@ with open(os.path.join(ROOT, 'dashboard.py'), encoding='utf-8') as fh:
     SOURCE = fh.read()
 TREE = ast.parse(SOURCE)
 
+# GeckoTerminal's public Robinhood pages use /robinhood/pools/<address> and
+# the OHLCV API uses the same network slug. Losing this mapping silently
+# reduced every HOOD chart to locally observed candles only.
+network_map = None
+for node in TREE.body:
+    if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == '_GECKOTERMINAL_NETWORK'
+            for t in node.targets):
+        network_map = ast.literal_eval(node.value)
+assert network_map is not None
+assert network_map['robinhood'] == 'robinhood'
+
 
 def function_source(name):
     for node in TREE.body:
