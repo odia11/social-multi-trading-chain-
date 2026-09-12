@@ -5,10 +5,20 @@ html,body{background:#080d12}
 a,button,[role="button"]{-webkit-tap-highlight-color:transparent}
 img{max-width:100%}
 
+/* When the tab/PWA is not visible, don't spend battery/GPU time repainting
+   decorative animations. Data/live-feed lifecycles remain page-owned. */
+html.oa-page-hidden *,html.oa-page-hidden *::before,html.oa-page-hidden *::after{animation-play-state:paused!important}
+
 @media(max-width:767px){
   html,body{max-width:100%;overflow-x:hidden;background:#080d12!important;-webkit-text-size-adjust:100%}
   body{min-height:100dvh}
   a,button,[role="button"]{touch-action:manipulation}
+
+  /* The shared bottom nav itself occupies about 98px including its inner
+     padding. Older rules reserved 118-132px, leaving a visible dead strip at
+     the bottom of many pages. Keep only the space the fixed control needs. */
+  html body.oa-shared-ux{padding-bottom:calc(102px + env(safe-area-inset-bottom,0px))!important}
+  html body.oa-shared-ux.oa-portfolio .wlt-center{padding-bottom:calc(108px + env(safe-area-inset-bottom,0px))!important}
 
   /* iOS zooms the viewport when a focused form control is below 16px. That
      creates the apparent page jump seen in in-app browsers, so text controls
@@ -36,13 +46,13 @@ img{max-width:100%}
   }
   html.oa-modal-open,html.oa-modal-open body{overflow:hidden!important;overscroll-behavior:none!important}
 
-  /* Fixed bottom nav needs a real content safe-zone on ordinary document
-     pages. Fullscreen/workspace pages opt out below. */
+  /* Ordinary document pages need a safe zone above the fixed nav, but not a
+     second oversized safe zone. Fullscreen/workspace pages opt out below. */
   body:not(.oa-home-mobile):not(.oa-portfolio):not(.oa-live-v2) .page,
   body:not(.oa-home-mobile):not(.oa-portfolio):not(.oa-live-v2) .page-wrap,
   body:not(.oa-home-mobile):not(.oa-portfolio):not(.oa-live-v2) .pr-wrap,
   body:not(.oa-home-mobile):not(.oa-portfolio):not(.oa-live-v2) .content{
-    padding-bottom:calc(132px + env(safe-area-inset-bottom,0px))!important
+    padding-bottom:calc(108px + env(safe-area-inset-bottom,0px))!important
   }
 
   /* Messages is a fullscreen workspace. Once a thread is open its composer
