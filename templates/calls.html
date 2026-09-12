@@ -157,6 +157,74 @@ html,body{min-height:100vh;background:var(--bg);font-family:var(--ui);color:var(
   .call-multi-val{font-size:16px}
 
 }
+
+/* ── Calls v2: clearer leaderboard + focused call composer ── */
+.page{max-width:1180px;padding:34px 24px 130px}
+.calls-hero{position:relative;overflow:hidden;border:1px solid rgba(247,185,85,.18);border-radius:22px;padding:28px 30px;margin-bottom:20px;background:radial-gradient(circle at 88% 20%,rgba(247,185,85,.15),transparent 27%),linear-gradient(135deg,#111820 0,#0b1118 62%,#11130f 100%)}
+.calls-hero:after{content:'';position:absolute;width:240px;height:240px;border:1px solid rgba(247,185,85,.13);border-radius:50%;right:-72px;top:-104px;box-shadow:0 0 0 34px rgba(247,185,85,.025),0 0 0 68px rgba(247,185,85,.018)}
+.page-header-row{position:relative;z-index:1;align-items:center}
+.page-eyebrow{display:flex;align-items:center;gap:7px;color:var(--accent);font:700 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;margin-bottom:7px}
+.page-title{font-size:34px;line-height:1.05;letter-spacing:-.045em;margin-bottom:8px}
+.page-sub{max-width:630px;margin:0;color:#9ba5b2;font-size:14px;line-height:1.55}
+.live-badge{border:1px solid rgba(58,210,155,.2);background:rgba(58,210,155,.07);border-radius:999px;padding:8px 11px}
+.calls-layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:20px;align-items:start}
+.calls-main,.calls-side{min-width:0}
+.calls-side{position:sticky;top:82px}
+.calls-panel{border:1px solid rgba(255,255,255,.075);border-radius:18px;background:linear-gradient(145deg,#0f151d,#0b1016);padding:18px}
+.section-head{display:flex;align-items:end;justify-content:space-between;gap:12px;margin:0 2px 12px}
+.section-head-copy h2{font-size:17px;letter-spacing:-.025em;margin-bottom:2px}
+.section-head-copy p{font-size:11.5px;color:var(--muted)}
+.section-label{margin:0;color:#798390}
+.podium-wrap{gap:12px;margin-bottom:20px}
+.podium-card{border-radius:17px;padding:18px 12px;border-color:rgba(255,255,255,.075);background:linear-gradient(155deg,#101720,#0b1117)}
+.podium-card.p1{padding:27px 14px 23px;border-color:rgba(247,185,85,.28);background:radial-gradient(circle at 50% 0,rgba(247,185,85,.18),transparent 47%),linear-gradient(155deg,#14181b,#0c1218)}
+.podium-rank{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:25px;border-radius:8px;background:#171e26;margin-bottom:10px}
+.podium-card.p1 .podium-rank{background:rgba(247,185,85,.13)}
+.podium-tile{border:1px solid rgba(255,255,255,.07);background:#17202a}
+.podium-sym{font-size:14px}.podium-multi{letter-spacing:-.04em}
+.call-box{margin:0;padding:19px;border-radius:18px;border-color:rgba(247,185,85,.16);background:linear-gradient(155deg,rgba(247,185,85,.07),#0d131a 42%)}
+.call-box-label{font-size:16px;letter-spacing:-.02em;text-transform:none;color:var(--text);margin-bottom:4px}
+.call-box-help{font-size:11.5px;color:#7f8996;line-height:1.45;margin-bottom:14px}
+.call-input-row{display:grid;grid-template-columns:1fr;gap:9px}
+.call-input{min-width:0;height:48px;border-radius:13px;padding:0 14px;background:#090f15;border-color:#202b36;font-size:13px}
+.call-btn{height:46px;border-radius:13px;font-size:13px;box-shadow:0 8px 24px rgba(247,185,85,.12)}
+.call-limit-note{padding-top:8px;border-top:1px solid rgba(255,255,255,.06);margin-top:12px}
+.call-dropdown{left:19px;right:19px;top:118px;margin-top:0;border-radius:13px;border-color:#293542;box-shadow:0 18px 45px rgba(0,0,0,.5)}
+.calls-how{margin-top:12px;padding:17px;border:1px solid rgba(255,255,255,.07);border-radius:17px;background:#0c1219}
+.calls-how-title{font-size:13px;font-weight:750;margin-bottom:11px}
+.calls-how-step{display:grid;grid-template-columns:26px 1fr;gap:10px;align-items:start;margin-top:10px;color:#8993a0;font-size:11.5px;line-height:1.4}
+.calls-how-step b{width:26px;height:26px;border-radius:8px;background:rgba(247,185,85,.1);color:var(--accent);display:flex;align-items:center;justify-content:center;font:700 11px var(--mono)}
+.calls-tabs{padding:4px;border:1px solid rgba(255,255,255,.075);border-radius:12px;background:#090f15;margin:0}
+.calls-tab{min-width:56px;padding:8px 14px;border:0;background:transparent;border-radius:9px}
+.calls-tab.active{background:#1a1b18;box-shadow:inset 0 0 0 1px rgba(247,185,85,.22)}
+.call-row{min-height:76px;padding:13px 15px;border-radius:15px;border-color:rgba(255,255,255,.07);background:linear-gradient(145deg,#0e151d,#0a1016);margin-bottom:9px}
+.call-row:hover{border-color:rgba(247,185,85,.18);background:#111922}
+.call-rank{width:32px;height:32px;border-radius:10px;background:#151d26;display:flex;align-items:center;justify-content:center}
+.call-avatar{width:38px;height:38px;border:1px solid rgba(255,255,255,.08)}
+.call-token{font-size:15px}.call-caller{color:#929ca9}.call-mcap{color:#6f7986}
+.call-multi-val{font-size:19px;padding:7px 9px;border-radius:10px;background:rgba(58,210,155,.07)}
+.call-multi-val.neg{background:rgba(247,107,98,.07)}
+
+@media(max-width:900px){.calls-layout{grid-template-columns:1fr 290px}}
+@media(max-width:767px){
+  .page{padding:14px 13px 124px}
+  .calls-hero{padding:20px 18px;border-radius:18px;margin-bottom:13px}
+  .page-title{font-size:27px}.page-sub{font-size:12px;max-width:270px}.live-badge{padding:6px 9px;font-size:9px}
+  .calls-layout{display:flex;flex-direction:column;gap:13px}
+  .calls-side{position:static;order:1;width:100%}.calls-main{order:2;width:100%}
+  .calls-panel{padding:13px;border-radius:16px}
+  .call-box{padding:15px;border-radius:16px}.call-box-help{margin-bottom:12px}
+  .call-input-row{grid-template-columns:minmax(0,1fr) 86px;gap:7px}.call-input,.call-btn{height:44px}.call-btn{padding:0 12px}
+  .call-dropdown{left:15px;right:15px;top:104px}
+  .calls-how{display:none}
+  .section-head{align-items:center;margin-bottom:10px}.section-head-copy p{display:none}
+  .calls-tabs{flex-shrink:0}.calls-tab{min-width:45px;padding:7px 10px}
+  .podium-wrap{gap:7px;margin-bottom:15px}
+  .podium-card{border-radius:14px;padding:10px 11px!important}.podium-card.p1{background:linear-gradient(100deg,rgba(247,185,85,.11),#0c131a)}
+  .podium-rank{min-width:27px;height:27px;margin:0}.podium-card .podium-tile,.podium-card.p1 .podium-tile{width:38px;height:38px;border-radius:10px}
+  .podium-card .podium-like{display:none}.podium-card .podium-multi{font-size:17px}
+  .call-row{min-height:70px;gap:8px;padding:11px 10px}.call-rank{width:27px;height:27px;border-radius:8px}.call-avatar{width:34px;height:34px}.call-caller-meta{font-size:10px}.call-mcap{font-size:10px}.call-multi-val{font-size:15px;padding:6px}
+}
 </style>
 </head>
 <body>
@@ -165,36 +233,53 @@ html,body{min-height:100vh;background:var(--bg);font-family:var(--ui);color:var(
 
 <!-- BODY -->
 <div class="page">
-  <div class="page-header-row">
-    <div>
-      <div class="page-title">Token Calls</div>
-      <div class="page-sub">Call a token publicly · ranked by gain since call · max {{ calls_per_day_limit }}/day</div>
+  <section class="calls-hero">
+    <div class="page-header-row">
+      <div>
+        <div class="page-eyebrow"><span>Community intelligence</span></div>
+        <h1 class="page-title">Calls Leaderboard</h1>
+        <p class="page-sub">Discover high-conviction token calls from the community, track performance from entry to peak and build your reputation.</p>
+      </div>
+      <div class="live-badge"><span class="live-dot"></span>LIVE</div>
     </div>
-    <div class="live-badge"><span class="live-dot"></span>LIVE</div>
-  </div>
+  </section>
 
-  <div class="podium-wrap" id="calls-podium" style="display:none"></div>
+  <div class="calls-layout">
+    <main class="calls-main calls-panel">
+      <div class="section-head">
+        <div class="section-head-copy"><h2>Top performers</h2><p>Ranked by performance since the original call</p></div>
+        <div class="calls-tabs">
+          <button class="calls-tab active" data-window="24h" onclick="_setCallsWindow('24h')">24H</button>
+          <button class="calls-tab" data-window="7d" onclick="_setCallsWindow('7d')">7D</button>
+          <button class="calls-tab" data-window="all" onclick="_setCallsWindow('all')">ALL</button>
+        </div>
+      </div>
+      <div class="podium-wrap" id="calls-podium" style="display:none"></div>
+      <div class="section-label">Leaderboard</div>
+      <div id="calls-list">
+        <div class="calls-empty">Loading calls…</div>
+      </div>
+    </main>
 
-  <div class="call-box">
-    <div class="call-box-label">Make a call</div>
-    <div class="call-input-row">
-      <input class="call-input" id="call-search-input" type="text" placeholder="Search token by name or paste an address…" autocomplete="off">
-      <button class="call-btn" id="call-submit-btn" disabled onclick="_submitCall()">Call it</button>
-    </div>
-    <div class="call-dropdown" id="call-dropdown"></div>
-    <div class="call-msg" id="call-msg"></div>
-    <div class="call-limit-note" id="call-limit-note"></div>
-  </div>
-
-  <div class="calls-tabs">
-    <button class="calls-tab active" data-window="24h" onclick="_setCallsWindow('24h')">24H</button>
-    <button class="calls-tab" data-window="7d" onclick="_setCallsWindow('7d')">7D</button>
-    <button class="calls-tab" data-window="all" onclick="_setCallsWindow('all')">ALL</button>
-  </div>
-
-  <div class="section-label">Recent Calls</div>
-  <div id="calls-list">
-    <div class="calls-empty">Loading calls…</div>
+    <aside class="calls-side">
+      <div class="call-box">
+        <div class="call-box-label">Make a token call</div>
+        <div class="call-box-help">Search a token or paste its contract address. Your entry price is recorded automatically.</div>
+        <div class="call-input-row">
+          <input class="call-input" id="call-search-input" type="text" placeholder="Token or contract address" autocomplete="off">
+          <button class="call-btn" id="call-submit-btn" disabled onclick="_submitCall()">Publish call</button>
+        </div>
+        <div class="call-dropdown" id="call-dropdown"></div>
+        <div class="call-msg" id="call-msg"></div>
+        <div class="call-limit-note" id="call-limit-note"></div>
+      </div>
+      <div class="calls-how">
+        <div class="calls-how-title">How calls work</div>
+        <div class="calls-how-step"><b>1</b><span>Choose a supported token.</span></div>
+        <div class="calls-how-step"><b>2</b><span>We lock its market cap and price at entry.</span></div>
+        <div class="calls-how-step"><b>3</b><span>Your best performers rise on the leaderboard.</span></div>
+      </div>
+    </aside>
   </div>
 </div>
 
