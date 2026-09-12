@@ -30,7 +30,7 @@
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/live-market')return;
   var css=document.createElement('link');css.rel='stylesheet';css.href='/static/live-market-redesign.css?v=7';document.head.appendChild(css);
-  var js=document.createElement('script');js.src='/static/live-market-redesign.js?v=3';js.defer=true;document.head.appendChild(js);
+  var js=document.createElement('script');js.src='/static/live-market-redesign.js?v=4';js.defer=true;document.head.appendChild(js);
 })();
 
 (function(){
