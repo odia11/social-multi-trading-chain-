@@ -5,7 +5,7 @@
 // Shared across routes; do not restrict this to Home or portrait widths.
 if(!document.getElementById('oa-scroll-guard')){
   var guard=document.createElement('script');guard.id='oa-scroll-guard';
-  guard.src='/static/mobile-overscroll-guard.js?v=2';
+  guard.src='/static/mobile-overscroll-guard.js?v=3';
   document.head.appendChild(guard);
 }
 
