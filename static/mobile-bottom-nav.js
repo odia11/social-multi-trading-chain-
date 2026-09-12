@@ -62,8 +62,7 @@ function build(){if(document.getElementById('oa-bottom-nav'))return;ensureHomeCo
 '<a href="/wallet" class="'+(wallet?'active':'')+'">'+icon('portfolio')+'<span class="oa-nav-label">Portfolio</span></a>'+
 '<button type="button" class="oa-menu-btn" aria-label="Open menu">'+icon('menu')+'<span class="oa-nav-label">Menu</span></button>';
 document.body.appendChild(nav);var btn=nav.querySelector('.oa-menu-btn');if(btn)btn.addEventListener('click',openAppMenu);var postBtn=nav.querySelector('.oa-post-main');if(postBtn)postBtn.addEventListener('click',openSocialComposer);buildWalletSheet();buildAppMenu();
-if(p==='/'&&((new URLSearchParams(location.search)).get('compose')==='1'||location.hash==='#feed-composer'))requestAnimationFrame(function(){requestAnimationFrame(function(){focusSocialComposer(0)})})}
-if(p==='/'&&location.hash==='#feed-composer'&&(new URLSearchParams(location.search)).get('compose')!=='1')requestAnimationFrame(function(){requestAnimationFrame(function(){focusSocialComposer(0)})})}
+if(p==='/'&&((new URLSearchParams(location.search)).get('compose')==='1'||location.hash==='#feed-composer'))requestAnimationFrame(function(){requestAnimationFrame(function(){focusSocialComposer(0)})})
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',build,{once:true});else build();
 })();
