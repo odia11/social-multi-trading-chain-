@@ -1,51 +1,44 @@
-/* OrcAgent mobile Home boundary guard.
-   Prevents the host iOS/Phantom webview from turning fast feed scrolling into
-   native pull-to-refresh / rubber-band overscroll. Normal document scrolling
-   remains fully native between the top and bottom boundaries. */
+/* Keep touch scrolling native; suppress only gestures escaping a scroll boundary. */
 (function(){
 'use strict';
-var path=location.pathname.replace(/\/+$/,'')||'/';
-if(path!=='/' || !window.matchMedia('(max-width:767px)').matches) return;
+if(window.__oaScrollGuardInstalled) return;
+window.__oaScrollGuardInstalled=true;
 
-document.documentElement.classList.add('oa-home-mobile-root');
-if(document.body) document.body.classList.add('oa-home-mobile-boundary-guard');
-else document.addEventListener('DOMContentLoaded',function(){document.body.classList.add('oa-home-mobile-boundary-guard')},{once:true});
+// Apply on every route and viewport size, including landscape phones/tablets.
+var style=document.createElement('style');
+style.textContent='html,body{overscroll-behavior-y:none!important}';
+document.head.appendChild(style);
 
-var startY=0;
-var tracking=false;
-
-function scrollY(){
-  return window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+var lastX=0,lastY=0,tracking=false;
+function canScroll(target,dy){
+  var root=document.scrollingElement||document.documentElement;
+  for(var el=target;el&&el!==document;el=el.parentElement){
+    if(el.nodeType!==1) continue;
+    var isRoot=el===root;
+    if(!isRoot&&!/^(auto|scroll|overlay)$/.test(getComputedStyle(el).overflowY)) continue;
+    var max=el.scrollHeight-el.clientHeight;
+    if(max>0&&((dy>0&&el.scrollTop>0.5)||(dy<0&&el.scrollTop<max-0.5))) return true;
+    // A contained scroller does not pass its gesture to the page underneath.
+    if(!isRoot&&/^(contain|none)$/.test(getComputedStyle(el).overscrollBehaviorY)) return false;
+  }
+  return false;
 }
-function maxScroll(){
-  var d=document.documentElement,b=document.body;
-  var h=Math.max(d.scrollHeight,d.offsetHeight,d.clientHeight,b?b.scrollHeight:0,b?b.offsetHeight:0);
-  return Math.max(0,h-window.innerHeight);
-}
-function interactive(target){
-  return !!(target&&target.closest&&target.closest('input,textarea,select,[contenteditable="true"],.feed-emoji-panel'));
-}
-
 document.addEventListener('touchstart',function(e){
-  if(e.touches.length!==1){tracking=false;return;}
-  startY=e.touches[0].clientY;
-  tracking=true;
+  tracking=e.touches.length===1;
+  if(!tracking) return;
+  lastX=e.touches[0].clientX;
+  lastY=e.touches[0].clientY;
 },{passive:true,capture:true});
-
 document.addEventListener('touchmove',function(e){
-  if(!tracking||e.touches.length!==1||!e.cancelable) return;
-  if(interactive(e.target)) return;
-  var y=e.touches[0].clientY;
-  var dy=y-startY;
-  var top=scrollY();
-  var max=maxScroll();
-  // Downward drag while already at the very top => Phantom/iOS refresh gesture.
-  // Upward drag while already at the bottom => rubber-band bounce. Block only
-  // those boundary drags; regular vertical scrolling is untouched.
-  if((top<=0.5&&dy>0)||(top>=max-0.5&&dy<0)) e.preventDefault();
+  if(!tracking||e.touches.length!==1){tracking=false;return;}
+  var x=e.touches[0].clientX,y=e.touches[0].clientY;
+  var dx=x-lastX,dy=y-lastY;
+  // Update each move so reversing direction immediately permits scrolling.
+  lastX=x;lastY=y;
+  if(!e.cancelable||!dy||Math.abs(dx)>Math.abs(dy)) return;
+  if(!canScroll(e.target,dy)) e.preventDefault();
 },{passive:false,capture:true});
-
-function stop(){tracking=false;startY=0;}
+function stop(){tracking=false;}
 document.addEventListener('touchend',stop,{passive:true,capture:true});
 document.addEventListener('touchcancel',stop,{passive:true,capture:true});
 })();
