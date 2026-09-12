@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 30304)
+Total output lines: 2543
+
 /* OrcAgent Live Market — "Pro terminal" desktop page controller.
    Talks to /api/market/scanner (server-side sort/filter), /api/market/tape
    (global buy/sell activity), and the existing token/wallet/trade/watchlist/
@@ -229,7 +232,7 @@ function renderChartSvg(idx, candles, currentPrice){
   // pointer position maps straight to "nearest x" -> "that candle's price
   // and time" with no unit conversion.
   var st = _chartTimers[idx];
-  if(st){ st.pts = pts; st.candles = candles; st.min = min; st.max = max; st.h = h; st.w = w; }
+  if(st){ st.pts = pts; st.candles = candles; st.min = min; st.max = max; st.h = h; st.w = w; st.priceH = priceH; st.plotW = w-46; }
 
   var maxVol = Math.max.apply(null,candles.map(function(c){return Number(c.v)||0;}))||1;
   var plotW=w-46, step=plotW/Math.max(n,1), bodyW=Math.max(2,Math.min(7,step*.62)), chartHtml='';
@@ -242,12 +245,14 @@ function renderChartSvg(idx, candles, currentPrice){
     var x=pts[i].x, open=Number(c.o!=null?c.o:c.c)||0, close=Number(c.c)||0, high=Number(c.h!=null?c.h:c.c)||0, low=Number(c.l!=null?c.l:c.c)||0;
     var yo=priceH-((open-min)/(max-min))*priceH, yc=priceH-((close-min)/(max-min))*priceH, yh=priceH-((high-min)/(max-min))*priceH, yl=priceH-((low-min)/(max-min))*priceH;
     var color=close>=open?'#3ad29b':'#f76b62', top=Math.min(yo,yc), bh=Math.max(1.5,Math.abs(yc-yo));
-    chartHtml+='<line x1="'+x.toFixed(2)+'" y1="'+yh.toFixed(2)+'" x2="'+x.toFixed(2)+'" y2="'+yl.toFixed(2)+'" stroke="'+color+'" stroke-width="1" vector-effect="non-scaling-stroke"></line>';
-    chartHtml+='<rect x="'+(x-bodyW/2).toFixed(2)+'" y="'+top.toFixed(2)+'" width="'+bodyW.toFixed(2)+'" height="'+bh.toFixed(2)+'" rx=".6" fill="'+color+'"></rect>';
+    var liveIds=i===candles.length-1?' id="pt-live-wick-'+idx+'"':'';
+    var liveBodyId=i===candles.length-1?' id="pt-live-body-'+idx+'"':'';
+    chartHtml+='<line'+liveIds+' x1="'+x.toFixed(2)+'" y1="'+yh.toFixed(2)+'" x2="'+x.toFixed(2)+'" y2="'+yl.toFixed(2)+'" stroke="'+color+'" stroke-width="1" vector-effect="non-scaling-stroke"></line>';
+    chartHtml+='<rect'+liveBodyId+' x="'+(x-bodyW/2).toFixed(2)+'" y="'+top.toFixed(2)+'" width="'+bodyW.toFixed(2)+'" height="'+bh.toFixed(2)+'" rx=".6" fill="'+color+'"></rect>';
     var vh=((Number(c.v)||0)/maxVol)*volH;
     chartHtml+='<rect x="'+(x-bodyW/2).toFixed(2)+'" y="'+(volTop+volH-vh).toFixed(2)+'" width="'+bodyW.toFixed(2)+'" height="'+vh.toFixed(2)+'" fill="'+color+'" opacity=".45"></rect>';
   });
-  svg.innerHTML=chartHtml+'<line x1="0" y1="'+priceY.toFixed(2)+'" x2="'+plotW.toFixed(2)+'" y2="'+priceY.toFixed(2)+'" stroke="#f7b955" stroke-width="1" stroke-dasharray="4,4" opacity=".72" vector-effect="non-scaling-stroke"></line>';
+  svg.innerHTML=chartHtml+'<line id="pt-live-guide-'+idx+'" x1="0" y1="'+priceY.toFixed(2)+'" x2="'+plotW.toFixed(2)+'" y2="'+priceY.toFixed(2)+'" stroke="#f7b955" stroke-width="1" stroke-dasharray="4,4" opacity=".72" vector-effect="non-scaling-stroke"></line>';
 
   // Reused across renders (not removed+recreated) so the CSS `top`
   // transition on .pt-price-pill actually animates between positions
@@ -261,8 +266,37 @@ function renderChartSvg(idx, candles, currentPrice){
   }
   pill.style.top = priceY+'px';
   pill.textContent = fmtPrice(priceVal);
+  if(st) st.renderedPrice = priceVal;
 
   updateAxis(idx, candles);
+}
+
+// Move only the still-forming candle. Rebuilding the complete SVG every two
+// seconds caused visible flashing/jank on mobile, especially while swiping.
+function updateLiveChartPrice(idx, nextPrice){
+  var st=_chartTimers[idx], wrap=document.getElementById('pt-chart-wrap-'+idx);
+  if(!st || !wrap || !st.candles || !st.candles.length || !(nextPrice>0)) return;
+  var last=st.candles[st.candles.length-1], previous=Number(st.renderedPrice||last.c||nextPrice);
+  last.c=nextPrice; last.h=Math.max(Number(last.h||nextPrice),nextPrice); last.l=Math.min(Number(last.l||nextPrice),nextPrice);
+  // A move outside the current scale needs fresh axes; ordinary ticks stay GPU-smooth.
+  if(nextPrice<=st.min || nextPrice>=st.max){ renderChartSvg(idx,st.candles,nextPrice); return; }
+  var body=document.getElementById('pt-live-body-'+idx), wick=document.getElementById('pt-live-wick-'+idx), guide=document.getElementById('pt-live-guide-'+idx);
+  var pill=wrap.querySelector('.pt-price-pill');
+  if(!body || !wick || !guide){ renderChartSvg(idx,st.candles,nextPrice); return; }
+  if(st.liveRaf) cancelAnimationFrame(st.liveRaf);
+  var started=performance.now(), duration=220;
+  function frame(now){
+    var q=Math.min(1,(now-started)/duration), eased=1-Math.pow(1-q,3), p=previous+(nextPrice-previous)*eased;
+    var y=function(v){return st.priceH-((v-st.min)/(st.max-st.min))*st.priceH;};
+    var yo=y(Number(last.o!=null?last.o:p)), yc=y(p), yh=y(Math.max(Number(last.h)||p,p)), yl=y(Math.min(Number(last.l)||p,p));
+    var color=p>=Number(last.o!=null?last.o:p)?'#3ad29b':'#f76b62';
+    body.setAttribute('y',Math.min(yo,yc).toFixed(2)); body.setAttribute('height',Math.max(1.5,Math.abs(yc-yo)).toFixed(2)); body.setAttribute('fill',color);
+    wick.setAttribute('y1',yh.toFixed(2)); wick.setAttribute('y2',yl.toFixed(2)); wick.setAttribute('stroke',color);
+    guide.setAttribute('y1',yc.toFixed(2)); guide.setAttribute('y2',yc.toFixed(2));
+    if(pill){pill.style.top=yc+'px'; pill.textContent=fmtPrice(p);}
+    if(q<1) st.liveRaf=requestAnimationFrame(frame); else {st.liveRaf=null; st.renderedPrice=nextPrice;}
+  }
+  st.liveRaf=requestAnimationFrame(frame);
 }
 
 // Touch/mouse "chart-scrub" for the hand-rolled SVG chart above (the
@@ -384,12 +418,23 @@ function chartTick(idx){
   if(!st || st.destroyed) return;
   fetchChart(st.mint, st.tf, st.pair, st.chain).then(function(r){
     if(!st || st.destroyed) return;
-    if(r && r.candles){
+    if(r && r.candles && r.candles.length>=2){
       // Kept so a live price can redraw this chart without fetching the
       // candles again -- the candles are the shape, the price is the movement.
       st.candles = r.candles;
       st.price   = r.current_price;
       renderChartSvg(idx, st.candles, st.price);
+    } else if(!st.candles || st.candles.length<2){
+      // Some new/EVM pools expose a real current price but no OHLC history.
+      // Start an honest flat live session immediately; subsequent real ticks
+      // form the candle instead of leaving a permanently empty chart.
+      var px=Number((r&&r.current_price)||st.seedPrice||0);
+      if(px>0){
+        var now=Math.floor(Date.now()/1000);
+        st.price=px;
+        st.candles=[{t:now-2,o:px,h:px,l:px,c:px,v:0},{t:now,o:px,h:px,l:px,c:px,v:0}];
+        renderChartSvg(idx,st.candles,px);
+      }
     }
   });
 }
@@ -434,7 +479,7 @@ function tickLivePrices(){
           last.c = px;
           if(px > last.h) last.h = px;
           if(px < last.l) last.l = px;
-          renderChartSvg(i, st.candles, px);
+          updateLiveChartPrice(i, px);
         });
       })
       .catch(function(){});   // decoration: a miss leaves the last drawing up
@@ -456,9 +501,9 @@ function startLivePrices(){
 // `chain` defaults to 'solana' -- the API's own default -- so a caller that
 // doesn't know/care about chain (there weren't any before this) still gets
 // the exact prior behavior.
-function mountChart(idx, mint, pairAddr, chain){
+function mountChart(idx, mint, pairAddr, chain, seedPrice){
   if(_chartTimers[idx]) return;
-  var st = {destroyed:false, mint:mint, pair:pairAddr, chain:(chain||'solana'), tf:'5m', timer:null};
+  var st = {destroyed:false, mint:mint, pair:pairAddr, chain:(chain||'solana'), seedPrice:Number(seedPrice)||0, tf:'5m', timer:null};
   _chartTimers[idx] = st;
   chartTick(idx);
   // 15s, not 5s: the server caches candles for 30 seconds, so polling every
@@ -473,6 +518,7 @@ function unmountChart(idx){
   if(!st) return;
   st.destroyed = true;
   if(st.timer) clearInterval(st.timer);
+  if(st.liveRaf) cancelAnimationFrame(st.liveRaf);
   if(st.scrubTeardown) st.scrubTeardown();
   delete _chartTimers[idx];
 }
@@ -549,7 +595,7 @@ function fetchFriends(idx, mint){
 function activateCard(card){
   var idx = card.dataset.idx, mint = card.dataset.mint, pair = card.dataset.pair;
   var t = ST.tokens[Number(idx)];
-  mountChart(idx, mint, pair, t ? t.chain : 'solana');
+  mountChart(idx, mint, pair, t ? t.chain : 'solana', t ? t.price_usd : 0);
   var done = _lazyDone[idx] || (_lazyDone[idx] = {});
   if(!done.safety){ done.safety = true; fetchSafety(idx, mint); }
   if(!done.friends){ done.friends = true; fetchFriends(idx, mint); }
@@ -1217,38 +1263,7 @@ function _openSheet(idx, mode){
     _sheetEl('pt-sheet-cap-txt').textContent = 'You sell';
     _sheetEl('pt-sheet-cur').textContent = 'USD';
   } else {
-    _sheetEl('pt-sheet-cap-txt').textContent = isEvm ? 'You spend at most' : 'You spend';
-    _sheetEl('pt-sheet-cur').textContent = isEvm ? evmCurrencyLabel(t.chain) : 'USDC';
-  }
-  _sheetEl('pt-slide').classList.toggle('sell', mode === 'sell');
-
-  var msg = document.getElementById('pt-buy-msg-'+idx);
-  if(msg){ msg.style.display = 'none'; msg.textContent = ''; }
-  _sheetEl('pt-sheet-go').dataset.idx = idx;
-  _sheetEl('pt-sheet-quote').textContent = '';
-
-  _sheetEl('pt-sheet').classList.add('open');
-  _sheetEl('pt-sheet-scrim').classList.add('open');
-  try{ document.body.style.overflow = 'hidden'; }catch(e){}
-  _paintSheet();
-  // A sell closes the whole tracked position server-side, so there is no
-  // balance to divide up and nothing to price -- only a confirmation.
-  if(mode === 'buy') _loadSheetBalance(t.chain);
-  else _loadSheetHolding(t);
-}
-
-function closeBuySheet(){
-  if(_sheetIdx === null) return;
-  var idx = _sheetIdx;
-  _sheetIdx = null;
-  _sheetAmt = '';
-  _sheetEl('pt-sheet').classList.remove('open');
-  _sheetEl('pt-sheet-scrim').classList.remove('open');
-  try{ document.body.style.overflow = ''; }catch(e){}
-  _sheetUnbindIds(idx);
-  clearTimeout(_quoteTimers[idx]);
-  delete _quotes[idx];
-  delete _quoteRenewals[idx];
+    _sheetEl('pt-sheet-cap-…304 tokens truncated…als[idx];
 }
 
 // `settled` means the amount is final rather than mid-typing -- a tap on
