@@ -1,0 +1,23 @@
+/* Final Calls mobile alignment pass. Loaded after live-market-redesign.css. */
+@media(max-width:767px){
+ body.oa-live-v2 .pt-card{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;column-gap:10px!important;row-gap:0!important}
+ body.oa-live-v2 .pt-card-hd{padding:16px 16px 14px!important}
+ body.oa-live-v2 .pt-price{padding:14px 16px 0!important;font-size:30px!important}
+ body.oa-live-v2 .pt-chg{padding:6px 16px 13px!important;font-size:12px!important}
+ body.oa-live-v2 .pt-stat-row{margin:0 0 10px!important;min-width:0!important;min-height:66px!important;padding:11px 12px!important}
+ body.oa-live-v2 .pt-stat-row:nth-of-type(odd){margin-left:16px!important}
+ body.oa-live-v2 .pt-stat-row:nth-of-type(even){margin-right:16px!important}
+ body.oa-live-v2 .pt-stat-lbl{font-size:10px!important;letter-spacing:.02em!important;color:#8793a1!important}
+ body.oa-live-v2 .pt-stat-val{font-size:14px!important;color:#eef1f5!important;overflow:hidden!important;text-overflow:ellipsis!important;max-width:100%!important}
+ body.oa-live-v2 .pt-chart-wrap{height:350px!important;margin:2px 16px 12px!important;border-radius:16px!important}
+ body.oa-live-v2 .pt-chart-live{top:12px!important;left:12px!important}
+ body.oa-live-v2 .pt-chart-tfs{top:8px!important;right:8px!important;gap:3px!important}
+ body.oa-live-v2 .pt-tf-pill{padding:5px 7px!important;font-size:9px!important}
+ body.oa-live-v2 .pt-card-ft{margin:0 16px 12px!important;padding:11px 12px!important}
+ body.oa-live-v2 .pt-trade-btns{padding:0 16px 16px!important;gap:9px!important}
+ body.oa-live-v2 .pt-buy-btn,body.oa-live-v2 .pt-sell-btn{min-height:52px!important;border-radius:13px!important}
+}
+.pt-chart-wrap.oa-canvas-ready .pt-chart-svg,.pt-chart-wrap.oa-canvas-ready .pt-chart-axis,.pt-chart-wrap.oa-canvas-ready .pt-price-pill,.pt-chart-wrap.oa-canvas-ready .pt-chart-scrub-line,.pt-chart-wrap.oa-canvas-ready .pt-chart-scrub-dot,.pt-chart-wrap.oa-canvas-ready .pt-chart-scrub-tip{display:none!important}
+.oa-live-canvas{position:absolute;left:0;right:0;top:34px;bottom:0;width:100%;height:calc(100% - 34px);display:block;z-index:1;touch-action:pan-y}
+.oa-live-tip{position:absolute;z-index:8;pointer-events:none;background:#eef1f5;color:#111820;border-radius:7px;padding:5px 8px;font:700 10px/1 'JetBrains Mono',monospace;white-space:nowrap;box-shadow:0 4px 16px rgba(0,0,0,.35)}
+.pt-chart-wrap.oa-canvas-ready .pt-chart-live,.pt-chart-wrap.oa-canvas-ready .pt-chart-tfs{z-index:9}
