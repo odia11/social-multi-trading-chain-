@@ -210,7 +210,7 @@ function renderChartSvg(idx, candles, currentPrice){
   var min = Math.min.apply(null, lows), max = Math.max.apply(null, highs);
   if(min===max){ min = min*0.98; max = (max*1.02)||1; }
   var pad = (max-min)*0.12;
-  min -= pad; max += pad;
+  min = Math.max(0,min-pad); max += pad;
 
   var n = candles.length, priceH = h*.77, volTop = h*.79, volH = h*.18;
   var pts = candles.map(function(c,i){
@@ -229,7 +229,9 @@ function renderChartSvg(idx, candles, currentPrice){
   // pointer position maps straight to "nearest x" -> "that candle's price
   // and time" with no unit conversion.
   var st = _chartTimers[idx];
-  if(st){ st.pts = pts; st.candles = candles; st.min = min; st.max = max; st.h = h; st.w = w; st.priceH = priceH; st.plotW = w-46; }
+  var realVolume=candles.some(function(c){return Number(c.v)>0;});
+  var sparse=candles.length<12||!realVolume;
+  if(st){ st.pts = pts; st.candles = candles; st.min = min; st.max = max; st.h = h; st.w = w; st.priceH = priceH; st.plotW = w-46; st.sparse=sparse; }
 
   var maxVol = Math.max.apply(null,candles.map(function(c){return Number(c.v)||0;}))||1;
   var plotW=w-46, step=plotW/Math.max(n,1), bodyW=Math.max(2,Math.min(7,step*.62)), chartHtml='';
@@ -238,7 +240,14 @@ function renderChartSvg(idx, candles, currentPrice){
     chartHtml+='<line x1="0" y1="'+yy.toFixed(2)+'" x2="'+plotW.toFixed(2)+'" y2="'+yy.toFixed(2)+'" stroke="#1a2530" stroke-width="1" vector-effect="non-scaling-stroke"></line>';
     chartHtml+='<text x="'+(plotW+5).toFixed(2)+'" y="'+Math.max(10,yy+4).toFixed(2)+'" fill="#657180" font-size="9" font-family="monospace">'+fmtPrice(label).replace('$','')+'</text>';
   }
-  candles.forEach(function(c,i){
+  if(sparse){
+    var path=buildSmoothPath(pts),grad='pt-line-grad-'+idx;
+    var area=path+' L'+pts[pts.length-1].x.toFixed(2)+','+priceH.toFixed(2)+' L'+pts[0].x.toFixed(2)+','+priceH.toFixed(2)+' Z';
+    chartHtml+='<defs><linearGradient id="'+grad+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#f7b955" stop-opacity=".30"></stop><stop offset="100%" stop-color="#f7b955" stop-opacity=".02"></stop></linearGradient></defs>';
+    chartHtml+='<path id="pt-live-area-'+idx+'" d="'+area+'" fill="url(#'+grad+')"></path>';
+    chartHtml+='<path id="pt-live-path-'+idx+'" d="'+path+'" fill="none" stroke="#f7b955" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path>';
+    pts.forEach(function(p,i){chartHtml+='<circle'+(i===pts.length-1?' id="pt-live-dot-'+idx+'"':'')+' cx="'+p.x.toFixed(2)+'" cy="'+p.y.toFixed(2)+'" r="2.2" fill="#ffd36a"></circle>';});
+  }else candles.forEach(function(c,i){
     var x=pts[i].x, open=Number(c.o!=null?c.o:c.c)||0, close=Number(c.c)||0, high=Number(c.h!=null?c.h:c.c)||0, low=Number(c.l!=null?c.l:c.c)||0;
     var yo=priceH-((open-min)/(max-min))*priceH, yc=priceH-((close-min)/(max-min))*priceH, yh=priceH-((high-min)/(max-min))*priceH, yl=priceH-((low-min)/(max-min))*priceH;
     var color=close>=open?'#3ad29b':'#f76b62', top=Math.min(yo,yc), bh=Math.max(1.5,Math.abs(yc-yo));
@@ -279,6 +288,22 @@ function updateLiveChartPrice(idx, nextPrice){
   if(nextPrice<=st.min || nextPrice>=st.max){ renderChartSvg(idx,st.candles,nextPrice); return; }
   var body=document.getElementById('pt-live-body-'+idx), wick=document.getElementById('pt-live-wick-'+idx), guide=document.getElementById('pt-live-guide-'+idx);
   var pill=wrap.querySelector('.pt-price-pill');
+  if(st.sparse){
+    var livePath=document.getElementById('pt-live-path-'+idx),liveArea=document.getElementById('pt-live-area-'+idx),liveDot=document.getElementById('pt-live-dot-'+idx);
+    if(!livePath||!liveArea||!guide){renderChartSvg(idx,st.candles,nextPrice);return;}
+    if(st.liveRaf)cancelAnimationFrame(st.liveRaf);
+    var sparseStart=performance.now(),sparseDuration=220;
+    function sparseFrame(now){
+      var q=Math.min(1,(now-sparseStart)/sparseDuration),eased=1-Math.pow(1-q,3),p=previous+(nextPrice-previous)*eased;
+      var y=st.priceH-((p-st.min)/(st.max-st.min))*st.priceH,points=st.pts.slice();
+      points[points.length-1]={x:points[points.length-1].x,y:y};
+      var d=buildSmoothPath(points),area=d+' L'+points[points.length-1].x.toFixed(2)+','+st.priceH.toFixed(2)+' L'+points[0].x.toFixed(2)+','+st.priceH.toFixed(2)+' Z';
+      livePath.setAttribute('d',d);liveArea.setAttribute('d',area);if(liveDot)liveDot.setAttribute('cy',y.toFixed(2));guide.setAttribute('y1',y.toFixed(2));guide.setAttribute('y2',y.toFixed(2));
+      if(pill){pill.style.top=y+'px';pill.textContent=fmtPrice(p);}
+      if(q<1)st.liveRaf=requestAnimationFrame(sparseFrame);else{st.liveRaf=null;st.renderedPrice=nextPrice;st.pts=points;}
+    }
+    st.liveRaf=requestAnimationFrame(sparseFrame);return;
+  }
   if(!body || !wick || !guide){ renderChartSvg(idx,st.candles,nextPrice); return; }
   if(st.liveRaf) cancelAnimationFrame(st.liveRaf);
   var started=performance.now(), duration=220;
