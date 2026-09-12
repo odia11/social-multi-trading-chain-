@@ -299,12 +299,13 @@ document.addEventListener('visibilitychange', function(){
 // worked -- but by then the token was already gone.
 async function _resumeFromDeviceToken(){
   var t = _deviceToken();
-  if(!t) return '';
   var res;
   try{
     res = await fetch('/api/session/resume', {
       method: 'POST', credentials: 'include',
       headers: {'Content-Type': 'application/json'},
+      // An empty body token is intentional: the server can recover from its
+      // HttpOnly remembered-login cookie when Safari removed localStorage.
       body: JSON.stringify({token: t})
     });
   }catch(e){
@@ -328,7 +329,7 @@ async function _resumeFromDeviceToken(){
   //
   // If what is in storage is no longer what we sent, another tab or login
   // flow has already replaced it -- leave that newer credential alone.
-  if(res.status === 401 && _deviceToken() === t) _clearDeviceToken();
+  if(t && res.status === 401 && _deviceToken() === t) _clearDeviceToken();
   return '';
 }
 
