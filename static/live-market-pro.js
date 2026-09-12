@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 30304)
-Total output lines: 2543
-
 /* OrcAgent Live Market — "Pro terminal" desktop page controller.
    Talks to /api/market/scanner (server-side sort/filter), /api/market/tape
    (global buy/sell activity), and the existing token/wallet/trade/watchlist/
@@ -1263,7 +1260,38 @@ function _openSheet(idx, mode){
     _sheetEl('pt-sheet-cap-txt').textContent = 'You sell';
     _sheetEl('pt-sheet-cur').textContent = 'USD';
   } else {
-    _sheetEl('pt-sheet-cap-…304 tokens truncated…als[idx];
+    _sheetEl('pt-sheet-cap-txt').textContent = isEvm ? 'You spend at most' : 'You spend';
+    _sheetEl('pt-sheet-cur').textContent = isEvm ? evmCurrencyLabel(t.chain) : 'USDC';
+  }
+  _sheetEl('pt-slide').classList.toggle('sell', mode === 'sell');
+
+  var msg = document.getElementById('pt-buy-msg-'+idx);
+  if(msg){ msg.style.display = 'none'; msg.textContent = ''; }
+  _sheetEl('pt-sheet-go').dataset.idx = idx;
+  _sheetEl('pt-sheet-quote').textContent = '';
+
+  _sheetEl('pt-sheet').classList.add('open');
+  _sheetEl('pt-sheet-scrim').classList.add('open');
+  try{ document.body.style.overflow = 'hidden'; }catch(e){}
+  _paintSheet();
+  // A sell closes the whole tracked position server-side, so there is no
+  // balance to divide up and nothing to price -- only a confirmation.
+  if(mode === 'buy') _loadSheetBalance(t.chain);
+  else _loadSheetHolding(t);
+}
+
+function closeBuySheet(){
+  if(_sheetIdx === null) return;
+  var idx = _sheetIdx;
+  _sheetIdx = null;
+  _sheetAmt = '';
+  _sheetEl('pt-sheet').classList.remove('open');
+  _sheetEl('pt-sheet-scrim').classList.remove('open');
+  try{ document.body.style.overflow = ''; }catch(e){}
+  _sheetUnbindIds(idx);
+  clearTimeout(_quoteTimers[idx]);
+  delete _quotes[idx];
+  delete _quoteRenewals[idx];
 }
 
 // `settled` means the amount is final rather than mid-typing -- a tap on
