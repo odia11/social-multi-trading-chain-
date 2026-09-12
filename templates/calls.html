@@ -160,9 +160,12 @@ html,body{min-height:100vh;background:var(--bg);font-family:var(--ui);color:var(
 
 /* ── Calls v2: clearer leaderboard + focused call composer ── */
 .page{max-width:1180px;padding:34px 24px 130px}
-.calls-hero{position:relative;overflow:hidden;border:1px solid rgba(247,185,85,.18);border-radius:22px;padding:28px 30px;margin-bottom:20px;background:radial-gradient(circle at 88% 20%,rgba(247,185,85,.15),transparent 27%),linear-gradient(135deg,#111820 0,#0b1118 62%,#11130f 100%)}
+.calls-hero{position:relative;overflow:hidden;border:1px solid rgba(247,185,85,.18);border-radius:22px;padding:35px 30px;margin-bottom:20px;background:radial-gradient(circle at 78% 30%,rgba(247,185,85,.13),transparent 28%),linear-gradient(135deg,#111820 0,#0b1118 62%,#11130f 100%)}
 .calls-hero:after{content:'';position:absolute;width:240px;height:240px;border:1px solid rgba(247,185,85,.13);border-radius:50%;right:-72px;top:-104px;box-shadow:0 0 0 34px rgba(247,185,85,.025),0 0 0 68px rgba(247,185,85,.018)}
 .page-header-row{position:relative;z-index:1;align-items:center}
+.calls-hero-copy{max-width:620px;position:relative;z-index:3}
+.calls-hero-art{position:absolute;right:125px;top:-88px;width:310px;height:310px;object-fit:contain;opacity:.78;pointer-events:none;filter:drop-shadow(0 20px 35px rgba(0,0,0,.5))}
+.calls-hero-slogan{position:absolute;right:28px;top:50%;transform:translateY(-50%) rotate(-2deg);width:118px;color:#f7b955;font:700 13px/1.45 var(--mono);letter-spacing:.04em;text-align:center;text-transform:uppercase;z-index:2}
 .page-eyebrow{display:flex;align-items:center;gap:7px;color:var(--accent);font:700 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;margin-bottom:7px}
 .page-title{font-size:34px;line-height:1.05;letter-spacing:-.045em;margin-bottom:8px}
 .page-sub{max-width:630px;margin:0;color:#9ba5b2;font-size:14px;line-height:1.55}
@@ -178,10 +181,12 @@ html,body{min-height:100vh;background:var(--bg);font-family:var(--ui);color:var(
 .podium-wrap{gap:12px;margin-bottom:20px}
 .podium-card{border-radius:17px;padding:18px 12px;border-color:rgba(255,255,255,.075);background:linear-gradient(155deg,#101720,#0b1117)}
 .podium-card.p1{padding:27px 14px 23px;border-color:rgba(247,185,85,.28);background:radial-gradient(circle at 50% 0,rgba(247,185,85,.18),transparent 47%),linear-gradient(155deg,#14181b,#0c1218)}
-.podium-rank{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:25px;border-radius:8px;background:#171e26;margin-bottom:10px}
+.podium-rank{display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:27px;border-radius:9px;background:#171e26;margin-bottom:10px}
+.podium-rank:before{content:'♛';font-size:12px;margin-right:2px}.podium-card.p2 .podium-rank{color:#cbd2dc}.podium-card.p3 .podium-rank{color:#d79656}
 .podium-card.p1 .podium-rank{background:rgba(247,185,85,.13)}
-.podium-tile{border:1px solid rgba(255,255,255,.07);background:#17202a}
-.podium-sym{font-size:14px}.podium-multi{letter-spacing:-.04em}
+.podium-tile{border:2px solid rgba(255,255,255,.1);background:#17202a;border-radius:50%;object-fit:cover}
+.podium-card.p1 .podium-tile{border-color:rgba(247,185,85,.55)}
+.podium-sym{font-size:13px;margin-bottom:2px}.podium-token{color:#c2cad4;font-size:11px;margin-bottom:7px}.podium-price{font:10.5px var(--mono);color:#8f99a6;margin-top:6px}.podium-gain{display:inline-flex;margin-top:7px;padding:3px 7px;border-radius:7px;background:rgba(58,210,155,.09);color:var(--green);font:700 10px var(--mono)}.podium-gain.neg{background:rgba(247,107,98,.09);color:var(--red)}.podium-multi{letter-spacing:-.04em}
 .call-box{margin:0;padding:19px;border-radius:18px;border-color:rgba(247,185,85,.16);background:linear-gradient(155deg,rgba(247,185,85,.07),#0d131a 42%)}
 .call-box-label{font-size:16px;letter-spacing:-.02em;text-transform:none;color:var(--text);margin-bottom:4px}
 .call-box-help{font-size:11.5px;color:#7f8996;line-height:1.45;margin-bottom:14px}
@@ -204,12 +209,13 @@ html,body{min-height:100vh;background:var(--bg);font-family:var(--ui);color:var(
 .call-token{font-size:15px}.call-caller{color:#929ca9}.call-mcap{color:#6f7986}
 .call-multi-val{font-size:19px;padding:7px 9px;border-radius:10px;background:rgba(58,210,155,.07)}
 .call-multi-val.neg{background:rgba(247,107,98,.07)}
+.calls-table-head{display:grid;grid-template-columns:42px 44px minmax(0,1fr) 104px;gap:12px;padding:0 15px 8px;color:#75808e;font-size:10px;text-transform:uppercase;letter-spacing:.07em}.calls-table-head span:last-child{text-align:right}
 
 @media(max-width:900px){.calls-layout{grid-template-columns:1fr 290px}}
 @media(max-width:767px){
   .page{padding:14px 13px 124px}
-  .calls-hero{padding:20px 18px;border-radius:18px;margin-bottom:13px}
-  .page-title{font-size:27px}.page-sub{font-size:12px;max-width:270px}.live-badge{padding:6px 9px;font-size:9px}
+  .calls-hero{padding:20px 18px 21px;border-radius:18px;margin-bottom:13px;min-height:122px}
+  .calls-hero-copy{max-width:78%}.page-eyebrow{display:none}.page-title{font-size:25px}.page-sub{font-size:11px;max-width:270px;line-height:1.4}.live-badge{padding:5px 8px;font-size:9px;position:absolute;top:0;right:0}.calls-hero-art{width:150px;height:150px;right:-37px;top:-36px;opacity:.52}.calls-hero-slogan{display:none}
   .calls-layout{display:flex;flex-direction:column;gap:13px}
   .calls-side{position:static;order:1;width:100%}.calls-main{order:2;width:100%}
   .calls-panel{padding:13px;border-radius:16px}
@@ -223,6 +229,7 @@ html,body{min-height:100vh;background:var(--bg);font-family:var(--ui);color:var(
   .podium-card{border-radius:14px;padding:10px 11px!important}.podium-card.p1{background:linear-gradient(100deg,rgba(247,185,85,.11),#0c131a)}
   .podium-rank{min-width:27px;height:27px;margin:0}.podium-card .podium-tile,.podium-card.p1 .podium-tile{width:38px;height:38px;border-radius:10px}
   .podium-card .podium-like{display:none}.podium-card .podium-multi{font-size:17px}
+  .podium-price,.podium-gain{display:none}.podium-token{margin-bottom:3px}.calls-table-head{grid-template-columns:35px 38px minmax(0,1fr) 76px;gap:8px;padding:0 10px 6px;font-size:8px}
   .call-row{min-height:70px;gap:8px;padding:11px 10px}.call-rank{width:27px;height:27px;border-radius:8px}.call-avatar{width:34px;height:34px}.call-caller-meta{font-size:10px}.call-mcap{font-size:10px}.call-multi-val{font-size:15px;padding:6px}
 }
 </style>
@@ -236,12 +243,16 @@ html,body{min-height:100vh;background:var(--bg);font-family:var(--ui);color:var(
   <section class="calls-hero">
     <div class="page-header-row">
       <div>
-        <div class="page-eyebrow"><span>Community intelligence</span></div>
-        <h1 class="page-title">Calls Leaderboard</h1>
-        <p class="page-sub">Discover high-conviction token calls from the community, track performance from entry to peak and build your reputation.</p>
+        <div class="calls-hero-copy">
+          <div class="page-eyebrow"><span>Community intelligence</span></div>
+          <h1 class="page-title">Calls Leaderboard</h1>
+          <p class="page-sub">Community token calls. Real results. Onchain.</p>
+        </div>
       </div>
       <div class="live-badge"><span class="live-dot"></span>LIVE</div>
     </div>
+    <img class="calls-hero-art" src="/static/orcagent-mobile-hero.svg" alt="" aria-hidden="true">
+    <div class="calls-hero-slogan">Better calls.<br>A brighter tomorrow.</div>
   </section>
 
   <div class="calls-layout">
@@ -256,6 +267,7 @@ html,body{min-height:100vh;background:var(--bg);font-family:var(--ui);color:var(
       </div>
       <div class="podium-wrap" id="calls-podium" style="display:none"></div>
       <div class="section-label">Leaderboard</div>
+      <div class="calls-table-head" aria-hidden="true"><span>#</span><span></span><span>Token &amp; caller</span><span>Gain</span></div>
       <div id="calls-list">
         <div class="calls-empty">Loading calls…</div>
       </div>
@@ -341,14 +353,20 @@ function _renderPodium(top3){
   el.innerHTML = top3.map(function(c, i){
     var rank = i+1;
     var neg = c.multiplier < 1 ? ' neg' : '';
+    var gain = Math.round((c.multiplier-1)*100);
+    var avatar = c.caller_avatar
+      ? '<img class="podium-tile" src="'+esc(c.caller_avatar)+'" alt="">'
+      : '<div class="podium-tile">'+esc((c.caller_username||'?').slice(0,2).toUpperCase())+'</div>';
     return '<div class="podium-card p'+rank+'" onclick="_goToToken(\''+esc(c.mint)+'\')">'
       +'<div class="podium-rank">#'+rank+'</div>'
-      +'<div class="podium-tile">'+esc((c.symbol||'?').slice(0,3).toUpperCase())+'</div>'
+      +avatar
       +'<div class="podium-info">'
-        +'<div class="podium-sym">$'+esc(c.symbol||'?')+'</div>'
-        +'<div class="podium-caller">'+esc(c.caller_username||'')+(c.caller_verified?' ✓':'')+'</div>'
+        +'<div class="podium-sym">'+esc(c.caller_username||'Unknown caller')+(c.caller_verified?' ✓':'')+'</div>'
+        +'<div class="podium-token">$'+esc(c.symbol||'?')+'</div>'
       +'</div>'
       +'<div class="podium-multi'+neg+'">'+_fmtMultiplier(c.multiplier)+'</div>'
+      +'<div class="podium-price">'+_fmtCallPrice(c.price_at_call)+' → '+_fmtCallPrice(c.peak_price)+'</div>'
+      +'<div class="podium-gain'+neg+'">'+(gain>=0?'+':'')+gain+'%</div>'
       +_likeBtnHtml(c, 'podium-like')
     +'</div>';
   }).join('');
