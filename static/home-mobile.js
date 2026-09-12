@@ -3,6 +3,7 @@
 'use strict';
 var path=location.pathname.replace(/\/+$/,'')||'/';
 if(path!=='/'||!window.matchMedia('(max-width:767px)').matches)return;
+if(window.__OA_HOME_SOCIAL_V2__)return;window.__OA_HOME_SOCIAL_V2__=1;
 var socialCss=document.createElement('link');socialCss.rel='stylesheet';socialCss.href='/static/home-social-feed.css?v=1';document.head.appendChild(socialCss);
 function ready(fn){if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fn);else fn()}
 function ensureTagline(){var logo=document.querySelector('.pt-nb-logo');if(!logo)return;logo.setAttribute('aria-label','OrcAgent — Trade, Share, Grow')}
