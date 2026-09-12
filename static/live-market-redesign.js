@@ -5,6 +5,18 @@
 'use strict';
 var path=location.pathname.replace(/\/+$/,'')||'/';
 if(path!=='/live-market') return;
+
+/* Final alignment + rendering polish. Loaded here so it always comes after
+   the base Live Market redesign assets without touching the scanner logic. */
+(function(){
+  if(!document.querySelector('link[data-oa-live-final]')){
+    var css=document.createElement('link');css.rel='stylesheet';css.href='/static/live-market-final.css?v=1';css.dataset.oaLiveFinal='1';document.head.appendChild(css);
+  }
+  if(!document.querySelector('script[data-oa-live-smooth]')){
+    var js=document.createElement('script');js.src='/static/live-market-smooth.js?v=1';js.defer=true;js.dataset.oaLiveSmooth='1';document.head.appendChild(js);
+  }
+})();
+
 document.documentElement.classList.add('oa-live-v2-root');
 function ready(fn){if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fn);else fn();}
 function txt(id){var e=document.getElementById(id);return e?(e.textContent||'').trim():'';}
