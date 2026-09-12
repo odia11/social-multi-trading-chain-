@@ -29,7 +29,7 @@
 (function(){
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/live-market')return;
-  var css=document.createElement('link');css.rel='stylesheet';css.href='/static/live-market-redesign.css?v=4';document.head.appendChild(css);
+  var css=document.createElement('link');css.rel='stylesheet';css.href='/static/live-market-redesign.css?v=5';document.head.appendChild(css);
   var js=document.createElement('script');js.src='/static/live-market-redesign.js?v=2';js.defer=true;document.head.appendChild(js);
 })();
 
@@ -43,7 +43,7 @@
 /* Shared premium mobile bottom nav across OrcAgent. */
 (function(){
   if(!window.matchMedia('(max-width:767px)').matches)return;
-  var css=document.createElement('link');css.rel='stylesheet';css.href='/static/mobile-bottom-nav.css?v=2';document.head.appendChild(css);
+  var css=document.createElement('link');css.rel='stylesheet';css.href='/static/mobile-bottom-nav.css?v=3';document.head.appendChild(css);
   var js=document.createElement('script');js.src='/static/mobile-bottom-nav.js?v=4';js.defer=true;document.head.appendChild(js);
 })();
 
