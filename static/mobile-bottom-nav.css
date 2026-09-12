@@ -15,8 +15,10 @@
   .oa-bottom-nav .oa-nav-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
   .oa-bottom-nav .oa-menu-btn{font:600 11px/1.1 Geist,system-ui,sans-serif}
 
-  /* Never let fixed navigation cover the last primary action on full-screen sheets. */
-  body.oa-live-v2 .pt-sheet{padding-bottom:calc(126px + env(safe-area-inset-bottom,0px))!important}
+  /* A trade is a focused full-screen flow: keep app navigation out of its way. */
+  body.oa-live-v2 .pt-sheet{padding-bottom:env(safe-area-inset-bottom,0px)!important;z-index:1300!important}
+  body.oa-trade-sheet-open .oa-bottom-nav{display:none!important}
+  body.oa-trade-sheet-open{padding-bottom:0!important;overflow:hidden!important}
   body.oa-portfolio .wlt-center{padding-bottom:calc(132px + env(safe-area-inset-bottom,0px))!important}
 
   /* Portfolio-specific action sheet opened by the large center button. */
