@@ -10,55 +10,53 @@ function closestLink(e){var n=e.target;return n&&n.closest?n.closest('a[href]'):
 /* Warm only the page the user is actually showing intent to open. The old
    idle routine fetched seven authenticated HTML pages after every navigation,
    which competed with the page's own API calls on the single app worker and
-   made "prefetching" feel like lag. Touch/hover/focus gives us the useful
-   part of prefetching without background-loading the whole product. */
+   made "prefetching" feel like lag. */
 ['pointerover','touchstart','focusin'].forEach(function(type){document.addEventListener(type,function(e){prefetch(closestLink(e))},{passive:true,capture:true})});
 
-/* Images below the first viewport should not delay initial rendering. Keep
-   explicitly eager images (logo/hero/token immediately visible) untouched. */
+/* Images below the first viewport should not delay initial rendering. */
 function tuneImage(img){
   if(!img||img.dataset.oaImgTuned==='1')return;
   img.dataset.oaImgTuned='1';
   if(!img.hasAttribute('decoding'))img.decoding='async';
   var aboveFold=!!img.closest('.pt-nb-topbar,.oa-m-hero,.pf-hero,.pt-sheet');
   if(!img.hasAttribute('loading')&&!aboveFold)img.loading='lazy';
-  if(!aboveFold&&!img.hasAttribute('fetchpriority')){
-    try{img.fetchPriority='low'}catch(_){ }
-  }
+  if(!aboveFold&&!img.hasAttribute('fetchpriority')){try{img.fetchPriority='low'}catch(_){ }}
 }
 function tuneTree(root){if(root&&root.matches&&root.matches('img'))tuneImage(root);if(root&&root.querySelectorAll)root.querySelectorAll('img').forEach(tuneImage)}
 
-/* Stop decorative CSS animation work while Safari/iOS has the page hidden.
-   Polling/data code remains owned by each page; this only saves paint work. */
+/* Stop decorative CSS animation work while Safari/iOS has the page hidden. */
 function syncVisibility(){document.documentElement.classList.toggle('oa-page-hidden',document.hidden)}
-document.addEventListener('visibilitychange',syncVisibility,{passive:true});
-syncVisibility();
+document.addEventListener('visibilitychange',syncVisibility,{passive:true});syncVisibility();
 
-/* Generic mobile modal lock. Old pages use several modal conventions: some
-   toggle .open, others set display:flex directly. They now all freeze the
-   document behind them and return to the exact same scroll position. */
+/* Generic mobile modal lock. */
 var MODAL_SEL='.s-modal,.modal-backdrop,.gd-modal-backdrop,[class*="modal-backdrop"],.modal-back,.w-modal-back';
 var modalLocked=false,modalY=0;
 function isModalNode(el){return !!(el&&el.matches&&el.matches(MODAL_SEL))}
-function subtreeHasModal(el){return !!(el&&el.querySelector&&el.querySelector(MODAL_SEL))}
 function isVisible(el){if(!el)return false;if(el.classList.contains('open'))return true;var st=el.style&&el.style.display;if(st&&st!=='none')return true;try{return getComputedStyle(el).display!=='none'}catch(e){return false}}
 function anyOpenModal(){var list=document.querySelectorAll(MODAL_SEL);for(var i=0;i<list.length;i++){if(isVisible(list[i]))return true}return false}
 function syncModalLock(){if(!window.matchMedia('(max-width:767px)').matches)return;if(document.documentElement.classList.contains('oa-groups-modal-open'))return;var open=anyOpenModal();if(open&&!modalLocked){modalLocked=true;modalY=window.scrollY||document.documentElement.scrollTop||0;document.documentElement.classList.add('oa-modal-open');document.body.style.position='fixed';document.body.style.top=(-modalY)+'px';document.body.style.left='0';document.body.style.right='0';document.body.style.width='100%'}else if(!open&&modalLocked){modalLocked=false;document.documentElement.classList.remove('oa-modal-open');document.body.style.position='';document.body.style.top='';document.body.style.left='';document.body.style.right='';document.body.style.width='';window.scrollTo(0,modalY)}}
+
+/* Observe class/style only on modal shells. The old observer watched those
+   attributes on every node in the app; live charts, feeds and counters mutate
+   them constantly, causing needless main-thread work. */
+var modalObserved=typeof WeakSet!=='undefined'?new WeakSet():null;
+var modalAttrObserver=window.MutationObserver?new MutationObserver(function(){syncModalLock()}):null;
+function observeModal(el){if(!modalAttrObserver||!isModalNode(el))return;if(modalObserved&&modalObserved.has(el))return;if(modalObserved)modalObserved.add(el);modalAttrObserver.observe(el,{attributes:true,attributeFilter:['class','style']})}
+function observeModalsIn(root){if(!root||root.nodeType!==1)return;if(isModalNode(root))observeModal(root);if(root.querySelectorAll)root.querySelectorAll(MODAL_SEL).forEach(observeModal)}
 
 /* Keep Messages' fullscreen thread truly fullscreen even though every normal
    page gets the shared bottom navigation. */
 function watchThread(){var main=document.querySelector('.msgs-main');if(!main)return;function sync(){document.body.classList.toggle('oa-thread-open',main.classList.contains('thread-open'))}sync();if(window.MutationObserver)new MutationObserver(sync).observe(main,{attributes:true,attributeFilter:['class']})}
 
 function ready(){
-  document.body.classList.add('oa-shared-ux');tuneTree(document);syncModalLock();
+  document.body.classList.add('oa-shared-ux');
+  tuneTree(document);syncModalLock();
+  document.querySelectorAll(MODAL_SEL).forEach(observeModal);
   if(window.MutationObserver)new MutationObserver(function(ms){
-    var modalMayHaveChanged=false;
-    ms.forEach(function(m){
-      if(m.type==='attributes'&&isModalNode(m.target))modalMayHaveChanged=true;
-      m.addedNodes.forEach(function(n){if(n.nodeType!==1)return;tuneTree(n);if(isModalNode(n)||subtreeHasModal(n))modalMayHaveChanged=true});
-    });
-    if(modalMayHaveChanged)syncModalLock();
-  }).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style']});
+    var modalAdded=false;
+    ms.forEach(function(m){m.addedNodes.forEach(function(n){if(n.nodeType!==1)return;tuneTree(n);observeModalsIn(n);if(isModalNode(n)||(n.querySelector&&n.querySelector(MODAL_SEL)))modalAdded=true})});
+    if(modalAdded)syncModalLock();
+  }).observe(document.body,{childList:true,subtree:true});
   watchThread();
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ready);else ready();
