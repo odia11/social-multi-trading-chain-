@@ -116,9 +116,9 @@ check('the remembered login still works after the deploy, so a browser whose '
       'cookie did expire is signed straight back in rather than shown the '
       'connect screen',
       third['resumed_wallet'] == WALLET)
-check('...and it is rotated on use, so the deploy does not leave a stale '
-      'credential lying about',
-      third['got_fresh_token'])
+check('...and the credential remains stable, so iOS cannot be stranded with '
+      'a server-revoked token if it suspends the page during restore',
+      not third['got_fresh_token'])
 
 # ── the two mechanisms that make it true, guarded at their source ───────
 INSTALL = open(REPO + '/deploy/install.sh', encoding='utf-8').read()

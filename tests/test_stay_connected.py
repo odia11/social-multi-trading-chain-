@@ -12,11 +12,10 @@ is exchanged for a fresh session when the cookie is gone.
 
 WHAT THAT OBLIGES
 Only the hash is stored, so a copy of the table is not a set of usable
-logins. It rotates on every use: if a stolen token is redeemed, the real
-owner's copy stops working, which turns silent sharing into a visible logout.
-It is minted only where a signature was actually verified. And Disconnect
-revokes every one of them — a session that clears and then quietly resumes
-tomorrow is the opposite of what that button says.
+logins. The token remains valid until Disconnect: rotating during restore
+created a race where iOS could be suspended before saving the replacement.
+It is minted only where a signature was actually verified. Disconnect revokes
+every one of them.
 
 The redeem path is exercised against a real database rather than read.
 """
@@ -104,14 +103,13 @@ with tempfile.TemporaryDirectory() as tmp:
 
     wallet, tok2 = ns['_redeem_device_token'](tok)
     check('redeeming returns the wallet it was issued for', wallet == 'WALLET_A')
-    check('...and a DIFFERENT token, because it rotates on use',
-          bool(tok2) and tok2 != tok)
+    check('...and the same stable token, so an interrupted mobile restore '
+          'cannot strand the browser with a credential the server just killed',
+          tok2 == tok)
 
     again, _ = ns['_redeem_device_token'](tok)
-    check('...leaving the presented one dead. A stolen copy redeemed once '
-          'signs the other side out, so theft is visible rather than silent',
-          again == '')
-    check('...while the replacement works', ns['_redeem_device_token'](tok2)[0] == 'WALLET_A')
+    check('...and it remains usable across repeated or concurrent restores',
+          again == 'WALLET_A')
 
     check('an unknown token is refused', ns['_redeem_device_token']('nonsense')[0] == '')
     check('an empty token is refused without touching the database',
@@ -208,8 +206,9 @@ check('...only when the server said there was no session, so a normal load '
       # asked.
       '} else {' in _branch
       and '_resumeFromDeviceToken' not in _branch.split('} else {')[0])
-check('a spent token is replaced immediately, or the next load would present '
-      'a dead one', '_storeDeviceToken(r.token)' in JS)
+check('the returned token is persisted, while stable-token restores remain '
+      'compatible with a future credential upgrade',
+      '_storeDeviceToken(r.token)' in JS)
 # A token the SERVER refuses is still dropped -- retrying it forever would
 # be its own bug. What changed is that "refused" now means the server said
 # so (401), not merely that the call did not come back with a session: that

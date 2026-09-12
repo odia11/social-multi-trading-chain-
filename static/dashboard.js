@@ -315,8 +315,9 @@ async function _resumeFromDeviceToken(){
   var r = null;
   try{ r = await res.json(); }catch(e){}
   if(res.ok && r && r.ok && r.wallet){
-    // The presented token is spent. Keeping it would sign this browser out
-    // on its next attempt.
+    // Store the credential returned by the server. It is normally the same
+    // stable token; keeping this assignment makes the client compatible with
+    // any future server-side credential upgrade.
     _storeDeviceToken(r.token);
     if(r.csrf_token) _csrfToken = r.csrf_token;
     return r.wallet;
@@ -325,12 +326,8 @@ async function _resumeFromDeviceToken(){
   // already spent -- then dropping it stops every later load retrying
   // something that can never work again.
   //
-  // Unless another tab got there first. The server rotates on every redeem,
-  // so two tabs opening together both present the same token: one is served
-  // and stores the replacement, the other is told 401 for a token that was
-  // valid a moment ago. Clearing then would delete the good replacement the
-  // first tab just stored. If what is in storage is no longer what we sent,
-  // someone else has already moved this on -- leave it alone.
+  // If what is in storage is no longer what we sent, another tab or login
+  // flow has already replaced it -- leave that newer credential alone.
   if(res.status === 401 && _deviceToken() === t) _clearDeviceToken();
   return '';
 }
