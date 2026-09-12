@@ -8890,118 +8890,28 @@ var _virtObserver = new IntersectionObserver(function(entries){
   });
 }, {rootMargin: '5000px 0px'});
 
-var _bottomHoldTimer = null;
+// Infinite pagination only: scrolling must never replace the feed with page 1.
 var _bottomHoldLastCheck = 0;
 var _BOTTOM_HOLD_THROTTLE_MS = 100;
 function _checkBottomHold() {
-  // scroll fires far more often than this needs to run (up to display refresh
-  // rate on a fling) -- document.documentElement.scrollHeight below forces a
-  // synchronous layout read, so gate it to ~10x/s instead of every tick.
   var now = Date.now();
   if (now - _bottomHoldLastCheck < _BOTTOM_HOLD_THROTTLE_MS) return;
   _bottomHoldLastCheck = now;
   var feedEl = document.getElementById('center-feed');
-  var mainEl = document.getElementById('main-content'); // .wrap -- the actual scroll
-  // container (html/body/#app all have overflow:hidden); window itself never
-  // scrolls in this layout, so window.scrollY/scrollHeight are meaningless here.
-  if (!feedEl || !mainEl || feedEl.offsetParent === null) {
-    if (_bottomHoldTimer) { clearTimeout(_bottomHoldTimer); _bottomHoldTimer = null; }
-    return;
-  }
-  // Skip entirely while the user is actively typing inside the feed (e.g. a
-  // reply box) -- on mobile, focusing an input shrinks the viewport (keyboard)
-  // and auto-scrolls the field into view, which can make the atBottom check
-  // below fire spuriously and then wipe the whole feed DOM (via loadHomeFeed()
-  // -> renderHomeFeed()) out from under the open box.
-  var _activeEl = document.activeElement;
-  if (_activeEl && feedEl.contains(_activeEl) &&
-      (_activeEl.tagName === 'TEXTAREA' || _activeEl.tagName === 'INPUT')) {
-    if (_bottomHoldTimer) { clearTimeout(_bottomHoldTimer); _bottomHoldTimer = null; }
-    return;
-  }
-  // Infinite scroll: once within ~600px of the bottom and there's a next_cursor
-  // from the last fetch, load the next (older) page and append it. Guarded by
-  // _homeFeedLoadingMore so a fast scroll/fling doesn't fire it more than once
-  // per page fetched.
-  var distanceToBottom = mainEl.scrollHeight - (mainEl.scrollTop + mainEl.clientHeight);
+  var mainEl = document.getElementById('main-content');
+  if (!feedEl || !mainEl || feedEl.offsetParent === null) return;
+  // Desktop owns a bounded .wrap scroller. Mobile Home expands that wrapper
+  // and scrolls the document; .wrap.scrollTop is always zero in that layout.
+  var scroller = /^(auto|scroll)$/.test(getComputedStyle(mainEl).overflowY)
+    ? mainEl : (document.scrollingElement || document.documentElement);
+  var distanceToBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
   if (distanceToBottom < 600 && _homeFeedNextCursor && !_homeFeedLoadingMore) {
     loadMoreHomeFeed();
   }
-  var atBottom = (mainEl.scrollTop + mainEl.clientHeight) >= (mainEl.scrollHeight - 40);
-  // Only fall back to the hold-to-refresh-for-new-posts behavior once there's
-  // no older page left to paginate into -- otherwise this would race with
-  // loadMoreHomeFeed() above and wipe the appended pages back to page 1.
-  if (atBottom && !_homeFeedNextCursor) {
-    if (!_bottomHoldTimer) {
-      _bottomHoldTimer = setTimeout(function() {
-        loadHomeFeed(); // refetch + re-render in place instead of a full page reload
-        _bottomHoldTimer = null; // allow the hold-at-bottom check to fire again later
-      }, 2000);
-    }
-  } else {
-    if (_bottomHoldTimer) { clearTimeout(_bottomHoldTimer); _bottomHoldTimer = null; }
-  }
 }
 document.getElementById('main-content')?.addEventListener('scroll', _checkBottomHold, { passive: true });
-
-// ── PULL-TO-REFRESH — home feed (mobile, touch only) ──
-(function(){
-  var feedEl = document.getElementById('center-feed');
-  var mainEl = document.getElementById('main-content'); // .wrap -- see _checkBottomHold above
-  if (!feedEl || !mainEl) return;
-
-  var PTR_THRESHOLD = 70;
-  var _ptrStartY = 0, _ptrActive = false, _ptrPulling = false, _ptrIndicator = null;
-
-  function _ptrEnsureIndicator(){
-    if (_ptrIndicator) return _ptrIndicator;
-    var wrap = document.createElement('div');
-    wrap.id = 'ptr-indicator';
-    wrap.style.cssText = 'display:flex;align-items:center;justify-content:center;height:0;overflow:hidden;transition:height .15s ease';
-    var spin = document.createElement('span');
-    spin.className = 'dm-img-spinner';
-    spin.style.cssText = 'width:20px;height:20px;border-width:2px';
-    wrap.appendChild(spin);
-    feedEl.parentNode.insertBefore(wrap, feedEl);
-    _ptrIndicator = wrap;
-    return wrap;
-  }
-
-  feedEl.addEventListener('touchstart', function(e){
-    // Don't hijack touches that start inside an open reply box (input focus,
-    // text selection, scrolling a long .fc-replies-list) -- _ptrActive stays
-    // false for this whole touch sequence, so touchmove's guard below skips
-    // it too and never calls preventDefault() on it.
-    if (mainEl.scrollTop !== 0 || e.target.closest('.fc-reply-box')) { _ptrActive = false; return; }
-    _ptrStartY = e.touches[0].clientY;
-    _ptrActive = true;
-    _ptrPulling = false;
-  }, { passive: true });
-
-  feedEl.addEventListener('touchmove', function(e){
-    if (!_ptrActive) return;
-    var dy = e.touches[0].clientY - _ptrStartY;
-    if (dy <= 0 || mainEl.scrollTop !== 0) { _ptrActive = false; return; }
-    _ptrPulling = true;
-    e.preventDefault(); // suppress native overscroll bounce while our indicator is dragging
-    var indicator = _ptrEnsureIndicator();
-    indicator.style.height = Math.min(dy, PTR_THRESHOLD) + 'px';
-  }, { passive: false });
-
-  feedEl.addEventListener('touchend', async function(){
-    if (!_ptrActive) return;
-    _ptrActive = false;
-    if (_ptrPulling && _ptrIndicator) {
-      var pulled = parseInt(_ptrIndicator.style.height, 10) || 0;
-      if (pulled >= PTR_THRESHOLD) {
-        _ptrIndicator.style.height = PTR_THRESHOLD + 'px'; // hold open, spinner keeps spinning
-        await loadHomeFeed();
-      }
-      _ptrIndicator.style.height = '0px';
-    }
-    _ptrPulling = false;
-  }, { passive: true });
-})();
+window.addEventListener('scroll', _checkBottomHold, { passive: true });
+// No touch refresh handlers: both swipe directions belong to native scrolling.
 
 function showToken(symbol){
   window.open('https://dexscreener.com/solana/'+symbol,'_blank')
