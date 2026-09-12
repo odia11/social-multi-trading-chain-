@@ -4121,7 +4121,7 @@ def _usdc_cache_put(key, value):
 
 _chart_cache_lock = threading.Lock()
 _chart_cache: dict = {}
-_CHART_CACHE_TTL   = 30  # seconds
+_CHART_CACHE_TTL   = 300  # candles are extended by the separate 2s live-price feed
 
 class _DexCachedResp:
     """Minimal requests.Response stand-in for cached DexScreener data."""
@@ -27086,6 +27086,24 @@ def _get_scanner_cached() -> list:
         if now - _scanner_cache['ts'] < 15 and _scanner_cache['data']:
             return _scanner_cache['data']
     data = _get_scanner_candidates()
+    # The scanner already receives a real USD price and the exact pool for
+    # every token.  Persist that free data on every scanner refresh, not only
+    # while somebody happens to have a chart visible.  This is the history
+    # source for networks for which GeckoTerminal has no OHLC endpoint (most
+    # notably Robinhood Chain), and it keeps building across page reloads and
+    # deploys without another provider or paid API.
+    observed_at = time.time()
+    by_chain = {}
+    for token in data:
+        pair = str(token.get('pair_address') or '').strip().lower()
+        try:
+            price = float(token.get('price_usd') or 0)
+        except (TypeError, ValueError):
+            price = 0.0
+        if pair and price > 0:
+            by_chain.setdefault(token.get('chain') or 'solana', {})[pair] = price
+    for chain_name, prices in by_chain.items():
+        _store_observed_market_prices(chain_name, prices, observed_at)
     with _scanner_lock:
         _scanner_cache['ts']   = time.time()
         _scanner_cache['data'] = data
@@ -27440,6 +27458,24 @@ def _stored_market_candles(chain: str, pair_address: str, tf: str,
     return list(grouped.values())[-limit:]
 
 
+def _best_stored_market_candles(chain: str, pair_address: str, tf: str,
+                                limit: int = 60) -> tuple:
+    """Return the requested stored timeframe, falling back to real 1m bars.
+
+    A new/unsupported pool may have many honest one-minute observations but
+    still only one five-minute bucket. Showing that single 5m candle made a
+    working chart look broken. Until enough requested bars exist we display
+    the finer observed bars and explicitly report the timeframe actually used.
+    """
+    requested = _stored_market_candles(chain, pair_address, tf, limit)
+    if len(requested) >= 2 or tf == '1m':
+        return requested, tf
+    finer = _stored_market_candles(chain, pair_address, '1m', limit)
+    if len(finer) > len(requested):
+        return finer, '1m'
+    return requested, tf
+
+
 # Token prices by MINT, cached per token. Same shape as the pool-price cache
 # below and for the same reason: overlapping screens share what they have in
 # common instead of each paying for a whole list.
@@ -27768,14 +27804,17 @@ def api_chart(mint):
         for i, tf_key in enumerate(tf_fallback_list):
             candles = _fetch_candles_for_tf(tf_key)
             tf_used = tf_key
-            if len(candles) >= 5 or i == len(tf_fallback_list) - 1:
+            # One real provider bar is already useful and must not trigger a
+            # burst of another four upstream calls. Live ticks extend it; the
+            # durable store supplies finer bars where the provider is absent.
+            if candles or i == len(tf_fallback_list) - 1:
                 break
 
         # Extend provider history with OrcAgent's own durable observations.
         # When the provider has no coverage (notably Robinhood Chain), this is
         # the primary history. Never fabricate bars for time ranges unseen by
         # either source.
-        stored = _stored_market_candles(chain, pair_address, tf)
+        stored, stored_tf = _best_stored_market_candles(chain, pair_address, tf)
         if stored:
             if candles and tf_used == tf:
                 by_time = {int(c['t']): c for c in candles}
@@ -27784,7 +27823,7 @@ def api_chart(mint):
                 candles = [by_time[k] for k in sorted(by_time)][-60:]
             elif not candles:
                 candles = stored
-                tf_used = tf
+                tf_used = stored_tf
 
         current_price = candles[-1]['c'] if candles else _fetch_current_price()
         if candles:

@@ -391,11 +391,38 @@ function attachChartSvgScrub(idx){
   };
 }
 
-function fetchChart(mint, tf, pairAddr, chain){
+// GeckoTerminal's free endpoint is shared by every card. Starting all visible
+// history requests in the same millisecond made the first one succeed and the
+// rest hit its rate limit. One paced queue gives every token a fair turn while
+// seed/live prices keep each card rendered immediately.
+var _chartFetchQueue = [], _chartFetchBusy = false, _lastChartFetchAt = 0;
+function drainChartFetchQueue(){
+  if(_chartFetchBusy || !_chartFetchQueue.length) return;
+  var wait=Math.max(0,2100-(Date.now()-_lastChartFetchAt));
+  _chartFetchBusy=true;
+  setTimeout(function(){
+    var job=_chartFetchQueue.shift();
+    if(!job || (job.state && job.state.destroyed)){
+      if(job) job.resolve(null);
+      _chartFetchBusy=false;
+      drainChartFetchQueue();
+      return;
+    }
+    _lastChartFetchAt=Date.now();
+    fetch(job.url).then(function(r){return r.json();}).then(job.resolve).catch(function(){job.resolve(null);}).then(function(){
+      _chartFetchBusy=false;
+      drainChartFetchQueue();
+    });
+  },wait);
+}
+function fetchChart(mint, tf, pairAddr, chain, state){
   var url = '/api/chart/'+encodeURIComponent(mint)+'?tf='+encodeURIComponent(tf);
   if(pairAddr) url += '&pair='+encodeURIComponent(pairAddr);
   if(chain) url += '&chain='+encodeURIComponent(chain);
-  return fetch(url).then(function(r){ return r.json(); }).catch(function(){ return null; });
+  return new Promise(function(resolve){
+    _chartFetchQueue.push({url:url,resolve:resolve,state:state});
+    drainChartFetchQueue();
+  });
 }
 
 function chartBucketSeconds(tf){
@@ -410,8 +437,9 @@ function startObservedCandle(st, price){
 function chartTick(idx){
   var st = _chartTimers[idx];
   if(!st || st.destroyed) return;
-  fetchChart(st.mint, st.tf, st.pair, st.chain).then(function(r){
-    if(!st || st.destroyed) return;
+  var requestedTf=st.tf;
+  fetchChart(st.mint, requestedTf, st.pair, st.chain, st).then(function(r){
+    if(!st || st.destroyed || st.tf!==requestedTf) return;
     if(r && r.candles && r.candles.length){
       // Kept so a live price can redraw this chart without fetching the
       // candles again -- the candles are the shape, the price is the movement.
@@ -523,7 +551,7 @@ function mountChart(idx, mint, pairAddr, chain, seedPrice){
   // five asked the same question six times for one answer. Movement comes
   // from the live price tick above instead, which costs one request for the
   // whole page.
-  st.timer = setInterval(function(){ chartTick(idx); }, 15000);
+  st.timer = setInterval(function(){ chartTick(idx); }, 300000);
   attachChartSvgScrub(idx);
 }
 function unmountChart(idx){
