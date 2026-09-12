@@ -498,8 +498,8 @@ function startLivePrices(){
 // `chain` defaults to 'solana' -- the API's own default -- so a caller that
 // doesn't know/care about chain (there weren't any before this) still gets
 // the exact prior behavior.
-function mountChart(idx, mint, pairAddr, chain, seedPrice){
-  if(_chartTimers[idx]) return;
+function primeChart(idx, mint, pairAddr, chain, seedPrice){
+  if(_chartTimers[idx]) return _chartTimers[idx];
   var st = {destroyed:false, mint:mint, pair:pairAddr, chain:(chain||'solana'), seedPrice:Number(seedPrice)||0, tf:'5m', timer:null};
   _chartTimers[idx] = st;
   // Paint immediately from the real scanner price. On production, opening
@@ -515,6 +515,11 @@ function mountChart(idx, mint, pairAddr, chain, seedPrice){
     ];
     renderChartSvg(idx,st.candles,st.seedPrice);
   }
+  return st;
+}
+function mountChart(idx, mint, pairAddr, chain, seedPrice){
+  var st=primeChart(idx,mint,pairAddr,chain,seedPrice);
+  if(st.timer) return;
   chartTick(idx);
   // 15s, not 5s: the server caches candles for 30 seconds, so polling every
   // five asked the same question six times for one answer. Movement comes
@@ -614,6 +619,13 @@ function activateCard(card){
 function observeCards(){
   var cards = document.querySelectorAll('.pt-card');
   if(_cardObserver) _cardObserver.disconnect();
+  // Give all cards a synchronous real-price chart. Only cards near the
+  // viewport continue into history/live polling, so this removes blank cards
+  // during a fast scroll without firing thirty chart API calls at once.
+  cards.forEach(function(card){
+    var idx=card.dataset.idx,t=ST.tokens[Number(idx)];
+    primeChart(idx,card.dataset.mint,card.dataset.pair,t?t.chain:'solana',t?t.price_usd:0);
+  });
   if(!('IntersectionObserver' in window)){
     cards.forEach(activateCard);
     return;
