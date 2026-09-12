@@ -55,3 +55,121 @@ body.oa-live-v2 .pt-sheet.sell-mode .pt-pct.on{background:rgba(255,83,104,.12)!i
  body.oa-live-v2 .pt-slide-fill{background:linear-gradient(90deg,#f7b955,#ffc95f)!important}.pt-sheet.sell-mode .pt-slide-fill{background:linear-gradient(90deg,#ff5368,#ff7180)!important}
  body.oa-live-v2 .pt-buy-msg{margin-left:16px!important;margin-right:16px!important}
 }
+
+/* ── Mobile execution sheet v4 ────────────────────────────────────────────
+   A focused amount-entry screen inspired by the speed of native trading
+   apps, while keeping OrcAgent's quote details and deliberate slide-to-trade.
+   The original ticket and keypad are authoritative; the earlier injected
+   two-card swap preview duplicated the same information and summoned the OS
+   keyboard over the confirmation area. */
+@media(max-width:767px){
+ body.oa-live-v2 .pt-sheet{
+  --sheet-bg:#060a0f!important;--sheet-tile:#0c131b!important;--sheet-key:#0a1118!important;
+  --sheet-line:#1b2632!important;
+  background:
+   radial-gradient(95% 42% at 50% -5%,rgba(247,185,85,.10),transparent 65%),
+   #060a0f!important;
+  display:none!important;grid-template-rows:auto auto minmax(122px,1fr) auto minmax(232px,36vh) auto!important;
+  overflow:hidden!important;padding-bottom:env(safe-area-inset-bottom,0px)!important
+ }
+ body.oa-live-v2 .pt-sheet.open{display:grid!important}
+ body.oa-live-v2 .pt-sheet-grab{width:42px!important;height:5px!important;margin:8px auto 2px!important;background:#303b48!important}
+ body.oa-live-v2 .pt-sheet-hd{
+  position:relative!important;top:auto!important;padding:10px 18px 13px!important;
+  background:transparent!important;border:0!important
+ }
+ body.oa-live-v2 .pt-sheet-img,body.oa-live-v2 .pt-sheet-img-ph{
+  width:48px!important;height:48px!important;border-radius:15px!important;
+  border-color:#263340!important;background:#101821!important
+ }
+ body.oa-live-v2 .pt-sheet-sym{font-size:18px!important;letter-spacing:-.02em!important}
+ body.oa-live-v2 .pt-sheet-chain{border-radius:7px!important;padding:3px 6px!important;background:#111923!important}
+ body.oa-live-v2 .pt-sheet-mc{font-size:12px!important;margin-top:5px!important}
+ body.oa-live-v2 .pt-sheet-price{font-size:17px!important}
+ body.oa-live-v2 .pt-sheet-chg{font-size:11px!important;border-radius:7px!important;padding:3px 7px!important}
+
+ .oa-swipe-mode{
+  height:46px!important;margin:0 18px 4px!important;border-radius:14px!important;
+  background:#0a1017!important;border-color:#202c38!important
+ }
+ .oa-swipe-mode:after{top:4px!important;bottom:4px!important;left:4px!important;width:calc(50% - 4px)!important;border-radius:11px!important}
+ .oa-swipe-mode button{font-size:13px!important}
+ .oa-swipe-hint{display:none!important}
+ .oa-swap-modern{display:none!important}
+
+ body.oa-live-v2 .pt-sheet-mid{
+  display:flex!important;min-height:122px!important;padding:7px 18px 8px!important;overflow:hidden!important
+ }
+ body.oa-live-v2 .pt-ticket{
+  display:flex!important;width:100%!important;justify-content:center!important;gap:7px!important;
+  background:transparent!important;border:0!important;border-radius:0!important;
+  padding:4px 2px 2px!important;text-align:center!important
+ }
+ body.oa-live-v2 .pt-ticket-top{justify-content:center!important;order:2!important}
+ body.oa-live-v2 .pt-sheet-cap{display:none!important}
+ body.oa-live-v2 .pt-ticket-bal{
+  font:500 12px/1.2 Geist,system-ui,sans-serif!important;color:#788493!important;text-align:center!important
+ }
+ body.oa-live-v2 .pt-ticket-bal b{color:#aeb7c3!important}
+ body.oa-live-v2 .pt-sheet-amt{
+  order:1!important;font:750 clamp(46px,15vw,64px)/1 Geist,system-ui,sans-serif!important;
+  letter-spacing:-.055em!important;text-align:center!important;color:#f5f7fa!important
+ }
+ body.oa-live-v2 .pt-sheet-amt.dim{color:#3d4652!important}
+ body.oa-live-v2 .pt-ticket-get{
+  order:3!important;justify-content:center!important;border:0!important;padding:0!important;min-height:18px!important
+ }
+ body.oa-live-v2 .pt-ticket-arrow{display:none!important}
+ body.oa-live-v2 .pt-sheet-get{font-size:12px!important;color:#8c98a7!important}
+ body.oa-live-v2 .pt-ticket-stats{order:4!important;padding-top:8px!important;margin-top:2px!important}
+
+ body.oa-live-v2 .pt-sheet-pcts{
+  grid-template-columns:repeat(4,1fr)!important;gap:8px!important;padding:0 18px 9px!important
+ }
+ body.oa-live-v2 .pt-pct{
+  min-height:42px!important;border-radius:13px!important;background:#0d141d!important;
+  border-color:#1d2935!important;color:#dce1e7!important;font-size:13px!important
+ }
+ body.oa-live-v2 .pt-pct:active,body.oa-live-v2 .pt-pct.on{
+  transform:scale(.97)!important;background:rgba(247,185,85,.14)!important;
+  border-color:rgba(247,185,85,.42)!important;color:#ffc45b!important
+ }
+
+ body.oa-live-v2 #pt-keys,body.oa-live-v2 .pt-keys{
+  display:grid!important;grid-template-columns:repeat(3,1fr)!important;
+  gap:6px!important;min-height:232px!important;max-height:36vh!important;padding:0 18px 8px!important
+ }
+ body.oa-live-v2 .pt-key{
+  min-height:48px!important;padding:0!important;border-radius:14px!important;
+  background:#0a1118!important;border-color:#17222d!important;
+  font-size:24px!important;font-weight:620!important;color:#f1f3f6!important
+ }
+ body.oa-live-v2 .pt-key:active{
+  background:rgba(247,185,85,.13)!important;border-color:rgba(247,185,85,.38)!important;
+  color:#ffc45b!important;transform:scale(.96)!important
+ }
+ body.oa-live-v2 .pt-key[data-k="del"]{color:#8f9aa8!important}
+
+ body.oa-live-v2 .pt-sheet-ft{
+  padding:0 18px 10px!important;background:linear-gradient(180deg,transparent,#060a0f 12%)!important
+ }
+ body.oa-live-v2 .pt-fees{
+  margin:0 0 8px!important;border-radius:12px!important;background:#0a1118!important;border-color:#192531!important
+ }
+ body.oa-live-v2 .pt-fees-sum{min-height:38px!important;padding:8px 11px!important;font-size:11px!important}
+ body.oa-live-v2 .pt-slide{
+  margin:0!important;min-height:60px!important;height:60px!important;border-radius:17px!important;
+  background:#0c131b!important;border-color:#233140!important
+ }
+ body.oa-live-v2 .pt-slide-knob{top:5px!important;left:5px!important;width:48px!important;height:48px!important}
+ body.oa-live-v2 .pt-slide .pt-slide-label{font-size:14px!important}
+}
+
+@media(max-width:767px) and (max-height:720px){
+ body.oa-live-v2 .pt-sheet{grid-template-rows:auto auto minmax(100px,1fr) auto minmax(184px,31vh) auto!important}
+ body.oa-live-v2 #pt-keys,body.oa-live-v2 .pt-keys{min-height:184px!important;max-height:31vh!important}
+ body.oa-live-v2 .pt-key{min-height:39px!important;font-size:21px!important}
+ body.oa-live-v2 .pt-sheet-img,body.oa-live-v2 .pt-sheet-img-ph{width:42px!important;height:42px!important}
+ body.oa-live-v2 .pt-sheet-hd{padding-top:6px!important;padding-bottom:8px!important}
+ body.oa-live-v2 .pt-sheet-amt{font-size:43px!important}
+}
