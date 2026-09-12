@@ -10,7 +10,7 @@ if(path!=='/live-market') return;
    the base Live Market redesign assets without touching the scanner logic. */
 (function(){
   if(!document.querySelector('link[data-oa-live-final]')){
-    var css=document.createElement('link');css.rel='stylesheet';css.href='/static/live-market-final.css?v=1';css.dataset.oaLiveFinal='1';document.head.appendChild(css);
+    var css=document.createElement('link');css.rel='stylesheet';css.href='/static/live-market-final.css?v=2';css.dataset.oaLiveFinal='1';document.head.appendChild(css);
   }
   if(!document.querySelector('script[data-oa-live-smooth]')){
     var js=document.createElement('script');js.src='/static/live-market-smooth.js?v=1';js.defer=true;js.dataset.oaLiveSmooth='1';document.head.appendChild(js);
