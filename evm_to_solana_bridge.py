@@ -20,7 +20,14 @@ This module installs two narrow adapters after dashboard has fully imported:
 2. The existing bridge continuation delegates every EVM destination to the
    original implementation. For dest_chain='solana' it re-reads the REAL
    Solana USDC balance after settlement and invokes the shared Solana/Jupiter
-   buy flow with at most the originally requested amount.
+   buy flow with at most the amount that was actually budgeted for the bridge.
+
+The number the user entered remains a spend CEILING. Source-chain gas is
+priced with the application's existing USD gas estimator and reserved from
+that ceiling before any USDC is bridged. 0x bridge fees/slippage then come out
+of the bridged amount, and Jupiter buys only with what really arrived. The
+reverse route therefore never deliberately moves `amount + 5%` or adds a
+platform-funded cost on top of what the user entered.
 
 No platform prefunding is introduced here. An EVM source that needs sponsored
 native gas is skipped, and the existing bridge executor has its own EVM gas
@@ -99,34 +106,65 @@ def _source_needs_sponsored_gas(appmod, chain: str, evm_address: str) -> bool:
         return True
 
 
-def _pick_evm_source(appmod, evm_address: str, needed_usdc: float) -> Optional[Tuple[str, str, float]]:
-    """Pick the richest EVM source that can pay BOTH the funds and its own gas.
+def _source_gas_budget_usd(appmod, chain: str) -> Optional[float]:
+    """Reserve source gas *inside* the amount the user entered.
 
-    Solana is deliberately not a candidate: this module exists only for the
-    reverse direction EVM -> Solana. EVM_CHAINS holds the on-chain stablecoin
-    address for every supported EVM network (USDG on Robinhood underneath,
-    while the user-facing amount remains USDC).
+    _te_gas_usd is the application's existing live native-gas-to-USD estimate.
+    A bridge may need a little more gas than a plain swap, so reserve 25% above
+    that estimate. If gas cannot be priced we refuse to auto-bridge rather than
+    silently let an unpriced cost escape the user's ceiling.
     """
-    if not evm_address:
+    estimator = getattr(appmod, '_te_gas_usd', None)
+    if estimator is None:
         return None
-    buffer_pct = float(getattr(appmod, '_AUTO_BRIDGE_BUFFER_PCT', 0.05) or 0.05)
-    needed_with_buffer = float(needed_usdc) * (1.0 + buffer_pct)
+    try:
+        estimate = float(estimator(chain))
+    except Exception as exc:
+        print(f'[evm->solana] {chain} gas price could not be estimated: {exc}', flush=True)
+        return None
+    if not (estimate >= 0):
+        return None
+    return estimate * 1.25
+
+
+def _pick_evm_source(appmod, evm_address: str, max_spend_usd: float) \
+        -> Optional[Tuple[str, str, float, float, float]]:
+    """Pick an EVM source that fits the user's all-in spend ceiling.
+
+    Returns (chain, token, balance, bridge_amount, gas_budget_usd). Solana is
+    deliberately not a candidate: this module exists only for EVM -> Solana.
+    The bridge amount is `max_spend_usd - reserved source gas`; 0x's own bridge
+    fee/slippage comes out of that amount, never on top of it.
+    """
+    if not evm_address or not (float(max_spend_usd) > 0):
+        return None
     candidates = []
+    min_bridge = float(getattr(appmod, 'SOLANA_MIN_SPEND_USDC', 1.0) or 1.0)
     for chain, cfg in getattr(appmod, 'EVM_CHAINS', {}).items():
+        if _source_needs_sponsored_gas(appmod, chain, evm_address):
+            print(f'[evm->solana] skipping {chain}: source wallet cannot pay its own bridge gas', flush=True)
+            continue
+        gas_budget = _source_gas_budget_usd(appmod, chain)
+        if gas_budget is None:
+            continue
+        bridge_amount = float(max_spend_usd) - gas_budget
+        if bridge_amount + 1e-9 < min_bridge:
+            continue
         try:
             balance = float(appmod.get_evm_usdc_balance(evm_address, chain))
         except Exception as exc:
             print(f'[evm->solana] {chain} balance check failed: {exc}', flush=True)
             continue
-        if balance + 1e-9 < needed_with_buffer:
-            continue
-        if _source_needs_sponsored_gas(appmod, chain, evm_address):
-            print(f'[evm->solana] skipping {chain}: source wallet cannot pay its own bridge gas', flush=True)
+        if balance + 1e-9 < bridge_amount:
             continue
         token = (cfg or {}).get('usdc')
         if token:
-            candidates.append((chain, token, balance))
-    return max(candidates, key=lambda item: item[2]) if candidates else None
+            candidates.append((chain, token, balance, bridge_amount, gas_budget))
+    if not candidates:
+        return None
+    # Prefer the route leaving the largest amount available for the actual buy;
+    # balance is the tie-breaker so we do not drain a smaller wallet first.
+    return max(candidates, key=lambda item: (item[3], item[2]))
 
 
 def _mark_auto_buy(appmod, bridge_id: int, status: str, result: Dict[str, Any]) -> None:
@@ -155,8 +193,8 @@ def _solana_auto_buy_after_bridge(appmod, bridge_id: int, user_id: int, wallet: 
             })
             return
 
-        # Never trust the bridge quote/output as spendable funds. The same
-        # rule as the existing EVM continuation: re-read what actually landed.
+        # Never trust the bridge quote/output as spendable funds. Re-read what
+        # really landed, then spend at most the bridge budget attached to row.
         solana_usdc = float(appmod._get_solana_usdc_balance(trading_wallet))
         spend = min(float(requested_usdc or 0), solana_usdc)
         min_spend = float(getattr(appmod, 'SOLANA_MIN_SPEND_USDC', 1.0) or 1.0)
@@ -196,9 +234,9 @@ def _solana_auto_buy_after_bridge(appmod, bridge_id: int, user_id: int, wallet: 
         if 'is_copy' in supported:
             kwargs['is_copy'] = False
 
-        # _solana_buy_flow is an internal flow, not an HTTP endpoint, and can
-        # return either a Flask response or (response,status). make_response
-        # normalises both without inventing a second Jupiter implementation.
+        # _solana_buy_flow is the already-tested Jupiter path. Reusing it keeps
+        # trade recording, fee bundling, copy triggers and risk state in one
+        # implementation instead of manufacturing a second swap path here.
         with appmod.app.app_context():
             rv = flow(wallet, token_address, **kwargs)
             response = appmod.app.make_response(rv)
@@ -272,10 +310,10 @@ def install(appmod) -> None:
         token_address = str(req.get('token_address') or '').strip()
         raw_amount = req.get('amount_usdc', req.get('amount_sol'))
         try:
-            requested = float(raw_amount)
+            max_spend = float(raw_amount)
         except (TypeError, ValueError):
             return response
-        if not wallet or not token_address or not (requested > 0):
+        if not wallet or not token_address or not (max_spend > 0):
             return response
 
         row = _user_row(appmod, wallet)
@@ -290,22 +328,23 @@ def install(appmod) -> None:
                 'dest_chain': 'solana'
             })
 
-        source = _pick_evm_source(appmod, evm_address, requested)
+        source = _pick_evm_source(appmod, evm_address, max_spend)
         if not source:
-            # Keep the original, accurate Solana shortfall response. Either no
-            # EVM chain has enough or every funded one lacks its own bridge gas.
+            # Keep the original accurate Solana shortfall response. Either no
+            # EVM chain can fit the all-in ceiling or a funded chain cannot pay
+            # its own gas without sponsorship.
             return response
 
-        source_chain, source_token, _balance = source
-        buffer_pct = float(getattr(appmod, '_AUTO_BRIDGE_BUFFER_PCT', 0.05) or 0.05)
-        bridge_amount = requested * (1.0 + buffer_pct)
+        source_chain, source_token, _balance, bridge_amount, gas_budget = source
         ok, msg_or_tx, bridge_id = appmod._execute_cross_chain_bridge(
             user_id, wallet,
             source_chain, 'solana', source_token, appmod.USDC_MINT,
             bridge_amount,
             initiated_by='auto_buy',
             auto_buy_token_address=token_address,
-            auto_buy_requested_usdc=requested,
+            # This is the amount allowed to reach Jupiter, not the larger
+            # number typed before source gas was reserved from the ceiling.
+            auto_buy_requested_usdc=bridge_amount,
         )
         if not ok or not bridge_id:
             print(f'[evm->solana] automatic bridge from {source_chain} could not start: {msg_or_tx}', flush=True)
@@ -316,8 +355,9 @@ def install(appmod) -> None:
             }), 400
 
         print(
-            f'[evm->solana] auto-buy bridge row {bridge_id}: {source_chain} -> solana '
-            f'for requested ${requested:.2f}', flush=True
+            f'[evm->solana] auto-buy bridge row {bridge_id}: {source_chain} -> solana; '
+            f'ceiling=${max_spend:.2f}, gas-reserve=${gas_budget:.2f}, '
+            f'bridge=${bridge_amount:.2f}', flush=True
         )
         return appmod.jsonify({
             'ok': True, 'pending': True, 'bridge_id': int(bridge_id),
