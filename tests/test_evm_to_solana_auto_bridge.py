@@ -2,10 +2,10 @@
 
 This feature deliberately extends the existing bridge state machine instead
 of adding a second provider/ledger. These checks protect the boundaries that
-matter when real money moves: source gas belongs to the user, an in-flight
-move is never duplicated, settlement is followed by a fresh destination
-balance read, and every old EVM destination still delegates to the original
-continuation unchanged.
+matter when real money moves: the entered amount remains an all-in ceiling,
+source gas belongs to the user, an in-flight move is never duplicated,
+settlement is followed by a fresh destination balance read, and every old EVM
+destination still delegates to the original continuation unchanged.
 """
 import pathlib
 import types
@@ -28,9 +28,9 @@ check('the extension reuses the existing cross-chain executor rather than a new 
       and 'requests.post(' not in SRC and 'requests.get(' not in SRC)
 check('Solana is the real bridge destination and its actual USDC mint is passed to the executor',
       "source_chain, 'solana', source_token, appmod.USDC_MINT" in SRC)
-check('the original buy is attached to the bridge row for settlement-time continuation',
+check('the buy is attached to the bridge row for settlement-time continuation',
       'auto_buy_token_address=token_address' in SRC
-      and 'auto_buy_requested_usdc=requested' in SRC)
+      and 'auto_buy_requested_usdc=bridge_amount' in SRC)
 check('a repeated click reuses an already pending/processing reverse bridge',
       "auto_buy_status IN ('pending','processing')" in SRC
       and '_existing_pending_bridge' in SRC)
@@ -40,9 +40,16 @@ check('source selection is EVM-only and requires the user wallet to fund its own
 check('the extension never invokes a sponsor or gas top-up action',
       '_sponsor_evm_gas(' not in SRC and '_sponsor_solana_gas(' not in SRC
       and '_ensure_evm_gas(' not in SRC and '_ensure_solana_gas(' not in SRC)
+check('source gas is priced with the existing live USD estimator',
+      '_te_gas_usd' in SRC and '_source_gas_budget_usd' in SRC)
+check('source gas is reserved from, never added on top of, the entered ceiling',
+      'bridge_amount = float(max_spend_usd) - gas_budget' in SRC
+      and 'requested * (1.0 + ' not in SRC)
+check('0x receives only that reduced bridge amount',
+      "source_chain, 'solana', source_token, appmod.USDC_MINT,\n            bridge_amount" in SRC)
 check('after settlement the REAL Solana USDC balance is re-read',
       '_get_solana_usdc_balance(trading_wallet)' in SRC)
-check('the post-bridge purchase can never exceed the originally requested amount',
+check('the post-bridge purchase can never exceed the amount budgeted for the bridge',
       'min(float(requested_usdc or 0), solana_usdc)' in SRC)
 check('the reverse continuation requires user-owned SOL gas before invoking Jupiter flow',
       '_get_user_sol(trading_wallet)' in SRC and 'SOL_NETWORK_RESERVE' in SRC
@@ -67,14 +74,15 @@ check('every process launcher serves app_entry:app',
       'app_entry:app' in PROC and 'app_entry:app' in START and 'app_entry:app' in SERVICE)
 
 # Exercise the source picker without importing dashboard.py or touching a
-# network. The richest funded chain wins, a source requiring sponsored gas is
-# excluded, and Solana is never even considered.
+# network. The route with the best amount left after its gas reserve wins, a
+# source requiring sponsored gas is excluded, and Solana is never considered.
 import evm_to_solana_bridge as ext  # noqa: E402
 
 balances = {'bsc': 120.0, 'base': 180.0, 'arbitrum': 160.0}
 needs_sponsor = {'bsc': False, 'base': True, 'arbitrum': False}
+gas_usd = {'bsc': 0.40, 'base': 0.20, 'arbitrum': 0.30}
 fake = types.SimpleNamespace(
-    _AUTO_BRIDGE_BUFFER_PCT=0.05,
+    SOLANA_MIN_SPEND_USDC=1.0,
     EVM_CHAINS={
         'bsc': {'usdc': 'BSC_USDC'},
         'base': {'usdc': 'BASE_USDC'},
@@ -82,19 +90,24 @@ fake = types.SimpleNamespace(
     },
     get_evm_usdc_balance=lambda _addr, chain: balances[chain],
     _te_needs_sponsored_gas=lambda chain, _addr: needs_sponsor[chain],
+    _te_gas_usd=lambda chain: gas_usd[chain],
 )
 source = ext._pick_evm_source(fake, '0xabc', 100.0)
-check('a richer chain that needs platform-sponsored gas is skipped',
-      source == ('arbitrum', 'ARB_USDC', 160.0))
+# Base would leave $99.75 but needs sponsored gas and is therefore forbidden.
+# Arbitrum reserves $0.375 (0.30 * 1.25), leaving $99.625 for the bridge.
+check('a richer route that needs platform-sponsored gas is skipped',
+      source == ('arbitrum', 'ARB_USDC', 160.0, 99.625, 0.375))
+check('the bridge plus reserved source gas never exceeds the entered ceiling',
+      abs(source[3] + source[4] - 100.0) < 1e-9)
 
-balances['arbitrum'] = 104.99  # below the 5% bridge-buffer requirement
+balances['arbitrum'] = 99.50  # below its $99.625 bridge budget
 source2 = ext._pick_evm_source(fake, '0xabc', 100.0)
-check('the source must cover the requested buy plus the existing bridge buffer',
-      source2 == ('bsc', 'BSC_USDC', 120.0))
+check('a source must actually hold the USDC amount left after reserving its gas',
+      source2 == ('bsc', 'BSC_USDC', 120.0, 99.5, 0.5))
 
 needs_sponsor['bsc'] = True
 source3 = ext._pick_evm_source(fake, '0xabc', 100.0)
 check('no source is returned when every sufficiently funded EVM chain needs sponsored gas',
       source3 is None)
 
-print('\n19/19 checks passed')
+print('\n23/23 checks passed')
