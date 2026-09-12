@@ -6,8 +6,8 @@ if(path!=='/live-market') return;
 (function(){
   if(!document.querySelector('link[data-oa-live-final]')){var css=document.createElement('link');css.rel='stylesheet';css.href='/static/live-market-final.css?v=3';css.dataset.oaLiveFinal='1';document.head.appendChild(css)}
   if(!document.querySelector('script[data-oa-live-smooth]')){var js=document.createElement('script');js.src='/static/live-market-smooth.js?v=1';js.defer=true;js.dataset.oaLiveSmooth='1';document.head.appendChild(js)}
-  if(!document.querySelector('script[data-oa-goldline]')){var gl=document.createElement('script');gl.src='/static/live-market-goldline.js?v=2';gl.defer=true;gl.dataset.oaGoldline='1';document.head.appendChild(gl)}
-  if(!document.querySelector('script[data-oa-live-hotfix]')){var hf=document.createElement('script');hf.src='/static/live-market-hotfix.js?v=4';hf.defer=true;hf.dataset.oaLiveHotfix='1';document.head.appendChild(hf)}
+  if(!document.querySelector('script[data-oa-goldline]')){var gl=document.createElement('script');gl.src='/static/live-market-goldline.js?v=3';gl.defer=true;gl.dataset.oaGoldline='1';document.head.appendChild(gl)}
+  if(!document.querySelector('script[data-oa-live-hotfix]')){var hf=document.createElement('script');hf.src='/static/live-market-hotfix.js?v=5';hf.defer=true;hf.dataset.oaLiveHotfix='1';document.head.appendChild(hf)}
 })();
 document.documentElement.classList.add('oa-live-v2-root');
 function ready(fn){if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fn);else fn()}
