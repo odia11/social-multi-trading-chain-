@@ -6,18 +6,33 @@ function sameOriginUrl(href){try{var u=new URL(href,location.href);if(u.origin!=
 function navCandidate(a){if(!a||!a.href||a.hasAttribute('download')||(a.target&&a.target!=='_self'))return null;var u=sameOriginUrl(a.href);if(!u)return null;if(u.pathname.indexOf('/api/')===0)return null;if(/^javascript:/i.test(a.getAttribute('href')||''))return null;if(u.pathname===location.pathname&&u.search===location.search)return null;return u}
 function prefetch(a){var u=navCandidate(a);if(!u)return;var key=u.pathname+u.search;if(prefetched.has(key))return;prefetched.add(key);var l=document.createElement('link');l.rel='prefetch';l.href=u.pathname+u.search;l.as='document';document.head.appendChild(l)}
 function closestLink(e){var n=e.target;return n&&n.closest?n.closest('a[href]'):null}
-['pointerover','touchstart','focusin'].forEach(function(type){document.addEventListener(type,function(e){prefetch(closestLink(e))},{passive:true,capture:true})});
 
-/* Warm the pages users are most likely to open next. Slow/data-saver
-   connections are deliberately excluded. Existing page-loader.js remains the
-   only navigation progress UI, so there is no duplicate loader. */
-function idlePrefetch(){var c=navigator.connection||navigator.mozConnection||navigator.webkitConnection;if(c&&(c.saveData||/2g/.test(c.effectiveType||'')))return;['/','/live-market','/wallet','/groups','/bot','/messages','/notifications'].forEach(function(h){var a=document.createElement('a');a.href=h;prefetch(a)})}
-if('requestIdleCallback'in window)requestIdleCallback(idlePrefetch,{timeout:2400});else setTimeout(idlePrefetch,1600);
+/* Warm only the page the user is actually showing intent to open. The old
+   idle routine fetched seven authenticated HTML pages after every navigation,
+   which competed with the page's own API calls on the single app worker and
+   made "prefetching" feel like lag. Touch/hover/focus gives us the useful
+   part of prefetching without background-loading the whole product. */
+['pointerover','touchstart','focusin'].forEach(function(type){document.addEventListener(type,function(e){prefetch(closestLink(e))},{passive:true,capture:true})});
 
 /* Images below the first viewport should not delay initial rendering. Keep
    explicitly eager images (logo/hero/token immediately visible) untouched. */
-function tuneImage(img){if(!img||img.dataset.oaImgTuned==='1')return;img.dataset.oaImgTuned='1';if(!img.hasAttribute('decoding'))img.decoding='async';if(!img.hasAttribute('loading')&&!img.closest('.pt-nb-topbar,.oa-m-hero,.pf-hero,.pt-sheet'))img.loading='lazy'}
+function tuneImage(img){
+  if(!img||img.dataset.oaImgTuned==='1')return;
+  img.dataset.oaImgTuned='1';
+  if(!img.hasAttribute('decoding'))img.decoding='async';
+  var aboveFold=!!img.closest('.pt-nb-topbar,.oa-m-hero,.pf-hero,.pt-sheet');
+  if(!img.hasAttribute('loading')&&!aboveFold)img.loading='lazy';
+  if(!aboveFold&&!img.hasAttribute('fetchpriority')){
+    try{img.fetchPriority='low'}catch(_){ }
+  }
+}
 function tuneTree(root){if(root&&root.matches&&root.matches('img'))tuneImage(root);if(root&&root.querySelectorAll)root.querySelectorAll('img').forEach(tuneImage)}
+
+/* Stop decorative CSS animation work while Safari/iOS has the page hidden.
+   Polling/data code remains owned by each page; this only saves paint work. */
+function syncVisibility(){document.documentElement.classList.toggle('oa-page-hidden',document.hidden)}
+document.addEventListener('visibilitychange',syncVisibility,{passive:true});
+syncVisibility();
 
 /* Generic mobile modal lock. Old pages use several modal conventions: some
    toggle .open, others set display:flex directly. They now all freeze the
