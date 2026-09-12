@@ -86,13 +86,14 @@ document.addEventListener('DOMContentLoaded',function(){
   document.querySelectorAll('.pt-nb-disconnect-btn').forEach(function(disconnectBtn){disconnectBtn.addEventListener('click',function(){if(typeof window.disconnectWallet==='function'){window.disconnectWallet();return}fetch('/api/logout',{method:'POST',credentials:'include'}).catch(function(){}).finally(function(){window.location.href='/'})})});
   document.addEventListener('click',function(e){if(moreDd&&moreDd.classList.contains('open')&&!e.target.closest('.pt-nb-more-wrap'))moreDd.classList.remove('open');if(searchRes&&searchRes.classList.contains('open')&&!e.target.closest('.pt-nb-search-wrap'))searchRes.classList.remove('open')});
   var _searchTimer=null,_searchSeq=0;
-  var searchHome=searchWrap&&searchWrap.parentNode,searchNext=searchWrap&&searchWrap.nextSibling;
+  var searchHome=searchWrap&&searchWrap.parentNode,searchNext=searchWrap&&searchWrap.nextSibling,searchPortal=null;
   function openMobileSearch(){
     if(!searchWrap||!window.matchMedia('(max-width:767px)').matches)return;
     // A fixed child of the sticky/backdrop-filter navbar uses that navbar as
     // its containing block on iOS. Portal it to body so inset:0 really means
     // the viewport instead of starting in the navbar's second grid column.
-    if(searchWrap.parentNode!==document.body)document.body.appendChild(searchWrap);
+    if(!searchPortal){searchPortal=document.createElement('div');searchPortal.id='pt-nb-search-portal';document.documentElement.appendChild(searchPortal)}
+    if(searchWrap.parentNode!==searchPortal)searchPortal.appendChild(searchWrap);
     searchWrap.classList.add('mobile-search-open');document.body.classList.add('oa-search-open');
     setTimeout(function(){searchIn.focus()},0)
   }
@@ -100,6 +101,7 @@ document.addEventListener('DOMContentLoaded',function(){
     if(!searchWrap)return;
     searchWrap.classList.remove('mobile-search-open');document.body.classList.remove('oa-search-open');if(searchRes)searchRes.classList.remove('open');searchIn.blur();
     if(searchHome){if(searchNext&&searchNext.parentNode===searchHome)searchHome.insertBefore(searchWrap,searchNext);else searchHome.appendChild(searchWrap)}
+    if(searchPortal){searchPortal.remove();searchPortal=null}
   }
   if(searchIn){searchIn.addEventListener('focus',openMobileSearch);searchIn.addEventListener('click',openMobileSearch);searchIn.addEventListener('input',function(){var q=searchIn.value.trim();clearTimeout(_searchTimer);if(q.length<2){if(searchRes){searchRes.innerHTML='<div class="pt-nb-sr-empty">Type at least 2 characters</div>';searchRes.classList.toggle('open',!!q)}return}if(searchRes){searchRes.innerHTML='<div class="pt-nb-sr-empty">Searching…</div>';searchRes.classList.add('open')}_searchTimer=setTimeout(function(){runSearch(q)},250)})}
   if(searchClose)searchClose.addEventListener('click',closeMobileSearch);
