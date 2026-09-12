@@ -2,6 +2,13 @@
 (function(){
 'use strict';
 
+// Shared across routes; do not restrict this to Home or portrait widths.
+if(!document.getElementById('oa-scroll-guard')){
+  var guard=document.createElement('script');guard.id='oa-scroll-guard';
+  guard.src='/static/mobile-overscroll-guard.js?v=2';
+  document.head.appendChild(guard);
+}
+
 (function(){
   if(location.pathname.replace(/\/+$/,'')!=='/wallet') return;
   document.documentElement.classList.add('oa-pf-boot');
@@ -22,7 +29,6 @@
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/'||!window.matchMedia('(max-width:767px)').matches)return;
   var css=document.createElement('link');css.rel='stylesheet';css.href='/static/home-mobile.css?v=4';document.head.appendChild(css);
-  var guard=document.createElement('script');guard.src='/static/mobile-overscroll-guard.js?v=1';guard.defer=true;document.head.appendChild(guard);
   var js=document.createElement('script');js.src='/static/home-mobile.js?v=3';js.defer=true;document.head.appendChild(js);
 })();
 
