@@ -17469,7 +17469,8 @@ def _redeem_device_token(token: str) -> tuple:
             conn.close()
     except Exception as e:
         print(f'[device-session] redeem failed: {e}', flush=True)
-        return '', ''
+        # Storage outages are retryable, not a refusal of the credential.
+        raise
 
 
 def _revoke_device_tokens(wallet: str) -> None:
@@ -17768,17 +17769,25 @@ def api_session_resume():
     token itself is the credential.
     """
     body = request.json or {}
-    # Prefer the explicit legacy/localStorage credential, then fall back to
-    # the HttpOnly recovery cookie.  This lets existing users migrate without
-    # reconnecting and keeps recovery working when Safari evicts localStorage.
-    token = str(body.get('token', '')).strip() or request.cookies.get(DEVICE_COOKIE_NAME, '').strip()
-    if not token:
-        # Worth its own line: "the browser had nothing to offer" and "what it
-        # offered was refused" are different problems with the same symptom,
-        # and telling them apart is most of the work.
-        print('[device-session] a browser asked to resume with no remembered '
-              'login stored', flush=True)
-    wallet, new_token = _redeem_device_token(token)
+    # A stale localStorage token must not hide a valid HttpOnly cookie.
+    # Preserve explicit-token precedence when both credentials are valid.
+    candidates = list(dict.fromkeys(t for t in (
+        str(body.get('token', '')).strip(),
+        request.cookies.get(DEVICE_COOKIE_NAME, '').strip(),
+    ) if t))
+    wallet, new_token = '', ''
+    try:
+        for token in candidates:
+            wallet, new_token = _redeem_device_token(token)
+            if wallet:
+                break
+    except Exception:
+        # The browser must retain its credential and retry after a restart or
+        # database lock, rather than treating it as a permanently dead login.
+        response = jsonify({'ok': False, 'msg': 'Session recovery temporarily unavailable'})
+        response.status_code = 503
+        response.headers['Retry-After'] = '3'
+        return response
     if not wallet:
         # Deliberately one answer for expired, revoked, unknown and malformed.
         return jsonify({'ok': False, 'msg': 'This device is no longer remembered'}), 401
