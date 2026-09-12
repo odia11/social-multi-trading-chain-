@@ -34,7 +34,6 @@ def install(appmod) -> None:
       .wlt-usdc-guide-title{font-size:13px;font-weight:700;color:#eef1f5;margin-bottom:4px}
       .wlt-usdc-guide-copy{font-size:11.5px;line-height:1.55;color:#8a919c}
       .wlt-usdc-guide-copy strong{color:#eef1f5;font-weight:650}
-      .wlt-usdc-guide-fees{margin-top:6px;color:#6f7783}
       @media(max-width:720px){
         .wlt-usdc-guide{padding:14px;gap:10px;border-radius:14px}
         .wlt-usdc-guide-copy{font-size:11px}
@@ -43,14 +42,9 @@ def install(appmod) -> None:
     <div class="wlt-usdc-guide" role="note" aria-label="How USDC deposits work">
       <div class="wlt-usdc-guide-ic">$</div>
       <div>
-        <div class="wlt-usdc-guide-title">Deposit USDC on any supported chain</div>
+        <div class="wlt-usdc-guide-title">Deposit USDC once. Trade tokens across all supported chains.</div>
         <div class="wlt-usdc-guide-copy">
-          Your USDC does <strong>not</strong> have to be on the same chain as the token you want to buy.
-          OrcAgent automatically routes USDC to the required chain when needed.
-          <div class="wlt-usdc-guide-fees">
-            <strong>USDC = trading balance.</strong> SOL, ETH, BNB and POL are only used for network fees.
-            Bridge and network costs are handled as part of the transaction; a network may still require its native gas balance to submit the route.
-          </div>
+          Deposit USDC on any supported chain. OrcAgent automatically routes it to the chain you trade on when needed. Bridge and network costs are handled as part of the transaction.
         </div>
       </div>
     </div>
