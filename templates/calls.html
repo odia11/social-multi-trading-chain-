@@ -213,28 +213,35 @@ html,body{min-height:100vh;background:var(--bg);font-family:var(--ui);color:var(
 
 @media(max-width:900px){.calls-layout{grid-template-columns:1fr 290px}}
 @media(max-width:767px){
+  body.oa-calls-page .pt-nb-topbar{display:grid!important;grid-template-columns:auto minmax(36px,1fr) auto!important;align-items:center!important;gap:8px!important;padding:10px 13px!important;flex-wrap:nowrap!important}
+  body.oa-calls-page .pt-nb-logo{grid-column:1!important;gap:8px!important}body.oa-calls-page .pt-nb-logo-mark{width:37px!important;height:37px!important;border-radius:11px!important}body.oa-calls-page .pt-nb-wordmark{display:block!important;font-size:17px!important}
+  body.oa-calls-page .pt-nb-menu-btn,body.oa-calls-page .pt-nb-nav{display:none!important}
+  body.oa-calls-page .pt-nb-search-wrap{grid-column:2!important;grid-row:1!important;order:0!important;justify-self:end!important;flex-basis:auto!important;width:36px!important;height:36px!important;margin:0!important}
+  body.oa-calls-page .pt-nb-search{width:36px!important;height:36px!important;padding:0!important;border-radius:11px!important;color:transparent!important;caret-color:transparent!important;cursor:pointer!important}body.oa-calls-page .pt-nb-search::placeholder{color:transparent!important}body.oa-calls-page .pt-nb-search-icon{left:50%!important;transform:translate(-50%,-50%)!important;color:#dce2e9!important}
+  body.oa-calls-page .pt-nb-right{grid-column:3!important;grid-row:1!important;gap:7px!important;margin:0!important}body.oa-calls-page .pt-nb-sol-chip{display:none!important}body.oa-calls-page .pt-nb-icon-btn{width:36px!important;height:36px!important;border-radius:11px!important}body.oa-calls-page .pt-nb-avatar{width:36px!important;height:36px!important;border:2px solid rgba(247,185,85,.5)!important}
+  body.oa-calls-page .pt-nb-search-wrap:focus-within{position:fixed!important;inset:0!important;width:auto!important;height:100dvh!important;z-index:1600!important;display:block!important;padding:calc(14px + env(safe-area-inset-top,0px)) 14px!important;background:rgba(5,11,17,.985)!important}
+  body.oa-calls-page .pt-nb-search-wrap:focus-within .pt-nb-search{width:100%!important;height:48px!important;padding:0 14px 0 42px!important;color:#eef1f5!important;caret-color:#f7b955!important;cursor:text!important}body.oa-calls-page .pt-nb-search-wrap:focus-within .pt-nb-search-icon{left:30px!important;top:calc(14px + env(safe-area-inset-top,0px) + 24px)!important;transform:none!important}body.oa-calls-page .pt-nb-search-wrap:focus-within .pt-nb-search-results{top:calc(70px + env(safe-area-inset-top,0px))!important;left:14px!important;right:14px!important;max-height:calc(100dvh - 90px)!important}
   .page{padding:14px 13px 124px}
   .calls-hero{padding:20px 18px 21px;border-radius:18px;margin-bottom:13px;min-height:122px}
-  .calls-hero-copy{max-width:78%}.page-eyebrow{display:none}.page-title{font-size:25px}.page-sub{font-size:11px;max-width:270px;line-height:1.4}.live-badge{padding:5px 8px;font-size:9px;position:absolute;top:0;right:0}.calls-hero-art{width:150px;height:150px;right:-37px;top:-36px;opacity:.52}.calls-hero-slogan{display:none}
+  .calls-hero-copy{max-width:none}.page-eyebrow{display:none}.page-title{font-size:23px;white-space:nowrap;padding-right:70px}.page-sub{font-size:11px;max-width:250px;line-height:1.4}.live-badge{padding:5px 8px;font-size:9px;position:absolute;top:0;right:0}.calls-hero-art{width:138px;height:138px;right:-35px;top:-29px;opacity:.48}.calls-hero-slogan{display:none}
   .calls-layout{display:flex;flex-direction:column;gap:13px}
   .calls-side{position:static;order:1;width:100%}.calls-main{order:2;width:100%}
   .calls-panel{padding:13px;border-radius:16px}
   .call-box{padding:15px;border-radius:16px}.call-box-help{margin-bottom:12px}
-  .call-input-row{grid-template-columns:minmax(0,1fr) 86px;gap:7px}.call-input,.call-btn{height:44px}.call-btn{padding:0 12px}
-  .call-dropdown{left:15px;right:15px;top:104px}
+  .call-input-row{grid-template-columns:1fr;gap:8px}.call-input,.call-btn{height:44px}.call-btn{width:100%;padding:0 12px}
+  .call-dropdown{left:15px;right:15px;top:156px}
   .calls-how{display:none}
   .section-head{align-items:center;margin-bottom:10px}.section-head-copy p{display:none}
   .calls-tabs{flex-shrink:0}.calls-tab{min-width:45px;padding:7px 10px}
-  .podium-wrap{gap:7px;margin-bottom:15px}
-  .podium-card{border-radius:14px;padding:10px 11px!important}.podium-card.p1{background:linear-gradient(100deg,rgba(247,185,85,.11),#0c131a)}
-  .podium-rank{min-width:27px;height:27px;margin:0}.podium-card .podium-tile,.podium-card.p1 .podium-tile{width:38px;height:38px;border-radius:10px}
-  .podium-card .podium-like{display:none}.podium-card .podium-multi{font-size:17px}
+  .podium-wrap{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));align-items:stretch!important;gap:7px;margin-bottom:15px}
+  .podium-card{order:initial!important;width:auto!important;display:flex!important;flex-direction:column!important;align-items:center!important;gap:3px!important;text-align:center!important;border-radius:14px;padding:12px 5px!important}.podium-card.p1{order:2!important;background:radial-gradient(circle at 50% 0,rgba(247,185,85,.16),transparent 52%),#0c131a}.podium-card.p2{order:1!important}.podium-card.p3{order:3!important}
+  .podium-rank{min-width:27px;height:27px;margin:0 0 3px!important}.podium-card .podium-tile,.podium-card.p1 .podium-tile{width:38px;height:38px;border-radius:50%;margin:0!important}.podium-info{width:100%;min-width:0}.podium-sym,.podium-token{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.podium-card .podium-like{display:none}.podium-card .podium-multi{margin:3px 0 0!important;font-size:17px}
   .podium-price,.podium-gain{display:none}.podium-token{margin-bottom:3px}.calls-table-head{grid-template-columns:35px 38px minmax(0,1fr) 76px;gap:8px;padding:0 10px 6px;font-size:8px}
   .call-row{min-height:70px;gap:8px;padding:11px 10px}.call-rank{width:27px;height:27px;border-radius:8px}.call-avatar{width:34px;height:34px}.call-caller-meta{font-size:10px}.call-mcap{font-size:10px}.call-multi-val{font-size:15px;padding:6px}
 }
 </style>
 </head>
-<body>
+<body class="oa-calls-page">
 
 {{ navbar_html('calls') }}
 
