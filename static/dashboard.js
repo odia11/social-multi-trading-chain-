@@ -300,19 +300,18 @@ document.addEventListener('visibilitychange', function(){
 async function _resumeFromDeviceToken(){
   var t = _deviceToken();
   var res;
-  try{
-    res = await fetch('/api/session/resume', {
-      method: 'POST', credentials: 'include',
-      headers: {'Content-Type': 'application/json'},
-      // An empty body token is intentional: the server can recover from its
-      // HttpOnly remembered-login cookie when Safari removed localStorage.
-      body: JSON.stringify({token: t})
-    });
-  }catch(e){
-    // Never reached the server. The token is almost certainly still good --
-    // keep it and let the next page load try again.
-    return '';
+  for(var attempt=0; attempt<3; attempt++){
+    if(attempt) await new Promise(function(resolve){ setTimeout(resolve, attempt*1000); });
+    try{
+      res = await fetch('/api/session/resume', {
+        method: 'POST', credentials: 'include',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({token: t})
+      });
+      if(res.status !== 429 && res.status < 500) break;
+    }catch(e){ res = null; }
   }
+  if(!res) return '';
   var r = null;
   try{ r = await res.json(); }catch(e){}
   if(res.ok && r && r.ok && r.wallet){
@@ -1050,15 +1049,14 @@ async function launchApp(){
   // ── 1. Verify / silently restore server-side session ────────────
   if(phantomKey){
     try{
-      const sr = await fetch('/api/state').then(r=>r.json()).catch(()=>null);
-      if(!sr || !sr.wallet){
-        // Session expired — re-register before showing the dashboard
-        const _wp=walletType==='Phantom'?window.solana:window.solflare;
-        const wr = await _connectWalletSigned(_wp, phantomKey);
-        if(!wr?.ok && (wr?.msg==='Signature rejected'||(wr?.msg||'').startsWith('Nonce expired'))){
-          showLfToast('🔑','Sign the request in your wallet to log in — please try again','warn');
-        } else if(wr){ settingsHasKey=wr.has_trading_key||false; _isAdmin=wr.is_admin||false; _updateKeyStatus(); if(wr.csrf_token) _csrfToken=wr.csrf_token; }
-      } else {
+      const stateResponse = await fetch('/api/state');
+      const sr = await stateResponse.json().catch(()=>null);
+      if(stateResponse.status === 401){
+        // Restore the proven session first. Never open a signing prompt just
+        // because a deploy, network outage or rate limit interrupted a read.
+        const restored = await _resumeFromDeviceToken();
+        if(restored) _applySessionWallet(restored);
+      } else if(stateResponse.ok && sr && sr.wallet){
         // Pick up any server-side flag changes (key uploaded from another tab, etc.)
         if(typeof sr.is_admin==='boolean') _isAdmin=sr.is_admin;
         if(typeof sr.has_trading_key==='boolean'){ settingsHasKey=sr.has_trading_key; _updateKeyStatus(); }
@@ -3254,8 +3252,20 @@ function _inDappBrowser(){ return !!(window.solana||window.solflare); }
   }
   // Checked AFTER that, so the server stays the authority: a real disconnect
   // clears the session too, and then the fetch above returns nothing anyway.
-  if(localStorage.getItem('orca_manual_disconnect') && !phantomKey){ return; }
-  if(phantomKey){ localStorage.removeItem('orca_manual_disconnect'); }
+  try{
+    if(localStorage.getItem('orca_manual_disconnect') && !phantomKey){ return; }
+    if(phantomKey){ localStorage.removeItem('orca_manual_disconnect'); }
+  }catch(e){ /* Cookie-backed sessions work when browser storage is blocked. */ }
+  // Home can start with an injected session, bypassing /api/session above.
+  // Backfill its recovery credential too (the server rejects read-only users).
+  if(phantomKey && !_deviceToken()){
+    try{
+      var remembered = await fetch('/api/session/remember', {
+        method:'POST', credentials:'include', headers:{'X-CSRF-Token':_csrfToken}
+      }).then(function(r){ return r.json(); });
+      if(remembered && remembered.ok) _storeDeviceToken(remembered.token);
+    }catch(e){}
+  }
   // Check extension wallet before using session wallet
   const phantomReady  = window.solana?.isPhantom   && window.solana?.isConnected && window.solana?.publicKey;
   const solflareReady = window.solflare?.isSolflare && window.solflare?.isConnected && window.solflare?.publicKey;
