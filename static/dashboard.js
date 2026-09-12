@@ -1899,7 +1899,12 @@ let _openMints=new Set(); // mints with open positions — drives SELL button vi
 
 // ── PUMP SCANNER ──
 async function fetchPumpScanner(){
-  if(!phantomKey){ document.getElementById('ps-panel').style.display='none'; return; }
+  // The redesigned home no longer renders the legacy pump-scanner panel.
+  // Guest mode still calls this loader, so treat the panel as an optional
+  // enhancement instead of throwing and interrupting the rest of launchApp.
+  const panel=document.getElementById('ps-panel');
+  if(!panel) return;
+  if(!phantomKey){ panel.style.display='none'; return; }
   const r=await fetch('/api/pump-scanner').then(r=>r.json()).catch(()=>null);
   if(r?.ok) renderPumpScanner(r.tokens||[]);
 }
