@@ -27089,9 +27089,9 @@ def _get_scanner_cached() -> list:
     # The scanner already receives a real USD price and the exact pool for
     # every token.  Persist that free data on every scanner refresh, not only
     # while somebody happens to have a chart visible.  This is the history
-    # source for networks for which GeckoTerminal has no OHLC endpoint (most
-    # notably Robinhood Chain), and it keeps building across page reloads and
-    # deploys without another provider or paid API.
+    # fallback for any network or brand-new pool for which GeckoTerminal has
+    # no OHLC result, and it keeps building across page reloads and deploys
+    # without another provider or paid API.
     observed_at = time.time()
     by_chain = {}
     for token in data:
@@ -27363,12 +27363,11 @@ def api_carousel():
 
 # GeckoTerminal's own network slugs -- NOT the same strings as DexScreener's
 # chainId (EVM_CHAINS[*]['dex_chain']) in every case, e.g. Polygon is
-# 'polygon_pos' here vs 'polygon' on DexScreener. Robinhood Chain has no
-# known GeckoTerminal network yet -- left unmapped so that leg of api_chart()
-# is skipped and falls straight through to the DexScreener-priceChange
-# fallback below instead of hitting a guaranteed 404 every 5 seconds.
+# 'polygon_pos' here vs 'polygon' on DexScreener. Robinhood uses the plain
+# 'robinhood' slug (the same slug visible in GeckoTerminal pool URLs).
 _GECKOTERMINAL_NETWORK = {
-    'solana': 'solana', 'bsc': 'bsc', 'base': 'base', 'arbitrum': 'arbitrum', 'polygon': 'polygon_pos',
+    'solana': 'solana', 'bsc': 'bsc', 'base': 'base', 'arbitrum': 'arbitrum',
+    'polygon': 'polygon_pos', 'robinhood': 'robinhood',
 }
 
 # How long a live price may be reused. Short, because this is the number that
@@ -27722,7 +27721,7 @@ def api_chart(mint):
 
         def _fetch_candles_for_tf(tf_key):
             if not gt_network:
-                return []  # e.g. Robinhood Chain -- no known GeckoTerminal network, skip straight to the DexScreener fallback below
+                return []  # Unknown future network: use durable observed-price history below.
             tcfg_local = _TF[tf_key]
             cache_key_local = (chain, pair_address, tf_key)
             with _chart_cache_lock:
@@ -27811,9 +27810,8 @@ def api_chart(mint):
                 break
 
         # Extend provider history with OrcAgent's own durable observations.
-        # When the provider has no coverage (notably Robinhood Chain), this is
-        # the primary history. Never fabricate bars for time ranges unseen by
-        # either source.
+        # When the provider has no coverage, this is the primary history.
+        # Never fabricate bars for time ranges unseen by either source.
         stored, stored_tf = _best_stored_market_candles(chain, pair_address, tf)
         if stored:
             if candles and tf_used == tf:
