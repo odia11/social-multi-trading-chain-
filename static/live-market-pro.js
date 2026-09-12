@@ -124,7 +124,7 @@ function closeMobileOverlays(){
 /* ── state ── */
 var ST = {
   sort: 'trending', minLiquidity: 25000, age: 'any',
-  lpLocked: false, mintRevoked: false, hideHoneypots: false, verifiedSocials: false,
+  lpLocked: false, mintRevoked: false, hideHoneypots: true, verifiedSocials: false,
   tokens: [], counts: {}
 };
 var watchSet = new Set();
