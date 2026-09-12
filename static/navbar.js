@@ -31,6 +31,12 @@
   if(here!=='/live-market')return;
   var css=document.createElement('link');css.rel='stylesheet';css.href='/static/live-market-redesign.css?v=7';document.head.appendChild(css);
   var js=document.createElement('script');js.src='/static/live-market-redesign.js?v=4';js.defer=true;document.head.appendChild(js);
+  /* Critical fixes deliberately load from navbar.js rather than from the
+     redesign chain. navbar.js itself is served with the running commit hash
+     by dashboard.py, so propagating that same version guarantees iOS cannot
+     keep an older chart/search controller after a deploy. */
+  var cur=(document.currentScript&&document.currentScript.src)||'',m=cur.match(/[?&]v=([^&]+)/),av=m?decodeURIComponent(m[1]):String(Date.now());
+  var critical=document.createElement('script');critical.src='/static/live-market-critical.js?v='+encodeURIComponent(av);critical.defer=true;document.head.appendChild(critical);
 })();
 
 (function(){
