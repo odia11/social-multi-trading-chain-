@@ -36,12 +36,6 @@ def install(appmod) -> None:
             if 'id="oa-app-ux-js"' not in html:
                 tags.append('<script id="oa-app-ux-js" src="/static/app-ux.js?v=3" defer></script>')
 
-            # The persistent mobile nav is loaded here with a cache-busted URL
-            # as well as by navbar.js. Its build guard makes this idempotent,
-            # while this early tag guarantees users immediately get the new
-            # Home / Live Market / Post / Portfolio / Menu route after deploy.
-            tags.append('<script src="/static/mobile-bottom-nav.js?v=5" defer></script>')
-
             # Font DNS/TLS setup costs are otherwise paid during first paint.
             if 'fonts.googleapis.com' in html and 'rel="preconnect" href="https://fonts.googleapis.com"' not in html:
                 tags.append('<link rel="preconnect" href="https://fonts.googleapis.com">')
@@ -62,13 +56,10 @@ def install(appmod) -> None:
                     '<link rel="preload" href="/static/live-market-redesign.js?v=5" as="script">',
                 ])
             elif path == '/':
-                # Mobile Home is now feed-first. Load the cache-busted controller
-                # directly so the composer is in place on first paint. The
-                # controller is guarded against a second load from navbar.js.
+                # CSS choice is media-specific, so the browser only downloads
+                # the variant it actually needs.
                 tags.extend([
                     '<link rel="preload" href="/static/home-mobile.css?v=4" as="style" media="(max-width:767px)">',
-                    '<link rel="stylesheet" href="/static/home-social-feed.css?v=1" media="(max-width:767px)">',
-                    '<script src="/static/home-mobile.js?v=4" defer></script>',
                     '<link rel="preload" href="/static/home-desktop.css?v=1" as="style" media="(min-width:1025px)">',
                 ])
 
