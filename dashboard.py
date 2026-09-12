@@ -17324,7 +17324,7 @@ def webauthn_login():
 # should be enough, and a deploy, a restart, or a week away should not undo
 # it. What is stored is a hash, what is handed out rotates on every use, and
 # a disconnect ends it everywhere.
-DEVICE_TOKEN_DAYS = 180
+DEVICE_TOKEN_DAYS = 3650
 
 def _hash_device_token(token: str) -> str:
     return hashlib.sha256((token or '').encode()).hexdigest()
@@ -17357,12 +17357,17 @@ def _issue_device_token(user_id: int, wallet: str) -> str:
 
 
 def _redeem_device_token(token: str) -> tuple:
-    """Exchange a remembered login for a session. Returns (wallet, new_token).
+    """Exchange a remembered login for a session. Returns (wallet, token).
 
-    Rotates: the presented token is spent and a fresh one issued. If a copy
-    has been stolen, whichever side redeems second finds a dead token and is
-    signed out — silent theft becomes a visible logout rather than two
-    sessions quietly sharing an account.
+    The token deliberately stays stable until Disconnect revokes it. Rotating
+    it here created a small but real logout window on mobile: the server
+    revoked the old token before Safari/iOS had persisted the replacement. If
+    the tab was suspended, killed or navigated in that window, the device kept
+    only a token the server had already killed. Concurrent restores could hit
+    the same race too.
+
+    Successful use extends the expiry, so an active device remains remembered.
+    This matches the product rule: only an explicit Disconnect ends a login.
 
     Returns ('', '') for anything not currently valid, without saying which
     of the reasons it was.
@@ -17396,19 +17401,13 @@ def _redeem_device_token(token: str) -> tuple:
                 print(f'[device-session] refused: expired {age_days:.1f} days after '
                       f'issue (wallet {wallet[:6]}…)', flush=True)
                 return '', ''
-            # Spend it before issuing the replacement, so a crash in between
-            # costs one login rather than leaving two valid tokens.
-            conn.execute('UPDATE device_sessions SET revoked=1 WHERE id=?', (row_id,))
-            new_token = secrets.token_urlsafe(32)
             conn.execute(
-                'INSERT INTO device_sessions (user_id, wallet, token_hash, created_at, '
-                'last_used_at, expires_at) VALUES (?,?,?,?,?,?)',
-                (user_id, wallet, _hash_device_token(new_token), now, now,
-                 now + DEVICE_TOKEN_DAYS * 86400))
+                'UPDATE device_sessions SET last_used_at=?, expires_at=? WHERE id=?',
+                (now, now + DEVICE_TOKEN_DAYS * 86400, row_id))
             conn.commit()
             print(f'[device-session] resumed {wallet[:6]}… from a remembered '
                   f'login', flush=True)
-            return wallet, new_token
+            return wallet, token
         finally:
             conn.close()
     except Exception as e:
@@ -30665,5 +30664,4 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     print('OrcAgent Dashboard running on port', port)
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
-
 
