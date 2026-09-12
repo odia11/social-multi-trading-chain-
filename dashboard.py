@@ -26869,7 +26869,7 @@ def api_market_live():
 # scanner UI's filters need, plus an on-demand safety enrichment step.
 _scanner_cache: dict = {'ts': 0.0, 'data': []}
 _scanner_lock = threading.Lock()
-_scanner_safety_cache: dict = {}  # mint -> (ts, {lp_locked_pct, mint_authority_active, freeze_authority_active})
+_scanner_safety_cache: dict = {}  # (chain,mint,include_lp) -> (ts, normalized safety result)
 _scanner_safety_lock = threading.Lock()
 _SCANNER_SAFETY_TTL = 600  # 10 min -- mint/freeze authority + LP-lock state rarely change
 _AGE_BUCKET_SECONDS = {'1h': 3600, '6h': 21600, '24h': 86400}
@@ -27110,22 +27110,78 @@ def _get_scanner_cached() -> list:
     return data
 
 
-def _scanner_get_safety(mint: str) -> dict:
+def _scanner_get_safety(mint: str, chain: str = 'solana', include_lp: bool = False) -> dict:
     now = time.time()
+    cache_key = (chain, mint.lower(), bool(include_lp))
     with _scanner_safety_lock:
-        cached = _scanner_safety_cache.get(mint)
+        cached = _scanner_safety_cache.get(cache_key)
         if cached and now - cached[0] < _SCANNER_SAFETY_TTL:
             return cached[1]
-    safety_raw = _check_mint_safety(mint)
-    lp         = _check_lp_locked(mint)
-    result = {
-        'lp_locked_pct':           float(lp.get('lp_locked_pct') or 0),
-        'mint_authority_active':   bool(safety_raw.get('mint_authority_active')),
-        'freeze_authority_active': bool(safety_raw.get('freeze_authority_active')),
-    }
+    if chain == 'solana':
+        mint_result = _check_mint_safety(mint)
+        lp = _check_lp_locked(mint) if include_lp else {}
+        result = {
+            'ok':                      bool(mint_result.get('ok')) and (not include_lp or bool(lp.get('ok'))),
+            'lp_locked_pct':           float(lp.get('lp_locked_pct') or 0),
+            'holder_concentration_risk': bool(lp.get('holder_concentration_risk')),
+            'mint_authority_active':   bool(mint_result.get('mint_authority_active')),
+            'freeze_authority_active': bool(mint_result.get('freeze_authority_active')),
+            'is_honeypot':             False,
+            'no_provider':             False,
+        }
+    else:
+        hp = _check_evm_honeypot(mint, chain)
+        result = {
+            'ok':            bool(hp.get('ok')),
+            'is_honeypot':  bool(hp.get('is_honeypot', True)),
+            'risk_level':   hp.get('risk_level'),
+            'buy_tax':      float(hp.get('buy_tax') or 0),
+            'sell_tax':     float(hp.get('sell_tax') or 0),
+            'no_provider':  bool(hp.get('no_provider')),
+            'lp_locked_pct': 0,
+            'mint_authority_active': False,
+            'freeze_authority_active': False,
+        }
     with _scanner_safety_lock:
-        _scanner_safety_cache[mint] = (time.time(), result)
+        _scanner_safety_cache[cache_key] = (time.time(), result)
     return result
+
+
+def _scanner_token_passes_scam_filter(token: dict, safety: dict) -> bool:
+    """Conservative default gate for Live Market discovery.
+
+    This removes tokens with concrete scam/rug indicators. It deliberately
+    does not promise that an unknown contract is safe: unsupported chains are
+    admitted only with substantially deeper, active two-sided liquidity.
+    """
+    liquidity = float(token.get('liquidity_usd') or 0)
+    volume = float(token.get('volume_24h') or 0)
+    buys = int(token.get('buys_24h') or 0)
+    sells = int(token.get('sells_24h') or 0)
+    total = buys + sells
+    if liquidity < 25000 or volume <= 0 or total < 20 or sells <= 0:
+        return False
+    sell_ratio = sells / total
+    if sell_ratio < 0.05 or sell_ratio > 0.95:
+        return False
+
+    chain = token.get('chain') or 'solana'
+    if chain == 'solana':
+        return bool(safety.get('ok')) \
+            and not safety.get('mint_authority_active') \
+            and not safety.get('freeze_authority_active')
+
+    if safety.get('no_provider'):
+        # No free sell simulator covers this chain yet. Unknown is not called
+        # "safe": require strong, expensive-to-fake two-sided market depth.
+        return liquidity >= 125000 and volume >= 100000 \
+            and sells >= 20 and 0.15 <= sell_ratio <= 0.85
+    if not safety.get('ok') or safety.get('is_honeypot'):
+        return False
+    if float(safety.get('buy_tax') or 0) > 15 or float(safety.get('sell_tax') or 0) > 15:
+        return False
+    risk = str(safety.get('risk_level') or '').strip().lower().replace(' ', '_')
+    return risk not in {'high', 'very_high', 'critical', 'honeypot'}
 
 
 def _scanner_score(tok: dict, safety: dict | None) -> int:
@@ -27202,13 +27258,23 @@ def api_market_scanner():
 
     filtered = [dict(t) for t in candidates if _passes_fast(t)]
 
+    # Scam filtering is ON by default. The old "hide honeypots" switch only
+    # checked whether sells were exactly zero, so obvious sell-blocking tokens
+    # with one dust sell still passed. Run the real chain-aware checks in
+    # parallel and cache them for ten minutes; cap the candidate batch so one
+    # page load cannot fan out without bound.
+    safety_subset = filtered[:45]
+    if safety_subset:
+        with ThreadPoolExecutor(max_workers=12) as ex:
+            safety_list = list(ex.map(
+                lambda t: _scanner_get_safety(t['mint'], t.get('chain') or 'solana', lp_locked),
+                safety_subset))
+        for t, s in zip(safety_subset, safety_list):
+            t['_safety'] = s
+        filtered = [t for t in safety_subset if _scanner_token_passes_scam_filter(t, t['_safety'])]
+
     if lp_locked or mint_revoked:
         subset = filtered[:40]
-        if subset:
-            with ThreadPoolExecutor(max_workers=8) as ex:
-                safety_list = list(ex.map(lambda t: _scanner_get_safety(t['mint']), subset))
-            for t, s in zip(subset, safety_list):
-                t['_safety'] = s
 
         def _passes_safety(t):
             s = t.get('_safety')
@@ -27222,8 +27288,7 @@ def api_market_scanner():
 
         filtered = [t for t in subset if _passes_safety(t)]
     else:
-        for t in filtered:
-            t['_safety'] = None
+        pass
 
     gainers_set = [t for t in filtered if t.get('price_change_24h', 0) > 0]
     new_set     = [t for t in filtered
