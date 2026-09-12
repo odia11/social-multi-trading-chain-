@@ -41,6 +41,7 @@
 .pt-nb-search:focus{border-color:#f7b955}
 .pt-nb-search::placeholder{color:#565d68}
 .pt-nb-search-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#565d68;font-size:13px;pointer-events:none}
+.pt-nb-search-close{display:none}
 .pt-nb-search-results{position:absolute;top:calc(100% + 6px);left:0;right:0;background:#101216;border:1px solid #21252c;border-top:2px solid #f7b955;border-radius:12px;max-height:340px;overflow-y:auto;z-index:280;display:none;box-shadow:0 16px 40px rgba(0,0,0,.5)}
 .pt-nb-search-results.open{display:block}
 .pt-nb-sr-hd{padding:8px 12px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#565d68}
@@ -60,6 +61,7 @@
 .pt-nb-sol-chip .dot{width:6px;height:6px;border-radius:50%;background:#f7b955}
 .pt-nb-sol-num{font-family:'JetBrains Mono',monospace}
 .pt-nb-avatar{width:34px;height:34px;border-radius:50%;background:#21252c;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#8a919c;flex-shrink:0;object-fit:cover;border:1px solid #21252c;font-family:'JetBrains Mono',monospace}
+.pt-nb-profile-link{display:flex;align-items:center;justify-content:center;border-radius:50%}
 
 .pt-nb-more-wrap{position:relative}
 .pt-nb-more-dd{display:none;position:absolute;top:calc(100% + 8px);right:0;background:#101216;border:1px solid #21252c;border-radius:13px;padding:6px;min-width:210px;max-height:calc(100vh - 90px);overflow-y:auto;z-index:280;box-shadow:0 16px 40px rgba(0,0,0,.5)}
