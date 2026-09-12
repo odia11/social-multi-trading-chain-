@@ -185,7 +185,7 @@ function renderChartSvg(idx, candles, currentPrice){
   var wrap = document.getElementById('pt-chart-wrap-'+idx);
   if(!svg || !wrap) return;
   var w = wrap.clientWidth || 300;
-  var h = 200;
+  var h = svg.clientHeight || 200;
   svg.setAttribute('viewBox', '0 0 '+w+' '+h);
 
   if(!candles || candles.length<2){
@@ -204,25 +204,24 @@ function renderChartSvg(idx, candles, currentPrice){
   var stale = wrap.querySelector('.pt-chart-empty');
   if(stale) stale.remove();
 
-  var values = candles.map(function(c){ return c.c; });
-  var min = Math.min.apply(null, values), max = Math.max.apply(null, values);
+  var values = candles.map(function(c){ return Number(c.c)||0; });
+  var lows = candles.map(function(c){ return Number(c.l!=null?c.l:c.c)||0; });
+  var highs = candles.map(function(c){ return Number(c.h!=null?c.h:c.c)||0; });
+  var min = Math.min.apply(null, lows), max = Math.max.apply(null, highs);
   if(min===max){ min = min*0.98; max = (max*1.02)||1; }
   var pad = (max-min)*0.12;
   min -= pad; max += pad;
 
-  var n = candles.length;
+  var n = candles.length, priceH = h*.77, volTop = h*.79, volH = h*.18;
   var pts = candles.map(function(c,i){
-    var x = n===1 ? 0 : (i/(n-1))*w;
-    var y = h - ((c.c-min)/(max-min))*h;
+    var x = n===1 ? 0 : (i/(n-1))*(w-46);
+    var y = priceH - ((c.c-min)/(max-min))*priceH;
     return {x:x, y:y};
   });
 
-  var linePath = buildSmoothPath(pts);
-  var areaPath = linePath + ' L'+pts[pts.length-1].x.toFixed(2)+','+h+' L'+pts[0].x.toFixed(2)+','+h+' Z';
-
   var priceVal = (currentPrice!=null && currentPrice>0) ? currentPrice : values[values.length-1];
-  var priceY = h - ((priceVal-min)/(max-min))*h;
-  priceY = Math.max(2, Math.min(h-2, priceY));
+  var priceY = priceH - ((priceVal-min)/(max-min))*priceH;
+  priceY = Math.max(3, Math.min(priceH-3, priceY));
 
   // Scrubbing (see attachScrub()) reads these off the timer state -- kept
   // in the exact same {x,y} pixel space the SVG itself was just drawn in
@@ -232,15 +231,23 @@ function renderChartSvg(idx, candles, currentPrice){
   var st = _chartTimers[idx];
   if(st){ st.pts = pts; st.candles = candles; st.min = min; st.max = max; st.h = h; st.w = w; }
 
-  var gradId = 'pt-grad-'+idx;
-  svg.innerHTML =
-      '<defs><linearGradient id="'+gradId+'" x1="0" y1="0" x2="0" y2="1">'
-    +   '<stop offset="0%" stop-color="#f7b955" stop-opacity="0.22"/>'
-    +   '<stop offset="100%" stop-color="#f7b955" stop-opacity="0"/>'
-    + '</linearGradient></defs>'
-    + '<path d="'+areaPath+'" fill="url(#'+gradId+')" stroke="none"></path>'
-    + '<line x1="0" y1="'+priceY.toFixed(2)+'" x2="'+w+'" y2="'+priceY.toFixed(2)+'" stroke="#f7b955" stroke-width="1" stroke-dasharray="3,4" opacity="0.55" vector-effect="non-scaling-stroke"></line>'
-    + '<path d="'+linePath+'" fill="none" stroke="#f7b955" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linecap="round"></path>';
+  var maxVol = Math.max.apply(null,candles.map(function(c){return Number(c.v)||0;}))||1;
+  var plotW=w-46, step=plotW/Math.max(n,1), bodyW=Math.max(2,Math.min(7,step*.62)), chartHtml='';
+  for(var gy=0;gy<5;gy++){
+    var yy=(priceH/4)*gy, label=max-((max-min)/4)*gy;
+    chartHtml+='<line x1="0" y1="'+yy.toFixed(2)+'" x2="'+plotW.toFixed(2)+'" y2="'+yy.toFixed(2)+'" stroke="#1a2530" stroke-width="1" vector-effect="non-scaling-stroke"></line>';
+    chartHtml+='<text x="'+(plotW+5).toFixed(2)+'" y="'+Math.max(10,yy+4).toFixed(2)+'" fill="#657180" font-size="9" font-family="monospace">'+fmtPrice(label).replace('$','')+'</text>';
+  }
+  candles.forEach(function(c,i){
+    var x=pts[i].x, open=Number(c.o!=null?c.o:c.c)||0, close=Number(c.c)||0, high=Number(c.h!=null?c.h:c.c)||0, low=Number(c.l!=null?c.l:c.c)||0;
+    var yo=priceH-((open-min)/(max-min))*priceH, yc=priceH-((close-min)/(max-min))*priceH, yh=priceH-((high-min)/(max-min))*priceH, yl=priceH-((low-min)/(max-min))*priceH;
+    var color=close>=open?'#3ad29b':'#f76b62', top=Math.min(yo,yc), bh=Math.max(1.5,Math.abs(yc-yo));
+    chartHtml+='<line x1="'+x.toFixed(2)+'" y1="'+yh.toFixed(2)+'" x2="'+x.toFixed(2)+'" y2="'+yl.toFixed(2)+'" stroke="'+color+'" stroke-width="1" vector-effect="non-scaling-stroke"></line>';
+    chartHtml+='<rect x="'+(x-bodyW/2).toFixed(2)+'" y="'+top.toFixed(2)+'" width="'+bodyW.toFixed(2)+'" height="'+bh.toFixed(2)+'" rx=".6" fill="'+color+'"></rect>';
+    var vh=((Number(c.v)||0)/maxVol)*volH;
+    chartHtml+='<rect x="'+(x-bodyW/2).toFixed(2)+'" y="'+(volTop+volH-vh).toFixed(2)+'" width="'+bodyW.toFixed(2)+'" height="'+vh.toFixed(2)+'" fill="'+color+'" opacity=".45"></rect>';
+  });
+  svg.innerHTML=chartHtml+'<line x1="0" y1="'+priceY.toFixed(2)+'" x2="'+plotW.toFixed(2)+'" y2="'+priceY.toFixed(2)+'" stroke="#f7b955" stroke-width="1" stroke-dasharray="4,4" opacity=".72" vector-effect="non-scaling-stroke"></line>';
 
   // Reused across renders (not removed+recreated) so the CSS `top`
   // transition on .pt-price-pill actually animates between positions
@@ -724,7 +731,7 @@ function cardHtml(t, idx){
     +     '<svg class="pt-chart-svg" id="pt-chart-svg-'+idx+'" preserveAspectRatio="none"></svg>'
     +     '<div class="pt-chart-live"><span class="pt-chart-live-dot"></span>LIVE</div>'
     +     '<div class="pt-chart-tfs" id="pt-chart-tfs-'+idx+'">'
-    +       tfPill('1m','1M') + tfPill('5m','5M', true) + tfPill('1h','1H') + tfPill('D','1D')
+    +       tfPill('1m','1M') + tfPill('5m','5M', true) + tfPill('1h','1H') + tfPill('4h','4H') + tfPill('D','1D')
     +     '</div>'
     +     '<div class="pt-chart-axis" id="pt-chart-axis-'+idx+'"></div>'
     +   '</div>'
