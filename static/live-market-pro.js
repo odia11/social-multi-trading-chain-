@@ -502,6 +502,19 @@ function mountChart(idx, mint, pairAddr, chain, seedPrice){
   if(_chartTimers[idx]) return;
   var st = {destroyed:false, mint:mint, pair:pairAddr, chain:(chain||'solana'), seedPrice:Number(seedPrice)||0, tf:'5m', timer:null};
   _chartTimers[idx] = st;
+  // Paint immediately from the real scanner price. On production, opening
+  // thirty cards can queue the history requests long enough that every chart
+  // looks blank until its timeframe is tapped. History replaces this seed as
+  // soon as it arrives; live ticks can already move it in the meantime.
+  if(st.seedPrice>0){
+    var now=Math.floor(Date.now()/1000);
+    st.price=st.seedPrice;
+    st.candles=[
+      {t:now-300,o:st.seedPrice,h:st.seedPrice,l:st.seedPrice,c:st.seedPrice,v:0},
+      {t:now,o:st.seedPrice,h:st.seedPrice,l:st.seedPrice,c:st.seedPrice,v:0}
+    ];
+    renderChartSvg(idx,st.candles,st.seedPrice);
+  }
   chartTick(idx);
   // 15s, not 5s: the server caches candles for 30 seconds, so polling every
   // five asked the same question six times for one answer. Movement comes
