@@ -13963,7 +13963,14 @@ def _evm_buy_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM'
     # min_trade_size/max_trade_size are already USDC-denominated (see
     # _migrate_trade_size_units) -- reused as-is rather than adding a
     # separate per-chain limit setting.
-    amount_usdc = max(min_size, min(max_size, amount_usdc))
+    # Never raise the amount a person entered. Silently turning (for example)
+    # 0.50 USDC into the configured 1.00 minimum violates the spend ceiling.
+    # The maximum may safely cap an oversized request; a sub-minimum request
+    # is refused so the user can choose a valid amount explicitly.
+    if amount_usdc < min_size:
+        return jsonify({'ok': False,
+                        'msg': f'Minimum trade amount is {min_size:.2f} USDC'}), 400
+    amount_usdc = min(max_size, amount_usdc)
     user_id = row[0]
 
     # Auto-bridge-then-buy: if this chain's own balance can't cover the
@@ -22893,72 +22900,30 @@ def api_token_info(mint_address):
 @app.route('/api/trade/buy', methods=['POST'])
 @rate_limit(10, 60)
 def api_trade_buy():
+    """Backward-compatible Solana buy, funded in USDC.
+
+    A few older dashboard and Live Market buttons still call this endpoint.
+    It must therefore use the same USDC-funded flow as every newer Solana
+    surface; leaving the historical SOL implementation here made the funding
+    currency depend on which button happened to be pressed.
+    """
     wallet = _authenticated_wallet()
     if not wallet:
         return jsonify({'ok': False, 'msg': 'No wallet connected'}), 401
-    data         = request.get_json(silent=True) or {}
-    mint         = _sanitize(str(data.get('token_address', '')).strip())
-    symbol       = _sanitize(str(data.get('token_symbol', '')).strip())[:20]
-    amount_sol   = data.get('amount_sol')
-    if not mint or not is_valid_solana_address(mint):
-        return jsonify({'ok': False, 'msg': 'Invalid token address'}), 400
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        row = conn.execute(
-            'SELECT id, encrypted_private_key, min_trade_size, max_trade_size FROM users WHERE wallet_address=?',
-            (wallet,)
-        ).fetchone()
-    finally:
-        conn.close()
-    if not row or not row[1]:
-        return jsonify({'ok': False, 'msg': 'No trading key configured'}), 400
-    user_id, enc_blob = row[0], row[1]
-    max_size = float(row[3]) if row[3] is not None else 10.0
-    if amount_sol is None:
-        amount_sol = max_size
-    try:
-        amount_sol = float(amount_sol)
-    except (TypeError, ValueError):
-        return jsonify({'ok': False, 'msg': 'Invalid amount'}), 400
-    amount_sol = min(max_size, amount_sol)
-    # Same pre-check /api/instant-trade already does -- 0.005 SOL buffer
-    # covers both the network fee and, if this is the first time the
-    # wallet holds this token, the associated-token-account rent (~0.002
-    # SOL). Without this, a too-small balance always reached a real
-    # Jupiter simulation and failed there with a lamports-level error
-    # ("insufficient lamports 715720, need 1000000") instead of failing
-    # fast with a clear message.
-    fetch_user_balances(wallet)
-    current_sol = get_user_state(wallet).get('sol', 0)
-    if current_sol < amount_sol + 0.005:
-        return jsonify({'ok': False, 'msg': f'Insufficient SOL balance. You have {current_sol:.4f} SOL, need at least {amount_sol + 0.005:.4f} SOL (includes network fee + new-token account rent).'}), 400
-    td = get_token_data(mint)
-    entry_price = float(td['price']) if td and td.get('price') else 0.0
-    if not symbol and td:
-        symbol = td.get('symbol', mint[:8])
-    buy_ok = False
-    with _use_key(enc_blob, wallet) as pk:
-        buy_ok, _tx_hash, buy_err, _tok_amt, _sol_amt = _execute_user_swap_ex(wallet, pk, 'buy', mint, str(amount_sol))
-    if not buy_ok:
-        return jsonify({'ok': False, 'msg': buy_err or 'Swap failed — check logs'}), 502
-    # Use the swap's own realized fill (actual tokens received for
-    # amount_sol) for entry_price instead of the quoted spot price above --
-    # falls back to the quote if parsing found nothing.
-    token_amount = _tok_amt if _tok_amt > 0 else (amount_sol / entry_price if entry_price > 0 else 0.0)
-    if _tok_amt > 0:
-        entry_price = amount_sol / _tok_amt
-    us        = get_user_state(wallet)
-    positions = us['positions']
-    pos = positions.get(mint, {})
-    pos['amount']    = pos.get('amount', 0.0) + token_amount
-    pos['buy_price'] = entry_price
-    pos['spend']     = pos.get('spend', 0.0) + amount_sol
-    pos['symbol']    = symbol
-    pos['opened_at'] = time.time()
-    pos.update(_snapshot_entry_risk(wallet, entry_price))
-    _upsert_open_position(user_id, wallet, mint, pos, source='manual')
-    _charge_txn_fee(pk, wallet, user_id, symbol, amount_sol, 'buy', bundled=True)
-    return jsonify({'ok': True, 'amount_sol': amount_sol, 'entry_price': entry_price, 'symbol': symbol})
+    data = request.get_json(silent=True) or {}
+    mint = _sanitize(str(data.get('token_address', '')).strip())
+    requested = data.get('amount_usdc', data.get('amount_sol'))
+    if requested is not None:
+        try:
+            requested = float(requested)
+        except (TypeError, ValueError):
+            return jsonify({'ok': False, 'msg': 'Invalid USDC amount'}), 400
+        if requested <= 0:
+            return jsonify({'ok': False, 'msg': 'USDC amount must be greater than zero'}), 400
+    return _solana_buy_flow(
+        wallet, mint, log_label='LIVE MARKET BUY', enforce_position_cap=False,
+        idle_note=' — start the bot for automatic TP/SL',
+        requested_usdc=requested)
 
 
 @app.route('/api/trade/sell', methods=['POST'])
@@ -25051,7 +25016,8 @@ def api_manual_buy():
 
 
 def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
-                     enforce_position_cap: bool, idle_note: str):
+                     enforce_position_cap: bool, idle_note: str,
+                     requested_usdc: float = None):
     """One Solana buy, for both /api/manual_buy and /api/pump-scanner/buy.
 
     These were two copies of the same function differing only in the field
@@ -25087,7 +25053,7 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
     conn = sqlite3.connect(DB_FILE)
     try:
         c   = conn.cursor()
-        row = c.execute('SELECT id, encrypted_private_key, min_trade_size FROM users '
+        row = c.execute('SELECT id, encrypted_private_key, min_trade_size, max_trade_size FROM users '
                         'WHERE wallet_address=?', (wallet,)).fetchone()
         bl  = c.execute('SELECT 1 FROM user_blacklist WHERE user_id=? AND mint=?',
                         (row[0], mint)).fetchone() if row else None
@@ -25099,6 +25065,7 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
         return jsonify({'ok': False, 'msg': 'This token is on your avoid list'}), 400
     user_id, enc_blob = row[0], row[1]
     min_trade_usdc    = float(row[2]) if row[2] is not None else 1.0
+    max_trade_usdc    = float(row[3]) if row[3] is not None else 10.0
 
     try:
         with _use_key(enc_blob, wallet) as _pk:
@@ -25171,7 +25138,12 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
         # The configured trade size is already USD-denominated, and USDC is a
         # dollar, so it IS the spend -- no price conversion, and nothing to go
         # wrong when the SOL price has not loaded yet.
-        spend = round(min(min_trade_usdc, us_usdc), 2)
+        if requested_usdc is not None and float(requested_usdc) < min_trade_usdc:
+            return jsonify({'ok': False,
+                            'msg': f'Minimum trade amount is {min_trade_usdc:.2f} USDC'}), 400
+        target_usdc = (min_trade_usdc if requested_usdc is None
+                       else min(max_trade_usdc, float(requested_usdc)))
+        spend = round(min(target_usdc, us_usdc), 2)
         if spend < SOLANA_MIN_SPEND_USDC:
             return jsonify({
                 'ok': False, 'low_balance': True, 'trading_wallet': trading_wallet,
