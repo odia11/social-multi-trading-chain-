@@ -10,10 +10,12 @@ from wallet_deposit_guidance import install as _install_wallet_deposit_guidance
 from app_performance import install as _install_app_performance
 from share_canonical_routes import install as _install_share_canonical_routes
 from mobile_ui_hotfix import install as _install_mobile_ui_hotfix
+from trusted_phantom_autoconnect import install as _install_trusted_phantom_autoconnect
 
 _install_evm_to_solana_bridge(_dashboard)
 _install_wallet_deposit_guidance(_dashboard)
 _install_app_performance(_dashboard)
 _install_share_canonical_routes(_dashboard)
 _install_mobile_ui_hotfix(_dashboard)
+_install_trusted_phantom_autoconnect(_dashboard)
 app = _dashboard.app
