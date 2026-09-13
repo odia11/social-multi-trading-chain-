@@ -206,14 +206,14 @@ function _showWalletOptions(){
 
    So a proven connection also gets a long-lived token, kept here, that is
    exchanged for a fresh session when the cookie is gone. The server stores
-   only its hash and rotates it on every use; Disconnect revokes it
+   only its hash; the credential stays stable until Disconnect revokes it
    everywhere. */
 function _deviceToken(){
   try{ return localStorage.getItem('orca_device_token') || ''; }catch(e){ return ''; }
 }
 function _storeDeviceToken(t){
-  // Private browsing throws on write. No remembering there, but nothing
-  // breaks either.
+  // Browser storage can reject writes; the HttpOnly cookie remains a
+  // separate recovery path.
   try{ if(t) localStorage.setItem('orca_device_token', t); }catch(e){}
 }
 function _clearDeviceToken(){
@@ -267,16 +267,6 @@ async function _claimPairing(){
 // exactly where it was, so initApp never runs again and the answer would sit
 // on the server unread until the next cold start. Ask whenever the app
 // becomes visible again while a sign-in it started is still outstanding.
-document.addEventListener('visibilitychange', function(){
-  if(document.visibilityState !== 'visible') return;
-  if(!_pairToken() || phantomKey) return;
-  _claimPairing().then(function(w){
-    // Reload rather than patching the screen in place: the app was showing
-    // the connect card, and everything past this point assumes a page that
-    // started out signed in.
-    if(w) window.location.reload();
-  });
-});
 
 // Returns the wallet if a session was restored, '' otherwise.
 //
@@ -551,7 +541,7 @@ async function _connectWalletSignedInner(provider, address){
 }
 
 function _phantomMobileV1Connect(){
-  localStorage.removeItem('orca_manual_disconnect');
+  try{ localStorage.removeItem('orca_manual_disconnect'); }catch(e){}
   var msgEl=document.getElementById('wallet-install-msg');
   var noteEl=document.getElementById('ob-phantom-note');
   function _setNote(txt,col){
@@ -644,7 +634,8 @@ function _applySolflareDetection(solflareBtn, solflareNote){
 
 /* On load: switch connect screen between Face ID / password / Phantom modes */
 document.addEventListener('DOMContentLoaded',function(){
-  var hasFaceId=!!localStorage.getItem('orca_credential_id');
+  var hasFaceId=false;
+  try{ hasFaceId=!!localStorage.getItem('orca_credential_id'); }catch(e){}
   var bioBtn    =document.getElementById('ob-bio-btn');
   var altLink   =document.getElementById('ob-alt-link');
   var pwdForm   =document.getElementById('ob-pwd-form');
@@ -733,7 +724,7 @@ async function _initCsrf(){
 }
 
 // Fetch CSRF token immediately on page load (before any user interaction)
-_initCsrf();
+var _csrfReady = _initCsrf();
 
 // ── NO INACTIVITY TIMEOUT ──
 // There used to be one here: a warning at 8 minutes and an automatic logout
@@ -783,7 +774,7 @@ function nextStep(n){currentStep=n+1;showStep(currentStep);}
 function gotoSetupGuide(){currentStep=1;showStep(1);}
 
 async function connectWalletOnboard(type){
-  localStorage.removeItem('orca_manual_disconnect');
+  try{ localStorage.removeItem('orca_manual_disconnect'); }catch(e){}
   const isPhantom=type==='phantom';
   const provider=isPhantom?window.solana:window.solflare;
   const name=isPhantom?'Phantom':'Solflare';
@@ -3201,6 +3192,7 @@ function _inDappBrowser(){ return !!(window.solana||window.solflare); }
 })();
 
 // ── STARTUP: restore session ──
+var _sessionBootstrapComplete = false;
 (async function initApp(){
   // Before concluding that nobody is signed in, ASK.
   //
@@ -3259,6 +3251,7 @@ function _inDappBrowser(){ return !!(window.solana||window.solflare); }
   // Home can start with an injected session, bypassing /api/session above.
   // Backfill its recovery credential too (the server rejects read-only users).
   if(phantomKey && !_deviceToken()){
+    await _csrfReady;
     try{
       var remembered = await fetch('/api/session/remember', {
         method:'POST', credentials:'include', headers:{'X-CSRF-Token':_csrfToken}
@@ -3320,35 +3313,40 @@ function _inDappBrowser(){ return !!(window.solana||window.solflare); }
   // re-detection needed, and avoids a redundant /api/wallet/set round-trip.
   if(phantomKey){ await launchApp(); return; }
 
-  // Extension already connected with no session wallet — register it
-  if(_p && _n){
-    const _pk=_p.publicKey.toString();
-    phantomKey=_pk; walletType=_n;
-    const r=await _connectWalletSigned(_p, _pk);
-    if(!r?.ok && (r?.msg==='Signature rejected'||(r?.msg||'').startsWith('Nonce expired'))){
-      const _m=document.getElementById('wallet-install-msg');
-      if(_m){ _m.textContent='Sign the request in your wallet to log in — please try again'; _m.style.display='block'; }
-      return;
-    }
-    if(r?.csrf_token) _csrfToken=r.csrf_token;
-    settingsHasKey=r?.has_trading_key||false; _isAdmin=r?.is_admin||false; _updateKeyStatus();
-    if(r?.success){
-      if(r.status==='new_user'){ gotoSetupGuide(); return; }
-      await launchApp();
-      return;
-    }
-    await launchApp();
-    return;
-  }
+  // A connected extension is not proof of an OrcAgent session. In particular,
+  // an interrupted recovery must not automatically trigger another signature.
+  // The explicit Connect buttons remain available when fresh proof is needed.
+})().catch(function(e){
+  console.warn('[auth] startup interrupted; recovery will retry on return', e);
+}).finally(function(){ _sessionBootstrapComplete = true; });
 
-  // No wallet detected — leave onboarding visible so user can connect
-  // (skipToApp() is still available for browse-without-connecting)
-})();
-
-window.addEventListener('pageshow', function(event) {
-  if (event.persisted) {
-    launchApp();
-  }
+var _sessionReturnPromise = null;
+function _recoverSessionOnReturn(){
+  if(!_sessionBootstrapComplete || document.visibilityState === 'hidden') return;
+  if(_sessionReturnPromise) return _sessionReturnPromise;
+  try{ if(localStorage.getItem('orca_manual_disconnect')) return; }catch(e){}
+  _sessionReturnPromise = (async function(){
+    var me = await fetch('/api/session', {credentials:'include', cache:'no-store'})
+      .then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; });
+    if(!me) return; // A network/server error is not a logout.
+    var wallet = me.authenticated && me.wallet;
+    if(wallet && me.csrf_token) _csrfToken = me.csrf_token;
+    if(!wallet){
+      wallet = await _claimPairing();
+      if(!wallet) wallet = await _resumeFromDeviceToken();
+    }
+    if(!wallet) return;
+    _applySessionWallet(wallet);
+    var onboard = document.getElementById('onboard');
+    if(onboard && !onboard.classList.contains('hide')) await launchApp();
+  })().catch(function(e){ console.warn('[auth] recovery interrupted', e); })
+    .finally(function(){ _sessionReturnPromise = null; });
+  return _sessionReturnPromise;
+}
+document.addEventListener('visibilitychange', _recoverSessionOnReturn);
+window.addEventListener('online', _recoverSessionOnReturn);
+window.addEventListener('pageshow', function(event){
+  if(event.persisted) _recoverSessionOnReturn();
 });
 
 // ── SETTINGS MODAL ──
