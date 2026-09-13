@@ -86,10 +86,6 @@ def install(dashboard_module):
 
     @wraps(original_post_to_x)
     def _post_to_x_with_canonical_link(wallet, text, media_ids=None):
-        # The old feed route appended link_fallback only when media upload
-        # failed. A successful image therefore removed the route back to the
-        # post. The request wrapper below puts the permanent post URL in this
-        # ContextVar; this layer applies it regardless of media success.
         link = _share_link.get()
         if link:
             text = _append_canonical_link(text, link)
@@ -115,11 +111,6 @@ def install(dashboard_module):
 
         app.view_functions[endpoint] = _feed_share_with_canonical_context
 
-    # Canonical post deep-link route. The dashboard already owns the reliable
-    # _jumpToPost(postId) implementation: it first checks the visible feed and,
-    # if the card is not loaded, GETs /api/feed/post/<id>, inserts that exact
-    # item, then scrolls to it. Serve the normal home shell at /post/<id> and
-    # trigger that existing path instead of duplicating feed rendering here.
     root_endpoint = _find_endpoint(app, '/')
     if 'canonical_post_by_id' not in app.view_functions:
         @app.route('/post/<path:post_id>', endpoint='canonical_post_by_id')
@@ -131,9 +122,6 @@ def install(dashboard_module):
                 return dashboard_module.make_response('Post route unavailable', 503)
             return root_view()
 
-    # Permanent profile route. Usernames are editable; numeric user IDs are
-    # not. Render the existing profile page directly so /u/<id> remains the
-    # browser URL instead of redirecting back to a rename-sensitive handle.
     if 'canonical_profile_by_id' not in app.view_functions:
         @app.route('/u/<int:user_id>', endpoint='canonical_profile_by_id')
         def canonical_profile_by_id(user_id):
@@ -153,9 +141,6 @@ def install(dashboard_module):
             body = response.get_data(as_text=True)
             changed = False
 
-            # A /post/<id> request keeps its clean canonical URL in the address
-            # bar while the existing feed deep-link loader opens exactly that
-            # post. No redirect to Home and no manual scrolling/searching.
             if path.startswith('/post/'):
                 post_id = path[len('/post/'):]
                 if _POST_ID_RE.fullmatch(post_id or '') and '</body>' in body:
@@ -164,7 +149,16 @@ def install(dashboard_module):
 <script id=\"orca-canonical-post-jump\">
 (function(){
   var postId = %s;
-  var tries = 0;
+  var jumpTries = 0;
+  var sessionTries = 0;
+  var reloadKey = 'orca-post-session-reload:' + postId;
+
+  function onboardVisible(){
+    var ob = document.getElementById('onboard');
+    if(!ob) return false;
+    return !ob.classList.contains('hide') && getComputedStyle(ob).display !== 'none';
+  }
+
   function openExactPost(){
     if(typeof window._jumpToPost === 'function'){
       Promise.resolve(window._jumpToPost(postId)).then(function(){
@@ -177,12 +171,55 @@ def install(dashboard_module):
       });
       return;
     }
-    if(++tries < 80) setTimeout(openExactPost, 100);
+    if(++jumpTries < 100) setTimeout(openExactPost, 100);
   }
-  if(document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', openExactPost, {once:true});
-  }else{
+
+  function finishAuthenticatedFlow(){
+    try{ sessionStorage.removeItem(reloadKey); }catch(e){}
+    if(typeof window.launchApp === 'function'){
+      try{ window.launchApp(); }catch(e){}
+    }
     openExactPost();
+  }
+
+  function checkExistingSession(){
+    fetch('/api/session', {credentials:'include', cache:'no-store'})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(data){
+        if(data && (data.wallet || data.wallet_address || data.ok)){
+          if(onboardVisible()){
+            var alreadyReloaded=false;
+            try{ alreadyReloaded=sessionStorage.getItem(reloadKey)==='1'; }catch(e){}
+            if(!alreadyReloaded){
+              try{ sessionStorage.setItem(reloadKey,'1'); }catch(e){}
+              location.replace(location.href);
+              return;
+            }
+          }
+          finishAuthenticatedFlow();
+          return;
+        }
+        if(++sessionTries < 30) setTimeout(checkExistingSession, 250);
+        else openExactPost();
+      })
+      .catch(function(){
+        if(++sessionTries < 30) setTimeout(checkExistingSession, 250);
+        else openExactPost();
+      });
+  }
+
+  function boot(){
+    if(!onboardVisible()){
+      openExactPost();
+      return;
+    }
+    checkExistingSession();
+  }
+
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', boot, {once:true});
+  }else{
+    boot();
   }
 })();
 </script>
@@ -193,9 +230,6 @@ def install(dashboard_module):
                     body = body.replace('</body>', script + '</body>', 1)
                     changed = True
 
-            # The existing template's Share Profile button uses
-            # window.location.href. Replace that rendered assignment with the
-            # permanent numeric-user-id URL.
             user_id = None
             if path.startswith('/u/'):
                 try:
