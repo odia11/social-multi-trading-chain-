@@ -5,6 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 JS = (ROOT / "static" / "messages-home-token-card-v1.js").read_text(encoding="utf-8")
 CSS = (ROOT / "static" / "messages-home-token-card-v1.css").read_text(encoding="utf-8")
 INJECTOR = (ROOT / "messages_premium_ui.py").read_text(encoding="utf-8")
+LIVE_MARKET = (ROOT / "templates" / "live_market.html").read_text(encoding="utf-8")
 
 
 def test_dm_card_uses_live_token_info_banner_and_price():
@@ -14,9 +15,12 @@ def test_dm_card_uses_live_token_info_banner_and_price():
     assert "data-dm-live-price" in JS
 
 
-def test_dm_card_opens_standalone_token_page():
-    assert "'/token/' + encodeURIComponent(mint)" in JS
+def test_dm_card_opens_correct_token_inside_live_market():
+    assert "'/live-market?addr='+encodeURIComponent(mint)" in JS
     assert "window.location.href=route" in JS
+    assert "'/token/' + encodeURIComponent(mint)" not in JS
+    assert "_params.get('addr')" in LIVE_MARKET
+    assert "showTokenCard" in LIVE_MARKET
 
 
 def test_old_dm_trade_payloads_keep_existing_renderer():
