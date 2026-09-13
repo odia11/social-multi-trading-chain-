@@ -10,6 +10,7 @@ import fcntl
 import gzip
 import hashlib
 import os
+import shutil
 import sqlite3
 import subprocess
 import tempfile
@@ -29,11 +30,21 @@ def _backup_once(dashboard_module):
     if list(out_dir.glob(f'orcagent-{day}*.db.gz.enc')):
         return
 
-    secret = str(os.getenv('SECRET_KEY') or dashboard_module.app.config.get('SECRET_KEY') or '')
-    if len(secret) < 32:
-        dashboard_module.app.logger.error('daily backup skipped: production SECRET_KEY unavailable')
+    root_secret = str(
+        os.getenv('BACKUP_ENCRYPTION_KEY') or
+        os.getenv('ENCRYPTION_KEY') or
+        os.getenv('SECRET_KEY') or
+        dashboard_module.app.config.get('SECRET_KEY') or ''
+    )
+    if len(root_secret) < 32:
+        dashboard_module.app.logger.error('daily backup skipped: stable encryption secret unavailable')
         return
-    backup_key = hashlib.sha256(('orcagent-backup-v1:' + secret).encode()).hexdigest()
+    if not shutil.which('openssl'):
+        dashboard_module.app.logger.error('daily backup skipped: openssl is not installed')
+        return
+    # Domain separation means the database-backup key is not the same bytes as
+    # the wallet/session secret even when it is derived from that stable root.
+    backup_key = hashlib.sha256(('orcagent-backup-v1:' + root_secret).encode()).hexdigest()
 
     with open(lock_path, 'a+b') as lockf:
         try:
