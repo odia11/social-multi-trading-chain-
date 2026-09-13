@@ -42,7 +42,7 @@ try:
 except ImportError:
     _COMPRESS_OK = False
 from contextlib import contextmanager
-from flask import Flask, jsonify, request, session, render_template, redirect, make_response, send_from_directory
+from flask import Flask, jsonify, request, session, render_template, redirect, make_response, send_from_directory, g
 from markupsafe import Markup
 import gzip
 import shutil
@@ -476,6 +476,10 @@ def _security_gate():
 
 @app.before_request
 def _refresh_session():
+    # Run before route redirects and CSRF checks, not after Home has rendered.
+    recovery_error = _restore_remembered_request()
+    if recovery_error is not None:
+        return recovery_error
     if session.get('wallet'):
         session.modified = True  # extend cookie lifetime on every API call
 
@@ -17360,6 +17364,7 @@ def _set_device_cookie(response, token: str):
     the explicit logout endpoint.
     """
     if token:
+        g.device_cookie_written = True
         response.set_cookie(
             DEVICE_COOKIE_NAME, token,
             max_age=DEVICE_TOKEN_DAYS * 86400,
@@ -17471,6 +17476,78 @@ def _redeem_device_token(token: str) -> tuple:
         print(f'[device-session] redeem failed: {e}', flush=True)
         # Storage outages are retryable, not a refusal of the credential.
         raise
+
+
+def _restore_remembered_request():
+    """Recover a verified identity before any page/API checks the session.
+
+    Only a server-validated recovery cookie can establish identity here. A
+    typed wallet address or an expired/revoked token never grants access.
+    Explicit resume handles its own token precedence; read-only browsing is
+    left alone. Logout must recover too so it can revoke an expired session.
+    """
+    if (request.path.startswith('/static/') or request.method == 'OPTIONS'
+            or request.path == '/api/session/resume' or session.get('wallet')):
+        return None
+    token = request.cookies.get(DEVICE_COOKIE_NAME, '')
+    if not token:
+        return None
+    try:
+        wallet, token = _redeem_device_token(token)
+        if not wallet:
+            return None
+        uid = get_or_create_user(wallet)
+    except Exception:
+        response = jsonify({'ok': False, 'msg': 'Session recovery temporarily unavailable'})
+        response.status_code = 503
+        response.headers['Retry-After'] = '3'
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+    session.permanent = True
+    session['wallet'] = wallet
+    session['user_id'] = uid
+    session.pop('readonly', None)
+    g.recovered_device_token = token
+    return None
+
+
+@app.after_request
+def _persist_remembered_session(response):
+    """Backfill and renew remembered cookies without a CSRF/bootstrap race.
+
+    Applies to all verified login methods and the installed-app handoff, as
+    well as older sessions which never received the new HttpOnly cookie.
+    This does not rely on JavaScript running or localStorage being writable.
+    """
+    if (request.path.startswith('/static/') or request.path == '/api/logout'
+            or request.method == 'OPTIONS' or response.status_code >= 400):
+        return response
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return response
+    response.headers['Cache-Control'] = 'no-store, private'
+    if getattr(g, 'device_cookie_written', False):
+        return response
+    token = getattr(g, 'recovered_device_token', '')
+    cookie = request.cookies.get(DEVICE_COOKIE_NAME, '')
+    # Normal polling should not write SQLite on every request. Renew on page
+    # visits/session checks; establish a missing cookie on the first response.
+    if not token and cookie and request.path != '/api/session' and response.mimetype != 'text/html':
+        return response
+    try:
+        if not token and cookie:
+            remembered_wallet, candidate = _redeem_device_token(cookie)
+            if remembered_wallet == wallet:
+                token = candidate
+        if not token:
+            uid = session.get('user_id') or get_or_create_user(wallet)
+            token = _issue_device_token(uid, wallet)
+        if token:
+            return _set_device_cookie(response, token)
+    except Exception as exc:
+        # Keep the proven session; a later visit retries the backfill.
+        print(f'[device-session] cookie persistence unavailable: {type(exc).__name__}', flush=True)
+    return response
 
 
 def _revoke_device_tokens(wallet: str) -> None:
@@ -17712,9 +17789,19 @@ def api_session_remember():
         uid = session.get('user_id') or get_or_create_user(wallet)
     except Exception:
         return jsonify({'ok': False}), 500
-    token = _issue_device_token(uid, wallet)
+    token = ''
+    cookie = request.cookies.get(DEVICE_COOKIE_NAME, '')
+    try:
+        if cookie:
+            remembered_wallet, candidate = _redeem_device_token(cookie)
+            if remembered_wallet == wallet:
+                token = candidate
+        if not token:
+            token = _issue_device_token(uid, wallet)
+    except Exception:
+        return jsonify({'ok': False}), 503
     if not token:
-        return jsonify({'ok': False}), 500
+        return jsonify({'ok': False}), 503
     return _set_device_cookie(jsonify({'ok': True, 'token': token}), token)
 
 

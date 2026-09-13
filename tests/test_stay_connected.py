@@ -27,7 +27,7 @@ import sys
 import tempfile
 import time
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py').read()
 JS = open(REPO + '/static/dashboard.js').read()
 TREE = ast.parse(SRC)
@@ -145,17 +145,15 @@ _minters = sorted(
     if isinstance(n, ast.FunctionDef)
     and n.name != '_issue_device_token'          # its own definition, not a caller
     and '_issue_device_token(' in (ast.get_source_segment(SRC, n) or ''))
-check('every place that mints a remembered login has already established who '
-      'this is, and there are exactly three: the wallet login itself; the '
-      'endpoint that remembers a session which is already authenticated; and '
-      'claiming a pairing, where the wallet came from a row the server wrote '
-      'after checking a signature. Nothing else may mint one — a remembered '
-      'login outlives the browser, so an unproved claim would become a '
-      'permanent one',
-      _minters == ['api_pair_claim', 'api_session_remember', 'set_wallet'])
+check('only verified login, verified pairing, or an authenticated-session '
+      'backfill may mint a remembered login',
+      _minters == ['_persist_remembered_session', 'api_pair_claim', 'api_session_remember', 'set_wallet'])
+check('automatic backfill refuses unverified/read-only sessions',
+      "wallet = _authenticated_wallet()" in fn('_persist_remembered_session')
+      and "if not wallet:" in fn('_persist_remembered_session'))
 check('...and the wallet login mints one only AFTER the signature has been '
       'checked, not beside it',
-      'Signature verification failed' in SRC[:SRC.index('_device_token =')])
+      'Signature verification failed' in fn('set_wallet').split('_device_token =', 1)[0])
 check('...while the remembering endpoint refuses a read-only session, which '
       'is an address someone typed and never proved',
       '_authenticated_wallet()' in fn('api_session_remember'))
