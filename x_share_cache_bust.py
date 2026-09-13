@@ -10,7 +10,7 @@ import re
 
 _INSTALLED = False
 _POST_LINK_RE = re.compile(r'(https://orcagent\.fun/post/[pt]\d+)(?!\?[^\s]*)')
-_PREVIEW_VERSION = '6'
+_PREVIEW_VERSION = '7'
 
 
 def _version_post_links(text):
