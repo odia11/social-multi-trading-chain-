@@ -6,37 +6,44 @@ the application's route/business logic.
 """
 from __future__ import annotations
 
+import re
+import secrets
 from urllib.parse import urlsplit
 
-from flask import jsonify, request
+from flask import g, jsonify, request
 
 _SAFE_METHODS = frozenset({'GET', 'HEAD', 'OPTIONS'})
 _BLOCKED_METHODS = frozenset({'TRACE', 'CONNECT'})
 _ALLOWED_HOSTS = frozenset({'orcagent.fun', 'www.orcagent.fun'})
-_RUNTIME_TAG = '<script src="/static/security-runtime.js?v=2" defer data-orca-security-runtime="1"></script>'
 _MAX_PATH = 4096
 _MAX_QUERY = 16384
+_SCRIPT_TAG_RE = re.compile(r'<script(?![^>]*\bnonce=)([^>]*)>', re.I)
 
-# The application still contains legacy inline JS/CSS, so unsafe-inline is
-# retained for compatibility. Other directives materially reduce exploit
-# surface while keeping the existing Dexscreener frame working.
-_CSP = '; '.join([
-    "default-src 'self'",
-    "base-uri 'self'",
-    "object-src 'none'",
-    "frame-ancestors 'none'",
-    "form-action 'self'",
-    "script-src 'self' 'unsafe-inline' https://unpkg.com",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' data: https://fonts.gstatic.com",
-    "img-src 'self' data: blob: https:",
-    "media-src 'self' blob: https:",
-    "connect-src 'self' https://api.binance.com https://api.mainnet-beta.solana.com https://mainnet.helius-rpc.com https://api.jup.ag https://quote-api.jup.ag https://api.dexscreener.com https://dexscreener.com https://api.helius.xyz wss: ws:",
-    "frame-src 'self' https://dexscreener.com",
-    "worker-src 'self' blob:",
-    "manifest-src 'self'",
-    "upgrade-insecure-requests",
-])
+
+def _csp(nonce: str) -> str:
+    # Legacy onclick/onchange attributes still exist across the UI, so
+    # script-src-attr keeps unsafe-inline temporarily. Script ELEMENTS are now
+    # nonce-gated: injected <script> blocks cannot execute without the random
+    # per-response nonce that only the server adds.
+    return '; '.join([
+        "default-src 'self'",
+        "base-uri 'self'",
+        "object-src 'none'",
+        "frame-ancestors 'none'",
+        "form-action 'self'",
+        "script-src 'self' https://unpkg.com",
+        f"script-src-elem 'self' https://unpkg.com 'nonce-{nonce}'",
+        "script-src-attr 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' data: https://fonts.gstatic.com",
+        "img-src 'self' data: blob: https:",
+        "media-src 'self' blob: https:",
+        "connect-src 'self' https://api.binance.com https://api.mainnet-beta.solana.com https://mainnet.helius-rpc.com https://api.jup.ag https://quote-api.jup.ag https://api.dexscreener.com https://dexscreener.com https://api.helius.xyz wss: ws:",
+        "frame-src 'self' https://dexscreener.com",
+        "worker-src 'self' blob:",
+        "manifest-src 'self'",
+        "upgrade-insecure-requests",
+    ])
 
 
 def _origin_host(value: str) -> str:
@@ -56,8 +63,6 @@ def install(dashboard_module):
         return
     app._orca_security_hardening_installed = True
 
-    # Bound request bodies and harden the Flask session cookie. The custom
-    # orca_device cookie is managed separately by the session-recovery code.
     app.config['MAX_CONTENT_LENGTH'] = min(
         int(app.config.get('MAX_CONTENT_LENGTH') or 12 * 1024 * 1024),
         12 * 1024 * 1024,
@@ -68,6 +73,7 @@ def install(dashboard_module):
 
     @app.before_request
     def _security_request_guard():
+        g.orca_csp_nonce = secrets.token_urlsafe(18)
         method = (request.method or '').upper()
         if method in _BLOCKED_METHODS:
             return jsonify({'error': 'Method not allowed'}), 405
@@ -89,8 +95,6 @@ def install(dashboard_module):
         if method in _SAFE_METHODS:
             return None
 
-        # Fetch Metadata catches modern-browser cross-site writes even if an
-        # Origin header is missing. Keep the Origin allowlist as a second wall.
         fetch_site = (request.headers.get('Sec-Fetch-Site') or '').strip().lower()
         if fetch_site == 'cross-site':
             return jsonify({'error': 'Cross-site request blocked'}), 403
@@ -105,8 +109,6 @@ def install(dashboard_module):
             if not origin_host or origin_host not in allowed:
                 return jsonify({'error': 'Cross-site request blocked'}), 403
 
-        # Reject simple text/plain mutation payloads for API routes. JSON and
-        # existing multipart/form endpoints remain compatible.
         if request.path.startswith('/api/') and request.content_length:
             ctype = (request.mimetype or '').lower()
             if ctype == 'text/plain':
@@ -115,7 +117,8 @@ def install(dashboard_module):
 
     @app.after_request
     def _security_headers(response):
-        response.headers.setdefault('Content-Security-Policy', _CSP)
+        nonce = getattr(g, 'orca_csp_nonce', '') or secrets.token_urlsafe(18)
+        response.headers['Content-Security-Policy'] = _csp(nonce)
         response.headers.setdefault('X-Content-Type-Options', 'nosniff')
         response.headers.setdefault('X-Frame-Options', 'DENY')
         response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
@@ -130,17 +133,26 @@ def install(dashboard_module):
         if request.path.startswith('/api/'):
             response.headers.setdefault('Cache-Control', 'no-store')
 
-        # Inject the client-side DOM/URL hardening guard on every HTML page.
         if response.status_code == 200 and response.mimetype == 'text/html':
             try:
                 body = response.get_data(as_text=True)
+                # Give every script element the server-only nonce. Event-handler
+                # attributes remain covered by script-src-attr during the legacy
+                # migration, but injected script blocks now fail CSP.
+                body = _SCRIPT_TAG_RE.sub(
+                    lambda m: '<script nonce="' + nonce + '"' + m.group(1) + '>', body
+                )
                 if 'data-orca-security-runtime="1"' not in body:
+                    runtime = (
+                        '<script nonce="' + nonce + '" src="/static/security-runtime.js?v=3" '
+                        'defer data-orca-security-runtime="1"></script>'
+                    )
                     if '</head>' in body:
-                        body = body.replace('</head>', _RUNTIME_TAG + '</head>', 1)
+                        body = body.replace('</head>', runtime + '</head>', 1)
                     else:
-                        body = _RUNTIME_TAG + body
-                    response.set_data(body)
-                    response.content_length = len(response.get_data())
+                        body = runtime + body
+                response.set_data(body)
+                response.content_length = len(response.get_data())
             except Exception as exc:
-                app.logger.warning('security runtime injection skipped: %s', exc)
+                app.logger.warning('security runtime/CSP nonce injection skipped: %s', exc)
         return response
