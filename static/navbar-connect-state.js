@@ -1,6 +1,8 @@
 /* OrcAgent shared navbar auth-state control.
    Logged out: the top-right profile slot becomes a Connect Wallet control.
-   Logged in: restore the normal user profile avatar/link. */
+   Logged in: restore the normal user profile avatar/link.
+   The old full-screen onboarding gate is intentionally bypassed: Home is
+   always browsable and the navbar connect control starts wallet connection. */
 (function(){
 'use strict';
 
@@ -27,20 +29,39 @@ function connectSvg(){
     +'</svg></span>';
 }
 
+function revealHome(){
+  var ob=document.getElementById('onboard');
+  var app=document.getElementById('app');
+  if(ob){ob.classList.add('hide');ob.style.display='none';ob.setAttribute('aria-hidden','true');}
+  if(app)app.style.display='flex';
+  try{
+    if(typeof window.skipToApp==='function')window.skipToApp();
+  }catch(_){}
+  // Some legacy code can try to re-open onboarding after async session checks.
+  setTimeout(function(){if(ob){ob.classList.add('hide');ob.style.display='none';}if(app)app.style.display='flex';},0);
+  setTimeout(function(){if(ob){ob.classList.add('hide');ob.style.display='none';}if(app)app.style.display='flex';},700);
+}
+
+function startWalletConnect(){
+  // Home already owns the battle-tested Phantom connect/recovery flow.
+  if(typeof window.connectWalletOnboard==='function'){
+    try{window.connectWalletOnboard('phantom');return true;}catch(_){}
+  }
+  if(typeof window.connectWallet==='function'){
+    try{window.connectWallet();return true;}catch(_){}
+  }
+  return false;
+}
+
 function openConnect(e){
   if(e){e.preventDefault();e.stopPropagation();}
-  var ob=document.getElementById('onboard');
-  if(ob){
-    ob.classList.remove('hide');
-    try{ if(typeof window.currentStep!=='undefined') window.currentStep=0; }catch(_){}
-    try{ if(typeof window.showStep==='function') window.showStep(0); }catch(_){}
-    var app=document.getElementById('app');if(app)app.style.display='none';
-    return false;
-  }
-  // On routes without the Home onboarding markup, send the user to Home and
-  // mark the intent so Home can open the connect panel immediately.
+  revealHome();
+  if(startWalletConnect())return false;
+  // Other routes may not load the Home wallet connector. Return to Home and
+  // start connection there without ever showing the old onboarding screen.
   try{sessionStorage.setItem('orca-open-connect','1');}catch(_){}
-  window.location.href='/';
+  if((location.pathname.replace(/\/+$/,'')||'/')!=='/')window.location.href='/';
+  else setTimeout(startWalletConnect,250);
   return false;
 }
 
@@ -83,21 +104,25 @@ function checkSession(attempt){
     showGuest();
   }).catch(function(){
     showGuest();
-    // Session/device recovery can finish just after first paint. Recheck a few
-    // times so a returning user automatically gets the avatar back.
     if((attempt||0)<8){clearTimeout(retryTimer);retryTimer=setTimeout(function(){checkSession((attempt||0)+1);},1000);}
   });
 }
 
 function boot(){
+  revealHome();
   var e=els();if(!e)return;remember(e);
-  // Never expose a stale server-rendered avatar to a logged-out visitor.
   showGuest();
   checkSession(0);
-  try{if(sessionStorage.getItem('orca-open-connect')==='1'){sessionStorage.removeItem('orca-open-connect');setTimeout(openConnect,0);}}catch(_){}
+  try{
+    if(sessionStorage.getItem('orca-open-connect')==='1'){
+      sessionStorage.removeItem('orca-open-connect');
+      setTimeout(function(){revealHome();startWalletConnect();},100);
+    }
+  }catch(_){}
 }
 
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
-window.addEventListener('pageshow',function(){checkSession(0);});
-document.addEventListener('visibilitychange',function(){if(!document.hidden)checkSession(0);});
+window.addEventListener('load',revealHome,{once:true});
+window.addEventListener('pageshow',function(){revealHome();checkSession(0);});
+document.addEventListener('visibilitychange',function(){if(!document.hidden){revealHome();checkSession(0);}});
 })();
