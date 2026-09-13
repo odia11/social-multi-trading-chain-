@@ -1,118 +1,138 @@
-/* Keep feed share dropdowns fully visible on mobile Safari/Phantom.
-   iOS can treat position:fixed as local to a transformed/contained ancestor,
-   so the menu is physically portaled to <body> while open. */
+/* OrcAgent mobile feed share dropdown — direct portal implementation. */
 (function(){
 'use strict';
 if(!window.matchMedia('(max-width:767px)').matches)return;
 
 var active=null;
-var activeHome=null;
-var activeNext=null;
-var activeBtn=null;
+var activePostId='';
+var placeholder=null;
+var originalParent=null;
+var originalNext=null;
 
-function isOpen(dd){
-  if(!dd)return false;
-  if(dd.style.display==='none')return false;
-  try{return getComputedStyle(dd).display!=='none'}catch(e){return true}
-}
+function menuId(postId){ return 'fc-share-dd-'+String(postId||''); }
+function cardId(postId){ return 'fc-card-'+String(postId||''); }
 
-function restoreMenu(){
+function restoreActive(){
   if(!active)return;
+  active.style.display='none';
   active.classList.remove('oa-share-floating');
   active.style.left='';
   active.style.top='';
-  active.style.right='';
-  active.style.bottom='';
   active.style.visibility='';
   active.style.width='';
-  if(activeHome){
-    try{
-      if(activeNext && activeNext.parentNode===activeHome) activeHome.insertBefore(active,activeNext);
-      else activeHome.appendChild(active);
-    }catch(e){}
+  active.style.maxWidth='';
+  if(originalParent){
+    if(placeholder && placeholder.parentNode===originalParent){
+      originalParent.insertBefore(active,placeholder);
+      placeholder.remove();
+    }else if(originalNext && originalNext.parentNode===originalParent){
+      originalParent.insertBefore(active,originalNext);
+    }else{
+      originalParent.appendChild(active);
+    }
   }
-  active=null;activeHome=null;activeNext=null;activeBtn=null;
+  active=null;
+  activePostId='';
+  placeholder=null;
+  originalParent=null;
+  originalNext=null;
 }
 
-function closeAndRestore(){
-  if(active){active.style.display='none';}
-  restoreMenu();
+function getShareButton(postId){
+  var card=document.getElementById(cardId(postId));
+  if(card){
+    var b=card.querySelector('.fc-share-btn');
+    if(b)return b;
+  }
+  var buttons=document.querySelectorAll('.fc-share-btn');
+  for(var i=0;i<buttons.length;i++){
+    var oc=buttons[i].getAttribute('onclick')||'';
+    if(oc.indexOf(String(postId))!==-1)return buttons[i];
+  }
+  return null;
 }
 
-function placeActive(){
-  if(!active||!activeBtn||!isOpen(active)){restoreMenu();return;}
-  active.style.visibility='hidden';
-  active.style.left='12px';
-  active.style.top='12px';
-  active.style.right='auto';
-  active.style.bottom='auto';
+function place(dd,btn){
+  dd.style.visibility='hidden';
+  dd.style.display='block';
+  dd.style.left='12px';
+  dd.style.top='12px';
+  dd.style.width='auto';
+  dd.style.maxWidth='calc(100vw - 24px)';
+
   requestAnimationFrame(function(){
-    if(!active||!activeBtn||!isOpen(active)){restoreMenu();return;}
-    var br=activeBtn.getBoundingClientRect();
-    var mr=active.getBoundingClientRect();
-    var pad=12,gap=8,vw=document.documentElement.clientWidth||window.innerWidth;
-    var vh=window.innerHeight||document.documentElement.clientHeight;
-    var width=Math.min(Math.max(180,mr.width||180),vw-pad*2);
-    active.style.width=Math.round(width)+'px';
-    mr=active.getBoundingClientRect();
-    var left=Math.min(Math.max(pad,br.right-mr.width),vw-mr.width-pad);
+    if(active!==dd)return;
+    var br=btn?btn.getBoundingClientRect():{left:window.innerWidth-56,right:window.innerWidth-20,top:window.innerHeight/2,bottom:window.innerHeight/2};
+    var mr=dd.getBoundingClientRect();
+    var pad=12,gap=10,vw=document.documentElement.clientWidth||window.innerWidth,vh=window.innerHeight;
+    var safeBottom=112; /* fixed OrcAgent bottom nav */
+    var usableBottom=Math.max(pad,vh-safeBottom);
+    var left=Math.min(Math.max(pad,br.right-mr.width),Math.max(pad,vw-mr.width-pad));
     var above=br.top-gap-mr.height;
     var below=br.bottom+gap;
     var top;
-    if(above>=pad) top=above;
-    else if(below+mr.height<=vh-pad) top=below;
-    else top=Math.max(pad,Math.min(vh-mr.height-pad,br.top-(mr.height/2)));
-    active.style.left=Math.round(left)+'px';
-    active.style.top=Math.round(top)+'px';
-    active.style.visibility='visible';
+    if(above>=pad){
+      top=above;
+    }else if(below+mr.height<=usableBottom){
+      top=below;
+    }else{
+      top=Math.max(pad,Math.min(usableBottom-mr.height,br.top-mr.height/2));
+    }
+    dd.style.left=Math.round(left)+'px';
+    dd.style.top=Math.round(top)+'px';
+    dd.style.visibility='visible';
   });
 }
 
-function portalMenu(btn){
-  var wrap=btn&&btn.closest('.fc-share-wrap');
-  var dd=wrap&&wrap.querySelector('.fc-share-dd');
-  if(!dd)return;
+function openPortal(postId){
+  postId=String(postId||'');
+  var dd=document.getElementById(menuId(postId));
+  var btn=getShareButton(postId);
+  if(!dd)return false;
 
-  /* The original inline handler has already toggled display by the time this
-     runs (scheduled with setTimeout below). A second tap therefore closes. */
-  if(!isOpen(dd)){
-    if(active===dd)restoreMenu();
-    return;
-  }
+  if(active===dd){ restoreActive(); return true; }
+  restoreActive();
 
-  if(active&&active!==dd) closeAndRestore();
-  if(active!==dd){
-    active=dd;
-    activeHome=dd.parentNode;
-    activeNext=dd.nextSibling;
-    activeBtn=btn;
-    dd.classList.add('oa-share-floating');
-    document.body.appendChild(dd);
-  }else{
-    activeBtn=btn;
-  }
-  placeActive();
+  originalParent=dd.parentNode;
+  originalNext=dd.nextSibling;
+  placeholder=document.createComment('orca-share-menu-placeholder');
+  if(originalParent)originalParent.insertBefore(placeholder,dd);
+
+  document.body.appendChild(dd);
+  active=dd;
+  activePostId=postId;
+  dd.classList.add('oa-share-floating');
+  place(dd,btn);
+  return true;
 }
 
+/* Override the feed's own inline onclick target. Inline handlers resolve the
+   global at click time, so this prevents the old absolute dropdown from ever
+   becoming visible on mobile. Wait until all dashboard scripts have executed. */
+function installOverride(){
+  window._fcShareToggle=function(postId){
+    openPortal(postId);
+  };
+}
+if(document.readyState==='loading'){
+  window.addEventListener('load',installOverride,{once:true});
+}else{
+  setTimeout(installOverride,0);
+}
+
+/* Close only after the menu item's own inline handler has had a chance to run. */
 document.addEventListener('click',function(e){
-  var btn=e.target.closest&&e.target.closest('.fc-share-btn');
-  if(btn){
-    setTimeout(function(){portalMenu(btn)},0);
+  if(!active)return;
+  if(e.target.closest && e.target.closest('.fc-share-dd')){
+    if(e.target.closest('.fc-share-item'))setTimeout(restoreActive,0);
     return;
   }
-  if(active){
-    if(e.target.closest&&e.target.closest('.fc-share-dd')){
-      /* Share action buttons close their own dropdown in the normal flow.
-         Restore the node after that handler has run. */
-      setTimeout(function(){if(active&&!isOpen(active))restoreMenu()},0);
-      return;
-    }
-    closeAndRestore();
-  }
+  if(e.target.closest && e.target.closest('.fc-share-btn'))return;
+  restoreActive();
 },false);
 
-window.addEventListener('scroll',function(){if(active)placeActive()},{passive:true});
-window.addEventListener('resize',function(){if(active)placeActive()},{passive:true});
-window.addEventListener('orientationchange',function(){setTimeout(function(){if(active)placeActive()},80)},{passive:true});
-document.addEventListener('visibilitychange',function(){if(document.hidden)restoreMenu()},{passive:true});
+document.addEventListener('keydown',function(e){if(e.key==='Escape')restoreActive();});
+window.addEventListener('scroll',restoreActive,{passive:true});
+window.addEventListener('resize',restoreActive,{passive:true});
+window.addEventListener('pagehide',restoreActive,{passive:true});
 })();
