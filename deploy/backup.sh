@@ -10,7 +10,8 @@ set -a
 # shellcheck disable=SC1090
 . "$ENV"
 set +a
-[ -n "${SECRET_KEY:-}" ] || { echo "backup: SECRET_KEY is required" >&2; exit 1; }
+ROOT_SECRET="${BACKUP_ENCRYPTION_KEY:-${ENCRYPTION_KEY:-${SECRET_KEY:-}}}"
+[ -n "$ROOT_SECRET" ] || { echo "backup: no stable encryption secret is configured" >&2; exit 1; }
 command -v sqlite3 >/dev/null
 command -v openssl >/dev/null
 mkdir -p "$OUT"
@@ -25,9 +26,8 @@ trap cleanup EXIT
 
 sqlite3 "$DB" ".backup '$TMP'"
 sqlite3 "$TMP" 'PRAGMA integrity_check;' | grep -qx ok
-# Domain-separated backup passphrase derived from the session secret without
-# writing either the source secret or derived passphrase to disk.
-BACKUP_KEY="$(printf 'orcagent-backup-v1:%s' "$SECRET_KEY" | sha256sum | awk '{print $1}')"
+# Domain-separated backup passphrase: never reuse the root secret bytes directly.
+BACKUP_KEY="$(printf 'orcagent-backup-v1:%s' "$ROOT_SECRET" | sha256sum | awk '{print $1}')"
 gzip -9 "$TMP"
 openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
   -in "$GZ" -out "$ENC" -pass env:BACKUP_KEY
