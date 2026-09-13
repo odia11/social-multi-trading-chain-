@@ -1,0 +1,17 @@
+[Unit]
+Description=OrcAgent encrypted database backup
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/orcagent/deploy/backup.sh
+User=root
+Group=root
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/data/backups
+ReadOnlyPaths=/data/orcagent.db /etc/orcagent.env /opt/orcagent
