@@ -1,33 +1,30 @@
-"""Approved Concept D v2 share-card renderer for OrcAgent X token/trade shares.
+"""Approved premium share-card renderer for OrcAgent X token/trade shares.
 
-Keeps the existing 1200x630 banner lookup, X media upload and canonical post
-link pipeline intact; only the visual composition is replaced.
+Keeps the existing 1200x630 banner lookup, media upload and permalink pipeline
+intact; only the visual composition is replaced. All visible copy is English.
 """
 import os
 from PIL import Image, ImageDraw, ImageFont
 
 _GOLD = (247, 185, 85)
-_GOLD2 = (255, 211, 119)
-_WHITE = (245, 246, 248)
-_MUTED = (168, 174, 184)
-_GREEN = (62, 234, 143)
-_RED = (255, 91, 111)
+_GOLD2 = (255, 204, 86)
+_WHITE = (248, 249, 251)
+_MUTED = (166, 174, 187)
+_GREEN = (55, 231, 132)
+_RED = (255, 92, 111)
+_DARK = (5, 9, 14)
 
 
 def _font(dm, bold, size):
-    candidates = []
-    if bold:
-        candidates += [
-            '/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc',
-            '/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc',
-            '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-        ]
-    else:
-        candidates += [
-            '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
-            '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
-            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-        ]
+    candidates = (
+        ['/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc',
+         '/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc',
+         '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf']
+        if bold else
+        ['/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+         '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
+         '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf']
+    )
     for path in candidates:
         if os.path.exists(path):
             try:
@@ -37,8 +34,8 @@ def _font(dm, bold, size):
     return dm._tc_font(bold, size)
 
 
-def _fmt_price(p):
-    p = float(p or 0)
+def _fmt_price(value):
+    p = float(value or 0)
     if not p:
         return '—'
     if p < 0.000001:
@@ -50,142 +47,136 @@ def _fmt_price(p):
     return f'${p:,.4f}'.rstrip('0').rstrip('.')
 
 
-def _fit(draw, text, xy, max_w, dm, bold=True, start=52, minimum=24, fill=_WHITE):
+def _fit(draw, text, xy, max_w, dm, bold=True, start=52, minimum=22, fill=_WHITE):
     x, y = xy
-    size = start
-    while size >= minimum:
-        f = _font(dm, bold, size)
-        bb = draw.textbbox((0, 0), text, font=f)
+    for size in range(start, minimum - 1, -2):
+        font = _font(dm, bold, size)
+        bb = draw.textbbox((0, 0), str(text), font=font)
         if bb[2] - bb[0] <= max_w:
-            draw.text((x, y), text, font=f, fill=fill)
-            return f
-        size -= 2
-    f = _font(dm, bold, minimum)
-    draw.text((x, y), text, font=f, fill=fill)
-    return f
+            draw.text((x, y), str(text), font=font, fill=fill)
+            return font
+    font = _font(dm, bold, minimum)
+    draw.text((x, y), str(text), font=font, fill=fill)
+    return font
 
 
 def _overlay(img):
     return Image.new('RGBA', img.size, (0, 0, 0, 0))
 
 
-def _draw_brand(draw, dm, W):
-    # Larger, cleaner OrcAgent header inspired by the approved Concept D v2.
-    draw.rounded_rectangle([42, 34, 103, 95], radius=17, fill=_GOLD2)
-    draw.polygon([(73, 49), (57, 82), (89, 82)], fill=(7, 10, 13))
-    draw.text((123, 35), 'OrcAgent', font=_font(dm, True, 40), fill=_WHITE)
-    draw.text((125, 78), 'TRADE SMARTER', font=_font(dm, False, 13), fill=(205, 188, 156))
-    draw.text((125, 97), 'TOGETHER', font=_font(dm, False, 13), fill=(205, 188, 156))
+def _draw_brand(draw, dm):
+    draw.rounded_rectangle([43, 35, 102, 94], radius=16, fill=_GOLD2)
+    draw.polygon([(72, 48), (56, 81), (89, 81)], fill=(6, 10, 14))
+    draw.text((122, 34), 'OrcAgent', font=_font(dm, True, 39), fill=_WHITE)
+    draw.text((124, 79), 'TRADE SMARTER', font=_font(dm, False, 13), fill=(201, 190, 168))
+    draw.text((124, 98), 'TOGETHER', font=_font(dm, False, 13), fill=(201, 190, 168))
 
-    draw.text((930, 43), 'MEMES MOVE', font=_font(dm, True, 14), fill=_GOLD2)
-    draw.text((930, 64), 'FASTER HERE', font=_font(dm, True, 14), fill=_GOLD2)
-    draw.text((1091, 53), '→', font=_font(dm, True, 30), fill=_GOLD2)
+    draw.text((930, 42), 'MEMES MOVE', font=_font(dm, True, 14), fill=_GOLD2)
+    draw.text((930, 63), 'FASTER HERE', font=_font(dm, True, 14), fill=_GOLD2)
+    draw.text((1095, 49), '→', font=_font(dm, True, 31), fill=_GOLD2)
 
 
 def _draw_chart_line(draw, pct):
-    # Decorative only; intentionally not presented as historical market data.
-    col = _GOLD2 if pct >= 0 else (221, 112, 118)
+    col = _GOLD2 if pct >= 0 else _RED
     if pct >= 0:
-        pts = [(824, 431), (865, 399), (903, 422), (946, 365), (984, 383), (1034, 323), (1079, 344), (1132, 276)]
+        pts = [(550, 439), (608, 421), (654, 440), (702, 399), (752, 416),
+               (799, 379), (849, 397), (899, 354), (951, 370), (1005, 321),
+               (1060, 339), (1128, 280)]
     else:
-        pts = [(824, 315), (865, 342), (903, 326), (946, 378), (984, 362), (1034, 417), (1079, 397), (1132, 450)]
-    draw.line(pts, fill=col, width=4, joint='curve')
+        pts = [(550, 307), (608, 330), (654, 316), (702, 351), (752, 339),
+               (799, 378), (849, 362), (899, 404), (951, 389), (1005, 432),
+               (1060, 414), (1128, 458)]
+    draw.line(pts, fill=col, width=5, joint='curve')
     x, y = pts[-1]
-    draw.line([(x - 12, y + (12 if pct >= 0 else -12)), (x, y), (x - 16, y + (3 if pct >= 0 else -3))], fill=col, width=4)
+    draw.ellipse([x-6, y-6, x+6, y+6], fill=col)
 
 
-def _draw_common(dm, img, symbol, price, pct, mode='CHART', entry_price=None, pnl_value=None, pnl_currency='SOL'):
+def _draw_common(dm, img, symbol, price, pct, mode='CHART', entry_price=None,
+                 pnl_value=None, pnl_currency='SOL'):
     W, H = img.size
     pct = float(pct or 0)
     pct_col = _GREEN if pct >= 0 else _RED
     mode = (mode or 'CHART').upper()
 
-    # Approved v2 composition: keep artwork prominent, but build a stable dark
-    # information zone at left and a clean footer. A subtle full-frame scrim
-    # keeps bright token banners from fighting the interface.
-    lay = _overlay(img)
-    ld = ImageDraw.Draw(lay)
-    ld.rectangle([0, 0, W, H], fill=(4, 7, 11, 72))
-    ld.rectangle([0, 0, W, 124], fill=(4, 7, 11, 212))
-    ld.rectangle([0, 495, W, H], fill=(4, 7, 11, 230))
-    for x in range(0, 560):
-        alpha = int(205 - 105 * (x / 560.0))
-        ld.line([(x, 120), (x, 494)], fill=(4, 7, 11, alpha))
-    img.paste(lay, (0, 0), lay)
+    # Dark cinematic treatment while preserving the token/banner artwork.
+    layer = _overlay(img)
+    ld = ImageDraw.Draw(layer)
+    ld.rectangle([0, 0, W, H], fill=(2, 6, 11, 74))
+    ld.rectangle([0, 0, W, 126], fill=(2, 6, 11, 210))
+    ld.rectangle([0, 477, W, H], fill=(2, 6, 11, 235))
+    for x in range(0, 520):
+        alpha = int(222 - 112 * (x / 520.0))
+        ld.line([(x, 120), (x, 478)], fill=(3, 7, 12, alpha))
+    img.paste(layer, (0, 0), layer)
 
     draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle([21, 20, W-21, H-20], radius=31, outline=_GOLD, width=2)
+    draw.rounded_rectangle([26, 25, W-26, H-25], radius=27, outline=(87, 62, 30), width=1)
+    _draw_brand(draw, dm)
 
-    # Refined gold frame, intentionally thinner than v1.
-    draw.rounded_rectangle([24, 22, W - 24, H - 22], radius=30, outline=_GOLD, width=2)
-    draw.rounded_rectangle([29, 27, W - 29, H - 27], radius=26, outline=(83, 61, 31), width=1)
-    _draw_brand(draw, dm, W)
-
-    # Left dark panel: compact and strongly readable over any token banner.
-    panel = _overlay(img)
-    pd = ImageDraw.Draw(panel)
-    pd.rounded_rectangle([48, 146, 470, 425], radius=24, fill=(5, 8, 12, 218), outline=(138, 97, 43, 205), width=2)
-    img.paste(panel, (0, 0), panel)
+    # Left market panel.
+    glass = _overlay(img)
+    gd = ImageDraw.Draw(glass)
+    gd.rounded_rectangle([47, 145, 476, 423], radius=25,
+                         fill=(4, 8, 13, 221), outline=(158, 111, 48, 215), width=2)
+    img.paste(glass, (0, 0), glass)
     draw = ImageDraw.Draw(img)
 
     badge_col = _GOLD2 if mode == 'CHART' else (_GREEN if mode == 'BUY' else _RED)
-    badge_w = 126 if mode == 'CHART' else 116
-    draw.rounded_rectangle([72, 168, 72 + badge_w, 207], radius=19, outline=badge_col, width=2)
-    badge_font = _font(dm, True, 18)
-    bb = draw.textbbox((0, 0), mode, font=badge_font)
-    draw.text((72 + (badge_w - (bb[2]-bb[0]))/2, 177), mode, font=badge_font, fill=badge_col)
+    badge_w = 146 if mode == 'CHART' else 126
+    draw.rounded_rectangle([70, 165, 70 + badge_w, 211], radius=22,
+                           outline=badge_col, width=2)
+    if mode == 'CHART':
+        # small chart-bars icon
+        draw.rectangle([88, 187, 94, 198], fill=badge_col)
+        draw.rectangle([99, 179, 105, 198], fill=badge_col)
+        draw.rectangle([110, 171, 116, 198], fill=badge_col)
+        tx = 130
+    else:
+        tx = 90
+    draw.text((tx, 176), mode, font=_font(dm, True, 18), fill=badge_col)
 
-    sym = '$' + str(symbol or 'TOKEN')
-    _fit(draw, sym, (72, 220), 360, dm, True, 61, 30, _WHITE)
+    sym = '$' + str(symbol or 'TOKEN').upper()
+    _fit(draw, sym, (70, 224), 370, dm, True, 62, 30, _WHITE)
 
     if mode == 'CHART':
-        draw.text((73, 314), 'PRICE', font=_font(dm, True, 14), fill=(207, 174, 117))
-        _fit(draw, _fmt_price(price), (72, 337), 360, dm, True, 39, 26, _WHITE)
+        draw.text((72, 318), 'PRICE', font=_font(dm, True, 14), fill=(200, 176, 132))
+        _fit(draw, _fmt_price(price), (70, 343), 365, dm, True, 42, 25, _WHITE)
     else:
-        draw.text((73, 314), 'PRICE', font=_font(dm, True, 14), fill=(207, 174, 117))
-        draw.text((288, 314), 'ENTRY', font=_font(dm, True, 14), fill=(207, 174, 117))
-        _fit(draw, _fmt_price(price), (72, 339), 190, dm, True, 34, 23, _WHITE)
-        _fit(draw, _fmt_price(entry_price), (288, 339), 150, dm, True, 28, 20, _WHITE)
-        draw.line([(270, 312), (270, 379)], fill=(95, 98, 106), width=1)
+        draw.text((72, 314), 'EXIT PRICE', font=_font(dm, True, 13), fill=(200, 176, 132))
+        draw.text((286, 314), 'ENTRY', font=_font(dm, True, 13), fill=(200, 176, 132))
+        _fit(draw, _fmt_price(price), (70, 339), 198, dm, True, 32, 20, _WHITE)
+        _fit(draw, _fmt_price(entry_price), (286, 339), 160, dm, True, 27, 19, _WHITE)
+        draw.line([(270, 314), (270, 381)], fill=(91, 98, 108), width=1)
         pnl = float(pnl_value or 0)
         sign = '+' if pnl >= 0 else ''
-        pnl_col = _GREEN if pnl >= 0 else _RED
-        _fit(draw, f'{sign}{pnl:.4f} {pnl_currency}', (73, 389), 350, dm, True, 22, 16, pnl_col)
+        _fit(draw, f'{sign}{pnl:.4f} {pnl_currency}', (71, 389), 355, dm, True, 22, 16,
+             _GREEN if pnl >= 0 else _RED)
 
-    # Large performance figure right. Give it breathing room and cleaner label.
-    pct_sign = '+' if pct >= 0 else ''
-    pct_text = f'{pct_sign}{pct:.2f}%'
-    pct_font = _font(dm, True, 82)
-    bb = draw.textbbox((0, 0), pct_text, font=pct_font)
-    pw = bb[2] - bb[0]
-    px = max(650, W - 70 - pw)
-    pbg = _overlay(img)
-    pbd = ImageDraw.Draw(pbg)
-    pbd.rounded_rectangle([px - 22, 162, W - 48, 294], radius=26, fill=(4, 8, 12, 158))
-    img.paste(pbg, (0, 0), pbg)
-    draw = ImageDraw.Draw(img)
-    _fit(draw, pct_text, (px, 176), W - px - 62, dm, True, 82, 48, pct_col)
-    label = 'TRADE PERFORMANCE' if mode != 'CHART' else '24H PERFORMANCE'
-    draw.text((px + 4, 263), label, font=_font(dm, True, 14), fill=(210, 213, 218))
-
+    # Hero performance on the right.
+    sign = '+' if pct >= 0 else ''
+    pct_text = f'{sign}{pct:.2f}%'
+    _fit(draw, pct_text, (645, 190), 500, dm, True, 84, 46, pct_col)
+    perf_label = '24H PERFORMANCE' if mode == 'CHART' else 'TRADE PERFORMANCE'
+    draw.text((736, 278), perf_label, font=_font(dm, True, 15), fill=(211, 217, 224))
     _draw_chart_line(draw, pct)
 
-    # Cleaner footer from approved v2: direct post route in the image, plus CTA.
-    draw.line([(49, 494), (W - 49, 494)], fill=(104, 75, 35), width=1)
-    draw.ellipse([55, 522, 100, 567], outline=_GOLD2, width=2)
-    draw.polygon([(77, 531), (65, 554), (89, 554)], fill=_GOLD2)
-    draw.text((121, 515), 'OrcAgent', font=_font(dm, True, 22), fill=_WHITE)
-    draw.text((121, 545), 'Trade smarter. Together.', font=_font(dm, False, 14), fill=_MUTED)
+    # Asset/channel strip, intentionally generic so it is correct across chains.
+    draw.line([(50, 463), (W-50, 463)], fill=(119, 83, 36), width=1)
+    draw.ellipse([58, 479, 99, 520], outline=_GOLD2, width=3)
+    draw.line([(69, 500), (87, 500)], fill=_GOLD2, width=3)
+    draw.text((121, 485), 'MULTI-CHAIN', font=_font(dm, True, 17), fill=(226, 228, 232))
+    draw.line([(430, 482), (430, 518)], fill=(105, 107, 112), width=1)
+    draw.text((468, 485), 'orcagent.fun', font=_font(dm, False, 18), fill=(226, 228, 232))
 
-    # The actual post id is not available inside the low-level renderer; the
-    # real clickable canonical /post/p... URL is always included in the tweet.
-    draw.text((455, 532), 'orcagent.fun/post/…', font=_font(dm, False, 20), fill=(194, 198, 207))
+    # Premium CTA footer matching the approved mock.
+    draw.line([(50, 531), (W-50, 531)], fill=(119, 83, 36), width=1)
+    draw.text((63, 551), 'TRADE SMARTER. TOGETHER.', font=_font(dm, True, 15), fill=_GOLD2)
+    draw.text((64, 579), 'MEMES  ×  MARKETS  ×  PEOPLE', font=_font(dm, False, 12), fill=_MUTED)
 
-    draw.rounded_rectangle([835, 515, 1135, 570], radius=27, fill=_GOLD2)
-    draw.text((879, 530), 'VIEW ON ORCAGENT', font=_font(dm, True, 18), fill=(10, 12, 14))
-    draw.text((1096, 525), '→', font=_font(dm, True, 29), fill=(10, 12, 14))
-
-    draw.text((52, 591), 'OrcAgent.fun', font=_font(dm, True, 15), fill=_GOLD2)
-    draw.text((493, 594), 'TRADE SMARTER. TOGETHER.', font=_font(dm, False, 11), fill=(153, 145, 129))
+    draw.rounded_rectangle([790, 548, 1138, 607], radius=29, fill=_GOLD2)
+    draw.text((837, 565), 'VIEW ON ORCAGENT', font=_font(dm, True, 19), fill=(8, 10, 13))
+    draw.text((1095, 557), '→', font=_font(dm, True, 31), fill=(8, 10, 13))
 
 
 def install(dm):
@@ -196,14 +187,13 @@ def install(dm):
     def _concept_d_chart(img, symbol, price, chg24h):
         _draw_common(dm, img, symbol, float(price or 0), float(chg24h or 0), mode='CHART')
 
-    def _concept_d_trade(img, symbol, side, entry_price, exit_price, pnl_pct, pnl_sol, pnl_currency='SOL'):
+    def _concept_d_trade(img, symbol, side, entry_price, exit_price, pnl_pct,
+                         pnl_sol, pnl_currency='SOL'):
         _draw_common(
             dm, img, symbol, float(exit_price or entry_price or 0), float(pnl_pct or 0),
             mode=(side or 'BUY').upper(), entry_price=float(entry_price or 0),
             pnl_value=float(pnl_sol or 0), pnl_currency=pnl_currency or 'SOL'
         )
 
-    # Existing generator calls resolve these globals dynamically, so this
-    # upgrades /api/trade-card/<id>.png, unfurls and X media uploads together.
     dm._tc_draw_chart_content = _concept_d_chart
     dm._tc_draw_content = _concept_d_trade
