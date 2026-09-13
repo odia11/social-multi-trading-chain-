@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PY_SOURCE = (ROOT / "dashboard.py").read_text(encoding="utf-8")
 JS_SOURCE = (ROOT / "static" / "dashboard.js").read_text(encoding="utf-8")
+MESSAGES_SOURCE = (ROOT / "templates" / "messages.html").read_text(encoding="utf-8")
 
 
 def _python_function(name):
@@ -70,3 +71,27 @@ def test_new_dm_payload_contains_every_field_the_shared_card_needs():
 
     assert "get_token_data(token_address)" in endpoint
     assert "if pnl_pct is not None else None" in endpoint
+
+
+def test_full_messages_page_uses_the_compact_token_card_too():
+    assert "function _renderDmTokenCard(tr)" in MESSAGES_SOURCE
+    assert "_renderDmTokenCard(tr)" in MESSAGES_SOURCE
+    assert "_hydrateDmTradeCards(area)" in MESSAGES_SOURCE
+    assert "data-dm-banner" in MESSAGES_SOURCE
+
+    old_three_column_labels = (
+        "Shared trade",
+        "RESULT",
+        "dm-trade-card-rows",
+    )
+    assert not any(label in MESSAGES_SOURCE for label in old_three_column_labels)
+
+
+def test_full_messages_trade_payload_has_token_identity_and_card_snapshot():
+    endpoint = _python_function("send_dm")
+
+    assert "mint_address" in endpoint
+    assert "base_currency" in endpoint
+    for key in ("symbol", "side", "entry_price", "exit_price", "pnl_pct",
+                "pnl_sol", "pnl_currency", "token_address", "chain", "amount"):
+        assert f"'{key}':" in endpoint
