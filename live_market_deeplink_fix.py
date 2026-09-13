@@ -22,7 +22,7 @@ def install(dashboard_module):
             if marker not in body and '</body>' in body:
                 body = body.replace(
                     '</body>',
-                    '<script src="/static/live-market-deeplink-fix.js?v=1" defer></script>\n</body>',
+                    '<script src="/static/live-market-deeplink-fix.js?v=2" defer></script>\n</body>',
                     1,
                 )
                 response.set_data(body)
