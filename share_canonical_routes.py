@@ -1,11 +1,13 @@
 """Canonical sharing fixes for OrcAgent.
 
 Keeps permanent app links attached to X shares, gives profiles a stable
-user-id route that survives username changes, and makes /post/<id> deep links
-open the exact shared feed post.
+user-id route that survives username changes, makes /post/<id> deep links
+open the exact shared feed post, and exposes rich X/Open Graph metadata for
+those canonical post URLs.
 """
 from contextvars import ContextVar
 from functools import wraps
+import html
 import json
 import os
 import re
@@ -72,6 +74,56 @@ def _profile_wallet(dashboard_module, user_id):
         return row[0] if row and row[0] else None
     finally:
         conn.close()
+
+
+def _post_social_meta(post_id):
+    """Return crawler-visible rich-card metadata for a canonical feed post."""
+    base = _public_base_url()
+    safe_id = quote(str(post_id or ''), safe='')
+    canonical = f'{base}/post/{safe_id}'
+
+    # The existing OrcAgent card renderer already produces the 1200x630 image
+    # used by X media uploads/unfurls. Point X/Open Graph at the same source so
+    # a pasted /post/<id> link renders visually on X instead of as plain text.
+    image = f'{base}/api/trade-card/{safe_id}.png'
+    title = 'OrcAgent · Social Trading Post'
+    description = 'View this post, token call or trade on OrcAgent.'
+
+    esc = lambda value: html.escape(value, quote=True)
+    return (
+        '\n<!-- OrcAgent canonical social preview -->\n'
+        f'<link rel="canonical" href="{esc(canonical)}">\n'
+        '<meta name="twitter:card" content="summary_large_image">\n'
+        f'<meta name="twitter:title" content="{esc(title)}">\n'
+        f'<meta name="twitter:description" content="{esc(description)}">\n'
+        f'<meta name="twitter:image" content="{esc(image)}">\n'
+        '<meta name="twitter:image:alt" content="OrcAgent post preview">\n'
+        '<meta property="og:type" content="website">\n'
+        f'<meta property="og:site_name" content="OrcAgent">\n'
+        f'<meta property="og:title" content="{esc(title)}">\n'
+        f'<meta property="og:description" content="{esc(description)}">\n'
+        f'<meta property="og:url" content="{esc(canonical)}">\n'
+        f'<meta property="og:image" content="{esc(image)}">\n'
+        '<meta property="og:image:width" content="1200">\n'
+        '<meta property="og:image:height" content="630">\n'
+        '<meta property="og:image:type" content="image/png">\n'
+    )
+
+
+def _inject_post_social_meta(body, post_id):
+    if not body or not _POST_ID_RE.fullmatch(post_id or ''):
+        return body, False
+    meta = _post_social_meta(post_id)
+    # Insert immediately after <head> so social crawlers see the canonical
+    # post metadata before any generic page-level tags.
+    updated, count = re.subn(
+        r'(<head\b[^>]*>)',
+        lambda m: m.group(1) + meta,
+        body,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    return updated, bool(count)
 
 
 def install(dashboard_module):
@@ -143,6 +195,10 @@ def install(dashboard_module):
 
             if path.startswith('/post/'):
                 post_id = path[len('/post/'):]
+                if _POST_ID_RE.fullmatch(post_id or ''):
+                    body, meta_changed = _inject_post_social_meta(body, post_id)
+                    changed = changed or meta_changed
+
                 if _POST_ID_RE.fullmatch(post_id or '') and '</body>' in body:
                     pid_js = json.dumps(post_id)
                     script = """
