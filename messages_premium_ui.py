@@ -29,6 +29,7 @@ def install(dashboard_module):
                 ('messages-composer-v4.css', '/static/messages-composer-v4.css?v=3'),
                 ('messages-thread-v5.css', '/static/messages-thread-v5.css?v=1'),
                 ('messages-thread-v6.css', '/static/messages-thread-v6.css?v=3'),
+                ('messages-home-token-card-v1.css', '/static/messages-home-token-card-v1.css?v=1'),
             ]
             for marker, href in css_assets:
                 if marker not in body and '</head>' in body:
@@ -39,6 +40,7 @@ def install(dashboard_module):
                 ('messages-composer-v4.js', '/static/messages-composer-v4.js?v=3'),
                 ('messages-thread-v5.js', '/static/messages-thread-v5.js?v=2'),
                 ('messages-thread-v6.js', '/static/messages-thread-v6.js?v=3'),
+                ('messages-home-token-card-v1.js', '/static/messages-home-token-card-v1.js?v=1'),
             ]
             for marker, src in js_assets:
                 if marker not in body and '</body>' in body:
