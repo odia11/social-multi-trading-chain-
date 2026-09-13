@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import os
 import secrets
 import sqlite3
@@ -40,7 +39,6 @@ def _object_ref() -> str:
     for key in _ID_KEYS:
         if key in body and body.get(key) not in (None, ''):
             parts.append(f'{key}={str(body.get(key))[:80]}')
-    # Path IDs are useful and contain no request secrets.
     if not parts:
         bits = [b for b in (request.path or '').split('/') if b]
         if bits and bits[-1].isdigit():
@@ -79,6 +77,31 @@ def install(dashboard_module):
     @app.before_request
     def _audit_request_id():
         g.orca_request_id = secrets.token_hex(12)
+        path = request.path or ''
+        if request.method not in {'POST', 'PUT', 'PATCH', 'DELETE'}:
+            return None
+        if not any(path == p or path.startswith(p + '/') for p in _SENSITIVE_PREFIXES):
+            return None
+        wallet = None
+        try:
+            fn = getattr(dashboard_module, '_authenticated_wallet', None)
+            wallet = fn() if callable(fn) else None
+        except Exception:
+            wallet = None
+        g.orca_audit_wallet = str(wallet or '')
+        g.orca_audit_user_id = None
+        if wallet:
+            try:
+                conn = sqlite3.connect(db_file)
+                try:
+                    row = conn.execute('SELECT id FROM users WHERE wallet_address=? LIMIT 1',
+                                       (wallet,)).fetchone()
+                    g.orca_audit_user_id = int(row[0]) if row else None
+                finally:
+                    conn.close()
+            except Exception:
+                g.orca_audit_user_id = None
+        return None
 
     @app.after_request
     def _audit_sensitive_mutation(response):
@@ -89,34 +112,17 @@ def install(dashboard_module):
         path = request.path or ''
         if not any(path == p or path.startswith(p + '/') for p in _SENSITIVE_PREFIXES):
             return response
-        wallet = None
-        try:
-            fn = getattr(dashboard_module, '_authenticated_wallet', None)
-            wallet = fn() if callable(fn) else None
-        except Exception:
-            wallet = None
-        user_id = None
-        if wallet:
-            try:
-                conn = sqlite3.connect(db_file)
-                try:
-                    row = conn.execute('SELECT id FROM users WHERE wallet_address=? LIMIT 1',
-                                       (wallet,)).fetchone()
-                    user_id = int(row[0]) if row else None
-                finally:
-                    conn.close()
-            except Exception:
-                user_id = None
+        wallet = getattr(g, 'orca_audit_wallet', '') or ''
+        user_id = getattr(g, 'orca_audit_user_id', None)
         try:
             conn = sqlite3.connect(db_file, timeout=5)
             try:
                 conn.execute('''INSERT INTO security_audit_log
                     (created_at,request_id,user_id,wallet,method,path,status,object_ref,ip_hash,user_agent)
                     VALUES (?,?,?,?,?,?,?,?,?,?)''',
-                    (time.time(), request_id, user_id, str(wallet or '')[:128],
+                    (time.time(), request_id, user_id, str(wallet)[:128],
                      request.method, path[:255], int(response.status_code), _object_ref(),
                      _ip_hash(), str(request.headers.get('User-Agent') or '')[:255]))
-                # Keep roughly one year by default. This is metadata, not message content.
                 conn.execute('DELETE FROM security_audit_log WHERE created_at < ?',
                              (time.time() - 366 * 86400,))
                 conn.commit()
