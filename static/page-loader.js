@@ -38,18 +38,26 @@
   }
   function validLink(a){ return !!linkUrl(a); }
 
+  /* Some standalone screens bootstrap substantial inline JavaScript while the
+     HTML parser is running. Replacing the current document with document.write
+     can make WebKit skip/interrupt that bootstrap even though the markup is
+     visibly installed. Groups then renders its skeleton forever because
+     _loadMyGroups/_loadDiscoverGroups never run. These routes may still be
+     prefetched, but their click always uses a real browser navigation so the
+     parser lifecycle is guaranteed. */
+  function requiresNativeNavigation(u){
+    if(!u)return true;
+    return /^\/groups(?:\/|$)/.test(u.pathname);
+  }
+
   /* ── Instant/warm navigation ──────────────────────────────────────────
      OrcAgent is still server-rendered. Replacing arbitrary page fragments
      would require every page script to gain an SPA lifecycle and risks
      duplicated polling/trading handlers. Instead, warm the *complete* next
-     document as soon as intent is visible (touch/pointer/focus). On click we
-     can install that already-fetched document immediately: no second network
-     round-trip, while the target page's normal scripts still bootstrap from
-     a clean document exactly as on a regular navigation.
-
-     Entries are deliberately short-lived because these pages contain private,
-     fast-changing account data. Nothing is persisted to localStorage, Cache
-     Storage or a service worker. */
+     document as soon as intent is visible (touch/pointer/focus). On supported
+     screens we can install that already-fetched document immediately. Heavy
+     standalone screens such as Groups use native navigation after the same
+     warm-up so their inline bootstrap always runs correctly. */
   var warm=new Map();
   var WARM_TTL=15000;
   var WARM_MAX=6;
@@ -84,8 +92,6 @@
 
   function warmLink(a){
     var u=linkUrl(a);if(!u)return;
-    /* Avoid warming destructive/auth endpoints even if somebody later turns
-       one into an anchor. Main page navigation is GET-only and safe. */
     if(/^\/(logout|disconnect|api)(\/|$)/i.test(u.pathname))return;
     fetchDocument(u).catch(function(){});
   }
@@ -94,21 +100,16 @@
     if(navigating)return;
     navigating=true;start();
     try{
-      /* Change the visible URL first so relative links, history and scripts in
-         the incoming document see the correct location while parsing. */
       history.pushState({oaInstant:true},'',u.href);
       document.open('text/html','replace');
       document.write(html);
       document.close();
-      /* The incoming page loads page-loader.js again and owns completion. */
     }catch(err){
       navigating=false;
       location.href=u.href;
     }
   }
 
-  /* Mobile intent arrives on pointerdown/touchstart roughly one finger-frame
-     before click; desktop additionally gets pointerover/focus prefetch. */
   document.addEventListener('pointerdown',function(e){
     var a=e.target&&e.target.closest?e.target.closest('a[href]'):null;warmLink(a);
   },{capture:true,passive:true});
@@ -129,10 +130,12 @@
     if(!u)return;
     start();
 
+    /* Groups must bootstrap through a normal document navigation. The prior
+       pointer/touch prefetch is still useful because the browser/server path is
+       warm, but do not document.write the cached HTML into the current page. */
+    if(requiresNativeNavigation(u))return;
+
     var hit=warm.get(u.href);
-    /* Only intercept if the document is already warm. If it is still in
-       flight, normal browser navigation wins; we never make a click slower
-       just to force the instant-nav path. */
     if(hit&&hit.html){
       e.preventDefault();
       e.stopPropagation();
@@ -140,11 +143,8 @@
     }
   },true);
 
-  /* Prime the five high-frequency app destinations once the current screen is
-     interactive. requestIdleCallback keeps first paint/network priority for
-     the page the user is actually looking at. */
   function primeCore(){
-    ['/','/live-market','/messages','/wallet'].forEach(function(path){
+    ['/','/live-market','/messages','/wallet','/groups'].forEach(function(path){
       try{
         var u=new URL(path,location.origin);
         if(u.pathname!==location.pathname) fetchDocument(u).catch(function(){});
@@ -156,12 +156,6 @@
 
   addEventListener('beforeunload',start);
 
-  /* Several older standalone templates register a bubble-phase pageshow
-     handler that calls location.reload() whenever Safari restores them from
-     bfcache. That makes Back/Forward needlessly re-download and rebuild the
-     whole page. Capture-phase handling runs first and stops only those
-     persisted restores; normal pageshow events still flow as before. Existing
-     page polling resumes from the preserved JS state. */
   addEventListener('pageshow',function(e){
     finish();navigating=false;
     if(e.persisted){
