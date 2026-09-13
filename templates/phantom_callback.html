@@ -144,6 +144,12 @@ var _b58enc=(function(){
     }).then(function(r){ return r.json(); }).catch(function(){ return null; });
 
     if(wr && (wr.ok || wr.success)){
+      // Store the same verified recovery credential as extension logins do.
+      // The HttpOnly cookie remains the fallback when storage is unavailable.
+      try{
+        if(wr.device_token) localStorage.setItem('orca_device_token', wr.device_token);
+        localStorage.removeItem('orca_manual_disconnect');
+      }catch(e){}
       msg.textContent = 'Connected! Redirecting…';
       window.location.href = '/';
     } else {
