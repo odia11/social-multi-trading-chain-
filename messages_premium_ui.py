@@ -28,7 +28,7 @@ def install(dashboard_module):
                 ('messages-premium-v3.css', '/static/messages-premium-v3.css?v=2'),
                 ('messages-composer-v4.css', '/static/messages-composer-v4.css?v=3'),
                 ('messages-thread-v5.css', '/static/messages-thread-v5.css?v=1'),
-                ('messages-thread-v6.css', '/static/messages-thread-v6.css?v=2'),
+                ('messages-thread-v6.css', '/static/messages-thread-v6.css?v=3'),
             ]
             for marker, href in css_assets:
                 if marker not in body and '</head>' in body:
