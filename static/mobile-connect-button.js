@@ -63,8 +63,9 @@ function showGuest(){
   btn.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h13a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h12"/><path d="M16 12h5v4h-5a2 2 0 0 1 0-4z"/></svg><span>Connect</span>';
   btn.style.cssText='height:44px;min-width:100px;padding:0 13px;border:0;border-radius:14px;background:#f7b955;color:#080d12;display:flex;align-items:center;justify-content:center;gap:7px;flex:0 0 auto;font:800 14px/1 system-ui,-apple-system,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.24);cursor:pointer;-webkit-tap-highlight-color:transparent';
   btn.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();if(startConnect())return;try{sessionStorage.setItem('orca-open-connect','1')}catch(_){}location.href='/';});
-  var nav=root.querySelector('.pt-nb-nav');
-  if(nav&&nav.parentNode===root)root.insertBefore(btn,nav.nextSibling);else root.appendChild(btn);
+  var profileSlot=root.querySelector('.pt-nb-profile-link');
+  if(profileSlot&&profileSlot.parentNode===root)root.insertBefore(btn,profileSlot);
+  else root.appendChild(btn);
 }
 function sync(force){
   if(providerConnected()){showUser();return;}
@@ -102,5 +103,14 @@ try{
     p.on('connect',function(){showUser();setTimeout(function(){sync(true)},500);});
     p.on('disconnect',function(){setTimeout(function(){sync(true)},400);});
   }
+}catch(_){}
+/* Older cached home-mobile.js builds used a second absolute-position Connect
+   button. Remove that stale element immediately if it is recreated so the
+   header can never overlap again during cache transition. */
+try{
+  new MutationObserver(function(){
+    var old=document.getElementById('oa-mobile-connect-wallet');
+    if(old)old.remove();
+  }).observe(document.documentElement,{childList:true,subtree:true});
 }catch(_){}
 })();
