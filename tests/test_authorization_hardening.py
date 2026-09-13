@@ -22,8 +22,10 @@ check('non-privileged roles fail closed',
 check('role query is parameterized',
       "WHERE wallet_address=?" in AUTH and "(wallet,)" in AUTH)
 check('owner wallets are explicitly supported', "OWNER_WALLET" in AUTH)
-check('API returns 401 for anonymous access', "'Authentication required'}), 401" in AUTH)
-check('API returns 403 for wrong role', "'Forbidden'}), 403" in AUTH)
+check('API returns 401 for anonymous access',
+      "_deny(401, 'Authentication required')" in AUTH)
+check('API returns 403 for wrong role',
+      "_deny(403, 'Forbidden')" in AUTH)
 check('authorization layer is installed in production entrypoint',
       '_install_authorization_hardening(_dashboard)' in ENTRY)
 
