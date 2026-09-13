@@ -9,6 +9,7 @@ from evm_to_solana_bridge import install as _install_evm_to_solana_bridge
 from wallet_deposit_guidance import install as _install_wallet_deposit_guidance
 from app_performance import install as _install_app_performance
 from x_post_preview_fix import install as _install_x_post_preview_fix
+from x_share_cache_bust import install as _install_x_share_cache_bust
 from share_canonical_routes import install as _install_share_canonical_routes
 from mobile_ui_hotfix import install as _install_mobile_ui_hotfix
 from trusted_phantom_autoconnect import install as _install_trusted_phantom_autoconnect
@@ -24,6 +25,10 @@ _install_app_performance(_dashboard)
 # after_request handlers in reverse registration order, so this executes last
 # and leaves one authoritative OG/Twitter metadata set for /post/<id>.
 _install_x_post_preview_fix(_dashboard)
+# Install before share_canonical_routes. That route adapter appends the
+# permanent /post/<id> link, then calls this wrapped _post_to_x which adds a
+# harmless version query so X cannot reuse its stale generic-card cache.
+_install_x_share_cache_bust(_dashboard)
 _install_share_canonical_routes(_dashboard)
 _install_mobile_ui_hotfix(_dashboard)
 _install_trusted_phantom_autoconnect(_dashboard)
