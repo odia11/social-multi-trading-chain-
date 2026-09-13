@@ -13,9 +13,9 @@ def install(dashboard_module):
 
     marker = 'data-orca-mobile-hotfix="1"'
     tags = (
-        '<link rel="stylesheet" href="/static/mobile-share-menu-fix.css?v=2" '
+        '<link rel="stylesheet" href="/static/mobile-share-menu-fix.css?v=3" '
         + marker + '>'
-        '<script src="/static/mobile-share-menu-fix.js?v=2" defer '
+        '<script src="/static/mobile-share-menu-fix.js?v=3" defer '
         + marker + '></script>'
         '<script src="/static/mobile-nav-post-force.js?v=2" defer '
         + marker + '></script>'
