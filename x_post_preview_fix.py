@@ -1,17 +1,16 @@
 """Ensure X/Open Graph previews for /post/<id> use the actual OrcAgent card.
 
-The built-in post permalink emits generic/fallback social metadata for normal
-feed posts. For posts that contain a __TRADE__ or __CHART__ embed, replace all
-existing OG/Twitter tags with one authoritative set pointing at the existing
-/api/trade-card/<id>.png renderer. This avoids duplicate metadata and stops X
-from choosing the generic OrcAgent image instead of the token/trade card.
+For trade/chart feed posts, replace every existing OG/Twitter tag with one
+authoritative metadata set that points at OrcAgent's real 1200x630 card
+renderer. When an X cache-bust query (xv) is present, keep that version in the
+canonical/og:url and the image URL too. X may otherwise normalize the shared
+URL back to the old canonical URL and reuse the stale generic preview.
 """
 import html
 import re
 
 _INSTALLED = False
 _POST_ID_RE = re.compile(r'^[pt]\d+$')
-
 _SOCIAL_META_RE = re.compile(
     r'\s*<meta\s+(?:name|property)=["\'](?:twitter:[^"\']+|og:[^"\']+)["\'][^>]*>\s*',
     re.IGNORECASE,
@@ -22,12 +21,19 @@ _CANONICAL_RE = re.compile(
 )
 
 
-def _social_block(base, post_id, tc):
+def _safe_version(value):
+    value = str(value or '').strip()
+    return value if re.fullmatch(r'[A-Za-z0-9_-]{1,24}', value) else ''
+
+
+def _social_block(base, post_id, tc, version=''):
     safe_id = html.escape(post_id, quote=True)
-    canonical = f'{base}/post/{safe_id}'
-    # Query version deliberately changes the crawler image URL after this fix,
-    # preventing X from reusing the previously cached generic preview image.
-    image = f'{base}/api/trade-card/{safe_id}.png?v=3'
+    version = _safe_version(version)
+    suffix = ('?xv=' + version) if version else ''
+    canonical = f'{base}/post/{safe_id}{suffix}'
+    image_version = version or '6'
+    image = f'{base}/api/trade-card/{safe_id}.png?v={html.escape(image_version, quote=True)}'
+
     symbol = html.escape(str((tc or {}).get('symbol') or 'TOKEN'), quote=True)
     if (tc or {}).get('kind') == 'chart':
         title = f'${symbol} on OrcAgent'
@@ -39,6 +45,7 @@ def _social_block(base, post_id, tc):
         pnl = float((tc or {}).get('pnl_pct') or 0)
         sign = '+' if pnl >= 0 else ''
         desc = f'{sign}{pnl:.2f}% · View on OrcAgent'
+
     title = html.escape(title, quote=True)
     desc = html.escape(desc, quote=True)
     return f'''\n<!-- authoritative OrcAgent X preview -->
@@ -66,7 +73,6 @@ def install(dashboard_module):
     if _INSTALLED:
         return
     _INSTALLED = True
-
     app = dashboard_module.app
 
     @app.after_request
@@ -82,8 +88,6 @@ def install(dashboard_module):
             if not _POST_ID_RE.fullmatch(post_id or ''):
                 return response
 
-            # Only replace metadata for actual trade/chart cards. Plain text and
-            # photo posts keep the original permalink metadata unchanged.
             tc = dashboard_module._tc_lookup(post_id)
             if not tc:
                 return response
@@ -94,8 +98,12 @@ def install(dashboard_module):
 
             body = _SOCIAL_META_RE.sub('\n', body)
             body = _CANONICAL_RE.sub('\n', body)
-            base = 'https://orcagent.fun'
-            block = _social_block(base, post_id, tc)
+            block = _social_block(
+                'https://orcagent.fun',
+                post_id,
+                tc,
+                request.args.get('xv', ''),
+            )
             body, count = re.subn(
                 r'(<head\b[^>]*>)',
                 lambda m: m.group(1) + block,
@@ -107,6 +115,8 @@ def install(dashboard_module):
                 response.set_data(body)
                 response.content_length = len(response.get_data())
                 response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                response.headers['Pragma'] = 'no-cache'
+                response.headers['Expires'] = '0'
         except Exception as exc:
             app.logger.warning('X post preview fix skipped: %s', exc)
         return response
