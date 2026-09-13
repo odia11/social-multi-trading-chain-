@@ -42,12 +42,14 @@ check('CSP disables object content', '"object-src \'none\'"' in HARDENING)
 check('CSP prevents third-party framing', '"frame-ancestors \'none\'"' in HARDENING)
 check('CSP explicitly permits only the required Dexscreener frame',
       '"frame-src \'self\' https://dexscreener.com"' in HARDENING)
+check('CSP script elements require a per-response nonce',
+      'script-src-elem' in HARDENING and "'nonce-{nonce}'" in HARDENING)
 check('HSTS is sent', 'Strict-Transport-Security' in HARDENING)
 check('MIME sniffing is disabled', 'X-Content-Type-Options' in HARDENING and 'nosniff' in HARDENING)
 check('legacy framing is denied', 'X-Frame-Options' in HARDENING and 'DENY' in HARDENING)
 check('cross-origin opener isolation is enabled', 'Cross-Origin-Opener-Policy' in HARDENING)
 check('security runtime is injected in HTML',
-      'security-runtime.js?v=2' in HARDENING and 'data-orca-security-runtime' in HARDENING)
+      'security-runtime.js?v=3' in HARDENING and 'data-orca-security-runtime' in HARDENING)
 
 check('runtime blocks javascript URLs', "javascript:" in RUNTIME)
 check('runtime blocks vbscript URLs', "vbscript:" in RUNTIME)
