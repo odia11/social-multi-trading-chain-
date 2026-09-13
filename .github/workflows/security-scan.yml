@@ -39,6 +39,9 @@ jobs:
           python tests/test_idor_hardening.py
           python tests/test_financial_authorization_hardening.py
           python tests/test_security_phase2.py
+          python tests/test_auth_replay_runtime.py
+          python tests/test_ssrf_hardening.py
+          python tests/test_stay_connected.py
 
       # ── 1. pip-audit: known CVEs in dependencies ──────────────────────────
       - name: pip-audit
