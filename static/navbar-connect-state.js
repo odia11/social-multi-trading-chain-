@@ -13,6 +13,10 @@ var lastCheckAt=0;
 var reconcileQueued=false;
 var MIN_CHECK_GAP_MS=15000;
 
+function manualDisconnectRequested(){
+  try{return localStorage.getItem('orca_manual_disconnect')==='1';}catch(_){return false;}
+}
+
 function els(){
   var link=document.querySelector('.pt-nb-profile-link');
   if(!link)return null;
@@ -40,6 +44,7 @@ function revealHome(){
 }
 
 function startWalletConnect(){
+  try{localStorage.removeItem('orca_manual_disconnect');}catch(_){}
   var phantomBtn=document.getElementById('phantom-ob-btn');
   if(phantomBtn){try{phantomBtn.click();return true;}catch(_){}}
   if(typeof window.connectWalletOnboard==='function'){
@@ -92,6 +97,7 @@ function renderGuest(){
 }
 
 function renderUser(d){
+  if(manualDisconnectRequested()){renderGuest();return;}
   authState='user';lastUser=d||lastUser;
   var e=els();if(!e)return;remember(e);
   if(e.link.getAttribute('data-oa-auth')!=='user'){
@@ -115,6 +121,7 @@ function renderUser(d){
 function reconcileChrome(){
   reconcileQueued=false;
   revealHome();
+  if(manualDisconnectRequested())authState='guest';
   var e=els();
   if(!e){wireGuestConnect();return;}
   if(authState==='user'){
@@ -130,6 +137,7 @@ function queueReconcile(){
 }
 
 function checkSession(force){
+  if(manualDisconnectRequested()){renderGuest();return;}
   var now=Date.now();
   if(checkInFlight)return;
   if(!force&&now-lastCheckAt<MIN_CHECK_GAP_MS)return;
@@ -139,25 +147,30 @@ function checkSession(force){
     if(!r.ok)throw new Error('not signed in');
     return r.json();
   }).then(function(d){
+    if(manualDisconnectRequested()){renderGuest();return;}
     if(d===null)return;
     if(d&&d.ok){renderUser(d);return;}
     renderGuest();
   }).catch(function(){renderGuest();}).finally(function(){checkInFlight=false;});
 }
 
+function onManualDisconnect(){
+  try{localStorage.setItem('orca_manual_disconnect','1');}catch(_){}
+  window.__ORCA_TRUSTED_PHANTOM_PUBLIC_KEY='';
+  renderGuest();
+  queueReconcile();
+}
+
 function boot(){
   revealHome();
-  renderGuest();
-  checkSession(true);
+  if(manualDisconnectRequested())renderGuest();
+  else {renderGuest();checkSession(true);}
   try{
     if(sessionStorage.getItem('orca-open-connect')==='1'){
       sessionStorage.removeItem('orca-open-connect');
       setTimeout(function(){revealHome();startWalletConnect();},100);
     }
   }catch(_){}
-  /* Home's mobile redesign can rebuild the top bar after this script runs.
-     Re-apply the already-known auth UI when that happens, without making
-     another /api/me request. */
   new MutationObserver(queueReconcile).observe(document.documentElement,{childList:true,subtree:true});
   setTimeout(queueReconcile,250);
   setTimeout(queueReconcile,1000);
@@ -165,6 +178,14 @@ function boot(){
 
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 window.addEventListener('load',queueReconcile,{once:true});
+window.addEventListener('orca:manual-disconnect',onManualDisconnect);
 window.addEventListener('pageshow',function(){queueReconcile();checkSession(false);});
 document.addEventListener('visibilitychange',function(){if(!document.hidden){queueReconcile();checkSession(false);}});
+document.addEventListener('click',function(e){
+  var t=e.target&&e.target.closest?e.target.closest('button,a,[role="button"]'):null;
+  if(t&&/disconnect wallet/i.test((t.textContent||'').trim())){
+    onManualDisconnect();
+    try{window.dispatchEvent(new CustomEvent('orca:manual-disconnect'));}catch(_){}
+  }
+},true);
 })();
