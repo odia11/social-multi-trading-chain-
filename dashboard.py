@@ -24669,12 +24669,34 @@ def share_trade_dm(peer_id):
     pos = us.get('positions', {}).get(token_address)
     if not pos or pos.get('amount', 0) <= 0:
         return jsonify({'ok': False, 'msg': 'No open position for this token'}), 400
+    entry_price = float(pos.get('buy_price', 0) or 0)
+    current_price = None
+    pnl_pct = None
+    try:
+        token_data = get_token_data(token_address)
+        if token_data and float(token_data.get('price', 0) or 0) > 0:
+            current_price = float(token_data['price'])
+            if entry_price > 0:
+                pnl_pct = round((current_price - entry_price) / entry_price * 100, 2)
+    except Exception:
+        pass
+    chain = str(pos.get('chain') or 'solana').lower()
+    pnl_currency = str(pos.get('base_currency') or ('SOL' if chain == 'solana' else 'USDC')).upper()
+    spend = float(pos.get('spend', 0) or 0)
     trade_payload = json.dumps({
         'type': 'trade_share',
         'token_address': token_address,
         'token_symbol': pos.get('symbol', token_address[:8]),
-        'entry_price': float(pos.get('buy_price', 0) or 0),
-        'amount_sol': float(pos.get('spend', 0) or 0),
+        'side': 'BUY',
+        'entry_price': entry_price,
+        'current_price': current_price,
+        'exit_price': current_price,
+        'pnl_pct': pnl_pct,
+        'pnl_sol': round(spend * pnl_pct / 100, 8) if pnl_pct is not None else None,
+        'pnl_currency': pnl_currency,
+        'amount': float(pos.get('amount', 0) or 0),
+        'amount_sol': spend,
+        'chain': chain,
     })
     conn = sqlite3.connect(DB_FILE)
     try:
