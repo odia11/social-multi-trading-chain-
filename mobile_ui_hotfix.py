@@ -27,7 +27,7 @@ def install(dashboard_module):
         + marker + '></script>'
         '<link rel="stylesheet" href="/static/home-feed-chart-redesign.css?v=1" '
         + marker + '>'
-        '<script src="/static/home-feed-chart-redesign.js?v=1" defer '
+        '<script src="/static/home-feed-chart-redesign.js?v=2" defer '
         + marker + '></script>'
     )
 
