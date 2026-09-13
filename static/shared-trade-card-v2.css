@@ -1,0 +1,30 @@
+/* OrcAgent shared token/trade card v2 — Home-style card for standalone surfaces. */
+.oa-stc{position:relative;overflow:hidden;width:100%;max-width:100%;min-height:138px;background:#0d1117;border:1px solid rgba(247,185,85,.5);border-radius:16px;font-family:'JetBrains Mono',monospace;cursor:pointer;isolation:isolate;box-shadow:0 10px 28px rgba(0,0,0,.28)}
+.oa-stc-banner{position:absolute;inset:0;background-size:cover;background-position:center;opacity:.72;transform:scale(1.01)}
+.oa-stc-shade{position:absolute;inset:0;background:linear-gradient(90deg,rgba(8,11,15,.95) 0%,rgba(8,11,15,.78) 52%,rgba(8,11,15,.36) 100%),linear-gradient(180deg,rgba(8,11,15,.15),rgba(8,11,15,.72))}
+.oa-stc-content{position:relative;z-index:1;padding:18px 20px 14px}
+.oa-stc-main{display:flex;align-items:center;justify-content:space-between;gap:16px;min-width:0}
+.oa-stc-left{min-width:0;flex:1}
+.oa-stc-title{display:flex;align-items:center;gap:10px;min-width:0;margin-bottom:10px}
+.oa-stc-title strong{font-size:20px;color:#eef1f5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.oa-stc-side{display:inline-flex;align-items:center;border-radius:7px;padding:4px 8px;font-size:11px;font-weight:800;line-height:1;border:1px solid currentColor}
+.oa-stc-side.buy{color:#00d084;background:rgba(0,208,132,.08)}
+.oa-stc-side.sell{color:#ff4d6a;background:rgba(255,77,106,.08)}
+.oa-stc-prices{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#9aa3af;font-size:12px;line-height:1.45}
+.oa-stc-prices b{font-weight:600;color:#c8ced7}.oa-stc-prices em{font-style:normal;color:#eef1f5}
+.oa-stc-pnl{margin-top:8px;color:#f7b955;font-size:15px;font-weight:700}
+.oa-stc-pct{font-size:34px;font-weight:800;line-height:1;white-space:nowrap;text-shadow:0 4px 20px rgba(0,0,0,.4)}
+.oa-stc-pct.pos{color:#00d084}.oa-stc-pct.neg{color:#ff4d6a}
+.oa-stc-footer{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:14px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08);color:#e3e7ec;font-family:'Geist',system-ui,sans-serif;font-size:12px;font-weight:600}
+.oa-stc:hover .oa-stc-footer{color:#f7b955}.oa-stc:focus-visible{outline:2px solid #f7b955;outline-offset:2px}
+.gd-post-body .oa-stc,.gd-composer-trade-preview .oa-stc{margin-top:8px}
+.gd-composer-trade-preview .oa-stc{max-width:360px}
+.msg-bubble.msg-trade .oa-stc{margin:0}
+@media(max-width:767px){
+  .oa-stc{min-height:126px;border-radius:14px}
+  .oa-stc-content{padding:15px 16px 12px}
+  .oa-stc-title{margin-bottom:8px}.oa-stc-title strong{font-size:17px}
+  .oa-stc-prices{font-size:10.5px;gap:6px}.oa-stc-pnl{font-size:13px;margin-top:6px}
+  .oa-stc-pct{font-size:27px}.oa-stc-footer{font-size:11px;margin-top:11px;padding-top:8px}
+  body.oa-thread-open .msg-bubble.msg-trade:has(.oa-stc){width:calc(100vw - 74px)!important;max-width:520px!important}
+}
