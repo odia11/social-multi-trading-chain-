@@ -15,7 +15,7 @@ def install(dashboard_module):
     tags = (
         '<link rel="stylesheet" href="/static/mobile-share-menu-fix.css?v=4" '
         + marker + '>'
-        '<script src="/static/mobile-share-menu-fix.js?v=4" defer '
+        '<script src="/static/mobile-share-menu-fix.js?v=5" defer '
         + marker + '></script>'
         '<script src="/static/mobile-nav-post-force.js?v=2" defer '
         + marker + '></script>'
