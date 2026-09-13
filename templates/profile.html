@@ -521,7 +521,7 @@ function copyWallet() {
 }
 
 function _shareProfile() {
-  var url = window.location.href;
+  // A wallet address is the permanent profile identifier. The visible route\n  // may contain a username, query string or hash, all of which can change.\n  var url = window.location.origin + '/profile/' + encodeURIComponent({{ wallet|tojson }});
   document.getElementById('spm-url').value = url;
   document.getElementById('spm-back').classList.add('open');
 }

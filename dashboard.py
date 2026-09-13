@@ -114,6 +114,18 @@ def _safe_external_image_url(url: str) -> bool:
             return False
     return True
 
+
+def _share_text_with_route(text: str, url: str, limit: int = 280) -> str:
+    """Attach one complete canonical route without exceeding the post limit."""
+    text = (text or '').strip()
+    url = (url or '').strip()
+    if not url:
+        return text[:limit]
+    room = max(0, limit - len(url) - 1)
+    if len(text) > room:
+        text = text[:max(0, room - 1)].rstrip() + '…'
+    return (text + ' ' + url).strip()
+
 _TC_FONT_CACHE = {}
 def _tc_font(bold, size):
     """Loads the same JetBrains Mono the app's own UI uses (vendored at
@@ -6161,12 +6173,10 @@ def _record_user_trade(user_id: int, us: dict, symbol: str, entry: float, exit_p
         if _xrow and _xrow[0]:
             _sign  = '+' if pnl_pct >= 0 else ''
             _link  = f'https://orcagent.fun/share/t{_trade_id}' if _trade_id else ''
-            _tweet = f'Just closed ${symbol} {_sign}{pnl_pct:.1f}% ({_sign}{pnl:.4f} {currency_label}) on @OrcAgent 🐋'
-            if _link:
-                _room = 280 - len(_link) - 1   # -1 for the joining space
-                if len(_tweet) > _room:
-                    _tweet = _tweet[:_room - 1].rstrip() + '…'
-                _tweet = _tweet + ' ' + _link
+            _tweet = _share_text_with_route(
+                f'Just closed ${symbol} {_sign}{pnl_pct:.1f}% ({_sign}{pnl:.4f} {currency_label}) on @OrcAgent 🐋',
+                _link,
+            )
             threading.Thread(target=_post_to_x, args=(wallet, _tweet), daemon=True).start()
     if pref_notifications and user_id:
         pnl_sign     = '+' if pnl >= 0 else ''
@@ -6301,7 +6311,12 @@ def _recalculate_badges(wallet: str) -> None:
             ).fetchone()
             if xrow and xrow[0]:
                 for badge in new_badges:
-                    _tweet = f'Just unlocked the {badge} badge on @OrcAgent 🏆'
+                    _profile_link = ('https://orcagent.fun/profile/' +
+                                     requests.utils.quote(wallet, safe=''))
+                    _tweet = _share_text_with_route(
+                        f'Just unlocked the {badge} badge on @OrcAgent 🏆',
+                        _profile_link,
+                    )
                     threading.Thread(target=_post_to_x, args=(wallet, _tweet), daemon=True).start()
         conn.close()
     except Exception as e:
@@ -21203,9 +21218,8 @@ def share_feed_to_x(post_id):
     # for a photo post, or the same 1200x630 trade/chart card image used for
     # the /share/<id> link-unfurl preview, for anything __TRADE__/__CHART__-
     # embedded or a native trade share. Any failure here (no X media scope,
-    # network hiccup, unexpected response shape) falls back to a plain text
-    # tweet with a link back to the post -- attaching a picture is a nice-to-
-    # have, it must never be the reason sharing fails outright.
+    # network hiccup, unexpected response shape) falls back to a text + link
+    # tweet. The canonical post route is included in both cases below.
     media_ids = None
     if wants_media:
         try:
@@ -21225,11 +21239,9 @@ def share_feed_to_x(post_id):
         except Exception as e:
             print(f'[x] media attach skipped for {wallet[:8]}: {e}', flush=True)
             media_ids = None
-        if not media_ids:
-            # No picture ended up attached (upload failed, or there simply
-            # wasn't a card image to render) -- add the link back so there's
-            # still something to look at beyond the caption.
-            text = (text + ' ' + link_fallback)[:250]
+    # A share is a route back to its source, whether or not X accepted the
+    # attached image. Keep the complete ID permalink inside the limit.
+    text = _share_text_with_route(text, link_fallback)
 
     ok = _post_to_x(wallet, text, media_ids=media_ids)
     return jsonify({'ok': ok, 'msg': 'Shared to X!' if ok else 'Failed to share to X'})
