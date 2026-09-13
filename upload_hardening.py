@@ -28,7 +28,7 @@ def _validate_image_bytes(raw: bytes) -> None:
     if not raw or len(raw) > _MAX_IMAGE_BYTES:
         raise ValueError('Image payload is empty or too large')
     try:
-        from PIL import Image, UnidentifiedImageError
+        from PIL import Image
         Image.MAX_IMAGE_PIXELS = _MAX_PIXELS
         with Image.open(io.BytesIO(raw)) as im:
             fmt = str(im.format or '').upper()
@@ -49,8 +49,11 @@ def _validate_image_bytes(raw: bytes) -> None:
 
 
 def _validate_data_uri(value: str) -> None:
-    text = str(value or '')
-    if not text.lower().startswith('data:image/'):
+    text = str(value or '').strip()
+    low = text.lower()
+    if low.startswith('data:') and not low.startswith('data:image/'):
+        raise ValueError('Only raster image data URIs are allowed in image fields')
+    if not low.startswith('data:image/'):
         return
     head, sep, payload = text.partition(',')
     if not sep or ';base64' not in head.lower():
@@ -73,7 +76,7 @@ def _walk_images(obj, key=''):
         for v in obj[:50]:
             yield from _walk_images(v, key)
     elif isinstance(obj, str):
-        if obj.lower().startswith('data:image/') or key in _IMAGE_KEYS or key.endswith('_image'):
+        if obj.lower().startswith('data:') or key in _IMAGE_KEYS or key.endswith('_image'):
             yield obj
 
 
