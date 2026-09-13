@@ -4,7 +4,7 @@ After=local-fs.target
 
 [Service]
 Type=oneshot
-ExecStart=/opt/orcagent/deploy/backup.sh
+ExecStart=/bin/bash /opt/orcagent/deploy/backup.sh
 User=root
 Group=root
 Nice=10
