@@ -1,9 +1,7 @@
-"""Force X to re-crawl OrcAgent post previews after metadata fixes.
+"""Keep OrcAgent X shares fresh and consistently branded.
 
-Adds a harmless version query to canonical /post/<id> links immediately before
-they are sent to X. The matching preview adapter preserves the same version in
-canonical/og:url and the card image URL, preventing X from normalizing the
-request back onto an older cached generic preview.
+Adds a cache-busting version to canonical /post/<id> links and ensures direct
+X shares include the @orcagent tag in English copy.
 """
 from functools import wraps
 import re
@@ -18,6 +16,18 @@ def _version_post_links(text):
     return _POST_LINK_RE.sub(lambda m: m.group(1) + '?xv=' + _PREVIEW_VERSION, text)
 
 
+def _ensure_orcagent_tag(text):
+    text = (text or '').strip()
+    if '@orcagent' in text.lower():
+        return text
+    # Keep the mention before the canonical URL when one is present.
+    match = re.search(r'\shttps://orcagent\.fun/post/', text)
+    if match:
+        pos = match.start()
+        return text[:pos].rstrip() + ' @orcagent' + text[pos:]
+    return (text + ' @orcagent').strip()
+
+
 def install(dashboard_module):
     global _INSTALLED
     if _INSTALLED:
@@ -28,10 +38,8 @@ def install(dashboard_module):
 
     @wraps(original_post_to_x)
     def _post_to_x_with_fresh_preview(wallet, text, media_ids=None):
-        return original_post_to_x(
-            wallet,
-            _version_post_links(text),
-            media_ids=media_ids,
-        )
+        text = _ensure_orcagent_tag(text)
+        text = _version_post_links(text)
+        return original_post_to_x(wallet, text, media_ids=media_ids)
 
     dashboard_module._post_to_x = _post_to_x_with_fresh_preview
