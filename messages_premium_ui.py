@@ -37,8 +37,8 @@ def install(dashboard_module):
             js_assets = [
                 ('messages-premium-v3.js', '/static/messages-premium-v3.js?v=1'),
                 ('messages-composer-v4.js', '/static/messages-composer-v4.js?v=3'),
-                ('messages-thread-v5.js', '/static/messages-thread-v5.js?v=1'),
-                ('messages-thread-v6.js', '/static/messages-thread-v6.js?v=2'),
+                ('messages-thread-v5.js', '/static/messages-thread-v5.js?v=2'),
+                ('messages-thread-v6.js', '/static/messages-thread-v6.js?v=3'),
             ]
             for marker, src in js_assets:
                 if marker not in body and '</body>' in body:
