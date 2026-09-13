@@ -1,19 +1,16 @@
-"""Force X to re-crawl canonical OrcAgent post previews after metadata fixes.
+"""Force X to re-crawl OrcAgent post previews after metadata fixes.
 
-X caches card metadata aggressively by URL. Older /post/<id> shares may still
-show the previous generic OrcAgent card even after the page now serves the
-correct token/trade Open Graph image. This adapter adds a harmless version query
-to canonical post links immediately before they are sent to X.
-
-It must be installed before share_canonical_routes so that adapter adds the
-canonical link first and this wrapper then version-stamps the final text.
+Adds a harmless version query to canonical /post/<id> links immediately before
+they are sent to X. The matching preview adapter preserves the same version in
+canonical/og:url and the card image URL, preventing X from normalizing the
+request back onto an older cached generic preview.
 """
 from functools import wraps
 import re
 
 _INSTALLED = False
 _POST_LINK_RE = re.compile(r'(https://orcagent\.fun/post/[pt]\d+)(?!\?[^\s]*)')
-_PREVIEW_VERSION = '5'
+_PREVIEW_VERSION = '6'
 
 
 def _version_post_links(text):
