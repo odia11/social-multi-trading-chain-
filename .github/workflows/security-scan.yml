@@ -27,6 +27,10 @@ jobs:
           pip install --quiet pip-audit bandit
           pip install --quiet -r requirements.txt || true
 
+      # ── 0. App-specific security regression checks ────────────────────────
+      - name: OrcAgent security regression checks
+        run: python tests/test_security_hardening.py
+
       # ── 1. pip-audit: known CVEs in dependencies ──────────────────────────
       - name: pip-audit
         run: pip-audit --strict -r requirements.txt
