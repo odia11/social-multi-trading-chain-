@@ -886,6 +886,68 @@ async function loadThread(peerId, forceScroll) {
 
 var _lastMsgsSig = null;
 
+/* The full Messages page is standalone and does not load dashboard.js. Keep
+   its trade share on the same compact token-card contract as Home, including
+   the token banner and a permanent token route for Solana cards. */
+var _dmTradeBannerCache = {};
+function _renderDmTokenCard(tr) {
+  tr = tr || {};
+  var symbol = tr.symbol || tr.token || '?';
+  var side = String(tr.side || 'SELL').toUpperCase();
+  var isBuy = side === 'BUY';
+  var entry = parseFloat(tr.entry_price != null ? tr.entry_price : tr.entry) || 0;
+  var exit = parseFloat(tr.exit_price != null ? tr.exit_price : tr.exit) || 0;
+  var pnl = parseFloat(tr.pnl_sol != null ? tr.pnl_sol : tr.pnl) || 0;
+  var pct = tr.pnl_pct != null ? parseFloat(tr.pnl_pct) : (entry ? (exit-entry)/entry*100 : 0);
+  if (!isFinite(pct)) pct = 0;
+  var currency = tr.pnl_currency || 'SOL';
+  var mint = tr.token_address || tr.mint_address || '';
+  var chain = String(tr.chain || 'solana').toLowerCase();
+  var sideColor = isBuy ? '#00d084' : '#ff4757';
+  var pnlColor = pct >= 0 ? '#00d084' : '#ff4757';
+  var pctText = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+  var pnlText = (pnl >= 0 ? '+' : '') + pnl.toFixed(4) + ' ' + _esc(currency);
+  var fp = function(n) {
+    return n ? (n < 0.001 ? '$'+n.toFixed(8).replace(/\.?0+$/,'') : '$'+n.toFixed(6)) : '—';
+  };
+  var route = mint && chain === 'solana' ? '/token/' + encodeURIComponent(mint) : '';
+  return '<div class="dm-token-share" data-mint="'+_esc(mint)+'"'
+    + (route ? ' role="link" tabindex="0" data-route="'+_esc(route)+'" onclick="location.href=this.dataset.route" onkeydown="if(event.key===\'Enter\')location.href=this.dataset.route"' : '')
+    + ' style="position:relative;overflow:hidden;background:#0d1117;border:1px solid #1a1f2e;border-radius:12px;padding:14px 16px;font-family:\'JetBrains Mono\',monospace;'+(route?'cursor:pointer':'')+'">'
+    + '<div data-dm-banner style="position:absolute;inset:0;background-size:cover;background-position:center"></div>'
+    + '<div style="position:absolute;inset:0;background:linear-gradient(to bottom,rgba(13,17,23,.58),rgba(13,17,23,.94))"></div>'
+    + '<div style="position:relative;z-index:1;display:flex;justify-content:space-between;align-items:center;gap:14px">'
+    +   '<div style="flex:1;min-width:0">'
+    +     '<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">'
+    +       '<span style="color:'+sideColor+';font-weight:700;font-size:11px;border:1px solid '+sideColor+'33;border-radius:4px;padding:1px 5px">'+side+'</span>'
+    +       '<span style="color:#eef1f5;font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">$'+_esc(symbol)+'</span>'
+    +     '</div>'
+    +     '<div style="color:#8a919c;font-size:11px;margin-bottom:5px">'+fp(entry)+' → '+fp(exit)+'</div>'
+    +     '<div style="color:#f7b955;font-size:12px;font-weight:600">'+pnlText+'</div>'
+    +   '</div>'
+    +   '<div style="font-size:24px;font-weight:700;color:'+pnlColor+';line-height:1;text-align:right;flex-shrink:0">'+pctText+'</div>'
+    + '</div>'
+    + '</div>';
+}
+
+function _hydrateDmTradeCards(area) {
+  if (!area) return;
+  area.querySelectorAll('.dm-token-share[data-mint]').forEach(function(card) {
+    var mint = card.dataset.mint;
+    var banner = card.querySelector('[data-dm-banner]');
+    if (!mint || !banner) return;
+    if (Object.prototype.hasOwnProperty.call(_dmTradeBannerCache, mint)) {
+      if (_dmTradeBannerCache[mint]) banner.style.backgroundImage = 'url('+_dmTradeBannerCache[mint]+')';
+      return;
+    }
+    fetch('/api/token/info/' + encodeURIComponent(mint)).then(function(r){ return r.json(); }).then(function(info) {
+      var url = info && info.ok && info.banner_url || null;
+      _dmTradeBannerCache[mint] = url;
+      if (url && banner.isConnected) banner.style.backgroundImage = 'url('+url+')';
+    }).catch(function(){ _dmTradeBannerCache[mint] = null; });
+  });
+}
+
 function _renderMessages(msgs, forceScroll) {
   var area = document.getElementById('msgs-area');
   if (!area) return;
@@ -914,28 +976,7 @@ function _renderMessages(msgs, forceScroll) {
       bubble = '<div class="msg-bubble msg-image"><img src="'+_esc(m.message)+'" loading="lazy" onclick="_showImgLightbox(this.src)"></div>';
     } else if (m.message_type === 'trade') {
       var tr = {}; try { tr = JSON.parse(m.message); } catch(e) {}
-      var trEntry  = parseFloat(tr.entry || 0);
-      var trExit   = parseFloat(tr.exit  || 0);
-      var trPnl    = parseFloat(tr.pnl   || 0);
-      var trPct    = trEntry ? (trExit - trEntry) / trEntry * 100 : 0;
-      var trPctCol = trPct >= 0 ? '#00d084' : '#ff4757';
-      var trPctStr = (trPct >= 0 ? '+' : '') + trPct.toFixed(2) + '%';
-      var trSolStr = (trPnl >= 0 ? '+' : '') + trPnl.toFixed(4) + ' SOL';
-      var trFp = function(n){ n = parseFloat(n||0); return n ? (n<0.001 ? '$'+n.toFixed(8).replace(/\.?0+$/,'') : '$'+n.toFixed(6)) : '—'; };
-      bubble = '<div class="msg-bubble msg-trade">'
-        + '<div style="position:relative;overflow:hidden;background:#0d1117;border:1px solid #1a1f2e;border-radius:10px;padding:14px 16px;font-family:\'JetBrains Mono\',monospace">'
-        +   '<div style="display:flex;justify-content:space-between;align-items:flex-start">'
-        +     '<div style="flex:1;min-width:0">'
-        +       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">'
-        +         '<span style="color:#eef1f5;font-weight:700;font-size:15px">$'+_esc(tr.token||'?')+'</span>'
-        +       '</div>'
-        +       '<div style="color:#8a919c;font-size:11px;margin-bottom:5px">'+trFp(trEntry)+' → '+trFp(trExit)+'</div>'
-        +       '<div style="color:#f7b955;font-size:12px;font-weight:600">'+trSolStr+'</div>'
-        +     '</div>'
-        +     '<div style="font-size:26px;font-weight:700;color:'+trPctCol+';line-height:1;text-align:right;padding-left:14px;align-self:center">'+trPctStr+'</div>'
-        +   '</div>'
-        + '</div>'
-        + '</div>';
+      bubble = '<div class="msg-bubble msg-trade">'+_renderDmTokenCard(tr)+'</div>';
     } else {
       bubble = '<div class="msg-bubble">'+_esc(m.message)+'</div>';
     }
@@ -957,6 +998,7 @@ function _renderMessages(msgs, forceScroll) {
       + '<span class="msg-time">'+_esc(_timeAgo(m.created_at))+editedTag+seenTag+'</span>'
       + '</div>';
   }).join('');
+  _hydrateDmTradeCards(area);
   if (forceScroll || atBottom) _scrollToBottom();
   var conv = _conversations.find(function(c){ return c.peer_id === _activePeerId; });
   if (conv && conv.unread > 0) { conv.unread = 0; _renderConvList(); }

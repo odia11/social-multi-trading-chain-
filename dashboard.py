@@ -24029,13 +24029,42 @@ def send_dm(peer_id):
             return jsonify({'ok': False, 'msg': 'Cannot message yourself'}), 400
         if message_type == 'trade':
             trow = conn.execute(
-                'SELECT token, entry_price, exit_price, pnl FROM trades WHERE id=? AND user_id=?',
+                '''SELECT token, entry_price, exit_price, pnl, mint_address,
+                          chain, base_currency, amount, token_amount, side,
+                          timestamp
+                   FROM trades WHERE id=? AND user_id=?''',
                 (trade_id, me)
             ).fetchone()
             if not trow:
                 return jsonify({'ok': False, 'msg': 'Trade not found'}), 404
-            token, entry_price, exit_price, pnl = trow
-            text = json.dumps({'token': token, 'entry': entry_price, 'exit': exit_price, 'pnl': pnl})
+            (token, entry_price, exit_price, pnl, mint_address, chain,
+             base_currency, amount, token_amount, side, trade_timestamp) = trow
+            entry_value = float(entry_price or 0)
+            exit_value = float(exit_price or 0)
+            pnl_value = float(pnl or 0)
+            pnl_pct = ((exit_value - entry_value) / entry_value * 100
+                       if entry_value else 0)
+            # Store the complete shared-card snapshot in the message. Older
+            # messages only have token/entry/exit/pnl and remain renderable;
+            # every new message can use the same token card, banner and route
+            # as the Home feed without another private trade lookup.
+            text = json.dumps({
+                'token': token,
+                'symbol': token,
+                'side': str(side or 'SELL').upper(),
+                'entry': entry_value,
+                'entry_price': entry_value,
+                'exit': exit_value,
+                'exit_price': exit_value,
+                'pnl': pnl_value,
+                'pnl_sol': pnl_value,
+                'pnl_pct': round(pnl_pct, 2),
+                'pnl_currency': str(base_currency or 'SOL').upper(),
+                'token_address': mint_address or '',
+                'chain': str(chain or 'solana').lower(),
+                'amount': float(token_amount or amount or 0),
+                'timestamp': trade_timestamp or '',
+            })
         now = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
         cur = conn.execute(
             'INSERT INTO direct_messages (sender_id, receiver_id, message, message_type, created_at) VALUES (?,?,?,?,?)',
