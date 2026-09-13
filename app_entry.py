@@ -13,6 +13,7 @@ from mobile_ui_hotfix import install as _install_mobile_ui_hotfix
 from trusted_phantom_autoconnect import install as _install_trusted_phantom_autoconnect
 from share_card_concept_d import install as _install_share_card_concept_d
 from messages_premium_ui import install as _install_messages_premium_ui
+from live_market_deeplink_fix import install as _install_live_market_deeplink_fix
 
 _install_evm_to_solana_bridge(_dashboard)
 _install_wallet_deposit_guidance(_dashboard)
@@ -22,4 +23,5 @@ _install_mobile_ui_hotfix(_dashboard)
 _install_trusted_phantom_autoconnect(_dashboard)
 _install_share_card_concept_d(_dashboard)
 _install_messages_premium_ui(_dashboard)
+_install_live_market_deeplink_fix(_dashboard)
 app = _dashboard.app
