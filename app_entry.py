@@ -24,6 +24,7 @@ from auth_replay_hardening import install as _install_auth_replay_hardening
 from authorization_hardening import install as _install_authorization_hardening
 from financial_authorization_hardening import install as _install_financial_authorization_hardening
 from owner_money_hardening import install as _install_owner_money_hardening
+from abuse_rate_hardening import install as _install_abuse_rate_hardening
 from upload_hardening import install as _install_upload_hardening
 from response_privacy_hardening import install as _install_response_privacy_hardening
 from audit_hardening import install as _install_audit_hardening
@@ -59,6 +60,7 @@ _install_auth_replay_hardening(_dashboard)
 _install_authorization_hardening(_dashboard)
 _install_financial_authorization_hardening(_dashboard)
 _install_owner_money_hardening(_dashboard)
+_install_abuse_rate_hardening(_dashboard)
 _install_upload_hardening(_dashboard)
 _install_response_privacy_hardening(_dashboard)
 _install_audit_hardening(_dashboard)
