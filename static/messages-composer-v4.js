@@ -1,4 +1,4 @@
-/* OrcAgent Messages Composer v4 — upgrade existing input without replacing message logic. */
+/* OrcAgent Messages Composer v4 — compact wide textarea without replacing message logic. */
 (function(){
 'use strict';
 if(!window.matchMedia('(max-width:767px)').matches)return;
@@ -11,9 +11,9 @@ function install(){
   var ta=document.createElement('textarea');
   ta.id='msgs-input';
   ta.className=(old.className||'msgs-input')+' oa-msgs-textarea';
-  ta.placeholder='Type a message…';
+  ta.placeholder='Message…';
   ta.maxLength=2000;
-  ta.rows=3;
+  ta.rows=1;
   ta.setAttribute('aria-label','Message');
   ta.value=old.value||'';
   ta.addEventListener('keydown',function(e){
@@ -30,8 +30,8 @@ function install(){
   bar.classList.add('oa-composer-v4');
 
   function resize(){
-    ta.style.height='78px';
-    var h=Math.max(78,Math.min(150,ta.scrollHeight));
+    ta.style.height='58px';
+    var h=Math.max(58,Math.min(108,ta.scrollHeight));
     ta.style.height=h+'px';
     counter.textContent=(ta.value||'').length+'/2000';
   }
@@ -59,7 +59,7 @@ function install(){
     window.visualViewport.addEventListener('scroll',updateViewport);
   }
 
-  /* _sendMessage clears #msgs-input.value. Keep height/counter in sync after sends. */
+  /* Keep textarea height synced after sends and DOM refreshes. */
   var obs=new MutationObserver(function(){resize();});
   obs.observe(bar,{childList:true,subtree:true});
   document.addEventListener('click',function(e){
@@ -68,6 +68,5 @@ function install(){
 }
 
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
-/* The thread composer is already in DOM on this template; retry briefly for cached/slow markup paths. */
 var tries=0,t=setInterval(function(){tries++;install();if(document.querySelector('.msgs-input-bar.oa-composer-v4')||tries>20)clearInterval(t);},100);
 })();
