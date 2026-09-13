@@ -29,6 +29,8 @@ def install(dashboard_module):
         + marker + '>'
         '<script src="/static/home-feed-chart-redesign.js?v=3" defer '
         + marker + '></script>'
+        '<link rel="stylesheet" href="/static/live-market-mobile-drawer-fix.css?v=1" '
+        + marker + '>'
     )
 
     @app.after_request
