@@ -5,8 +5,7 @@ if(!window.matchMedia('(max-width:767px)').matches)return;
 var navDisplay='';
 function isOpen(){
   var main=document.querySelector('.msgs-main');
-  var thread=document.getElementById('msgs-thread');
-  return !!((main&&main.classList.contains('thread-open'))||(thread&&getComputedStyle(thread).display!=='none'));
+  return !!(main&&main.classList.contains('thread-open'));
 }
 function setImportant(el,prop,val){if(el)el.style.setProperty(prop,val,'important')}
 function clear(el,props){if(!el)return;props.forEach(function(p){el.style.removeProperty(p)})}
@@ -50,6 +49,7 @@ function sync(){
     }
   }else{
     document.body.style.removeProperty('padding-bottom');
+    document.documentElement.classList.remove('oa-thread-open');
     [app,main,right,thread].forEach(function(el){clear(el,['position','top','right','bottom','left','width','height','max-height','margin','padding','overflow','display','flex-direction'])});
   }
 }
@@ -57,7 +57,8 @@ var pending=false;
 var mo=new MutationObserver(function(){if(pending)return;pending=true;requestAnimationFrame(function(){pending=false;sync();});});
 function start(){
   sync();
-  mo.observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style']});
+  var main=document.querySelector('.msgs-main');
+  if(main)mo.observe(main,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style']});
   window.addEventListener('pageshow',sync);
   window.addEventListener('resize',sync);
   if(window.visualViewport){window.visualViewport.addEventListener('resize',sync);}
