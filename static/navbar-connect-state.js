@@ -8,7 +8,9 @@
 
 var original=null;
 var lastConnected=null;
-var retryTimer=null;
+var checkInFlight=false;
+var lastCheckAt=0;
+var MIN_CHECK_GAP_MS=15000;
 
 function els(){
   var link=document.querySelector('.pt-nb-profile-link');
@@ -34,16 +36,12 @@ function revealHome(){
   var app=document.getElementById('app');
   if(ob){ob.classList.add('hide');ob.style.display='none';ob.setAttribute('aria-hidden','true');}
   if(app)app.style.display='flex';
-  try{
-    if(typeof window.skipToApp==='function')window.skipToApp();
-  }catch(_){}
-  // Some legacy code can try to re-open onboarding after async session checks.
+  try{if(typeof window.skipToApp==='function')window.skipToApp();}catch(_){}
   setTimeout(function(){if(ob){ob.classList.add('hide');ob.style.display='none';}if(app)app.style.display='flex';},0);
   setTimeout(function(){if(ob){ob.classList.add('hide');ob.style.display='none';}if(app)app.style.display='flex';},700);
 }
 
 function startWalletConnect(){
-  // Home already owns the battle-tested Phantom connect/recovery flow.
   if(typeof window.connectWalletOnboard==='function'){
     try{window.connectWalletOnboard('phantom');return true;}catch(_){}
   }
@@ -57,8 +55,6 @@ function openConnect(e){
   if(e){e.preventDefault();e.stopPropagation();}
   revealHome();
   if(startWalletConnect())return false;
-  // Other routes may not load the Home wallet connector. Return to Home and
-  // start connection there without ever showing the old onboarding screen.
   try{sessionStorage.setItem('orca-open-connect','1');}catch(_){}
   if((location.pathname.replace(/\/+$/,'')||'/')!=='/')window.location.href='/';
   else setTimeout(startWalletConnect,250);
@@ -95,24 +91,27 @@ function showUser(d){
   }
 }
 
-function checkSession(attempt){
+function checkSession(force){
+  var now=Date.now();
+  if(checkInFlight)return;
+  if(!force && now-lastCheckAt<MIN_CHECK_GAP_MS)return;
+  lastCheckAt=now;checkInFlight=true;
   fetch('/api/me',{credentials:'include',cache:'no-store'}).then(function(r){
+    if(r.status===429){return null;}
     if(!r.ok)throw new Error('not signed in');
     return r.json();
   }).then(function(d){
+    if(d===null)return; // preserve current UI on rate-limit; do not retry-loop
     if(d&&d.ok){showUser(d);return;}
     showGuest();
-  }).catch(function(){
-    showGuest();
-    if((attempt||0)<8){clearTimeout(retryTimer);retryTimer=setTimeout(function(){checkSession((attempt||0)+1);},1000);}
-  });
+  }).catch(function(){showGuest();}).finally(function(){checkInFlight=false;});
 }
 
 function boot(){
   revealHome();
   var e=els();if(!e)return;remember(e);
   showGuest();
-  checkSession(0);
+  checkSession(true);
   try{
     if(sessionStorage.getItem('orca-open-connect')==='1'){
       sessionStorage.removeItem('orca-open-connect');
@@ -123,6 +122,6 @@ function boot(){
 
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 window.addEventListener('load',revealHome,{once:true});
-window.addEventListener('pageshow',function(){revealHome();checkSession(0);});
-document.addEventListener('visibilitychange',function(){if(!document.hidden){revealHome();checkSession(0);}});
+window.addEventListener('pageshow',function(){revealHome();checkSession(false);});
+document.addEventListener('visibilitychange',function(){if(!document.hidden){revealHome();checkSession(false);}});
 })();
