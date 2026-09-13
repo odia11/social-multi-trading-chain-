@@ -1,0 +1,51 @@
+/* OrcAgent Messages Premium v3 — completes the approved mobile thread design. */
+@media(max-width:767px){
+  /* Keep OrcAgent bottom navigation visible in an open conversation. The old
+     shared UX layer intentionally hid it; the approved messaging design keeps it. */
+  body.oa-thread-open{padding-bottom:calc(102px + env(safe-area-inset-bottom,0px))!important;overflow:hidden!important}
+  body.oa-thread-open .oa-bottom-nav{display:flex!important}
+  body.oa-thread-open .pt-nb-topbar{display:none!important}
+  body.oa-thread-open .msgs-right{height:calc(100dvh - 102px - env(safe-area-inset-bottom,0px))!important;max-height:calc(100dvh - 102px - env(safe-area-inset-bottom,0px))!important}
+  body.oa-thread-open .msgs-thread{height:100%!important;min-height:0!important}
+
+  /* Complete thread header. */
+  .msgs-thread-hdr{min-height:82px!important;padding:12px 14px 12px 10px!important;gap:10px!important;background:#080b10!important;border-bottom:1px solid #20262f!important}
+  .msgs-back{display:inline-flex!important;align-items:center!important;justify-content:center!important;width:42px!important;min-width:42px!important;height:46px!important;padding:0!important;margin:0!important;color:#f7b955!important;font-size:0!important;border-radius:14px!important;background:transparent!important}
+  .msgs-back:before{content:'‹';display:block;font-family:Arial,sans-serif;font-size:44px;font-weight:300;line-height:32px;transform:translateY(-2px)}
+  .msgs-thread-avatar{width:54px!important;height:54px!important;border:1px solid rgba(247,185,85,.45)!important}
+  .msgs-thread-name{font-size:19px!important;line-height:1.2!important}
+  .msgs-thread-status{font-size:12px!important;line-height:1.25!important;color:#77808d!important}
+  .msgs-thread-status.online{color:#38d6a2!important}
+  .msgs-copy-trades-btn,.msgs-more-btn{width:48px!important;height:48px!important;min-width:48px!important;border-radius:16px!important;background:#0e131a!important;border:1px solid #27303a!important}
+  .msgs-copy-trades-label{display:none!important}
+
+  /* Conversation body gets the same generous spacing as the approved mockup. */
+  .msgs-area{padding:18px 16px 24px!important;gap:10px!important;min-height:0!important}
+  .msgs-day-divider{margin:12px 0 14px!important;font-size:12px!important}
+  .msg-bubble{font-size:16px!important;line-height:1.45!important}
+  .msg-wrap.theirs .msg-bubble:not(.msg-trade){background:linear-gradient(145deg,#171c23,#11161c)!important;border:1px solid #272e38!important}
+  .msg-wrap.mine .msg-bubble:not(.msg-trade){background:linear-gradient(135deg,#ffc85f,#f4b34a)!important}
+
+  /* Composer sits directly above the persistent nav and uses the complete
+     image / trade / emoji / input / send control row already provided by the app. */
+  .msgs-compose,.msgs-input-row,.msgs-composer{flex-shrink:0!important;background:#080b10!important;border-top:1px solid #20262f!important;padding-bottom:max(10px,env(safe-area-inset-bottom,0px))!important}
+  .msgs-input-row{padding:10px 12px!important;gap:9px!important}
+  .msgs-input{height:50px!important;min-width:0!important;flex:1!important;border-radius:25px!important;background:#10151c!important}
+  .msgs-emoji-btn,.msgs-trade-btn,.msgs-attach-btn{width:50px!important;height:50px!important;min-width:50px!important;border-radius:16px!important}
+  .msgs-send-btn{width:54px!important;height:54px!important;min-width:54px!important}
+
+  /* Structured v3 trade message. */
+  .msg-bubble.msg-trade.oa-trade-v3{width:calc(100vw - 32px)!important;max-width:560px!important}
+  .oa-dm-trade-card{overflow:hidden;border-radius:20px;background:linear-gradient(145deg,#121820,#0b1016);border:1px solid rgba(247,185,85,.38);box-shadow:0 14px 36px rgba(0,0,0,.26)}
+  .oa-dm-trade-top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 17px 12px}
+  .oa-dm-trade-token{font-size:20px;font-weight:750;color:#f3f5f7;letter-spacing:-.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .oa-dm-trade-pct{font-size:22px;font-weight:800;white-space:nowrap}
+  .oa-dm-trade-pct.pos,.oa-dm-trade-pnl.pos{color:#35d6a2}.oa-dm-trade-pct.neg,.oa-dm-trade-pnl.neg{color:#ff6476}
+  .oa-dm-trade-stats{display:grid;grid-template-columns:1fr 1fr 1fr;border-top:1px solid #242b34;border-bottom:1px solid #242b34;margin:0 17px}
+  .oa-dm-trade-stat{padding:12px 10px 12px 0;min-width:0}.oa-dm-trade-stat+.oa-dm-trade-stat{border-left:1px solid #242b34;padding-left:12px}
+  .oa-dm-trade-label{display:block;color:#7f8997;font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
+  .oa-dm-trade-value{display:block;color:#eef1f5;font-size:14px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .oa-dm-trade-bottom{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 17px 15px}
+  .oa-dm-trade-pnl{font-size:14px;font-weight:750}.oa-dm-trade-caption{font-size:11px;color:#7f8997}
+  .oa-dm-trade-link{display:flex;align-items:center;justify-content:center;margin:0 17px 16px;height:42px;border:1px solid rgba(247,185,85,.38);border-radius:13px;color:#f7b955;text-decoration:none;font-size:13px;font-weight:700;background:rgba(247,185,85,.06)}
+}
