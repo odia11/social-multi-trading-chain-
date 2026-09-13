@@ -19,6 +19,7 @@ from live_market_deeplink_fix import install as _install_live_market_deeplink_fi
 from x_share_fallback import install as _install_x_share_fallback
 from security_hardening import install as _install_security_hardening
 from authorization_hardening import install as _install_authorization_hardening
+from financial_authorization_hardening import install as _install_financial_authorization_hardening
 
 _install_evm_to_solana_bridge(_dashboard)
 _install_wallet_deposit_guidance(_dashboard)
@@ -40,4 +41,5 @@ _install_live_market_deeplink_fix(_dashboard)
 _install_x_share_fallback(_dashboard)
 _install_security_hardening(_dashboard)
 _install_authorization_hardening(_dashboard)
+_install_financial_authorization_hardening(_dashboard)
 app = _dashboard.app
