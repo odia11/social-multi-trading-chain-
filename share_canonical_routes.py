@@ -1,17 +1,21 @@
 """Canonical sharing fixes for OrcAgent.
 
-Keeps permanent app links attached to X shares and gives profiles a stable
-user-id route that survives username changes.
+Keeps permanent app links attached to X shares, gives profiles a stable
+user-id route that survives username changes, and makes /post/<id> deep links
+open the exact shared feed post.
 """
 from contextvars import ContextVar
 from functools import wraps
+import json
 import os
+import re
 import sqlite3
 from urllib.parse import quote
 
 
 _share_link = ContextVar('orca_share_link', default='')
 _INSTALLED = False
+_POST_ID_RE = re.compile(r'^[pt]\d+$')
 
 
 def _public_base_url():
@@ -30,6 +34,13 @@ def _append_canonical_link(text, link, limit=280):
     if trimmed:
         trimmed += '…'
     return (trimmed + suffix).strip()
+
+
+def _find_endpoint(app, rule_text):
+    for rule in app.url_map.iter_rules():
+        if rule.rule == rule_text and 'GET' in rule.methods:
+            return rule.endpoint
+    return None
 
 
 def _find_feed_share_endpoint(app):
@@ -104,6 +115,22 @@ def install(dashboard_module):
 
         app.view_functions[endpoint] = _feed_share_with_canonical_context
 
+    # Canonical post deep-link route. The dashboard already owns the reliable
+    # _jumpToPost(postId) implementation: it first checks the visible feed and,
+    # if the card is not loaded, GETs /api/feed/post/<id>, inserts that exact
+    # item, then scrolls to it. Serve the normal home shell at /post/<id> and
+    # trigger that existing path instead of duplicating feed rendering here.
+    root_endpoint = _find_endpoint(app, '/')
+    if 'canonical_post_by_id' not in app.view_functions:
+        @app.route('/post/<path:post_id>', endpoint='canonical_post_by_id')
+        def canonical_post_by_id(post_id):
+            if not _POST_ID_RE.fullmatch(post_id or ''):
+                return dashboard_module.make_response('Post not found', 404)
+            root_view = app.view_functions.get(root_endpoint) if root_endpoint else None
+            if root_view is None:
+                return dashboard_module.make_response('Post route unavailable', 503)
+            return root_view()
+
     # Permanent profile route. Usernames are editable; numeric user IDs are
     # not. Render the existing profile page directly so /u/<id> remains the
     # browser URL instead of redirecting back to a rename-sensitive handle.
@@ -115,17 +142,60 @@ def install(dashboard_module):
                 return dashboard_module.make_response('Profile not found', 404)
             return dashboard_module.profile_view(wallet)
 
-    # The existing template's Share Profile button uses window.location.href.
-    # Replace just that rendered assignment with the permanent /u/<id> URL.
-    # This also repairs old /profile/<username> visits without rewriting the
-    # large template file itself.
     @app.after_request
-    def _canonical_profile_share_url(response):
+    def _canonical_share_routes(response):
         try:
             from flask import request
-            if response.status_code != 200 or not response.mimetype == 'text/html':
+            if response.status_code != 200 or response.mimetype != 'text/html':
                 return response
+
             path = request.path or ''
+            body = response.get_data(as_text=True)
+            changed = False
+
+            # A /post/<id> request keeps its clean canonical URL in the address
+            # bar while the existing feed deep-link loader opens exactly that
+            # post. No redirect to Home and no manual scrolling/searching.
+            if path.startswith('/post/'):
+                post_id = path[len('/post/'):]
+                if _POST_ID_RE.fullmatch(post_id or '') and '</body>' in body:
+                    pid_js = json.dumps(post_id)
+                    script = """
+<script id=\"orca-canonical-post-jump\">
+(function(){
+  var postId = %s;
+  var tries = 0;
+  function openExactPost(){
+    if(typeof window._jumpToPost === 'function'){
+      Promise.resolve(window._jumpToPost(postId)).then(function(){
+        var card=document.getElementById('fc-card-'+postId);
+        if(card){
+          card.scrollIntoView({block:'center',behavior:'auto'});
+          card.classList.add('orca-deep-linked-post');
+          setTimeout(function(){card.classList.remove('orca-deep-linked-post');},1800);
+        }
+      });
+      return;
+    }
+    if(++tries < 80) setTimeout(openExactPost, 100);
+  }
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', openExactPost, {once:true});
+  }else{
+    openExactPost();
+  }
+})();
+</script>
+<style>
+.orca-deep-linked-post{outline:1px solid rgba(247,185,85,.7);box-shadow:0 0 0 3px rgba(247,185,85,.08);transition:outline-color .35s,box-shadow .35s}
+</style>
+""" % pid_js
+                    body = body.replace('</body>', script + '</body>', 1)
+                    changed = True
+
+            # The existing template's Share Profile button uses
+            # window.location.href. Replace that rendered assignment with the
+            # permanent numeric-user-id URL.
             user_id = None
             if path.startswith('/u/'):
                 try:
@@ -136,17 +206,16 @@ def install(dashboard_module):
                 identifier = path[len('/profile/'):]
                 if identifier:
                     user_id = _profile_user_id(dashboard_module, identifier)
-            if not user_id:
-                return response
+            if user_id:
+                old = 'var url = window.location.href;'
+                if old in body:
+                    stable = _public_base_url() + '/u/' + str(user_id)
+                    body = body.replace(old, 'var url = ' + repr(stable) + ';', 1)
+                    changed = True
 
-            body = response.get_data(as_text=True)
-            old = 'var url = window.location.href;'
-            if old not in body:
-                return response
-            stable = _public_base_url() + '/u/' + str(user_id)
-            body = body.replace(old, 'var url = ' + repr(stable) + ';', 1)
-            response.set_data(body)
-            response.content_length = len(response.get_data())
+            if changed:
+                response.set_data(body)
+                response.content_length = len(response.get_data())
         except Exception as exc:
-            app.logger.warning('canonical profile share patch skipped: %s', exc)
+            app.logger.warning('canonical share route patch skipped: %s', exc)
         return response
