@@ -5,13 +5,14 @@ an error payload (for example when a user's X OAuth connection is unavailable).
 The mobile UI currently turns that into a generic "Failed to share to X" modal.
 
 This adapter preserves direct posting when it succeeds. When it explicitly
-fails, the browser is sent to X's official web intent with the permanent
-OrcAgent /post/<id> URL. That means users can still share the post on X and X
-can unfurl the canonical Open Graph/Twitter card metadata already attached to
-that route.
+fails, the browser is sent to X's official web intent with a versioned permanent
+OrcAgent /post/<id> URL. Keeping the version on the fallback path matters: X
+aggressively caches link cards, and the unversioned fallback previously kept
+reusing the old generic OrcAgent preview even after the server metadata was fixed.
 """
 
 _INSTALLED = False
+_PREVIEW_VERSION = '7'
 
 
 _SCRIPT = r'''
@@ -22,6 +23,7 @@ _SCRIPT = r'''
 
   var nativeFetch = window.fetch.bind(window);
   var shareRe = /\/api\/feed\/share-to-x\/([^?#]+)/;
+  var previewVersion = '7';
 
   function postIdFrom(input){
     try {
@@ -31,8 +33,12 @@ _SCRIPT = r'''
     } catch(e) { return ''; }
   }
 
+  function canonicalUrl(postId){
+    return window.location.origin + '/post/' + encodeURIComponent(postId) + '?xv=' + previewVersion;
+  }
+
   function xIntent(postId){
-    var canonical = window.location.origin + '/post/' + encodeURIComponent(postId);
+    var canonical = canonicalUrl(postId);
     var text = 'View this post on OrcAgent';
     return 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(text) +
            '&url=' + encodeURIComponent(canonical);
@@ -44,7 +50,7 @@ _SCRIPT = r'''
       ok: true,
       fallback: true,
       share_url: intent,
-      canonical_url: window.location.origin + '/post/' + encodeURIComponent(postId)
+      canonical_url: canonicalUrl(postId)
     }), {
       status: 200,
       headers: {'Content-Type': 'application/json'}
