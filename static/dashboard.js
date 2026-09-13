@@ -7151,57 +7151,119 @@ function selectToken(symbol, mint){
 
 var _mentionTarget = null;
 var _mentionAtPos = -1;
+var _mentionRequest = 0;
+var _mentionCaret = -1;
+var _mentionFrame = 0;
 function _mentionHide(){
   var box = document.getElementById('mention-suggest');
   if(box) box.style.display='none';
   _mentionTarget = null;
+  _mentionAtPos = -1;
+  _mentionCaret = -1;
+  _mentionRequest++; // Late search responses must not reopen a closed list.
+}
+function _mentionPosition(){
+  var el = _mentionTarget;
+  var box = document.getElementById('mention-suggest');
+  if(!el || !box || box.style.display==='none') return;
+  var rect = el.getBoundingClientRect();
+  var vv = window.visualViewport;
+  var top = vv ? vv.offsetTop : 0;
+  var left = vv ? vv.offsetLeft : 0;
+  var width = vv ? vv.width : window.innerWidth;
+  var bottom = top + (vv ? vv.height : window.innerHeight);
+  // The keyboard and nested/document scrolling can move the field entirely
+  // offscreen. Never leave its suggestions floating over unrelated content.
+  if(!el.isConnected || rect.bottom<=top || rect.top>=bottom){ _mentionHide(); return; }
+  var above = Math.max(0, rect.top-top-8);
+  var below = Math.max(0, bottom-rect.bottom-8);
+  box.style.width = Math.max(0,Math.min(rect.width,320,width-16))+'px';
+  box.style.maxHeight = '200px';
+  // Measure rendered rows, not an assumed number of 40px rows.
+  var wanted = Math.min(box.scrollHeight+2,200);
+  var useBelow = below>=wanted || below>=above;
+  var available = useBelow ? below : above;
+  if(available<36){ _mentionHide(); return; }
+  box.style.maxHeight = Math.min(wanted,available)+'px';
+  box.style.left = Math.max(left+8,Math.min(rect.left,left+width-box.offsetWidth-8))+'px';
+  box.style.top = (useBelow ? rect.bottom+6 : rect.top-box.offsetHeight-6)+'px';
+}
+function _mentionSchedulePosition(){
+  if(!_mentionTarget || _mentionFrame) return;
+  _mentionFrame = requestAnimationFrame(function(){ _mentionFrame=0; _mentionPosition(); });
 }
 function _mentionCheck(el){
   var val = el.value;
   var pos = el.selectionStart;
-  var uptoCursor = val.slice(0, pos);
-  var m = uptoCursor.match(/@([a-zA-Z0-9_]*)$/);
+  var m = val.slice(0,pos).match(/@([a-zA-Z0-9_]+)$/);
   if(!m){ _mentionHide(); return; }
-  var partial = m[1];
-  _mentionAtPos = pos - m[0].length;
+  _mentionAtPos = pos-m[0].length;
   _mentionTarget = el;
-  if(partial.length < 1){ _mentionHide(); return; }
-  fetch('/api/users/search?q='+encodeURIComponent(partial)).then(function(r){return r.json();}).then(function(d){
-    var users = (d && d.users) || [];
+  _mentionCaret = pos;
+  var requestId = ++_mentionRequest;
+  fetch('/api/users/search?q='+encodeURIComponent(m[1])).then(function(r){
+    if(!r.ok) throw new Error('Mention search unavailable');
+    return r.json();
+  }).then(function(d){
+    if(requestId!==_mentionRequest || _mentionTarget!==el || document.activeElement!==el
+        || el.value!==val || el.selectionStart!==pos) return;
     var box = document.getElementById('mention-suggest');
-    if(!users.length){ box.style.display='none'; return; }
-    var rect = el.getBoundingClientRect();
-    box.style.left = rect.left+'px';
-    box.style.top = (rect.top - Math.min(users.length,5)*40 - 8)+'px';
-    box.innerHTML = users.map(function(u){
-      return '<div onclick="_mentionSelect(\''+u.username.replace(/'/g,"\\'")+'\')" style="padding:9px 12px;cursor:pointer;color:#eef1f5;border-bottom:1px solid #16191f"><span style="color:#f7b955;font-weight:700">@'+esc(u.username)+'</span></div>';
-    }).join('');
+    if(!box) return;
+    var users = ((d && d.users)||[]).filter(function(u){return /^[a-zA-Z0-9_]+$/.test(u.username||'')});
+    if(!users.length){ _mentionHide(); return; }
+    box.replaceChildren();
+    box.style.boxSizing='border-box';
+    users.forEach(function(u){
+      var row=document.createElement('button');
+      row.type='button';
+      row.style.cssText='display:block;width:100%;padding:10px 12px;text-align:left;background:transparent;border:0;border-bottom:1px solid #21252c;color:#f7b955;font:inherit;font-weight:700;cursor:pointer';
+      row.textContent='@'+u.username;
+      // Keep the textarea focused so iOS does not move the keyboard before
+      // the click selects the suggestion.
+      row.addEventListener('pointerdown',function(e){e.preventDefault()});
+      row.addEventListener('click',function(){_mentionSelect(u.username)});
+      box.appendChild(row);
+    });
     box.style.display='block';
-  }).catch(function(){});
+    _mentionPosition();
+  }).catch(function(){ if(requestId===_mentionRequest) _mentionHide(); });
 }
 function _mentionSelect(username){
   if(!_mentionTarget) return;
   var el = _mentionTarget;
-  var val = el.value;
   var pos = el.selectionStart;
-  var before = val.slice(0, _mentionAtPos);
-  var after = val.slice(pos);
-  el.value = before + '@' + username + ' ' + after;
-  var newPos = (before + '@' + username + ' ').length;
-  el.focus();
-  el.setSelectionRange(newPos, newPos);
+  var before = el.value.slice(0,_mentionAtPos);
+  var after = el.value.slice(pos);
+  el.value = before+'@'+username+' '+after;
+  var newPos = (before+'@'+username+' ').length;
   _mentionHide();
+  el.focus({preventScroll:true});
+  el.setSelectionRange(newPos,newPos);
+  el.dispatchEvent(new Event('input',{bubbles:true}));
 }
-document.addEventListener('input', function(e){
-  if(e.target.id === 'postText' || e.target.classList.contains('fc-reply-inp')){
-    _mentionCheck(e.target);
-  }
+document.addEventListener('input',function(e){
+  if(e.target.id==='postText' || e.target.classList.contains('fc-reply-inp')) _mentionCheck(e.target);
 });
-document.addEventListener('click', function(e){
-  if(!e.target.closest('#mention-suggest') && e.target.id !== 'postText' && !e.target.classList.contains('fc-reply-inp')){
-    _mentionHide();
-  }
+document.addEventListener('click',function(e){
+  if(!e.target.closest('#mention-suggest') && e.target!==_mentionTarget) _mentionHide();
 });
+document.addEventListener('focusout',function(e){
+  if(e.target!==_mentionTarget) return;
+  setTimeout(function(){
+    var box=document.getElementById('mention-suggest');
+    if(document.activeElement!==_mentionTarget && !(box && box.contains(document.activeElement))) _mentionHide();
+  },0);
+});
+document.addEventListener('keydown',function(e){ if(e.key==='Escape') _mentionHide(); });
+document.addEventListener('selectionchange',function(){
+  if(_mentionTarget && document.activeElement===_mentionTarget && _mentionTarget.selectionStart!==_mentionCaret) _mentionCheck(_mentionTarget);
+});
+window.addEventListener('scroll',_mentionSchedulePosition,true);
+window.addEventListener('resize',_mentionSchedulePosition);
+if(window.visualViewport){
+  window.visualViewport.addEventListener('scroll',_mentionSchedulePosition);
+  window.visualViewport.addEventListener('resize',_mentionSchedulePosition);
+}
 function tagUser(){
   document.getElementById('userTagModal').style.display='flex'
   const inp=document.getElementById('userTagSearch')
