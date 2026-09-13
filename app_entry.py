@@ -17,9 +17,18 @@ from share_card_concept_d import install as _install_share_card_concept_d
 from messages_premium_ui import install as _install_messages_premium_ui
 from live_market_deeplink_fix import install as _install_live_market_deeplink_fix
 from x_share_fallback import install as _install_x_share_fallback
+from secret_hygiene import install as _install_secret_hygiene
 from security_hardening import install as _install_security_hardening
+from ssrf_hardening import install as _install_ssrf_hardening
+from auth_replay_hardening import install as _install_auth_replay_hardening
 from authorization_hardening import install as _install_authorization_hardening
 from financial_authorization_hardening import install as _install_financial_authorization_hardening
+from owner_money_hardening import install as _install_owner_money_hardening
+from upload_hardening import install as _install_upload_hardening
+from response_privacy_hardening import install as _install_response_privacy_hardening
+from audit_hardening import install as _install_audit_hardening
+from security_monitoring import install as _install_security_monitoring
+from backup_scheduler import install as _install_backup_scheduler
 
 _install_evm_to_solana_bridge(_dashboard)
 _install_wallet_deposit_guidance(_dashboard)
@@ -39,7 +48,21 @@ _install_share_card_concept_d(_dashboard)
 _install_messages_premium_ui(_dashboard)
 _install_live_market_deeplink_fix(_dashboard)
 _install_x_share_fallback(_dashboard)
+
+# Security layers. Startup secret validation runs before request guards. The
+# remaining adapters are defense-in-depth around the route-level checks that
+# already exist in dashboard.py.
+_install_secret_hygiene(_dashboard)
 _install_security_hardening(_dashboard)
+_install_ssrf_hardening(_dashboard)
+_install_auth_replay_hardening(_dashboard)
 _install_authorization_hardening(_dashboard)
 _install_financial_authorization_hardening(_dashboard)
+_install_owner_money_hardening(_dashboard)
+_install_upload_hardening(_dashboard)
+_install_response_privacy_hardening(_dashboard)
+_install_audit_hardening(_dashboard)
+_install_security_monitoring(_dashboard)
+_install_backup_scheduler(_dashboard)
+
 app = _dashboard.app
