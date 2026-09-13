@@ -1,19 +1,11 @@
 """Reliable Share-to-X fallback for OrcAgent.
 
-The existing backend direct-post route can legitimately return HTTP 200 with
-an error payload (for example when a user's X OAuth connection is unavailable).
-The mobile UI currently turns that into a generic "Failed to share to X" modal.
-
-This adapter preserves direct posting when it succeeds. When it explicitly
-fails, the browser is sent to X's official web intent with a versioned permanent
-OrcAgent /post/<id> URL. Keeping the version on the fallback path matters: X
-aggressively caches link cards, and the unversioned fallback previously kept
-reusing the old generic OrcAgent preview even after the server metadata was fixed.
+Preserves direct posting when it succeeds. When it fails, opens X's official
+composer with the permanent OrcAgent post link, English copy and @orcagent tag.
 """
 
 _INSTALLED = False
 _PREVIEW_VERSION = '7'
-
 
 _SCRIPT = r'''
 <script id="orca-x-share-fallback">
@@ -39,22 +31,16 @@ _SCRIPT = r'''
 
   function xIntent(postId){
     var canonical = canonicalUrl(postId);
-    var text = 'View this post on OrcAgent';
+    var text = 'View this post on OrcAgent @orcagent';
     return 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(text) +
            '&url=' + encodeURIComponent(canonical);
   }
 
   function syntheticSuccess(intent, postId){
     return new Response(JSON.stringify({
-      success: true,
-      ok: true,
-      fallback: true,
-      share_url: intent,
-      canonical_url: canonicalUrl(postId)
-    }), {
-      status: 200,
-      headers: {'Content-Type': 'application/json'}
-    });
+      success: true, ok: true, fallback: true,
+      share_url: intent, canonical_url: canonicalUrl(postId)
+    }), {status: 200, headers: {'Content-Type': 'application/json'}});
   }
 
   function isExplicitFailure(resp, data, raw){
@@ -71,8 +57,6 @@ _SCRIPT = r'''
 
   function openFallback(postId){
     var intent = xIntent(postId);
-    // Same-tab navigation is dependable on iOS Safari even after an async
-    // request; window.open() is often blocked once the original tap stack ends.
     setTimeout(function(){ window.location.href = intent; }, 0);
     return intent;
   }
@@ -80,23 +64,18 @@ _SCRIPT = r'''
   window.fetch = function(input, init){
     var postId = postIdFrom(input);
     if (!postId) return nativeFetch(input, init);
-
     return nativeFetch(input, init).then(function(resp){
       return resp.clone().text().then(function(raw){
         var data = null;
         try { data = raw ? JSON.parse(raw) : null; } catch(e) {}
         if (!isExplicitFailure(resp, data, raw)) return resp;
-
-        var intent = openFallback(postId);
-        return syntheticSuccess(intent, postId);
+        return syntheticSuccess(openFallback(postId), postId);
       }).catch(function(){
         if (resp && resp.ok) return resp;
-        var intent = openFallback(postId);
-        return syntheticSuccess(intent, postId);
+        return syntheticSuccess(openFallback(postId), postId);
       });
     }).catch(function(){
-      var intent = openFallback(postId);
-      return syntheticSuccess(intent, postId);
+      return syntheticSuccess(openFallback(postId), postId);
     });
   };
 })();
@@ -109,7 +88,6 @@ def install(dashboard_module):
     if _INSTALLED:
         return
     _INSTALLED = True
-
     app = dashboard_module.app
 
     @app.after_request
