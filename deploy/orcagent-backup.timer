@@ -1,0 +1,11 @@
+[Unit]
+Description=Run OrcAgent encrypted backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+Persistent=true
+RandomizedDelaySec=20m
+Unit=orcagent-backup.service
+
+[Install]
+WantedBy=timers.target
