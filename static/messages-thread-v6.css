@@ -139,7 +139,22 @@
   html body.oa-msgs-typing .msgs-area{padding-bottom:96px!important}
 }
 
+/* iPhone 390px: keep the full Copy Trades pill instead of collapsing to an
+   empty round button. Tighten the surrounding header controls to make room. */
 @media(max-width:390px){
-  html body.oa-thread-open .msgs-copy-trades-btn{width:46px!important;min-width:46px!important;padding:0!important;font-size:0!important;border-radius:50%!important}
-  html body.oa-thread-open .msgs-copy-trades-btn .msgs-copy-trades-label{display:none!important}
+  html body.oa-thread-open .msgs-thread-hdr{padding-left:7px!important;padding-right:7px!important;gap:5px!important}
+  html body.oa-thread-open .msgs-back{width:26px!important;min-width:26px!important}
+  html body.oa-thread-open .msgs-thread-avatar{width:46px!important;height:46px!important;min-width:46px!important}
+  html body.oa-thread-open .msgs-thread-name{font-size:16px!important}
+  html body.oa-thread-open .msgs-thread-status{font-size:10px!important}
+  html body.oa-thread-open .msgs-copy-trades-btn{display:inline-flex!important;width:96px!important;min-width:96px!important;height:40px!important;padding:0 8px!important;border-radius:20px!important;font-size:11px!important;gap:4px!important}
+  html body.oa-thread-open .msgs-copy-trades-btn .msgs-copy-trades-label{display:inline!important;font-size:11px!important;white-space:nowrap!important}
+  html body.oa-thread-open .msgs-more-btn{width:40px!important;height:40px!important;min-width:40px!important}
+
+  /* Slightly denser cards on iPhone so chat context stays visible. */
+  html body.oa-thread-open .msg-bubble.msg-trade{width:calc(100vw - 62px)!important}
+  html body.oa-thread-open .oa-dm-trade-top{padding:11px 12px 8px!important}
+  html body.oa-thread-open .oa-dm-trade-stats{margin:0 12px!important}
+  html body.oa-thread-open .oa-dm-trade-stat{padding-top:8px!important;padding-bottom:8px!important}
+  html body.oa-thread-open .oa-dm-trade-bottom{padding:9px 12px 10px!important}
 }
