@@ -24,8 +24,12 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install --quiet pip-audit bandit
-          pip install --quiet -r requirements.txt || true
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet pip-audit bandit
+          python -m pip install --quiet -r requirements.txt
+
+      - name: Python compile check
+        run: python -m compileall -q .
 
       # ── 0. App-specific security regression checks ────────────────────────
       - name: OrcAgent security regression checks
@@ -34,6 +38,7 @@ jobs:
           python tests/test_authorization_hardening.py
           python tests/test_idor_hardening.py
           python tests/test_financial_authorization_hardening.py
+          python tests/test_security_phase2.py
 
       # ── 1. pip-audit: known CVEs in dependencies ──────────────────────────
       - name: pip-audit
@@ -48,16 +53,15 @@ jobs:
             --confidence-level medium \
             -f txt
 
-      # ── 3. gitleaks: secret / credential scan ─────────────────────────────
+      # ── 3. gitleaks: full-history secret / credential scan ───────────────
       - name: gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── 4. Custom checks: debug flag & CORS origin reflection ─────────────
+      # ── 4. Custom checks ──────────────────────────────────────────────────
       - name: Check for debug=True in production code
         run: |
-          # Fail if app.run(debug=True) appears anywhere outside comments
           if grep -rn --include="*.py" 'app\.run.*debug\s*=\s*True' . ; then
             echo "ERROR: debug=True found in Python source — must not reach production."
             exit 1
@@ -66,11 +70,17 @@ jobs:
 
       - name: Check for CORS origin reflection
         run: |
-          # Fail if Access-Control-Allow-Origin is set to a raw request.headers value
-          # (pattern: both the header assignment and request.headers on the same logical line)
           if grep -rn --include="*.py" \
             -E "Access-Control-Allow-Origin.*request\.headers|request\.headers.*Access-Control-Allow-Origin" . ; then
             echo "ERROR: Potential CORS origin reflection detected — use an explicit allowlist."
             exit 1
           fi
           echo "OK: no CORS origin reflection found."
+
+      - name: Check tracked secret files
+        run: |
+          if git ls-files | grep -E '(^|/)(\.env($|\.)|\.secret_key$|id_rsa$|id_ed25519$|.*\.pem$|.*\.key$)' ; then
+            echo "ERROR: secret-like file is tracked by git."
+            exit 1
+          fi
+          echo "OK: no secret-like files tracked."
