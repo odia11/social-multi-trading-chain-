@@ -19,7 +19,7 @@ def install(dashboard_module):
         + marker + '></script>'
         '<script src="/static/mobile-nav-post-force.js?v=2" defer '
         + marker + '></script>'
-        '<script src="/static/navbar-connect-state.js?v=3" defer '
+        '<script src="/static/navbar-connect-state.js?v=4" defer '
         + marker + '></script>'
     )
 
