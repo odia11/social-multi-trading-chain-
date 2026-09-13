@@ -25,12 +25,13 @@ privacy = read('response_privacy_hardening.py')
 audit = read('audit_hardening.py')
 backup = read('backup_scheduler.py')
 owner = read('owner_money_hardening.py')
+rate = read('abuse_rate_hardening.py')
 sec = read('security_hardening.py')
 secret = read('secret_hygiene.py')
 monitor = read('security_monitoring.py')
 
 for module in ('auth_replay_hardening','ssrf_hardening','secret_hygiene','owner_money_hardening',
-               'upload_hardening','response_privacy_hardening','audit_hardening',
+               'abuse_rate_hardening','upload_hardening','response_privacy_hardening','audit_hardening',
                'security_monitoring','backup_scheduler'):
     check(f'{module} is installed by app_entry', f'from {module} import install' in entry)
 
@@ -51,6 +52,8 @@ check('sensitive mutations are audit logged without raw bodies',
 check('audit IP is HMAC hashed rather than stored raw', 'hmac.new' in audit and 'ip_hash' in audit)
 check('money-moving admin mutations require OWNER_WALLET',
       'OWNER_WALLET' in owner and 'collect-fees' in owner and 'Owner wallet required' in owner)
+check('high-risk actions have category abuse ceilings',
+      'sec:auth:' in rate and 'sec:withdraw:' in rate and 'sec:bridge:' in rate and 'sec:trade:' in rate)
 check('production secrets are rejected when weak/default',
       '_bad_secret' in secret and 'len(raw) < minimum' in secret and 'RuntimeError' in secret)
 check('daily backup is encrypted and restore-verified',
