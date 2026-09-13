@@ -1,4 +1,4 @@
-/* OrcAgent mobile auth control.
+/* OrcAgent global auth control.
  *
  * Important rules:
  * - Never render Connect optimistically.
@@ -7,10 +7,10 @@
  *   not explicitly disconnected.
  * - Manual Disconnect must win immediately, even if Phantom still reports the
  *   provider as connected for a moment or /api/me is still settling.
+ * - This controller runs on every OrcAgent page that renders the shared topbar.
  */
 (function(){
 'use strict';
-if((location.pathname.replace(/\/+$/,'')||'/')!=='/' || !window.matchMedia('(max-width:767px)').matches)return;
 
 var checking=false,last=0,INTERVAL=15000;
 
