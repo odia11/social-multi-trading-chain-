@@ -8,6 +8,7 @@ import dashboard as _dashboard
 from evm_to_solana_bridge import install as _install_evm_to_solana_bridge
 from wallet_deposit_guidance import install as _install_wallet_deposit_guidance
 from app_performance import install as _install_app_performance
+from x_post_preview_fix import install as _install_x_post_preview_fix
 from share_canonical_routes import install as _install_share_canonical_routes
 from mobile_ui_hotfix import install as _install_mobile_ui_hotfix
 from trusted_phantom_autoconnect import install as _install_trusted_phantom_autoconnect
@@ -19,6 +20,10 @@ from x_share_fallback import install as _install_x_share_fallback
 _install_evm_to_solana_bridge(_dashboard)
 _install_wallet_deposit_guidance(_dashboard)
 _install_app_performance(_dashboard)
+# Register this before share_canonical_routes: Flask runs app-level
+# after_request handlers in reverse registration order, so this executes last
+# and leaves one authoritative OG/Twitter metadata set for /post/<id>.
+_install_x_post_preview_fix(_dashboard)
 _install_share_canonical_routes(_dashboard)
 _install_mobile_ui_hotfix(_dashboard)
 _install_trusted_phantom_autoconnect(_dashboard)
