@@ -1,12 +1,15 @@
 /* OrcAgent Messages Premium v3 — completes the approved mobile thread design. */
 @media(max-width:767px){
-  /* Keep OrcAgent bottom navigation visible in an open conversation. The old
-     shared UX layer intentionally hid it; the approved messaging design keeps it. */
-  body.oa-thread-open{padding-bottom:calc(102px + env(safe-area-inset-bottom,0px))!important;overflow:hidden!important}
-  body.oa-thread-open .oa-bottom-nav{display:flex!important}
+  /* A thread must fill the real viewport. Only reserve room for the shared
+     bottom nav when that nav is actually present in the DOM. Previously we
+     always reserved/subtracted 102px, which created a large empty black strip
+     below the composer on message threads where the nav had not rendered. */
+  body.oa-thread-open{padding-bottom:0!important;overflow:hidden!important}
   body.oa-thread-open .pt-nb-topbar{display:none!important}
-  body.oa-thread-open .msgs-right{height:calc(100dvh - 102px - env(safe-area-inset-bottom,0px))!important;max-height:calc(100dvh - 102px - env(safe-area-inset-bottom,0px))!important}
+  body.oa-thread-open .msgs-right{height:100dvh!important;max-height:100dvh!important}
   body.oa-thread-open .msgs-thread{height:100%!important;min-height:0!important}
+  body.oa-thread-open:has(.oa-bottom-nav) .oa-bottom-nav{display:flex!important}
+  body.oa-thread-open:has(.oa-bottom-nav) .msgs-right{height:calc(100dvh - 102px - env(safe-area-inset-bottom,0px))!important;max-height:calc(100dvh - 102px - env(safe-area-inset-bottom,0px))!important}
 
   /* Complete thread header. */
   .msgs-thread-hdr{min-height:82px!important;padding:12px 14px 12px 10px!important;gap:10px!important;background:#080b10!important;border-bottom:1px solid #20262f!important}
@@ -26,9 +29,8 @@
   .msg-wrap.theirs .msg-bubble:not(.msg-trade){background:linear-gradient(145deg,#171c23,#11161c)!important;border:1px solid #272e38!important}
   .msg-wrap.mine .msg-bubble:not(.msg-trade){background:linear-gradient(135deg,#ffc85f,#f4b34a)!important}
 
-  /* Composer sits directly above the persistent nav and uses the complete
-     image / trade / emoji / input / send control row already provided by the app. */
-  .msgs-compose,.msgs-input-row,.msgs-composer{flex-shrink:0!important;background:#080b10!important;border-top:1px solid #20262f!important;padding-bottom:max(10px,env(safe-area-inset-bottom,0px))!important}
+  /* Composer sits at the actual bottom of the chat workspace. */
+  .msgs-compose,.msgs-input-row,.msgs-composer{flex-shrink:0!important;background:#080b10!important;border-top:1px solid #20262f!important;padding-bottom:max(10px,env(safe-area-inset-bottom,0px))!important;margin-bottom:0!important}
   .msgs-input-row{padding:10px 12px!important;gap:9px!important}
   .msgs-input{height:50px!important;min-width:0!important;flex:1!important;border-radius:25px!important;background:#10151c!important}
   .msgs-emoji-btn,.msgs-trade-btn,.msgs-attach-btn{width:50px!important;height:50px!important;min-width:50px!important;border-radius:16px!important}
