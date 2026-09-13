@@ -42,11 +42,21 @@ function authOnlyEls(root){
   if(!root)return [];
   return Array.prototype.slice.call(root.querySelectorAll('a[href^="/messages"],a[href^="/notifications"]'));
 }
+function setMenuAuth(connected){
+  document.querySelectorAll('.pt-nb-disconnect-btn').forEach(function(el){
+    el.style.display=connected?'':'none';
+    el.setAttribute('aria-hidden',connected?'false':'true');
+  });
+  document.querySelectorAll('.pt-nb-admin-link').forEach(function(el){
+    if(!connected){el.style.display='none';el.setAttribute('aria-hidden','true');}
+  });
+}
 function removeLegacyButtons(){
   ['oa-guest-connect-btn','oa-mobile-connect-wallet'].forEach(function(id){var b=document.getElementById(id);if(b)b.remove()});
 }
 function showUser(d){
   if(manualDisconnectRequested()){showGuest(true);return;}
+  setMenuAuth(true);
   removeLegacyButtons();
   var root=document.querySelector('.pt-nb-topbar');
   if(!root)return;
@@ -62,6 +72,7 @@ function showUser(d){
 function showGuest(force){
   if(!force&&providerConnected()){showUser();return;}
   window.__ORCA_TRUSTED_PHANTOM_PUBLIC_KEY='';
+  setMenuAuth(false);
   var root=document.querySelector('.pt-nb-topbar');if(!root)return;
   removeLegacyButtons();
   var profile=root.querySelector('.pt-nb-profile-link');if(profile)profile.style.display='none';
@@ -127,7 +138,10 @@ try{
   new MutationObserver(function(){
     var old=document.getElementById('oa-mobile-connect-wallet');
     if(old)old.remove();
-    if(manualDisconnectRequested()&&!document.getElementById('oa-guest-connect-btn'))showGuest(true);
+    if(manualDisconnectRequested()){
+      setMenuAuth(false);
+      if(!document.getElementById('oa-guest-connect-btn'))showGuest(true);
+    }
   }).observe(document.documentElement,{childList:true,subtree:true});
 }catch(_){}
 })();
