@@ -6211,37 +6211,27 @@ function _dmBuildMessageEl(m, myId){
     div.className='dm-msg '+(mine?'mine':'theirs')+' trade-share';
     let td={};
     try{ td=JSON.parse(m.message); }catch(_){}
-    const sym=_esc(td.token_symbol||'???');
     const addr=td.token_address||'';
-    const entry=td.entry_price!=null?('$'+Number(td.entry_price).toFixed(8)):'—';
-    const amtSol=td.amount_sol!=null?(Number(td.amount_sol).toFixed(4)+' SOL'):'—';
-    const pnl=td.pnl_pct!=null?td.pnl_pct:null;
     const closed=!!(td.exit_reason);
-    const pnlHtml=pnl!=null
-      ?`<span class="dm-trade-card-val ${pnl>=0?'pos':'neg'}">${pnl>=0?'+':''}${pnl.toFixed(2)}%</span>`
-      :`<span class="dm-trade-card-val">—</span>`;
     const btnId='cp-btn-'+m.id+'_'+Date.now();
     const errId='cp-err-'+m.id+'_'+Date.now();
+    // Use the exact same card renderer as the Home feed/composer. Messages
+    // created before the richer payload existed still render with safe
+    // fallbacks; new ones also show the share-time price and PnL snapshot.
+    const sharedCard=_renderTradeTerminalCard({
+      symbol:td.token_symbol||td.symbol||'???',
+      side:td.side||'BUY',
+      entry_price:Number(td.entry_price||0),
+      exit_price:Number(td.exit_price||td.current_price||0),
+      pnl_pct:td.pnl_pct==null?0:Number(td.pnl_pct),
+      pnl_sol:td.pnl_sol==null?0:Number(td.pnl_sol),
+      pnl_currency:td.pnl_currency||'SOL',
+      amount:Number(td.amount||0),
+      token_address:addr
+    });
     div.innerHTML=`
-      <div class="dm-trade-card${closed?' closed':''}">
-        <div class="dm-trade-card-header">
-          <span class="dm-trade-card-symbol">🟢 ${sym}</span>
-          ${closed?'<span class="dm-trade-card-closed-badge">Trade Closed</span>':''}
-        </div>
-        <div class="dm-trade-card-rows">
-          <div class="dm-trade-card-row">
-            <span class="dm-trade-card-lbl">Entry</span>
-            <span class="dm-trade-card-val">${entry}</span>
-          </div>
-          <div class="dm-trade-card-row">
-            <span class="dm-trade-card-lbl">PnL</span>
-            ${pnlHtml}
-          </div>
-          <div class="dm-trade-card-row">
-            <span class="dm-trade-card-lbl">Size</span>
-            <span class="dm-trade-card-val">${amtSol}</span>
-          </div>
-        </div>
+      <div class="dm-shared-token-card${closed?' closed':''}">
+        ${sharedCard}
         <button class="dm-copy-btn" id="${btnId}" ${closed||mine?'disabled':''} onclick="_dmCopyTrade(this,'${btnId}','${errId}',${_esc(JSON.stringify(addr))},${_esc(JSON.stringify(td.entry_price||0))},${_esc(JSON.stringify(td.amount_sol||0))})">
           ${closed?'Trade Closed':mine?'Your Trade':'⚡ Copy Trade'}
         </button>
@@ -6554,6 +6544,7 @@ function _dmRenderMessages(msgs){
   const myId=_dmMyId;
   container.innerHTML='';
   msgs.forEach(m=>container.appendChild(_dmBuildMessageEl(m, myId)));
+  container.querySelectorAll('.dm-shared-token-card [data-mint]').forEach(_hydrateTradeBanner);
   container.scrollTop=container.scrollHeight;
 }
 
@@ -6561,7 +6552,9 @@ function _dmAppendMessage(m){
   const container=document.getElementById('dm-messages-area');
   const empty=container.querySelector('.dm-chat-empty');
   if(empty) container.removeChild(empty);
-  container.appendChild(_dmBuildMessageEl(m, _dmMyId));
+  const messageEl=_dmBuildMessageEl(m, _dmMyId);
+  container.appendChild(messageEl);
+  messageEl.querySelectorAll('.dm-shared-token-card [data-mint]').forEach(_hydrateTradeBanner);
   container.scrollTop=container.scrollHeight;
 }
 
