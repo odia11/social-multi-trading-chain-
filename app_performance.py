@@ -36,6 +36,15 @@ def install(appmod) -> None:
             if 'id="oa-app-ux-js"' not in html:
                 tags.append('<script id="oa-app-ux-js" src="/static/app-ux.js?v=3" defer></script>')
 
+            # One token/trade card renderer for standalone social surfaces.
+            # It patches Groups/Messages at runtime while Home remains the
+            # reference renderer. Legacy rows without a mint use their old
+            # renderer, so historical posts and DMs stay compatible.
+            if 'id="oa-shared-trade-card-css"' not in html:
+                tags.append('<link id="oa-shared-trade-card-css" rel="stylesheet" href="/static/shared-trade-card-v2.css?v=1">')
+            if 'id="oa-shared-trade-card-js"' not in html:
+                tags.append('<script id="oa-shared-trade-card-js" src="/static/shared-trade-card-v2.js?v=1" defer></script>')
+
             # Font DNS/TLS setup costs are otherwise paid during first paint.
             if 'fonts.googleapis.com' in html and 'rel="preconnect" href="https://fonts.googleapis.com"' not in html:
                 tags.append('<link rel="preconnect" href="https://fonts.googleapis.com">')
