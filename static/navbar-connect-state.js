@@ -2,12 +2,12 @@
    Logged out: the top-right profile slot becomes a Connect Wallet control.
    Logged in: restore the normal user profile avatar/link.
    The old full-screen onboarding gate is intentionally bypassed: Home is
-   always browsable and the navbar connect control starts wallet connection. */
+   always browsable and every Connect Wallet control starts the existing
+   Phantom connection flow directly. */
 (function(){
 'use strict';
 
 var original=null;
-var lastConnected=null;
 var checkInFlight=false;
 var lastCheckAt=0;
 var MIN_CHECK_GAP_MS=15000;
@@ -36,12 +36,16 @@ function revealHome(){
   var app=document.getElementById('app');
   if(ob){ob.classList.add('hide');ob.style.display='none';ob.setAttribute('aria-hidden','true');}
   if(app)app.style.display='flex';
-  try{if(typeof window.skipToApp==='function')window.skipToApp();}catch(_){}
-  setTimeout(function(){if(ob){ob.classList.add('hide');ob.style.display='none';}if(app)app.style.display='flex';},0);
-  setTimeout(function(){if(ob){ob.classList.add('hide');ob.style.display='none';}if(app)app.style.display='flex';},700);
 }
 
 function startWalletConnect(){
+  /* Use the original Phantom button first. Its inline onclick is the exact
+     connection path OrcAgent already used successfully before onboarding was
+     removed, and it stays available in the DOM even while the panel is hidden. */
+  var phantomBtn=document.getElementById('phantom-ob-btn');
+  if(phantomBtn){
+    try{phantomBtn.click();return true;}catch(_){}
+  }
   if(typeof window.connectWalletOnboard==='function'){
     try{window.connectWalletOnboard('phantom');return true;}catch(_){}
   }
@@ -57,26 +61,37 @@ function openConnect(e){
   if(startWalletConnect())return false;
   try{sessionStorage.setItem('orca-open-connect','1');}catch(_){}
   if((location.pathname.replace(/\/+$/,'')||'/')!=='/')window.location.href='/';
-  else setTimeout(startWalletConnect,250);
+  else setTimeout(startWalletConnect,150);
   return false;
 }
 
+function wireGuestConnect(){
+  /* The existing guest banner still has its old onboarding onclick. Replace
+     it so "Browsing as guest · Connect wallet" uses the same direct flow as
+     the top-right connect icon. */
+  document.querySelectorAll('#guest-banner .gb-link,.gb-link').forEach(function(btn){
+    btn.onclick=openConnect;
+    btn.setAttribute('aria-label','Connect Wallet');
+  });
+}
+
 function showGuest(){
-  var e=els();if(!e)return;remember(e);
-  lastConnected=false;
-  e.link.removeAttribute('href');
-  e.link.setAttribute('role','button');
-  e.link.setAttribute('tabindex','0');
-  e.link.setAttribute('title','Connect Wallet');
-  e.link.setAttribute('aria-label','Connect Wallet');
-  e.link.innerHTML=connectSvg();
-  e.link.onclick=openConnect;
-  e.link.onkeydown=function(ev){if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();openConnect(ev);}};
+  var e=els();if(e){
+    remember(e);
+    e.link.removeAttribute('href');
+    e.link.setAttribute('role','button');
+    e.link.setAttribute('tabindex','0');
+    e.link.setAttribute('title','Connect Wallet');
+    e.link.setAttribute('aria-label','Connect Wallet');
+    e.link.innerHTML=connectSvg();
+    e.link.onclick=openConnect;
+    e.link.onkeydown=function(ev){if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();openConnect(ev);}};
+  }
+  wireGuestConnect();
 }
 
 function showUser(d){
   var e=els();if(!e)return;remember(e);
-  lastConnected=true;
   e.link.innerHTML=original.html;
   if(original.href)e.link.setAttribute('href',original.href);else e.link.removeAttribute('href');
   if(original.title)e.link.setAttribute('title',original.title);else e.link.removeAttribute('title');
@@ -97,11 +112,11 @@ function checkSession(force){
   if(!force && now-lastCheckAt<MIN_CHECK_GAP_MS)return;
   lastCheckAt=now;checkInFlight=true;
   fetch('/api/me',{credentials:'include',cache:'no-store'}).then(function(r){
-    if(r.status===429){return null;}
+    if(r.status===429)return null;
     if(!r.ok)throw new Error('not signed in');
     return r.json();
   }).then(function(d){
-    if(d===null)return; // preserve current UI on rate-limit; do not retry-loop
+    if(d===null)return;
     if(d&&d.ok){showUser(d);return;}
     showGuest();
   }).catch(function(){showGuest();}).finally(function(){checkInFlight=false;});
@@ -109,7 +124,6 @@ function checkSession(force){
 
 function boot(){
   revealHome();
-  var e=els();if(!e)return;remember(e);
   showGuest();
   checkSession(true);
   try{
@@ -121,7 +135,7 @@ function boot(){
 }
 
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
-window.addEventListener('load',revealHome,{once:true});
-window.addEventListener('pageshow',function(){revealHome();checkSession(false);});
-document.addEventListener('visibilitychange',function(){if(!document.hidden){revealHome();checkSession(false);}});
+window.addEventListener('load',function(){revealHome();wireGuestConnect();},{once:true});
+window.addEventListener('pageshow',function(){revealHome();wireGuestConnect();checkSession(false);});
+document.addEventListener('visibilitychange',function(){if(!document.hidden){revealHome();wireGuestConnect();checkSession(false);}});
 })();
