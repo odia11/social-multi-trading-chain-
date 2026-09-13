@@ -30,14 +30,23 @@ function decorateIncoming(){
 }
 
 function markThreadState(){
-  var thread=document.getElementById('msgs-thread');
-  var open=!!(thread&&getComputedStyle(thread).display!=='none');
+  var main=document.querySelector('.msgs-main');
+  var open=!!(main&&main.classList.contains('thread-open'));
   document.body.classList.toggle('oa-thread-open',open);
   if(open)decorateIncoming();
 }
 
-function run(){markThreadState();decorateIncoming();}
-var mo=new MutationObserver(function(){requestAnimationFrame(run)});
-function start(){run();mo.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['style','class']});}
+function run(){markThreadState();if(document.body.classList.contains('oa-thread-open'))decorateIncoming();}
+var pending=false;
+var mo=new MutationObserver(function(){
+  if(pending)return;
+  pending=true;
+  requestAnimationFrame(function(){pending=false;run();});
+});
+function start(){
+  run();
+  var main=document.querySelector('.msgs-main');
+  if(main)mo.observe(main,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style']});
+}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
