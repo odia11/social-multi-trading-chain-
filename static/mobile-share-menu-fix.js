@@ -65,19 +65,15 @@ function place(dd,btn){
     var br=btn?btn.getBoundingClientRect():{left:window.innerWidth-56,right:window.innerWidth-20,top:window.innerHeight/2,bottom:window.innerHeight/2};
     var mr=dd.getBoundingClientRect();
     var pad=12,gap=10,vw=document.documentElement.clientWidth||window.innerWidth,vh=window.innerHeight;
-    var safeBottom=112; /* fixed OrcAgent bottom nav */
+    var safeBottom=112;
     var usableBottom=Math.max(pad,vh-safeBottom);
     var left=Math.min(Math.max(pad,br.right-mr.width),Math.max(pad,vw-mr.width-pad));
     var above=br.top-gap-mr.height;
     var below=br.bottom+gap;
     var top;
-    if(above>=pad){
-      top=above;
-    }else if(below+mr.height<=usableBottom){
-      top=below;
-    }else{
-      top=Math.max(pad,Math.min(usableBottom-mr.height,br.top-mr.height/2));
-    }
+    if(above>=pad){ top=above; }
+    else if(below+mr.height<=usableBottom){ top=below; }
+    else{ top=Math.max(pad,Math.min(usableBottom-mr.height,br.top-mr.height/2)); }
     dd.style.left=Math.round(left)+'px';
     dd.style.top=Math.round(top)+'px';
     dd.style.visibility='visible';
@@ -106,13 +102,8 @@ function openPortal(postId){
   return true;
 }
 
-/* Override the feed's own inline onclick target. Inline handlers resolve the
-   global at click time, so this prevents the old absolute dropdown from ever
-   becoming visible on mobile. Wait until all dashboard scripts have executed. */
 function installOverride(){
-  window._fcShareToggle=function(postId){
-    openPortal(postId);
-  };
+  window._fcShareToggle=function(postId){ openPortal(postId); };
 }
 if(document.readyState==='loading'){
   window.addEventListener('load',installOverride,{once:true});
@@ -120,16 +111,19 @@ if(document.readyState==='loading'){
   setTimeout(installOverride,0);
 }
 
-/* Close only after the menu item's own inline handler has had a chance to run. */
+/* Capture phase is intentional. Some feed item handlers stop propagation, so
+   the old bubble listener never saw the tap and the menu stayed floating over
+   the success modal. Scheduling restore preserves the item's own onclick. */
 document.addEventListener('click',function(e){
   if(!active)return;
-  if(e.target.closest && e.target.closest('.fc-share-dd')){
-    if(e.target.closest('.fc-share-item'))setTimeout(restoreActive,0);
+  var closest=e.target && e.target.closest ? e.target.closest.bind(e.target) : null;
+  if(closest && closest('.fc-share-dd')){
+    if(closest('.fc-share-item'))setTimeout(restoreActive,0);
     return;
   }
-  if(e.target.closest && e.target.closest('.fc-share-btn'))return;
+  if(closest && closest('.fc-share-btn'))return;
   restoreActive();
-},false);
+},true);
 
 document.addEventListener('keydown',function(e){if(e.key==='Escape')restoreActive();});
 window.addEventListener('scroll',restoreActive,{passive:true});
