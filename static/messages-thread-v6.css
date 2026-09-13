@@ -1,0 +1,56 @@
+/* OrcAgent Messages Thread v6 — authoritative mobile fullscreen thread fixes */
+@media(max-width:767px){
+  html body.oa-thread-open #oa-bottom-nav,
+  html body.oa-thread-open .oa-bottom-nav,
+  html body.oa-thread-open .pt-nb-topbar{display:none!important}
+
+  html body.oa-thread-open{padding-bottom:0!important;overflow:hidden!important;background:#070a0f!important}
+  html body.oa-thread-open #app,
+  html body.oa-thread-open .msgs-main,
+  html body.oa-thread-open .msgs-right,
+  html body.oa-thread-open .msgs-thread{height:100dvh!important;max-height:100dvh!important;min-height:0!important;background:#070a0f!important}
+  html body.oa-thread-open .msgs-right{display:flex!important;flex-direction:column!important;width:100%!important}
+  html body.oa-thread-open .msgs-thread{display:flex!important;flex-direction:column!important}
+
+  html body.oa-thread-open .msgs-thread-hdr{min-height:86px!important;padding:11px 10px!important;gap:7px!important;background:#070a0f!important;border-bottom:1px solid #20262f!important}
+  html body.oa-thread-open .msgs-back{width:30px!important;min-width:30px!important;height:44px!important}
+  html body.oa-thread-open .msgs-back:before{font-size:42px!important}
+  html body.oa-thread-open .msgs-thread-avatar{width:50px!important;height:50px!important;min-width:50px!important}
+  html body.oa-thread-open .msgs-thread-meta{flex:1 1 auto!important;min-width:0!important}
+  html body.oa-thread-open .msgs-thread-name{font-size:18px!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+  html body.oa-thread-open .msgs-thread-status{font-size:11px!important;margin-top:2px!important}
+  html body.oa-thread-open .msgs-copy-trades-btn{display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:6px!important;width:88px!important;min-width:88px!important;height:42px!important;padding:0 10px!important;border-radius:21px!important;font-size:11px!important;border:1px solid rgba(247,185,85,.82)!important;color:#f7b955!important;background:rgba(247,185,85,.035)!important}
+  html body.oa-thread-open .msgs-copy-trades-btn .msgs-copy-trades-label{display:inline!important;font-size:11px!important}
+  html body.oa-thread-open .msgs-more-btn{width:42px!important;height:42px!important;min-width:42px!important}
+
+  html body.oa-thread-open .msgs-area{flex:1 1 auto!important;min-height:0!important;overflow-y:auto!important;padding:14px 14px 18px!important;gap:9px!important}
+  html body.oa-thread-open .msg-wrap.theirs{padding-left:46px!important}
+  html body.oa-thread-open .oa-peer-mini-avatar{width:36px!important;height:36px!important;left:0!important;top:3px!important}
+  html body.oa-thread-open .msg-bubble:not(.msg-trade){font-size:15px!important;line-height:1.43!important;max-width:78vw!important;padding:11px 14px!important}
+
+  html body.oa-thread-open .msg-bubble.msg-trade{width:calc(100vw - 74px)!important;max-width:520px!important}
+  html body.oa-thread-open .oa-dm-trade-card{border-radius:16px!important}
+  html body.oa-thread-open .oa-dm-trade-top{padding:13px 14px 10px!important}
+  html body.oa-thread-open .oa-dm-trade-token{font-size:18px!important}
+  html body.oa-thread-open .oa-dm-trade-pct{font-size:17px!important;padding:5px 8px!important}
+  html body.oa-thread-open .oa-dm-trade-stats{margin:0 14px!important;grid-template-columns:repeat(3,minmax(0,1fr))!important}
+  html body.oa-thread-open .oa-dm-trade-stat{padding:10px 6px 10px 0!important}
+  html body.oa-thread-open .oa-dm-trade-stat+.oa-dm-trade-stat{padding-left:8px!important}
+  html body.oa-thread-open .oa-dm-trade-label{font-size:9px!important}
+  html body.oa-thread-open .oa-dm-trade-value{font-size:11px!important;overflow:visible!important;text-overflow:clip!important;white-space:normal!important;word-break:break-word!important;line-height:1.25!important}
+  html body.oa-thread-open .oa-dm-trade-bottom{padding:11px 14px 13px!important}
+  html body.oa-thread-open .oa-dm-trade-pnl{font-size:13px!important}
+
+  html body.oa-thread-open .msgs-input-bar.oa-composer-v4{flex:0 0 auto!important;display:grid!important;grid-template-columns:42px 42px 42px minmax(0,1fr) 50px!important;align-items:center!important;gap:6px!important;padding:10px 8px calc(10px + env(safe-area-inset-bottom,0px))!important;background:#090d12!important;border-top:1px solid #20262f!important;position:relative!important;bottom:auto!important;left:auto!important;right:auto!important}
+  html body.oa-thread-open .oa-compose-text-wrap{grid-column:4!important;min-height:50px!important;max-height:98px!important;border-radius:26px!important}
+  html body.oa-thread-open .msgs-input.oa-msgs-textarea{height:50px!important;min-height:50px!important;max-height:98px!important;padding:13px 15px!important;font-size:16px!important}
+  html body.oa-thread-open .msgs-input-bar.oa-composer-v4>.msgs-attach-btn,
+  html body.oa-thread-open .msgs-input-bar.oa-composer-v4>.msgs-trade-wrap>.msgs-attach-btn,
+  html body.oa-thread-open .msgs-input-bar.oa-composer-v4>.msgs-emoji-wrap>.msgs-emoji-btn{width:42px!important;height:42px!important;min-width:42px!important}
+  html body.oa-thread-open .msgs-input-bar.oa-composer-v4 .msgs-send,
+  html body.oa-thread-open .msgs-input-bar.oa-composer-v4 .msgs-send-btn{width:50px!important;height:50px!important;min-width:50px!important}
+
+  html body.oa-msgs-typing #oa-bottom-nav,
+  html body.oa-msgs-typing .oa-bottom-nav{display:none!important}
+  html body.oa-msgs-typing .msgs-input-bar.oa-composer-v4{position:fixed!important;left:0!important;right:0!important;bottom:var(--oa-kb-offset,0px)!important;z-index:1600!important}
+}
