@@ -21,7 +21,7 @@ def install(dashboard_module):
         + marker + '></script>'
         '<script src="/static/navbar-connect-state.js?v=5" defer '
         + marker + '></script>'
-        '<script src="/static/mobile-connect-button.js?v=4" defer '
+        '<script src="/static/mobile-connect-button.js?v=5" defer '
         + marker + '></script>'
         '<script src="/static/guest-menu-auth-fix.js?v=1" defer '
         + marker + '></script>'
