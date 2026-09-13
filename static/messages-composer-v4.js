@@ -1,4 +1,4 @@
-/* OrcAgent Messages Composer v4 — compact wide textarea without replacing message logic. */
+/* OrcAgent Messages Composer v5 — compact premium composer matching approved design. */
 (function(){
 'use strict';
 if(!window.matchMedia('(max-width:767px)').matches)return;
@@ -17,7 +17,10 @@ function install(){
   ta.setAttribute('aria-label','Message');
   ta.value=old.value||'';
   ta.addEventListener('keydown',function(e){
-    if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();if(typeof window._sendMessage==='function')window._sendMessage();}
+    if(e.key==='Enter'&&!e.shiftKey){
+      e.preventDefault();
+      if(typeof window._sendMessage==='function')window._sendMessage();
+    }
   });
 
   var wrap=document.createElement('div');
@@ -25,13 +28,14 @@ function install(){
   var counter=document.createElement('span');
   counter.className='oa-msg-counter';
   counter.textContent='0/2000';
-  wrap.appendChild(ta);wrap.appendChild(counter);
+  wrap.appendChild(ta);
+  wrap.appendChild(counter);
   old.replaceWith(wrap);
   bar.classList.add('oa-composer-v4');
 
   function resize(){
-    ta.style.height='58px';
-    var h=Math.max(58,Math.min(108,ta.scrollHeight));
+    ta.style.height='54px';
+    var h=Math.max(54,Math.min(116,ta.scrollHeight));
     ta.style.height=h+'px';
     counter.textContent=(ta.value||'').length+'/2000';
   }
@@ -52,6 +56,7 @@ function install(){
     var area=document.getElementById('msgs-area');
     if(area){requestAnimationFrame(function(){area.scrollTop=area.scrollHeight;});}
   }
+
   ta.addEventListener('focus',function(){setTyping(true);});
   ta.addEventListener('blur',function(){setTimeout(function(){if(document.activeElement!==ta)setTyping(false);},120);});
   if(window.visualViewport){
@@ -59,9 +64,6 @@ function install(){
     window.visualViewport.addEventListener('scroll',updateViewport);
   }
 
-  /* Keep textarea height synced after sends and DOM refreshes. */
-  var obs=new MutationObserver(function(){resize();});
-  obs.observe(bar,{childList:true,subtree:true});
   document.addEventListener('click',function(e){
     if(e.target.closest('#msgs-send,.msgs-send,.msgs-send-btn'))setTimeout(resize,60);
   });
