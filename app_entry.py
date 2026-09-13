@@ -17,6 +17,7 @@ from share_card_concept_d import install as _install_share_card_concept_d
 from messages_premium_ui import install as _install_messages_premium_ui
 from live_market_deeplink_fix import install as _install_live_market_deeplink_fix
 from x_share_fallback import install as _install_x_share_fallback
+from security_hardening import install as _install_security_hardening
 
 _install_evm_to_solana_bridge(_dashboard)
 _install_wallet_deposit_guidance(_dashboard)
@@ -36,4 +37,5 @@ _install_share_card_concept_d(_dashboard)
 _install_messages_premium_ui(_dashboard)
 _install_live_market_deeplink_fix(_dashboard)
 _install_x_share_fallback(_dashboard)
+_install_security_hardening(_dashboard)
 app = _dashboard.app
