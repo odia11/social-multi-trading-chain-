@@ -1,0 +1,25 @@
+/* OrcAgent DM token/trade card v1 — same visual language as Home. */
+.dm-home-token-card{position:relative;overflow:hidden;background:#0d1117;border:1px solid #1a1f2e;border-radius:10px;margin:2px 0;font-family:'JetBrains Mono',monospace;cursor:pointer;min-height:118px}
+.dm-home-token-banner{position:absolute;inset:0;background-size:cover;background-position:center;opacity:.72}
+.dm-home-token-shade{position:absolute;inset:0;background:linear-gradient(to bottom,rgba(13,17,23,.5),rgba(13,17,23,.95))}
+.dm-home-token-content{position:relative;z-index:1;padding:14px 16px 10px}
+.dm-home-token-main{display:flex;justify-content:space-between;align-items:center;gap:14px}
+.dm-home-token-left{flex:1;min-width:0}
+.dm-home-token-title-row{display:flex;align-items:center;gap:8px;margin-bottom:7px;min-width:0}
+.dm-home-token-side{font-size:10px;font-weight:800;border-radius:4px;padding:2px 6px;line-height:1.2;flex-shrink:0}
+.dm-home-token-side.buy{color:#00d084;border:1px solid rgba(0,208,132,.28);background:rgba(0,208,132,.06)}
+.dm-home-token-side.sell{color:#ff4757;border:1px solid rgba(255,71,87,.28);background:rgba(255,71,87,.06)}
+.dm-home-token-symbol{font-size:15px;font-weight:800;color:#eef1f5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dm-home-token-prices{display:flex;align-items:center;gap:7px;flex-wrap:wrap;color:#8a919c;font-size:10px;line-height:1.4}
+.dm-home-token-prices b{color:#707986;font-weight:600}.dm-home-token-prices em{font-style:normal;color:#cbd1d8}.dm-home-token-dot{color:#3b434d}
+.dm-home-token-pnl{color:#f7b955;font-size:12px;font-weight:700;margin-top:6px}
+.dm-home-token-pct{font-size:24px;font-weight:800;line-height:1;white-space:nowrap;flex-shrink:0;text-shadow:0 2px 14px rgba(0,0,0,.35)}
+.dm-home-token-pct.pos{color:#00d084}.dm-home-token-pct.neg{color:#ff4757}
+.dm-home-token-footer{display:flex;justify-content:flex-end;gap:6px;align-items:center;margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.06);color:#a5adb8;font-size:10px;font-family:'Geist',system-ui,sans-serif}
+.dm-home-token-card:focus-visible{outline:2px solid rgba(247,185,85,.85);outline-offset:2px}
+@media(max-width:767px){
+  body.oa-thread-open .msg-bubble.msg-trade:has(.dm-home-token-card){width:calc(100vw - 74px)!important;max-width:520px!important}
+  body.oa-thread-open .dm-home-token-card{border-radius:14px;min-height:112px}
+  body.oa-thread-open .dm-home-token-content{padding:13px 14px 9px}
+  body.oa-thread-open .dm-home-token-pct{font-size:21px}
+}
