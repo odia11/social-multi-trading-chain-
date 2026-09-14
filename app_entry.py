@@ -1,16 +1,16 @@
 """Production WSGI entry point.
 
-OrcAgent's product policy is that the platform never fronts user gas. Force
-that policy before dashboard.py is imported so every route/background loop
-sees it from first import, regardless of a stale server environment value.
-Then import the existing application so every route, migration and background
-loop is registered exactly as before, followed by the narrow runtime adapters.
+OrcAgent's product policy is that the platform itself never subsidizes user
+gas. On BNB Chain, a USDC-only BUY uses 0x Gasless: the relayer handles BNB
+and the network cost is billed inside the user's USDC order. Force the legacy
+platform-sponsor switch off before dashboard.py is imported, then install the
+Gasless adapter after the existing application is registered.
 """
 import os
 
-# Product invariant: all network gas/bridge/trading costs belong to the user.
-# This must run BEFORE importing dashboard because dashboard reads the setting
-# at import time and also starts background loops during import.
+# Product invariant: OrcAgent's own wallet does not subsidize users. This does
+# NOT mean a user must hold BNB: bsc_gasless_trading makes BSC BUYs relayed and
+# bills gas in the USDC sell amount instead.
 os.environ['ORCAGENT_FRONTS_GAS'] = '0'
 
 import dashboard as _dashboard
@@ -38,6 +38,7 @@ from financial_authorization_hardening import install as _install_financial_auth
 from owner_money_hardening import install as _install_owner_money_hardening
 from abuse_rate_hardening import install as _install_abuse_rate_hardening
 from upload_hardening import install as _install_upload_hardening
+from bsc_gasless_trading import install as _install_bsc_gasless_trading
 from trading_wallet_generator import install as _install_trading_wallet_generator
 from response_privacy_hardening import install as _install_response_privacy_hardening
 from audit_hardening import install as _install_audit_hardening
@@ -80,6 +81,11 @@ _install_financial_authorization_hardening(_dashboard)
 _install_owner_money_hardening(_dashboard)
 _install_abuse_rate_hardening(_dashboard)
 _install_upload_hardening(_dashboard)
+
+# BNB Chain BUYs: a wallet may hold only USDC and zero BNB. 0x Gasless relays
+# the EIP-712 order and takes gas + OrcAgent's fee from the same USDC-funded
+# order, so there is no platform subsidy and no native-token prerequisite.
+_install_bsc_gasless_trading(_dashboard)
 
 # New-user wallet onboarding: generates a dedicated Solana wallet plus one
 # shared EVM wallet, displays both keys once for backup, and only stores them
