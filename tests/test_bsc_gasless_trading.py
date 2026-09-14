@@ -48,7 +48,8 @@ check('trade is signed EIP-712 and submitted to the relayer',
       and "'signatureType': 2" in src
       and "'/gasless/submit'" in src)
 check('relayed trade is not marked successful until 0x reports confirmed',
-      "'/gasless/status/'" in src and "if last == 'confirmed':" in src)
+      "f'/gasless/status/{trade_hash}'" in src and "if last == 'confirmed':" in src
+      and "if last in {'failed', 'reverted', 'cancelled', 'canceled'}:" in src)
 check('the old second ERC20 fee transfer is skipped after a gasless BSC buy',
       'state.last_bsc_buy' in src and '_record_bundled_fee(' in src
       and "chain == _BSC and str(kind).lower() == 'buy'" in src)
