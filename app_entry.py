@@ -18,6 +18,7 @@ from messages_premium_ui import install as _install_messages_premium_ui
 from live_market_deeplink_fix import install as _install_live_market_deeplink_fix
 from x_share_fallback import install as _install_x_share_fallback
 from canonical_domain import install as _install_canonical_domain
+from browser_shared_secret_hardening import install as _install_browser_shared_secret_hardening
 from secret_hygiene import install as _install_secret_hygiene
 from security_hardening import install as _install_security_hardening
 from ssrf_hardening import install as _install_ssrf_hardening
@@ -49,6 +50,11 @@ _install_x_share_fallback(_dashboard)
 # can derive an absolute URL/origin from them. Loopback remains allowed for
 # the server-side health/security smoke checks.
 _install_canonical_domain(_dashboard)
+
+# A server-wide credential rendered into browser HTML is public, not secret.
+# Disable that legacy boundary before requests begin; browser mutations rely
+# on authenticated session + CSRF + the route/object authorization layers.
+_install_browser_shared_secret_hardening(_dashboard)
 
 # Security layers. Startup secret validation runs before request guards. The
 # remaining adapters are defense-in-depth around the route-level checks that
