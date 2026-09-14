@@ -70,9 +70,8 @@ _CSS = r'''
     flex-shrink: 0 !important;
   }
 
-  /* The slide track MUST stay positioned. The knob and fill are absolute
-     children of this element. Making the track position:static caused the
-     red/yellow knob to jump to the top-left of the token header. */
+  /* Keep the slider itself as the positioning context for its absolute
+     children. Buy and Sell share this exact track. */
   body.oa-live-v2 .pt-slide {
     position: relative !important;
     transform: none !important;
@@ -83,7 +82,9 @@ _CSS = r'''
 
   body.oa-live-v2 .pt-slide-fill {
     position: absolute !important;
-    inset: 0 auto 0 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
     height: 100% !important;
     max-width: 100% !important;
     border-radius: inherit !important;
@@ -91,11 +92,14 @@ _CSS = r'''
     z-index: 1 !important;
   }
 
+  /* IMPORTANT: the slider JS moves the knob with an inline translateX().
+     Do not set transform here (especially not !important), otherwise the
+     inline drag transform is blocked and the knob appears stuck/floating.
+     The base component uses top:5px/left:5px; preserve that geometry. */
   body.oa-live-v2 .pt-slide-knob {
     position: absolute !important;
-    top: 50% !important;
+    top: 5px !important;
     left: 5px !important;
-    transform: translateY(-50%) !important;
     margin: 0 !important;
     z-index: 3 !important;
   }
