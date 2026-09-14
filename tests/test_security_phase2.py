@@ -45,6 +45,10 @@ check('image validation is bytes-based and rejects unsupported formats',
       '_validate_image_bytes' in upload and "{'JPEG', 'PNG', 'GIF', 'WEBP'}" in upload and 'im.verify()' in upload)
 check('image dimensions/pixels/frames are bounded',
       '_MAX_PIXELS' in upload and '_MAX_EDGE' in upload and '_MAX_GIF_FRAMES' in upload)
+check('upload JSON walk never silently skips tail items',
+      'for v in obj:' in upload and 'obj[:50]' not in upload)
+check('over-complex upload JSON is rejected fail-closed',
+      '_MAX_WALK_NODES' in upload and '_MAX_NESTING' in upload and 'Upload payload is too complex' in upload)
 check('API privacy filter strips private-key and token-hash fields',
       'encrypted_private_key' in privacy and 'token_hash' in privacy and '_clean(' in privacy)
 check('API privacy filter covers mnemonic, API key and secret schema variants',
