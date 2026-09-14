@@ -1,14 +1,16 @@
-"""Gasless Solana USDC BUY adapter using Jupiter's order/execute API.
+"""Gasless Solana USDC BUY adapter using Jupiter Ultra order/execute.
 
-A trading wallet may hold USDC and zero SOL. Jupiter's automatic gasless
-support can pay base/priority fees and account rent, then recover that cost
-from the swap itself. OrcAgent does not provide SOL and does not use its own
-sponsor wallet.
+The amount passed to this adapter is an ALL-IN ceiling: Jupiter receives that
+exact USDC input amount and may recover its gasless/network costs and an
+optional OrcAgent integrator fee from inside the swap. OrcAgent never adds SOL,
+never adds a fee on top, and never uses its own sponsor wallet.
 
-This adapter only replaces USDC-funded BUY execution. Sells and legacy SOL
-trades keep the existing engine. When JUPITER_API_KEY is absent it also keeps
-the existing engine, so a deploy cannot silently break trading; production
-must configure the key before relying on zero-SOL Solana buys.
+Set JUPITER_REFERRAL_ACCOUNT to OrcAgent's Jupiter Ultra referral account to
+collect the existing OrcAgent transaction fee atomically inside the order.
+The configured FEE_RATE_TXN is translated to referralFee bps (0.75% -> 75).
+If no referral account is configured, trading keeps working exactly as before;
+the adapter marks the fee as not bundled so accounting never books revenue
+that was not actually collected.
 """
 from __future__ import annotations
 
@@ -29,6 +31,20 @@ _GASLESS_SOL_THRESHOLD = 0.01
 
 def _api_key() -> str:
     return (os.getenv('JUPITER_API_KEY', '') or '').strip()
+
+
+def _referral_account() -> str:
+    return (os.getenv('JUPITER_REFERRAL_ACCOUNT', '') or '').strip()
+
+
+def _referral_fee_bps(d) -> int:
+    rate = Decimal(str(getattr(d, 'FEE_RATE_TXN', '0') or '0'))
+    bps = int((rate * Decimal('10000')).to_integral_value())
+    if bps and not 50 <= bps <= 255:
+        raise RuntimeError(
+            f'OrcAgent Solana fee is {bps} bps, but Jupiter Ultra integrator fees '
+            'must be between 50 and 255 bps')
+    return bps
 
 
 def _headers():
@@ -89,12 +105,22 @@ def _order(d, wallet: str, mint: str, amount_usdc: str):
     raw = amount * Decimal(1_000_000)
     if raw != raw.to_integral_value():
         raise RuntimeError('USDC amount has more than 6 decimal places')
+
     params = {
         'inputMint': _USDC,
         'outputMint': mint,
         'amount': str(int(raw)),
         'taker': wallet,
     }
+
+    referral = _referral_account()
+    fee_bps = _referral_fee_bps(d)
+    if referral and fee_bps:
+        # Jupiter Ultra takes the integrator fee from inside the exact input
+        # order, so amount remains the user's absolute spend ceiling.
+        params['referralAccount'] = referral
+        params['referralFee'] = str(fee_bps)
+
     r = requests.get(_API + '/order', params=params, headers=_headers(), timeout=20)
     try:
         data = r.json()
@@ -106,18 +132,31 @@ def _order(d, wallet: str, mint: str, amount_usdc: str):
         code = data.get('errorCode')
         message = data.get('errorMessage') or data.get('error') or 'Jupiter returned no executable transaction'
         if code == 3:
-            raise RuntimeError('This Solana buy is below Jupiter\'s current gasless minimum. Increase the USDC amount; OrcAgent will not ask for SOL or subsidize the trade.')
+            raise RuntimeError(
+                "This Solana buy is below Jupiter's current gasless minimum. "
+                'Increase the USDC amount; OrcAgent will not ask for SOL or subsidize the trade.')
         raise RuntimeError(str(message)[:300])
 
-    # If this wallet is in the zero/low-SOL case, never accept a transaction
-    # that expects the user to pay SOL. Either Jupiter makes it gasless or the
-    # order is refused; OrcAgent does not silently fall back to sponsorship.
+    # If a referral fee was requested, only call it bundled when Jupiter's
+    # response proves that it was actually applied. Missing referral token
+    # accounts may otherwise allow the swap while collecting no integrator fee.
+    applied_fee_bps = int(data.get('feeBps') or 0)
+    platform_fee = data.get('platformFee') or {}
+    fee_applied = bool(referral and fee_bps and applied_fee_bps >= fee_bps
+                       and int(platform_fee.get('amount') or 0) > 0)
+    data['_orcagent_fee_requested_bps'] = fee_bps if referral else 0
+    data['_orcagent_fee_applied'] = fee_applied
+
+    # A low/zero-SOL wallet must receive a genuinely gasless order. Never
+    # silently fall back to a transaction paid by OrcAgent or requiring SOL.
     try:
         low_sol = _sol_balance(d, wallet) < _GASLESS_SOL_THRESHOLD
     except Exception:
         low_sol = False
     if low_sol and not bool(data.get('gasless')):
-        raise RuntimeError('Jupiter did not provide a gasless route for this low-SOL wallet. No SOL will be requested or paid by OrcAgent.')
+        raise RuntimeError(
+            'Jupiter did not provide a gasless route for this low-SOL wallet. '
+            'No SOL will be requested or paid by OrcAgent.')
     return data
 
 
@@ -142,7 +181,6 @@ def _execute(order: dict, signed_tx: str):
                 return sig, data
             code = data.get('code')
             last_error = str(data.get('error') or data.get('message') or data.get('status') or code or 'execute failed')[:300]
-            # Definitive on-chain/business failures should not be retried.
             if code not in (-1000, -1005, -1006, None):
                 break
         except requests.RequestException as exc:
@@ -158,9 +196,8 @@ def install(d):
 
     def execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str,
                              amount_str: str, base: str = 'SOL', capture: dict = None):
-        # Jupiter automatic gasless applies to the USDC-funded buy path. If no
-        # API key is configured, preserve current behaviour rather than making
-        # every Solana trade fail at import/deploy time.
+        # Only USDC-funded BUYs use Ultra gasless. If no API key is configured,
+        # preserve the legacy path instead of breaking deployment startup.
         if str(action).lower() != 'buy' or str(base).upper() != 'USDC' or not _api_key():
             return original(wallet, private_key, action, mint, amount_str, base, capture)
         try:
@@ -174,8 +211,14 @@ def install(d):
             token_amount = float(Decimal(str(raw_out)) / (Decimal(10) ** decimals))
             if capture is not None:
                 capture['gasless'] = bool(order.get('gasless'))
-                capture['fee_bundled'] = False
+                # The legacy caller uses this boolean to decide whether it may
+                # record a bundled fee. Only say yes when Jupiter proved it.
+                capture['fee_bundled'] = bool(order.get('_orcagent_fee_applied'))
+                capture['fee_bps'] = int(order.get('_orcagent_fee_requested_bps') or 0)
+                capture['fee_mint'] = order.get('feeMint') or ''
                 capture['router'] = order.get('router')
+            # Ultra ExactIn spends exactly amount_str. Gasless and integrator
+            # costs are recovered inside that amount, never on top of it.
             return True, signature, '', token_amount, float(Decimal(str(amount_str)))
         except Exception as exc:
             return False, '', d._redact_keys(str(exc))[:500], 0.0, 0.0
