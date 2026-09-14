@@ -5,9 +5,9 @@ actually need. Everywhere else, database/internal credential fields are stripped
 recursively before JSON leaves the process. If redaction itself ever fails, the
 response is replaced with a generic error instead of leaking the original payload.
 
-A deliberately narrow exception exists for wallet onboarding: OrcAgent may show a
-newly generated private key to its owner once so it can be backed up. Only explicit
-onboarding endpoints and exact response schemas are allowed through, all no-store.
+One legacy authenticated trading-wallet generator has a deliberately narrow,
+validated one-time export exception. Guest onboarding generates keys in the browser,
+so onboarding responses never need a secret-field exception.
 """
 from __future__ import annotations
 
@@ -30,7 +30,6 @@ _AUTH_ALLOWED_PATHS = {
 }
 _FULL_KEY_EXPORT_PATHS = {
     '/api/wallet/generate-trading-wallet',
-    '/api/onboarding/wallet/create',
 }
 _FULL_KEY_EXPORT_FIELDS = {
     'ok', 'solana_address', 'solana_private_key',
@@ -40,14 +39,6 @@ _FULL_KEY_REQUIRED_FIELDS = {
     'ok', 'solana_address', 'solana_private_key',
     'evm_address', 'evm_private_key',
 }
-_IMPORT_KEY_EXPORT_PATH = '/api/onboarding/wallet/import'
-_IMPORT_KEY_EXPORT_FIELDS = {
-    'ok', 'wallet', 'evm_address', 'evm_private_key', 'warning', 'needs_confirmation',
-}
-_IMPORT_KEY_REQUIRED_FIELDS = {
-    'ok', 'wallet', 'evm_address', 'evm_private_key', 'warning', 'needs_confirmation',
-}
-
 
 def _is_secret_field(key: object) -> bool:
     low = str(key).strip().lower()
@@ -99,20 +90,6 @@ def _valid_full_key_export(payload) -> bool:
                for k in ('solana_address', 'solana_private_key', 'evm_address', 'evm_private_key'))
 
 
-def _valid_import_key_export(payload) -> bool:
-    if not isinstance(payload, dict) or payload.get('ok') is not True:
-        return False
-    keys = set(payload)
-    if not _IMPORT_KEY_REQUIRED_FIELDS.issubset(keys):
-        return False
-    if not keys.issubset(_IMPORT_KEY_EXPORT_FIELDS):
-        return False
-    if payload.get('needs_confirmation') is not True:
-        return False
-    return all(isinstance(payload.get(k), str) and payload.get(k)
-               for k in ('wallet', 'evm_address', 'evm_private_key', 'warning'))
-
-
 def _mark_no_store(response):
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
     response.headers['Pragma'] = 'no-cache'
@@ -137,9 +114,6 @@ def install(dashboard_module):
 
             if request.path in _FULL_KEY_EXPORT_PATHS and _valid_full_key_export(payload):
                 return _mark_no_store(response)
-            if request.path == _IMPORT_KEY_EXPORT_PATH and _valid_import_key_export(payload):
-                return _mark_no_store(response)
-
             cleaned = _clean(payload, request.path in _AUTH_ALLOWED_PATHS)
             if cleaned != payload:
                 body = json.dumps(cleaned, separators=(',', ':'), ensure_ascii=False, default=str).encode('utf-8')

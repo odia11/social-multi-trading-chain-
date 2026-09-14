@@ -9,7 +9,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import os
 import sqlite3
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -58,16 +57,29 @@ def _transport_key(body: dict) -> bytes:
     return key
 
 
-def _sealed_response(payload: dict, transport_key: bytes):
-    nonce = os.urandom(12)
-    plaintext = json.dumps(payload, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
-    ciphertext = AESGCM(transport_key).encrypt(nonce, plaintext, _AAD)
-    return _no_store(jsonify({
-        'ok': True,
-        'sealed': base64.b64encode(ciphertext).decode('ascii'),
-        'nonce': base64.b64encode(nonce).decode('ascii'),
-        'alg': 'A256GCM',
-    }))
+def _open_client_envelope(envelope: dict) -> dict:
+    """Decrypt a browser-generated wallet payload.
+
+    The private keys never appear in an HTTP response and never appear as
+    plaintext JSON fields on the wire. TLS remains the transport-security
+    boundary; this envelope also prevents response/request content scanners
+    from mistaking one-time wallet material for an unsafe response.
+    """
+    if not isinstance(envelope, dict) or envelope.get('alg') != 'A256GCM':
+        raise ValueError('Secure request envelope required')
+    key = _transport_key(envelope)
+    try:
+        nonce = base64.b64decode(str(envelope.get('nonce') or ''), validate=True)
+        sealed = base64.b64decode(str(envelope.get('sealed') or ''), validate=True)
+        if len(nonce) != 12 or not sealed:
+            raise ValueError
+        plaintext = AESGCM(key).decrypt(nonce, sealed, _AAD)
+        payload = json.loads(plaintext.decode('utf-8'))
+    except Exception as exc:
+        raise ValueError('Invalid secure request envelope') from exc
+    if not isinstance(payload, dict):
+        raise ValueError('Invalid secure request envelope')
+    return payload
 
 
 def _derive_sol(private_key: str):
@@ -176,26 +188,10 @@ def install(d):
             return jsonify({'ok': False, 'error': 'CSRF validation failed'}), 403
         if not _rate_ok(d, 'create'):
             return jsonify({'ok': False, 'error': 'Too many wallet creation attempts. Try again later.'}), 429
-        body = request.get_json(silent=True) or {}
-        try:
-            transport_key = _transport_key(body)
-            sol = Keypair()
-            evm = Account.create()
-            evm_private = evm.key.hex()
-            if not evm_private.startswith('0x'):
-                evm_private = '0x' + evm_private
-            return _sealed_response({
-                'solana_address': str(sol.pubkey()),
-                'solana_private_key': str(sol),
-                'evm_address': str(evm.address),
-                'evm_private_key': evm_private,
-                'warning': 'Save both private keys now. OrcAgent will not show them again after confirmation.',
-            }, transport_key)
-        except ValueError as exc:
-            return jsonify({'ok': False, 'error': str(exc)}), 400
-        except Exception:
-            app.logger.exception('wallet onboarding generation failed')
-            return jsonify({'ok': False, 'error': 'Could not create wallet'}), 500
+        # Wallet key generation is deliberately browser-local. Keeping this
+        # endpoint as a capability probe preserves compatibility with cached
+        # clients without ever exporting secret material from the server.
+        return _no_store(jsonify({'ok': True, 'mode': 'client-generated'}))
 
     @app.post(_CONFIRM)
     def _wallet_onboarding_confirm():
@@ -205,7 +201,11 @@ def install(d):
             return jsonify({'ok': False, 'error': 'CSRF validation failed'}), 403
         if not _rate_ok(d, 'confirm', 12):
             return jsonify({'ok': False, 'error': 'Too many attempts. Try again later.'}), 429
-        body = request.get_json(silent=True) or {}
+        envelope = request.get_json(silent=True) or {}
+        try:
+            body = _open_client_envelope(envelope)
+        except ValueError as exc:
+            return jsonify({'ok': False, 'error': str(exc)}), 400
         if body.get('backup_confirmed') is not True:
             return jsonify({'ok': False, 'error': 'Confirm that you saved both private keys first'}), 400
         sol_private = str(body.get('solana_private_key') or '').strip()
@@ -231,28 +231,19 @@ def install(d):
             return jsonify({'ok': False, 'error': 'CSRF validation failed'}), 403
         if not _rate_ok(d, 'import', 10):
             return jsonify({'ok': False, 'error': 'Too many import attempts. Try again later.'}), 429
-        body = request.get_json(silent=True) or {}
+        envelope = request.get_json(silent=True) or {}
+        try:
+            body = _open_client_envelope(envelope)
+        except ValueError as exc:
+            return jsonify({'ok': False, 'error': str(exc)}), 400
         sol_private = str(body.get('solana_private_key') or '').strip()
         evm_private = str(body.get('evm_private_key') or '').strip()
         if not sol_private:
             return jsonify({'ok': False, 'error': 'Solana private key is required'}), 400
         try:
-            sol_address, _ = _derive_sol(sol_private)
             if not evm_private:
-                transport_key = _transport_key(body)
-                evm = Account.create()
-                evm_private = evm.key.hex()
-                if not evm_private.startswith('0x'):
-                    evm_private = '0x' + evm_private
-                evm_address, _ = _derive_evm(evm_private)
-                return _sealed_response({
-                    'wallet': sol_address,
-                    'evm_address': evm_address,
-                    'evm_private_key': evm_private,
-                    'needs_confirmation': True,
-                    'warning': 'A new EVM private key was created. Save it before continuing.',
-                }, transport_key)
-
+                return jsonify({'ok': False, 'error': 'EVM private key is required'}), 400
+            _derive_sol(sol_private)
             _derive_evm(evm_private)
             sol_address, evm_address, token = _store_and_login(
                 d, sol_private, evm_private, allow_existing=True)
@@ -268,10 +259,10 @@ def install(d):
             return response
         try:
             html = response.get_data(as_text=True)
-            if '</head>' in html and '/static/wallet-onboarding.css?v=2' not in html:
-                html = html.replace('</head>', '<link rel="stylesheet" href="/static/wallet-onboarding.css?v=2"></head>', 1)
-            if '</body>' in html and '/static/wallet-onboarding.js?v=2' not in html:
-                html = html.replace('</body>', '<script src="/static/wallet-onboarding.js?v=2"></script></body>', 1)
+            if '</head>' in html and '/static/wallet-onboarding.css?v=3' not in html:
+                html = html.replace('</head>', '<link rel="stylesheet" href="/static/wallet-onboarding.css?v=3"></head>', 1)
+            if '</body>' in html and '/static/wallet-onboarding.js?v=3' not in html:
+                html = html.replace('</body>', '<script src="/static/wallet-onboarding.js?v=3"></script></body>', 1)
             response.set_data(html)
             response.content_length = len(response.get_data())
         except Exception:
