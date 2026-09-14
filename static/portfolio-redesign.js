@@ -34,9 +34,15 @@ function polishWithdrawModal(){
   var title=modal.querySelector('.w-modal-title');if(title&&/^\s*Send\s*$/i.test(title.textContent||''))title.textContent='Withdraw';
   var btn=document.getElementById('send-btn');if(btn){var text=(btn.textContent||'').trim();if(/^Send\b/i.test(text))btn.textContent=text.replace(/^Send\b/i,'Withdraw')}
 }
+function removeBotRecentActivity(){
+  document.querySelectorAll('.act-card').forEach(function(card){
+    var title=card.querySelector('.act-title');
+    if(title&&/^\s*Recent activity\s*$/i.test(title.textContent||''))card.remove();
+  });
+}
 function boot(){
   if(location.pathname.replace(/\/+$/,'')!=='/wallet'){revealPortfolio();return}
-  if(document.body.classList.contains('oa-portfolio')){revealWhenStyled();return}
+  if(document.body.classList.contains('oa-portfolio')){removeBotRecentActivity();revealWhenStyled();return}
   document.body.classList.add('oa-portfolio','pf-view-overview');
   document.title='Portfolio — OrcAgent';
 
@@ -65,7 +71,7 @@ function boot(){
 
   var holdings=document.querySelector('.holdings');
   if(holdings){var ht=holdings.querySelector('.holdings-title');if(ht)ht.textContent='Assets'}
-  document.querySelectorAll('.act-card').forEach(function(el,i){if(i>0)el.dataset.pfExtra='1'});
+  removeBotRecentActivity();
 
   function showView(view){
     document.body.classList.remove('pf-view-overview','pf-view-deposit','pf-view-withdraw');
