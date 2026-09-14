@@ -259,10 +259,10 @@ def install(d):
             return response
         try:
             html = response.get_data(as_text=True)
-            if '</head>' in html and '/static/wallet-onboarding.css?v=3' not in html:
-                html = html.replace('</head>', '<link rel="stylesheet" href="/static/wallet-onboarding.css?v=3"></head>', 1)
-            if '</body>' in html and '/static/wallet-onboarding.js?v=3' not in html:
-                html = html.replace('</body>', '<script src="/static/wallet-onboarding.js?v=3"></script></body>', 1)
+            if '</head>' in html and '/static/wallet-onboarding.css?v=4' not in html:
+                html = html.replace('</head>', '<link rel="stylesheet" href="/static/wallet-onboarding.css?v=4"></head>', 1)
+            if '</body>' in html and '/static/wallet-onboarding.js?v=4' not in html:
+                html = html.replace('</body>', '<script src="/static/wallet-onboarding.js?v=4"></script></body>', 1)
             response.set_data(html)
             response.content_length = len(response.get_data())
         except Exception:

@@ -40,6 +40,13 @@ check('import creates a browser-local EVM key when omitted',
       'OrcAgent created this key securely on your device.' in js
       and "EVM private key is required" in py)
 check('onboarding assets are cache-busted',
-      'wallet-onboarding.js?v=3' in py and 'wallet-onboarding.css?v=3' in py)
+      'wallet-onboarding.js?v=4' in py and 'wallet-onboarding.css?v=4' in py)
+
+check('backup UI masks keys and exposes explicit show/copy controls',
+      'type="password"' in js and 'data-show=' in js and 'data-copy=' in js
+      and 'navigator.clipboard.writeText' in js)
+check('professional backup flow includes progress and security context',
+      'oa-ob-progress' in js and 'Secure your wallet' in js
+      and 'Encrypted during activation' in js)
 
 raise SystemExit(0 if all(checks) else 1)
