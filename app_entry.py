@@ -36,6 +36,7 @@ from abuse_rate_hardening import install as _install_abuse_rate_hardening
 from upload_hardening import install as _install_upload_hardening
 from bsc_gasless_trading import install as _install_evm_gasless_trading
 from solana_gasless_trading import install as _install_solana_gasless_trading
+from cross_chain_budget_guard import install as _install_cross_chain_budget_guard
 from wallet_onboarding import install as _install_wallet_onboarding
 from trading_wallet_generator import install as _install_trading_wallet_generator
 from response_privacy_hardening import install as _install_response_privacy_hardening
@@ -87,6 +88,12 @@ _install_evm_gasless_trading(_dashboard)
 # network fee/rent is recovered by Jupiter from the swap instead of requiring
 # the user to pre-fund SOL.
 _install_solana_gasless_trading(_dashboard)
+
+# Cross-chain buying follows the same economic invariant: the number entered
+# by the user is the absolute all-in ceiling. It also lets settled EVM->Solana
+# buys continue through Jupiter gasless without demanding a separate SOL
+# reserve after the USDC has arrived.
+_install_cross_chain_budget_guard(_dashboard)
 
 # Guest homepage onboarding mirrors the familiar wallet-app choice: create a
 # new self-custodial wallet, import an existing private key, or connect Phantom.
