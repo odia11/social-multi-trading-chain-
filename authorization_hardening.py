@@ -12,7 +12,7 @@ import os
 import re
 import sqlite3
 
-from flask import jsonify, request, session
+from flask import jsonify, request
 
 _ADMIN_ROLES = frozenset({'admin', 'executive', 'moderator', 'analyst'})
 _MUTATING = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
@@ -36,6 +36,7 @@ def _connect(dashboard_module):
 
 
 def _table_columns(conn, table: str) -> set[str]:
+    # Table names passed here are fixed internal constants, never request data.
     try:
         return {str(r[1]) for r in conn.execute('PRAGMA table_info(' + table + ')')}
     except Exception:
@@ -74,33 +75,36 @@ def _role_for_wallet(dashboard_module, wallet: str) -> str:
 
 
 def _identity(dashboard_module):
-    """Return only a cryptographically authenticated wallet + its DB user id."""
+    """Return only a cryptographically authenticated wallet + DB-bound user id.
+
+    Never trust a separately cached session user_id here. During wallet changes or
+    recovery a stale session id could otherwise pair Wallet A's fresh proof with
+    User B's numeric id. Ownership is always re-derived from the proven wallet.
+    """
     auth_fn = getattr(dashboard_module, '_authenticated_wallet', None)
-    wallet = auth_fn() if callable(auth_fn) else None
+    try:
+        wallet = auth_fn() if callable(auth_fn) else None
+    except Exception:
+        wallet = None
     if not wallet:
         return None, None
+    wallet = str(wallet)
 
-    uid = session.get('user_id')
     try:
-        uid = int(uid) if uid is not None else None
-    except (TypeError, ValueError):
-        uid = None
-
-    if uid is None:
+        conn = _connect(dashboard_module)
+        if conn is None:
+            return wallet, None
         try:
-            conn = _connect(dashboard_module)
-            if conn is not None:
-                try:
-                    row = conn.execute(
-                        'SELECT id FROM users WHERE wallet_address=? LIMIT 1',
-                        (wallet,),
-                    ).fetchone()
-                    uid = int(row[0]) if row else None
-                finally:
-                    conn.close()
-        except Exception:
-            uid = None
-    return str(wallet), uid
+            row = conn.execute(
+                'SELECT id FROM users WHERE wallet_address=? LIMIT 1',
+                (wallet,),
+            ).fetchone()
+            uid = int(row[0]) if row else None
+        finally:
+            conn.close()
+    except Exception:
+        uid = None
+    return wallet, uid
 
 
 def _deny(status: int, message: str):
@@ -108,7 +112,7 @@ def _deny(status: int, message: str):
 
 
 def _row_owned_by(conn, table: str, row_id: int, uid: int | None, wallet: str) -> bool | None:
-    """Return True/False when schema proves ownership; None when unknown."""
+    """Return True/False when schema proves ownership; None when it cannot."""
     if not _table_exists(conn, table):
         return None
     cols = _table_columns(conn, table)
@@ -204,6 +208,15 @@ def _group_post_owned_or_manager(conn, group_id: int, post_id: int, uid: int | N
     return manager
 
 
+def _require_proven(result: bool | None):
+    """Translate tri-state ownership into fail-closed authorization semantics."""
+    if result is True:
+        return None
+    if result is False:
+        return _deny(403, 'Forbidden')
+    return _deny(503, 'Authorization backend unavailable')
+
+
 def install(dashboard_module):
     app = dashboard_module.app
     if getattr(app, '_orca_authorization_hardening_installed', False):
@@ -243,23 +256,22 @@ def install(dashboard_module):
         wallet, uid = _identity(dashboard_module)
         if not wallet:
             return _deny(401, 'Authentication required')
+        if uid is None:
+            return _deny(403, 'Account not available')
 
         try:
             conn = _connect(dashboard_module)
             if conn is None:
                 return _deny(503, 'Authorization backend unavailable')
             try:
-                # Editing/deleting a message by numeric message id must only
-                # ever affect a message authored by the authenticated user.
                 m = re.fullmatch(r'/api/messages/(\d+)', path)
                 if m and method in {'PUT', 'PATCH', 'DELETE'}:
-                    owned = _message_owned(conn, int(m.group(1)), uid, wallet)
-                    if owned is False:
-                        app.logger.warning('IDOR blocked message=%s wallet=%s', m.group(1), wallet[:8] + '…')
-                        return _deny(403, 'Forbidden')
+                    result = _message_owned(conn, int(m.group(1)), uid, wallet)
+                    denied = _require_proven(result)
+                    if denied:
+                        app.logger.warning('IDOR blocked/unknown message=%s wallet=%s', m.group(1), wallet[:8] + '…')
+                        return denied
 
-                # Bulk notification deletion is restricted to the caller's
-                # own notification rows even when ids are manually altered.
                 if path == '/api/notifications/mine/delete_batch':
                     body = request.get_json(silent=True) or {}
                     raw_ids = body.get('ids') or []
@@ -267,20 +279,20 @@ def install(dashboard_module):
                         ids = [int(x) for x in raw_ids]
                     except (TypeError, ValueError):
                         return _deny(400, 'Invalid notification ids')
-                    owned = _notification_ids_owned(conn, ids, uid, wallet)
-                    if owned is False:
-                        app.logger.warning('IDOR blocked notification batch wallet=%s', wallet[:8] + '…')
-                        return _deny(403, 'Forbidden')
+                    result = _notification_ids_owned(conn, ids, uid, wallet)
+                    denied = _require_proven(result)
+                    if denied:
+                        app.logger.warning('IDOR blocked/unknown notification batch wallet=%s', wallet[:8] + '…')
+                        return denied
 
-                # Ordinary posts may only be edited/deleted by their author.
                 p = re.fullmatch(r'/api/posts/(\d+)', path)
                 if p and method in {'PUT', 'PATCH', 'DELETE'}:
-                    owned = _row_owned_by(conn, 'posts', int(p.group(1)), uid, wallet)
-                    if owned is False:
-                        app.logger.warning('IDOR blocked post=%s wallet=%s', p.group(1), wallet[:8] + '…')
-                        return _deny(403, 'Forbidden')
+                    result = _row_owned_by(conn, 'posts', int(p.group(1)), uid, wallet)
+                    denied = _require_proven(result)
+                    if denied:
+                        app.logger.warning('IDOR blocked/unknown post=%s wallet=%s', p.group(1), wallet[:8] + '…')
+                        return denied
 
-                # Group manager actions require creator/group moderator rights.
                 g = re.match(r'^/api/groups/(\d+)(?:/(.*))?$', path)
                 if g:
                     group_id = int(g.group(1))
@@ -288,20 +300,20 @@ def install(dashboard_module):
                     action = tail.split('/', 1)[0] if tail else ''
                     post_match = re.fullmatch(r'posts/(\d+)', tail)
                     if post_match and method in {'PUT', 'PATCH', 'DELETE'}:
-                        allowed = _group_post_owned_or_manager(conn, group_id, int(post_match.group(1)), uid, wallet)
-                        if allowed is False:
-                            app.logger.warning('IDOR blocked group-post=%s group=%s wallet=%s', post_match.group(1), group_id, wallet[:8] + '…')
-                            return _deny(403, 'Forbidden')
+                        result = _group_post_owned_or_manager(conn, group_id, int(post_match.group(1)), uid, wallet)
+                        denied = _require_proven(result)
+                        if denied:
+                            app.logger.warning('IDOR blocked/unknown group-post=%s group=%s wallet=%s', post_match.group(1), group_id, wallet[:8] + '…')
+                            return denied
                     elif action in _GROUP_MANAGER_ACTIONS:
-                        allowed = _group_manager(conn, group_id, uid)
-                        if allowed is False:
-                            app.logger.warning('IDOR blocked group action=%s group=%s wallet=%s', action, group_id, wallet[:8] + '…')
-                            return _deny(403, 'Forbidden')
+                        result = _group_manager(conn, group_id, uid)
+                        denied = _require_proven(result)
+                        if denied:
+                            app.logger.warning('IDOR blocked/unknown group action=%s group=%s wallet=%s', action, group_id, wallet[:8] + '…')
+                            return denied
             finally:
                 conn.close()
         except sqlite3.Error:
-            # An authorization DB failure must not silently authorize a
-            # destructive request. Existing read routes are unaffected.
             app.logger.exception('authorization DB error path=%s', path)
             return _deny(503, 'Authorization backend unavailable')
 
