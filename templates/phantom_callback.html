@@ -7,16 +7,20 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0a0b0e;color:#eef1f5;font-family:'Geist',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:14px;padding:20px;text-align:center}
-.spin{font-size:36px;animation:spin 1s linear infinite;display:inline-block;color:#3ad29b}
+.spin{font-size:36px;animation:spin 1s linear infinite;display:inline-block;color:#ffbd59}
+.spin.done{animation:none}
 @keyframes spin{to{transform:rotate(360deg)}}
-.msg{font-size:14px;color:#8a919c;max-width:300px;line-height:1.5}
+.msg{font-size:14px;color:#9ca6b4;max-width:340px;line-height:1.55}
+.msg.ok{color:#eef1f5;font-size:17px;font-weight:650}
 .err{color:#f76b62}
+.pwa-note{display:none;max-width:340px;padding:14px 16px;border:1px solid rgba(255,189,89,.3);border-radius:14px;background:rgba(255,189,89,.08);color:#d7b97d;font-size:13px;line-height:1.5}
 .brand{font-size:11px;color:#565d68;margin-top:20px;letter-spacing:.08em;text-transform:uppercase}
 </style>
 </head>
 <body>
 <div class="spin">◌</div>
 <div class="msg" id="msg">Completing wallet connection…</div>
+<div class="pwa-note" id="pwa-note">You can close this browser page and return to the OrcAgent app. Your secure session will be picked up automatically.</div>
 <div class="brand">OrcAgent</div>
 
 <script>
@@ -36,11 +40,32 @@ var _b58enc=(function(){
 
 (async function(){
   var msg = document.getElementById('msg');
+  var spin = document.querySelector('.spin');
+  var p = new URLSearchParams(window.location.search);
+  var fromInstalledApp = p.get('source') === 'pwa';
+
+  function safeReturnRoute(raw){
+    try{
+      if(typeof raw !== 'string' || !raw || raw.indexOf('\\') !== -1) return '/';
+      var u = new URL(raw, window.location.origin);
+      if(u.origin !== window.location.origin || u.pathname === '/phantom-callback') return '/';
+      return u.pathname + u.search + u.hash;
+    }catch(e){ return '/'; }
+  }
+  var returnTo = safeReturnRoute(p.get('return_to'));
 
   function fail(txt){
     msg.className = 'msg err';
     msg.textContent = txt;
-    setTimeout(function(){ window.location.href = '/'; }, 5000);
+    if(fromInstalledApp){
+      var note = document.getElementById('pwa-note');
+      if(note){
+        note.textContent = 'Return to the OrcAgent app and try connecting again.';
+        note.style.display = 'block';
+      }
+    }else{
+      setTimeout(function(){ window.location.replace(returnTo); }, 5000);
+    }
   }
 
   /* Local copy of static/dashboard.js's _phantomMobileV1SignMessage() --
@@ -74,7 +99,14 @@ var _b58enc=(function(){
       fail('Could not prepare signature request: '+((sr && sr.error) || 'unknown'));
       return;
     }
-    var _cbUrl = 'https://orcagent.fun/phantom-callback?step=sign&token='+encodeURIComponent(sr.token)+'&_cb='+Date.now();
+    var _nextQuery = new URLSearchParams({
+      step:'sign',
+      token:sr.token,
+      source:fromInstalledApp?'pwa':'browser',
+      return_to:returnTo,
+      _cb:String(Date.now())
+    });
+    var _cbUrl = 'https://orcagent.fun/phantom-callback?'+_nextQuery.toString();
     console.log('[phantom-cb] sign-init ok, token=', sr.token.slice(0,8)+'…');
     var signParams = new URLSearchParams({
       dapp_encryption_public_key: sr.dapp_pk,
@@ -85,7 +117,6 @@ var _b58enc=(function(){
     window.location.href = 'https://phantom.app/ul/v1/signMessage?'+signParams.toString();
   }
 
-  var p = new URLSearchParams(window.location.search);
   console.log('[phantom-cb] URL:', window.location.href);
   p.forEach(function(v,k){
     console.log('[phantom-cb]', k, '=', (k==='data'||k==='nonce') ? v.slice(0,20)+'…' : v);
@@ -150,8 +181,17 @@ var _b58enc=(function(){
         if(wr.device_token) localStorage.setItem('orca_device_token', wr.device_token);
         localStorage.removeItem('orca_manual_disconnect');
       }catch(e){}
-      msg.textContent = 'Connected! Redirecting…';
-      window.location.href = '/';
+      if(fromInstalledApp){
+        if(spin){ spin.classList.add('done'); spin.textContent = '✓'; }
+        msg.className = 'msg ok';
+        msg.textContent = 'Connected to OrcAgent';
+        var note = document.getElementById('pwa-note');
+        if(note) note.style.display = 'block';
+        document.title = 'Connected · OrcAgent';
+      }else{
+        msg.textContent = 'Connected! Redirecting…';
+        window.location.replace(returnTo);
+      }
     } else {
       fail('Auth failed: '+((wr && wr.msg) || 'unknown'));
     }

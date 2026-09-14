@@ -238,6 +238,35 @@ function _storePairToken(t){
 function _clearPairToken(){
   try{ localStorage.removeItem('orca_pair'); }catch(e){}
 }
+var _pairedReturnRoute = '';
+function _safeWalletReturnRoute(raw){
+  try{
+    if(typeof raw !== 'string' || !raw || raw.indexOf('\\') !== -1) return '/';
+    var u = new URL(raw, window.location.origin);
+    if(u.origin !== window.location.origin || u.pathname === '/phantom-callback') return '/';
+    return u.pathname + u.search + u.hash;
+  }catch(e){ return '/'; }
+}
+function _currentWalletReturnRoute(){
+  return _safeWalletReturnRoute(window.location.pathname + window.location.search + window.location.hash);
+}
+function _storePairReturnRoute(route){
+  try{ localStorage.setItem('orca_pair_return', _safeWalletReturnRoute(route)); }catch(e){}
+}
+function _takePairReturnRoute(){
+  try{
+    var route = _safeWalletReturnRoute(localStorage.getItem('orca_pair_return') || '/');
+    localStorage.removeItem('orca_pair_return');
+    return route;
+  }catch(e){ return '/'; }
+}
+function _finishPairedReturn(){
+  var route = _pairedReturnRoute;
+  _pairedReturnRoute = '';
+  if(!route) return;
+  var current = _currentWalletReturnRoute();
+  if(route !== current) window.location.replace(route);
+}
 // Ask whether the sign-in that this app started has finished. Returns the
 // wallet, or '' for "not yet" -- which is also what it returns for expired
 // and unknown, so nothing here has to tell those apart.
@@ -252,6 +281,7 @@ async function _claimPairing(){
     }).then(function(x){ return x.json(); }).catch(function(){ return null; });
     if(r && r.ok && r.wallet){
       _clearPairToken();
+      _pairedReturnRoute = _takePairReturnRoute();
       // The session now lives in THIS container. The remembered login is what
       // keeps it there after iOS next clears storage -- without it the app
       // would be back to square one in a week.
@@ -542,6 +572,8 @@ async function _connectWalletSignedInner(provider, address){
 
 function _phantomMobileV1Connect(){
   try{ localStorage.removeItem('orca_manual_disconnect'); }catch(e){}
+  var _returnRoute = _currentWalletReturnRoute();
+  if(isStandalonePWA) _storePairReturnRoute(_returnRoute);
   var msgEl=document.getElementById('wallet-install-msg');
   var noteEl=document.getElementById('ob-phantom-note');
   function _setNote(txt,col){
@@ -562,6 +594,10 @@ function _phantomMobileV1Connect(){
         .catch(function(){ return ''; })
     : Promise.resolve('');
   _pairPromise.then(function(_pair){
+  if(isStandalonePWA && !_pair){
+    _setNote('Could not prepare app sign-in — please try again.','var(--red)');
+    return;
+  }
   // Server generates the NaCl keypair — no browser storage needed
   fetch('/api/phantom/init',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({pair:_pair})})
   .then(function(r){return r.json();})
@@ -570,7 +606,13 @@ function _phantomMobileV1Connect(){
       _setNote('Connection init failed — please try again.','var(--red)');
       return;
     }
-    var _cbUrl='https://orcagent.fun/phantom-callback?token='+encodeURIComponent(d.token)+'&_cb='+Date.now();
+    var _cbQuery=new URLSearchParams({
+      token:d.token,
+      source:isStandalonePWA?'pwa':'browser',
+      return_to:_returnRoute,
+      _cb:String(Date.now())
+    });
+    var _cbUrl='https://orcagent.fun/phantom-callback?'+_cbQuery.toString();
     console.log('[phantom] server-side init ok, token=',d.token.slice(0,8)+'…');
     var params=new URLSearchParams({
       app_url:'https://orcagent.fun',
@@ -3311,7 +3353,7 @@ var _sessionBootstrapComplete = false;
   }
   // If Flask session pre-populated phantomKey, go straight to launchApp — no extension
   // re-detection needed, and avoids a redundant /api/wallet/set round-trip.
-  if(phantomKey){ await launchApp(); return; }
+  if(phantomKey){ await launchApp(); _finishPairedReturn(); return; }
 
   // A connected extension is not proof of an OrcAgent session. In particular,
   // an interrupted recovery must not automatically trigger another signature.
@@ -3339,6 +3381,7 @@ function _recoverSessionOnReturn(){
     _applySessionWallet(wallet);
     var onboard = document.getElementById('onboard');
     if(onboard && !onboard.classList.contains('hide')) await launchApp();
+    _finishPairedReturn();
   })().catch(function(e){ console.warn('[auth] recovery interrupted', e); })
     .finally(function(){ _sessionReturnPromise = null; });
   return _sessionReturnPromise;
