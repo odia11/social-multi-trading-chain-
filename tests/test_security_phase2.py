@@ -56,10 +56,14 @@ check('redacted API responses are non-cacheable', "response.headers['Cache-Contr
 check('sensitive mutations are audit logged without raw bodies',
       'security_audit_log' in audit and 'request.get_json' in audit and 'private_key' not in audit)
 check('audit IP is HMAC hashed rather than stored raw', 'hmac.new' in audit and 'ip_hash' in audit)
+check('audit attribution validates the nginx-supplied client IP',
+      '_trusted_client_ip' in audit and 'ipaddress.ip_address' in audit and 'X-Real-IP' in audit)
 check('money-moving admin mutations require OWNER_WALLET',
       'OWNER_WALLET' in owner and 'collect-fees' in owner and 'Owner wallet required' in owner)
 check('high-risk actions have category abuse ceilings',
       'sec:auth:' in rate and 'sec:withdraw:' in rate and 'sec:bridge:' in rate and 'sec:trade:' in rate)
+check('abuse ceilings use validated trusted client IP',
+      '_trusted_client_ip' in rate and 'ipaddress.ip_address' in rate and 'X-Real-IP' in rate)
 check('production secrets are rejected when weak/default',
       '_bad_secret' in secret and 'len(raw) < minimum' in secret and 'RuntimeError' in secret)
 check('daily backup is encrypted and restore-verified',
@@ -70,6 +74,9 @@ check('CSP script elements are nonce gated',
 check('legacy handlers are isolated to script-src-attr instead of all scripts',
       "script-src-attr 'unsafe-inline'" in sec and "script-src 'self' https://unpkg.com" in sec)
 check('security anomalies are surfaced in logs', 'SECURITY_ANOMALY' in monitor and '401' in monitor and '429' in monitor)
+check('security anomaly attribution uses validated trusted client IP',
+      '_trusted_client_ip' in monitor and 'ipaddress.ip_address' in monitor and 'X-Real-IP' in monitor)
+check('security anomaly log path strips control characters', "ch >= ' '" in monitor and "ch != '\\x7f'" in monitor)
 
 passed = sum(ok for _, ok in checks)
 print(f'\n{passed}/{len(checks)} checks passed')
