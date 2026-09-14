@@ -8,7 +8,7 @@ if((location.pathname.replace(/\/+$/,'')||'/')!=='/wallet')return;
 
 var LABELS={bsc:'BSC',base:'BASE',arbitrum:'ARB',polygon:'POLY',robinhood:'HOOD',solana:'SOL'};
 var _busy=false,_timer=null,_queued=null,_lastPaint=0;
-var AUTO_REFRESH_MS=15000;
+var AUTO_REFRESH_MS=5000;
 
 function list(){return window._wTokens||window._allSpl||[]}
 function num(v){v=Number(v||0);return isFinite(v)&&v>0?v:0}
@@ -89,8 +89,9 @@ function boot(){
   decorate();
   var h=document.querySelector('.holdings');
   if(h&&window.MutationObserver){var mt=null;new MutationObserver(function(){clearTimeout(mt);mt=setTimeout(decorate,80)}).observe(h,{childList:true,subtree:true})}
-  /* One initial holdings load, then calm price snapshots. No focus/visibility
-     storm: iOS can fire those events repeatedly while switching app/browser. */
+  /* One initial holdings load, then 5-second complete snapshots. No focus/
+     visibility storm: iOS can fire those events repeatedly while switching
+     app/browser. */
   queue(refreshHoldings,60);
   if(_timer)clearInterval(_timer);
   _timer=setInterval(refreshValue,AUTO_REFRESH_MS);
