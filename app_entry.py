@@ -17,6 +17,7 @@ from share_card_concept_d import install as _install_share_card_concept_d
 from messages_premium_ui import install as _install_messages_premium_ui
 from live_market_deeplink_fix import install as _install_live_market_deeplink_fix
 from x_share_fallback import install as _install_x_share_fallback
+from canonical_domain import install as _install_canonical_domain
 from secret_hygiene import install as _install_secret_hygiene
 from security_hardening import install as _install_security_hardening
 from ssrf_hardening import install as _install_ssrf_hardening
@@ -34,13 +35,7 @@ from backup_scheduler import install as _install_backup_scheduler
 _install_evm_to_solana_bridge(_dashboard)
 _install_wallet_deposit_guidance(_dashboard)
 _install_app_performance(_dashboard)
-# Register this before share_canonical_routes: Flask runs app-level
-# after_request handlers in reverse registration order, so this executes last
-# and leaves one authoritative OG/Twitter metadata set for /post/<id>.
 _install_x_post_preview_fix(_dashboard)
-# Install before share_canonical_routes. That route adapter appends the
-# permanent /post/<id> link, then calls this wrapped _post_to_x which adds a
-# harmless version query so X cannot reuse its stale generic-card cache.
 _install_x_share_cache_bust(_dashboard)
 _install_share_canonical_routes(_dashboard)
 _install_mobile_ui_hotfix(_dashboard)
@@ -49,6 +44,11 @@ _install_share_card_concept_d(_dashboard)
 _install_messages_premium_ui(_dashboard)
 _install_live_market_deeplink_fix(_dashboard)
 _install_x_share_fallback(_dashboard)
+
+# Reject untrusted Host headers before any security- or auth-sensitive route
+# can derive an absolute URL/origin from them. Loopback remains allowed for
+# the server-side health/security smoke checks.
+_install_canonical_domain(_dashboard)
 
 # Security layers. Startup secret validation runs before request guards. The
 # remaining adapters are defense-in-depth around the route-level checks that
