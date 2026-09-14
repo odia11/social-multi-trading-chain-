@@ -64,6 +64,7 @@ def install(appmod) -> None:
                 style('portfolio-redesign.css', '/static/portfolio-redesign.css?v=4')
                 script('portfolio-redesign.js', '/static/portfolio-redesign.js?v=4')
                 script('portfolio-assets.js', '/static/portfolio-assets.js?v=1')
+                script('portfolio-value-authority.js', '/static/portfolio-value-authority.js?v=1')
             elif path == '/live-market':
                 style('live-market-redesign.css', '/static/live-market-redesign.css?v=7')
                 style('live-market-final.css', '/static/live-market-final.css?v=4', ' data-oa-live-final="1"')
