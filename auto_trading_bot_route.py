@@ -1,8 +1,8 @@
 """Dedicated Auto Trading Bot route.
 
-This exists so Start Trading has one stable, query-free destination that cannot
-be confused with Live Market or have its query string stripped by iOS/PWA
-navigation. It reuses the existing bot APIs and security/session helpers.
+This module gives the autonomous bot one stable destination and fixes every
+navigation-style "Start Trading" CTA to use it. The actual bot start/stop
+button on the bot page is deliberately excluded.
 """
 import sqlite3
 from flask import redirect
@@ -10,6 +10,9 @@ from flask import redirect
 
 def install(dashboard):
     app = dashboard.app
+    if getattr(app, '_orca_auto_trading_route_installed', False):
+        return
+    app._orca_auto_trading_route_installed = True
 
     @app.route('/auto-trading-bot')
     def auto_trading_bot_page():
@@ -45,14 +48,8 @@ def install(dashboard):
 
     @app.after_request
     def _fix_start_trading_links(response):
-        """Force the hero Start Trading action to the autonomous bot page.
-
-        The delegated click guard also catches hero buttons inserted later by
-        home-desktop.js, so the destination is correct even when old markup or
-        a browser/PWA cache still contains the former Live Market link.
-        """
         ctype = response.headers.get('Content-Type', '')
-        if 'text/html' not in ctype:
+        if response.status_code != 200 or 'text/html' not in ctype:
             return response
         try:
             body = response.get_data(as_text=True)
@@ -60,25 +57,41 @@ def install(dashboard):
             return response
 
         original = body
-        body = body.replace('href="/bot?view=trading"', 'href="/auto-trading-bot"')
-        body = body.replace("href='/bot?view=trading'", "href='/auto-trading-bot'")
-        body = body.replace(
-            '<a class="oa-home-primary" href="/live-market">Start Trading',
-            '<a class="oa-home-primary" href="/auto-trading-bot">Start Trading',
-        )
-        body = body.replace(
-            '<a class="hero-cta" href="/live-market"',
-            '<a class="hero-cta" href="/auto-trading-bot"',
-        )
 
+        # Known hero/home variants, including older cached markup shapes.
+        replacements = (
+            ('href="/bot?view=trading"', 'href="/auto-trading-bot"'),
+            ("href='/bot?view=trading'", "href='/auto-trading-bot'"),
+            ('<a class="oa-home-primary" href="/live-market">Start Trading',
+             '<a class="oa-home-primary" href="/auto-trading-bot">Start Trading'),
+            ('<a class="oa-m-primary" href="/live-market">Start Trading',
+             '<a class="oa-m-primary" href="/auto-trading-bot">Start Trading'),
+            ('<a class="hero-cta" href="/live-market"',
+             '<a class="hero-cta" href="/auto-trading-bot"'),
+        )
+        for old, new in replacements:
+            body = body.replace(old, new)
+
+        # Capture phase intentionally wins over old SPA/mobile click handlers.
+        # Only navigation CTAs are redirected. The real bot start/stop controls
+        # (#bot-toggle-btn and #sb-start-btn) keep executing the bot action.
         guard = r'''<script id="oa-auto-bot-route-guard">
 (function(){
+  var TARGET='/auto-trading-bot';
+  function textOf(el){return String((el&&el.textContent)||'').replace(/\s+/g,' ').trim().toLowerCase();}
+  function isRealBotToggle(el){return !!(el&&(el.id==='bot-toggle-btn'||el.id==='sb-start-btn'||el.closest&&el.closest('#bot-dashboard,.status-card')));}
   document.addEventListener('click',function(e){
-    var a=e.target&&e.target.closest?e.target.closest('a'):null;
-    if(!a)return;
-    if(a.id==='bot-start-landing'||a.classList.contains('oa-home-primary')||a.id==='oa-home-bot-btn'){
-      e.preventDefault();e.stopImmediatePropagation();window.location.assign('/auto-trading-bot');
-    }
+    var el=e.target&&e.target.closest?e.target.closest('a,button'):null;
+    if(!el||isRealBotToggle(el))return;
+    var known=el.id==='bot-start-landing'||el.id==='oa-home-bot-btn'||
+      el.classList.contains('oa-home-primary')||el.classList.contains('oa-m-primary')||
+      el.classList.contains('hero-cta')||el.id==='mn-drawer-trade-btn';
+    var labelled=textOf(el)==='start trading'||textOf(el).indexOf('start trading →')===0;
+    if(!known&&!labelled)return;
+    e.preventDefault();
+    e.stopPropagation();
+    if(e.stopImmediatePropagation)e.stopImmediatePropagation();
+    window.location.assign(TARGET);
   },true);
 })();
 </script>'''
