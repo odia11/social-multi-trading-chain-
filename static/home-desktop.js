@@ -21,7 +21,7 @@ function buildHero(wrap){
     +'<div class="oa-home-eyebrow">ORCAGENT</div>'
     +'<h1>Smarter Trading.<br><span>Stronger Together.</span></h1>'
     +'<p>AI-powered trading, live market intelligence, social insights and real-time opportunities — all inside one OrcAgent platform.</p>'
-    +'<a class="oa-home-primary" href="/live-market">Start Trading <span>→</span></a>'
+    +'<a class="oa-home-primary" href="/bot?view=trading">Start Trading <span>→</span></a>'
     +'</div>';
   wrap.insertBefore(hero,wrap.firstChild);
 }
@@ -34,7 +34,7 @@ function buildBot(wrap){
       +'<div class="oa-home-bot-title">Your bot is <span id="oa-home-bot-state">checking…</span><span class="oa-home-bot-dot" id="oa-home-bot-dot"></span></div>'
       +'<div class="oa-home-bot-meta"><span id="oa-home-bot-open">— open</span><span>•</span><span id="oa-home-bot-pnl">PnL —</span></div>'
     +'</div>'
-    +'<a class="oa-home-bot-btn" href="/bot" id="oa-home-bot-btn">Open AI Bot</a>';
+    +'<a class="oa-home-bot-btn" href="/bot?view=trading" id="oa-home-bot-btn">Open AI Bot</a>';
   var anchor=wrap.children[1]||null;
   if(anchor) wrap.insertBefore(bot,anchor); else wrap.appendChild(bot);
   fetch('/api/bot/status',{credentials:'include'}).then(function(r){return r.json();}).then(function(d){
