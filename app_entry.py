@@ -40,6 +40,7 @@ from cross_chain_budget_guard import install as _install_cross_chain_budget_guar
 from header_stable_balance import install as _install_header_stable_balance
 from portfolio_multichain_holdings import install as _install_portfolio_multichain_holdings
 from portfolio_trade_history import install as _install_portfolio_trade_history
+from portfolio_token_withdraw import install as _install_portfolio_token_withdraw
 from live_market_sheet_overlap_fix import install as _install_live_market_sheet_overlap_fix
 from mobile_footer_visibility_fix import install as _install_mobile_footer_visibility_fix
 from wallet_onboarding import install as _install_wallet_onboarding
@@ -112,6 +113,11 @@ _install_portfolio_multichain_holdings(_dashboard)
 # Portfolio transaction history: collapsible BUY/SELL ledger with calendar
 # filtering, sourced from completed Live Market executions and realized sells.
 _install_portfolio_trade_history(_dashboard)
+
+# Withdraw any actual Portfolio token to another wallet. The server owns source
+# wallet identity and rechecks the on-chain token balance before broadcasting;
+# all network fees remain the user's responsibility.
+_install_portfolio_token_withdraw(_dashboard)
 
 # Keep mobile Live Market execution-sheet sections in normal document flow so
 # stats, percentage shortcuts, keypad, fees and slider never overlap.
