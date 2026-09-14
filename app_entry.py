@@ -37,6 +37,7 @@ from upload_hardening import install as _install_upload_hardening
 from bsc_gasless_trading import install as _install_evm_gasless_trading
 from solana_gasless_trading import install as _install_solana_gasless_trading
 from cross_chain_budget_guard import install as _install_cross_chain_budget_guard
+from header_stable_balance import install as _install_header_stable_balance
 from wallet_onboarding import install as _install_wallet_onboarding
 from trading_wallet_generator import install as _install_trading_wallet_generator
 from response_privacy_hardening import install as _install_response_privacy_hardening
@@ -94,6 +95,10 @@ _install_solana_gasless_trading(_dashboard)
 # buys continue through Jupiter gasless without demanding a separate SOL
 # reserve after the USDC has arrived.
 _install_cross_chain_budget_guard(_dashboard)
+
+# The compact amount pill in the shared top bar shows the user's aggregate
+# stablecoin spending balance across every supported chain, formatted as USD.
+_install_header_stable_balance(_dashboard)
 
 # Guest homepage onboarding mirrors the familiar wallet-app choice: create a
 # new self-custodial wallet, import an existing private key, or connect Phantom.
