@@ -41,7 +41,8 @@ check('generated EVM key during import is staged until backup confirmation',
 check('one-time secret responses are explicitly privacy-guarded',
       '/api/onboarding/wallet/create' in privacy
       and '/api/onboarding/wallet/import' in privacy
-      and '_valid_one_time_key_export' in privacy)
+      and '_valid_full_key_export' in privacy
+      and '_valid_import_key_export' in privacy)
 check('onboarding API responses are no-store',
       "Cache-Control'] = 'no-store, no-cache, must-revalidate, private'" in py)
 
