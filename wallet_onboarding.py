@@ -1,10 +1,8 @@
 """Phantom-style first-run wallet onboarding for OrcAgent.
 
-Guest users can either keep using the existing Phantom connect flow, create a
-new self-custodial OrcAgent wallet, or import an existing Solana private key.
-New/imported keys are only accepted over HTTPS, encrypted immediately with the
-existing wallet-bound encryption helpers, never logged, and one-time generated
-keys are returned with no-store headers so the user can back them up.
+Guest users can keep using Phantom, create a new OrcAgent wallet, or import an
+existing Solana private key. Generated keys are shown once, must be backed up
+before activation, and are encrypted with the existing wallet-bound helpers.
 """
 from __future__ import annotations
 
@@ -155,15 +153,14 @@ def install(d):
             evm_private = evm.key.hex()
             if not evm_private.startswith('0x'):
                 evm_private = '0x' + evm_private
-            resp = jsonify({
+            return _no_store(jsonify({
                 'ok': True,
                 'solana_address': str(sol.pubkey()),
                 'solana_private_key': sol_private,
                 'evm_address': str(evm.address),
                 'evm_private_key': evm_private,
                 'warning': 'Save both private keys now. OrcAgent will not show them again after confirmation.',
-            })
-            return _no_store(resp)
+            }))
         except Exception:
             app.logger.exception('wallet onboarding generation failed')
             return jsonify({'ok': False, 'error': 'Could not create wallet'}), 500
@@ -207,27 +204,32 @@ def install(d):
         evm_private = str(body.get('evm_private_key') or '').strip()
         if not sol_private:
             return jsonify({'ok': False, 'error': 'Solana private key is required'}), 400
-        generated_evm = False
         try:
-            _derive_sol(sol_private)
-            if evm_private:
-                _derive_evm(evm_private)
-            else:
+            sol_address, _ = _derive_sol(sol_private)
+            if not evm_private:
                 evm = Account.create()
                 evm_private = evm.key.hex()
                 if not evm_private.startswith('0x'):
                     evm_private = '0x' + evm_private
-                generated_evm = True
+                evm_address, _ = _derive_evm(evm_private)
+                # Do NOT persist or authenticate yet. The browser must make the
+                # user back up this newly generated EVM key and then call the
+                # normal confirmation endpoint with both keys.
+                return _no_store(jsonify({
+                    'ok': True,
+                    'wallet': sol_address,
+                    'evm_address': evm_address,
+                    'evm_private_key': evm_private,
+                    'needs_confirmation': True,
+                    'warning': 'A new EVM private key was created. Save it before continuing.',
+                }))
+
+            _derive_evm(evm_private)
             sol_address, evm_address, token = _store_and_login(
                 d, sol_private, evm_private, allow_existing=True)
-            payload = {'ok': True, 'wallet': sol_address, 'evm_address': evm_address}
-            if generated_evm:
-                payload['evm_private_key'] = evm_private
-                payload['warning'] = 'A new EVM private key was created for BSC/Base/Arbitrum/Polygon/Robinhood. Save it now.'
-            resp = jsonify(payload)
+            resp = jsonify({'ok': True, 'wallet': sol_address, 'evm_address': evm_address})
             return _with_device_cookie(d, _no_store(resp), token)
         except Exception as exc:
-            # Never echo submitted private-key material.
             msg = 'Invalid private key' if isinstance(exc, (ValueError, TypeError)) else 'Could not import wallet'
             return jsonify({'ok': False, 'error': msg}), 400
 
