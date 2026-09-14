@@ -38,9 +38,6 @@ chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 say "Creating and locking down the data directory ($DATA_DIR)"
 mkdir -p "$DATA_DIR/backups"
 chown -R "$APP_USER:$APP_USER" "$DATA_DIR"
-# Database rows, wallet/session material, audit logs and backup ciphertext are
-# private application state. Repair permissions from older deployments too,
-# rather than only relying on the new service UMask for files created later.
 find "$DATA_DIR" -xdev -type d -exec chmod 700 {} +
 find "$DATA_DIR" -xdev -type f -exec chmod 600 {} +
 chmod 700 "$DATA_DIR" "$DATA_DIR/backups"
@@ -134,6 +131,16 @@ fi
 grep -qF 'include /etc/nginx/snippets/orcagent-server-security.conf;' "$NGINX_SITE" \
   || die "could not attach nginx security snippet to the OrcAgent server block"
 
+# Certbot-managed production files are preserved above, so explicitly repair
+# the one proxy directive that affects security identity. proxy_add_* trusts
+# any X-Forwarded-For value supplied by the client and would let attackers
+# evade per-IP abuse ceilings/audit attribution. OrcAgent is directly behind
+# this nginx instance, so the socket peer is the authoritative client IP.
+sed -Ei 's#proxy_set_header[[:space:]]+X-Forwarded-For[[:space:]]+\$proxy_add_x_forwarded_for;#proxy_set_header X-Forwarded-For   \$remote_addr;#g' "$NGINX_SITE"
+if grep -q '\$proxy_add_x_forwarded_for' "$NGINX_SITE"; then
+  die "unsafe X-Forwarded-For append is still present in nginx configuration"
+fi
+
 ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/orcagent
 rm -f /etc/nginx/sites-enabled/default
 nginx -t || die "nginx security configuration failed validation"
@@ -146,6 +153,8 @@ printf '%s' "$NGINX_DUMP" | grep -q 'limit_conn orca_conn 80' \
   || die "nginx OrcAgent connection limit is not active"
 printf '%s' "$NGINX_DUMP" | grep -q 'server_tokens off' \
   || die "nginx server token suppression is not active"
+printf '%s' "$NGINX_DUMP" | grep -q 'proxy_set_header X-Forwarded-For[[:space:]]*\$remote_addr' \
+  || die "nginx is not enforcing a trusted forwarded client IP"
 echo "  nginx edge hardening active"
 
 cat <<EOF
@@ -154,9 +163,9 @@ cat <<EOF
 Setup complete.
 
 The application process is sandboxed, startup validates security headers and
-loopback binding, persistent data is owner-only, nginx rejects TRACE/CONNECT
-and limits abusive connection fan-out, and encrypted restore-verified database
-backups are scheduled.
+loopback binding, persistent data is owner-only, nginx rejects TRACE/CONNECT,
+strips spoofable forwarded IPs and limits abusive connection fan-out, and
+encrypted restore-verified database backups are scheduled.
 
 Useful checks:
     systemctl status orcagent
