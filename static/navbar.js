@@ -2,61 +2,71 @@
 (function(){
 'use strict';
 
-// Shared across routes; do not restrict this to Home or portrait widths.
-if(!document.getElementById('oa-scroll-guard')){
-  var guard=document.createElement('script');guard.id='oa-scroll-guard';
-  guard.src='/static/mobile-overscroll-guard.js?v=3';
-  document.head.appendChild(guard);
+function ensureStyle(href, marker){
+  if(document.querySelector('link[href*="'+marker+'"]'))return;
+  var el=document.createElement('link');el.rel='stylesheet';el.href=href;document.head.appendChild(el);
 }
+function ensureScript(src, marker, id){
+  if((id&&document.getElementById(id))||document.querySelector('script[src*="'+marker+'"]'))return;
+  var el=document.createElement('script');if(id)el.id=id;el.src=src;el.defer=true;document.head.appendChild(el);
+}
+
+// Shared across routes; do not restrict this to Home or portrait widths.
+ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.js','oa-scroll-guard');
 
 (function(){
   if(location.pathname.replace(/\/+$/,'')!=='/wallet') return;
-  document.documentElement.classList.add('oa-pf-boot');
-  var boot=document.createElement('style');boot.id='oa-pf-boot-style';boot.textContent='html.oa-pf-boot,html.oa-pf-boot body{background:#080d12!important}html.oa-pf-boot body{visibility:hidden!important}';document.head.appendChild(boot);
-  var css=document.createElement('link');css.rel='stylesheet';css.href='/static/portfolio-redesign.css?v=4';document.head.appendChild(css);
-  var js=document.createElement('script');js.src='/static/portfolio-redesign.js?v=4';js.defer=true;document.head.appendChild(js);
-  var assets=document.createElement('script');assets.src='/static/portfolio-assets.js?v=1';assets.defer=true;document.head.appendChild(assets);
+  var styled=!!document.querySelector('link[href*="portfolio-redesign.css"]');
+  if(!styled){
+    document.documentElement.classList.add('oa-pf-boot');
+    var boot=document.createElement('style');boot.id='oa-pf-boot-style';
+    boot.textContent='html.oa-pf-boot,html.oa-pf-boot body{background:#080d12!important}html.oa-pf-boot body{visibility:hidden!important}';
+    document.head.appendChild(boot);
+  }
+  ensureStyle('/static/portfolio-redesign.css?v=4','portfolio-redesign.css');
+  ensureScript('/static/portfolio-redesign.js?v=4','portfolio-redesign.js');
+  ensureScript('/static/portfolio-assets.js?v=1','portfolio-assets.js');
 })();
 
 (function(){
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/'||!window.matchMedia('(min-width:1025px)').matches)return;
-  var css=document.createElement('link');css.rel='stylesheet';css.href='/static/home-desktop.css?v=1';document.head.appendChild(css);
-  var js=document.createElement('script');js.src='/static/home-desktop.js?v=1';js.defer=true;document.head.appendChild(js);
+  ensureStyle('/static/home-desktop.css?v=1','home-desktop.css');
+  ensureScript('/static/home-desktop.js?v=1','home-desktop.js');
 })();
 
 (function(){
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/'||!window.matchMedia('(max-width:767px)').matches)return;
-  var css=document.createElement('link');css.rel='stylesheet';css.href='/static/home-mobile.css?v=4';document.head.appendChild(css);
-  var js=document.createElement('script');js.src='/static/home-mobile.js?v=3';js.defer=true;document.head.appendChild(js);
+  ensureStyle('/static/home-mobile.css?v=4','home-mobile.css');
+  ensureScript('/static/home-mobile.js?v=3','home-mobile.js');
 })();
 
 (function(){
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/live-market')return;
-  var css=document.createElement('link');css.rel='stylesheet';css.href='/static/live-market-redesign.css?v=7';document.head.appendChild(css);
-  var js=document.createElement('script');js.src='/static/live-market-redesign.js?v=5';js.defer=true;document.head.appendChild(js);
+  ensureStyle('/static/live-market-redesign.css?v=7','live-market-redesign.css');
+  ensureScript('/static/live-market-redesign.js?v=5','live-market-redesign.js');
 })();
 
 (function(){
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/groups')return;
-  var css=document.createElement('link');css.rel='stylesheet';css.href='/static/groups-redesign.css?v=1';document.head.appendChild(css);
-  var js=document.createElement('script');js.src='/static/groups-redesign.js?v=1';js.defer=true;document.head.appendChild(js);
+  ensureStyle('/static/groups-redesign.css?v=1','groups-redesign.css');
+  ensureScript('/static/groups-redesign.js?v=1','groups-redesign.js');
 })();
 
 /* Shared premium mobile bottom nav across OrcAgent. */
 (function(){
   if(!window.matchMedia('(max-width:767px)').matches)return;
-  var css=document.createElement('link');css.rel='stylesheet';css.href='/static/mobile-bottom-nav.css?v=3';document.head.appendChild(css);
-  var js=document.createElement('script');js.src='/static/mobile-bottom-nav.js?v=4';js.defer=true;document.head.appendChild(js);
+  ensureStyle('/static/mobile-bottom-nav.css?v=3','mobile-bottom-nav.css');
+  ensureScript('/static/mobile-bottom-nav.js?v=4','mobile-bottom-nav.js');
 })();
 
 /* Consistent reply/repost/like/bookmark SVGs wherever feed actions exist. */
 (function(){
-  var css=document.createElement('link');css.rel='stylesheet';css.href='/static/feed-action-icons.css?v=2';document.head.appendChild(css);
-  var js=document.createElement('script');js.src='/static/feed-action-icons.js?v=1';js.defer=true;document.head.appendChild(js);
+  ensureStyle('/static/feed-action-icons.css?v=2','feed-action-icons.css');
+  ensureScript('/static/feed-action-icons.js?v=1','feed-action-icons.js');
 })();
 
 var _NB_LIVE_CHAINS=['solana','bsc','base','arbitrum','polygon','robinhood'];

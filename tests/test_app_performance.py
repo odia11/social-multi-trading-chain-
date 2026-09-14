@@ -40,14 +40,15 @@ check('portfolio gets a compact but safe fixed-nav reserve',
       'body.oa-shared-ux.oa-portfolio .wlt-center' in CSS)
 check('every HTML response gets the shared v3 performance assets early',
       'oa-app-ux.css?v=3' in PERF and 'oa-app-ux.js?v=3' in PERF)
-check('portfolio and Live Market heavy redesign assets are preloaded',
+check('route-critical redesign assets are applied before first paint',
       'portfolio-redesign.css?v=4' in PERF
       and 'live-market-redesign.css?v=7' in PERF)
 check('production WSGI installs the performance adapter',
       'from app_performance import install as _install_app_performance' in ENTRY
       and '_install_app_performance(_dashboard)' in ENTRY)
-check('fallback page loader points at the same v3 shared layer',
-      'app-ux.css?v=3' in LOADER and 'app-ux.js?v=3' in LOADER)
+check('fallback loader no longer duplicates document prefetching',
+      'app-ux.css?v=3' in LOADER and 'app-ux.js?v=3' in LOADER
+      and 'fetchDocument' not in LOADER and 'primeCore' not in LOADER)
 check('nginx compresses text assets while retaining live proxy streaming',
       'gzip on;' in NGINX and 'application/javascript' in NGINX
       and 'proxy_buffering off;' in NGINX)

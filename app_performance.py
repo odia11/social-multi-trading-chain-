@@ -1,8 +1,7 @@
 """Shared performance bootstrap for every OrcAgent HTML page.
 
-Keeps the common UX layer early in the document instead of waiting for a
-page-specific loader, and preloads the heaviest route assets that otherwise
-create a visible blank/styled-late interval on mobile.
+Loads route-critical styles before first paint and keeps page-specific scripts
+deferred. The browser should never render legacy markup and restyle it later.
 """
 
 
@@ -17,60 +16,51 @@ def install(appmod) -> None:
             if response.status_code != 200:
                 return response
             ctype = (response.content_type or '').lower()
-            if 'text/html' not in ctype:
+            if 'text/html' not in ctype or appmod.request.method not in ('GET', 'HEAD'):
                 return response
-            if appmod.request.method not in ('GET', 'HEAD'):
-                return response
-
             html = response.get_data(as_text=True)
             if '</head>' not in html:
                 return response
-
             path = appmod.request.path.rstrip('/') or '/'
             tags = []
 
-            # Shared layer first, on every HTML screen. page-loader.js has ID
-            # guards, so older templates that still load it won't duplicate it.
-            if 'id="oa-app-ux-css"' not in html:
-                tags.append('<link id="oa-app-ux-css" rel="stylesheet" href="/static/app-ux.css?v=3">')
-            if 'id="oa-app-ux-js"' not in html:
-                tags.append('<script id="oa-app-ux-js" src="/static/app-ux.js?v=3" defer></script>')
+            def style(asset, href, extra=''):
+                if asset not in html:
+                    tags.append(f'<link rel="stylesheet" href="{href}"{extra}>')
 
-            # One token/trade card renderer for standalone social surfaces.
-            # It patches Groups/Messages at runtime while Home remains the
-            # reference renderer. Legacy rows without a mint use their old
-            # renderer, so historical posts and DMs stay compatible.
-            if 'id="oa-shared-trade-card-css"' not in html:
-                tags.append('<link id="oa-shared-trade-card-css" rel="stylesheet" href="/static/shared-trade-card-v2.css?v=1">')
-            if 'id="oa-shared-trade-card-js"' not in html:
-                tags.append('<script id="oa-shared-trade-card-js" src="/static/shared-trade-card-v2.js?v=1" defer></script>')
+            def script(asset, src, extra=''):
+                if asset not in html:
+                    tags.append(f'<script src="{src}" defer{extra}></script>')
 
-            # Font DNS/TLS setup costs are otherwise paid during first paint.
+            style('app-ux.css', '/static/app-ux.css?v=3', ' id="oa-app-ux-css"')
+            script('app-ux.js', '/static/app-ux.js?v=3', ' id="oa-app-ux-js"')
+            style('shared-trade-card-v2.css', '/static/shared-trade-card-v2.css?v=1', ' id="oa-shared-trade-card-css"')
+            script('shared-trade-card-v2.js', '/static/shared-trade-card-v2.js?v=1', ' id="oa-shared-trade-card-js"')
+            style('feed-action-icons.css', '/static/feed-action-icons.css?v=2')
+            script('feed-action-icons.js', '/static/feed-action-icons.js?v=1')
+
             if 'fonts.googleapis.com' in html and 'rel="preconnect" href="https://fonts.googleapis.com"' not in html:
                 tags.append('<link rel="preconnect" href="https://fonts.googleapis.com">')
                 tags.append('<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>')
 
-            # These redesigns are dynamically appended by navbar.js. Preload
-            # the exact same URL so Safari can fetch them in parallel with the
-            # document instead of only after navbar.js executes.
+            # Blocking CSS prevents FOUC. JavaScript stays deferred.
             if path == '/wallet':
-                tags.extend([
-                    '<link rel="preload" href="/static/portfolio-redesign.css?v=4" as="style">',
-                    '<link rel="preload" href="/static/portfolio-redesign.js?v=4" as="script">',
-                    '<link rel="preload" href="/static/portfolio-assets.js?v=1" as="script">',
-                ])
+                style('portfolio-redesign.css', '/static/portfolio-redesign.css?v=4')
+                script('portfolio-redesign.js', '/static/portfolio-redesign.js?v=4')
+                script('portfolio-assets.js', '/static/portfolio-assets.js?v=1')
             elif path == '/live-market':
-                tags.extend([
-                    '<link rel="preload" href="/static/live-market-redesign.css?v=7" as="style">',
-                    '<link rel="preload" href="/static/live-market-redesign.js?v=5" as="script">',
-                ])
+                style('live-market-redesign.css', '/static/live-market-redesign.css?v=7')
+                style('live-market-final.css', '/static/live-market-final.css?v=4', ' data-oa-live-final="1"')
+                script('live-market-redesign.js', '/static/live-market-redesign.js?v=5')
+                script('live-market-hotfix.js', '/static/live-market-hotfix.js?v=8', ' data-oa-live-hotfix="1"')
+            elif path == '/groups':
+                style('groups-redesign.css', '/static/groups-redesign.css?v=1')
+                script('groups-redesign.js', '/static/groups-redesign.js?v=1')
             elif path == '/':
-                # CSS choice is media-specific, so the browser only downloads
-                # the variant it actually needs.
-                tags.extend([
-                    '<link rel="preload" href="/static/home-mobile.css?v=4" as="style" media="(max-width:767px)">',
-                    '<link rel="preload" href="/static/home-desktop.css?v=1" as="style" media="(min-width:1025px)">',
-                ])
+                style('home-mobile.css', '/static/home-mobile.css?v=4', ' media="(max-width:767px)"')
+                style('home-mobile-polish.css', '/static/home-mobile-polish.css?v=3', ' media="(max-width:767px)"')
+                style('home-composer-mobile.css', '/static/home-composer-mobile.css?v=1', ' media="(max-width:767px)"')
+                style('home-desktop.css', '/static/home-desktop.css?v=1', ' media="(min-width:1025px)"')
 
             if tags:
                 html = html.replace('</head>', '\n'.join(tags) + '\n</head>', 1)

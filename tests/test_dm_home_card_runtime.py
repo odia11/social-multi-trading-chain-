@@ -2,8 +2,8 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-JS = (ROOT / "static" / "messages-home-token-card-v1.js").read_text(encoding="utf-8")
-CSS = (ROOT / "static" / "messages-home-token-card-v1.css").read_text(encoding="utf-8")
+JS = (ROOT / "static" / "messages-ui.js").read_text(encoding="utf-8")
+CSS = (ROOT / "static" / "messages-ui.css").read_text(encoding="utf-8")
 INJECTOR = (ROOT / "messages_premium_ui.py").read_text(encoding="utf-8")
 LIVE_MARKET = (ROOT / "templates" / "live_market.html").read_text(encoding="utf-8")
 
@@ -33,6 +33,6 @@ def test_copy_trade_logic_is_not_replaced():
 
 
 def test_assets_are_loaded_on_messages_page():
-    assert "messages-home-token-card-v1.css" in INJECTOR
-    assert "messages-home-token-card-v1.js" in INJECTOR
+    assert "messages-ui.css" in INJECTOR
+    assert "messages-ui.js" in INJECTOR
     assert ".dm-home-token-card" in CSS

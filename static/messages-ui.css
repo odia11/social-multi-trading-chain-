@@ -1,0 +1,569 @@
+/* messages-premium-v2.css */
+/* OrcAgent Messages Premium v2 — approved inbox + thread redesign */
+:root{--oa-msg-gold:#f7b955;--oa-msg-gold2:#ffc45b;--oa-msg-bg:#080b10;--oa-msg-card:#0f1319;--oa-msg-card2:#12171e;--oa-msg-border:#20262f;--oa-msg-text:#f3f5f7;--oa-msg-muted:#7d8694;--oa-msg-green:#35d6a2;--oa-msg-red:#ff5d70}
+body{background:radial-gradient(circle at 50% -20%,rgba(247,185,85,.055),transparent 34%),var(--oa-msg-bg)!important}
+.msgs-main{background:var(--oa-msg-bg)}
+.msgs-left,.msgs-right{background:var(--oa-msg-bg)!important}
+
+/* Inbox shell */
+.msgs-left{border-color:rgba(255,255,255,.05)!important}
+.msgs-left-hdr{background:linear-gradient(180deg,rgba(15,19,25,.98),rgba(8,11,16,.98))!important;border-color:rgba(255,255,255,.06)!important}
+.msgs-left-title{font-size:22px!important;font-weight:750!important;letter-spacing:-.02em;color:var(--oa-msg-text)!important}
+.msgs-left-title-row{position:relative}
+.msgs-left-title-row:after{content:'Connect. Trade. Grow Together.';display:block;position:absolute;left:36px;top:31px;color:var(--oa-msg-muted);font-size:11px;font-weight:500;letter-spacing:.01em;pointer-events:none}
+.msgs-home-back{color:var(--oa-msg-gold)!important;font-size:28px!important}
+.msgs-new-btn{width:46px!important;height:46px!important;background:linear-gradient(180deg,#ffc45b,#f7b955)!important;box-shadow:0 8px 26px rgba(247,185,85,.23);border:1px solid rgba(255,213,128,.5)!important}
+.msgs-new-btn svg{width:19px;height:19px;stroke-width:2.2}
+.msgs-search{background:#0d1117!important;border-color:#242b35!important;border-radius:16px!important;padding-top:12px!important;padding-bottom:12px!important;font-size:14px!important}
+.msgs-search:focus{border-color:rgba(247,185,85,.6)!important;box-shadow:0 0 0 3px rgba(247,185,85,.08)}
+
+.conv-list{padding:10px 10px 24px!important}
+.conv-row-wrap{margin:0 0 9px;border-radius:17px;overflow:visible!important}
+.conv-row{min-height:76px;padding:12px 14px!important;margin:0!important;border:1px solid rgba(255,255,255,.065)!important;border-radius:17px!important;background:linear-gradient(145deg,rgba(18,23,30,.96),rgba(11,15,20,.96))!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.018);gap:13px!important}
+.conv-row:hover,.conv-row.active{background:linear-gradient(145deg,rgba(24,29,37,.98),rgba(13,17,23,.98))!important;border-color:rgba(247,185,85,.2)!important}
+.conv-row:after{content:'›';font-size:27px;line-height:1;color:#87909e;margin-left:2px;flex-shrink:0;font-weight:300}
+.conv-avatar{width:52px!important;height:52px!important;font-size:17px!important;box-shadow:0 0 0 1px rgba(247,185,85,.15),0 8px 22px rgba(0,0,0,.22)}
+.conv-name{font-size:15px!important;font-weight:750!important;letter-spacing:-.01em;color:var(--oa-msg-text)!important}
+.conv-preview{font-size:13px!important;color:#8b94a2!important;margin-top:4px!important;line-height:1.25}
+.conv-preview.unread{color:#cfd4dc!important;font-weight:600}
+.conv-time{font-size:11px!important;color:#7d8694!important}
+.conv-badge{width:8px!important;height:8px!important;min-width:8px;padding:0!important;border-radius:50%!important;color:transparent!important;background:var(--oa-msg-gold)!important;box-shadow:0 0 13px rgba(247,185,85,.75)}
+.conv-meta{gap:7px!important}
+.conv-del-icon{display:none!important}
+
+/* Thread */
+.msgs-thread-hdr{min-height:72px;padding:12px 18px!important;background:rgba(8,11,16,.97)!important;border-color:rgba(255,255,255,.07)!important;box-shadow:0 8px 24px rgba(0,0,0,.12)}
+.msgs-back{color:var(--oa-msg-gold)!important;font-size:15px!important}
+.msgs-thread-avatar{width:48px!important;height:48px!important;font-size:16px!important;box-shadow:0 0 0 1px rgba(247,185,85,.25)}
+.msgs-thread-name{font-size:17px!important;font-weight:750!important;color:var(--oa-msg-text)!important;letter-spacing:-.01em}
+.msgs-thread-status{font-size:12px!important;margin-top:1px!important}
+.msgs-more-btn,.msgs-copy-trades-btn{width:42px!important;height:42px!important;border-radius:14px!important;background:#0d1218!important;border:1px solid #242b35!important;color:#aab2be!important}
+.msgs-copy-trades-btn.active{background:rgba(53,214,162,.08)!important;color:var(--oa-msg-green)!important;border-color:rgba(53,214,162,.28)!important}
+
+.msgs-area{padding:18px 16px 22px!important;gap:8px!important;background:radial-gradient(circle at 100% 0,rgba(247,185,85,.025),transparent 30%)}
+.msgs-day-divider{display:flex;align-items:center;gap:14px;color:#7d8694!important;font-size:11px!important;margin:8px 0 12px!important;font-weight:500!important}
+.msgs-day-divider:before,.msgs-day-divider:after{content:'';height:1px;flex:1;background:#20262f}
+.msg-bubble{font-size:15px!important;line-height:1.45!important;padding:11px 15px!important;max-width:min(510px,82vw)!important;box-shadow:0 5px 18px rgba(0,0,0,.14)}
+.msg-wrap.theirs .msg-bubble{background:linear-gradient(145deg,#171c23,#11161c)!important;border:1px solid #252c35!important;border-radius:18px 18px 18px 5px!important;color:#e8ebf0!important}
+.msg-wrap.mine .msg-bubble{background:linear-gradient(135deg,#ffc65d,#f3ad3f)!important;border:1px solid rgba(255,220,148,.42)!important;border-radius:18px 18px 5px 18px!important;color:#0c0d0f!important;font-weight:520!important;box-shadow:0 9px 24px rgba(247,185,85,.15)}
+.msg-time{font-size:10.5px!important;color:#707987!important;margin-top:4px!important}
+.msg-seen-tag{color:var(--oa-msg-gold)!important;font-size:11px!important}
+
+/* Embedded trade share cards */
+.msg-bubble.msg-trade{width:min(560px,88vw)!important;max-width:min(560px,88vw)!important;background:none!important;border:none!important;box-shadow:none!important;padding:0!important}
+.msg-bubble.msg-trade>div{border-radius:18px!important;border:1px solid rgba(247,185,85,.18)!important;background:linear-gradient(145deg,#11171d,#0b1015)!important;box-shadow:0 12px 35px rgba(0,0,0,.22)!important;padding:16px!important}
+.msg-trade-tok{font-size:15px!important;color:var(--oa-msg-gold)!important}
+.msg-trade-prices{color:#9099a6!important;font-size:12px!important}
+.msg-trade-pnl{font-size:18px!important}
+
+/* Composer */
+.msgs-compose,.msgs-input-row,.msgs-composer{background:rgba(8,11,16,.98)!important;border-color:rgba(247,185,85,.14)!important;backdrop-filter:blur(18px)}
+.msgs-input{height:46px!important;border-radius:24px!important;background:#10151c!important;border:1px solid #252c35!important;color:#eef1f5!important;padding:0 17px!important;font-size:16px!important}
+.msgs-input:focus{border-color:rgba(247,185,85,.5)!important;box-shadow:0 0 0 3px rgba(247,185,85,.06)!important}
+.msgs-emoji-btn,.msgs-trade-btn,.msgs-attach-btn{border-radius:14px!important;background:#0e1319!important;border-color:#252c35!important;color:#aeb6c1!important}
+.msgs-send-btn{background:linear-gradient(180deg,#ffc45b,#f7b955)!important;color:#0b0d10!important;border-radius:50%!important;box-shadow:0 8px 22px rgba(247,185,85,.22)!important}
+
+@media(min-width:768px){
+  .msgs-left{width:355px!important;min-width:355px!important}
+  .msgs-left-hdr{padding:20px 18px 17px!important}
+  .msgs-left-title-row{margin-bottom:26px!important}
+  .conv-list{padding:12px!important}
+  .msgs-area{padding:24px 28px!important}
+}
+
+@media(max-width:767px){
+  body{padding-bottom:calc(86px + env(safe-area-inset-bottom))!important}
+  #app,.msgs-main{background:var(--oa-msg-bg)!important}
+  .msgs-left{padding-bottom:4px!important}
+  .msgs-left-hdr{position:sticky!important;top:0!important;height:88px!important;padding:12px 18px 10px!important;display:flex!important;align-items:flex-start!important;background:rgba(8,11,16,.96)!important;backdrop-filter:blur(20px)!important}
+  .msgs-left-title-row{height:64px!important;align-items:center!important}
+  .msgs-left-title{font-size:24px!important}
+  .msgs-left-title-row:after{left:40px;top:44px;font-size:11px}
+  .msgs-home-back{min-width:36px!important;margin-right:8px!important}
+  .msgs-new-btn{width:50px!important;height:50px!important}
+  .conv-list{padding:8px 16px 18px!important}
+  .conv-row-wrap{margin-bottom:10px!important}
+  .conv-row{min-height:86px!important;padding:14px!important;border-radius:19px!important}
+  .conv-avatar{width:56px!important;height:56px!important}
+  .conv-name{font-size:17px!important}
+  .conv-preview{font-size:14px!important;max-width:calc(100vw - 190px)}
+  .conv-time{font-size:12px!important}
+
+  .msgs-right{height:calc(100dvh - 86px - env(safe-area-inset-bottom))!important;min-height:0!important;background:var(--oa-msg-bg)!important}
+  .msgs-thread{height:100%!important;min-height:0!important}
+  .msgs-thread-hdr{min-height:76px!important;padding:10px 14px!important;position:sticky;top:0;z-index:12}
+  .msgs-back{display:inline-flex!important;font-size:0!important;width:38px!important;height:44px!important;padding:0!important;justify-content:center!important}
+  .msgs-back svg{width:25px;height:25px}
+  .msgs-thread-avatar{width:50px!important;height:50px!important}
+  .msgs-thread-name{font-size:18px!important}
+  .msgs-area{padding:16px 14px 110px!important}
+  .msg-bubble{font-size:16px!important;max-width:84vw!important}
+  .msg-bubble.msg-trade{width:89vw!important;max-width:89vw!important}
+  .msgs-input{font-size:16px!important}
+}
+
+/* messages-premium-v3.css */
+/* OrcAgent Messages Premium v3 — completes the approved mobile thread design. */
+@media(max-width:767px){
+  /* A thread must fill the real viewport. Only reserve room for the shared
+     bottom nav when that nav is actually present in the DOM. Previously we
+     always reserved/subtracted 102px, which created a large empty black strip
+     below the composer on message threads where the nav had not rendered. */
+  body.oa-thread-open{padding-bottom:0!important;overflow:hidden!important}
+  body.oa-thread-open .pt-nb-topbar{display:none!important}
+  body.oa-thread-open .msgs-right{height:100dvh!important;max-height:100dvh!important}
+  body.oa-thread-open .msgs-thread{height:100%!important;min-height:0!important}
+  body.oa-thread-open:has(.oa-bottom-nav) .oa-bottom-nav{display:flex!important}
+  body.oa-thread-open:has(.oa-bottom-nav) .msgs-right{height:calc(100dvh - 102px - env(safe-area-inset-bottom,0px))!important;max-height:calc(100dvh - 102px - env(safe-area-inset-bottom,0px))!important}
+
+  /* Complete thread header. */
+  .msgs-thread-hdr{min-height:82px!important;padding:12px 14px 12px 10px!important;gap:10px!important;background:#080b10!important;border-bottom:1px solid #20262f!important}
+  .msgs-back{display:inline-flex!important;align-items:center!important;justify-content:center!important;width:42px!important;min-width:42px!important;height:46px!important;padding:0!important;margin:0!important;color:#f7b955!important;font-size:0!important;border-radius:14px!important;background:transparent!important}
+  .msgs-back:before{content:'‹';display:block;font-family:Arial,sans-serif;font-size:44px;font-weight:300;line-height:32px;transform:translateY(-2px)}
+  .msgs-thread-avatar{width:54px!important;height:54px!important;border:1px solid rgba(247,185,85,.45)!important}
+  .msgs-thread-name{font-size:19px!important;line-height:1.2!important}
+  .msgs-thread-status{font-size:12px!important;line-height:1.25!important;color:#77808d!important}
+  .msgs-thread-status.online{color:#38d6a2!important}
+  .msgs-copy-trades-btn,.msgs-more-btn{width:48px!important;height:48px!important;min-width:48px!important;border-radius:16px!important;background:#0e131a!important;border:1px solid #27303a!important}
+  .msgs-copy-trades-label{display:none!important}
+
+  /* Conversation body gets the same generous spacing as the approved mockup. */
+  .msgs-area{padding:18px 16px 24px!important;gap:10px!important;min-height:0!important}
+  .msgs-day-divider{margin:12px 0 14px!important;font-size:12px!important}
+  .msg-bubble{font-size:16px!important;line-height:1.45!important}
+  .msg-wrap.theirs .msg-bubble:not(.msg-trade){background:linear-gradient(145deg,#171c23,#11161c)!important;border:1px solid #272e38!important}
+  .msg-wrap.mine .msg-bubble:not(.msg-trade){background:linear-gradient(135deg,#ffc85f,#f4b34a)!important}
+
+  /* Composer sits at the actual bottom of the chat workspace. */
+  .msgs-compose,.msgs-input-row,.msgs-composer{flex-shrink:0!important;background:#080b10!important;border-top:1px solid #20262f!important;padding-bottom:max(10px,env(safe-area-inset-bottom,0px))!important;margin-bottom:0!important}
+  .msgs-input-row{padding:10px 12px!important;gap:9px!important}
+  .msgs-input{height:50px!important;min-width:0!important;flex:1!important;border-radius:25px!important;background:#10151c!important}
+  .msgs-emoji-btn,.msgs-trade-btn,.msgs-attach-btn{width:50px!important;height:50px!important;min-width:50px!important;border-radius:16px!important}
+  .msgs-send-btn{width:54px!important;height:54px!important;min-width:54px!important}
+
+  /* Structured v3 trade message. */
+  .msg-bubble.msg-trade.oa-trade-v3{width:calc(100vw - 32px)!important;max-width:560px!important}
+  .oa-dm-trade-card{overflow:hidden;border-radius:20px;background:linear-gradient(145deg,#121820,#0b1016);border:1px solid rgba(247,185,85,.38);box-shadow:0 14px 36px rgba(0,0,0,.26)}
+  .oa-dm-trade-top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 17px 12px}
+  .oa-dm-trade-token{font-size:20px;font-weight:750;color:#f3f5f7;letter-spacing:-.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .oa-dm-trade-pct{font-size:22px;font-weight:800;white-space:nowrap}
+  .oa-dm-trade-pct.pos,.oa-dm-trade-pnl.pos{color:#35d6a2}.oa-dm-trade-pct.neg,.oa-dm-trade-pnl.neg{color:#ff6476}
+  .oa-dm-trade-stats{display:grid;grid-template-columns:1fr 1fr 1fr;border-top:1px solid #242b34;border-bottom:1px solid #242b34;margin:0 17px}
+  .oa-dm-trade-stat{padding:12px 10px 12px 0;min-width:0}.oa-dm-trade-stat+.oa-dm-trade-stat{border-left:1px solid #242b34;padding-left:12px}
+  .oa-dm-trade-label{display:block;color:#7f8997;font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
+  .oa-dm-trade-value{display:block;color:#eef1f5;font-size:14px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .oa-dm-trade-bottom{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 17px 15px}
+  .oa-dm-trade-pnl{font-size:14px;font-weight:750}.oa-dm-trade-caption{font-size:11px;color:#7f8997}
+  .oa-dm-trade-link{display:flex;align-items:center;justify-content:center;margin:0 17px 16px;height:42px;border:1px solid rgba(247,185,85,.38);border-radius:13px;color:#f7b955;text-decoration:none;font-size:13px;font-weight:700;background:rgba(247,185,85,.06)}
+}
+
+/* messages-composer-v4.css */
+/* OrcAgent Messages Composer v5 — approved compact premium composer */
+@media(max-width:767px){
+  body.oa-thread-open:not(.oa-msgs-typing){padding-bottom:calc(102px + env(safe-area-inset-bottom,0px))!important}
+  body.oa-thread-open:not(.oa-msgs-typing) .msgs-right{height:calc(100dvh - 102px - env(safe-area-inset-bottom,0px))!important;max-height:calc(100dvh - 102px - env(safe-area-inset-bottom,0px))!important}
+  body.oa-thread-open:not(.oa-msgs-typing) .oa-bottom-nav{display:flex!important}
+
+  .msgs-input-bar.oa-composer-v4{
+    flex-shrink:0!important;
+    display:grid!important;
+    grid-template-columns:44px 44px 44px minmax(0,1fr) 56px!important;
+    align-items:center!important;
+    gap:8px!important;
+    min-height:92px!important;
+    padding:11px 12px!important;
+    background:linear-gradient(180deg,#0b0f14,#080b10)!important;
+    border-top:1px solid rgba(247,185,85,.20)!important;
+    border-bottom:1px solid rgba(255,255,255,.03)!important;
+    box-shadow:0 -12px 34px rgba(0,0,0,.30)!important;
+    position:relative!important;
+    z-index:25!important;
+  }
+
+  .msgs-input-bar.oa-composer-v4>.msgs-attach-btn,
+  .msgs-input-bar.oa-composer-v4>.msgs-trade-wrap,
+  .msgs-input-bar.oa-composer-v4>.msgs-emoji-wrap{
+    align-self:center!important;
+    justify-self:center!important;
+    width:44px!important;
+    height:44px!important;
+    min-width:44px!important;
+  }
+  .msgs-input-bar.oa-composer-v4>.msgs-attach-btn{grid-column:1!important}
+  .msgs-input-bar.oa-composer-v4>.msgs-trade-wrap{grid-column:2!important}
+  .msgs-input-bar.oa-composer-v4>.msgs-emoji-wrap{grid-column:3!important}
+
+  .msgs-input-bar.oa-composer-v4>.msgs-attach-btn,
+  .msgs-input-bar.oa-composer-v4>.msgs-trade-wrap>.msgs-attach-btn,
+  .msgs-input-bar.oa-composer-v4>.msgs-emoji-wrap>.msgs-emoji-btn{
+    width:44px!important;
+    height:44px!important;
+    min-width:44px!important;
+    border-radius:50%!important;
+    background:#0e141b!important;
+    border:1px solid #313945!important;
+    color:#c0c7d0!important;
+    display:flex!important;
+    align-items:center!important;
+    justify-content:center!important;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.02)!important;
+  }
+
+  .oa-compose-text-wrap{
+    grid-column:4!important;
+    min-width:0!important;
+    min-height:56px!important;
+    max-height:118px!important;
+    position:relative!important;
+    display:flex!important;
+    align-items:center!important;
+    border:1px solid rgba(247,185,85,.28)!important;
+    border-radius:30px!important;
+    background:linear-gradient(145deg,#121821,#0d131a)!important;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.025)!important;
+    overflow:hidden!important;
+  }
+  .oa-compose-text-wrap:focus-within{
+    border-color:rgba(247,185,85,.72)!important;
+    box-shadow:0 0 0 3px rgba(247,185,85,.07),inset 0 1px 0 rgba(255,255,255,.03)!important;
+  }
+  .msgs-input.oa-msgs-textarea{
+    width:100%!important;
+    min-width:0!important;
+    min-height:54px!important;
+    max-height:116px!important;
+    height:54px!important;
+    resize:none!important;
+    overflow-y:auto!important;
+    display:block!important;
+    padding:15px 17px 13px!important;
+    border:0!important;
+    outline:0!important;
+    background:transparent!important;
+    color:#eef1f5!important;
+    font-family:'Geist',system-ui,sans-serif!important;
+    font-size:17px!important;
+    line-height:1.42!important;
+    box-shadow:none!important;
+  }
+  .msgs-input.oa-msgs-textarea::placeholder{color:#717b89!important}
+  .oa-msg-counter{display:none!important}
+
+  .msgs-input-bar.oa-composer-v4 .msgs-send,
+  .msgs-input-bar.oa-composer-v4 .msgs-send-btn{
+    grid-column:5!important;
+    width:56px!important;
+    height:56px!important;
+    min-width:56px!important;
+    border-radius:50%!important;
+    display:flex!important;
+    align-items:center!important;
+    justify-content:center!important;
+    background:linear-gradient(180deg,#ffc965,#f7b955)!important;
+    color:#080b10!important;
+    border:1px solid rgba(255,222,154,.58)!important;
+    box-shadow:0 8px 26px rgba(247,185,85,.28)!important;
+  }
+  .msgs-input-bar.oa-composer-v4 .msgs-send svg,
+  .msgs-input-bar.oa-composer-v4 .msgs-send-btn svg{width:24px!important;height:24px!important;stroke-width:2!important}
+
+  body.oa-msgs-typing{padding-bottom:0!important;overflow:hidden!important}
+  body.oa-msgs-typing .oa-bottom-nav{display:none!important}
+  body.oa-msgs-typing .msgs-right{height:100dvh!important;max-height:100dvh!important}
+  body.oa-msgs-typing .msgs-input-bar.oa-composer-v4{
+    position:fixed!important;
+    left:0!important;
+    right:0!important;
+    bottom:var(--oa-kb-offset,0px)!important;
+    z-index:1300!important;
+    padding-bottom:10px!important;
+  }
+  body.oa-msgs-typing .msgs-area{padding-bottom:130px!important}
+
+  @media(max-width:390px){
+    .msgs-input-bar.oa-composer-v4{grid-template-columns:40px 40px 40px minmax(0,1fr) 52px!important;gap:6px!important;padding-left:8px!important;padding-right:8px!important}
+    .msgs-input-bar.oa-composer-v4>.msgs-attach-btn,
+    .msgs-input-bar.oa-composer-v4>.msgs-trade-wrap,
+    .msgs-input-bar.oa-composer-v4>.msgs-emoji-wrap,
+    .msgs-input-bar.oa-composer-v4>.msgs-trade-wrap>.msgs-attach-btn,
+    .msgs-input-bar.oa-composer-v4>.msgs-emoji-wrap>.msgs-emoji-btn{width:40px!important;height:40px!important;min-width:40px!important}
+    .msgs-input-bar.oa-composer-v4 .msgs-send,
+    .msgs-input-bar.oa-composer-v4 .msgs-send-btn{width:52px!important;height:52px!important;min-width:52px!important}
+    .msgs-input.oa-msgs-textarea{padding-left:15px!important;padding-right:15px!important}
+  }
+}
+
+/* messages-thread-v5.css */
+/* OrcAgent Messages Thread v5 — approved fullscreen chat design */
+@media(max-width:767px){
+  body.oa-thread-open{padding-bottom:0!important;overflow:hidden!important;background:#070a0f!important}
+  body.oa-thread-open .oa-bottom-nav{display:none!important}
+  body.oa-thread-open .pt-nb-topbar{display:none!important}
+  body.oa-thread-open #app,body.oa-thread-open .msgs-main{height:100dvh!important;max-height:100dvh!important;overflow:hidden!important;background:#070a0f!important}
+  body.oa-thread-open .msgs-left{display:none!important}
+  body.oa-thread-open .msgs-right{display:flex!important;width:100%!important;height:100dvh!important;max-height:100dvh!important;min-height:0!important;background:#070a0f!important}
+  body.oa-thread-open .msgs-thread{display:flex!important;flex-direction:column!important;width:100%!important;height:100%!important;min-height:0!important;background:#070a0f!important}
+
+  /* Header */
+  body.oa-thread-open .msgs-thread-hdr{position:relative!important;top:auto!important;z-index:40!important;flex:0 0 auto!important;min-height:92px!important;padding:14px 16px 13px 10px!important;gap:11px!important;background:#070a0f!important;border-bottom:1px solid #20262f!important;box-shadow:none!important}
+  body.oa-thread-open .msgs-back{display:inline-flex!important;align-items:center!important;justify-content:center!important;width:38px!important;min-width:38px!important;height:48px!important;padding:0!important;margin:0!important;color:#f7b955!important;font-size:0!important;background:transparent!important;border:none!important}
+  body.oa-thread-open .msgs-back:before{content:'‹';font-family:Arial,sans-serif;font-size:46px;font-weight:300;line-height:1;transform:translateY(-2px)}
+  body.oa-thread-open .msgs-thread-avatar{width:58px!important;height:58px!important;min-width:58px!important;border:1px solid rgba(247,185,85,.72)!important;box-shadow:0 0 0 2px rgba(247,185,85,.06),0 8px 28px rgba(0,0,0,.25)!important}
+  body.oa-thread-open .msgs-thread-meta{min-width:0!important;align-self:center!important}
+  body.oa-thread-open .msgs-thread-name{font-size:19px!important;font-weight:760!important;line-height:1.18!important;color:#f4f6f8!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+  body.oa-thread-open .msgs-thread-status{font-size:12px!important;line-height:1.3!important;color:#8b94a2!important;margin-top:4px!important}
+  body.oa-thread-open .msgs-thread-status.online{color:#31d59c!important}
+  body.oa-thread-open .msgs-copy-trades-btn{width:auto!important;min-width:122px!important;height:46px!important;padding:0 14px!important;border-radius:23px!important;border:1px solid rgba(247,185,85,.8)!important;background:rgba(247,185,85,.035)!important;color:#f7b955!important;font-size:13px!important;font-weight:700!important;box-shadow:inset 0 0 0 1px rgba(247,185,85,.05)!important}
+  body.oa-thread-open .msgs-copy-trades-label{display:inline!important}
+  body.oa-thread-open .msgs-more-btn{width:46px!important;height:46px!important;min-width:46px!important;border-radius:50%!important;border:1px solid rgba(247,185,85,.72)!important;background:rgba(247,185,85,.025)!important;color:#f7b955!important;font-size:18px!important}
+
+  /* Conversation canvas */
+  body.oa-thread-open .msgs-area{flex:1 1 auto!important;min-height:0!important;overflow-y:auto!important;padding:18px 18px 24px!important;gap:10px!important;background:radial-gradient(circle at 92% 5%,rgba(247,185,85,.025),transparent 27%),#070a0f!important;overscroll-behavior:contain!important;-webkit-overflow-scrolling:touch!important}
+  body.oa-thread-open .msgs-day-divider{display:flex!important;align-items:center!important;justify-content:center!important;gap:14px!important;margin:0 0 14px!important;color:#8a93a0!important;font-size:12px!important;font-weight:500!important}
+  body.oa-thread-open .msgs-day-divider:before,body.oa-thread-open .msgs-day-divider:after{content:''!important;display:block!important;height:1px!important;flex:1!important;background:#252c35!important}
+  body.oa-thread-open .msgs-day-divider{padding:0 2px!important}
+
+  body.oa-thread-open .msg-wrap{position:relative!important;width:100%!important;margin:0 0 4px!important}
+  body.oa-thread-open .msg-wrap.theirs{align-items:flex-start!important;padding-left:54px!important}
+  body.oa-thread-open .msg-wrap.mine{align-items:flex-end!important;padding-left:50px!important}
+  body.oa-thread-open .msg-bubble-wrap{max-width:100%!important}
+  body.oa-thread-open .msg-bubble:not(.msg-trade){font-size:16px!important;line-height:1.48!important;padding:12px 15px!important;max-width:min(560px,78vw)!important;box-shadow:none!important}
+  body.oa-thread-open .msg-wrap.theirs .msg-bubble:not(.msg-trade){background:linear-gradient(145deg,#171c23,#11161c)!important;border:1px solid #2a313b!important;border-radius:18px 18px 18px 6px!important;color:#f1f3f6!important;font-weight:430!important}
+  body.oa-thread-open .msg-wrap.mine .msg-bubble:not(.msg-trade){background:linear-gradient(135deg,#ffc85f,#f4b34a)!important;border:1px solid rgba(255,221,150,.4)!important;border-radius:18px 18px 6px 18px!important;color:#0c0f13!important;font-weight:520!important;box-shadow:0 9px 26px rgba(247,185,85,.1)!important}
+  body.oa-thread-open .msg-time{font-size:11px!important;color:#7e8794!important;margin-top:5px!important;padding:0 4px!important}
+  body.oa-thread-open .msg-seen-tag{color:#f7b955!important;font-weight:700!important}
+
+  /* Peer avatar beside each incoming item */
+  body.oa-thread-open .oa-peer-mini-avatar{position:absolute!important;left:0!important;top:3px!important;width:42px!important;height:42px!important;border-radius:50%!important;overflow:hidden!important;display:flex!important;align-items:center!important;justify-content:center!important;color:#fff!important;font-size:13px!important;font-weight:700!important;border:1px solid rgba(247,185,85,.78)!important;background:#111720!important;box-shadow:0 6px 18px rgba(0,0,0,.24)!important}
+  body.oa-thread-open .oa-peer-mini-avatar img{width:100%!important;height:100%!important;object-fit:cover!important}
+
+  /* Trade card */
+  body.oa-thread-open .msg-bubble.msg-trade{width:calc(100vw - 92px)!important;max-width:610px!important;margin:0!important;padding:0!important;background:none!important;border:none!important;box-shadow:none!important}
+  body.oa-thread-open .oa-dm-trade-card{overflow:hidden!important;border-radius:18px!important;background:linear-gradient(145deg,#11171e,#0a0f15)!important;border:1px solid rgba(247,185,85,.8)!important;box-shadow:0 14px 36px rgba(0,0,0,.22)!important}
+  body.oa-thread-open .oa-dm-trade-top{padding:16px 17px 12px!important}
+  body.oa-thread-open .oa-dm-trade-token{font-size:20px!important}
+  body.oa-thread-open .oa-dm-trade-pct{font-size:19px!important;padding:6px 10px!important;border-radius:12px!important;background:rgba(53,214,162,.12)!important}
+  body.oa-thread-open .oa-dm-trade-stats{margin:0 17px!important}
+  body.oa-thread-open .oa-dm-trade-link{height:42px!important;border-radius:21px!important;background:linear-gradient(180deg,#ffc85f,#f7b955)!important;color:#111!important;border:none!important}
+
+  /* Approved composer: one premium bar, roomy typing area, gold send button */
+  body.oa-thread-open .msgs-input-bar.oa-composer-v4{position:relative!important;left:auto!important;right:auto!important;bottom:auto!important;flex:0 0 auto!important;display:grid!important;grid-template-columns:46px 46px 46px minmax(0,1fr) 54px!important;grid-template-rows:auto!important;align-items:center!important;gap:8px!important;padding:12px 12px calc(12px + env(safe-area-inset-bottom,0px))!important;background:#090d12!important;border-top:1px solid #20262f!important;box-shadow:0 -10px 28px rgba(0,0,0,.2)!important;z-index:45!important}
+  body.oa-thread-open .oa-compose-text-wrap{grid-column:4!important;grid-row:1!important;min-width:0!important;min-height:54px!important;max-height:106px!important;border-radius:29px!important;border:1px solid #2b333d!important;background:linear-gradient(145deg,#111720,#0d1218)!important;overflow:hidden!important;position:relative!important}
+  body.oa-thread-open .oa-compose-text-wrap:focus-within{border-color:rgba(247,185,85,.72)!important;box-shadow:0 0 0 2px rgba(247,185,85,.06)!important}
+  body.oa-thread-open .msgs-input.oa-msgs-textarea{display:block!important;width:100%!important;height:54px!important;min-height:54px!important;max-height:106px!important;resize:none!important;overflow-y:auto!important;border:0!important;outline:0!important;background:transparent!important;color:#eef1f5!important;font-size:16px!important;line-height:1.4!important;padding:15px 17px!important;border-radius:29px!important;font-family:'Geist',system-ui,sans-serif!important;box-shadow:none!important}
+  body.oa-thread-open .msgs-input.oa-msgs-textarea::placeholder{color:#687280!important}
+  body.oa-thread-open .oa-msg-counter{display:none!important}
+  body.oa-thread-open .msgs-input-bar.oa-composer-v4>.msgs-attach-btn{grid-column:1!important;grid-row:1!important}
+  body.oa-thread-open .msgs-input-bar.oa-composer-v4>.msgs-trade-wrap{grid-column:2!important;grid-row:1!important}
+  body.oa-thread-open .msgs-input-bar.oa-composer-v4>.msgs-emoji-wrap{grid-column:3!important;grid-row:1!important}
+  body.oa-thread-open .msgs-input-bar.oa-composer-v4>.msgs-attach-btn,
+  body.oa-thread-open .msgs-input-bar.oa-composer-v4>.msgs-trade-wrap>.msgs-attach-btn,
+  body.oa-thread-open .msgs-input-bar.oa-composer-v4>.msgs-emoji-wrap>.msgs-emoji-btn{width:46px!important;height:46px!important;min-width:46px!important;border-radius:50%!important;border:1px solid #2b333e!important;background:#0f151c!important;color:#aeb6c2!important}
+  body.oa-thread-open .msgs-input-bar.oa-composer-v4 .msgs-send,
+  body.oa-thread-open .msgs-input-bar.oa-composer-v4 .msgs-send-btn{grid-column:5!important;grid-row:1!important;width:54px!important;height:54px!important;min-width:54px!important;border-radius:50%!important;border:1px solid rgba(255,218,143,.5)!important;background:linear-gradient(180deg,#ffc960,#f7b955)!important;color:#0b0e12!important;box-shadow:0 8px 24px rgba(247,185,85,.18)!important}
+
+  /* Keyboard mode */
+  body.oa-msgs-typing .oa-bottom-nav{display:none!important}
+  body.oa-msgs-typing .msgs-input-bar.oa-composer-v4{position:fixed!important;left:0!important;right:0!important;bottom:var(--oa-kb-offset,0px)!important;z-index:1500!important}
+  body.oa-msgs-typing .msgs-area{padding-bottom:92px!important}
+}
+
+@media(max-width:420px){
+  body.oa-thread-open .msgs-copy-trades-btn{min-width:46px!important;width:46px!important;padding:0!important;font-size:0!important;border-radius:50%!important}
+  body.oa-thread-open .msgs-copy-trades-btn .msgs-copy-trades-label{display:none!important}
+  body.oa-thread-open .msgs-input-bar.oa-composer-v4{grid-template-columns:42px 42px 42px minmax(0,1fr) 50px!important;gap:6px!important;padding-left:8px!important;padding-right:8px!important}
+  body.oa-thread-open .msgs-input-bar.oa-composer-v4>.msgs-attach-btn,
+  body.oa-thread-open .msgs-input-bar.oa-composer-v4>.msgs-trade-wrap>.msgs-attach-btn,
+  body.oa-thread-open .msgs-input-bar.oa-composer-v4>.msgs-emoji-wrap>.msgs-emoji-btn{width:42px!important;height:42px!important;min-width:42px!important}
+  body.oa-thread-open .msgs-input-bar.oa-composer-v4 .msgs-send,
+  body.oa-thread-open .msgs-input-bar.oa-composer-v4 .msgs-send-btn{width:50px!important;height:50px!important;min-width:50px!important}
+}
+
+/* messages-thread-v6.css */
+/* OrcAgent Messages Thread v6 — authoritative mobile fullscreen thread fixes */
+@media(max-width:767px){
+  html.oa-thread-open,
+  html.oa-thread-open body,
+  html body.oa-shared-ux.oa-thread-open,
+  html body.oa-thread-open{
+    width:100%!important;
+    height:100%!important;
+    min-height:100%!important;
+    margin:0!important;
+    padding:0!important;
+    overflow:hidden!important;
+    background:#070a0f!important;
+  }
+
+  html body.oa-thread-open #oa-bottom-nav,
+  html body.oa-thread-open .oa-bottom-nav,
+  html body.oa-thread-open .oa-bottom-nav-spacer,
+  html body.oa-thread-open #oa-bottom-nav-spacer,
+  html body.oa-thread-open .bottom-nav-spacer,
+  html body.oa-thread-open .pt-nb-topbar{display:none!important}
+
+  /* Make the conversation its own viewport. This deliberately does not rely
+     on the normal app flex-height because iOS/Phantom can keep nav reserve
+     space in that layout even after the nav itself is hidden. */
+  html body.oa-thread-open #app,
+  html body.oa-thread-open .msgs-main{
+    position:fixed!important;
+    inset:0!important;
+    width:100vw!important;
+    height:100dvh!important;
+    min-height:100dvh!important;
+    max-height:100dvh!important;
+    margin:0!important;
+    padding:0!important;
+    overflow:hidden!important;
+    background:#070a0f!important;
+  }
+  html body.oa-thread-open .msgs-left{display:none!important}
+  html body.oa-thread-open .msgs-right{
+    position:fixed!important;
+    inset:0!important;
+    display:flex!important;
+    flex-direction:column!important;
+    width:100vw!important;
+    height:100dvh!important;
+    min-height:100dvh!important;
+    max-height:100dvh!important;
+    margin:0!important;
+    padding:0!important;
+    overflow:hidden!important;
+    background:#070a0f!important;
+  }
+  html body.oa-thread-open .msgs-thread{
+    position:absolute!important;
+    inset:0!important;
+    display:flex!important;
+    flex-direction:column!important;
+    width:100%!important;
+    height:100%!important;
+    min-height:0!important;
+    margin:0!important;
+    padding:0!important;
+    overflow:hidden!important;
+    background:#070a0f!important;
+  }
+
+  html body.oa-thread-open .msgs-thread-hdr{position:relative!important;top:auto!important;z-index:40!important;flex:0 0 auto!important;min-height:86px!important;padding:11px 10px!important;gap:7px!important;background:#070a0f!important;border-bottom:1px solid #20262f!important;box-shadow:none!important}
+  html body.oa-thread-open .msgs-back{width:30px!important;min-width:30px!important;height:44px!important}
+  html body.oa-thread-open .msgs-back:before{font-size:42px!important}
+  html body.oa-thread-open .msgs-thread-avatar{width:50px!important;height:50px!important;min-width:50px!important}
+  html body.oa-thread-open .msgs-thread-meta{flex:1 1 auto!important;min-width:0!important}
+  html body.oa-thread-open .msgs-thread-name{font-size:18px!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+  html body.oa-thread-open .msgs-thread-status{font-size:11px!important;margin-top:2px!important}
+  html body.oa-thread-open .msgs-copy-trades-btn{display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:6px!important;width:112px!important;min-width:112px!important;height:42px!important;padding:0 11px!important;border-radius:21px!important;font-size:12px!important;border:1px solid rgba(247,185,85,.82)!important;color:#f7b955!important;background:rgba(247,185,85,.035)!important}
+  html body.oa-thread-open .msgs-copy-trades-btn .msgs-copy-trades-label{display:inline!important;font-size:12px!important}
+  html body.oa-thread-open .msgs-more-btn{width:42px!important;height:42px!important;min-width:42px!important}
+
+  /* The message list uses the whole remaining viewport but reserves only the
+     real composer height. */
+  html body.oa-thread-open .msgs-area{
+    flex:1 1 auto!important;
+    min-height:0!important;
+    height:auto!important;
+    overflow-y:auto!important;
+    padding:14px 14px calc(96px + env(safe-area-inset-bottom,0px))!important;
+    gap:9px!important;
+    background:#070a0f!important;
+    overscroll-behavior:contain!important;
+    -webkit-overflow-scrolling:touch!important;
+  }
+  html body.oa-thread-open .msg-wrap.theirs{padding-left:46px!important}
+  html body.oa-thread-open .oa-peer-mini-avatar{width:36px!important;height:36px!important;left:0!important;top:3px!important}
+  html body.oa-thread-open .msg-bubble:not(.msg-trade){font-size:15px!important;line-height:1.43!important;max-width:78vw!important;padding:11px 14px!important}
+
+  html body.oa-thread-open .msg-bubble.msg-trade{width:calc(100vw - 74px)!important;max-width:520px!important}
+  html body.oa-thread-open .oa-dm-trade-card{border-radius:16px!important}
+  html body.oa-thread-open .oa-dm-trade-top{padding:13px 14px 10px!important}
+  html body.oa-thread-open .oa-dm-trade-token{font-size:18px!important}
+  html body.oa-thread-open .oa-dm-trade-pct{font-size:17px!important;padding:5px 8px!important}
+  html body.oa-thread-open .oa-dm-trade-stats{margin:0 14px!important;grid-template-columns:repeat(3,minmax(0,1fr))!important}
+  html body.oa-thread-open .oa-dm-trade-stat{padding:10px 6px 10px 0!important;min-width:0!important}
+  html body.oa-thread-open .oa-dm-trade-stat+.oa-dm-trade-stat{padding-left:8px!important}
+  html body.oa-thread-open .oa-dm-trade-label{font-size:9px!important}
+  html body.oa-thread-open .oa-dm-trade-value{font-size:11px!important;overflow:visible!important;text-overflow:clip!important;white-space:normal!important;word-break:break-word!important;line-height:1.25!important}
+  html body.oa-thread-open .oa-dm-trade-bottom{padding:11px 14px 13px!important}
+  html body.oa-thread-open .oa-dm-trade-pnl{font-size:13px!important}
+
+  /* Composer is anchored to the viewport bottom, not the normal page flow. */
+  html body.oa-thread-open .msgs-input-bar.oa-composer-v4{
+    position:absolute!important;
+    left:0!important;
+    right:0!important;
+    bottom:0!important;
+    z-index:80!important;
+    display:grid!important;
+    grid-template-columns:42px 42px 42px minmax(0,1fr) 50px!important;
+    grid-template-rows:auto!important;
+    align-items:center!important;
+    gap:6px!important;
+    width:100%!important;
+    margin:0!important;
+    padding:10px 8px calc(10px + env(safe-area-inset-bottom,0px))!important;
+    background:#090d12!important;
+    border-top:1px solid #20262f!important;
+    box-shadow:0 -10px 28px rgba(0,0,0,.2)!important;
+  }
+  html body.oa-thread-open .oa-compose-text-wrap{grid-column:4!important;grid-row:1!important;min-width:0!important;min-height:50px!important;max-height:98px!important;border-radius:26px!important}
+  html body.oa-thread-open .msgs-input.oa-msgs-textarea{height:50px!important;min-height:50px!important;max-height:98px!important;padding:13px 15px!important;font-size:16px!important}
+  html body.oa-thread-open .msgs-input-bar.oa-composer-v4>.msgs-attach-btn,
+  html body.oa-thread-open .msgs-input-bar.oa-composer-v4>.msgs-trade-wrap>.msgs-attach-btn,
+  html body.oa-thread-open .msgs-input-bar.oa-composer-v4>.msgs-emoji-wrap>.msgs-emoji-btn{width:42px!important;height:42px!important;min-width:42px!important}
+  html body.oa-thread-open .msgs-input-bar.oa-composer-v4 .msgs-send,
+  html body.oa-thread-open .msgs-input-bar.oa-composer-v4 .msgs-send-btn{width:50px!important;height:50px!important;min-width:50px!important}
+
+  html body.oa-msgs-typing #oa-bottom-nav,
+  html body.oa-msgs-typing .oa-bottom-nav{display:none!important}
+  html body.oa-msgs-typing .msgs-input-bar.oa-composer-v4{position:fixed!important;left:0!important;right:0!important;bottom:var(--oa-kb-offset,0px)!important;z-index:1600!important}
+  html body.oa-msgs-typing .msgs-area{padding-bottom:96px!important}
+}
+
+/* iPhone 390px: keep the full Copy Trades pill instead of collapsing to an
+   empty round button. Tighten the surrounding header controls to make room. */
+@media(max-width:390px){
+  html body.oa-thread-open .msgs-thread-hdr{padding-left:7px!important;padding-right:7px!important;gap:5px!important}
+  html body.oa-thread-open .msgs-back{width:26px!important;min-width:26px!important}
+  html body.oa-thread-open .msgs-thread-avatar{width:46px!important;height:46px!important;min-width:46px!important}
+  html body.oa-thread-open .msgs-thread-name{font-size:16px!important}
+  html body.oa-thread-open .msgs-thread-status{font-size:10px!important}
+  html body.oa-thread-open .msgs-copy-trades-btn{display:inline-flex!important;width:96px!important;min-width:96px!important;height:40px!important;padding:0 8px!important;border-radius:20px!important;font-size:11px!important;gap:4px!important}
+  html body.oa-thread-open .msgs-copy-trades-btn .msgs-copy-trades-label{display:inline!important;font-size:11px!important;white-space:nowrap!important}
+  html body.oa-thread-open .msgs-more-btn{width:40px!important;height:40px!important;min-width:40px!important}
+
+  /* Slightly denser cards on iPhone so chat context stays visible. */
+  html body.oa-thread-open .msg-bubble.msg-trade{width:calc(100vw - 62px)!important}
+  html body.oa-thread-open .oa-dm-trade-top{padding:11px 12px 8px!important}
+  html body.oa-thread-open .oa-dm-trade-stats{margin:0 12px!important}
+  html body.oa-thread-open .oa-dm-trade-stat{padding-top:8px!important;padding-bottom:8px!important}
+  html body.oa-thread-open .oa-dm-trade-bottom{padding:9px 12px 10px!important}
+}
+
+/* messages-home-token-card-v1.css */
+/* OrcAgent DM token/trade card v1 — same visual language as Home. */
+.dm-home-token-card{position:relative;overflow:hidden;background:#0d1117;border:1px solid #1a1f2e;border-radius:10px;margin:2px 0;font-family:'JetBrains Mono',monospace;cursor:pointer;min-height:118px}
+.dm-home-token-banner{position:absolute;inset:0;background-size:cover;background-position:center;opacity:.72}
+.dm-home-token-shade{position:absolute;inset:0;background:linear-gradient(to bottom,rgba(13,17,23,.5),rgba(13,17,23,.95))}
+.dm-home-token-content{position:relative;z-index:1;padding:14px 16px 10px}
+.dm-home-token-main{display:flex;justify-content:space-between;align-items:center;gap:14px}
+.dm-home-token-left{flex:1;min-width:0}
+.dm-home-token-title-row{display:flex;align-items:center;gap:8px;margin-bottom:7px;min-width:0}
+.dm-home-token-side{font-size:10px;font-weight:800;border-radius:4px;padding:2px 6px;line-height:1.2;flex-shrink:0}
+.dm-home-token-side.buy{color:#00d084;border:1px solid rgba(0,208,132,.28);background:rgba(0,208,132,.06)}
+.dm-home-token-side.sell{color:#ff4757;border:1px solid rgba(255,71,87,.28);background:rgba(255,71,87,.06)}
+.dm-home-token-symbol{font-size:15px;font-weight:800;color:#eef1f5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dm-home-token-prices{display:flex;align-items:center;gap:7px;flex-wrap:wrap;color:#8a919c;font-size:10px;line-height:1.4}
+.dm-home-token-prices b{color:#707986;font-weight:600}.dm-home-token-prices em{font-style:normal;color:#cbd1d8}.dm-home-token-dot{color:#3b434d}
+.dm-home-token-pnl{color:#f7b955;font-size:12px;font-weight:700;margin-top:6px}
+.dm-home-token-pct{font-size:24px;font-weight:800;line-height:1;white-space:nowrap;flex-shrink:0;text-shadow:0 2px 14px rgba(0,0,0,.35)}
+.dm-home-token-pct.pos{color:#00d084}.dm-home-token-pct.neg{color:#ff4757}
+.dm-home-token-footer{display:flex;justify-content:flex-end;gap:6px;align-items:center;margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.06);color:#a5adb8;font-size:10px;font-family:'Geist',system-ui,sans-serif}
+.dm-home-token-card:focus-visible{outline:2px solid rgba(247,185,85,.85);outline-offset:2px}
+@media(max-width:767px){
+  body.oa-thread-open .msg-bubble.msg-trade:has(.dm-home-token-card){width:calc(100vw - 74px)!important;max-width:520px!important}
+  body.oa-thread-open .dm-home-token-card{border-radius:14px;min-height:112px}
+  body.oa-thread-open .dm-home-token-content{padding:13px 14px 9px}
+  body.oa-thread-open .dm-home-token-pct{font-size:21px}
+}

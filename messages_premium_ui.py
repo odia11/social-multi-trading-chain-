@@ -1,53 +1,30 @@
-"""Inject the approved OrcAgent premium inbox/chat UI onto the existing messages page.
+"""Load the approved Messages presentation as two ordered bundles.
 
-Messaging routes, data and actions remain owned by templates/messages.html. This
-adapter only loads the approved presentation/enhancement assets.
+The bundle order matches the previous assets, preserving cascade and behaviour
+with nine fewer HTTP requests.
 """
-
-_INSTALLED = False
 
 
 def install(dashboard_module):
-    global _INSTALLED
-    if _INSTALLED:
-        return
-    _INSTALLED = True
     app = dashboard_module.app
+    if getattr(app, '_orca_messages_ui_installed', False):
+        return
+    app._orca_messages_ui_installed = True
 
     @app.after_request
-    def _messages_premium_ui(response):
+    def _messages_ui(response):
         try:
             if response.status_code != 200 or response.mimetype != 'text/html':
                 return response
             body = response.get_data(as_text=True)
             if '<title>Messages — OrcAgent</title>' not in body:
                 return response
-
-            css_assets = [
-                ('messages-premium-v2.css', '/static/messages-premium-v2.css?v=1'),
-                ('messages-premium-v3.css', '/static/messages-premium-v3.css?v=2'),
-                ('messages-composer-v4.css', '/static/messages-composer-v4.css?v=3'),
-                ('messages-thread-v5.css', '/static/messages-thread-v5.css?v=1'),
-                ('messages-thread-v6.css', '/static/messages-thread-v6.css?v=3'),
-                ('messages-home-token-card-v1.css', '/static/messages-home-token-card-v1.css?v=1'),
-            ]
-            for marker, href in css_assets:
-                if marker not in body and '</head>' in body:
-                    body = body.replace('</head>', f'<link rel="stylesheet" href="{href}">\n</head>', 1)
-
-            js_assets = [
-                ('messages-premium-v3.js', '/static/messages-premium-v3.js?v=1'),
-                ('messages-composer-v4.js', '/static/messages-composer-v4.js?v=3'),
-                ('messages-thread-v5.js', '/static/messages-thread-v5.js?v=2'),
-                ('messages-thread-v6.js', '/static/messages-thread-v6.js?v=3'),
-                ('messages-home-token-card-v1.js', '/static/messages-home-token-card-v1.js?v=2'),
-            ]
-            for marker, src in js_assets:
-                if marker not in body and '</body>' in body:
-                    body = body.replace('</body>', f'<script src="{src}" defer></script>\n</body>', 1)
-
+            if 'messages-ui.css' not in body and '</head>' in body:
+                body = body.replace('</head>', '<link rel="stylesheet" href="/static/messages-ui.css?v=1">\n</head>', 1)
+            if 'messages-ui.js' not in body and '</body>' in body:
+                body = body.replace('</body>', '<script src="/static/messages-ui.js?v=1" defer></script>\n</body>', 1)
             response.set_data(body)
             response.content_length = len(response.get_data())
         except Exception as exc:
-            app.logger.warning('messages premium UI injection skipped: %s', exc)
+            app.logger.warning('messages UI injection skipped: %s', exc)
         return response
