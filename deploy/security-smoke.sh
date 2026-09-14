@@ -10,8 +10,6 @@ BASE=http://127.0.0.1:8080
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
 
-# Gunicorn may need a moment before it accepts its first request. This script
-# is also used as systemd ExecStartPost, while the unit is still "activating".
 for _ in $(seq 1 15); do
   if curl -fsS -D "$TMP" -o /dev/null --max-time 4 "$BASE/"; then
     break
@@ -65,6 +63,20 @@ esac
 MODE="$(stat -c '%a' /etc/orcagent.env 2>/dev/null || true)"
 [ "$MODE" = "640" ] || [ "$MODE" = "600" ] || fail "/etc/orcagent.env permissions are $MODE (expected 640/600)"
 ok "production environment file is not world-readable"
+
+# Persistent application state can contain wallet/session records and audit
+# information. Nothing under /data should be group/world readable or writable.
+DATA_MODE="$(stat -c '%a' /data 2>/dev/null || true)"
+[ "$DATA_MODE" = "700" ] || fail "/data permissions are $DATA_MODE (expected 700)"
+if find /data -xdev \( -type f -o -type d \) \( -perm /0077 \) -print -quit 2>/dev/null | grep -q .; then
+  BAD_PATH="$(find /data -xdev \( -type f -o -type d \) \( -perm /0077 \) -print -quit 2>/dev/null || true)"
+  fail "persistent state is accessible to group/world: $BAD_PATH"
+fi
+if [ -f /data/orcagent.db ]; then
+  DB_MODE="$(stat -c '%a' /data/orcagent.db)"
+  [ "$DB_MODE" = "600" ] || fail "database permissions are $DB_MODE (expected 600)"
+fi
+ok "persistent application state is owner-only"
 
 STATE="$(systemctl is-active orcagent 2>/dev/null || true)"
 case "$STATE" in active|activating) ;; *) fail "orcagent service state is $STATE" ;; esac
