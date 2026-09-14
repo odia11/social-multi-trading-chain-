@@ -25,8 +25,6 @@ def install(d):
     d._orca_multichain_portfolio_installed = True
     app = d.app
 
-    # Resolve the existing view by rule instead of depending on its Python
-    # function name, which has changed over the lifetime of the project.
     endpoint = None
     for rule in app.url_map.iter_rules():
         if rule.rule == '/api/wallet/tokens' and 'GET' in rule.methods:
@@ -52,8 +50,6 @@ def install(d):
             state = d.get_user_state(wallet) or {}
             positions = state.get('positions') or {}
 
-            # Existing SPL tokens remain authoritative for Solana. Only append
-            # positions that explicitly identify a supported non-Solana chain.
             seen = set()
             for t in tokens:
                 addr = str(t.get('mint') or t.get('address') or t.get('token_address') or '').lower()
@@ -79,9 +75,6 @@ def install(d):
                 name = str(pos.get('name') or symbol)
                 buy_price = _num(pos.get('buy_price', pos.get('entry_price', 0)))
                 price = _num(pos.get('price_usd', pos.get('current_price', 0)))
-
-                # Prefer a fresh market price when the app can resolve it, but
-                # never hide the holding merely because pricing is unavailable.
                 try:
                     td = d.get_token_data(token_address)
                     if td:
@@ -131,7 +124,9 @@ def install(d):
             if marker in html:
                 return response
             version = getattr(d, '_APP_VERSION', '1')
-            tag = '<script src="/static/portfolio-multichain.js?v=%s" defer %s></script>' % (version, marker)
+            # pf-stable-2 is intentional: iOS/PWA can hold a previous controller
+            # even after deploy when the app version itself does not change.
+            tag = '<script src="/static/portfolio-multichain.js?v=%s-pf-stable-2" defer %s></script>' % (version, marker)
             html = html.replace('</body>', tag + '</body>', 1) if '</body>' in html else html + tag
             response.set_data(html)
             response.content_length = len(response.get_data())
