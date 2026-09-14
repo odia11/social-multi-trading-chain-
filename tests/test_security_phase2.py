@@ -18,6 +18,7 @@ def check(name, cond):
     print(('PASS ' if cond else 'FAIL ') + name)
 
 entry = read('app_entry.py')
+canonical = read('canonical_domain.py')
 replay = read('auth_replay_hardening.py')
 ssrf = read('ssrf_hardening.py')
 upload = read('upload_hardening.py')
@@ -30,11 +31,17 @@ sec = read('security_hardening.py')
 secret = read('secret_hygiene.py')
 monitor = read('security_monitoring.py')
 
-for module in ('auth_replay_hardening','ssrf_hardening','secret_hygiene','owner_money_hardening',
+for module in ('canonical_domain','auth_replay_hardening','ssrf_hardening','secret_hygiene','owner_money_hardening',
                'abuse_rate_hardening','upload_hardening','response_privacy_hardening','audit_hardening',
                'security_monitoring','backup_scheduler'):
     check(f'{module} is installed by app_entry', f'from {module} import install' in entry)
 
+check('untrusted Host headers are rejected',
+      '_ALLOWED_HOSTS' in canonical and 'abort(400)' in canonical and 'request.host' in canonical)
+check('canonical www host is redirected without changing mutation method',
+      '_ALIAS_HOSTS' in canonical and 'code=308' in canonical)
+check('loopback host remains allowed for server health checks',
+      '127.0.0.1' in canonical and 'localhost' in canonical)
 check('login nonce is single-use with an atomic unique claim',
       'BEGIN IMMEDIATE' in replay and 'auth_nonce_claims' in replay and 'IntegrityError' in replay)
 check('login nonce expires quickly', '_NONCE_TTL_SECONDS = 600' in replay)
