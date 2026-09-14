@@ -33,39 +33,14 @@ say "Creating the service user (no login shell — it only runs the app)"
 id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin "$APP_USER"
 
 say "Installing the application into $APP_DIR"
-# --delete keeps the deployed copy exactly matching the repo, but never
-# reaches into $DATA_DIR, which lives outside $APP_DIR precisely so that
-# redeploying can't touch the database.
-# 'venv' is excluded for a reason that cost an outage: a virtualenv records
-# the ABSOLUTE path of its own python inside every script it installs. Copying
-# one built in ~/orcagent into /opt/orcagent leaves gunicorn starting with
-#     #!/home/<you>/orcagent/venv/bin/python3
-# and the service user cannot read another user's home, so it fails to exec
-# with "Permission denied" on a file that looks perfectly executable.
-#
-# .secret_key is excluded because --delete would remove it: it is gitignored,
-# so it does not exist in the clone, and rsync deletes anything in $APP_DIR
-# that the source does not have. That is exactly what happened -- every deploy
-# deleted the key that signs login sessions, the next start generated a fresh
-# one, and every user in every browser was logged out and had to reconnect
-# their wallet. The app now keeps the key in DATA_DIR instead, and this
-# exclusion protects any install that still has one here, including long
-# enough for that migration to run once.
 if command -v rsync >/dev/null 2>&1; then
   rsync -a --delete --exclude '.git' --exclude '__pycache__' --exclude '*.db' \
         --exclude 'venv' --exclude '.secret_key' "$REPO_DIR"/ "$APP_DIR"/
 
-# ── stamp which commit this is ──
-# .git is deliberately excluded above, so the deployed copy cannot ask git
-# what it is -- and _app_version() fell back to the time the process started.
-# That is a fine cache-buster and useless as an answer to "which code is
-# actually running", which is the first question in every support round.
-if [ -e "$REPO_DIR/.git" ]; then
-  git -C "$REPO_DIR" rev-parse --short HEAD > "$APP_DIR/VERSION" 2>/dev/null || true
-fi
+  if [ -e "$REPO_DIR/.git" ]; then
+    git -C "$REPO_DIR" rev-parse --short HEAD > "$APP_DIR/VERSION" 2>/dev/null || true
+  fi
 else
-  # Without rsync there is no --delete, so removed files linger. Worth knowing
-  # rather than silently getting a different deploy.
   echo "  rsync not installed — copying without --delete (stale files will remain)"
   find "$REPO_DIR" -mindepth 1 -maxdepth 1 \
        ! -name .git ! -name venv ! -name '__pycache__' \
@@ -74,17 +49,10 @@ fi
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
 say "Creating the data directory ($DATA_DIR)"
-# The app writes its database, logs, backups and heartbeat here. It picks
-# /data automatically when it exists (see _DATA_DIR in dashboard.py), which
-# is what keeps your data outside the deployed code.
 mkdir -p "$DATA_DIR/backups"
 chown -R "$APP_USER:$APP_USER" "$DATA_DIR"
 
 say "Building the Python environment"
-# A venv whose scripts point somewhere else is worse than no venv: it looks
-# installed and fails at exec time with a permissions error that says nothing
-# about the real cause. `python3 -m venv` on an existing directory does NOT
-# rewrite those paths, so the only reliable repair is to rebuild it.
 if [ -x "$APP_DIR/venv/bin/gunicorn" ] \
    && ! head -1 "$APP_DIR/venv/bin/gunicorn" | grep -q "^#\!$APP_DIR/"; then
   echo "  existing venv points outside $APP_DIR ($(head -1 "$APP_DIR/venv/bin/gunicorn"))"
@@ -96,15 +64,6 @@ python3 -m venv "$APP_DIR/venv"
 "$APP_DIR/venv/bin/pip" install --quiet -r "$APP_DIR/requirements.txt"
 chown -R "$APP_USER:$APP_USER" "$APP_DIR/venv"
 
-# Checked, not assumed. This is the exact failure that took the site down.
-# The output is CAPTURED rather than discarded: a check that fails without
-# saying why just moves the guesswork one step later, which is the whole
-# problem it exists to solve.
-# `cd "$APP_DIR"` first, in a subshell. sudo carries the CURRENT directory
-# into the target user's session, and this script is normally run from the
-# git clone in someone's home -- which the service user cannot enter. sudo
-# then fails with "can't chdir" before the command runs at all, and the check
-# reports a broken venv that is in fact perfectly fine.
 if ! VENV_ERR="$(cd "$APP_DIR" && sudo -u "$APP_USER" "$APP_DIR/venv/bin/gunicorn" --version 2>&1)"; then
   printf '\n\033[1;31m✗ The service user cannot run %s\033[0m\n' "$APP_DIR/venv/bin/gunicorn"
   echo "  it said: $VENV_ERR"
@@ -122,40 +81,58 @@ else
   cp "$REPO_DIR/deploy/env.example" "$ENV_FILE"
   echo "  created from the template — FILL IT IN before starting the service"
 fi
-# Readable only by root and the service user: this file holds the encryption
-# key that every stored wallet key depends on.
 chown root:"$APP_USER" "$ENV_FILE"
 chmod 640 "$ENV_FILE"
 
 say "Installing the systemd services"
-cp "$REPO_DIR/deploy/orcagent.service"          /etc/systemd/system/orcagent.service
-cp "$REPO_DIR/deploy/orcagent-monitor.service"  /etc/systemd/system/orcagent-monitor.service
-cp "$REPO_DIR/deploy/orcagent-backup.service"   /etc/systemd/system/orcagent-backup.service
-cp "$REPO_DIR/deploy/orcagent-backup.timer"     /etc/systemd/system/orcagent-backup.timer
+cp "$REPO_DIR/deploy/orcagent.service"           /etc/systemd/system/orcagent.service
+cp "$REPO_DIR/deploy/orcagent-monitor.service"   /etc/systemd/system/orcagent-monitor.service
+cp "$REPO_DIR/deploy/orcagent-backup.service"    /etc/systemd/system/orcagent-backup.service
+cp "$REPO_DIR/deploy/orcagent-backup.timer"      /etc/systemd/system/orcagent-backup.timer
 chmod 755 "$APP_DIR/deploy/backup.sh"
+
+# Fail before restarting production if a security directive is misspelled or
+# a unit is otherwise invalid. This prevents a hardening change from turning
+# into an outage on deploy.
+if ! systemd-analyze verify \
+    /etc/systemd/system/orcagent.service \
+    /etc/systemd/system/orcagent-monitor.service \
+    /etc/systemd/system/orcagent-backup.service \
+    /etc/systemd/system/orcagent-backup.timer >/tmp/orcagent-systemd-verify.log 2>&1; then
+  cat /tmp/orcagent-systemd-verify.log
+  die "systemd unit verification failed — production was not restarted"
+fi
+echo "  systemd unit verification passed"
+
 systemctl daemon-reload
 systemctl enable orcagent orcagent-monitor >/dev/null
-# Enabling with --now guarantees the verified encrypted backup schedule is
-# actually active after every normal deploy, not merely present in Git.
 systemctl enable --now orcagent-backup.timer >/dev/null
 
-say "Verifying backup timer"
+say "Verifying backup protection"
 if ! systemctl is-enabled --quiet orcagent-backup.timer; then
   die "orcagent-backup.timer is not enabled"
 fi
 if ! systemctl is-active --quiet orcagent-backup.timer; then
   die "orcagent-backup.timer is not active"
 fi
+
+# Prove the unprivileged, sandboxed backup can really read the DB and secret
+# and create a restore-verified encrypted artifact. If there is no DB yet the
+# script exits cleanly and the fresh-install path remains valid.
+if ! systemctl start orcagent-backup.service; then
+  journalctl -u orcagent-backup.service -n 40 --no-pager || true
+  die "encrypted backup service failed its execution test"
+fi
+if [ -f "$DATA_DIR/orcagent.db" ]; then
+  LATEST_BACKUP="$(ls -1t "$DATA_DIR"/backups/daily/orcagent-*.db.gz.enc 2>/dev/null | head -1 || true)"
+  [ -n "$LATEST_BACKUP" ] || die "backup service ran but produced no encrypted backup"
+  echo "  verified encrypted backup: $LATEST_BACKUP"
+fi
 NEXT_BACKUP="$(systemctl list-timers orcagent-backup.timer --no-legend 2>/dev/null | awk '{print $1" "$2" "$3" "$4}' || true)"
-echo "  encrypted daily backup timer active${NEXT_BACKUP:+ — next: $NEXT_BACKUP}"
+echo "  daily backup timer active${NEXT_BACKUP:+ — next: $NEXT_BACKUP}"
 
 say "Installing the nginx site"
 NGINX_SITE=/etc/nginx/sites-available/orcagent
-# certbot rewrites this file IN PLACE to add the certificate and the HTTPS
-# redirect. Copying the template over it would throw all of that away and
-# reload nginx serving plain HTTP -- on a site whose session cookie is Secure,
-# that means nobody can log in. So once a certificate is in there, the file
-# belongs to certbot and this script leaves it alone.
 if [ -f "$NGINX_SITE" ] && grep -q 'ssl_certificate' "$NGINX_SITE"; then
   echo "  already has a certificate — left untouched so certbot's config survives"
   echo "  (if you need the template back: certbot delete, then re-run this)"
