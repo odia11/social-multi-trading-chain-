@@ -35,9 +35,16 @@ else
 fi
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
-say "Creating the data directory ($DATA_DIR)"
+say "Creating and locking down the data directory ($DATA_DIR)"
 mkdir -p "$DATA_DIR/backups"
 chown -R "$APP_USER:$APP_USER" "$DATA_DIR"
+# Database rows, wallet/session material, audit logs and backup ciphertext are
+# private application state. Repair permissions from older deployments too,
+# rather than only relying on the new service UMask for files created later.
+find "$DATA_DIR" -xdev -type d -exec chmod 700 {} +
+find "$DATA_DIR" -xdev -type f -exec chmod 600 {} +
+chmod 700 "$DATA_DIR" "$DATA_DIR/backups"
+echo "  persistent state is owner-only"
 
 say "Building the Python environment"
 if [ -x "$APP_DIR/venv/bin/gunicorn" ] \
@@ -121,9 +128,6 @@ else
   echo "  installed plain HTTP template — run certbot on a fresh server"
 fi
 
-# Existing production TLS files belong to Certbot, but they still need the
-# security snippet. Inject one include after OrcAgent's server_name without
-# replacing any certificate, redirect or TLS directive.
 if ! grep -qF 'include /etc/nginx/snippets/orcagent-server-security.conf;' "$NGINX_SITE"; then
   sed -i '/server_name[[:space:]]\+orcagent\.fun[[:space:]]\+www\.orcagent\.fun;/a\    include /etc/nginx/snippets/orcagent-server-security.conf;' "$NGINX_SITE"
 fi
@@ -135,8 +139,6 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t || die "nginx security configuration failed validation"
 systemctl reload nginx
 
-# Confirm the live nginx configuration actually loaded both layers; checking
-# only the files on disk can miss include/path mistakes.
 NGINX_DUMP="$(nginx -T 2>/dev/null)"
 printf '%s' "$NGINX_DUMP" | grep -q 'limit_conn_zone .*orca_conn' \
   || die "nginx connection-abuse zone is not loaded"
@@ -152,8 +154,9 @@ cat <<EOF
 Setup complete.
 
 The application process is sandboxed, startup validates security headers and
-loopback binding, nginx rejects TRACE/CONNECT and limits abusive connection
-fan-out, and encrypted restore-verified database backups are scheduled.
+loopback binding, persistent data is owner-only, nginx rejects TRACE/CONNECT
+and limits abusive connection fan-out, and encrypted restore-verified database
+backups are scheduled.
 
 Useful checks:
     systemctl status orcagent
