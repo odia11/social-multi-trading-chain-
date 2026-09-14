@@ -29,6 +29,7 @@ from financial_authorization_hardening import install as _install_financial_auth
 from owner_money_hardening import install as _install_owner_money_hardening
 from abuse_rate_hardening import install as _install_abuse_rate_hardening
 from upload_hardening import install as _install_upload_hardening
+from trading_wallet_generator import install as _install_trading_wallet_generator
 from response_privacy_hardening import install as _install_response_privacy_hardening
 from audit_hardening import install as _install_audit_hardening
 from security_monitoring import install as _install_security_monitoring
@@ -70,6 +71,12 @@ _install_financial_authorization_hardening(_dashboard)
 _install_owner_money_hardening(_dashboard)
 _install_abuse_rate_hardening(_dashboard)
 _install_upload_hardening(_dashboard)
+
+# New-user wallet onboarding: generates a dedicated Solana wallet plus one
+# shared EVM wallet, displays both keys once for backup, and only stores them
+# after explicit confirmation using dashboard.py's existing encrypted-key format.
+_install_trading_wallet_generator(_dashboard)
+
 _install_response_privacy_hardening(_dashboard)
 _install_audit_hardening(_dashboard)
 _install_security_monitoring(_dashboard)
