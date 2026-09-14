@@ -51,6 +51,7 @@ jobs:
           python tests/test_stay_connected.py
           python tests/test_deploy_security.py
           python tests/test_browser_shared_secret_hardening.py
+          python tests/test_admin_csrf_hardening.py
 
       - name: pip-audit
         run: pip-audit --strict -r requirements.txt
