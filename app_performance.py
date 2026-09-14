@@ -32,6 +32,22 @@ def install(appmod) -> None:
                 if asset not in html:
                     tags.append(f'<script src="{src}" defer{extra}></script>')
 
+            # Several older templates still register `pageshow => location.reload()`.
+            # On iOS/PWA that turns the browser's instant back-forward cache into a
+            # visible white/black flash and a full route reload. Register this guard
+            # in <head> before those body scripts are parsed. It only suppresses the
+            # persisted BFCache reload; normal navigation and normal pageshow events
+            # are untouched. Fresh data continues through each page's regular polls.
+            if 'data-orca-bfcache-guard="1"' not in html:
+                tags.append(
+                    '<script data-orca-bfcache-guard="1">'
+                    '(function(){window.addEventListener("pageshow",function(e){'
+                    'if(!e.persisted)return;e.stopImmediatePropagation();'
+                    'setTimeout(function(){document.dispatchEvent(new CustomEvent("orca:bfcache-restored"));},0);'
+                    '},true);})();'
+                    '</script>'
+                )
+
             style('app-ux.css', '/static/app-ux.css?v=3', ' id="oa-app-ux-css"')
             script('app-ux.js', '/static/app-ux.js?v=3', ' id="oa-app-ux-js"')
             style('shared-trade-card-v2.css', '/static/shared-trade-card-v2.css?v=1', ' id="oa-shared-trade-card-css"')
