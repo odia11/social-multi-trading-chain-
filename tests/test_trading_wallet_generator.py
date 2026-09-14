@@ -70,8 +70,6 @@ mod = SimpleNamespace(
 install_generator(mod)
 install_privacy(mod)
 
-# Define the general leak probe before the first request; Flask correctly
-# refuses adding routes after request handling has started.
 @app.get('/api/test-secret')
 def secret_probe():
     return {'ok': True, 'private_key': 'must-not-leak'}
@@ -124,6 +122,10 @@ check('stored Solana ciphertext decrypts only for identity wallet', dec(row[0], 
 check('stored EVM ciphertext decrypts only for identity wallet', dec(row[3], 'IDENTITY_WALLET') == payload['evm_private_key'])
 check('runtime marks trading key ready', state.get('IDENTITY_WALLET', {}).get('has_trading_key') is True)
 check('security events never receive plaintext key material', all(payload['solana_private_key'] not in str(x) and payload['evm_private_key'] not in str(x) for x in logs))
+
+# The new-user generator must never silently rotate an existing funded wallet.
+r_existing = client.post('/api/wallet/generate-trading-wallet', headers=headers)
+check('existing trading wallet cannot be overwritten by generator', r_existing.status_code == 409)
 
 r4 = client.get('/api/test-secret')
 check('privacy guard still strips private keys everywhere else', 'private_key' not in r4.get_json())
