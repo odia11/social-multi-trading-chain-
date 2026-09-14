@@ -4,6 +4,11 @@ Authentication endpoints are allowed to return the short-lived values their clie
 actually need. Everywhere else, database/internal credential fields are stripped
 recursively before JSON leaves the process. If redaction itself ever fails, the
 response is replaced with a generic error instead of leaking the original payload.
+
+One deliberately narrow exception exists for new-wallet generation: OrcAgent must
+show a newly generated trading key to its owner once so they can back it up. That
+exact endpoint is schema-checked and forced no-store; no DB-derived secret response
+is permitted through this exception.
 """
 from __future__ import annotations
 
@@ -24,15 +29,21 @@ _AUTH_ALLOWED_PATHS = {
     '/api/wallet/set', '/api/session/remember', '/api/session/resume',
     '/api/pair/claim', '/api/csrf',
 }
+_ONE_TIME_KEY_EXPORT_PATH = '/api/wallet/generate-trading-wallet'
+_ONE_TIME_KEY_EXPORT_FIELDS = {
+    'ok', 'solana_address', 'solana_private_key',
+    'evm_address', 'evm_private_key', 'warning',
+}
+_ONE_TIME_REQUIRED_FIELDS = {
+    'ok', 'solana_address', 'solana_private_key',
+    'evm_address', 'evm_private_key',
+}
 
 
 def _is_secret_field(key: object) -> bool:
     low = str(key).strip().lower()
     if low in _ALWAYS_SECRET:
         return True
-    # Catch schema variations without blanketing ordinary token metadata such
-    # as token_address/token_symbol. Private keys and secrets are never valid
-    # API response fields.
     return (
         low.startswith('encrypted_private_key')
         or low.endswith('_private_key')
@@ -67,6 +78,18 @@ def _replace_with_blocked(response):
     return response
 
 
+def _valid_one_time_key_export(payload) -> bool:
+    if not isinstance(payload, dict) or payload.get('ok') is not True:
+        return False
+    keys = set(payload)
+    if not _ONE_TIME_REQUIRED_FIELDS.issubset(keys):
+        return False
+    if not keys.issubset(_ONE_TIME_KEY_EXPORT_FIELDS):
+        return False
+    return all(isinstance(payload.get(k), str) and payload.get(k)
+               for k in ('solana_address', 'solana_private_key', 'evm_address', 'evm_private_key'))
+
+
 def install(dashboard_module):
     app = dashboard_module.app
     if getattr(app, '_orca_response_privacy_installed', False):
@@ -81,6 +104,16 @@ def install(dashboard_module):
             payload = response.get_json(silent=True)
             if payload is None:
                 return response
+
+            # New generated keys are intentionally shown exactly once. This is
+            # the only API path allowed to emit private-key fields, and only if
+            # its complete response matches the narrow generation schema.
+            if request.path == _ONE_TIME_KEY_EXPORT_PATH and _valid_one_time_key_export(payload):
+                response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+                response.headers['Pragma'] = 'no-cache'
+                response.headers['Expires'] = '0'
+                return response
+
             cleaned = _clean(payload, request.path in _AUTH_ALLOWED_PATHS)
             if cleaned != payload:
                 body = json.dumps(cleaned, separators=(',', ':'), ensure_ascii=False, default=str).encode('utf-8')
@@ -89,8 +122,6 @@ def install(dashboard_module):
                 response.headers['Cache-Control'] = 'no-store'
                 response.content_length = len(body)
         except Exception as exc:
-            # Privacy controls must fail closed. Returning the original body on
-            # a sanitizer error would turn a defensive layer into a secret leak.
             app.logger.error('API response privacy filter blocked response: %s', type(exc).__name__)
             return _replace_with_blocked(response)
         return response
