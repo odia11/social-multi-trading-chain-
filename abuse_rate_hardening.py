@@ -6,13 +6,32 @@ a second wall so a newly added sensitive route cannot accidentally be unlimited.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 
 from flask import jsonify, request
 
 
+def _trusted_client_ip() -> str:
+    # Gunicorn is loopback-only and nginx overwrites X-Real-IP/X-Forwarded-For
+    # with $remote_addr. Prefer X-Real-IP and validate it rather than accepting
+    # an arbitrary client-controlled forwarding chain.
+    for raw in (request.headers.get('X-Real-IP'), request.headers.get('X-Forwarded-For')):
+        value = (raw or '').split(',')[0].strip()
+        if not value:
+            continue
+        try:
+            return str(ipaddress.ip_address(value))
+        except ValueError:
+            continue
+    value = (request.remote_addr or '').strip()
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError:
+        return 'unknown'
+
+
 def _ip_key():
-    ip = (request.headers.get('X-Forwarded-For') or '').split(',')[0].strip() or request.remote_addr or ''
-    return hashlib.sha256(ip.encode()).hexdigest()[:20]
+    return hashlib.sha256(_trusted_client_ip().encode()).hexdigest()[:20]
 
 
 def install(dashboard_module):
