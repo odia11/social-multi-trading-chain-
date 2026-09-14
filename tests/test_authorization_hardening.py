@@ -22,6 +22,10 @@ check('non-privileged roles fail closed',
 check('role query is parameterized',
       "WHERE wallet_address=?" in AUTH and "(wallet,)" in AUTH)
 check('owner wallets are explicitly supported', "OWNER_WALLET" in AUTH)
+check('constant ADMIN_WALLET super-admin is included in owner boundary',
+      "getattr(dashboard_module, 'ADMIN_WALLET'" in AUTH and 'owners.add(admin_wallet)' in AUTH)
+check('dashboard OWNER_WALLETS set is included in owner boundary',
+      "getattr(dashboard_module, 'OWNER_WALLETS'" in AUTH and 'owners.update' in AUTH)
 check('API returns 401 for anonymous access',
       "_deny(401, 'Authentication required')" in AUTH)
 check('API returns 403 for wrong role',
@@ -46,7 +50,7 @@ check('moderator allowlist contains support and moderation actions',
       and "'/api/admin/support/threads/'" in AUTH)
 check('admin mutations are checked before handler execution',
       "path.startswith('/api/admin') and method in _MUTATING" in AUTH
-      and '_admin_mutation_denial(path, role, wallet)' in AUTH)
+      and '_admin_mutation_denial(dashboard_module, path, role, wallet)' in AUTH)
 
 check('authorization layer is installed in production entrypoint',
       '_install_authorization_hardening(_dashboard)' in ENTRY)
