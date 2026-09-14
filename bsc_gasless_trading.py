@@ -1,14 +1,18 @@
-"""0x Gasless v2 adapter for BNB Chain USDC-funded BUYs.
+"""0x Gasless v2 adapter for every EVM BUY OrcAgent supports.
 
-Product rule: the amount a user enters is the maximum amount of USDC they
-spend. They do not need to pre-fund BNB and OrcAgent does not fund BNB for
-them. 0x's relayer pays native gas and bills that gas in the sell token
-(Binance-Peg USDC), while OrcAgent's platform fee is included in the same
-Gasless order via swapFeeBps.
+Product rule: a user may hold only the chain's dollar asset (USDC, or USDG
+on Robinhood Chain) and still BUY with zero native gas token. OrcAgent does
+not subsidize gas. 0x relays the signed EIP-712 order and recovers network
+costs inside the user's sell-token-funded order; OrcAgent's platform fee is
+embedded in that same order via swapFeeBps.
 
-This adapter is intentionally BSC BUY-only. Sells, withdrawals and arbitrary
-ERC20 sends still use the normal on-chain path because a random token cannot
-be assumed to support a gasless permit.
+The filename is kept for backwards compatibility with app_entry.py and older
+deployments, but the adapter is no longer BSC-specific. It derives chain id,
+stable token and decimals from OrcAgent's central registry for BSC, Base,
+Arbitrum, Polygon and Robinhood Chain.
+
+Sells, withdrawals and arbitrary ERC20 transfers intentionally keep the normal
+on-chain gas path: a random token cannot be assumed to support gasless permit.
 """
 from __future__ import annotations
 
@@ -23,18 +27,11 @@ from eth_account import Account
 
 _API = 'https://api.0x.org'
 _HEADERS_VERSION = 'v2'
-_BSC = 'bsc'
-_BSC_CHAIN_ID = 56
 _STATUS_TIMEOUT = 75
 
 
 def _is_buy_context() -> bool:
-    """True only while the existing code is arranging/executing a BUY.
-
-    _ensure_evm_gas() has no action argument and is also used for withdrawals
-    and sells, so globally bypassing it on BSC would strand those operations.
-    Keep the exception narrowly scoped to call stacks that are buying.
-    """
+    """True only while existing code is arranging/executing a BUY."""
     frame = inspect.currentframe()
     try:
         for _ in range(18):
@@ -94,54 +91,93 @@ def _sign_eip712(private_key: str, obj: dict):
     return _split_signature(Account.sign_typed_data(private_key, full_message=full))
 
 
-def _fee_recipient(d):
+def _evm_chain(d, chain_name: str):
+    chain = d.te_registry.get_chain(chain_name)
+    if chain.kind != 'evm' or not chain.chain_id:
+        raise RuntimeError(f'{chain_name} is not an EVM gasless chain')
+    return chain
+
+
+def _stable_decimals(d, chain_name: str, stable) -> int:
+    """Use verified registry decimals; read the deployed ERC20 when unknown."""
+    if stable.decimals is not None:
+        return int(stable.decimals)
+    w3 = d._get_web3(chain_name)
+    abi = [{
+        'constant': True, 'inputs': [], 'name': 'decimals',
+        'outputs': [{'name': '', 'type': 'uint8'}], 'type': 'function'
+    }]
+    contract = w3.eth.contract(address=w3.to_checksum_address(stable.address), abi=abi)
+    decimals = int(contract.functions.decimals().call())
+    if decimals < 0 or decimals > 36:
+        raise RuntimeError(f'implausible {stable.symbol} decimals on {chain_name}: {decimals}')
+    try:
+        d.te_registry.verify_decimals(chain_name, stable.address, decimals, source='on-chain contract')
+    except Exception:
+        pass
+    return decimals
+
+
+def _to_stable_raw(d, chain_name: str, amount: Decimal, stable) -> int:
+    decimals = _stable_decimals(d, chain_name, stable)
+    scaled = amount * (Decimal(10) ** decimals)
+    if scaled != scaled.to_integral_value():
+        raise RuntimeError(
+            f'{amount} has more precision than {stable.symbol} on {chain_name} can represent')
+    return int(scaled)
+
+
+def _fee_recipient(d, chain_name: str):
     addr = ''
     try:
-        addr = (d._evm_fee_recipient(_BSC) or '').strip()
+        addr = (d._evm_fee_recipient(chain_name) or '').strip()
     except Exception:
         addr = ''
     if not addr or not addr.startswith('0x') or len(addr) != 42:
-        raise RuntimeError('EVM fee wallet is not configured; refusing to create a trade with unaccounted platform fees')
+        raise RuntimeError(
+            f'EVM fee wallet is not configured for {chain_name}; refusing a trade with unaccounted platform fees')
     return addr
 
 
-def _gasless_quote(d, private_key: str, buy_token: str, amount_usdc: str):
-    chain = d.te_registry.get_chain(_BSC)
+def _gasless_quote(d, private_key: str, buy_token: str, amount_usdc: str, chain_name: str):
+    chain = _evm_chain(d, chain_name)
     stable = chain.stable
     amount = Decimal(str(amount_usdc))
     if amount <= 0:
-        raise RuntimeError('USDC amount must be greater than zero')
-    sell_raw = d.te_registry.to_raw(amount, stable)
+        raise RuntimeError(f'{stable.symbol} amount must be greater than zero')
+    sell_raw = _to_stable_raw(d, chain_name, amount, stable)
     taker = Account.from_key(private_key).address
     fee_bps = int((Decimal(str(d.FEE_RATE_TXN)) * Decimal('10000')).to_integral_value())
     params = {
-        'chainId': str(_BSC_CHAIN_ID),
+        'chainId': str(chain.chain_id),
         'sellToken': stable.address,
         'buyToken': buy_token,
         'sellAmount': str(sell_raw),
         'taker': taker,
-        'swapFeeRecipient': _fee_recipient(d),
+        'swapFeeRecipient': _fee_recipient(d, chain_name),
         'swapFeeBps': str(fee_bps),
         'swapFeeToken': stable.address,
     }
     r = requests.get(_API + '/gasless/quote', params=params,
                      headers=_api_headers(d), timeout=15)
-    q = _json_response(r, '0x gasless quote')
+    q = _json_response(r, f'0x gasless quote ({chain.display_name})')
     if q.get('liquidityAvailable') is False:
-        raise RuntimeError('No gasless BSC liquidity route is available for this token')
+        raise RuntimeError(f'No gasless {chain.display_name} liquidity route is available for this token')
     if not q.get('trade'):
-        raise RuntimeError('0x gasless quote contained no executable trade')
-    return q
+        raise RuntimeError(f'0x gasless quote for {chain.display_name} contained no executable trade')
+    return q, chain
 
 
-def _submit_and_wait(d, private_key: str, quote: dict):
+def _submit_and_wait(d, private_key: str, quote: dict, chain) -> str:
     issues = quote.get('issues') or {}
     allowance_needed = issues.get('allowance') is not None
     approval = quote.get('approval')
     approval_submit = None
     if allowance_needed:
         if not approval:
-            raise RuntimeError('This USDC approval cannot be completed gaslessly; no BNB will be requested or spent')
+            raise RuntimeError(
+                f'This {chain.stable.symbol} approval cannot be completed gaslessly on '
+                f'{chain.display_name}; no {chain.native.symbol} will be requested or spent')
         approval_submit = {
             'type': approval.get('type'),
             'eip712': approval.get('eip712'),
@@ -155,14 +191,14 @@ def _submit_and_wait(d, private_key: str, quote: dict):
             'eip712': trade.get('eip712'),
             'signature': _sign_eip712(private_key, trade),
         },
-        'chainId': _BSC_CHAIN_ID,
+        'chainId': int(chain.chain_id),
     }
     if approval_submit:
         body['approval'] = approval_submit
 
     r = requests.post(_API + '/gasless/submit', json=body,
                       headers=_api_headers(d), timeout=15)
-    out = _json_response(r, '0x gasless submit')
+    out = _json_response(r, f'0x gasless submit ({chain.display_name})')
     trade_hash = out.get('tradeHash')
     if not trade_hash:
         raise RuntimeError('0x gasless submit returned no tradeHash')
@@ -171,9 +207,9 @@ def _submit_and_wait(d, private_key: str, quote: dict):
     last = ''
     while time.time() < deadline:
         sr = requests.get(_API + f'/gasless/status/{trade_hash}',
-                          params={'chainId': str(_BSC_CHAIN_ID)},
+                          params={'chainId': str(chain.chain_id)},
                           headers=_api_headers(d), timeout=12)
-        status = _json_response(sr, '0x gasless status')
+        status = _json_response(sr, f'0x gasless status ({chain.display_name})')
         last = str(status.get('status') or '').lower()
         if last == 'confirmed':
             txs = status.get('transactions') or []
@@ -184,21 +220,18 @@ def _submit_and_wait(d, private_key: str, quote: dict):
             reason = status.get('reason') or status.get('error') or last
             raise RuntimeError(f'0x gasless trade {last}: {reason}')
         time.sleep(2)
-    raise RuntimeError(f'0x gasless trade was submitted but not confirmed within {_STATUS_TIMEOUT}s (last status: {last or "unknown"})')
+    raise RuntimeError(
+        f'0x gasless trade was submitted but not confirmed within {_STATUS_TIMEOUT}s '
+        f'(last status: {last or "unknown"})')
 
 
 def _record_bundled_fee(d, wallet: str, symbol: str, purchase_usdc: float,
                         kind: str, chain: str, tx_hash: str, gross_profit: float = 0.0):
-    """Record a platform fee already collected inside the 0x gasless order.
-
-    No second ERC20 transfer is sent: that would require BNB and would also
-    double-charge the user. Referral accounting mirrors dashboard's existing
-    EVM fee path.
-    """
+    """Record the platform fee already collected inside the 0x order."""
     fee = round(float(purchase_usdc) * float(d.FEE_RATE_TXN), 6)
     if fee <= 0:
         return
-    recipient = _fee_recipient(d)
+    recipient = _fee_recipient(d, chain)
     conn = sqlite3.connect(d.DB_FILE)
     try:
         conn.execute('PRAGMA busy_timeout=3000')
@@ -228,33 +261,42 @@ def install(d):
     original_fee = d._charge_evm_txn_fee
     state = __import__('threading').local()
 
+    def _supported(chain_name: str) -> bool:
+        try:
+            return d.te_registry.get_chain(chain_name).kind == 'evm'
+        except Exception:
+            return False
+
     def ensure_gas(user_id, wallet, private_key, evm_address, chain,
                    auto_buy_token_address=None, auto_buy_requested_usdc=None):
-        if chain == _BSC and _is_buy_context():
+        # Every supported EVM BUY is relayed. Native BNB/ETH/POL is neither
+        # required from the user nor funded by OrcAgent.
+        if _supported(chain) and _is_buy_context():
             return True, '', None
         return original_ensure(user_id, wallet, private_key, evm_address, chain,
                                auto_buy_token_address, auto_buy_requested_usdc)
 
     def execute(wallet, private_key, action, token_address, amount_str, chain='bsc'):
-        if chain != _BSC or str(action).lower() != 'buy':
+        if not _supported(chain) or str(action).lower() != 'buy':
             return original_execute(wallet, private_key, action, token_address, amount_str, chain)
         try:
-            quote = _gasless_quote(d, private_key, token_address, amount_str)
-            tx_hash = _submit_and_wait(d, private_key, quote)
-            state.last_bsc_buy = {'tx_hash': tx_hash, 'at': time.time()}
+            quote, meta = _gasless_quote(d, private_key, token_address, amount_str, chain)
+            tx_hash = _submit_and_wait(d, private_key, quote, meta)
+            state.last_evm_buy = {'chain': chain, 'tx_hash': tx_hash, 'at': time.time()}
             return True, '', tx_hash
         except Exception as exc:
             return False, d._redact_keys(str(exc))[:500], ''
 
     def charge_fee(private_key, wallet, user_id, symbol, usdc_amount, kind,
                    chain='bsc', trade_ts=None, gross_profit=0.0):
-        marker = getattr(state, 'last_bsc_buy', None)
-        if chain == _BSC and str(kind).lower() == 'buy' and marker and time.time() - marker['at'] < 120:
+        marker = getattr(state, 'last_evm_buy', None)
+        if (_supported(chain) and str(kind).lower() == 'buy' and marker
+                and marker.get('chain') == chain and time.time() - marker['at'] < 120):
             try:
                 _record_bundled_fee(d, wallet, symbol, usdc_amount, kind, chain,
                                     marker['tx_hash'], gross_profit)
             finally:
-                state.last_bsc_buy = None
+                state.last_evm_buy = None
             return
         return original_fee(private_key, wallet, user_id, symbol, usdc_amount, kind,
                             chain, trade_ts, gross_profit)
