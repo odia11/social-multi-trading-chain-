@@ -32,12 +32,6 @@ def install(appmod) -> None:
                 if asset not in html:
                     tags.append(f'<script src="{src}" defer{extra}></script>')
 
-            # Several older templates still register `pageshow => location.reload()`.
-            # On iOS/PWA that turns the browser's instant back-forward cache into a
-            # visible white/black flash and a full route reload. Register this guard
-            # in <head> before those body scripts are parsed. It only suppresses the
-            # persisted BFCache reload; normal navigation and normal pageshow events
-            # are untouched. Fresh data continues through each page's regular polls.
             if 'data-orca-bfcache-guard="1"' not in html:
                 tags.append(
                     '<script data-orca-bfcache-guard="1">'
@@ -59,12 +53,13 @@ def install(appmod) -> None:
                 tags.append('<link rel="preconnect" href="https://fonts.googleapis.com">')
                 tags.append('<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>')
 
-            # Blocking CSS prevents FOUC. JavaScript stays deferred.
             if path == '/wallet':
                 style('portfolio-redesign.css', '/static/portfolio-redesign.css?v=4')
-                script('portfolio-redesign.js', '/static/portfolio-redesign.js?v=4')
+                # v6 deliberately removes the legacy stable-only writer. Do not
+                # re-add portfolio-value-authority.js: fighting writers were the
+                # visible Portfolio flicker on iOS/PWA.
+                script('portfolio-redesign.js', '/static/portfolio-redesign.js?v=6')
                 script('portfolio-assets.js', '/static/portfolio-assets.js?v=1')
-                script('portfolio-value-authority.js', '/static/portfolio-value-authority.js?v=1')
             elif path == '/live-market':
                 style('live-market-redesign.css', '/static/live-market-redesign.css?v=7')
                 style('live-market-final.css', '/static/live-market-final.css?v=4', ' data-oa-live-final="1"')
