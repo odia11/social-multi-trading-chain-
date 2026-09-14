@@ -6,6 +6,7 @@ service = (ROOT / 'deploy/orcagent.service').read_text()
 install = (ROOT / 'deploy/install.sh').read_text()
 env_example = (ROOT / 'deploy/env.example').read_text()
 gasless = (ROOT / 'bsc_gasless_trading.py').read_text()
+solana_test = (ROOT / 'tests/test_solana_gasless_trading.py').read_text()
 
 checks = []
 def check(name, cond):
@@ -18,13 +19,25 @@ check('systemd also disables the legacy platform sponsor rail',
       'Environment=ORCAGENT_FRONTS_GAS=0' in service)
 check('installer normalizes production env policy',
       "sed -i '/^[[:space:]]*ORCAGENT_FRONTS_GAS=/d'" in install
-      and "ORCAGENT_FRONTS_GAS=0" in install)
-check('fresh installs disable platform subsidy', 'ORCAGENT_FRONTS_GAS=0' in env_example)
-check('BSC buy does not turn this into a BNB requirement: it uses 0x Gasless',
-      "'/gasless/quote'" in gasless and "'/gasless/submit'" in gasless
-      and 'zero BNB' in env_example)
-check('legacy sponsor keys are documented as unused for BSC buys',
-      'Legacy platform sponsor keys are intentionally unused' in env_example
-      and 'BSC USDC-only buys do NOT depend on these wallets' in env_example)
+      and 'ORCAGENT_FRONTS_GAS=0' in install)
+check('fresh installs disable platform subsidy',
+      'ORCAGENT_FRONTS_GAS=0' in env_example)
+
+check('every supported EVM BUY uses 0x Gasless instead of requiring native gas',
+      "'/gasless/quote'" in gasless
+      and "'/gasless/submit'" in gasless
+      and 'get_chain(chain_name)' in gasless
+      and "kind == 'evm'" in gasless
+      and 'EVM BUYs use 0x Gasless on every supported EVM chain.' in env_example)
+
+check('Solana USDC BUYs have a zero-SOL gasless rail',
+      'JUPITER_API_KEY=' in env_example
+      and 'Solana USDC BUYs use Jupiter gasless' in env_example
+      and ('zero SOL' in solana_test or 'zero/low SOL' in env_example))
+
+check('legacy sponsor keys are documented as unused under the no-subsidy policy',
+      'Legacy platform sponsor keys are intentionally unused under this policy.' in env_example
+      and 'GAS_SPONSOR_PRIVATE_KEY=' in env_example
+      and 'SOL_GAS_SPONSOR_PRIVATE_KEY=' in env_example)
 
 raise SystemExit(0 if all(checks) else 1)
