@@ -6,6 +6,9 @@ monitor = (ROOT/'deploy/orcagent-monitor.service').read_text()
 backup = (ROOT/'deploy/orcagent-backup.service').read_text()
 install = (ROOT/'deploy/install.sh').read_text()
 smoke = (ROOT/'deploy/security-smoke.sh').read_text()
+nginx = (ROOT/'deploy/nginx-orcagent.conf').read_text()
+nginx_server = (ROOT/'deploy/nginx-server-security.conf').read_text()
+nginx_zones = (ROOT/'deploy/nginx-security-zones.conf').read_text()
 
 checks = []
 def check(name, cond):
@@ -29,5 +32,13 @@ check('smoke validates CSP', 'Content-Security-Policy' in smoke and "frame-ances
 check('smoke validates loopback binding', 'gunicorn port 8080 is publicly bound' in smoke)
 check('smoke validates env permissions', '/etc/orcagent.env permissions' in smoke)
 check('smoke validates backup timer', 'orcagent-backup.timer' in smoke)
+
+check('nginx template loads server security snippet', 'orcagent-server-security.conf' in nginx)
+check('nginx hides version tokens', 'server_tokens off' in nginx_server)
+check('nginx rejects TRACE and CONNECT', 'TRACE|CONNECT' in nginx_server and 'return 405' in nginx_server)
+check('nginx connection limit has a shared zone', 'limit_conn_zone' in nginx_zones and 'orca_conn' in nginx_zones)
+check('nginx server enforces connection cap', 'limit_conn orca_conn 80' in nginx_server)
+check('installer preserves Certbot TLS while injecting security snippet', "grep -q 'ssl_certificate'" in install and 'sed -i' in install and 'orcagent-server-security.conf' in install)
+check('installer validates live nginx security config', 'nginx -T' in install and 'server_tokens off' in install and 'limit_conn orca_conn 80' in install)
 
 raise SystemExit(0 if all(checks) else 1)
