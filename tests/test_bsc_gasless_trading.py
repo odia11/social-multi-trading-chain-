@@ -11,8 +11,8 @@ def check(name, cond):
     checks.append(bool(cond)); print(('PASS ' if cond else 'FAIL ') + name)
 
 check('adapter remains installed in production entrypoint',
-      'from bsc_gasless_trading import install as _install_bsc_gasless_trading' in entry
-      and '_install_bsc_gasless_trading(_dashboard)' in entry)
+      'from bsc_gasless_trading import install as _install_evm_gasless_trading' in entry
+      and '_install_evm_gasless_trading(_dashboard)' in entry)
 for chain, cid in [('bsc', 56), ('base', 8453), ('arbitrum', 42161),
                    ('polygon', 137), ('robinhood', 4663)]:
     check(f'{chain} is registered with chain id {cid}',
