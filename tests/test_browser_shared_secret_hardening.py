@@ -1,4 +1,5 @@
 """Regression checks for removing the legacy browser-visible shared secret."""
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,17 +19,16 @@ check('legacy module shared secret is explicitly disabled',
       "dashboard_module.API_SHARED_SECRET = ''" in SRC)
 check('app config shared secret is explicitly disabled',
       "app.config['API_SHARED_SECRET'] = ''" in SRC)
-check('HTML safety net scrubs exact historical secret',
-      'body.replace(legacy_secret' in SRC)
+check('legacy shared-secret environment value is retired at runtime',
+      "os.environ.pop('API_SHARED_SECRET', None)" in SRC)
+check('HTML safety net scrubs exact historical secret', 'body.replace(legacy_secret' in SRC)
 check('HTML scrub failure is fail-closed',
       'Security response blocked' in SRC and 'response.status_code = 500' in SRC)
 
-# Exercise the adapter itself with a realistic page. This proves the original
-# secret is absent even if a legacy renderer captured it before the module
-# variable was blanked.
 from browser_shared_secret_hardening import install
 app = Flask(__name__)
 secret = 'server-wide-value-that-must-never-reach-a-browser'
+os.environ['API_SHARED_SECRET'] = secret
 mod = SimpleNamespace(app=app, API_SHARED_SECRET=secret)
 
 @app.get('/')
@@ -41,6 +41,7 @@ with app.test_client() as client:
     body = r.get_data(as_text=True)
     check('runtime blanks dashboard API_SHARED_SECRET', mod.API_SHARED_SECRET == '')
     check('runtime blanks Flask API_SHARED_SECRET config', app.config.get('API_SHARED_SECRET') == '')
+    check('runtime removes legacy shared secret from process environment', 'API_SHARED_SECRET' not in os.environ)
     check('historical server secret is absent from rendered HTML', secret not in body)
     check('scrubbed HTML is marked no-store', 'no-store' in (r.headers.get('Cache-Control') or ''))
 
