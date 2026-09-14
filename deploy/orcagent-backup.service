@@ -4,14 +4,37 @@ After=local-fs.target
 
 [Service]
 Type=oneshot
+User=orcagent
+Group=orcagent
 ExecStart=/bin/bash /opt/orcagent/deploy/backup.sh
-User=root
-Group=root
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
-PrivateTmp=true
+UMask=0077
+
+# Backups need only the live database, the environment secret used to derive
+# the encryption key, the backup script and /data/backups as their sole write
+# location. Running as the application user removes the previous root process.
 NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
 ProtectSystem=strict
+ProtectHome=true
 ReadWritePaths=/data/backups
 ReadOnlyPaths=/data/orcagent.db /etc/orcagent.env /opt/orcagent
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX
+ProtectProc=invisible
+ProcSubset=pid
