@@ -9436,15 +9436,48 @@ function _homeCopyTrade(uid, username){
   else if(typeof openProfileCard==='function') openProfileCard(uid);
 }
 
+function _xShareIntent(postId){
+  var canonical=window.location.origin+'/post/'+encodeURIComponent(postId)+'?xv=8';
+  var text='View this post on OrcAgent @orcagent';
+  return 'https://twitter.com/intent/tweet?text='+encodeURIComponent(text)
+    +'&url='+encodeURIComponent(canonical);
+}
+function _safeXShareUrl(raw){
+  try{
+    var u=new URL(String(raw||''),window.location.origin);
+    var host=u.hostname.toLowerCase();
+    if((host==='twitter.com'||host==='www.twitter.com'||host==='x.com'||host==='www.x.com')
+       && u.pathname==='/intent/tweet') return u.href;
+  }catch(e){}
+  return '';
+}
+function _openXShareFallback(postId, suppliedUrl){
+  var target=_safeXShareUrl(suppliedUrl)||_xShareIntent(postId);
+  window.location.assign(target);
+}
 function _shareToX(event, postId){
-  event.stopPropagation();
-  fetch('/api/feed/share-to-x/'+encodeURIComponent(postId), {method:'POST'})
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if(d.ok) openAlertModal({text:'✓ Shared to X!'});
-      else openAlertModal({text:d.msg || 'Could not share to X'});
+  if(event) event.stopPropagation();
+  fetch('/api/feed/share-to-x/'+encodeURIComponent(postId), {
+    method:'POST',
+    credentials:'include'
+  })
+    .then(function(r){
+      return r.text().then(function(raw){
+        try{return raw?JSON.parse(raw):{};}catch(e){return {};}
+      });
     })
-    .catch(function(){ openAlertModal({text:'Network error — could not share to X'}); });
+    .then(function(d){
+      var directSuccess=!!(d&&(d.ok===true||d.success===true)&&d.fallback!==true);
+      if(directSuccess){
+        openAlertModal({text:'✓ Shared to X!'});
+        return;
+      }
+      // Invalid/expired X credentials must never strand the user behind an
+      // error dialog. X's official composer still shares the permanent post
+      // route, whose Open Graph image is the same OrcAgent token card.
+      _openXShareFallback(postId,d&&d.share_url);
+    })
+    .catch(function(){ _openXShareFallback(postId,''); });
 }
 function _feedToggleRepost(btn, postId){
   if(!btn) return;

@@ -21,7 +21,6 @@ from trusted_phantom_autoconnect import install as _install_trusted_phantom_auto
 from share_card_concept_d import install as _install_share_card_concept_d
 from messages_premium_ui import install as _install_messages_premium_ui
 from live_market_deeplink_fix import install as _install_live_market_deeplink_fix
-from x_share_fallback import install as _install_x_share_fallback
 from canonical_domain import install as _install_canonical_domain
 from browser_shared_secret_hardening import install as _install_browser_shared_secret_hardening
 from secret_hygiene import install as _install_secret_hygiene
@@ -54,7 +53,6 @@ _install_trusted_phantom_autoconnect(_dashboard)
 _install_share_card_concept_d(_dashboard)
 _install_messages_premium_ui(_dashboard)
 _install_live_market_deeplink_fix(_dashboard)
-_install_x_share_fallback(_dashboard)
 
 # Reject untrusted Host headers before any security- or auth-sensitive route
 # can derive an absolute URL/origin from them. Loopback remains allowed for
