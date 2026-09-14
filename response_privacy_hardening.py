@@ -5,10 +5,9 @@ actually need. Everywhere else, database/internal credential fields are stripped
 recursively before JSON leaves the process. If redaction itself ever fails, the
 response is replaced with a generic error instead of leaking the original payload.
 
-One deliberately narrow exception exists for new-wallet generation: OrcAgent must
-show a newly generated trading key to its owner once so they can back it up. That
-exact endpoint is schema-checked and forced no-store; no DB-derived secret response
-is permitted through this exception.
+A deliberately narrow exception exists for wallet onboarding: OrcAgent may show a
+newly generated private key to its owner once so it can be backed up. Only explicit
+onboarding endpoints and exact response schemas are allowed through, all no-store.
 """
 from __future__ import annotations
 
@@ -29,15 +28,23 @@ _AUTH_ALLOWED_PATHS = {
     '/api/wallet/set', '/api/session/remember', '/api/session/resume',
     '/api/pair/claim', '/api/csrf',
 }
-_ONE_TIME_KEY_EXPORT_PATH = '/api/wallet/generate-trading-wallet'
-_ONE_TIME_KEY_EXPORT_FIELDS = {
+_FULL_KEY_EXPORT_PATHS = {
+    '/api/wallet/generate-trading-wallet',
+    '/api/onboarding/wallet/create',
+}
+_FULL_KEY_EXPORT_FIELDS = {
     'ok', 'solana_address', 'solana_private_key',
     'evm_address', 'evm_private_key', 'warning',
 }
-_ONE_TIME_REQUIRED_FIELDS = {
+_FULL_KEY_REQUIRED_FIELDS = {
     'ok', 'solana_address', 'solana_private_key',
     'evm_address', 'evm_private_key',
 }
+_IMPORT_KEY_EXPORT_PATH = '/api/onboarding/wallet/import'
+_IMPORT_KEY_EXPORT_FIELDS = {
+    'ok', 'wallet', 'evm_address', 'evm_private_key', 'warning',
+}
+_IMPORT_KEY_REQUIRED_FIELDS = {'ok', 'wallet', 'evm_address', 'evm_private_key', 'warning'}
 
 
 def _is_secret_field(key: object) -> bool:
@@ -78,16 +85,35 @@ def _replace_with_blocked(response):
     return response
 
 
-def _valid_one_time_key_export(payload) -> bool:
+def _valid_full_key_export(payload) -> bool:
     if not isinstance(payload, dict) or payload.get('ok') is not True:
         return False
     keys = set(payload)
-    if not _ONE_TIME_REQUIRED_FIELDS.issubset(keys):
+    if not _FULL_KEY_REQUIRED_FIELDS.issubset(keys):
         return False
-    if not keys.issubset(_ONE_TIME_KEY_EXPORT_FIELDS):
+    if not keys.issubset(_FULL_KEY_EXPORT_FIELDS):
         return False
     return all(isinstance(payload.get(k), str) and payload.get(k)
                for k in ('solana_address', 'solana_private_key', 'evm_address', 'evm_private_key'))
+
+
+def _valid_import_key_export(payload) -> bool:
+    if not isinstance(payload, dict) or payload.get('ok') is not True:
+        return False
+    keys = set(payload)
+    if not _IMPORT_KEY_REQUIRED_FIELDS.issubset(keys):
+        return False
+    if not keys.issubset(_IMPORT_KEY_EXPORT_FIELDS):
+        return False
+    return all(isinstance(payload.get(k), str) and payload.get(k)
+               for k in ('wallet', 'evm_address', 'evm_private_key', 'warning'))
+
+
+def _mark_no_store(response):
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 def install(dashboard_module):
@@ -105,14 +131,10 @@ def install(dashboard_module):
             if payload is None:
                 return response
 
-            # New generated keys are intentionally shown exactly once. This is
-            # the only API path allowed to emit private-key fields, and only if
-            # its complete response matches the narrow generation schema.
-            if request.path == _ONE_TIME_KEY_EXPORT_PATH and _valid_one_time_key_export(payload):
-                response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
-                response.headers['Pragma'] = 'no-cache'
-                response.headers['Expires'] = '0'
-                return response
+            if request.path in _FULL_KEY_EXPORT_PATHS and _valid_full_key_export(payload):
+                return _mark_no_store(response)
+            if request.path == _IMPORT_KEY_EXPORT_PATH and _valid_import_key_export(payload):
+                return _mark_no_store(response)
 
             cleaned = _clean(payload, request.path in _AUTH_ALLOWED_PATHS)
             if cleaned != payload:
