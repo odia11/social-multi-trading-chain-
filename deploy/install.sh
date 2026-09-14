@@ -67,11 +67,20 @@ echo "  $("$APP_DIR/venv/bin/gunicorn" --version) — runnable by $APP_USER"
 
 say "Preparing the environment file ($ENV_FILE)"
 if [ -f "$ENV_FILE" ]; then
-  echo "  already exists — left untouched so your secrets are not overwritten"
+  echo "  already exists — secrets left untouched"
 else
   cp "$REPO_DIR/deploy/env.example" "$ENV_FILE"
   echo "  created from the template — FILL IT IN before starting the service"
 fi
+
+# Product invariant: OrcAgent never advances gas for users. Preserve every
+# secret/value in the production env file, but normalize this one policy flag
+# on every install so an old Railway-era value cannot silently re-enable
+# sponsor spending. verify_live.py sources this same file after deployment.
+sed -i '/^[[:space:]]*ORCAGENT_FRONTS_GAS=/d' "$ENV_FILE"
+printf '\nORCAGENT_FRONTS_GAS=0\n' >> "$ENV_FILE"
+echo "  gas policy enforced: users fund their own native gas"
+
 chown root:"$APP_USER" "$ENV_FILE"
 chmod 640 "$ENV_FILE"
 
@@ -166,6 +175,9 @@ The application process is sandboxed, startup validates security headers and
 loopback binding, persistent data is owner-only, nginx rejects TRACE/CONNECT,
 strips spoofable forwarded IPs and limits abusive connection fan-out, and
 encrypted restore-verified database backups are scheduled.
+
+Gas policy: OrcAgent fronts nothing; every user funds network gas from their
+own trading wallet.
 
 Useful checks:
     systemctl status orcagent
