@@ -58,7 +58,9 @@ def install(dashboard):
 
         original = body
 
-        # Known hero/home variants, including older cached markup shapes.
+        # Rewrite every known home/hero version at the HTML boundary. This is
+        # intentionally server-side so an old cached home-mobile/home-desktop
+        # bundle cannot decide that Start Trading means Live Market.
         replacements = (
             ('href="/bot?view=trading"', 'href="/auto-trading-bot"'),
             ("href='/bot?view=trading'", "href='/auto-trading-bot'"),
@@ -72,39 +74,60 @@ def install(dashboard):
         for old, new in replacements:
             body = body.replace(old, new)
 
-        # Capture phase intentionally wins over old SPA/mobile click handlers.
-        # Only navigation CTAs are redirected. The real bot start/stop controls
-        # (#bot-toggle-btn and #sb-start-btn) keep executing the bot action.
+        # This guard is injected into <head>, before navbar.js/home-mobile.js
+        # can run. It therefore wins even if Safari/PWA still has an old home
+        # bundle that creates a /live-market Start Trading anchor later.
+        # Capture phase is deliberate: stop the old target before any bubble
+        # handler or SPA navigation controller sees the tap.
         guard = r'''<script id="oa-auto-bot-route-guard">
 (function(){
   var TARGET='/auto-trading-bot';
-  function textOf(el){return String((el&&el.textContent)||'').replace(/\s+/g,' ').trim().toLowerCase();}
-  function isRealBotToggle(el){return !!(el&&(el.id==='bot-toggle-btn'||el.id==='sb-start-btn'||el.closest&&el.closest('#bot-dashboard,.status-card')));}
+  function label(el){return String((el&&el.textContent)||'').replace(/\s+/g,' ').trim().toLowerCase();}
+  function isBotToggle(el){
+    return !!(el && (el.id==='bot-toggle-btn' || el.id==='sb-start-btn' ||
+      (el.closest && el.closest('#bot-dashboard,.status-card'))));
+  }
+  function isStartNavigation(el){
+    if(!el || isBotToggle(el)) return false;
+    if(el.id==='bot-start-landing' || el.id==='oa-home-bot-btn' || el.id==='mn-drawer-trade-btn') return true;
+    if(el.classList && (el.classList.contains('oa-home-primary') ||
+       el.classList.contains('oa-m-primary') || el.classList.contains('hero-cta'))) return true;
+    var t=label(el);
+    return t==='start trading' || t.indexOf('start trading →')===0 || t.indexOf('start trading ➜')===0;
+  }
   document.addEventListener('click',function(e){
     var el=e.target&&e.target.closest?e.target.closest('a,button'):null;
-    if(!el||isRealBotToggle(el))return;
-    var known=el.id==='bot-start-landing'||el.id==='oa-home-bot-btn'||
-      el.classList.contains('oa-home-primary')||el.classList.contains('oa-m-primary')||
-      el.classList.contains('hero-cta')||el.id==='mn-drawer-trade-btn';
-    var labelled=textOf(el)==='start trading'||textOf(el).indexOf('start trading →')===0;
-    if(!known&&!labelled)return;
+    if(!isStartNavigation(el)) return;
     e.preventDefault();
     e.stopPropagation();
-    if(e.stopImmediatePropagation)e.stopImmediatePropagation();
-    window.location.assign(TARGET);
+    if(e.stopImmediatePropagation) e.stopImmediatePropagation();
+    window.location.href=TARGET;
   },true);
+  document.addEventListener('touchend',function(e){
+    var el=e.target&&e.target.closest?e.target.closest('a,button'):null;
+    if(!isStartNavigation(el)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if(e.stopImmediatePropagation) e.stopImmediatePropagation();
+    window.location.href=TARGET;
+  },{capture:true,passive:false});
 })();
 </script>'''
         if 'id="oa-auto-bot-route-guard"' not in body:
-            if '</body>' in body:
+            if '<head>' in body:
+                body = body.replace('<head>', '<head>\n' + guard, 1)
+            elif '</body>' in body:
                 body = body.replace('</body>', guard + '\n</body>', 1)
             else:
-                body += guard
+                body = guard + body
 
         if body != original:
             response.set_data(body)
             response.headers['Content-Length'] = str(len(response.get_data()))
-            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-            response.headers['Pragma'] = 'no-cache'
-            response.headers['Expires'] = '0'
+
+        # HTML must never pin an obsolete navigation bundle in an installed
+        # iOS web app. Static assets can still be cached by their own versions.
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
         return response
