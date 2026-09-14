@@ -1,7 +1,12 @@
 (function(){
 'use strict';
 var generated=null,bypass=false;
+var AAD='orcagent-wallet-onboarding-v1';
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]);});}
+function bytesToB64(bytes){var s='';for(var i=0;i<bytes.length;i++)s+=String.fromCharCode(bytes[i]);return btoa(s);}
+function b64ToBytes(s){var raw=atob(s||'');var out=new Uint8Array(raw.length);for(var i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);return out;}
+async function makeTransport(){if(!window.crypto||!crypto.subtle||!crypto.getRandomValues)throw new Error('Secure browser crypto is not available');var raw=crypto.getRandomValues(new Uint8Array(32));return{raw:raw,b64:bytesToB64(raw)};}
+async function openSealed(d,raw){if(!d||!d.sealed||!d.nonce||d.alg!=='A256GCM')return d;var key=await crypto.subtle.importKey('raw',raw,{name:'AES-GCM'},false,['decrypt']);var pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:b64ToBytes(d.nonce),additionalData:new TextEncoder().encode(AAD),tagLength:128},key,b64ToBytes(d.sealed));return JSON.parse(new TextDecoder().decode(pt));}
 async function csrf(){
   if(window._csrfToken)return window._csrfToken;
   if(window._csrf)return window._csrf;
@@ -48,7 +53,12 @@ function stage(html){var m=modal();m.querySelector('.oa-ob-actions').hidden=true
 function backButton(s){var b=s.querySelector('[data-back]');if(b)b.onclick=function(){wipe();open();};}
 async function showCreate(){
   var s=stage('<button class="oa-ob-back" data-back>← Back</button><h3>Create New Wallet</h3><div class="oa-ob-loading">Generating securely…</div>');backButton(s);
-  try{var d=await post('/api/onboarding/wallet/create',{});generated=d;s.innerHTML='<button class="oa-ob-back" data-back>← Back</button><h3>Back up your private keys</h3><div class="oa-ob-warning">These keys control your funds. Save them somewhere safe now. OrcAgent will not show them again after activation.</div><label>Solana address</label><div class="oa-ob-address">'+esc(d.solana_address)+'</div><label>Solana private key</label><textarea class="oa-ob-secret" id="oa-ob-sol" readonly>'+esc(d.solana_private_key)+'</textarea><label>EVM address</label><div class="oa-ob-address">'+esc(d.evm_address)+'</div><label>EVM private key</label><textarea class="oa-ob-secret" id="oa-ob-evm" readonly>'+esc(d.evm_private_key)+'</textarea><label class="oa-ob-check"><input type="checkbox" id="oa-ob-confirm"> I saved both private keys safely.</label><button class="oa-ob-primary oa-ob-finish" id="oa-ob-activate" disabled>Activate Wallet</button><div class="oa-ob-msg" id="oa-ob-msg"></div>';backButton(s);var c=s.querySelector('#oa-ob-confirm'),a=s.querySelector('#oa-ob-activate');c.onchange=function(){a.disabled=!c.checked;};a.onclick=activate;
+  try{
+    var tr=await makeTransport();
+    var envelope=await post('/api/onboarding/wallet/create',{transport_key:tr.b64});
+    var d=await openSealed(envelope,tr.raw);tr.raw.fill(0);generated=d;
+    s.innerHTML='<button class="oa-ob-back" data-back>← Back</button><h3>Back up your private keys</h3><div class="oa-ob-warning">These keys control your funds. Save them somewhere safe now. OrcAgent will not show them again after activation.</div><label>Solana address</label><div class="oa-ob-address">'+esc(d.solana_address)+'</div><label>Solana private key</label><textarea class="oa-ob-secret" id="oa-ob-sol" readonly>'+esc(d.solana_private_key)+'</textarea><label>EVM address</label><div class="oa-ob-address">'+esc(d.evm_address)+'</div><label>EVM private key</label><textarea class="oa-ob-secret" id="oa-ob-evm" readonly>'+esc(d.evm_private_key)+'</textarea><label class="oa-ob-check"><input type="checkbox" id="oa-ob-confirm"> I saved both private keys safely.</label><button class="oa-ob-primary oa-ob-finish" id="oa-ob-activate" disabled>Activate Wallet</button><div class="oa-ob-msg" id="oa-ob-msg"></div>';
+    backButton(s);var c=s.querySelector('#oa-ob-confirm'),a=s.querySelector('#oa-ob-activate');c.onchange=function(){a.disabled=!c.checked;};a.onclick=activate;
   }catch(e){s.innerHTML='<button class="oa-ob-back" data-back>← Back</button><div class="oa-ob-msg bad">'+esc(e.message)+'</div>';backButton(s);}
 }
 async function activate(){var a=document.getElementById('oa-ob-activate'),msg=document.getElementById('oa-ob-msg');a.disabled=true;a.textContent='Activating…';try{await post('/api/onboarding/wallet/confirm',{solana_private_key:generated.solana_private_key,evm_private_key:generated.evm_private_key,backup_confirmed:true});wipe();try{localStorage.removeItem('orca_manual_disconnect');}catch(_){}location.href='/';}catch(e){msg.textContent=e.message;msg.className='oa-ob-msg bad';a.disabled=false;a.textContent='Activate Wallet';}}
@@ -59,16 +69,17 @@ async function doImport(){
   if(!sol){msg.textContent='Enter your Solana private key.';msg.className='oa-ob-msg bad';return;}
   b.disabled=true;b.textContent='Importing…';
   try{
-    var d=await post('/api/onboarding/wallet/import',{solana_private_key:sol,evm_private_key:evm});
+    var payload={solana_private_key:sol,evm_private_key:evm},tr=null;
+    if(!evm){tr=await makeTransport();payload.transport_key=tr.b64;}
+    var d=await post('/api/onboarding/wallet/import',payload);
+    if(tr){d=await openSealed(d,tr.raw);tr.raw.fill(0);}
     document.getElementById('oa-import-sol').value='';document.getElementById('oa-import-evm').value='';
     if(d.needs_confirmation&&d.evm_private_key){
       generated={solana_private_key:sol,evm_private_key:d.evm_private_key};
       var s=stage('<h3>Save your new EVM private key</h3><div class="oa-ob-warning">Your Solana wallet is ready to import. OrcAgent created one EVM wallet for the supported EVM chains. Save this key before activation.</div><div class="oa-ob-address">'+esc(d.evm_address)+'</div><textarea class="oa-ob-secret" readonly>'+esc(d.evm_private_key)+'</textarea><label class="oa-ob-check"><input type="checkbox" id="oa-import-confirm"> I saved this EVM private key safely.</label><button class="oa-ob-primary oa-ob-finish" id="oa-import-done" disabled>Activate Imported Wallet</button><div class="oa-ob-msg" id="oa-import-final-msg"></div>');
       var c=s.querySelector('#oa-import-confirm'),done=s.querySelector('#oa-import-done');c.onchange=function(){done.disabled=!c.checked;};
       done.onclick=async function(){var fm=document.getElementById('oa-import-final-msg');done.disabled=true;done.textContent='Activating…';try{await post('/api/onboarding/wallet/confirm',{solana_private_key:generated.solana_private_key,evm_private_key:generated.evm_private_key,backup_confirmed:true});wipe();try{localStorage.removeItem('orca_manual_disconnect');}catch(_){}location.href='/';}catch(e){fm.textContent=e.message;fm.className='oa-ob-msg bad';done.disabled=false;done.textContent='Activate Imported Wallet';}};
-    }else{
-      try{localStorage.removeItem('orca_manual_disconnect');}catch(_){}location.href='/';
-    }
+    }else{try{localStorage.removeItem('orca_manual_disconnect');}catch(_){}location.href='/';}
   }catch(e){msg.textContent=e.message;msg.className='oa-ob-msg bad';b.disabled=false;b.textContent='Import Wallet';}
 }
 document.addEventListener('click',function(e){
