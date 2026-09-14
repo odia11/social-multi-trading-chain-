@@ -36,6 +36,7 @@ from abuse_rate_hardening import install as _install_abuse_rate_hardening
 from upload_hardening import install as _install_upload_hardening
 from bsc_gasless_trading import install as _install_evm_gasless_trading
 from solana_gasless_trading import install as _install_solana_gasless_trading
+from wallet_onboarding import install as _install_wallet_onboarding
 from trading_wallet_generator import install as _install_trading_wallet_generator
 from response_privacy_hardening import install as _install_response_privacy_hardening
 from audit_hardening import install as _install_audit_hardening
@@ -87,9 +88,13 @@ _install_evm_gasless_trading(_dashboard)
 # the user to pre-fund SOL.
 _install_solana_gasless_trading(_dashboard)
 
-# New-user wallet onboarding: generates a dedicated Solana wallet plus one
-# shared EVM wallet, displays both keys once for backup, and only stores them
-# after explicit confirmation using dashboard.py's existing encrypted-key format.
+# Guest homepage onboarding mirrors the familiar wallet-app choice: create a
+# new self-custodial wallet, import an existing private key, or connect Phantom.
+# Generated/imported wallet keys are encrypted before storage and never logged.
+_install_wallet_onboarding(_dashboard)
+
+# Existing authenticated users can still create a dedicated trading-wallet pair
+# from Settings/Manage Wallet without replacing any funded wallet.
 _install_trading_wallet_generator(_dashboard)
 
 _install_response_privacy_hardening(_dashboard)
