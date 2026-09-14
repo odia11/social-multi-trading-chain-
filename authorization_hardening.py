@@ -21,9 +21,6 @@ _GROUP_MANAGER_ACTIONS = frozenset({
     'kick', 'remove-member', 'ban', 'unban', 'promote', 'demote',
 })
 
-# These endpoints can create/remove privileged staff or change platform-wide
-# execution policy. They stay behind the OWNER_WALLET boundary even if a DB
-# role is accidentally over-granted.
 _OWNER_ONLY_ADMIN_PATHS = frozenset({
     '/api/admin/invite',
     '/api/admin/role/change',
@@ -31,9 +28,6 @@ _OWNER_ONLY_ADMIN_PATHS = frozenset({
     '/api/admin/features/toggle',
 })
 
-# Moderators are intentionally limited to moderation/support mutations. They
-# may not change staff roles, feature flags, trading policy, AI-filter policy,
-# security configuration, treasury state or other executive settings.
 _MODERATOR_ADMIN_MUTATION_PREFIXES = (
     '/api/admin/ban',
     '/api/admin/clear_ratelimit',
@@ -43,8 +37,26 @@ _MODERATOR_ADMIN_MUTATION_PREFIXES = (
 )
 
 
-def _owner_wallets() -> set[str]:
-    return {w.strip() for w in os.getenv('OWNER_WALLET', '').split(',') if w.strip()}
+def _owner_wallets(dashboard_module=None) -> set[str]:
+    """Return every wallet OrcAgent itself treats as a top-level owner.
+
+    dashboard.py deliberately has both env-configurable OWNER_WALLETS and a
+    constant ADMIN_WALLET super-admin. Security middleware must preserve that
+    exact authority model or it can accidentally lock the real super-admin out
+    when OWNER_WALLET differs or is blank.
+    """
+    owners = {w.strip() for w in os.getenv('OWNER_WALLET', '').split(',') if w.strip()}
+    if dashboard_module is not None:
+        configured = getattr(dashboard_module, 'OWNER_WALLETS', None)
+        if configured:
+            try:
+                owners.update(str(w).strip() for w in configured if str(w).strip())
+            except TypeError:
+                pass
+        admin_wallet = str(getattr(dashboard_module, 'ADMIN_WALLET', '') or '').strip()
+        if admin_wallet:
+            owners.add(admin_wallet)
+    return owners
 
 
 def _connect(dashboard_module):
@@ -57,7 +69,6 @@ def _connect(dashboard_module):
 
 
 def _table_columns(conn, table: str) -> set[str]:
-    # Table names passed here are fixed internal constants, never request data.
     try:
         return {str(r[1]) for r in conn.execute('PRAGMA table_info(' + table + ')')}
     except Exception:
@@ -77,7 +88,7 @@ def _table_exists(conn, table: str) -> bool:
 def _role_for_wallet(dashboard_module, wallet: str) -> str:
     if not wallet:
         return 'user'
-    if wallet in _owner_wallets():
+    if wallet in _owner_wallets(dashboard_module):
         return 'admin'
     try:
         conn = _connect(dashboard_module)
@@ -96,12 +107,7 @@ def _role_for_wallet(dashboard_module, wallet: str) -> str:
 
 
 def _identity(dashboard_module):
-    """Return only a cryptographically authenticated wallet + DB-bound user id.
-
-    Never trust a separately cached session user_id here. During wallet changes or
-    recovery a stale session id could otherwise pair Wallet A's fresh proof with
-    User B's numeric id. Ownership is always re-derived from the proven wallet.
-    """
+    """Return only a cryptographically authenticated wallet + DB-bound user id."""
     auth_fn = getattr(dashboard_module, '_authenticated_wallet', None)
     try:
         wallet = auth_fn() if callable(auth_fn) else None
@@ -133,7 +139,6 @@ def _deny(status: int, message: str):
 
 
 def _row_owned_by(conn, table: str, row_id: int, uid: int | None, wallet: str) -> bool | None:
-    """Return True/False when schema proves ownership; None when it cannot."""
     if not _table_exists(conn, table):
         return None
     cols = _table_columns(conn, table)
@@ -230,7 +235,6 @@ def _group_post_owned_or_manager(conn, group_id: int, post_id: int, uid: int | N
 
 
 def _require_proven(result: bool | None):
-    """Translate tri-state ownership into fail-closed authorization semantics."""
     if result is True:
         return None
     if result is False:
@@ -238,9 +242,8 @@ def _require_proven(result: bool | None):
     return _deny(503, 'Authorization backend unavailable')
 
 
-def _admin_mutation_denial(path: str, role: str, wallet: str):
-    """Return a denial tuple when an admin mutation exceeds the caller's tier."""
-    if path in _OWNER_ONLY_ADMIN_PATHS and wallet not in _owner_wallets():
+def _admin_mutation_denial(dashboard_module, path: str, role: str, wallet: str):
+    if path in _OWNER_ONLY_ADMIN_PATHS and wallet not in _owner_wallets(dashboard_module):
         return _deny(403, 'Owner wallet required')
     if role == 'analyst':
         return _deny(403, 'Read-only admin role')
@@ -274,10 +277,8 @@ def install(dashboard_module):
                 app.logger.warning('authorization denied path=%s wallet=%s role=%s', path, wallet[:8] + '…', role)
                 return _deny(403, 'Forbidden') if path.startswith('/api/') else ('Forbidden', 403)
 
-            # Reading the admin console remains role-based. Mutations are
-            # tiered server-side; hiding buttons in HTML is never authority.
             if path.startswith('/api/admin') and method in _MUTATING:
-                denied = _admin_mutation_denial(path, role, wallet)
+                denied = _admin_mutation_denial(dashboard_module, path, role, wallet)
                 if denied:
                     app.logger.warning(
                         'admin privilege boundary denied path=%s wallet=%s role=%s',
