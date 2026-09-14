@@ -9,6 +9,8 @@ smoke = (ROOT/'deploy/security-smoke.sh').read_text()
 nginx = (ROOT/'deploy/nginx-orcagent.conf').read_text()
 nginx_server = (ROOT/'deploy/nginx-server-security.conf').read_text()
 nginx_zones = (ROOT/'deploy/nginx-security-zones.conf').read_text()
+dockerfile = (ROOT/'Dockerfile').read_text()
+dockerignore = (ROOT/'.dockerignore').read_text()
 
 checks = []
 def check(name, cond):
@@ -55,5 +57,11 @@ check('installer repairs spoofable forwarded IP in existing Certbot config',
 check('installer preserves Certbot TLS while injecting security snippet', "grep -q 'ssl_certificate'" in install and 'sed -i' in install and 'orcagent-server-security.conf' in install)
 check('installer validates live nginx security config', 'nginx -T' in install and 'server_tokens off' in install and 'limit_conn orca_conn 80' in install)
 check('installer verifies trusted forwarded client IP is active', 'nginx is not enforcing a trusted forwarded client IP' in install)
+
+check('container creates a non-root service user', 'useradd --system' in dockerfile and 'orcagent' in dockerfile)
+check('container runs as non-root user', 'USER orcagent:orcagent' in dockerfile)
+check('container copies application owned by service user', 'COPY --chown=orcagent:orcagent . .' in dockerfile)
+for pattern in ('.git', '.env', '*.db', '*.pem', '*.key', 'venv'):
+    check('docker build context excludes '+pattern, pattern in dockerignore)
 
 raise SystemExit(0 if all(checks) else 1)
