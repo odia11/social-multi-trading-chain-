@@ -27,6 +27,11 @@ ExecStart=/opt/orcagent/venv/bin/gunicorn app_entry:app \
     --access-logfile - \
     --error-logfile -
 
+# Do not declare a deploy healthy merely because gunicorn opened a socket.
+# Check the actual hardening headers, loopback-only bind, env permissions and
+# encrypted backup timer. A failed check makes systemd mark startup failed.
+ExecStartPost=/bin/bash /opt/orcagent/deploy/security-smoke.sh
+
 Restart=always
 RestartSec=5
 KillSignal=SIGTERM
