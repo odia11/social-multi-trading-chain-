@@ -22,6 +22,7 @@ def build_db():
       CREATE TABLE groups(id INTEGER PRIMARY KEY, created_by INTEGER, name TEXT);
       CREATE TABLE group_members(id INTEGER PRIMARY KEY, group_id INTEGER, user_id INTEGER, role TEXT);
       CREATE TABLE group_posts(id INTEGER PRIMARY KEY, group_id INTEGER, user_id INTEGER, body TEXT);
+      CREATE TABLE opaque_objects(id INTEGER PRIMARY KEY, payload TEXT);
     ''')
     con.execute("INSERT INTO users VALUES(1,'WALLET1','user')")
     con.execute("INSERT INTO users VALUES(2,'WALLET2','user')")
@@ -36,6 +37,7 @@ def build_db():
     con.execute("INSERT INTO group_members VALUES(1,41,1,'member')")
     con.execute("INSERT INTO group_posts VALUES(50,41,1,'mine in other group')")
     con.execute("INSERT INTO group_posts VALUES(51,41,2,'theirs in other group')")
+    con.execute("INSERT INTO opaque_objects VALUES(60,'no ownership columns')")
     con.commit(); con.close()
     return path
 
@@ -60,7 +62,7 @@ try:
     checks.append(check('author can delete own group post', a._group_post_owned_or_manager(con, 41, 50, 1, 'WALLET1') is True))
     checks.append(check('member cannot delete another group post', a._group_post_owned_or_manager(con, 41, 51, 1, 'WALLET1') is False))
     checks.append(check('unknown ownership schema remains unknown, never auto-allowed',
-                        a._row_owned_by(con, 'users', 1, 1, 'WALLET1') is None))
+                        a._row_owned_by(con, 'opaque_objects', 60, 1, 'WALLET1') is None))
 finally:
     con.close(); os.unlink(path)
 
