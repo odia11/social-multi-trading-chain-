@@ -59,6 +59,8 @@ try:
     checks.append(check('ordinary member is not manager', a._group_manager(con, 41, 1) is False))
     checks.append(check('author can delete own group post', a._group_post_owned_or_manager(con, 41, 50, 1, 'WALLET1') is True))
     checks.append(check('member cannot delete another group post', a._group_post_owned_or_manager(con, 41, 51, 1, 'WALLET1') is False))
+    checks.append(check('unknown ownership schema remains unknown, never auto-allowed',
+                        a._row_owned_by(con, 'users', 1, 1, 'WALLET1') is None))
 finally:
     con.close(); os.unlink(path)
 
@@ -67,5 +69,10 @@ checks.append(check('mutating message ids are guarded', "method in {'PUT', 'PATC
 checks.append(check('notification batch ids are ownership checked', '_notification_ids_owned' in src and 'delete_batch' in src))
 checks.append(check('group manager actions have a server-side guard', '_GROUP_MANAGER_ACTIONS' in src and '_group_manager' in src))
 checks.append(check('authorization database failure is fail-closed', "503, 'Authorization backend unavailable'" in src))
+checks.append(check('unknown ownership result is fail-closed', '_require_proven' in src and "return _deny(503, 'Authorization backend unavailable')" in src))
+checks.append(check('user id is re-derived from the authenticated wallet',
+                    'SELECT id FROM users WHERE wallet_address=?' in src and 'session.get(' not in src))
+checks.append(check('protected mutation requires a DB user bound to proven wallet',
+                    "return _deny(403, 'Account not available')" in src))
 
 raise SystemExit(0 if all(checks) else 1)
