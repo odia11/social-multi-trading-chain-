@@ -1,16 +1,12 @@
 """Production WSGI entry point.
 
-OrcAgent's product policy is that the platform itself never subsidizes user
-gas. On BNB Chain, a USDC-only BUY uses 0x Gasless: the relayer handles BNB
-and the network cost is billed inside the user's USDC order. Force the legacy
-platform-sponsor switch off before dashboard.py is imported, then install the
-Gasless adapter after the existing application is registered.
+OrcAgent never subsidizes user gas. EVM BUYs use 0x Gasless and Solana
+USDC BUYs use Jupiter gasless support, so a user can trade without first
+holding the chain's native gas token when the provider offers a gasless route.
 """
 import os
 
-# Product invariant: OrcAgent's own wallet does not subsidize users. This does
-# NOT mean a user must hold BNB: bsc_gasless_trading makes BSC BUYs relayed and
-# bills gas in the USDC sell amount instead.
+# Product invariant: OrcAgent's own wallet does not subsidize user gas.
 os.environ['ORCAGENT_FRONTS_GAS'] = '0'
 
 import dashboard as _dashboard
@@ -38,7 +34,8 @@ from financial_authorization_hardening import install as _install_financial_auth
 from owner_money_hardening import install as _install_owner_money_hardening
 from abuse_rate_hardening import install as _install_abuse_rate_hardening
 from upload_hardening import install as _install_upload_hardening
-from bsc_gasless_trading import install as _install_bsc_gasless_trading
+from bsc_gasless_trading import install as _install_evm_gasless_trading
+from solana_gasless_trading import install as _install_solana_gasless_trading
 from trading_wallet_generator import install as _install_trading_wallet_generator
 from response_privacy_hardening import install as _install_response_privacy_hardening
 from audit_hardening import install as _install_audit_hardening
@@ -68,9 +65,7 @@ _install_canonical_domain(_dashboard)
 # on authenticated session + CSRF + the route/object authorization layers.
 _install_browser_shared_secret_hardening(_dashboard)
 
-# Security layers. Startup secret validation runs before request guards. The
-# remaining adapters are defense-in-depth around the route-level checks that
-# already exist in dashboard.py.
+# Security layers.
 _install_secret_hygiene(_dashboard)
 _install_security_hardening(_dashboard)
 _install_ssrf_hardening(_dashboard)
@@ -82,10 +77,15 @@ _install_owner_money_hardening(_dashboard)
 _install_abuse_rate_hardening(_dashboard)
 _install_upload_hardening(_dashboard)
 
-# BNB Chain BUYs: a wallet may hold only USDC and zero BNB. 0x Gasless relays
-# the EIP-712 order and takes gas + OrcAgent's fee from the same USDC-funded
-# order, so there is no platform subsidy and no native-token prerequisite.
-_install_bsc_gasless_trading(_dashboard)
+# Every EVM BUY (BNB Chain, Base, Arbitrum, Polygon, Robinhood Chain) uses
+# 0x Gasless: native BNB/ETH/POL is not a prerequisite for a stablecoin-funded
+# buy, and OrcAgent does not front it.
+_install_evm_gasless_trading(_dashboard)
+
+# Solana USDC BUYs use Jupiter's automatic gasless path when configured. The
+# network fee/rent is recovered by Jupiter from the swap instead of requiring
+# the user to pre-fund SOL.
+_install_solana_gasless_trading(_dashboard)
 
 # New-user wallet onboarding: generates a dedicated Solana wallet plus one
 # shared EVM wallet, displays both keys once for backup, and only stores them
