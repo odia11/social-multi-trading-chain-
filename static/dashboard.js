@@ -9394,7 +9394,7 @@ function _renderFeedCard(e){
       +'<span class="fc-like-count" onclick="event.stopPropagation();_fcOpenLikedBy(\''+esc(safePostId)+'\')" title="See who liked this">'+esc(String(e.like_count||0))+'</span>'
     +'</button>'
     +'<div class="fc-react-wrap">'
-    +'<button class="fc-action fc-react-btn" onclick="_feedReactOpen(event,\''+esc(safePostId)+'\')" title="React">+</button>'
+    +'<button class="fc-action fc-emoji-react-btn" onclick="_feedReactOpen(event,\''+esc(safePostId)+'\')" title="Choose emoji" aria-label="Choose emoji" style="width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:0;background:transparent;font-size:22px;line-height:1">😊</button>'
     +'<div class="fc-react-palette" id="rpal-'+esc(safePostId)+'"></div>'
     +'</div>'
     +'<div class="fc-share-wrap">'
