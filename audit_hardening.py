@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import os
 import secrets
 import sqlite3
@@ -23,9 +24,24 @@ _ID_KEYS = ('id', 'post_id', 'message_id', 'group_id', 'trade_id', 'bridge_id',
             'notification_id', 'user_id', 'peer_id', 'target_user_id')
 
 
+def _trusted_client_ip() -> str:
+    for raw in (request.headers.get('X-Real-IP'), request.headers.get('X-Forwarded-For')):
+        value = (raw or '').split(',')[0].strip()
+        if not value:
+            continue
+        try:
+            return str(ipaddress.ip_address(value))
+        except ValueError:
+            continue
+    value = (request.remote_addr or '').strip()
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError:
+        return ''
+
+
 def _ip_hash() -> str:
-    forwarded = (request.headers.get('X-Forwarded-For') or '').split(',')[0].strip()
-    value = forwarded or request.remote_addr or ''
+    value = _trusted_client_ip()
     key = str(os.getenv('SECRET_KEY') or 'audit').encode()
     return hmac.new(key, value.encode(), hashlib.sha256).hexdigest()[:24] if value else ''
 
@@ -129,5 +145,5 @@ def install(dashboard_module):
             finally:
                 conn.close()
         except Exception as exc:
-            app.logger.warning('security audit write failed request_id=%s: %s', request_id, exc)
+            app.logger.warning('security audit write failed request_id=%s: %s', request_id, type(exc).__name__)
         return response
