@@ -13,6 +13,7 @@ be assumed to support a gasless permit.
 from __future__ import annotations
 
 import inspect
+import os
 import sqlite3
 import time
 from decimal import Decimal
@@ -53,7 +54,7 @@ def _is_buy_context() -> bool:
 
 
 def _api_headers(d):
-    key = (getattr(d, 'ZEROX_API_KEY', '') or '').strip()
+    key = (getattr(d, 'ZEROX_API_KEY', '') or os.getenv('ZEROX_API_KEY', '')).strip()
     if not key:
         raise RuntimeError('ZEROX_API_KEY is not configured')
     return {'0x-api-key': key, '0x-version': _HEADERS_VERSION,
@@ -72,8 +73,6 @@ def _json_response(resp, label):
 
 
 def _split_signature(signed):
-    # eth-account gives canonical 32-byte r/s and v=27/28. 0x Gasless v2
-    # expects those pieces plus signatureType 2 (EIP-712).
     return {
         'r': '0x' + int(signed.r).to_bytes(32, 'big').hex(),
         's': '0x' + int(signed.s).to_bytes(32, 'big').hex(),
@@ -142,8 +141,6 @@ def _submit_and_wait(d, private_key: str, quote: dict):
     approval_submit = None
     if allowance_needed:
         if not approval:
-            # A standard ERC20 approve itself costs BNB, defeating the product
-            # promise. Fail clearly instead of silently falling back to it.
             raise RuntimeError('This USDC approval cannot be completed gaslessly; no BNB will be requested or spent')
         approval_submit = {
             'type': approval.get('type'),
@@ -179,7 +176,9 @@ def _submit_and_wait(d, private_key: str, quote: dict):
         status = _json_response(sr, '0x gasless status')
         last = str(status.get('status') or '').lower()
         if last == 'confirmed':
-            tx_hash = (status.get('transactions') or [{}])[-1].get('hash') or status.get('transactionHash') or trade_hash
+            txs = status.get('transactions') or []
+            tx_hash = (txs[-1].get('hash') if txs and isinstance(txs[-1], dict) else None) \
+                      or status.get('transactionHash') or trade_hash
             return tx_hash
         if last in {'failed', 'reverted', 'cancelled', 'canceled'}:
             reason = status.get('reason') or status.get('error') or last
@@ -227,13 +226,10 @@ def install(d):
     original_execute = d._execute_evm_swap
     original_ensure = d._ensure_evm_gas
     original_fee = d._charge_evm_txn_fee
-
     state = __import__('threading').local()
 
     def ensure_gas(user_id, wallet, private_key, evm_address, chain,
                    auto_buy_token_address=None, auto_buy_requested_usdc=None):
-        # BSC BUYs use a relayed EIP-712 trade. Native BNB is neither required
-        # nor provided by OrcAgent. Every other action keeps the old gas logic.
         if chain == _BSC and _is_buy_context():
             return True, '', None
         return original_ensure(user_id, wallet, private_key, evm_address, chain,
@@ -248,8 +244,6 @@ def install(d):
             state.last_bsc_buy = {'tx_hash': tx_hash, 'at': time.time()}
             return True, '', tx_hash
         except Exception as exc:
-            # Never include key/signature material in an error. 0x responses
-            # above are reduced to status/reason before reaching here.
             return False, d._redact_keys(str(exc))[:500], ''
 
     def charge_fee(private_key, wallet, user_id, symbol, usdc_amount, kind,
