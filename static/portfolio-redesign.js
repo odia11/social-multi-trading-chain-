@@ -34,15 +34,16 @@ function polishWithdrawModal(){
   var title=modal.querySelector('.w-modal-title');if(title&&/^\s*Send\s*$/i.test(title.textContent||''))title.textContent='Withdraw';
   var btn=document.getElementById('send-btn');if(btn){var text=(btn.textContent||'').trim();if(/^Send\b/i.test(text))btn.textContent=text.replace(/^Send\b/i,'Withdraw')}
 }
-function removeBotRecentActivity(){
-  document.querySelectorAll('.act-card').forEach(function(card){
-    var title=card.querySelector('.act-title');
-    if(title&&/^\s*Recent activity\s*$/i.test(title.textContent||''))card.remove();
-  });
+function removeLegacyHistoryCards(){
+  /* The old Wallet template contains Recent activity, Bridge History and
+     Trade History cards. Bot trades belong on /history and bridge diagnostics
+     do not belong in Portfolio. Portfolio now has one dedicated Live Market
+     transaction card injected separately, so remove every legacy act-card. */
+  document.querySelectorAll('.act-card').forEach(function(card){card.remove()});
 }
 function boot(){
   if(location.pathname.replace(/\/+$/,'')!=='/wallet'){revealPortfolio();return}
-  if(document.body.classList.contains('oa-portfolio')){removeBotRecentActivity();revealWhenStyled();return}
+  if(document.body.classList.contains('oa-portfolio')){removeLegacyHistoryCards();revealWhenStyled();return}
   document.body.classList.add('oa-portfolio','pf-view-overview');
   document.title='Portfolio — OrcAgent';
 
@@ -71,7 +72,7 @@ function boot(){
 
   var holdings=document.querySelector('.holdings');
   if(holdings){var ht=holdings.querySelector('.holdings-title');if(ht)ht.textContent='Assets'}
-  removeBotRecentActivity();
+  removeLegacyHistoryCards();
 
   function showView(view){
     document.body.classList.remove('pf-view-overview','pf-view-deposit','pf-view-withdraw');
@@ -97,9 +98,6 @@ function boot(){
     sanitizeAssetPercentages(holdings);
   }
 
-  /* Do not observe #avail and do not fetch wallet totals here. Those were the
-     two competing writers that made pf-total visibly jump every refresh.
-     portfolio-multichain.js is the single live-data controller. */
   revealWhenStyled();
   setTimeout(function(){if(typeof window.OrcAgentRefreshPortfolio==='function')window.OrcAgentRefreshPortfolio()},60);
 }
