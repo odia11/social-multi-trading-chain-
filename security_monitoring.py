@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import collections
 import hashlib
+import ipaddress
 import os
 import threading
 import time
@@ -22,8 +23,24 @@ _THRESHOLDS = {401: 12, 403: 12, 429: 8}
 _SENSITIVE = ('/api/admin', '/api/withdraw', '/api/bridge', '/api/trade', '/api/wallet/set', '/api/session/')
 
 
+def _trusted_client_ip() -> str:
+    for raw in (request.headers.get('X-Real-IP'), request.headers.get('X-Forwarded-For')):
+        value = (raw or '').split(',')[0].strip()
+        if not value:
+            continue
+        try:
+            return str(ipaddress.ip_address(value))
+        except ValueError:
+            continue
+    value = (request.remote_addr or '').strip()
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError:
+        return 'unknown'
+
+
 def _client_key() -> str:
-    ip = (request.headers.get('X-Forwarded-For') or '').split(',')[0].strip() or request.remote_addr or ''
+    ip = _trusted_client_ip()
     salt = str(os.getenv('SECRET_KEY') or 'monitor').encode()
     return hashlib.sha256(salt + b'|' + ip.encode()).hexdigest()[:16]
 
@@ -50,7 +67,6 @@ def install(dashboard_module):
             while dq and dq[0] < cutoff:
                 dq.popleft()
             count = len(dq)
-            # Bound memory: remove stale buckets opportunistically.
             if len(_EVENTS) > 5000:
                 for key in list(_EVENTS)[:1000]:
                     q = _EVENTS[key]
@@ -60,8 +76,11 @@ def install(dashboard_module):
                         _EVENTS.pop(key, None)
         threshold = _THRESHOLDS.get(status, 3)
         if count == threshold or (count > threshold and count % threshold == 0):
+            # Path comes from WSGI routing, but strip control characters before
+            # journald output so crafted URLs cannot forge extra log lines.
+            safe_path = ''.join(ch for ch in path[:160] if ch >= ' ' and ch != '\x7f')
             app.logger.warning(
                 'SECURITY_ANOMALY client=%s status=%s path=%s count=%s window=%ss',
-                client, status, path[:160], count, _WINDOW,
+                client, status, safe_path, count, _WINDOW,
             )
         return response
