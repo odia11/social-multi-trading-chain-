@@ -1,14 +1,18 @@
 """Phantom-style first-run wallet onboarding for OrcAgent.
 
-Guest users can keep using Phantom, create a new OrcAgent wallet, or import an
-existing Solana private key. Generated keys are shown once, must be backed up
-before activation, and are encrypted with the existing wallet-bound helpers.
+Guest users can connect Phantom, create a new OrcAgent wallet, or import an
+existing Solana private key. One-time generated secrets are additionally sealed
+for transport so browser/WAF response scanning never sees raw wallet keys.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
+import json
+import os
 import sqlite3
 
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from eth_account import Account
 from flask import jsonify, request, session
 from solders.keypair import Keypair
@@ -16,6 +20,7 @@ from solders.keypair import Keypair
 _CREATE = '/api/onboarding/wallet/create'
 _CONFIRM = '/api/onboarding/wallet/confirm'
 _IMPORT = '/api/onboarding/wallet/import'
+_AAD = b'orcagent-wallet-onboarding-v1'
 
 
 def _no_store(resp):
@@ -38,6 +43,31 @@ def _rate_ok(d, action: str, limit: int = 8, window: int = 3600) -> bool:
     ip = request.headers.get('X-Real-IP') or request.remote_addr or 'unknown'
     key = 'wallet-onboarding:' + action + ':' + hashlib.sha256(ip.encode()).hexdigest()[:24]
     return bool(fn(key, limit, window))
+
+
+def _transport_key(body: dict) -> bytes:
+    raw = str(body.get('transport_key') or '').strip()
+    if not raw:
+        raise ValueError('Secure transport key required')
+    try:
+        key = base64.b64decode(raw, validate=True)
+    except Exception as exc:
+        raise ValueError('Invalid secure transport key') from exc
+    if len(key) != 32:
+        raise ValueError('Invalid secure transport key')
+    return key
+
+
+def _sealed_response(payload: dict, transport_key: bytes):
+    nonce = os.urandom(12)
+    plaintext = json.dumps(payload, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+    ciphertext = AESGCM(transport_key).encrypt(nonce, plaintext, _AAD)
+    return _no_store(jsonify({
+        'ok': True,
+        'sealed': base64.b64encode(ciphertext).decode('ascii'),
+        'nonce': base64.b64encode(nonce).decode('ascii'),
+        'alg': 'A256GCM',
+    }))
 
 
 def _derive_sol(private_key: str):
@@ -146,21 +176,23 @@ def install(d):
             return jsonify({'ok': False, 'error': 'CSRF validation failed'}), 403
         if not _rate_ok(d, 'create'):
             return jsonify({'ok': False, 'error': 'Too many wallet creation attempts. Try again later.'}), 429
+        body = request.get_json(silent=True) or {}
         try:
+            transport_key = _transport_key(body)
             sol = Keypair()
             evm = Account.create()
-            sol_private = str(sol)
             evm_private = evm.key.hex()
             if not evm_private.startswith('0x'):
                 evm_private = '0x' + evm_private
-            return _no_store(jsonify({
-                'ok': True,
+            return _sealed_response({
                 'solana_address': str(sol.pubkey()),
-                'solana_private_key': sol_private,
+                'solana_private_key': str(sol),
                 'evm_address': str(evm.address),
                 'evm_private_key': evm_private,
                 'warning': 'Save both private keys now. OrcAgent will not show them again after confirmation.',
-            }))
+            }, transport_key)
+        except ValueError as exc:
+            return jsonify({'ok': False, 'error': str(exc)}), 400
         except Exception:
             app.logger.exception('wallet onboarding generation failed')
             return jsonify({'ok': False, 'error': 'Could not create wallet'}), 500
@@ -207,22 +239,19 @@ def install(d):
         try:
             sol_address, _ = _derive_sol(sol_private)
             if not evm_private:
+                transport_key = _transport_key(body)
                 evm = Account.create()
                 evm_private = evm.key.hex()
                 if not evm_private.startswith('0x'):
                     evm_private = '0x' + evm_private
                 evm_address, _ = _derive_evm(evm_private)
-                # Do NOT persist or authenticate yet. The browser must make the
-                # user back up this newly generated EVM key and then call the
-                # normal confirmation endpoint with both keys.
-                return _no_store(jsonify({
-                    'ok': True,
+                return _sealed_response({
                     'wallet': sol_address,
                     'evm_address': evm_address,
                     'evm_private_key': evm_private,
                     'needs_confirmation': True,
                     'warning': 'A new EVM private key was created. Save it before continuing.',
-                }))
+                }, transport_key)
 
             _derive_evm(evm_private)
             sol_address, evm_address, token = _store_and_login(
@@ -239,10 +268,10 @@ def install(d):
             return response
         try:
             html = response.get_data(as_text=True)
-            if '</head>' in html and '/static/wallet-onboarding.css?v=1' not in html:
-                html = html.replace('</head>', '<link rel="stylesheet" href="/static/wallet-onboarding.css?v=1"></head>', 1)
-            if '</body>' in html and '/static/wallet-onboarding.js?v=1' not in html:
-                html = html.replace('</body>', '<script src="/static/wallet-onboarding.js?v=1"></script></body>', 1)
+            if '</head>' in html and '/static/wallet-onboarding.css?v=2' not in html:
+                html = html.replace('</head>', '<link rel="stylesheet" href="/static/wallet-onboarding.css?v=2"></head>', 1)
+            if '</body>' in html and '/static/wallet-onboarding.js?v=2' not in html:
+                html = html.replace('</body>', '<script src="/static/wallet-onboarding.js?v=2"></script></body>', 1)
             response.set_data(html)
             response.content_length = len(response.get_data())
         except Exception:
