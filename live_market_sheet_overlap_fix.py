@@ -15,9 +15,6 @@ _CSS = r'''
     overscroll-behavior-y: contain;
   }
 
-  /* The amount/ticket block must own enough height for the 3-column stats.
-     Previously it was flex:1 and was squeezed by the keypad/footer, causing
-     24H MOVE / LIQUIDITY / VOLUME to sit underneath the percentage row. */
   body.oa-live-v2 .pt-sheet-mid {
     flex: 0 0 auto !important;
     min-height: 205px !important;
@@ -67,16 +64,49 @@ _CSS = r'''
 
   body.oa-live-v2 .pt-sheet-fees,
   body.oa-live-v2 .pt-fees,
-  body.oa-live-v2 .pt-sheet-ft,
-  body.oa-live-v2 .pt-slide {
+  body.oa-live-v2 .pt-sheet-ft {
     position: static !important;
     transform: none !important;
     flex-shrink: 0 !important;
   }
+
+  /* The slide track MUST stay positioned. The knob and fill are absolute
+     children of this element. Making the track position:static caused the
+     red/yellow knob to jump to the top-left of the token header. */
+  body.oa-live-v2 .pt-slide {
+    position: relative !important;
+    transform: none !important;
+    flex-shrink: 0 !important;
+    overflow: hidden !important;
+    isolation: isolate !important;
+  }
+
+  body.oa-live-v2 .pt-slide-fill {
+    position: absolute !important;
+    inset: 0 auto 0 0 !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    border-radius: inherit !important;
+    pointer-events: none !important;
+    z-index: 1 !important;
+  }
+
+  body.oa-live-v2 .pt-slide-knob {
+    position: absolute !important;
+    top: 50% !important;
+    left: 5px !important;
+    transform: translateY(-50%) !important;
+    margin: 0 !important;
+    z-index: 3 !important;
+  }
+
+  body.oa-live-v2 .pt-sheet-go {
+    position: relative !important;
+    z-index: 2 !important;
+    pointer-events: none !important;
+  }
 }
 
-/* Extra breathing room on shorter iPhones: scrolling is preferable to
-   overlapping controls or shrinking tap targets. */
 @media (max-width: 767px) and (max-height: 760px) {
   body.oa-live-v2 .pt-sheet-mid { min-height: 190px !important; }
   body.oa-live-v2 .pt-ticket { min-height: 172px !important; }
