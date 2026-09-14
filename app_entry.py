@@ -40,6 +40,7 @@ from cross_chain_budget_guard import install as _install_cross_chain_budget_guar
 from header_stable_balance import install as _install_header_stable_balance
 from portfolio_multichain_holdings import install as _install_portfolio_multichain_holdings
 from live_market_sheet_overlap_fix import install as _install_live_market_sheet_overlap_fix
+from mobile_footer_visibility_fix import install as _install_mobile_footer_visibility_fix
 from wallet_onboarding import install as _install_wallet_onboarding
 from trading_wallet_generator import install as _install_trading_wallet_generator
 from response_privacy_hardening import install as _install_response_privacy_hardening
@@ -110,6 +111,10 @@ _install_portfolio_multichain_holdings(_dashboard)
 # Keep mobile Live Market execution-sheet sections in normal document flow so
 # stats, percentage shortcuts, keypad, fees and slider never overlap.
 _install_live_market_sheet_overlap_fix(_dashboard)
+
+# Keep the shared mobile footer fully inside the iPhone/PWA viewport, including
+# its labels and safe-area padding, instead of letting the lower half clip off.
+_install_mobile_footer_visibility_fix(_dashboard)
 
 # Guest homepage onboarding mirrors the familiar wallet-app choice: create a
 # new self-custodial wallet, import an existing private key, or connect Phantom.
