@@ -18,6 +18,8 @@ _MAX_IMAGE_BYTES = 5 * 1024 * 1024
 _MAX_EDGE = 6000
 _MAX_PIXELS = 24_000_000
 _MAX_GIF_FRAMES = 180
+_MAX_WALK_NODES = 5000
+_MAX_NESTING = 32
 _IMAGE_KEYS = {
     'image', 'image_data', 'image_url', 'avatar', 'avatar_url', 'banner', 'banner_url',
     'photo', 'picture', 'group_avatar', 'group_banner',
@@ -40,7 +42,6 @@ def _validate_image_bytes(raw: bytes) -> None:
             frames = int(getattr(im, 'n_frames', 1) or 1)
             if frames > _MAX_GIF_FRAMES:
                 raise ValueError('Animated image has too many frames')
-            # verify() forces Pillow to parse enough structure to reject truncated/polyglot junk.
             im.verify()
     except ValueError:
         raise
@@ -68,13 +69,21 @@ def _validate_data_uri(value: str) -> None:
     _validate_image_bytes(raw)
 
 
-def _walk_images(obj, key=''):
+def _walk_images(obj, key='', *, _state=None, _depth=0):
+    # Never silently skip the tail of a list: that used to let an attacker put
+    # a malicious image in item 51 and bypass validation. Instead bound the
+    # total JSON structure and reject over-complex payloads fail-closed.
+    if _state is None:
+        _state = [0]
+    _state[0] += 1
+    if _state[0] > _MAX_WALK_NODES or _depth > _MAX_NESTING:
+        raise ValueError('Upload payload is too complex')
     if isinstance(obj, dict):
         for k, v in obj.items():
-            yield from _walk_images(v, str(k).lower())
+            yield from _walk_images(v, str(k).lower(), _state=_state, _depth=_depth + 1)
     elif isinstance(obj, list):
-        for v in obj[:50]:
-            yield from _walk_images(v, key)
+        for v in obj:
+            yield from _walk_images(v, key, _state=_state, _depth=_depth + 1)
     elif isinstance(obj, str):
         if obj.lower().startswith('data:') or key in _IMAGE_KEYS or key.endswith('_image'):
             yield obj
@@ -96,7 +105,6 @@ def install(dashboard_module):
                 if body is not None:
                     for value in _walk_images(body):
                         _validate_data_uri(value)
-            # Validate multipart images by bytes, never by filename extension alone.
             for storage in request.files.values():
                 mime = str(storage.mimetype or '').lower()
                 if not mime.startswith('image/'):
