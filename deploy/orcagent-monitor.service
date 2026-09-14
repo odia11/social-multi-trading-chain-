@@ -10,23 +10,39 @@ Group=orcagent
 WorkingDirectory=/opt/orcagent
 EnvironmentFile=/etc/orcagent.env
 Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+UMask=0077
 
-# A separate unit rather than a background process inside start.sh. In a
-# container the app process IS the container, so backgrounding it there is
-# fine; here systemd is the supervisor, and giving it its own unit means the
-# monitor restarting can't take the app down with it -- or the reverse. It
-# also stays silent by design: with no Telegram token configured it simply
-# does nothing.
+# Separate from the app so monitor restarts never restart trading, and vice
+# versa. With no Telegram token configured it stays intentionally silent.
 ExecStart=/opt/orcagent/venv/bin/python monitor.py
 
 Restart=always
 RestartSec=15
 
-# Reads the heartbeat file only; it never needs to write anything.
+# The monitor only needs to read application state and make normal network
+# calls for alerts. It gets no host-management privileges.
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
+ReadOnlyPaths=/data /opt/orcagent /etc/orcagent.env
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ProtectProc=invisible
+ProcSubset=pid
 
 StandardOutput=journal
 StandardError=journal
