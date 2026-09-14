@@ -4,6 +4,7 @@
 if((location.pathname.replace(/\/+$/,'')||'/')!=='/wallet') return;
 
 var LABELS={bsc:'BSC',base:'BASE',arbitrum:'ARB',polygon:'POLY',robinhood:'HOOD',solana:'SOL'};
+var _refreshing=false,_refreshTimer=null;
 
 function list(){ return window._wTokens||window._allSpl||[]; }
 function indexFromButton(btn){
@@ -51,6 +52,22 @@ var style=document.createElement('style');
 style.textContent='.oa-chain-badge{display:inline-flex;align-items:center;margin-left:7px;padding:2px 6px;border:1px solid rgba(247,185,85,.28);border-radius:999px;color:#f7b955;background:rgba(247,185,85,.08);font-size:9px;font-weight:800;letter-spacing:.06em;vertical-align:middle}.tok-row-block[data-chain="robinhood"] .oa-chain-badge{color:#d9b7ff;border-color:rgba(217,183,255,.28);background:rgba(217,183,255,.08)}';
 document.head.appendChild(style);
 
+/* Keep Portfolio live. A successful buy is recorded by the trading route
+   before it answers success. The wallet page therefore does not need a page
+   reload; it only needs to re-read the token feed with cache busting. */
+function refreshPortfolio(){
+  if(_refreshing||document.hidden)return Promise.resolve();
+  _refreshing=true;
+  var jobs=[];
+  try{if(typeof window.loadTokens==='function')jobs.push(Promise.resolve(window.loadTokens(true)));}catch(e){}
+  try{if(typeof window.loadUsdcSummary==='function')jobs.push(Promise.resolve(window.loadUsdcSummary()));}catch(e){}
+  try{if(typeof window.loadBalance==='function')jobs.push(Promise.resolve(window.loadBalance()));}catch(e){}
+  return Promise.allSettled(jobs).then(function(){
+    decorate();
+    document.dispatchEvent(new CustomEvent('orca:portfolio-changed'));
+  }).finally(function(){_refreshing=false});
+}
+
 function boot(){
   decorate();
   var h=document.querySelector('.holdings');
@@ -58,6 +75,17 @@ function boot(){
     var timer=null;
     new MutationObserver(function(){clearTimeout(timer);timer=setTimeout(decorate,0);}).observe(h,{childList:true,subtree:true});
   }
+  /* The legacy wallet calls loadTokens() without ?bust=1 on first paint.
+     Immediately follow it with an authoritative read so a token bought a
+     moment ago appears as soon as Portfolio opens. */
+  setTimeout(refreshPortfolio,80);
+  setTimeout(refreshPortfolio,900);
+  _refreshTimer=setInterval(refreshPortfolio,4000);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+window.addEventListener('pageshow',function(){setTimeout(refreshPortfolio,0)});
+window.addEventListener('focus',refreshPortfolio);
+document.addEventListener('visibilitychange',function(){if(!document.hidden)refreshPortfolio()});
+document.addEventListener('orca:trade-complete',refreshPortfolio);
+window.OrcAgentRefreshPortfolio=refreshPortfolio;
 })();
