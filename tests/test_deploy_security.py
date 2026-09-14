@@ -27,7 +27,12 @@ check('app is loopback only', '--bind 127.0.0.1:8080' in service)
 check('app startup executes security smoke check', 'ExecStartPost=/bin/bash /opt/orcagent/deploy/security-smoke.sh' in service)
 check('app uses owner-only umask', 'UMask=0077' in service)
 check('backup runs unprivileged', 'User=orcagent' in backup and 'Group=orcagent' in backup and 'User=root' not in backup)
-check('backup only writes backup directory', 'ReadWritePaths=/data/backups' in backup)
+# A live SQLite database can be in WAL mode. sqlite3 may need to open/create
+# or lock the -wal/-shm sidecars beside /data/orcagent.db, so the unprivileged
+# backup service needs /data writable. It still has no capabilities and the
+# backup script only creates artifacts below /data/backups.
+check('backup permits SQLite WAL sidecar access', 'ReadWritePaths=/data' in backup)
+check('backup keeps system and application tree read-only', 'ProtectSystem=strict' in backup and '/opt/orcagent' in backup and '/etc/orcagent.env' in backup)
 check('installer verifies systemd units', 'systemd-analyze verify' in install)
 check('installer executes backup service', 'systemctl start orcagent-backup.service' in install)
 check('installer installs smoke checker executable', 'security-smoke.sh' in install and 'chmod 755' in install)
