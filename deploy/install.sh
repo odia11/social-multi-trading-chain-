@@ -27,13 +27,12 @@ die(){ printf '\n\033[1;31m✗ %s\033[0m\n' "$*"; exit 1; }
 
 say "Installing system packages"
 apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip nginx sqlite3 curl ca-certificates rsync
+apt-get install -y -qq python3 python3-venv python3-pip nginx sqlite3 curl ca-certificates rsync openssl
 
 say "Creating the service user (no login shell — it only runs the app)"
 id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin "$APP_USER"
 
 say "Installing the application into $APP_DIR"
-mkdir -p "$APP_DIR"
 # --delete keeps the deployed copy exactly matching the repo, but never
 # reaches into $DATA_DIR, which lives outside $APP_DIR precisely so that
 # redeploying can't touch the database.
@@ -129,10 +128,26 @@ chown root:"$APP_USER" "$ENV_FILE"
 chmod 640 "$ENV_FILE"
 
 say "Installing the systemd services"
-cp "$REPO_DIR/deploy/orcagent.service"         /etc/systemd/system/orcagent.service
-cp "$REPO_DIR/deploy/orcagent-monitor.service" /etc/systemd/system/orcagent-monitor.service
+cp "$REPO_DIR/deploy/orcagent.service"          /etc/systemd/system/orcagent.service
+cp "$REPO_DIR/deploy/orcagent-monitor.service"  /etc/systemd/system/orcagent-monitor.service
+cp "$REPO_DIR/deploy/orcagent-backup.service"   /etc/systemd/system/orcagent-backup.service
+cp "$REPO_DIR/deploy/orcagent-backup.timer"     /etc/systemd/system/orcagent-backup.timer
+chmod 755 "$APP_DIR/deploy/backup.sh"
 systemctl daemon-reload
 systemctl enable orcagent orcagent-monitor >/dev/null
+# Enabling with --now guarantees the verified encrypted backup schedule is
+# actually active after every normal deploy, not merely present in Git.
+systemctl enable --now orcagent-backup.timer >/dev/null
+
+say "Verifying backup timer"
+if ! systemctl is-enabled --quiet orcagent-backup.timer; then
+  die "orcagent-backup.timer is not enabled"
+fi
+if ! systemctl is-active --quiet orcagent-backup.timer; then
+  die "orcagent-backup.timer is not active"
+fi
+NEXT_BACKUP="$(systemctl list-timers orcagent-backup.timer --no-legend 2>/dev/null | awk '{print $1" "$2" "$3" "$4}' || true)"
+echo "  encrypted daily backup timer active${NEXT_BACKUP:+ — next: $NEXT_BACKUP}"
 
 say "Installing the nginx site"
 NGINX_SITE=/etc/nginx/sites-available/orcagent
@@ -170,6 +185,11 @@ Setup complete. Three things left, in this order:
          systemctl start orcagent orcagent-monitor
          systemctl status orcagent
          journalctl -u orcagent -f
+
+The encrypted verified database backup timer is installed and enabled too.
+You can check it with:
+         systemctl status orcagent-backup.timer
+         systemctl list-timers orcagent-backup.timer
 
 Then point your domain at this server and run:
          certbot --nginx -d orcagent.fun -d www.orcagent.fun
