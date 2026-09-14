@@ -1,17 +1,5 @@
 #!/usr/bin/env bash
 # ── OrcAgent — one-shot server setup (Ubuntu/Debian) ──
-#
-# Run this ONCE on a fresh server, as root, from the repo directory:
-#     sudo bash deploy/install.sh
-#
-# It is safe to run again: every step checks before it acts, so a re-run
-# repairs a half-finished setup instead of duplicating it.
-#
-# What it does NOT do, on purpose:
-#   - It never writes your secrets. It creates /etc/orcagent.env from the
-#     template with placeholder values and stops; you fill it in yourself.
-#   - It never touches an existing database. Your live data is copied over
-#     separately (see deploy/README.md) so a mistake here cannot erase it.
 set -euo pipefail
 
 APP_USER=orcagent
@@ -36,7 +24,6 @@ say "Installing the application into $APP_DIR"
 if command -v rsync >/dev/null 2>&1; then
   rsync -a --delete --exclude '.git' --exclude '__pycache__' --exclude '*.db' \
         --exclude 'venv' --exclude '.secret_key' "$REPO_DIR"/ "$APP_DIR"/
-
   if [ -e "$REPO_DIR/.git" ]; then
     git -C "$REPO_DIR" rev-parse --short HEAD > "$APP_DIR/VERSION" 2>/dev/null || true
   fi
@@ -89,11 +76,8 @@ cp "$REPO_DIR/deploy/orcagent.service"           /etc/systemd/system/orcagent.se
 cp "$REPO_DIR/deploy/orcagent-monitor.service"   /etc/systemd/system/orcagent-monitor.service
 cp "$REPO_DIR/deploy/orcagent-backup.service"    /etc/systemd/system/orcagent-backup.service
 cp "$REPO_DIR/deploy/orcagent-backup.timer"      /etc/systemd/system/orcagent-backup.timer
-chmod 755 "$APP_DIR/deploy/backup.sh"
+chmod 755 "$APP_DIR/deploy/backup.sh" "$APP_DIR/deploy/security-smoke.sh"
 
-# Fail before restarting production if a security directive is misspelled or
-# a unit is otherwise invalid. This prevents a hardening change from turning
-# into an outage on deploy.
 if ! systemd-analyze verify \
     /etc/systemd/system/orcagent.service \
     /etc/systemd/system/orcagent-monitor.service \
@@ -115,10 +99,6 @@ fi
 if ! systemctl is-active --quiet orcagent-backup.timer; then
   die "orcagent-backup.timer is not active"
 fi
-
-# Prove the unprivileged, sandboxed backup can really read the DB and secret
-# and create a restore-verified encrypted artifact. If there is no DB yet the
-# script exits cleanly and the fresh-install path remains valid.
 if ! systemctl start orcagent-backup.service; then
   journalctl -u orcagent-backup.service -n 40 --no-pager || true
   die "encrypted backup service failed its execution test"
@@ -147,28 +127,18 @@ nginx -t && systemctl reload nginx
 cat <<EOF
 
 ────────────────────────────────────────────────────────────
-Setup complete. Three things left, in this order:
+Setup complete.
 
-  1. Fill in your secrets:
-         nano $ENV_FILE
+The application service is sandboxed, validates its security posture on every
+start, and the encrypted restore-verified database backup timer is enabled.
 
-     ENCRYPTION_KEY must be EXACTLY the value from Railway.
-     A different key makes every stored wallet key unreadable.
+Useful checks:
+    systemctl status orcagent
+    systemctl status orcagent-backup.timer
+    sudo -u orcagent /opt/orcagent/deploy/security-smoke.sh
 
-  2. Copy your live database across (see deploy/README.md),
-     otherwise the app starts empty — no users, no trades.
-
-  3. Start it:
-         systemctl start orcagent orcagent-monitor
-         systemctl status orcagent
-         journalctl -u orcagent -f
-
-The encrypted verified database backup timer is installed and enabled too.
-You can check it with:
-         systemctl status orcagent-backup.timer
-         systemctl list-timers orcagent-backup.timer
-
-Then point your domain at this server and run:
-         certbot --nginx -d orcagent.fun -d www.orcagent.fun
+On a fresh server, fill $ENV_FILE, copy the live database, start the services,
+then obtain TLS with:
+    certbot --nginx -d orcagent.fun -d www.orcagent.fun
 ────────────────────────────────────────────────────────────
 EOF
