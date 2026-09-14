@@ -33,7 +33,6 @@ jobs:
       - name: Python compile check
         run: python -m compileall -q .
 
-      # ── 0. App-specific security regression checks ────────────────────────
       - name: OrcAgent security regression checks
         run: |
           python tests/test_security_hardening.py
@@ -44,12 +43,11 @@ jobs:
           python tests/test_auth_replay_runtime.py
           python tests/test_ssrf_hardening.py
           python tests/test_stay_connected.py
+          python tests/test_deploy_security.py
 
-      # ── 1. pip-audit: known CVEs in dependencies ──────────────────────────
       - name: pip-audit
         run: pip-audit --strict -r requirements.txt
 
-      # ── 2. bandit: Python static analysis ─────────────────────────────────
       - name: bandit
         run: |
           bandit -r . \
@@ -58,13 +56,11 @@ jobs:
             --confidence-level medium \
             -f txt
 
-      # ── 3. gitleaks: full-history secret / credential scan ───────────────
       - name: gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── 4. Custom checks ──────────────────────────────────────────────────
       - name: Check for debug=True in production code
         run: |
           if grep -rn --include="*.py" 'app\.run.*debug\s*=\s*True' . ; then
