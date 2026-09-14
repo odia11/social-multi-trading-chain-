@@ -47,7 +47,13 @@ check('static route is read-only at the edge', 'location /static/' in nginx and 
 check('static assets carry nosniff protection', 'X-Content-Type-Options "nosniff"' in nginx)
 check('health route is non-cacheable', 'location = /health' in nginx and 'Cache-Control "no-store"' in nginx)
 check('upstream implementation header is hidden', 'proxy_hide_header X-Powered-By;' in nginx)
+check('nginx overwrites X-Forwarded-For instead of trusting client chain',
+      'proxy_set_header X-Forwarded-For   $remote_addr;' in nginx and '$proxy_add_x_forwarded_for' not in nginx)
+check('installer repairs spoofable forwarded IP in existing Certbot config',
+      'unsafe X-Forwarded-For append' in install and '$proxy_add_x_forwarded_for' in install
+      and 'proxy_set_header X-Forwarded-For' in install and '$remote_addr' in install)
 check('installer preserves Certbot TLS while injecting security snippet', "grep -q 'ssl_certificate'" in install and 'sed -i' in install and 'orcagent-server-security.conf' in install)
 check('installer validates live nginx security config', 'nginx -T' in install and 'server_tokens off' in install and 'limit_conn orca_conn 80' in install)
+check('installer verifies trusted forwarded client IP is active', 'nginx is not enforcing a trusted forwarded client IP' in install)
 
 raise SystemExit(0 if all(checks) else 1)
