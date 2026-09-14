@@ -39,6 +39,7 @@ from solana_gasless_trading import install as _install_solana_gasless_trading
 from cross_chain_budget_guard import install as _install_cross_chain_budget_guard
 from header_stable_balance import install as _install_header_stable_balance
 from portfolio_multichain_holdings import install as _install_portfolio_multichain_holdings
+from portfolio_trade_history import install as _install_portfolio_trade_history
 from live_market_sheet_overlap_fix import install as _install_live_market_sheet_overlap_fix
 from mobile_footer_visibility_fix import install as _install_mobile_footer_visibility_fix
 from wallet_onboarding import install as _install_wallet_onboarding
@@ -107,6 +108,10 @@ _install_header_stable_balance(_dashboard)
 # SPL accounts on Solana. This extends the existing token feed read-only and
 # labels EVM assets with their chain in the UI.
 _install_portfolio_multichain_holdings(_dashboard)
+
+# Portfolio transaction history: collapsible BUY/SELL ledger with calendar
+# filtering, sourced from completed Live Market executions and realized sells.
+_install_portfolio_trade_history(_dashboard)
 
 # Keep mobile Live Market execution-sheet sections in normal document flow so
 # stats, percentage shortcuts, keypad, fees and slider never overlap.
