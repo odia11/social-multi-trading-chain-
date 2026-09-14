@@ -242,18 +242,26 @@ def install(dashboard_module):
 
     @app.after_request
     def _inject_generator_ui(response):
-        if request.path != '/settings' or response.mimetype != 'text/html':
+        """Expose the generator on every HTML page that renders Manage Wallet.
+
+        OrcAgent's normal webapp is a single-page dashboard. The old code only
+        injected the generator on the literal /settings response, so the normal
+        dashboard could contain #manage-modal while never loading the generator.
+        """
+        if response.mimetype != 'text/html':
             return response
         try:
             html = response.get_data(as_text=True)
+            if 'id="manage-modal"' not in html:
+                return response
             marker = '</head>'
-            if marker in html and '/static/trading-wallet-generator.css?v=1' not in html:
+            if marker in html and '/static/trading-wallet-generator.css?v=2' not in html:
                 html = html.replace(marker,
-                    '<link rel="stylesheet" href="/static/trading-wallet-generator.css?v=1">' + marker, 1)
+                    '<link rel="stylesheet" href="/static/trading-wallet-generator.css?v=2">' + marker, 1)
             marker = '</body>'
-            if marker in html and '/static/trading-wallet-generator.js?v=1' not in html:
+            if marker in html and '/static/trading-wallet-generator.js?v=2' not in html:
                 html = html.replace(marker,
-                    '<script src="/static/trading-wallet-generator.js?v=1"></script>' + marker, 1)
+                    '<script src="/static/trading-wallet-generator.js?v=2"></script>' + marker, 1)
             response.set_data(html)
             response.content_length = len(response.get_data())
         except Exception:
