@@ -800,11 +800,13 @@ function doLogout(){
   _resetBadges();
   _resetMyProfile();
   _copySource=null; _updateCopyPill();
-  document.getElementById('app').style.display='none';
-  document.getElementById('onboard').classList.remove('hide');
+  // Disconnect returns to the public feed. The removed legacy onboarding
+  // must never cover the app merely because the visitor is signed out.
+  guestMode=true;
+  document.getElementById('onboard').classList.add('hide');
+  launchApp().catch(function(e){ console.warn('[guest] launch interrupted',e); });
   document.getElementById('s-sol').innerHTML='<span class="stat-placeholder">——</span>';
   _solCounterDone=false;
-  currentStep=0; showStep(0);
 }
 
 // ── ONBOARDING ──
@@ -970,11 +972,14 @@ function _minimizeGuestBanner(){
 }
 function _guestConnect(){
   _minimizeGuestBanner();
-  var app=document.getElementById('app');
-  if(app) app.style.display='none';
-  var ob=document.getElementById('onboard');
-  if(ob) ob.classList.remove('hide');
-  currentStep=0; showStep(0);
+  // Connect is now an explicit action and opens the approved wallet sheet.
+  // Never resurrect the old full-screen onboarding.
+  if(window.OrcAgentWalletOnboarding &&
+     typeof window.OrcAgentWalletOnboarding.open==='function'){
+    window.OrcAgentWalletOnboarding.open();
+    return;
+  }
+  connectWalletOnboard('phantom');
 }
 function checkGuest(){
   if(!guestMode) return false;
@@ -3287,7 +3292,11 @@ var _sessionBootstrapComplete = false;
   // Checked AFTER that, so the server stays the authority: a real disconnect
   // clears the session too, and then the fetch above returns nothing anyway.
   try{
-    if(localStorage.getItem('orca_manual_disconnect') && !phantomKey){ return; }
+    if(localStorage.getItem('orca_manual_disconnect') && !phantomKey){
+      guestMode=true;
+      await launchApp();
+      return;
+    }
     if(phantomKey){ localStorage.removeItem('orca_manual_disconnect'); }
   }catch(e){ /* Cookie-backed sessions work when browser storage is blocked. */ }
   // Home can start with an injected session, bypassing /api/session above.
@@ -3357,7 +3366,10 @@ var _sessionBootstrapComplete = false;
 
   // A connected extension is not proof of an OrcAgent session. In particular,
   // an interrupted recovery must not automatically trigger another signature.
-  // The explicit Connect buttons remain available when fresh proof is needed.
+  // The explicit Connect button remains available when fresh proof is needed.
+  // Signed-out visitors always enter the public feed; no startup gate.
+  guestMode=true;
+  await launchApp();
 })().catch(function(e){
   console.warn('[auth] startup interrupted; recovery will retry on return', e);
 }).finally(function(){ _sessionBootstrapComplete = true; });

@@ -38,7 +38,8 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
 @keyframes orcaBlink{0%,100%{opacity:1}50%{opacity:.35}}
 
 /* ── ONBOARDING ── */
-#onboard{position:fixed;inset:0;background:var(--bg);z-index:100;display:flex;align-items:center;justify-content:center;padding:1rem;overflow-y:auto}
+/* Legacy full-screen onboarding is retained only for its wallet handlers. It must never paint. */
+#onboard{position:fixed;inset:0;background:var(--bg);z-index:100;display:none;align-items:center;justify-content:center;padding:1rem;overflow-y:auto}
 #onboard.hide{display:none}
 .ob-box{background:var(--bg2);border:1px solid var(--border2);border-radius:20px;padding:2rem 2rem 1.75rem;width:100%;max-width:400px;max-height:90vh;overflow-y:auto;box-shadow:0 0 80px rgba(0,0,0,.18);text-align:center}
 .ob-logo-tile{width:48px;height:48px;min-width:48px;background:var(--accent);border-radius:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px}
@@ -3550,7 +3551,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
 
 
 <!-- ONBOARDING -->
-<div id="onboard">
+<div id="onboard" class="hide" aria-hidden="true">
 <script>
 // Set and checked here -- the FIRST thing inside #onboard, before any of its
 // own markup (wallet-connect buttons, the private-key form, the terms modal)
@@ -3819,7 +3820,7 @@ if (window.__SESSION_WALLET) {
 </div>
 
 <!-- MAIN APP -->
-<div id="app" style="display:none">
+<div id="app" style="display:block">
 <div id="avatar-lightbox" onclick="_closeAvatarLightbox()"><img id="avatar-lightbox-img" src="" alt=""></div>
 <!-- Full-size viewer for posted photos. Built by _image_lightbox_html() in
      dashboard.py so this page and the DM page cannot drift apart. -->
