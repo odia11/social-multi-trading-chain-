@@ -21,6 +21,27 @@ _GROUP_MANAGER_ACTIONS = frozenset({
     'kick', 'remove-member', 'ban', 'unban', 'promote', 'demote',
 })
 
+# These endpoints can create/remove privileged staff or change platform-wide
+# execution policy. They stay behind the OWNER_WALLET boundary even if a DB
+# role is accidentally over-granted.
+_OWNER_ONLY_ADMIN_PATHS = frozenset({
+    '/api/admin/invite',
+    '/api/admin/role/change',
+    '/api/admin/role/remove',
+    '/api/admin/features/toggle',
+})
+
+# Moderators are intentionally limited to moderation/support mutations. They
+# may not change staff roles, feature flags, trading policy, AI-filter policy,
+# security configuration, treasury state or other executive settings.
+_MODERATOR_ADMIN_MUTATION_PREFIXES = (
+    '/api/admin/ban',
+    '/api/admin/clear_ratelimit',
+    '/api/admin/post/delete',
+    '/api/admin/user/verify',
+    '/api/admin/support/threads/',
+)
+
 
 def _owner_wallets() -> set[str]:
     return {w.strip() for w in os.getenv('OWNER_WALLET', '').split(',') if w.strip()}
@@ -217,6 +238,17 @@ def _require_proven(result: bool | None):
     return _deny(503, 'Authorization backend unavailable')
 
 
+def _admin_mutation_denial(path: str, role: str, wallet: str):
+    """Return a denial tuple when an admin mutation exceeds the caller's tier."""
+    if path in _OWNER_ONLY_ADMIN_PATHS and wallet not in _owner_wallets():
+        return _deny(403, 'Owner wallet required')
+    if role == 'analyst':
+        return _deny(403, 'Read-only admin role')
+    if role == 'moderator' and not path.startswith(_MODERATOR_ADMIN_MUTATION_PREFIXES):
+        return _deny(403, 'Moderator permission required')
+    return None
+
+
 def install(dashboard_module):
     app = dashboard_module.app
     if getattr(app, '_orca_authorization_hardening_installed', False):
@@ -241,6 +273,17 @@ def install(dashboard_module):
             if role not in _ADMIN_ROLES:
                 app.logger.warning('authorization denied path=%s wallet=%s role=%s', path, wallet[:8] + '…', role)
                 return _deny(403, 'Forbidden') if path.startswith('/api/') else ('Forbidden', 403)
+
+            # Reading the admin console remains role-based. Mutations are
+            # tiered server-side; hiding buttons in HTML is never authority.
+            if path.startswith('/api/admin') and method in _MUTATING:
+                denied = _admin_mutation_denial(path, role, wallet)
+                if denied:
+                    app.logger.warning(
+                        'admin privilege boundary denied path=%s wallet=%s role=%s',
+                        path, wallet[:8] + '…', role,
+                    )
+                    return denied
             return None
 
         if method not in _MUTATING:
