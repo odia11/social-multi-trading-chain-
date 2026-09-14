@@ -12,16 +12,18 @@ IOSchedulingClass=best-effort
 IOSchedulingPriority=7
 UMask=0077
 
-# Backups need only the live database, the environment secret used to derive
-# the encryption key, the backup script and /data/backups as their sole write
-# location. Running as the application user removes the previous root process.
+# SQLite may run in WAL mode. Opening a live WAL database can require access
+# to its -wal/-shm sidecars (and creation of -shm when it is absent), so the
+# database directory itself must be writable by the same unprivileged service
+# user. The backup process still runs as `orcagent`, without capabilities, and
+# the script only writes temporary/backup files under /data/backups.
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/data/backups
-ReadOnlyPaths=/data/orcagent.db /etc/orcagent.env /opt/orcagent
+ReadWritePaths=/data
+ReadOnlyPaths=/etc/orcagent.env /opt/orcagent
 CapabilityBoundingSet=
 AmbientCapabilities=
 ProtectKernelTunables=true
