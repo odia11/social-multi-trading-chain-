@@ -47,6 +47,12 @@ check('image dimensions/pixels/frames are bounded',
       '_MAX_PIXELS' in upload and '_MAX_EDGE' in upload and '_MAX_GIF_FRAMES' in upload)
 check('API privacy filter strips private-key and token-hash fields',
       'encrypted_private_key' in privacy and 'token_hash' in privacy and '_clean(' in privacy)
+check('API privacy filter covers mnemonic, API key and secret schema variants',
+      "'mnemonic'" in privacy and "'api_key'" in privacy and "low.endswith('_secret')" in privacy)
+check('API privacy filter fails closed on sanitizer error',
+      '_replace_with_blocked' in privacy and 'Response blocked by privacy guard' in privacy
+      and 'return _replace_with_blocked(response)' in privacy)
+check('redacted API responses are non-cacheable', "response.headers['Cache-Control'] = 'no-store'" in privacy)
 check('sensitive mutations are audit logged without raw bodies',
       'security_audit_log' in audit and 'request.get_json' in audit and 'private_key' not in audit)
 check('audit IP is HMAC hashed rather than stored raw', 'hmac.new' in audit and 'ip_hash' in audit)
