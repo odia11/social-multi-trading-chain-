@@ -63,6 +63,29 @@
 .oa-ob-stage>.oa-ob-secret:focus{border-color:var(--oa-gold)}
 .oa-ob-stage small{font-size:10px;color:#7f8a95}
 
+
+/* Premium wallet-choice cards */
+.oa-ob-trust{display:flex;align-items:center;gap:10px;margin-top:18px;color:#a4aeba;font-size:12px;font-weight:600}
+.oa-ob-trust b,.oa-ob-chooser-foot b{padding:0 3px;color:#65717c;font-weight:700}
+.oa-ob-trust-icon{flex:0 0 auto;width:22px;height:25px;color:var(--oa-gold)}
+.oa-ob-option{display:grid;grid-template-columns:48px minmax(0,1fr) 20px;align-items:center;gap:13px;width:100%;min-height:86px;padding:13px;border:1px solid var(--oa-line);border-radius:17px;background:rgba(15,22,29,.82);color:var(--oa-text);text-align:left;font:inherit;cursor:pointer;transition:border-color .18s,background .18s,transform .18s,box-shadow .18s}
+.oa-ob-option:hover{border-color:#414d59;background:#111a23}
+.oa-ob-option:active{transform:scale(.992)}
+.oa-ob-option-featured{border-color:var(--oa-gold);background:linear-gradient(100deg,rgba(246,189,88,.065),rgba(15,22,29,.88));box-shadow:inset 0 0 0 1px rgba(246,189,88,.05)}
+.oa-ob-option-featured:hover{border-color:#ffd071;background:linear-gradient(100deg,rgba(246,189,88,.09),rgba(17,26,35,.94))}
+.oa-ob-option-icon{display:grid;place-items:center;width:48px;height:48px;border:1px solid #303b46;border-radius:14px;background:#0b1117;color:#aab5c0}
+.oa-ob-option-featured .oa-ob-option-icon{border-color:rgba(246,189,88,.38);color:var(--oa-gold)}
+.oa-ob-option-phantom{color:#9c83f6}
+.oa-ob-option-svg{width:26px;height:26px;display:block}
+.oa-ob-option-copy{display:block;min-width:0}
+.oa-ob-option-title{display:flex;align-items:center;flex-wrap:wrap;gap:7px;color:#f3f5f7;font-size:15px;font-weight:800;line-height:1.25;letter-spacing:-.012em}
+.oa-ob-option-title em{display:inline-flex;align-items:center;min-height:19px;padding:2px 7px;border-radius:99px;background:var(--oa-gold);color:#0a0f14;font-size:8px;font-style:normal;font-weight:950;letter-spacing:.045em}
+.oa-ob-option-sub{display:block;margin-top:5px;overflow:hidden;color:#98a3af;font-size:12px;font-weight:500;line-height:1.35;text-overflow:ellipsis}
+.oa-ob-chevron{width:20px;height:20px;color:#77838e}
+.oa-ob-option:hover .oa-ob-chevron{color:var(--oa-gold)}
+.oa-ob-chooser-foot{display:flex;align-items:center;justify-content:center;gap:8px;margin:20px 0 0;padding-top:17px;border-top:1px solid #222d36;color:#7f8b96;font-size:11px}
+.oa-ob-chooser-foot svg{width:15px;height:15px;flex:0 0 auto}
+
 @media(max-width:600px){
  .oa-ob-backdrop{padding:0;align-items:flex-end;background:rgba(1,4,8,.7)}
  .oa-ob-card{width:100%;max-height:94dvh;border-radius:28px 28px 0 0;padding:18px 18px calc(20px + env(safe-area-inset-bottom));box-shadow:0 -18px 70px rgba(0,0,0,.56)}
@@ -71,7 +94,13 @@
  .oa-ob-brand{margin-bottom:11px}
  .oa-ob-card h2{font-size:27px}
  .oa-ob-card h3{font-size:26px}
- .oa-ob-actions{margin-top:20px}
+ .oa-ob-actions{margin-top:18px}
+ .oa-ob-trust{margin-top:15px}
+ .oa-ob-option{grid-template-columns:46px minmax(0,1fr) 18px;min-height:82px;padding:12px;gap:11px}
+ .oa-ob-option-icon{width:46px;height:46px}
+ .oa-ob-option-title{font-size:14px}
+ .oa-ob-option-sub{font-size:11.5px}
+ .oa-ob-chooser-foot{margin-top:18px;padding-top:15px}
  .oa-ob-primary,.oa-ob-secondary{padding:15px 16px}
  .oa-ob-progress{margin:21px 0 19px;gap:6px}
  .oa-ob-step{font-size:10px}
