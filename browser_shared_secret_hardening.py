@@ -6,9 +6,14 @@ boundaries -- authenticated wallet/session, CSRF and route/object authorization 
 production disables the legacy shared-secret requirement for browser routes and
 scrubs the historical value from HTML as a final safety net.
 
-This module never logs or returns the old secret value.
+Because this credential was historically delivered to browsers, it must be treated as
+compromised. The legacy environment variable is therefore removed from the running
+process after import too; no later code should accidentally revive it as an auth factor.
+This module never logs or returns the old value.
 """
 from __future__ import annotations
+
+import os
 
 
 def install(dashboard_module):
@@ -19,7 +24,11 @@ def install(dashboard_module):
 
     # Capture only so an already-rendered legacy page can be scrubbed below.
     # Do not persist, print or expose this value anywhere else.
-    legacy_secret = str(getattr(dashboard_module, 'API_SHARED_SECRET', '') or '')
+    legacy_secret = str(
+        getattr(dashboard_module, 'API_SHARED_SECRET', '')
+        or os.environ.get('API_SHARED_SECRET', '')
+        or ''
+    )
 
     # dashboard.py's mutation guard and template context both read this module
     # value. An empty value makes browser requests rely on session + CSRF +
@@ -27,6 +36,7 @@ def install(dashboard_module):
     if hasattr(dashboard_module, 'API_SHARED_SECRET'):
         dashboard_module.API_SHARED_SECRET = ''
     app.config['API_SHARED_SECRET'] = ''
+    os.environ.pop('API_SHARED_SECRET', None)
 
     @app.after_request
     def _never_emit_legacy_shared_secret(response):
