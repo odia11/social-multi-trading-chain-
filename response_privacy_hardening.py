@@ -42,9 +42,11 @@ _FULL_KEY_REQUIRED_FIELDS = {
 }
 _IMPORT_KEY_EXPORT_PATH = '/api/onboarding/wallet/import'
 _IMPORT_KEY_EXPORT_FIELDS = {
-    'ok', 'wallet', 'evm_address', 'evm_private_key', 'warning',
+    'ok', 'wallet', 'evm_address', 'evm_private_key', 'warning', 'needs_confirmation',
 }
-_IMPORT_KEY_REQUIRED_FIELDS = {'ok', 'wallet', 'evm_address', 'evm_private_key', 'warning'}
+_IMPORT_KEY_REQUIRED_FIELDS = {
+    'ok', 'wallet', 'evm_address', 'evm_private_key', 'warning', 'needs_confirmation',
+}
 
 
 def _is_secret_field(key: object) -> bool:
@@ -104,6 +106,8 @@ def _valid_import_key_export(payload) -> bool:
     if not _IMPORT_KEY_REQUIRED_FIELDS.issubset(keys):
         return False
     if not keys.issubset(_IMPORT_KEY_EXPORT_FIELDS):
+        return False
+    if payload.get('needs_confirmation') is not True:
         return False
     return all(isinstance(payload.get(k), str) and payload.get(k)
                for k in ('wallet', 'evm_address', 'evm_private_key', 'warning'))
