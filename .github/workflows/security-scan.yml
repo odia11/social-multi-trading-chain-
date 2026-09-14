@@ -55,6 +55,7 @@ jobs:
           python tests/test_trading_wallet_generator.py
           python tests/test_no_platform_gas_fronting.py
           python tests/test_bsc_gasless_trading.py
+          python tests/test_solana_gasless_trading.py
 
       - name: pip-audit
         run: pip-audit --strict -r requirements.txt
