@@ -43,16 +43,22 @@ if [ -n "$COOKIE" ]; then
   ok "session cookie attributes hardened"
 fi
 
-if command -v ss >/dev/null 2>&1; then
-  LISTEN="$(ss -ltnH '( sport = :8080 )' 2>/dev/null || true)"
-  [ -n "$LISTEN" ] || fail "nothing is listening on app port 8080"
-  printf '%s\n' "$LISTEN" | grep -Eq '127\.0\.0\.1:8080|\[::1\]:8080' \
-    || fail "app port 8080 is not loopback-only"
-  if printf '%s\n' "$LISTEN" | grep -Eq '(^|[[:space:]])0\.0\.0\.0:8080|\[::\]:8080'; then
-    fail "gunicorn port 8080 is publicly bound"
-  fi
-  ok "gunicorn bound to loopback only"
+# Do not use `ss` here. This script runs as ExecStartPost inside the same
+# hardened systemd unit as Gunicorn. ProtectProc=invisible / ProcSubset=pid can
+# hide the kernel socket table from the control process, causing `ss` to return
+# an empty list even while curl to 127.0.0.1:8080 succeeds. That is a false
+# negative which previously put an otherwise healthy app into an auto-restart
+# loop. We verify both facts that matter instead:
+#   1) the app actually answered on 127.0.0.1:8080 above; and
+#   2) the installed unit is configured to bind Gunicorn to loopback only.
+UNIT_TEXT="$(systemctl cat orcagent.service 2>/dev/null || true)"
+[ -n "$UNIT_TEXT" ] || fail "could not read installed orcagent.service"
+printf '%s\n' "$UNIT_TEXT" | grep -q -- '--bind 127\.0\.0\.1:8080' \
+  || fail "gunicorn service is not configured for loopback-only port 8080"
+if printf '%s\n' "$UNIT_TEXT" | grep -Eq -- '--bind (0\.0\.0\.0|\[::\]|::):8080'; then
+  fail "gunicorn port 8080 is publicly bound"
 fi
+ok "gunicorn configured for loopback only and app answered on loopback"
 
 SHELL_PATH="$(getent passwd orcagent | cut -d: -f7 || true)"
 case "$SHELL_PATH" in
