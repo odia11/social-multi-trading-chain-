@@ -27,7 +27,9 @@ trap cleanup EXIT
 sqlite3 "$DB" ".backup '$TMP'"
 sqlite3 "$TMP" 'PRAGMA integrity_check;' | grep -qx ok
 # Domain-separated backup passphrase: never reuse the root secret bytes directly.
-BACKUP_KEY="$(printf 'orcagent-backup-v1:%s' "$ROOT_SECRET" | sha256sum | awk '{print $1}')"
+# OpenSSL's `-pass env:BACKUP_KEY` reads from the process environment, so this
+# derived value must be exported rather than only assigned as a shell variable.
+export BACKUP_KEY="$(printf 'orcagent-backup-v1:%s' "$ROOT_SECRET" | sha256sum | awk '{print $1}')"
 gzip -9 "$TMP"
 openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
   -in "$GZ" -out "$ENC" -pass env:BACKUP_KEY
