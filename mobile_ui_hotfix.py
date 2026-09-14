@@ -17,6 +17,7 @@ def install(dashboard_module):
         '<script src="/static/mobile-connect-button.js?v=5" defer ' + marker + '></script>'
     )
     home_tags = (
+        '<script src="/static/home-start-trading-route.js?v=1" defer ' + marker + '></script>'
         '<link rel="stylesheet" href="/static/home-feed-chart-redesign.css?v=2" ' + marker + '>'
         '<script src="/static/home-feed-chart-redesign.js?v=3" defer ' + marker + '></script>'
     )
