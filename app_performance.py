@@ -55,10 +55,10 @@ def install(appmod) -> None:
 
             if path == '/wallet':
                 style('portfolio-redesign.css', '/static/portfolio-redesign.css?v=4')
-                # v7 removes the legacy bot Recent activity card from Portfolio.
-                # Bot trade history remains available on /history; Portfolio keeps
-                # the dedicated Live Market transaction section instead.
-                script('portfolio-redesign.js', '/static/portfolio-redesign.js?v=7')
+                # v8 removes all legacy activity/history cards from Portfolio.
+                # The only trade list left on this route is the dedicated,
+                # Live-Market-only transaction component.
+                script('portfolio-redesign.js', '/static/portfolio-redesign.js?v=8')
                 script('portfolio-assets.js', '/static/portfolio-assets.js?v=1')
             elif path == '/live-market':
                 style('live-market-redesign.css', '/static/live-market-redesign.css?v=7')
