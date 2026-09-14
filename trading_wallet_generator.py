@@ -57,6 +57,26 @@ def _validate_helpers(dashboard_module):
     return all(callable(getattr(dashboard_module, name, None)) for name in required)
 
 
+def _existing_key_state(dashboard_module, wallet: str):
+    db_file = getattr(dashboard_module, 'DB_FILE', None)
+    if not db_file:
+        return None
+    try:
+        conn = sqlite3.connect(db_file, timeout=5.0)
+        try:
+            row = conn.execute(
+                'SELECT encrypted_private_key, encrypted_private_key_bsc FROM users WHERE wallet_address=? LIMIT 1',
+                (wallet,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return False
+        return bool((row[0] or '').strip() or (row[1] or '').strip())
+    except sqlite3.Error:
+        return None
+
+
 def install(dashboard_module):
     app = dashboard_module.app
     if getattr(app, '_orca_trading_wallet_generator_installed', False):
@@ -72,6 +92,12 @@ def install(dashboard_module):
             return jsonify({'ok': False, 'error': 'CSRF validation failed'}), 403
         if not _rate_ok(dashboard_module, wallet, 'generate', 5, 3600):
             return jsonify({'ok': False, 'error': 'Too many wallet generations. Try again later.'}), 429
+
+        existing = _existing_key_state(dashboard_module, wallet)
+        if existing is None:
+            return jsonify({'ok': False, 'error': 'Wallet database unavailable'}), 503
+        if existing:
+            return jsonify({'ok': False, 'error': 'A trading wallet is already configured. Existing wallet keys are never replaced by the new-user generator.'}), 409
 
         try:
             sol = Keypair()
@@ -95,9 +121,6 @@ def install(dashboard_module):
             except Exception:
                 pass
 
-        # These two secret fields are intentionally allowed only for this exact
-        # one-time endpoint by response_privacy_hardening.py. They are never read
-        # from the DB and the response is always no-store.
         resp = jsonify({
             'ok': True,
             'solana_address': sol_address,
@@ -120,6 +143,12 @@ def install(dashboard_module):
         if not _validate_helpers(dashboard_module):
             app.logger.error('trading wallet generator missing encryption helpers')
             return jsonify({'ok': False, 'error': 'Wallet security backend unavailable'}), 503
+
+        existing = _existing_key_state(dashboard_module, wallet)
+        if existing is None:
+            return jsonify({'ok': False, 'error': 'Wallet database unavailable'}), 503
+        if existing:
+            return jsonify({'ok': False, 'error': 'A trading wallet is already configured. Existing keys were left unchanged.'}), 409
 
         body = request.get_json(silent=True) or {}
         if body.get('backup_confirmed') is not True:
@@ -146,9 +175,6 @@ def install(dashboard_module):
         except Exception:
             return jsonify({'ok': False, 'error': 'Invalid EVM private key'}), 400
 
-        # A generated trading wallet should be separate from the login/identity
-        # wallet. Accidentally replacing it with the connected Solana wallet would
-        # defeat the purpose of keeping a limited-funds trading wallet.
         if sol_address == wallet:
             return jsonify({'ok': False, 'error': 'Trading wallet must be separate from your connected wallet'}), 400
 
@@ -164,15 +190,19 @@ def install(dashboard_module):
             return jsonify({'ok': False, 'error': 'Could not securely store trading wallet'}), 500
 
         db_file = getattr(dashboard_module, 'DB_FILE', None)
-        if not db_file:
-            return jsonify({'ok': False, 'error': 'Wallet database unavailable'}), 503
-
         sol_hash = hashlib.sha256(sol_private.encode()).hexdigest()
         try:
             conn = sqlite3.connect(db_file, timeout=10.0)
             try:
                 conn.execute('BEGIN IMMEDIATE')
                 conn.execute('INSERT OR IGNORE INTO users (wallet_address) VALUES (?)', (wallet,))
+                current = conn.execute(
+                    'SELECT encrypted_private_key, encrypted_private_key_bsc FROM users WHERE wallet_address=?',
+                    (wallet,),
+                ).fetchone()
+                if current and ((current[0] or '').strip() or (current[1] or '').strip()):
+                    conn.rollback()
+                    return jsonify({'ok': False, 'error': 'Trading wallet was configured in another session. Existing keys were left unchanged.'}), 409
                 conn.execute(
                     'UPDATE users SET encrypted_private_key=?, key_hash=?, '
                     'bsc_wallet_address=?, encrypted_private_key_bsc=? '
@@ -203,7 +233,6 @@ def install(dashboard_module):
             except Exception:
                 pass
 
-        # Never echo key material after storage.
         return _no_store(jsonify({
             'ok': True,
             'has_trading_key': True,
