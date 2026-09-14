@@ -93,12 +93,8 @@ systemctl enable orcagent orcagent-monitor >/dev/null
 systemctl enable --now orcagent-backup.timer >/dev/null
 
 say "Verifying backup protection"
-if ! systemctl is-enabled --quiet orcagent-backup.timer; then
-  die "orcagent-backup.timer is not enabled"
-fi
-if ! systemctl is-active --quiet orcagent-backup.timer; then
-  die "orcagent-backup.timer is not active"
-fi
+systemctl is-enabled --quiet orcagent-backup.timer || die "orcagent-backup.timer is not enabled"
+systemctl is-active --quiet orcagent-backup.timer || die "orcagent-backup.timer is not active"
 if ! systemctl start orcagent-backup.service; then
   journalctl -u orcagent-backup.service -n 40 --no-pager || true
   die "encrypted backup service failed its execution test"
@@ -111,26 +107,53 @@ fi
 NEXT_BACKUP="$(systemctl list-timers orcagent-backup.timer --no-legend 2>/dev/null | awk '{print $1" "$2" "$3" "$4}' || true)"
 echo "  daily backup timer active${NEXT_BACKUP:+ — next: $NEXT_BACKUP}"
 
-say "Installing the nginx site"
+say "Installing nginx security layer"
+mkdir -p /etc/nginx/snippets /etc/nginx/conf.d
+cp "$REPO_DIR/deploy/nginx-security-zones.conf" /etc/nginx/conf.d/orcagent-security-zones.conf
+cp "$REPO_DIR/deploy/nginx-server-security.conf" /etc/nginx/snippets/orcagent-server-security.conf
+chmod 644 /etc/nginx/conf.d/orcagent-security-zones.conf /etc/nginx/snippets/orcagent-server-security.conf
+
 NGINX_SITE=/etc/nginx/sites-available/orcagent
 if [ -f "$NGINX_SITE" ] && grep -q 'ssl_certificate' "$NGINX_SITE"; then
-  echo "  already has a certificate — left untouched so certbot's config survives"
-  echo "  (if you need the template back: certbot delete, then re-run this)"
+  echo "  existing Certbot TLS site preserved"
 else
   cp "$REPO_DIR/deploy/nginx-orcagent.conf" "$NGINX_SITE"
-  echo "  installed (plain HTTP — run certbot afterwards)"
+  echo "  installed plain HTTP template — run certbot on a fresh server"
 fi
+
+# Existing production TLS files belong to Certbot, but they still need the
+# security snippet. Inject one include after OrcAgent's server_name without
+# replacing any certificate, redirect or TLS directive.
+if ! grep -qF 'include /etc/nginx/snippets/orcagent-server-security.conf;' "$NGINX_SITE"; then
+  sed -i '/server_name[[:space:]]\+orcagent\.fun[[:space:]]\+www\.orcagent\.fun;/a\    include /etc/nginx/snippets/orcagent-server-security.conf;' "$NGINX_SITE"
+fi
+grep -qF 'include /etc/nginx/snippets/orcagent-server-security.conf;' "$NGINX_SITE" \
+  || die "could not attach nginx security snippet to the OrcAgent server block"
+
 ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/orcagent
 rm -f /etc/nginx/sites-enabled/default
-nginx -t && systemctl reload nginx
+nginx -t || die "nginx security configuration failed validation"
+systemctl reload nginx
+
+# Confirm the live nginx configuration actually loaded both layers; checking
+# only the files on disk can miss include/path mistakes.
+NGINX_DUMP="$(nginx -T 2>/dev/null)"
+printf '%s' "$NGINX_DUMP" | grep -q 'limit_conn_zone .*orca_conn' \
+  || die "nginx connection-abuse zone is not loaded"
+printf '%s' "$NGINX_DUMP" | grep -q 'limit_conn orca_conn 80' \
+  || die "nginx OrcAgent connection limit is not active"
+printf '%s' "$NGINX_DUMP" | grep -q 'server_tokens off' \
+  || die "nginx server token suppression is not active"
+echo "  nginx edge hardening active"
 
 cat <<EOF
 
 ────────────────────────────────────────────────────────────
 Setup complete.
 
-The application service is sandboxed, validates its security posture on every
-start, and the encrypted restore-verified database backup timer is enabled.
+The application process is sandboxed, startup validates security headers and
+loopback binding, nginx rejects TRACE/CONNECT and limits abusive connection
+fan-out, and encrypted restore-verified database backups are scheduled.
 
 Useful checks:
     systemctl status orcagent
