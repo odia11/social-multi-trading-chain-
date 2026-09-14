@@ -10,6 +10,10 @@ Group=orcagent
 WorkingDirectory=/opt/orcagent
 EnvironmentFile=/etc/orcagent.env
 
+# Product invariant: OrcAgent never fronts user gas. Users fund native gas
+# from their own trading wallet; platform sponsor balances are irrelevant.
+Environment=ORCAGENT_FRONTS_GAS=0
+
 # /opt/orcagent is read-only below (ProtectSystem=strict), so let Python skip
 # writing .pyc files rather than failing to on every import.
 Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
