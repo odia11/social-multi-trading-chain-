@@ -90,7 +90,6 @@ def _pick_gasless_order(private_key: str, max_spend_usdc: Decimal,
         except Exception as exc:
             last_error = str(exc)
             low = last_error.lower()
-            # These failures cannot be repaired by simply asking for a larger quote.
             if ('api_key' in low or 'api key' in low or '401' in low or
                     '403' in low or 'unauthor' in low or 'forbidden' in low):
                 raise
@@ -146,8 +145,6 @@ def install(d):
 
     def auto_bridge(user_id, wallet, evm_address, dest_chain,
                     token_address, amount_usdc):
-        # Preserve the established path. Intervene only in the proven dead-end:
-        # Solana was chosen as source and it lacks SOL for the origin tx.
         first = original(user_id, wallet, evm_address, dest_chain,
                          token_address, amount_usdc)
         if not isinstance(first, dict) or first.get('started'):
@@ -172,7 +169,18 @@ def install(d):
                 return _failure(wallet, 'Solana trading wallet is not configured')
 
             current_sol = Decimal(str(d._get_user_sol(trading_address) or 0))
-            target_sol = Decimal(str(getattr(d, 'SOL_NETWORK_RESERVE', 0.005) or 0.005))
+            # A cross-chain origin transaction does NOT need OrcAgent's full
+            # 0.005 SOL trading reserve. That reserve is for keeping enough SOL
+            # around for later Solana buys/sells too. Here we only bootstrap the
+            # source bridge transaction. Keeping the two values coupled made a
+            # $1.30 Robinhood buy reserve ~$1+ of SOL before the bridge and fail
+            # even though the bridge itself needs only a fraction of that.
+            # The bridge-specific reserve is configurable; 0.001 SOL is the
+            # conservative default and still remains fully user-funded.
+            bridge_reserve = getattr(d, 'SOL_BRIDGE_GAS_RESERVE', 0.001)
+            target_sol = Decimal(str(bridge_reserve or 0.001))
+            if target_sol <= 0:
+                target_sol = Decimal('0.001')
             if current_sol >= target_sol:
                 return original(user_id, wallet, evm_address, dest_chain,
                                 token_address, float(ceiling))
@@ -188,8 +196,6 @@ def install(d):
                     private_key, max_bootstrap, shortfall)
                 _execute_order(private_key, order)
 
-            # Jupiter reports success after confirmation, but the configured RPC
-            # can lag slightly. Re-read instead of trusting the quote as money.
             actual_sol = current_sol
             for _ in range(8):
                 try:
