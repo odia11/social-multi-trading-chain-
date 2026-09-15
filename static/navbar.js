@@ -24,7 +24,7 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
     boot.textContent='html.oa-pf-boot,html.oa-pf-boot body{background:#080d12!important}html.oa-pf-boot body{visibility:hidden!important}';
     document.head.appendChild(boot);
   }
-  ensureStyle('/static/portfolio-redesign.css?v=5','portfolio-redesign.css');
+  ensureStyle('/static/portfolio-redesign.css?v=6','portfolio-redesign.css');
   ensureScript('/static/portfolio-redesign.js?v=9','portfolio-redesign.js');
   ensureScript('/static/portfolio-assets.js?v=1','portfolio-assets.js');
 })();
@@ -40,7 +40,7 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/'||!window.matchMedia('(max-width:767px)').matches)return;
   document.documentElement.classList.add('oa-home-mobile-root');
-  ensureStyle('/static/home-mobile.css?v=5','home-mobile.css');
+  ensureStyle('/static/home-mobile.css?v=6','home-mobile.css');
   ensureScript('/static/home-mobile.js?v=4','home-mobile.js');
 })();
 

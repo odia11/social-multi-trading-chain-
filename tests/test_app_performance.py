@@ -41,10 +41,10 @@ check('portfolio gets a compact but safe fixed-nav reserve',
 check('every HTML response gets the shared v3 performance assets early',
       'app-ux.css?v=3' in PERF and 'app-ux.js?v=3' in PERF)
 check('route-critical redesign assets are applied before first paint',
-      'portfolio-redesign.css?v=5' in PERF
+      'portfolio-redesign.css?v=6' in PERF
       and 'live-market-redesign.css?v=7' in PERF
-      and 'home-mobile.css?v=5' in PERF
-      and 'home-mobile-polish.css?v=4' in PERF)
+      and 'home-mobile.css?v=6' in PERF
+      and 'home-mobile-polish.css?v=5' in PERF)
 check('production WSGI installs the performance adapter',
       'from app_performance import install as _install_app_performance' in ENTRY
       and '_install_app_performance(_dashboard)' in ENTRY)

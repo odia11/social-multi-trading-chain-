@@ -54,7 +54,7 @@ def install(appmod) -> None:
                 tags.append('<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>')
 
             if path == '/wallet':
-                style('portfolio-redesign.css', '/static/portfolio-redesign.css?v=5')
+                style('portfolio-redesign.css', '/static/portfolio-redesign.css?v=6')
                 # v8 removes all legacy activity/history cards from Portfolio.
                 # The only trade list left on this route is the dedicated,
                 # Live-Market-only transaction component.
@@ -69,8 +69,8 @@ def install(appmod) -> None:
                 style('groups-redesign.css', '/static/groups-redesign.css?v=1')
                 script('groups-redesign.js', '/static/groups-redesign.js?v=1')
             elif path == '/':
-                style('home-mobile.css', '/static/home-mobile.css?v=5', ' media="(max-width:767px)"')
-                style('home-mobile-polish.css', '/static/home-mobile-polish.css?v=4', ' media="(max-width:767px)"')
+                style('home-mobile.css', '/static/home-mobile.css?v=6', ' media="(max-width:767px)"')
+                style('home-mobile-polish.css', '/static/home-mobile-polish.css?v=5', ' media="(max-width:767px)"')
                 style('home-composer-mobile.css', '/static/home-composer-mobile.css?v=1', ' media="(max-width:767px)"')
                 style('home-desktop.css', '/static/home-desktop.css?v=1', ' media="(min-width:1025px)"')
 
