@@ -23,6 +23,7 @@ try:
         ResidentKeyRequirement as _WaResidentKeyRequirement,
         AttestationConveyancePreference as _WaAttestationConveyancePreference,
         PublicKeyCredentialDescriptor as _WaPublicKeyCredentialDescriptor,
+        AuthenticatorAttachment as _WaAuthenticatorAttachment,
     )
     from webauthn.helpers.exceptions import InvalidRegistrationResponse as _WaInvalidRegistrationResponse, \
         InvalidAuthenticationResponse as _WaInvalidAuthenticationResponse
@@ -17175,7 +17176,15 @@ def webauthn_register_options():
         user_display_name=wallet,
         attestation=_WaAttestationConveyancePreference.NONE,
         authenticator_selection=_WaAuthenticatorSelectionCriteria(
-            resident_key=_WaResidentKeyRequirement.PREFERRED,
+            # THIS device's own Face ID or Touch ID. Without it iOS is free to
+            # offer a security key or a scan-this-QR-with-another-phone flow
+            # as well, which is a longer road to the same place and not what
+            # the button says it does.
+            authenticator_attachment=_WaAuthenticatorAttachment.PLATFORM,
+            # Discoverable, so signing in later needs nothing remembered on
+            # this device -- an installed app has its own storage, and a
+            # passkey made in Safari leaves no trace in it.
+            resident_key=_WaResidentKeyRequirement.REQUIRED,
             user_verification=_WaUserVerificationRequirement.REQUIRED,
         ),
         exclude_credentials=exclude or None,

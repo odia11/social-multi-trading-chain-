@@ -109,6 +109,24 @@ function _waCredentialToJSON(cred){
   return out;
 }
 
+/* Signing in has the same problem the setup did: asking the server for a
+   challenge after the tap spends the tap's user activation, and iOS then
+   refuses to show the sheet. Fetched when the button appears instead. */
+var _pkLoginOpts = null, _pkLoginAt = 0;
+function _prefetchPasskeyLoginOptions(){
+  var storedId = null;
+  try{ storedId = localStorage.getItem('orca_credential_id'); }catch(e){}
+  var url = '/api/auth/webauthn/login/options'
+          + (storedId ? ('?credential_id=' + encodeURIComponent(storedId)) : '');
+  return fetch(url, {credentials:'include'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d && d.challenge){ _pkLoginOpts = d; _pkLoginAt = Date.now(); }
+      return (d && d.challenge) ? d : null;
+    })
+    .catch(function(){ return null; });
+}
+
 async function _webAuthnLogin(){
   var errEl=document.getElementById('ob-bio-err');
   var btn=document.getElementById('ob-bio-btn');
@@ -120,12 +138,13 @@ async function _webAuthnLogin(){
   }
   if(btn) btn.disabled=true;
   if(label) label.textContent='Authenticating…';
-  var failed=false;
+  var failed=false, _retryable=false, startedAt=0;
   try{
-    var storedId=localStorage.getItem('orca_credential_id');
-    var optUrl='/api/auth/webauthn/login/options'+(storedId?('?credential_id='+encodeURIComponent(storedId)):'');
-    var opt=await fetch(optUrl).then(function(r){return r.json();}).catch(function(){return null;});
+    var fresh = _pkLoginOpts && (Date.now() - _pkLoginAt) < PK_OPTS_FRESH_MS;
+    var opt = fresh ? _pkLoginOpts : await _prefetchPasskeyLoginOptions();
+    _pkLoginOpts = null;                 // one challenge, one attempt
     if(!opt||!opt.challenge){ if(errEl) errEl.textContent='Face ID unavailable — try connecting wallet instead.'; failed=true; return; }
+    var startedAt = Date.now();
     var cred=await navigator.credentials.get({publicKey:_waOptionsFromJSON(opt)});
     if(!cred){ if(errEl) errEl.textContent='Face ID failed.'; failed=true; return; }
     var r=await fetch('/api/auth/webauthn/login',{
@@ -140,15 +159,23 @@ async function _webAuthnLogin(){
       failed=true;
     }
   }catch(e){
-    var em=e.name==='NotAllowedError'?'Face ID failed — try connecting wallet instead.':
-           e.name==='SecurityError'?'Domain mismatch — passkey not valid for this site.':
-           'Auth failed: '+(e.message||e.name);
+    // Same two meanings as on the setup side: dismissed, or never shown.
+    var quick = (Date.now() - (typeof startedAt === 'number' ? startedAt : 0)) < 700;
+    var em = e.name==='NotAllowedError'
+             ? (quick ? 'The Face ID prompt did not open. Tap Login with Face ID once more.'
+                      : 'Face ID cancelled — tap again, or connect your wallet instead.')
+           : e.name==='SecurityError' ? 'This address cannot use your passkey. Open OrcAgent at orcagent.fun.'
+           : 'Auth failed: '+(e.message||e.name);
     if(errEl) errEl.textContent=em;
+    if(e.name==='NotAllowedError'){ _prefetchPasskeyLoginOptions(); _retryable=true; }
     failed=true;
   }finally{
     if(btn) btn.disabled=false;
     if(label) label.textContent='Login with Face ID';
-    if(failed) _showWalletOptions();
+    // A prompt that was dismissed or never opened is not a reason to take
+    // the Face ID button away -- the whole fix is that tapping again works.
+    // Only a real dead end falls back to the wallet buttons.
+    if(failed && !_retryable) _showWalletOptions();
   }
 }
 
@@ -347,19 +374,81 @@ async function _resumeFromDeviceToken(){
    Shown from the SERVER's answer, not localStorage. An installed app has its
    own storage, so a passkey registered in Safari leaves no trace there — the
    client cannot tell "no passkey" from "not this context". */
+/* ── having the challenge in hand BEFORE the tap ──
+   navigator.credentials.create() has to run while the tap that asked for it
+   is still the browser's current user activation. Fetching the challenge
+   first spends that activation on a network round trip, and iOS then
+   refuses the call outright -- with NotAllowedError, the same error it
+   raises when somebody dismisses the sheet. So the screen said "Setup
+   cancelled." for a sheet that had never appeared, and no amount of tapping
+   ever produced a different answer.
+
+   The challenge is fetched ahead of the tap instead, and kept fresh while
+   the prompt is on screen. The server holds one for 120 seconds; this
+   replaces it well inside that, and never while a prompt is actually open,
+   since fetching another would invalidate the one being answered. */
+var _pkOpts = null, _pkOptsAt = 0, _pkOptsTimer = null, _pkBusy = false;
+var PK_OPTS_FRESH_MS = 80000;      // the server's own window is 120s
+
+function _pkOptsFresh(){
+  return !!_pkOpts && (Date.now() - _pkOptsAt) < PK_OPTS_FRESH_MS;
+}
+function _prefetchPasskeyOptions(){
+  if(_pkBusy) return Promise.resolve(_pkOpts);
+  return fetch('/api/auth/webauthn/register/options', {credentials:'include'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d && d.challenge){ _pkOpts = d; _pkOptsAt = Date.now(); }
+      return (d && d.challenge) ? d : null;
+    })
+    .catch(function(){ return null; });
+}
+function _keepPasskeyOptionsFresh(on){
+  if(_pkOptsTimer){ clearInterval(_pkOptsTimer); _pkOptsTimer = null; }
+  if(!on) return;
+  _prefetchPasskeyOptions();
+  _pkOptsTimer = setInterval(_prefetchPasskeyOptions, PK_OPTS_FRESH_MS);
+}
+
+/* Whether this device can make a Face ID / Touch ID passkey at all.
+   window.PublicKeyCredential alone does not answer that: it is present in
+   browsers with no platform authenticator, in private windows, and inside
+   in-app browsers where passkeys do not work -- so the banner offered a
+   button that could only ever fail. */
+function _faceIdPossible(){
+  if(!window.PublicKeyCredential
+     || !PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable){
+    return Promise.resolve(false);
+  }
+  try{
+    return PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
+      .then(function(ok){ return !!ok; })
+      .catch(function(){ return false; });
+  }catch(e){ return Promise.resolve(false); }
+}
+
 function _passkeyBannerDismissed(){
   try{ return localStorage.getItem('orca_pk_prompt_off') === '1'; }catch(e){ return false; }
 }
 function _dismissPasskeyBanner(){
   var b = document.getElementById('pk-banner');
   if(b) b.style.display = 'none';
+  _keepPasskeyOptionsFresh(false);     // nothing on screen to keep ready for
   try{ localStorage.setItem('orca_pk_prompt_off', '1'); }catch(e){}
 }
 function _maybePromptPasskey(session){
   var b = document.getElementById('pk-banner');
   if(!b || !session || !session.authenticated) return;
   if(session.has_passkey) return;            // already has the way back
-  if(!window.PublicKeyCredential) return;    // device cannot make one
+  // Asked of the device rather than assumed. A browser with no platform
+  // authenticator, a private window, or an in-app browser all have
+  // window.PublicKeyCredential and none of them can make a Face ID passkey
+  // -- offering the button there is offering something that can only fail.
+  _faceIdPossible().then(function(can){
+    if(can) _showPasskeyBanner(b, session);
+  });
+}
+function _showPasskeyBanner(b, session){
   // Inside an installed app the reminder is not a convenience, so it is not
   // dismissible-forever there: losing the session locks the person out.
   // Read through a guard: this function is defined above the const that holds
@@ -368,6 +457,10 @@ function _maybePromptPasskey(session){
   var standalone = false;
   try{ standalone = isStandalonePWA; }catch(e){ standalone = false; }
   if(_passkeyBannerDismissed() && !standalone) return;
+  // The challenge has to be in hand before the tap -- see the note above
+  // _pkOpts. Started here, when the banner appears, and kept fresh for as
+  // long as it is on screen.
+  _keepPasskeyOptionsFresh(true);
   var t = document.getElementById('pk-banner-title');
   var sub = document.getElementById('pk-banner-sub');
   if(standalone){
@@ -404,12 +497,28 @@ async function _setupFaceID(opts){
     msg.textContent=text;
   }
   if(!wallet){ _show('Connect a wallet first.',false); return; }
-  if(!window.PublicKeyCredential){ _show('WebAuthn not supported on this device.',false); return; }
+  if(!window.PublicKeyCredential){
+    _show('This browser cannot use Face ID. Open OrcAgent in Safari and try '
+          + 'again.',false); return; }
+  if(!(await _faceIdPossible())){
+    // Said once, plainly, instead of a button that fails every time.
+    _show('This device has no Face ID or Touch ID available to websites. It '
+          + 'needs a screen lock turned on, and a normal browser window — '
+          + 'private windows and in-app browsers cannot do it.',false);
+    return;
+  }
   if(btn){ btn.disabled=true; btn.textContent='Setting up…'; }
   if(msg){ msg.style.color='var(--muted)'; msg.textContent=''; }
+  _pkBusy = true;
+  var started = Date.now();
   try{
-    var opt=await fetch('/api/auth/webauthn/register/options').then(function(r){return r.json();}).catch(function(){return null;});
+    // Prefetched where possible: asking the server for a challenge HERE
+    // spends the tap's user activation on a network round trip, and iOS then
+    // refuses the call without ever showing the sheet.
+    var opt = _pkOptsFresh() ? _pkOpts : await _prefetchPasskeyOptions();
+    _pkOpts = null;                     // one challenge, one attempt
     if(!opt||!opt.challenge){ _show((opt&&opt.msg)||'Could not start Face ID setup.',false); return; }
+    started = Date.now();
     var cred=await navigator.credentials.create({publicKey:_waOptionsFromJSON(opt)});
     if(!cred){ _show('Registration failed — please try again.',false); return; }
     var r=await fetch('/api/auth/webauthn/register',{
@@ -418,7 +527,8 @@ async function _setupFaceID(opts){
     }).then(res=>res.json()).catch(()=>null);
     if(r&&r.success){
       localStorage.setItem('orca_credential_id',cred.id);
-      _show('✓ Face ID saved!',true);
+      _keepPasskeyOptionsFresh(false);
+      _show('✓ Face ID saved — you can sign in with it from now on.',true);
       _updateFaceIdStatus();
       if(opts.onDone) opts.onDone();
       setTimeout(function(){ var p=document.getElementById('s-faceid-prompt'); if(p) p.style.display='none'; },2500);
@@ -426,10 +536,44 @@ async function _setupFaceID(opts){
       _show('Registration failed: '+((r&&r.msg)||'unknown error'),false);
     }
   }catch(e){
-    _show(e.name==='NotAllowedError'?'Setup cancelled.':
-          e.name==='InvalidStateError'?'Passkey already exists — try logging in.':
-          'Setup failed: '+(e.message||e.name), false);
+    // NotAllowedError means two completely different things: somebody
+    // dismissed the sheet, or the sheet never appeared at all. The time
+    // tells them apart -- nobody reads and dismisses a Face ID prompt in
+    // half a second -- and being told you cancelled something you never saw
+    // is what made this look broken rather than merely refused.
+    if(e.name === 'NotAllowedError'){
+      if(Date.now() - started < 700){
+        _show('The Face ID prompt did not open. Tap Set up Face ID once more '
+              + '— it usually works on the second try.', false);
+        _prefetchPasskeyOptions();      // ready for that second tap
+      } else {
+        _show('Cancelled. Tap Set up Face ID whenever you are ready.', false);
+        _prefetchPasskeyOptions();
+      }
+    } else if(e.name === 'InvalidStateError'){
+      // Not a failure: this device already has one. Saying so and recording
+      // it locally beats telling somebody to try something they have done.
+      try{ localStorage.setItem('orca_credential_id','1'); }catch(_e){}
+      _show('Face ID is already set up on this device — you can sign in with '
+            + 'it.', true);
+      _updateFaceIdStatus();
+      if(opts.onDone) opts.onDone();
+    } else if(e.name === 'SecurityError'){
+      _show('Face ID cannot be set up from this address. Open OrcAgent at '
+            + 'orcagent.fun and try again.', false);
+    } else if(e.name === 'ConstraintError' || e.name === 'NotSupportedError'){
+      // The passkey has to be one the device can find on its own later --
+      // an installed app has its own storage and cannot be told which one
+      // to use. A device that will not store one says so here rather than
+      // leaving somebody with a login that works in Safari and nowhere else.
+      _show('This device will not save a passkey for OrcAgent. Check that a '
+            + 'screen lock and iCloud Keychain are turned on, then try again.',
+            false);
+    } else {
+      _show('Setup failed: '+(e.message||e.name), false);
+    }
   }finally{
+    _pkBusy = false;
     if(btn){ btn.disabled=false; btn.textContent=opts.btnLabel||'Setup Face ID'; }
   }
 }
@@ -661,6 +805,7 @@ document.addEventListener('DOMContentLoaded',function(){
   if(hasFaceId){
     /* Face ID mode: show Face ID button + "or connect differently" link; hide wallet buttons */
     if(bioBtn)   bioBtn.style.display='flex';
+    _prefetchPasskeyLoginOptions();   // ready before the tap, not after it
     if(altLink)  altLink.style.display='';
     if(pwdForm)  pwdForm.style.display='none';
     if(wbtns)    wbtns.style.display='none';
@@ -3247,6 +3392,20 @@ function _inDappBrowser(){ return !!(window.solana||window.solflare); }
         }
       }
       if(_me) _maybePromptPasskey(_me);
+    }catch(e){}
+  } else {
+    // The prompt used to live ONLY inside the branch above, which runs when
+    // the page has no wallet in hand yet. So the moment a wallet was
+    // remembered -- which is the normal state for anyone already using the
+    // app -- the offer of a passkey was skipped entirely, and the people
+    // most likely to be locked out later were exactly the ones never asked.
+    // Whether to prompt is the server's answer about the session, not a
+    // question of whether this page happens to know a wallet address.
+    try{
+      fetch('/api/session', {credentials:'include'})
+        .then(function(r){ return r.json(); })
+        .then(function(me){ if(me) _maybePromptPasskey(me); })
+        .catch(function(){});
     }catch(e){}
   }
   // Checked AFTER that, so the server stays the authority: a real disconnect
