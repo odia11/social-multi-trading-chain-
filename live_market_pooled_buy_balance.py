@@ -1,22 +1,26 @@
 """Make Live Market BUY controls use OrcAgent's wallet-wide USDC balance.
 
 Why the first hotfix did not work:
-``static/live-market-pro.js`` is wrapped in an IIFE.  Its ``_loadSheetBalance``,
+``static/live-market-pro.js`` is wrapped in an IIFE. Its ``_loadSheetBalance``,
 ``_sheetAvail`` and ``_paintSheet`` names are closure-local, not ``window``
-properties.  Trying to replace ``window._loadSheetBalance`` therefore changed
+properties. Trying to replace ``window._loadSheetBalance`` therefore changed
 nothing; the real function kept reading only the destination-chain balance.
 
-This version patches the data boundary instead.  On Live Market pages only,
-and before the page controller starts, reads of ``/api/wallet/usdc-summary``
-are normalised so each BUY-facing chain balance equals ``total_usdc``.  The
-page's own closure-local code then naturally renders and validates the pooled
-amount.  No trade endpoint is changed: the server still decides whether the
-money is already on the destination or whether an automatic bridge/conversion
-must run first.
+This version patches both sides of the boundary. The Live Market sheet renders
+the wallet-wide stablecoin balance, while underfunded EVM execution is routed
+into OrcAgent's existing automatic bridge-then-buy state machine before the
+trade engine can reject it against the empty destination-chain balance.
 """
 
 
 def install(d):
+    # Keep the displayed pooled balance and the execution path consistent.
+    # Without this, a user can see wallet-wide USDC in Live Market but
+    # /api/trade/execute still rejects the order against the destination-only
+    # balance before the established auto-bridge flow gets a chance to run.
+    from live_market_cross_chain_execute import install as _install_cross_chain_execute
+    _install_cross_chain_execute(d)
+
     app = d.app
     if getattr(app, '_orca_live_market_pooled_buy_balance_installed', False):
         return
@@ -57,7 +61,7 @@ def install(d):
         body.total_usdc = total;
         body.evm_chains = body.evm_chains || {};
         // Live Market's own _loadSheetBalance(chain) reads one of these
-        // closure-locally.  Give that function the wallet-wide buying power;
+        // closure-locally. Give that function the wallet-wide buying power;
         // the backend auto-bridge remains authoritative about where the funds
         // actually live and moves/converts them only after the user confirms.
         CHAINS.forEach(function(c){ body.evm_chains[c] = total; });
@@ -86,7 +90,7 @@ def install(d):
             body = response.get_data(as_text=True)
             if marker in body:
                 return response
-            # Only the Live Market trade sheet gets this behaviour.  Inject in
+            # Only the Live Market trade sheet gets this behaviour. Inject in
             # <head>, before live-market-pro.js can prefetch/cache the old
             # per-chain balances.
             if 'pt-sheet' not in body or 'live-market-pro' not in body:
