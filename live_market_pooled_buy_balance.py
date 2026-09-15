@@ -1,15 +1,18 @@
-"""Make Live Market's BUY sheet match OrcAgent's automatic funding model.
+"""Make Live Market BUY controls use OrcAgent's wallet-wide USDC balance.
 
-The backend already auto-bridges a buy when the destination chain does not
-hold enough of its stable asset.  The Live Market sheet nevertheless used
-only the destination-chain balance and disabled the slider before the request
-could ever reach that backend path.  That was especially visible on Robinhood
-Chain: a user could have USDC elsewhere in the OrcAgent wallet, see the money
-in the shared header, yet the HOOD buy sheet said $0 available.
+Why the first hotfix did not work:
+``static/live-market-pro.js`` is wrapped in an IIFE.  Its ``_loadSheetBalance``,
+``_sheetAvail`` and ``_paintSheet`` names are closure-local, not ``window``
+properties.  Trying to replace ``window._loadSheetBalance`` therefore changed
+nothing; the real function kept reading only the destination-chain balance.
 
-For BUYs, the amount controls must use /api/wallet/usdc-summary.total_usdc --
-the amount the product presents as spendable USDC across the wallet.  SELLs
-remain chain/position-specific and are untouched.
+This version patches the data boundary instead.  On Live Market pages only,
+and before the page controller starts, reads of ``/api/wallet/usdc-summary``
+are normalised so each BUY-facing chain balance equals ``total_usdc``.  The
+page's own closure-local code then naturally renders and validates the pooled
+amount.  No trade endpoint is changed: the server still decides whether the
+money is already on the destination or whether an automatic bridge/conversion
+must run first.
 """
 
 
@@ -22,49 +25,56 @@ def install(d):
     marker = 'id="oa-pooled-buy-balance"'
     script = r'''<script id="oa-pooled-buy-balance">
 (function(){
-  function pooledBalance(summary){
-    var total = Number(summary && summary.total_usdc);
+  'use strict';
+  if(window.__orcaPooledBuyFetchInstalled) return;
+  window.__orcaPooledBuyFetchInstalled = true;
+
+  var originalFetch = window.fetch.bind(window);
+  var CHAINS = ['bsc','base','arbitrum','polygon','robinhood'];
+
+  function pooledTotal(d){
+    var total = Number(d && d.total_usdc);
     if(Number.isFinite(total) && total >= 0) return total;
-    var n = Number(summary && summary.solana_usdc) || 0;
-    var evm = (summary && summary.evm_chains) || {};
-    ['bsc','base','arbitrum','polygon','robinhood'].forEach(function(c){
-      n += Number(evm[c]) || 0;
-    });
+    var n = Number(d && d.solana_usdc) || 0;
+    var evm = (d && d.evm_chains) || {};
+    CHAINS.forEach(function(c){ n += Number(evm[c]) || 0; });
     return n;
   }
 
-  function installOverride(){
-    if(typeof window._paintSheet !== 'function') return false;
-    // A BUY can auto-bridge from another funded chain.  Do not use the
-    // destination balance as a client-side veto; that prevented the request
-    // from ever reaching _maybe_start_auto_bridge_for_buy on the server.
-    window._loadSheetBalance = function(_chain){
-      var now = Date.now();
-      var use = function(d){
-        window._sheetAvail = pooledBalance(d);
-        window._paintSheet();
-      };
-      if(window._availCache && window._availCache.data &&
-         now - window._availCache.t < 12000){
-        use(window._availCache.data);
-        return;
-      }
-      fetch('/api/wallet/usdc-summary', {credentials:'include'})
-        .then(function(r){ return r.json(); })
-        .then(function(d){
-          if(!d || !d.ok) return;
-          window._availCache = {t:Date.now(), data:d};
-          use(d);
-        })
-        .catch(function(){});
-    };
-    return true;
+  function isSummaryRequest(input){
+    var url = '';
+    try{ url = typeof input === 'string' ? input : (input && input.url) || ''; }
+    catch(e){ return false; }
+    return url.indexOf('/api/wallet/usdc-summary') !== -1;
   }
 
-  if(!installOverride()){
-    document.addEventListener('DOMContentLoaded', installOverride, {once:true});
-    setTimeout(installOverride, 0);
-  }
+  window.fetch = function(input, init){
+    return originalFetch(input, init).then(function(resp){
+      if(!isSummaryRequest(input) || !resp || !resp.ok) return resp;
+      return resp.clone().json().then(function(body){
+        if(!body || !body.ok) return resp;
+        var total = pooledTotal(body);
+        body.total_usdc = total;
+        body.evm_chains = body.evm_chains || {};
+        // Live Market's own _loadSheetBalance(chain) reads one of these
+        // closure-locally.  Give that function the wallet-wide buying power;
+        // the backend auto-bridge remains authoritative about where the funds
+        // actually live and moves/converts them only after the user confirms.
+        CHAINS.forEach(function(c){ body.evm_chains[c] = total; });
+        body.solana_usdc = total;
+        body.pooled_for_live_market_buy = true;
+
+        var headers = new Headers(resp.headers);
+        headers.set('Content-Type', 'application/json');
+        headers.set('Cache-Control', 'no-store');
+        return new Response(JSON.stringify(body), {
+          status: resp.status,
+          statusText: resp.statusText,
+          headers: headers
+        });
+      }).catch(function(){ return resp; });
+    });
+  };
 })();
 </script>'''
 
@@ -74,13 +84,17 @@ def install(d):
             if response.status_code != 200 or response.mimetype != 'text/html':
                 return response
             body = response.get_data(as_text=True)
-            if marker in body or '/api/wallet/usdc-summary' not in body:
+            if marker in body:
                 return response
-            # Scope this to pages that actually contain the shared Live Market
-            # buy sheet.  The marker is stable across desktop/mobile.
-            if 'pt-sheet' not in body or 'confirmBuy' not in body:
+            # Only the Live Market trade sheet gets this behaviour.  Inject in
+            # <head>, before live-market-pro.js can prefetch/cache the old
+            # per-chain balances.
+            if 'pt-sheet' not in body or 'live-market-pro' not in body:
                 return response
-            body = body.replace('</body>', script + '\n</body>', 1) if '</body>' in body else body + script
+            if '</head>' in body:
+                body = body.replace('</head>', script + '\n</head>', 1)
+            else:
+                body = script + body
             response.set_data(body)
             response.headers['Content-Length'] = str(len(response.get_data()))
             response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
