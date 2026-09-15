@@ -239,9 +239,19 @@ check('the env example documents the rule, so an operator can find it without '
       'reading the source', 'ORCAGENT_FRONTS_GAS' in ENV)
 check('...naming the default rather than showing a line that changes nothing '
       'when uncommented', 'ORCAGENT_FRONTS_GAS=0' in ENV)
-check('...and saying what funding the sponsor wallets is FOR, since that is the '
-      'one thing this rule asks of the owner',
-      'float' in ENV.lower() and 'sponsor' in ENV.lower())
+# This asked the env file to explain what funding the sponsor wallets is
+# for. Under the rule it now documents there is no funding to explain:
+# ORCAGENT_FRONTS_GAS is 0, users fund their own gas, and the sponsor keys
+# are deliberately left empty. So it asks for what the owner now needs to
+# know instead -- that filling those keys in is not a step they are missing.
+_env = ENV.lower()
+check('...and saying what the rule asks of the owner, which under this one is '
+      'to leave the sponsor keys alone rather than to fund them',
+      'sponsor' in _env
+      and ('intentionally unused' in _env or 'leave them empty' in _env))
+check('...with the keys present but empty, so an operator copying this file '
+      'does not go hunting for a setting that is deliberately off',
+      'GAS_SPONSOR_PRIVATE_KEY=\n' in ENV or 'GAS_SPONSOR_PRIVATE_KEY=' in ENV)
 
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)

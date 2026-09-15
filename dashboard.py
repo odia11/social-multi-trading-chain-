@@ -17886,6 +17886,13 @@ def api_session_resume():
         str(body.get('token', '')).strip(),
         request.cookies.get(DEVICE_COOKIE_NAME, '').strip(),
     ) if t))
+    if not candidates:
+        # "Nothing stored" and "what it had was refused" are different
+        # problems with the same symptom, and the caller is told the same
+        # thing either way -- so the difference has to live in the log, or
+        # nobody can tell a browser that never had a login from one whose
+        # login stopped working.
+        print('[device-session] refused: no remembered login stored', flush=True)
     wallet, new_token = '', ''
     try:
         for token in candidates:

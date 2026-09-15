@@ -35,7 +35,7 @@ def strip(fragment):
 
 
 # The onboarding, as a new wallet actually meets it.
-INTRO = HTML[HTML.index('<div id="onboard">'):HTML.index('<!-- SETTINGS MODAL -->')]
+INTRO = HTML[re.search(r'<div id="onboard"[^>]*>', HTML).start():HTML.index('<!-- SETTINGS MODAL -->')]
 SUB   = strip(HTML[HTML.index('<div class="ob-sub">'):HTML.index('<div class="ob-progress">')])
 STEP1 = strip(HTML[HTML.index('id="step-1"'):HTML.index('id="ob-privkey"')])
 
