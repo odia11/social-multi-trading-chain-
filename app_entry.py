@@ -23,6 +23,7 @@ from share_card_concept_d import install as _install_share_card_concept_d
 from messages_premium_ui import install as _install_messages_premium_ui
 from live_market_deeplink_fix import install as _install_live_market_deeplink_fix
 from auto_trading_bot_route import install as _install_auto_trading_bot_route
+from multichain_auto_bot import install as _install_multichain_auto_bot
 from canonical_domain import install as _install_canonical_domain
 from browser_shared_secret_hardening import install as _install_browser_shared_secret_hardening
 from secret_hygiene import install as _install_secret_hygiene
@@ -93,6 +94,12 @@ _install_upload_hardening(_dashboard)
 # 0x Gasless: native BNB/ETH/POL is not a prerequisite for a stablecoin-funded
 # buy, and OrcAgent does not front it.
 _install_evm_gasless_trading(_dashboard)
+
+# The autonomous bot used to perform its own native-gas precheck before the
+# shared EVM BUY flow, which meant a USDC-only wallet never reached 0x Gasless.
+# Patch the bot entry scanner after installing the gasless execution layer so
+# Start Trading can autonomously enter every supported EVM chain using USDC.
+_install_multichain_auto_bot(_dashboard)
 
 # Solana USDC BUYs use Jupiter's automatic gasless path when configured. The
 # network fee/rent is recovered by Jupiter from the swap instead of requiring
