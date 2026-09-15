@@ -16,6 +16,7 @@ back into SOL. Its base is recorded on the position, and forcing those sells
 into USDC would misstate the profit on every trade opened before today.
 """
 import ast
+import re
 import sys
 
 REPO = '/home/user/Orc-agent-Solana-chain-'
@@ -56,9 +57,21 @@ check('...while still ANSWERING with the real currency, so an older page that '
 buy = fn('_solana_buy_flow')
 check('the manual buy funds the trade in the one currency',
       'base=SOLANA_BASE_CURRENCY' in buy)
+# Asserted as the property rather than as one exact line: the sizing has
+# since grown a requested amount, clamped to the user's own max trade size,
+# and a literal match called that a regression when it is the opposite. What
+# must stay true is that no SOL price appears anywhere in working out what
+# to spend -- a dollar setting funding a dollar token needs no conversion,
+# and a conversion is what breaks when the price has not loaded.
 check('...spending the configured size directly, with no conversion through a '
       'SOL price that may not have loaded yet',
-      'spend = round(min(min_trade_usdc, us_usdc), 2)' in buy)
+      re.search(r'spend = round\(min\((\w+), us_usdc\), 2\)', buy) is not None
+      and not re.search(r'_sol_price|sol_price_usd', buy))
+check('...and honouring an amount the user actually asked for, between their '
+      'own minimum and maximum, rather than always spending the minimum',
+      'requested_usdc' in buy
+      and 'min(max_trade_usdc, float(requested_usdc))' in buy
+      and 'Minimum trade amount is' in buy)
 check('...checking the USDC balance for the trade', '_get_solana_usdc_balance' in buy)
 check('...and the SOL balance SEPARATELY, for the network fee. One check '
       'covering both is how a user gets told the wrong currency is short',
