@@ -51,5 +51,18 @@ def test_sitemap_and_robots_point_to_canonical_site():
     robots = client.get("/robots.txt").get_data(as_text=True)
     assert "<loc>https://orcagent.fun/</loc>" in sitemap
     assert "<loc>https://orcagent.fun/live-market</loc>" in sitemap
+    assert '<?xml-stylesheet type="text/xsl" href="/sitemap.xsl"?>' in sitemap
+    assert "\n  <url>\n    <loc>" in sitemap
     assert "Sitemap: https://orcagent.fun/sitemap.xml" in robots
     assert "Disallow: /api/" in robots
+
+
+def test_sitemap_has_a_readable_professional_browser_view():
+    client = make_app().test_client()
+    stylesheet = client.get("/sitemap.xsl")
+    body = stylesheet.get_data(as_text=True)
+    assert stylesheet.status_code == 200
+    assert "application/xml" in stylesheet.content_type
+    assert "ORCAGENT" in body
+    assert "Public Sitemap" in body
+    assert 'href="{sm:loc}"' in body
