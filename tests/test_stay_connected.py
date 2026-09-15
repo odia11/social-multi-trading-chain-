@@ -12,11 +12,10 @@ is exchanged for a fresh session when the cookie is gone.
 
 WHAT THAT OBLIGES
 Only the hash is stored, so a copy of the table is not a set of usable
-logins. It rotates on every use: if a stolen token is redeemed, the real
-owner's copy stops working, which turns silent sharing into a visible logout.
-It is minted only where a signature was actually verified. And Disconnect
-revokes every one of them — a session that clears and then quietly resumes
-tomorrow is the opposite of what that button says.
+logins. The token remains valid until Disconnect: rotating during restore
+created a race where iOS could be suspended before saving the replacement.
+It is minted only where a signature was actually verified. Disconnect revokes
+every one of them.
 
 The redeem path is exercised against a real database rather than read.
 """
@@ -28,7 +27,7 @@ import sys
 import tempfile
 import time
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py').read()
 JS = open(REPO + '/static/dashboard.js').read()
 TREE = ast.parse(SRC)
@@ -104,14 +103,13 @@ with tempfile.TemporaryDirectory() as tmp:
 
     wallet, tok2 = ns['_redeem_device_token'](tok)
     check('redeeming returns the wallet it was issued for', wallet == 'WALLET_A')
-    check('...and a DIFFERENT token, because it rotates on use',
-          bool(tok2) and tok2 != tok)
+    check('...and the same stable token, so an interrupted mobile restore '
+          'cannot strand the browser with a credential the server just killed',
+          tok2 == tok)
 
     again, _ = ns['_redeem_device_token'](tok)
-    check('...leaving the presented one dead. A stolen copy redeemed once '
-          'signs the other side out, so theft is visible rather than silent',
-          again == '')
-    check('...while the replacement works', ns['_redeem_device_token'](tok2)[0] == 'WALLET_A')
+    check('...and it remains usable across repeated or concurrent restores',
+          again == 'WALLET_A')
 
     check('an unknown token is refused', ns['_redeem_device_token']('nonsense')[0] == '')
     check('an empty token is refused without touching the database',
@@ -147,17 +145,15 @@ _minters = sorted(
     if isinstance(n, ast.FunctionDef)
     and n.name != '_issue_device_token'          # its own definition, not a caller
     and '_issue_device_token(' in (ast.get_source_segment(SRC, n) or ''))
-check('every place that mints a remembered login has already established who '
-      'this is, and there are exactly three: the wallet login itself; the '
-      'endpoint that remembers a session which is already authenticated; and '
-      'claiming a pairing, where the wallet came from a row the server wrote '
-      'after checking a signature. Nothing else may mint one — a remembered '
-      'login outlives the browser, so an unproved claim would become a '
-      'permanent one',
-      _minters == ['api_pair_claim', 'api_session_remember', 'set_wallet'])
+check('only verified login, verified pairing, or an authenticated-session '
+      'backfill may mint a remembered login',
+      _minters == ['_persist_remembered_session', 'api_pair_claim', 'api_session_remember', 'set_wallet'])
+check('automatic backfill refuses unverified/read-only sessions',
+      "wallet = _authenticated_wallet()" in fn('_persist_remembered_session')
+      and "if not wallet:" in fn('_persist_remembered_session'))
 check('...and the wallet login mints one only AFTER the signature has been '
       'checked, not beside it',
-      'Signature verification failed' in SRC[:SRC.index('_device_token =')])
+      'Signature verification failed' in fn('set_wallet').split('_device_token =', 1)[0])
 check('...while the remembering endpoint refuses a read-only session, which '
       'is an address someone typed and never proved',
       '_authenticated_wallet()' in fn('api_session_remember'))
@@ -208,8 +204,9 @@ check('...only when the server said there was no session, so a normal load '
       # asked.
       '} else {' in _branch
       and '_resumeFromDeviceToken' not in _branch.split('} else {')[0])
-check('a spent token is replaced immediately, or the next load would present '
-      'a dead one', '_storeDeviceToken(r.token)' in JS)
+check('the returned token is persisted, while stable-token restores remain '
+      'compatible with a future credential upgrade',
+      '_storeDeviceToken(r.token)' in JS)
 # A token the SERVER refuses is still dropped -- retrying it forever would
 # be its own bug. What changed is that "refused" now means the server said
 # so (401), not merely that the call did not come back with a session: that

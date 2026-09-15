@@ -1,9 +1,8 @@
 # ── OrcAgent — production image ──
-# Sensitive variables (API keys, private keys, secrets) are NEVER set here.
-# They are injected at runtime via Railway's Variables tab → os.environ.
+# Sensitive variables (API keys, private keys, secrets) are NEVER baked into
+# the image. They are injected at runtime by the deployment platform.
 FROM python:3.12-slim
 
-# Safe, non-sensitive build/runtime configuration only
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -11,16 +10,20 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Install dependencies first (layer-cached until requirements.txt changes)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application source
-COPY . .
+# A compromised web process must not automatically become root inside the
+# container. Create the service identity before source is copied and make only
+# the app workspace writable by it for legacy/container deployments that do
+# not mount /data.
+RUN groupadd --system orcagent && useradd --system --gid orcagent --home-dir /app --shell /usr/sbin/nologin orcagent
+COPY --chown=orcagent:orcagent . .
+RUN chmod 755 start.sh && find /app -type d -exec chmod 755 {} +
 
-# Railway injects PORT at runtime; expose it as documentation only
+USER orcagent:orcagent
+
 EXPOSE 8080
 
-# start.sh launches monitor.py in the background, then execs gunicorn as PID 1
-RUN chmod +x start.sh
+# start.sh launches monitor.py in the background, then execs gunicorn as PID 1.
 CMD ["sh", "start.sh"]

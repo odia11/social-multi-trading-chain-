@@ -1,0 +1,34 @@
+/* OrcAgent Live Market mobile filter drawer viewport fix */
+@media (max-width: 767px){
+  html,body{max-width:100%!important;overflow-x:hidden!important}
+  .pt-shell{min-width:0!important;width:100%!important;max-width:100%!important;padding-left:12px!important;padding-right:12px!important}
+  .pt-panel{width:100%!important;max-width:100%!important;min-width:0!important;overflow:hidden!important}
+  .pt-left.mobile-open{
+    left:12px!important;
+    right:12px!important;
+    width:auto!important;
+    max-width:none!important;
+    top:var(--pt-nb-h,104px)!important;
+    bottom:calc(92px + env(safe-area-inset-bottom))!important;
+    height:auto!important;
+    max-height:none!important;
+    padding:18px 16px 24px!important;
+    overflow-y:auto!important;
+    overflow-x:hidden!important;
+    overscroll-behavior:contain!important;
+    -webkit-overflow-scrolling:touch!important;
+    border:1px solid var(--panel-border)!important;
+    border-radius:22px 22px 0 0!important;
+    box-sizing:border-box!important;
+  }
+  .pt-left.mobile-open,.pt-left.mobile-open *{box-sizing:border-box!important;max-width:100%!important}
+  .pt-left.mobile-open .pt-sort-row,
+  .pt-left.mobile-open .pt-toggle-row,
+  .pt-left.mobile-open .pt-adv-sum{min-width:0!important;width:100%!important}
+  .pt-left.mobile-open .pt-sort-row>*:first-child,
+  .pt-left.mobile-open .pt-toggle-row>*:first-child{min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important}
+  .pt-left.mobile-open .pt-sort-count,
+  .pt-left.mobile-open .pt-adv-count{flex:0 0 auto!important}
+  .pt-left.mobile-open .pt-bot-card{margin-top:18px!important;margin-bottom:8px!important;flex:0 0 auto!important}
+  .pt-scrim{top:var(--pt-nb-h,104px)!important;bottom:calc(92px + env(safe-area-inset-bottom))!important}
+}

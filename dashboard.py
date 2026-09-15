@@ -43,7 +43,7 @@ try:
 except ImportError:
     _COMPRESS_OK = False
 from contextlib import contextmanager
-from flask import Flask, jsonify, request, session, render_template, redirect, make_response, send_from_directory
+from flask import Flask, jsonify, request, session, render_template, redirect, make_response, send_from_directory, g
 from markupsafe import Markup
 import gzip
 import shutil
@@ -114,6 +114,18 @@ def _safe_external_image_url(url: str) -> bool:
                 ip.is_multicast or ip.is_reserved or ip.is_unspecified):
             return False
     return True
+
+
+def _share_text_with_route(text: str, url: str, limit: int = 280) -> str:
+    """Attach one complete canonical route without exceeding the post limit."""
+    text = (text or '').strip()
+    url = (url or '').strip()
+    if not url:
+        return text[:limit]
+    room = max(0, limit - len(url) - 1)
+    if len(text) > room:
+        text = text[:max(0, room - 1)].rstrip() + '…'
+    return (text + ' ' + url).strip()
 
 _TC_FONT_CACHE = {}
 def _tc_font(bold, size):
@@ -477,6 +489,10 @@ def _security_gate():
 
 @app.before_request
 def _refresh_session():
+    # Run before route redirects and CSRF checks, not after Home has rendered.
+    recovery_error = _restore_remembered_request()
+    if recovery_error is not None:
+        return recovery_error
     if session.get('wallet'):
         session.modified = True  # extend cookie lifetime on every API call
 
@@ -2625,6 +2641,22 @@ def init_db():
         UNIQUE(user_id, token_address)
     )''')
     c.execute('CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlist(user_id)')
+    # Free, first-party market history. Every real price observed by the
+    # existing batched DexScreener feed is folded into a durable 1-minute
+    # OHLC candle. Higher timeframes are derived from these rows on read.
+    c.execute('''CREATE TABLE IF NOT EXISTS market_candles_1m (
+        chain        TEXT NOT NULL,
+        pair_address TEXT NOT NULL,
+        bucket_ts    INTEGER NOT NULL,
+        open          REAL NOT NULL,
+        high          REAL NOT NULL,
+        low           REAL NOT NULL,
+        close         REAL NOT NULL,
+        samples       INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY(chain, pair_address, bucket_ts)
+    )''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_market_candles_pair_time '
+              'ON market_candles_1m(chain, pair_address, bucket_ts)')
     # Trade-engine tables: quotes, executions, per-cost drift and balance
     # reservations. Owned by trade_engine/ledger.py so the schema lives with
     # the code that reads it and can be tested standalone; created here so it
@@ -4106,7 +4138,7 @@ def _usdc_cache_put(key, value):
 
 _chart_cache_lock = threading.Lock()
 _chart_cache: dict = {}
-_CHART_CACHE_TTL   = 30  # seconds
+_CHART_CACHE_TTL   = 300  # candles are extended by the separate 2s live-price feed
 
 class _DexCachedResp:
     """Minimal requests.Response stand-in for cached DexScreener data."""
@@ -6142,12 +6174,10 @@ def _record_user_trade(user_id: int, us: dict, symbol: str, entry: float, exit_p
         if _xrow and _xrow[0]:
             _sign  = '+' if pnl_pct >= 0 else ''
             _link  = f'https://orcagent.fun/share/t{_trade_id}' if _trade_id else ''
-            _tweet = f'Just closed ${symbol} {_sign}{pnl_pct:.1f}% ({_sign}{pnl:.4f} {currency_label}) on @OrcAgent 🐋'
-            if _link:
-                _room = 280 - len(_link) - 1   # -1 for the joining space
-                if len(_tweet) > _room:
-                    _tweet = _tweet[:_room - 1].rstrip() + '…'
-                _tweet = _tweet + ' ' + _link
+            _tweet = _share_text_with_route(
+                f'Just closed ${symbol} {_sign}{pnl_pct:.1f}% ({_sign}{pnl:.4f} {currency_label}) on @OrcAgent 🐋',
+                _link,
+            )
             threading.Thread(target=_post_to_x, args=(wallet, _tweet), daemon=True).start()
     if pref_notifications and user_id:
         pnl_sign     = '+' if pnl >= 0 else ''
@@ -6282,7 +6312,12 @@ def _recalculate_badges(wallet: str) -> None:
             ).fetchone()
             if xrow and xrow[0]:
                 for badge in new_badges:
-                    _tweet = f'Just unlocked the {badge} badge on @OrcAgent 🏆'
+                    _profile_link = ('https://orcagent.fun/profile/' +
+                                     requests.utils.quote(wallet, safe=''))
+                    _tweet = _share_text_with_route(
+                        f'Just unlocked the {badge} badge on @OrcAgent 🏆',
+                        _profile_link,
+                    )
                     threading.Thread(target=_post_to_x, args=(wallet, _tweet), daemon=True).start()
         conn.close()
     except Exception as e:
@@ -13948,7 +13983,14 @@ def _evm_buy_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM'
     # min_trade_size/max_trade_size are already USDC-denominated (see
     # _migrate_trade_size_units) -- reused as-is rather than adding a
     # separate per-chain limit setting.
-    amount_usdc = max(min_size, min(max_size, amount_usdc))
+    # Never raise the amount a person entered. Silently turning (for example)
+    # 0.50 USDC into the configured 1.00 minimum violates the spend ceiling.
+    # The maximum may safely cap an oversized request; a sub-minimum request
+    # is refused so the user can choose a valid amount explicitly.
+    if amount_usdc < min_size:
+        return jsonify({'ok': False,
+                        'msg': f'Minimum trade amount is {min_size:.2f} USDC'}), 400
+    amount_usdc = min(max_size, amount_usdc)
     user_id = row[0]
 
     # Auto-bridge-then-buy: if this chain's own balance can't cover the
@@ -17333,7 +17375,42 @@ def webauthn_login():
 # should be enough, and a deploy, a restart, or a week away should not undo
 # it. What is stored is a hash, what is handed out rotates on every use, and
 # a disconnect ends it everywhere.
-DEVICE_TOKEN_DAYS = 180
+DEVICE_TOKEN_DAYS = 3650
+DEVICE_COOKIE_NAME = 'orca_device'
+
+
+def _set_device_cookie(response, token: str):
+    """Keep the recovery credential outside JavaScript-managed storage too.
+
+    Safari can evict localStorage independently of cookies, and storage writes
+    can fail in private/restricted contexts.  An HttpOnly cookie gives the
+    server a second, deploy-independent recovery path.  It is cleared only by
+    the explicit logout endpoint.
+    """
+    if token:
+        g.device_cookie_written = True
+        response.set_cookie(
+            DEVICE_COOKIE_NAME, token,
+            max_age=DEVICE_TOKEN_DAYS * 86400,
+            secure=bool(app.config.get('SESSION_COOKIE_SECURE')),
+            httponly=True,
+            samesite='Lax',
+            path='/',
+            domain=app.config.get('SESSION_COOKIE_DOMAIN'),
+        )
+    return response
+
+
+def _clear_device_cookie(response):
+    response.delete_cookie(
+        DEVICE_COOKIE_NAME,
+        secure=bool(app.config.get('SESSION_COOKIE_SECURE')),
+        httponly=True,
+        samesite='Lax',
+        path='/',
+        domain=app.config.get('SESSION_COOKIE_DOMAIN'),
+    )
+    return response
 
 def _hash_device_token(token: str) -> str:
     return hashlib.sha256((token or '').encode()).hexdigest()
@@ -17366,12 +17443,17 @@ def _issue_device_token(user_id: int, wallet: str) -> str:
 
 
 def _redeem_device_token(token: str) -> tuple:
-    """Exchange a remembered login for a session. Returns (wallet, new_token).
+    """Exchange a remembered login for a session. Returns (wallet, token).
 
-    Rotates: the presented token is spent and a fresh one issued. If a copy
-    has been stolen, whichever side redeems second finds a dead token and is
-    signed out — silent theft becomes a visible logout rather than two
-    sessions quietly sharing an account.
+    The token deliberately stays stable until Disconnect revokes it. Rotating
+    it here created a small but real logout window on mobile: the server
+    revoked the old token before Safari/iOS had persisted the replacement. If
+    the tab was suspended, killed or navigated in that window, the device kept
+    only a token the server had already killed. Concurrent restores could hit
+    the same race too.
+
+    Successful use extends the expiry, so an active device remains remembered.
+    This matches the product rule: only an explicit Disconnect ends a login.
 
     Returns ('', '') for anything not currently valid, without saying which
     of the reasons it was.
@@ -17405,24 +17487,91 @@ def _redeem_device_token(token: str) -> tuple:
                 print(f'[device-session] refused: expired {age_days:.1f} days after '
                       f'issue (wallet {wallet[:6]}…)', flush=True)
                 return '', ''
-            # Spend it before issuing the replacement, so a crash in between
-            # costs one login rather than leaving two valid tokens.
-            conn.execute('UPDATE device_sessions SET revoked=1 WHERE id=?', (row_id,))
-            new_token = secrets.token_urlsafe(32)
             conn.execute(
-                'INSERT INTO device_sessions (user_id, wallet, token_hash, created_at, '
-                'last_used_at, expires_at) VALUES (?,?,?,?,?,?)',
-                (user_id, wallet, _hash_device_token(new_token), now, now,
-                 now + DEVICE_TOKEN_DAYS * 86400))
+                'UPDATE device_sessions SET last_used_at=?, expires_at=? WHERE id=?',
+                (now, now + DEVICE_TOKEN_DAYS * 86400, row_id))
             conn.commit()
             print(f'[device-session] resumed {wallet[:6]}… from a remembered '
                   f'login', flush=True)
-            return wallet, new_token
+            return wallet, token
         finally:
             conn.close()
     except Exception as e:
         print(f'[device-session] redeem failed: {e}', flush=True)
-        return '', ''
+        # Storage outages are retryable, not a refusal of the credential.
+        raise
+
+
+def _restore_remembered_request():
+    """Recover a verified identity before any page/API checks the session.
+
+    Only a server-validated recovery cookie can establish identity here. A
+    typed wallet address or an expired/revoked token never grants access.
+    Explicit resume handles its own token precedence; read-only browsing is
+    left alone. Logout must recover too so it can revoke an expired session.
+    """
+    if (request.path.startswith('/static/') or request.method == 'OPTIONS'
+            or request.path == '/api/session/resume' or session.get('wallet')):
+        return None
+    token = request.cookies.get(DEVICE_COOKIE_NAME, '')
+    if not token:
+        return None
+    try:
+        wallet, token = _redeem_device_token(token)
+        if not wallet:
+            return None
+        uid = get_or_create_user(wallet)
+    except Exception:
+        response = jsonify({'ok': False, 'msg': 'Session recovery temporarily unavailable'})
+        response.status_code = 503
+        response.headers['Retry-After'] = '3'
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+    session.permanent = True
+    session['wallet'] = wallet
+    session['user_id'] = uid
+    session.pop('readonly', None)
+    g.recovered_device_token = token
+    return None
+
+
+@app.after_request
+def _persist_remembered_session(response):
+    """Backfill and renew remembered cookies without a CSRF/bootstrap race.
+
+    Applies to all verified login methods and the installed-app handoff, as
+    well as older sessions which never received the new HttpOnly cookie.
+    This does not rely on JavaScript running or localStorage being writable.
+    """
+    if (request.path.startswith('/static/') or request.path == '/api/logout'
+            or request.method == 'OPTIONS' or response.status_code >= 400):
+        return response
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return response
+    response.headers['Cache-Control'] = 'no-store, private'
+    if getattr(g, 'device_cookie_written', False):
+        return response
+    token = getattr(g, 'recovered_device_token', '')
+    cookie = request.cookies.get(DEVICE_COOKIE_NAME, '')
+    # Normal polling should not write SQLite on every request. Renew on page
+    # visits/session checks; establish a missing cookie on the first response.
+    if not token and cookie and request.path != '/api/session' and response.mimetype != 'text/html':
+        return response
+    try:
+        if not token and cookie:
+            remembered_wallet, candidate = _redeem_device_token(cookie)
+            if remembered_wallet == wallet:
+                token = candidate
+        if not token:
+            uid = session.get('user_id') or get_or_create_user(wallet)
+            token = _issue_device_token(uid, wallet)
+        if token:
+            return _set_device_cookie(response, token)
+    except Exception as exc:
+        # Keep the proven session; a later visit retries the backfill.
+        print(f'[device-session] cookie persistence unavailable: {type(exc).__name__}', flush=True)
+    return response
 
 
 def _revoke_device_tokens(wallet: str) -> None:
@@ -17635,8 +17784,9 @@ def api_pair_claim():
         device_token = _issue_device_token(session['user_id'], wallet)
     except Exception:
         pass
-    return jsonify({'ok': True, 'wallet': wallet, 'device_token': device_token,
-                    'csrf_token': _get_csrf_token()})
+    response = jsonify({'ok': True, 'wallet': wallet, 'device_token': device_token,
+                        'csrf_token': _get_csrf_token()})
+    return _set_device_cookie(response, device_token)
 
 
 @app.route('/api/session/remember', methods=['POST'])
@@ -17663,10 +17813,20 @@ def api_session_remember():
         uid = session.get('user_id') or get_or_create_user(wallet)
     except Exception:
         return jsonify({'ok': False}), 500
-    token = _issue_device_token(uid, wallet)
+    token = ''
+    cookie = request.cookies.get(DEVICE_COOKIE_NAME, '')
+    try:
+        if cookie:
+            remembered_wallet, candidate = _redeem_device_token(cookie)
+            if remembered_wallet == wallet:
+                token = candidate
+        if not token:
+            token = _issue_device_token(uid, wallet)
+    except Exception:
+        return jsonify({'ok': False}), 503
     if not token:
-        return jsonify({'ok': False}), 500
-    return jsonify({'ok': True, 'token': token})
+        return jsonify({'ok': False}), 503
+    return _set_device_cookie(jsonify({'ok': True, 'token': token}), token)
 
 
 @app.route('/app.webmanifest')
@@ -17720,14 +17880,25 @@ def api_session_resume():
     token itself is the credential.
     """
     body = request.json or {}
-    token = str(body.get('token', '')).strip()
-    if not token:
-        # Worth its own line: "the browser had nothing to offer" and "what it
-        # offered was refused" are different problems with the same symptom,
-        # and telling them apart is most of the work.
-        print('[device-session] a browser asked to resume with no remembered '
-              'login stored', flush=True)
-    wallet, new_token = _redeem_device_token(token)
+    # A stale localStorage token must not hide a valid HttpOnly cookie.
+    # Preserve explicit-token precedence when both credentials are valid.
+    candidates = list(dict.fromkeys(t for t in (
+        str(body.get('token', '')).strip(),
+        request.cookies.get(DEVICE_COOKIE_NAME, '').strip(),
+    ) if t))
+    wallet, new_token = '', ''
+    try:
+        for token in candidates:
+            wallet, new_token = _redeem_device_token(token)
+            if wallet:
+                break
+    except Exception:
+        # The browser must retain its credential and retry after a restart or
+        # database lock, rather than treating it as a permanently dead login.
+        response = jsonify({'ok': False, 'msg': 'Session recovery temporarily unavailable'})
+        response.status_code = 503
+        response.headers['Retry-After'] = '3'
+        return response
     if not wallet:
         # Deliberately one answer for expired, revoked, unknown and malformed.
         return jsonify({'ok': False, 'msg': 'This device is no longer remembered'}), 401
@@ -17739,8 +17910,9 @@ def api_session_resume():
         session['user_id'] = get_or_create_user(wallet)
     except Exception:
         pass
-    return jsonify({'ok': True, 'wallet': wallet, 'token': new_token,
-                    'csrf_token': _get_csrf_token()})
+    response = jsonify({'ok': True, 'wallet': wallet, 'token': new_token,
+                        'csrf_token': _get_csrf_token()})
+    return _set_device_cookie(response, new_token)
 
 
 @app.route('/api/session', methods=['GET'])
@@ -17901,11 +18073,12 @@ def set_wallet():
         us = get_user_state(address)
         us['has_trading_key'] = has_trading_key
         user_status = 'new_user' if is_new_user else 'existing'
-        return jsonify({'ok': True, 'success': True, 'redirect': '/dashboard',
-                        'wallet': address, 'has_trading_key': has_trading_key,
-                        'is_admin': _is_owner(address), 'csrf_token': csrf_tok,
-                        'device_token': _device_token,
-                        'status': user_status})
+        response = jsonify({'ok': True, 'success': True, 'redirect': '/dashboard',
+                            'wallet': address, 'has_trading_key': has_trading_key,
+                            'is_admin': _is_owner(address), 'csrf_token': csrf_tok,
+                            'device_token': _device_token,
+                            'status': user_status})
+        return _set_device_cookie(response, _device_token)
     else:
         prev = _current_wallet()
         session.pop('wallet', None)
@@ -17922,7 +18095,7 @@ def logout():
     # opposite of what the button says.
     _revoke_device_tokens(session.get('wallet', ''))
     session.clear()
-    return jsonify({'status': 'ok'})
+    return _clear_device_cookie(jsonify({'status': 'ok'}))
 
 # ── SETTINGS ──
 @app.route('/api/settings', methods=['GET'])
@@ -21054,9 +21227,8 @@ def share_feed_to_x(post_id):
     # for a photo post, or the same 1200x630 trade/chart card image used for
     # the /share/<id> link-unfurl preview, for anything __TRADE__/__CHART__-
     # embedded or a native trade share. Any failure here (no X media scope,
-    # network hiccup, unexpected response shape) falls back to a plain text
-    # tweet with a link back to the post -- attaching a picture is a nice-to-
-    # have, it must never be the reason sharing fails outright.
+    # network hiccup, unexpected response shape) falls back to a text + link
+    # tweet. The canonical post route is included in both cases below.
     media_ids = None
     if wants_media:
         try:
@@ -21076,11 +21248,9 @@ def share_feed_to_x(post_id):
         except Exception as e:
             print(f'[x] media attach skipped for {wallet[:8]}: {e}', flush=True)
             media_ids = None
-        if not media_ids:
-            # No picture ended up attached (upload failed, or there simply
-            # wasn't a card image to render) -- add the link back so there's
-            # still something to look at beyond the caption.
-            text = (text + ' ' + link_fallback)[:250]
+    # A share is a route back to its source, whether or not X accepted the
+    # attached image. Keep the complete ID permalink inside the limit.
+    text = _share_text_with_route(text, link_fallback)
 
     ok = _post_to_x(wallet, text, media_ids=media_ids)
     return jsonify({'ok': ok, 'msg': 'Shared to X!' if ok else 'Failed to share to X'})
@@ -22847,72 +23017,30 @@ def api_token_info(mint_address):
 @app.route('/api/trade/buy', methods=['POST'])
 @rate_limit(10, 60)
 def api_trade_buy():
+    """Backward-compatible Solana buy, funded in USDC.
+
+    A few older dashboard and Live Market buttons still call this endpoint.
+    It must therefore use the same USDC-funded flow as every newer Solana
+    surface; leaving the historical SOL implementation here made the funding
+    currency depend on which button happened to be pressed.
+    """
     wallet = _authenticated_wallet()
     if not wallet:
         return jsonify({'ok': False, 'msg': 'No wallet connected'}), 401
-    data         = request.get_json(silent=True) or {}
-    mint         = _sanitize(str(data.get('token_address', '')).strip())
-    symbol       = _sanitize(str(data.get('token_symbol', '')).strip())[:20]
-    amount_sol   = data.get('amount_sol')
-    if not mint or not is_valid_solana_address(mint):
-        return jsonify({'ok': False, 'msg': 'Invalid token address'}), 400
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        row = conn.execute(
-            'SELECT id, encrypted_private_key, min_trade_size, max_trade_size FROM users WHERE wallet_address=?',
-            (wallet,)
-        ).fetchone()
-    finally:
-        conn.close()
-    if not row or not row[1]:
-        return jsonify({'ok': False, 'msg': 'No trading key configured'}), 400
-    user_id, enc_blob = row[0], row[1]
-    max_size = float(row[3]) if row[3] is not None else 10.0
-    if amount_sol is None:
-        amount_sol = max_size
-    try:
-        amount_sol = float(amount_sol)
-    except (TypeError, ValueError):
-        return jsonify({'ok': False, 'msg': 'Invalid amount'}), 400
-    amount_sol = min(max_size, amount_sol)
-    # Same pre-check /api/instant-trade already does -- 0.005 SOL buffer
-    # covers both the network fee and, if this is the first time the
-    # wallet holds this token, the associated-token-account rent (~0.002
-    # SOL). Without this, a too-small balance always reached a real
-    # Jupiter simulation and failed there with a lamports-level error
-    # ("insufficient lamports 715720, need 1000000") instead of failing
-    # fast with a clear message.
-    fetch_user_balances(wallet)
-    current_sol = get_user_state(wallet).get('sol', 0)
-    if current_sol < amount_sol + 0.005:
-        return jsonify({'ok': False, 'msg': f'Insufficient SOL balance. You have {current_sol:.4f} SOL, need at least {amount_sol + 0.005:.4f} SOL (includes network fee + new-token account rent).'}), 400
-    td = get_token_data(mint)
-    entry_price = float(td['price']) if td and td.get('price') else 0.0
-    if not symbol and td:
-        symbol = td.get('symbol', mint[:8])
-    buy_ok = False
-    with _use_key(enc_blob, wallet) as pk:
-        buy_ok, _tx_hash, buy_err, _tok_amt, _sol_amt = _execute_user_swap_ex(wallet, pk, 'buy', mint, str(amount_sol))
-    if not buy_ok:
-        return jsonify({'ok': False, 'msg': buy_err or 'Swap failed — check logs'}), 502
-    # Use the swap's own realized fill (actual tokens received for
-    # amount_sol) for entry_price instead of the quoted spot price above --
-    # falls back to the quote if parsing found nothing.
-    token_amount = _tok_amt if _tok_amt > 0 else (amount_sol / entry_price if entry_price > 0 else 0.0)
-    if _tok_amt > 0:
-        entry_price = amount_sol / _tok_amt
-    us        = get_user_state(wallet)
-    positions = us['positions']
-    pos = positions.get(mint, {})
-    pos['amount']    = pos.get('amount', 0.0) + token_amount
-    pos['buy_price'] = entry_price
-    pos['spend']     = pos.get('spend', 0.0) + amount_sol
-    pos['symbol']    = symbol
-    pos['opened_at'] = time.time()
-    pos.update(_snapshot_entry_risk(wallet, entry_price))
-    _upsert_open_position(user_id, wallet, mint, pos, source='manual')
-    _charge_txn_fee(pk, wallet, user_id, symbol, amount_sol, 'buy', bundled=True)
-    return jsonify({'ok': True, 'amount_sol': amount_sol, 'entry_price': entry_price, 'symbol': symbol})
+    data = request.get_json(silent=True) or {}
+    mint = _sanitize(str(data.get('token_address', '')).strip())
+    requested = data.get('amount_usdc', data.get('amount_sol'))
+    if requested is not None:
+        try:
+            requested = float(requested)
+        except (TypeError, ValueError):
+            return jsonify({'ok': False, 'msg': 'Invalid USDC amount'}), 400
+        if requested <= 0:
+            return jsonify({'ok': False, 'msg': 'USDC amount must be greater than zero'}), 400
+    return _solana_buy_flow(
+        wallet, mint, log_label='LIVE MARKET BUY', enforce_position_cap=False,
+        idle_note=' — start the bot for automatic TP/SL',
+        requested_usdc=requested)
 
 
 @app.route('/api/trade/sell', methods=['POST'])
@@ -23910,13 +24038,42 @@ def send_dm(peer_id):
             return jsonify({'ok': False, 'msg': 'Cannot message yourself'}), 400
         if message_type == 'trade':
             trow = conn.execute(
-                'SELECT token, entry_price, exit_price, pnl FROM trades WHERE id=? AND user_id=?',
+                '''SELECT token, entry_price, exit_price, pnl, mint_address,
+                          chain, base_currency, amount, token_amount, side,
+                          timestamp
+                   FROM trades WHERE id=? AND user_id=?''',
                 (trade_id, me)
             ).fetchone()
             if not trow:
                 return jsonify({'ok': False, 'msg': 'Trade not found'}), 404
-            token, entry_price, exit_price, pnl = trow
-            text = json.dumps({'token': token, 'entry': entry_price, 'exit': exit_price, 'pnl': pnl})
+            (token, entry_price, exit_price, pnl, mint_address, chain,
+             base_currency, amount, token_amount, side, trade_timestamp) = trow
+            entry_value = float(entry_price or 0)
+            exit_value = float(exit_price or 0)
+            pnl_value = float(pnl or 0)
+            pnl_pct = ((exit_value - entry_value) / entry_value * 100
+                       if entry_value else 0)
+            # Store the complete shared-card snapshot in the message. Older
+            # messages only have token/entry/exit/pnl and remain renderable;
+            # every new message can use the same token card, banner and route
+            # as the Home feed without another private trade lookup.
+            text = json.dumps({
+                'token': token,
+                'symbol': token,
+                'side': str(side or 'SELL').upper(),
+                'entry': entry_value,
+                'entry_price': entry_value,
+                'exit': exit_value,
+                'exit_price': exit_value,
+                'pnl': pnl_value,
+                'pnl_sol': pnl_value,
+                'pnl_pct': round(pnl_pct, 2),
+                'pnl_currency': str(base_currency or 'SOL').upper(),
+                'token_address': mint_address or '',
+                'chain': str(chain or 'solana').lower(),
+                'amount': float(token_amount or amount or 0),
+                'timestamp': trade_timestamp or '',
+            })
         now = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
         cur = conn.execute(
             'INSERT INTO direct_messages (sender_id, receiver_id, message, message_type, created_at) VALUES (?,?,?,?,?)',
@@ -24550,12 +24707,34 @@ def share_trade_dm(peer_id):
     pos = us.get('positions', {}).get(token_address)
     if not pos or pos.get('amount', 0) <= 0:
         return jsonify({'ok': False, 'msg': 'No open position for this token'}), 400
+    entry_price = float(pos.get('buy_price', 0) or 0)
+    current_price = None
+    pnl_pct = None
+    try:
+        token_data = get_token_data(token_address)
+        if token_data and float(token_data.get('price', 0) or 0) > 0:
+            current_price = float(token_data['price'])
+            if entry_price > 0:
+                pnl_pct = round((current_price - entry_price) / entry_price * 100, 2)
+    except Exception:
+        pass
+    chain = str(pos.get('chain') or 'solana').lower()
+    pnl_currency = str(pos.get('base_currency') or ('SOL' if chain == 'solana' else 'USDC')).upper()
+    spend = float(pos.get('spend', 0) or 0)
     trade_payload = json.dumps({
         'type': 'trade_share',
         'token_address': token_address,
         'token_symbol': pos.get('symbol', token_address[:8]),
-        'entry_price': float(pos.get('buy_price', 0) or 0),
-        'amount_sol': float(pos.get('spend', 0) or 0),
+        'side': 'BUY',
+        'entry_price': entry_price,
+        'current_price': current_price,
+        'exit_price': current_price,
+        'pnl_pct': pnl_pct,
+        'pnl_sol': round(spend * pnl_pct / 100, 8) if pnl_pct is not None else None,
+        'pnl_currency': pnl_currency,
+        'amount': float(pos.get('amount', 0) or 0),
+        'amount_sol': spend,
+        'chain': chain,
     })
     conn = sqlite3.connect(DB_FILE)
     try:
@@ -25005,7 +25184,8 @@ def api_manual_buy():
 
 
 def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
-                     enforce_position_cap: bool, idle_note: str):
+                     enforce_position_cap: bool, idle_note: str,
+                     requested_usdc: float = None):
     """One Solana buy, for both /api/manual_buy and /api/pump-scanner/buy.
 
     These were two copies of the same function differing only in the field
@@ -25041,7 +25221,7 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
     conn = sqlite3.connect(DB_FILE)
     try:
         c   = conn.cursor()
-        row = c.execute('SELECT id, encrypted_private_key, min_trade_size FROM users '
+        row = c.execute('SELECT id, encrypted_private_key, min_trade_size, max_trade_size FROM users '
                         'WHERE wallet_address=?', (wallet,)).fetchone()
         bl  = c.execute('SELECT 1 FROM user_blacklist WHERE user_id=? AND mint=?',
                         (row[0], mint)).fetchone() if row else None
@@ -25053,6 +25233,7 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
         return jsonify({'ok': False, 'msg': 'This token is on your avoid list'}), 400
     user_id, enc_blob = row[0], row[1]
     min_trade_usdc    = float(row[2]) if row[2] is not None else 1.0
+    max_trade_usdc    = float(row[3]) if row[3] is not None else 10.0
 
     try:
         with _use_key(enc_blob, wallet) as _pk:
@@ -25125,7 +25306,12 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
         # The configured trade size is already USD-denominated, and USDC is a
         # dollar, so it IS the spend -- no price conversion, and nothing to go
         # wrong when the SOL price has not loaded yet.
-        spend = round(min(min_trade_usdc, us_usdc), 2)
+        if requested_usdc is not None and float(requested_usdc) < min_trade_usdc:
+            return jsonify({'ok': False,
+                            'msg': f'Minimum trade amount is {min_trade_usdc:.2f} USDC'}), 400
+        target_usdc = (min_trade_usdc if requested_usdc is None
+                       else min(max_trade_usdc, float(requested_usdc)))
+        spend = round(min(target_usdc, us_usdc), 2)
         if spend < SOLANA_MIN_SPEND_USDC:
             return jsonify({
                 'ok': False, 'low_balance': True, 'trading_wallet': trading_wallet,
@@ -26863,7 +27049,7 @@ def api_market_live():
 # scanner UI's filters need, plus an on-demand safety enrichment step.
 _scanner_cache: dict = {'ts': 0.0, 'data': []}
 _scanner_lock = threading.Lock()
-_scanner_safety_cache: dict = {}  # mint -> (ts, {lp_locked_pct, mint_authority_active, freeze_authority_active})
+_scanner_safety_cache: dict = {}  # (chain,mint,include_lp) -> (ts, normalized safety result)
 _scanner_safety_lock = threading.Lock()
 _SCANNER_SAFETY_TTL = 600  # 10 min -- mint/freeze authority + LP-lock state rarely change
 _AGE_BUCKET_SECONDS = {'1h': 3600, '6h': 21600, '24h': 86400}
@@ -27080,28 +27266,102 @@ def _get_scanner_cached() -> list:
         if now - _scanner_cache['ts'] < 15 and _scanner_cache['data']:
             return _scanner_cache['data']
     data = _get_scanner_candidates()
+    # The scanner already receives a real USD price and the exact pool for
+    # every token.  Persist that free data on every scanner refresh, not only
+    # while somebody happens to have a chart visible.  This is the history
+    # fallback for any network or brand-new pool for which GeckoTerminal has
+    # no OHLC result, and it keeps building across page reloads and deploys
+    # without another provider or paid API.
+    observed_at = time.time()
+    by_chain = {}
+    for token in data:
+        pair = str(token.get('pair_address') or '').strip().lower()
+        try:
+            price = float(token.get('price_usd') or 0)
+        except (TypeError, ValueError):
+            price = 0.0
+        if pair and price > 0:
+            by_chain.setdefault(token.get('chain') or 'solana', {})[pair] = price
+    for chain_name, prices in by_chain.items():
+        _store_observed_market_prices(chain_name, prices, observed_at)
     with _scanner_lock:
         _scanner_cache['ts']   = time.time()
         _scanner_cache['data'] = data
     return data
 
 
-def _scanner_get_safety(mint: str) -> dict:
+def _scanner_get_safety(mint: str, chain: str = 'solana', include_lp: bool = False) -> dict:
     now = time.time()
+    cache_key = (chain, mint.lower(), bool(include_lp))
     with _scanner_safety_lock:
-        cached = _scanner_safety_cache.get(mint)
+        cached = _scanner_safety_cache.get(cache_key)
         if cached and now - cached[0] < _SCANNER_SAFETY_TTL:
             return cached[1]
-    safety_raw = _check_mint_safety(mint)
-    lp         = _check_lp_locked(mint)
-    result = {
-        'lp_locked_pct':           float(lp.get('lp_locked_pct') or 0),
-        'mint_authority_active':   bool(safety_raw.get('mint_authority_active')),
-        'freeze_authority_active': bool(safety_raw.get('freeze_authority_active')),
-    }
+    if chain == 'solana':
+        mint_result = _check_mint_safety(mint)
+        lp = _check_lp_locked(mint) if include_lp else {}
+        result = {
+            'ok':                      bool(mint_result.get('ok')) and (not include_lp or bool(lp.get('ok'))),
+            'lp_locked_pct':           float(lp.get('lp_locked_pct') or 0),
+            'holder_concentration_risk': bool(lp.get('holder_concentration_risk')),
+            'mint_authority_active':   bool(mint_result.get('mint_authority_active')),
+            'freeze_authority_active': bool(mint_result.get('freeze_authority_active')),
+            'is_honeypot':             False,
+            'no_provider':             False,
+        }
+    else:
+        hp = _check_evm_honeypot(mint, chain)
+        result = {
+            'ok':            bool(hp.get('ok')),
+            'is_honeypot':  bool(hp.get('is_honeypot', True)),
+            'risk_level':   hp.get('risk_level'),
+            'buy_tax':      float(hp.get('buy_tax') or 0),
+            'sell_tax':     float(hp.get('sell_tax') or 0),
+            'no_provider':  bool(hp.get('no_provider')),
+            'lp_locked_pct': 0,
+            'mint_authority_active': False,
+            'freeze_authority_active': False,
+        }
     with _scanner_safety_lock:
-        _scanner_safety_cache[mint] = (time.time(), result)
+        _scanner_safety_cache[cache_key] = (time.time(), result)
     return result
+
+
+def _scanner_token_passes_scam_filter(token: dict, safety: dict) -> bool:
+    """Conservative default gate for Live Market discovery.
+
+    This removes tokens with concrete scam/rug indicators. It deliberately
+    does not promise that an unknown contract is safe: unsupported chains are
+    admitted only with substantially deeper, active two-sided liquidity.
+    """
+    liquidity = float(token.get('liquidity_usd') or 0)
+    volume = float(token.get('volume_24h') or 0)
+    buys = int(token.get('buys_24h') or 0)
+    sells = int(token.get('sells_24h') or 0)
+    total = buys + sells
+    if liquidity < 25000 or volume <= 0 or total < 20 or sells <= 0:
+        return False
+    sell_ratio = sells / total
+    if sell_ratio < 0.05 or sell_ratio > 0.95:
+        return False
+
+    chain = token.get('chain') or 'solana'
+    if chain == 'solana':
+        return bool(safety.get('ok')) \
+            and not safety.get('mint_authority_active') \
+            and not safety.get('freeze_authority_active')
+
+    if safety.get('no_provider'):
+        # No free sell simulator covers this chain yet. Unknown is not called
+        # "safe": require strong, expensive-to-fake two-sided market depth.
+        return liquidity >= 125000 and volume >= 100000 \
+            and sells >= 20 and 0.15 <= sell_ratio <= 0.85
+    if not safety.get('ok') or safety.get('is_honeypot'):
+        return False
+    if float(safety.get('buy_tax') or 0) > 15 or float(safety.get('sell_tax') or 0) > 15:
+        return False
+    risk = str(safety.get('risk_level') or '').strip().lower().replace(' ', '_')
+    return risk not in {'high', 'very_high', 'critical', 'honeypot'}
 
 
 def _scanner_score(tok: dict, safety: dict | None) -> int:
@@ -27178,13 +27438,23 @@ def api_market_scanner():
 
     filtered = [dict(t) for t in candidates if _passes_fast(t)]
 
+    # Scam filtering is ON by default. The old "hide honeypots" switch only
+    # checked whether sells were exactly zero, so obvious sell-blocking tokens
+    # with one dust sell still passed. Run the real chain-aware checks in
+    # parallel and cache them for ten minutes; cap the candidate batch so one
+    # page load cannot fan out without bound.
+    safety_subset = filtered[:45]
+    if safety_subset:
+        with ThreadPoolExecutor(max_workers=12) as ex:
+            safety_list = list(ex.map(
+                lambda t: _scanner_get_safety(t['mint'], t.get('chain') or 'solana', lp_locked),
+                safety_subset))
+        for t, s in zip(safety_subset, safety_list):
+            t['_safety'] = s
+        filtered = [t for t in safety_subset if _scanner_token_passes_scam_filter(t, t['_safety'])]
+
     if lp_locked or mint_revoked:
         subset = filtered[:40]
-        if subset:
-            with ThreadPoolExecutor(max_workers=8) as ex:
-                safety_list = list(ex.map(lambda t: _scanner_get_safety(t['mint']), subset))
-            for t, s in zip(subset, safety_list):
-                t['_safety'] = s
 
         def _passes_safety(t):
             s = t.get('_safety')
@@ -27198,8 +27468,7 @@ def api_market_scanner():
 
         filtered = [t for t in subset if _passes_safety(t)]
     else:
-        for t in filtered:
-            t['_safety'] = None
+        pass
 
     gainers_set = [t for t in filtered if t.get('price_change_24h', 0) > 0]
     new_set     = [t for t in filtered
@@ -27339,12 +27608,11 @@ def api_carousel():
 
 # GeckoTerminal's own network slugs -- NOT the same strings as DexScreener's
 # chainId (EVM_CHAINS[*]['dex_chain']) in every case, e.g. Polygon is
-# 'polygon_pos' here vs 'polygon' on DexScreener. Robinhood Chain has no
-# known GeckoTerminal network yet -- left unmapped so that leg of api_chart()
-# is skipped and falls straight through to the DexScreener-priceChange
-# fallback below instead of hitting a guaranteed 404 every 5 seconds.
+# 'polygon_pos' here vs 'polygon' on DexScreener. Robinhood uses the plain
+# 'robinhood' slug (the same slug visible in GeckoTerminal pool URLs).
 _GECKOTERMINAL_NETWORK = {
-    'solana': 'solana', 'bsc': 'bsc', 'base': 'base', 'arbitrum': 'arbitrum', 'polygon': 'polygon_pos',
+    'solana': 'solana', 'bsc': 'bsc', 'base': 'base', 'arbitrum': 'arbitrum',
+    'polygon': 'polygon_pos', 'robinhood': 'robinhood',
 }
 
 # How long a live price may be reused. Short, because this is the number that
@@ -27366,6 +27634,90 @@ _LIVE_PRICE_TTL = 2
 # back free.
 _live_price_lock = threading.Lock()
 _live_price_cache: dict = {}   # (chain, pair_lower) -> (fetched_at, price)
+
+_MARKET_TF_SECONDS = {'1m': 60, '5m': 300, '15m': 900,
+                      '1h': 3600, '4h': 14400, 'D': 86400}
+
+
+def _store_observed_market_prices(chain: str, prices: dict, observed_at: float) -> None:
+    """Persist real observed prices as one-minute OHLC candles.
+
+    This intentionally stores no synthetic backfill. It gives unsupported or
+    brand-new pools durable history from the first moment OrcAgent sees them.
+    One transaction stores the whole <=30-pair batch to keep SQLite cheap.
+    """
+    if not prices:
+        return
+    bucket = int(observed_at) // 60 * 60
+    rows = [(chain, pair.lower(), bucket, float(price), float(price),
+             float(price), float(price))
+            for pair, price in prices.items() if float(price or 0) > 0]
+    if not rows:
+        return
+    try:
+        conn = sqlite3.connect(DB_FILE, timeout=5)
+        conn.execute('PRAGMA busy_timeout=5000')
+        conn.executemany('''INSERT INTO market_candles_1m
+            (chain,pair_address,bucket_ts,open,high,low,close)
+            VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(chain,pair_address,bucket_ts) DO UPDATE SET
+              high=MAX(high,excluded.high), low=MIN(low,excluded.low),
+              close=excluded.close, samples=samples+1''', rows)
+        # Keep 30 days; enough for the 1D view without unbounded growth.
+        conn.execute('DELETE FROM market_candles_1m WHERE bucket_ts < ?',
+                     (bucket - 30 * 86400,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f'[chart-store] write failed: {e}', flush=True)
+
+
+def _stored_market_candles(chain: str, pair_address: str, tf: str,
+                           limit: int = 60) -> list:
+    """Read durable 1m candles and aggregate them to the requested timeframe."""
+    seconds = _MARKET_TF_SECONDS.get(tf, 300)
+    try:
+        conn = sqlite3.connect(DB_FILE, timeout=5)
+        rows = conn.execute('''SELECT bucket_ts,open,high,low,close,samples
+            FROM market_candles_1m
+            WHERE chain=? AND pair_address=?
+            ORDER BY bucket_ts DESC LIMIT ?''',
+            (chain, pair_address.lower(), max(limit * (seconds // 60), limit))).fetchall()
+        conn.close()
+    except Exception as e:
+        print(f'[chart-store] read failed: {e}', flush=True)
+        return []
+    grouped = {}
+    for ts, op, hi, lo, cl, samples in reversed(rows):
+        bucket = int(ts) // seconds * seconds
+        cur = grouped.get(bucket)
+        if cur is None:
+            grouped[bucket] = {'t': bucket, 'o': op, 'h': hi, 'l': lo,
+                               'c': cl, 'v': 0, 'samples': samples}
+        else:
+            cur['h'] = max(cur['h'], hi)
+            cur['l'] = min(cur['l'], lo)
+            cur['c'] = cl
+            cur['samples'] += samples
+    return list(grouped.values())[-limit:]
+
+
+def _best_stored_market_candles(chain: str, pair_address: str, tf: str,
+                                limit: int = 60) -> tuple:
+    """Return the requested stored timeframe, falling back to real 1m bars.
+
+    A new/unsupported pool may have many honest one-minute observations but
+    still only one five-minute bucket. Showing that single 5m candle made a
+    working chart look broken. Until enough requested bars exist we display
+    the finer observed bars and explicitly report the timeframe actually used.
+    """
+    requested = _stored_market_candles(chain, pair_address, tf, limit)
+    if len(requested) >= 2 or tf == '1m':
+        return requested, tf
+    finer = _stored_market_candles(chain, pair_address, '1m', limit)
+    if len(finer) > len(requested):
+        return finer, '1m'
+    return requested, tf
 
 
 # Token prices by MINT, cached per token. Same shape as the pool-price cache
@@ -27528,6 +27880,7 @@ def api_market_prices():
             if addr and px > 0:
                 fresh[addr.lower()] = px
         prices.update(fresh)
+        _store_observed_market_prices(chain, fresh, now)
         with _live_price_lock:
             for k, v in fresh.items():
                 _live_price_cache[(chain, k)] = (now, v)
@@ -27613,7 +27966,7 @@ def api_chart(mint):
 
         def _fetch_candles_for_tf(tf_key):
             if not gt_network:
-                return []  # e.g. Robinhood Chain -- no known GeckoTerminal network, skip straight to the DexScreener fallback below
+                return []  # Unknown future network: use durable observed-price history below.
             tcfg_local = _TF[tf_key]
             cache_key_local = (chain, pair_address, tf_key)
             with _chart_cache_lock:
@@ -27695,52 +28048,27 @@ def api_chart(mint):
         for i, tf_key in enumerate(tf_fallback_list):
             candles = _fetch_candles_for_tf(tf_key)
             tf_used = tf_key
-            if len(candles) >= 5 or i == len(tf_fallback_list) - 1:
+            # One real provider bar is already useful and must not trigger a
+            # burst of another four upstream calls. Live ticks extend it; the
+            # durable store supplies finer bars where the provider is absent.
+            if candles or i == len(tf_fallback_list) - 1:
                 break
 
-        # ── Step 3: priceChange fallback — GeckoTerminal had nothing usable at
-        # any granularity (brand-new pool with too little history, or a 429).
-        # Reconstruct a rough <=4-point trend from the pair's priceChange
-        # percentages (m5/h1/h6/24h -- the same fields _sparkline() in
-        # live_market.html already uses) instead of handing the frontend an
-        # empty candles array. Only hit when candles are still empty, so the
-        # common already-has-real-candles path pays no extra request. ──
-        is_fallback = False
-        if not candles:
-            try:
-                pr = _dex_get(f'https://api.dexscreener.com/latest/dex/pairs/{dex_chain_id}/' + pair_address, timeout=8)
-                pdata = pr.json() if (pr and pr.status_code == 200) else {}
-                pair_data = pdata.get('pair') or (pdata.get('pairs') or [None])[0] or {}
-                price_change = pair_data.get('priceChange') or {}
-                cur_price = float(pair_data.get('priceUsd') or 0) or None
-            except Exception as e:
-                print(f'[chart] fallback priceChange fetch error: {e}', flush=True)
-                price_change, cur_price = {}, None
-
-            if cur_price:
-                now_i = int(now)
-                fallback_candles = []
-                for pc_key, secs_ago in (('h24', 86400), ('h6', 21600), ('h1', 3600), ('m5', 300)):
-                    pct = price_change.get(pc_key)
-                    if pct is None:
-                        continue
-                    denom = 1 + (pct / 100.0)
-                    if denom <= 0:
-                        continue
-                    past_price = cur_price / denom
-                    fallback_candles.append({
-                        't': now_i - secs_ago, 'o': past_price, 'h': past_price,
-                        'l': past_price, 'c': past_price, 'v': 0,
-                    })
-                fallback_candles.sort(key=lambda x: x['t'])
-                if fallback_candles:
-                    candles = fallback_candles
-                    is_fallback = True
+        # Extend provider history with OrcAgent's own durable observations.
+        # When the provider has no coverage, this is the primary history.
+        # Never fabricate bars for time ranges unseen by either source.
+        stored, stored_tf = _best_stored_market_candles(chain, pair_address, tf)
+        if stored:
+            if candles and tf_used == tf:
+                by_time = {int(c['t']): c for c in candles}
+                for c in stored:
+                    by_time[int(c['t'])] = c
+                candles = [by_time[k] for k in sorted(by_time)][-60:]
+            elif not candles:
+                candles = stored
+                tf_used = stored_tf
 
         current_price = candles[-1]['c'] if candles else _fetch_current_price()
-
-        if is_fallback:
-            return jsonify({'candles': candles, 'pair_address': pair_address, 'tf_used': tf_used, 'current_price': current_price, 'fallback': True})
         if candles:
             return jsonify({'candles': candles, 'pair_address': pair_address, 'tf_used': tf_used, 'current_price': current_price})
         return jsonify({'candles': [], 'error': 'Chart unavailable', 'pair_address': pair_address, 'tf_used': tf_used, 'current_price': current_price})
@@ -30674,5 +31002,3 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     print('OrcAgent Dashboard running on port', port)
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
-
-

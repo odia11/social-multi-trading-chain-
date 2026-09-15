@@ -1,0 +1,36 @@
+/* OrcAgent compact premium chart-post card for the Home feed. */
+body .oa-feed-chart-v2{background:linear-gradient(180deg,#0b1118 0%,#0a0f15 100%)!important;border:1px solid #202a36!important;border-radius:16px!important;overflow:hidden!important;margin:8px 0 10px!important;box-shadow:0 12px 30px rgba(0,0,0,.2)!important;font-family:Geist,Inter,system-ui,-apple-system,sans-serif!important;color:#eef1f5!important;position:relative!important}
+body .oa-feed-chart-v2 .oa-fc-hero{height:122px;position:relative;overflow:hidden;background:#0d131a}
+body .oa-feed-chart-v2 .oa-fc-banner{position:absolute;inset:0;background-size:cover;background-position:center;transform:scale(1.01)}
+body .oa-feed-chart-v2 .oa-fc-hero-shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(4,8,12,.05),rgba(7,11,16,.18) 58%,rgba(7,11,16,.9))}
+body .oa-feed-chart-v2 .oa-fc-chain{position:absolute;right:10px;top:10px;z-index:2;display:inline-flex;align-items:center;gap:6px;padding:6px 9px;border:1px solid rgba(255,255,255,.12);border-radius:10px;background:rgba(6,10,15,.76);backdrop-filter:blur(10px);font-size:10px;font-weight:800;color:#eef1f5}
+body .oa-feed-chart-v2 .oa-fc-chain-dot{width:7px;height:7px;border-radius:50%;background:linear-gradient(135deg,#8b5cf6,#22d3ee)}
+body .oa-feed-chart-v2 .oa-fc-head{position:relative;display:flex;align-items:flex-end;gap:10px;padding:0 14px 8px;margin-top:-28px;z-index:3}
+body .oa-feed-chart-v2 .oa-fc-logo{width:58px;height:58px;flex:0 0 58px;border-radius:50%;border:3px solid #f7b955;background:#171d25;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;color:#f7b955;box-shadow:0 5px 14px rgba(0,0,0,.32)}
+body .oa-feed-chart-v2 .oa-fc-logo img{width:100%;height:100%;object-fit:cover}
+body .oa-feed-chart-v2 .oa-fc-title{min-width:0;flex:1;padding-bottom:1px}
+body .oa-feed-chart-v2 .oa-fc-symbol{font:800 22px/1.05 'JetBrains Mono',ui-monospace,monospace;letter-spacing:-.03em;color:#f4f7fb}
+body .oa-feed-chart-v2 .oa-fc-subrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px}
+body .oa-feed-chart-v2 .oa-fc-name{font-size:12px;color:#8f99a8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px}
+body .oa-feed-chart-v2 .oa-fc-tag{padding:3px 7px;border-radius:6px;border:1px solid rgba(247,185,85,.25);background:rgba(247,185,85,.1);color:#f7b955;font-size:9px;font-weight:800}
+body .oa-feed-chart-v2 .oa-fc-main{padding:5px 14px 13px}
+body .oa-feed-chart-v2 .oa-fc-price-row{display:grid;grid-template-columns:minmax(0,1fr) 108px;gap:8px;align-items:end;margin:2px 0 9px}
+body .oa-feed-chart-v2 .oa-fc-price{font:800 29px/1.05 'JetBrains Mono',ui-monospace,monospace;letter-spacing:-.05em;color:#f4f7fb;white-space:nowrap}
+body .oa-feed-chart-v2 .oa-fc-change{font-size:14px;font-weight:800;margin-top:3px;color:#36d7a0}.oa-feed-chart-v2 .oa-fc-change.neg{color:#ff716a}
+body .oa-feed-chart-v2 .oa-fc-change small{color:#788392;font-size:10px;font-weight:500;margin-left:3px}
+body .oa-feed-chart-v2 .oa-fc-spark{width:100%;height:46px;align-self:end;overflow:visible}
+body .oa-feed-chart-v2 .oa-fc-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+body .oa-feed-chart-v2 .oa-fc-stat{min-height:48px;padding:8px 7px;border:1px solid #1c2631;border-radius:9px;background:#111821;display:flex;flex-direction:column;justify-content:center;min-width:0}
+body .oa-feed-chart-v2 .oa-fc-stat-label{font-size:8px;text-transform:uppercase;letter-spacing:.05em;color:#707b8b;margin-bottom:3px;white-space:nowrap}
+body .oa-feed-chart-v2 .oa-fc-stat-value{font:750 11px/1.15 'JetBrains Mono',ui-monospace,monospace;color:#f1f4f8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body .oa-feed-chart-v2 .oa-fc-flow{margin-top:7px;padding:9px 10px;border:1px solid #1c2631;border-radius:10px;background:#111821;display:grid;grid-template-columns:auto 1fr;align-items:center;gap:12px}
+body .oa-feed-chart-v2 .oa-fc-flow-label{font-size:8px;text-transform:uppercase;letter-spacing:.05em;color:#707b8b}.oa-feed-chart-v2 .oa-fc-buys{color:#36d7a0}.oa-feed-chart-v2 .oa-fc-sells{color:#ff716a}
+body .oa-feed-chart-v2 .oa-fc-flow-values{font:750 11px/1.2 'JetBrains Mono',ui-monospace,monospace;margin-top:2px}
+body .oa-feed-chart-v2 .oa-fc-flow-right{font-size:9px;text-align:right;color:#758090}.oa-feed-chart-v2 .oa-fc-bar{height:4px;border-radius:999px;background:#ff716a;overflow:hidden;margin-top:5px}.oa-feed-chart-v2 .oa-fc-bar>span{display:block;height:100%;border-radius:999px;background:#36d7a0;transition:width .6s ease}
+body .oa-feed-chart-v2 .oa-fc-pcts{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:7px 0}
+body .oa-feed-chart-v2 .oa-fc-pct{padding:6px 3px;border:1px solid rgba(54,215,160,.17);border-radius:8px;background:rgba(54,215,160,.07);text-align:center;font:700 9px/1.12 'JetBrains Mono',ui-monospace,monospace;color:#36d7a0}.oa-feed-chart-v2 .oa-fc-pct span{color:#9aa4b2;margin-right:2px}.oa-feed-chart-v2 .oa-fc-pct b{display:block;margin-top:2px}.oa-feed-chart-v2 .oa-fc-pct.neg{color:#ff716a;border-color:rgba(255,113,106,.17);background:rgba(255,113,106,.07)}
+body .oa-feed-chart-v2 .oa-fc-bottom{display:grid;grid-template-columns:minmax(0,1fr) 118px;gap:7px;align-items:stretch}
+body .oa-feed-chart-v2 .oa-fc-pair{display:flex;align-items:center;gap:7px;padding:9px 10px;border:1px solid #1c2631;border-radius:9px;background:#0f151d;font-size:9px;color:#8d98a7;min-width:0}.oa-feed-chart-v2 .oa-fc-pair code{font:600 9px/1 'JetBrains Mono',ui-monospace,monospace;color:#d9dee6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body .oa-feed-chart-v2 .oa-fc-cta{border:1px solid rgba(247,185,85,.78);border-radius:9px;background:linear-gradient(180deg,rgba(247,185,85,.14),rgba(247,185,85,.05));display:flex;align-items:center;justify-content:center;gap:6px;color:#f7c268;font-size:11px;font-weight:800;box-shadow:inset 0 0 18px rgba(247,185,85,.04);cursor:pointer;-webkit-tap-highlight-color:transparent}
+body .oa-feed-chart-v2 .oa-fc-cta:active{transform:scale(.985)}
+@media(max-width:520px){body .oa-feed-chart-v2 .oa-fc-hero{height:112px}body .oa-feed-chart-v2 .oa-fc-head{padding-left:12px;padding-right:12px;margin-top:-25px}body .oa-feed-chart-v2 .oa-fc-main{padding:4px 12px 11px}body .oa-feed-chart-v2 .oa-fc-logo{width:54px;height:54px;flex-basis:54px}body .oa-feed-chart-v2 .oa-fc-symbol{font-size:20px}body .oa-feed-chart-v2 .oa-fc-price-row{grid-template-columns:minmax(0,1fr) 94px}body .oa-feed-chart-v2 .oa-fc-price{font-size:27px}body .oa-feed-chart-v2 .oa-fc-stats{grid-template-columns:1fr 1fr}body .oa-feed-chart-v2 .oa-fc-stat{min-height:46px}body .oa-feed-chart-v2 .oa-fc-bottom{grid-template-columns:minmax(0,1fr) 108px}}

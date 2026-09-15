@@ -124,7 +124,7 @@ function closeMobileOverlays(){
 /* ── state ── */
 var ST = {
   sort: 'trending', minLiquidity: 25000, age: 'any',
-  lpLocked: false, mintRevoked: false, hideHoneypots: false, verifiedSocials: false,
+  lpLocked: false, mintRevoked: false, hideHoneypots: true, verifiedSocials: false,
   tokens: [], counts: {}
 };
 var watchSet = new Set();
@@ -147,21 +147,9 @@ var SORT_DEFS = [
   {key:'friends',  label:'Friends buying'}
 ];
 
-/* ── chart (custom SVG: smooth cubic-bezier line, gradient fill, dotted
+/* ── chart (custom SVG: candlesticks, volume, dotted
    current-price line, price pill, timeframe pills, time axis) ── */
 var _chartTimers = {}; // idx -> {destroyed, mint, pair, tf, timer}
-
-function buildSmoothPath(pts){
-  if(pts.length<2) return '';
-  var d = 'M'+pts[0].x.toFixed(2)+','+pts[0].y.toFixed(2);
-  for(var i=0;i<pts.length-1;i++){
-    var p0 = pts[i===0?0:i-1], p1 = pts[i], p2 = pts[i+1], p3 = pts[i+2]||p2;
-    var c1x = p1.x+(p2.x-p0.x)/6, c1y = p1.y+(p2.y-p0.y)/6;
-    var c2x = p2.x-(p3.x-p1.x)/6, c2y = p2.y-(p3.y-p1.y)/6;
-    d += ' C'+c1x.toFixed(2)+','+c1y.toFixed(2)+' '+c2x.toFixed(2)+','+c2y.toFixed(2)+' '+p2.x.toFixed(2)+','+p2.y.toFixed(2);
-  }
-  return d;
-}
 
 function updateAxis(idx, candles){
   var axisEl = document.getElementById('pt-chart-axis-'+idx);
@@ -185,10 +173,10 @@ function renderChartSvg(idx, candles, currentPrice){
   var wrap = document.getElementById('pt-chart-wrap-'+idx);
   if(!svg || !wrap) return;
   var w = wrap.clientWidth || 300;
-  var h = 200;
+  var h = svg.clientHeight || 200;
   svg.setAttribute('viewBox', '0 0 '+w+' '+h);
 
-  if(!candles || candles.length<2){
+  if(!candles || !candles.length){
     var oldPill0 = wrap.querySelector('.pt-price-pill');
     if(oldPill0) oldPill0.remove();
     svg.innerHTML = '';
@@ -204,25 +192,24 @@ function renderChartSvg(idx, candles, currentPrice){
   var stale = wrap.querySelector('.pt-chart-empty');
   if(stale) stale.remove();
 
-  var values = candles.map(function(c){ return c.c; });
-  var min = Math.min.apply(null, values), max = Math.max.apply(null, values);
+  var values = candles.map(function(c){ return Number(c.c)||0; });
+  var lows = candles.map(function(c){ return Number(c.l!=null?c.l:c.c)||0; });
+  var highs = candles.map(function(c){ return Number(c.h!=null?c.h:c.c)||0; });
+  var min = Math.min.apply(null, lows), max = Math.max.apply(null, highs);
   if(min===max){ min = min*0.98; max = (max*1.02)||1; }
   var pad = (max-min)*0.12;
-  min -= pad; max += pad;
+  min = Math.max(0,min-pad); max += pad;
 
-  var n = candles.length;
+  var n = candles.length, priceH = h*.77, volTop = h*.79, volH = h*.18;
   var pts = candles.map(function(c,i){
-    var x = n===1 ? 0 : (i/(n-1))*w;
-    var y = h - ((c.c-min)/(max-min))*h;
+    var x = n===1 ? (w-46)/2 : (i/(n-1))*(w-46);
+    var y = priceH - ((c.c-min)/(max-min))*priceH;
     return {x:x, y:y};
   });
 
-  var linePath = buildSmoothPath(pts);
-  var areaPath = linePath + ' L'+pts[pts.length-1].x.toFixed(2)+','+h+' L'+pts[0].x.toFixed(2)+','+h+' Z';
-
   var priceVal = (currentPrice!=null && currentPrice>0) ? currentPrice : values[values.length-1];
-  var priceY = h - ((priceVal-min)/(max-min))*h;
-  priceY = Math.max(2, Math.min(h-2, priceY));
+  var priceY = priceH - ((priceVal-min)/(max-min))*priceH;
+  priceY = Math.max(3, Math.min(priceH-3, priceY));
 
   // Scrubbing (see attachScrub()) reads these off the timer state -- kept
   // in the exact same {x,y} pixel space the SVG itself was just drawn in
@@ -230,17 +217,27 @@ function renderChartSvg(idx, candles, currentPrice){
   // pointer position maps straight to "nearest x" -> "that candle's price
   // and time" with no unit conversion.
   var st = _chartTimers[idx];
-  if(st){ st.pts = pts; st.candles = candles; st.min = min; st.max = max; st.h = h; st.w = w; }
+  if(st){ st.pts = pts; st.candles = candles; st.min = min; st.max = max; st.h = h; st.w = w; st.priceH = priceH; st.plotW = w-46; }
 
-  var gradId = 'pt-grad-'+idx;
-  svg.innerHTML =
-      '<defs><linearGradient id="'+gradId+'" x1="0" y1="0" x2="0" y2="1">'
-    +   '<stop offset="0%" stop-color="#f7b955" stop-opacity="0.22"/>'
-    +   '<stop offset="100%" stop-color="#f7b955" stop-opacity="0"/>'
-    + '</linearGradient></defs>'
-    + '<path d="'+areaPath+'" fill="url(#'+gradId+')" stroke="none"></path>'
-    + '<line x1="0" y1="'+priceY.toFixed(2)+'" x2="'+w+'" y2="'+priceY.toFixed(2)+'" stroke="#f7b955" stroke-width="1" stroke-dasharray="3,4" opacity="0.55" vector-effect="non-scaling-stroke"></line>'
-    + '<path d="'+linePath+'" fill="none" stroke="#f7b955" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linecap="round"></path>';
+  var maxVol = Math.max.apply(null,candles.map(function(c){return Number(c.v)||0;}))||1;
+  var plotW=w-46, step=plotW/Math.max(n,1), bodyW=Math.max(2,Math.min(7,step*.62)), chartHtml='';
+  for(var gy=0;gy<5;gy++){
+    var yy=(priceH/4)*gy, label=max-((max-min)/4)*gy;
+    chartHtml+='<line x1="0" y1="'+yy.toFixed(2)+'" x2="'+plotW.toFixed(2)+'" y2="'+yy.toFixed(2)+'" stroke="#1a2530" stroke-width="1" vector-effect="non-scaling-stroke"></line>';
+    chartHtml+='<text x="'+(plotW+5).toFixed(2)+'" y="'+Math.max(10,yy+4).toFixed(2)+'" fill="#657180" font-size="9" font-family="monospace">'+fmtPrice(label).replace('$','')+'</text>';
+  }
+  candles.forEach(function(c,i){
+    var x=pts[i].x, open=Number(c.o!=null?c.o:c.c)||0, close=Number(c.c)||0, high=Number(c.h!=null?c.h:c.c)||0, low=Number(c.l!=null?c.l:c.c)||0;
+    var yo=priceH-((open-min)/(max-min))*priceH, yc=priceH-((close-min)/(max-min))*priceH, yh=priceH-((high-min)/(max-min))*priceH, yl=priceH-((low-min)/(max-min))*priceH;
+    var color=close>=open?'#3ad29b':'#f76b62', top=Math.min(yo,yc), bh=Math.max(1.5,Math.abs(yc-yo));
+    var liveIds=i===candles.length-1?' id="pt-live-wick-'+idx+'"':'';
+    var liveBodyId=i===candles.length-1?' id="pt-live-body-'+idx+'"':'';
+    chartHtml+='<line'+liveIds+' x1="'+x.toFixed(2)+'" y1="'+yh.toFixed(2)+'" x2="'+x.toFixed(2)+'" y2="'+yl.toFixed(2)+'" stroke="'+color+'" stroke-width="1" vector-effect="non-scaling-stroke"></line>';
+    chartHtml+='<rect'+liveBodyId+' x="'+(x-bodyW/2).toFixed(2)+'" y="'+top.toFixed(2)+'" width="'+bodyW.toFixed(2)+'" height="'+bh.toFixed(2)+'" rx=".6" fill="'+color+'"></rect>';
+    var vh=((Number(c.v)||0)/maxVol)*volH;
+    chartHtml+='<rect x="'+(x-bodyW/2).toFixed(2)+'" y="'+(volTop+volH-vh).toFixed(2)+'" width="'+bodyW.toFixed(2)+'" height="'+vh.toFixed(2)+'" fill="'+color+'" opacity=".45"></rect>';
+  });
+  svg.innerHTML=chartHtml+'<line id="pt-live-guide-'+idx+'" x1="0" y1="'+priceY.toFixed(2)+'" x2="'+plotW.toFixed(2)+'" y2="'+priceY.toFixed(2)+'" stroke="#f7b955" stroke-width="1" stroke-dasharray="4,4" opacity=".72" vector-effect="non-scaling-stroke"></line>';
 
   // Reused across renders (not removed+recreated) so the CSS `top`
   // transition on .pt-price-pill actually animates between positions
@@ -254,8 +251,37 @@ function renderChartSvg(idx, candles, currentPrice){
   }
   pill.style.top = priceY+'px';
   pill.textContent = fmtPrice(priceVal);
+  if(st) st.renderedPrice = priceVal;
 
   updateAxis(idx, candles);
+}
+
+// Move only the still-forming candle. Rebuilding the complete SVG every two
+// seconds caused visible flashing/jank on mobile, especially while swiping.
+function updateLiveChartPrice(idx, nextPrice){
+  var st=_chartTimers[idx], wrap=document.getElementById('pt-chart-wrap-'+idx);
+  if(!st || !wrap || !st.candles || !st.candles.length || !(nextPrice>0)) return;
+  var last=st.candles[st.candles.length-1], previous=Number(st.renderedPrice||last.c||nextPrice);
+  last.c=nextPrice; last.h=Math.max(Number(last.h||nextPrice),nextPrice); last.l=Math.min(Number(last.l||nextPrice),nextPrice);
+  // A move outside the current scale needs fresh axes; ordinary ticks stay GPU-smooth.
+  if(nextPrice<=st.min || nextPrice>=st.max){ renderChartSvg(idx,st.candles,nextPrice); return; }
+  var body=document.getElementById('pt-live-body-'+idx), wick=document.getElementById('pt-live-wick-'+idx), guide=document.getElementById('pt-live-guide-'+idx);
+  var pill=wrap.querySelector('.pt-price-pill');
+  if(!body || !wick || !guide){ renderChartSvg(idx,st.candles,nextPrice); return; }
+  if(st.liveRaf) cancelAnimationFrame(st.liveRaf);
+  var started=performance.now(), duration=220;
+  function frame(now){
+    var q=Math.min(1,(now-started)/duration), eased=1-Math.pow(1-q,3), p=previous+(nextPrice-previous)*eased;
+    var y=function(v){return st.priceH-((v-st.min)/(st.max-st.min))*st.priceH;};
+    var yo=y(Number(last.o!=null?last.o:p)), yc=y(p), yh=y(Math.max(Number(last.h)||p,p)), yl=y(Math.min(Number(last.l)||p,p));
+    var color=p>=Number(last.o!=null?last.o:p)?'#3ad29b':'#f76b62';
+    body.setAttribute('y',Math.min(yo,yc).toFixed(2)); body.setAttribute('height',Math.max(1.5,Math.abs(yc-yo)).toFixed(2)); body.setAttribute('fill',color);
+    wick.setAttribute('y1',yh.toFixed(2)); wick.setAttribute('y2',yl.toFixed(2)); wick.setAttribute('stroke',color);
+    guide.setAttribute('y1',yc.toFixed(2)); guide.setAttribute('y2',yc.toFixed(2));
+    if(pill){pill.style.top=yc+'px'; pill.textContent=fmtPrice(p);}
+    if(q<1) st.liveRaf=requestAnimationFrame(frame); else {st.liveRaf=null; st.renderedPrice=nextPrice;}
+  }
+  st.liveRaf=requestAnimationFrame(frame);
 }
 
 // Touch/mouse "chart-scrub" for the hand-rolled SVG chart above (the
@@ -365,24 +391,70 @@ function attachChartSvgScrub(idx){
   };
 }
 
-function fetchChart(mint, tf, pairAddr, chain){
+// GeckoTerminal's free endpoint is shared by every card. Starting all visible
+// history requests in the same millisecond made the first one succeed and the
+// rest hit its rate limit. One paced queue gives every token a fair turn while
+// seed/live prices keep each card rendered immediately.
+var _chartFetchQueue = [], _chartFetchBusy = false, _lastChartFetchAt = 0;
+function drainChartFetchQueue(){
+  if(_chartFetchBusy || !_chartFetchQueue.length) return;
+  var wait=Math.max(0,2100-(Date.now()-_lastChartFetchAt));
+  _chartFetchBusy=true;
+  setTimeout(function(){
+    var job=_chartFetchQueue.shift();
+    if(!job || (job.state && job.state.destroyed)){
+      if(job) job.resolve(null);
+      _chartFetchBusy=false;
+      drainChartFetchQueue();
+      return;
+    }
+    _lastChartFetchAt=Date.now();
+    fetch(job.url).then(function(r){return r.json();}).then(job.resolve).catch(function(){job.resolve(null);}).then(function(){
+      _chartFetchBusy=false;
+      drainChartFetchQueue();
+    });
+  },wait);
+}
+function fetchChart(mint, tf, pairAddr, chain, state){
   var url = '/api/chart/'+encodeURIComponent(mint)+'?tf='+encodeURIComponent(tf);
   if(pairAddr) url += '&pair='+encodeURIComponent(pairAddr);
   if(chain) url += '&chain='+encodeURIComponent(chain);
-  return fetch(url).then(function(r){ return r.json(); }).catch(function(){ return null; });
+  return new Promise(function(resolve){
+    _chartFetchQueue.push({url:url,resolve:resolve,state:state});
+    drainChartFetchQueue();
+  });
+}
+
+function chartBucketSeconds(tf){
+  return ({'1m':60,'5m':300,'15m':900,'1h':3600,'4h':14400,'D':86400})[tf] || 300;
+}
+
+function startObservedCandle(st, price){
+  var seconds=chartBucketSeconds(st.tf), now=Math.floor(Date.now()/1000);
+  return {t:Math.floor(now/seconds)*seconds,o:price,h:price,l:price,c:price,v:0};
 }
 
 function chartTick(idx){
   var st = _chartTimers[idx];
   if(!st || st.destroyed) return;
-  fetchChart(st.mint, st.tf, st.pair, st.chain).then(function(r){
-    if(!st || st.destroyed) return;
-    if(r && r.candles){
+  var requestedTf=st.tf;
+  fetchChart(st.mint, requestedTf, st.pair, st.chain, st).then(function(r){
+    if(!st || st.destroyed || st.tf!==requestedTf) return;
+    if(r && r.candles && r.candles.length){
       // Kept so a live price can redraw this chart without fetching the
       // candles again -- the candles are the shape, the price is the movement.
       st.candles = r.candles;
       st.price   = r.current_price;
       renderChartSvg(idx, st.candles, st.price);
+    } else if(!st.candles || !st.candles.length){
+      // Some new/EVM pools expose a current price but no OHLC history.
+      // Start one honest observed candle; subsequent real ticks form it.
+      var px=Number((r&&r.current_price)||st.seedPrice||0);
+      if(px>0){
+        st.price=px;
+        st.candles=[startObservedCandle(st,px)];
+        renderChartSvg(idx,st.candles,px);
+      }
     }
   });
 }
@@ -424,10 +496,19 @@ function tickLivePrices(){
           // current price -- move it, and stretch its high/low to match, or
           // the wick would end up outside its own candle.
           var last = st.candles[st.candles.length - 1];
+          var seconds=chartBucketSeconds(st.tf), now=Math.floor(Date.now()/1000);
+          var bucket=Math.floor(now/seconds)*seconds;
+          if(bucket>last.t){
+            last=startObservedCandle(st,px);
+            st.candles.push(last);
+            if(st.candles.length>60) st.candles.shift();
+            renderChartSvg(i,st.candles,px);
+            return;
+          }
           last.c = px;
           if(px > last.h) last.h = px;
           if(px < last.l) last.l = px;
-          renderChartSvg(i, st.candles, px);
+          updateLiveChartPrice(i, px);
         });
       })
       .catch(function(){});   // decoration: a miss leaves the last drawing up
@@ -449,16 +530,28 @@ function startLivePrices(){
 // `chain` defaults to 'solana' -- the API's own default -- so a caller that
 // doesn't know/care about chain (there weren't any before this) still gets
 // the exact prior behavior.
-function mountChart(idx, mint, pairAddr, chain){
-  if(_chartTimers[idx]) return;
-  var st = {destroyed:false, mint:mint, pair:pairAddr, chain:(chain||'solana'), tf:'5m', timer:null};
+function primeChart(idx, mint, pairAddr, chain, seedPrice){
+  if(_chartTimers[idx]) return _chartTimers[idx];
+  var st = {destroyed:false, mint:mint, pair:pairAddr, chain:(chain||'solana'), seedPrice:Number(seedPrice)||0, tf:'5m', timer:null};
   _chartTimers[idx] = st;
+  // Paint one still-forming candle from the scanner's observed real price.
+  // Provider history replaces it as soon as it arrives.
+  if(st.seedPrice>0){
+    st.price=st.seedPrice;
+    st.candles=[startObservedCandle(st,st.seedPrice)];
+    renderChartSvg(idx,st.candles,st.seedPrice);
+  }
+  return st;
+}
+function mountChart(idx, mint, pairAddr, chain, seedPrice){
+  var st=primeChart(idx,mint,pairAddr,chain,seedPrice);
+  if(st.timer) return;
   chartTick(idx);
   // 15s, not 5s: the server caches candles for 30 seconds, so polling every
   // five asked the same question six times for one answer. Movement comes
   // from the live price tick above instead, which costs one request for the
   // whole page.
-  st.timer = setInterval(function(){ chartTick(idx); }, 15000);
+  st.timer = setInterval(function(){ chartTick(idx); }, 300000);
   attachChartSvgScrub(idx);
 }
 function unmountChart(idx){
@@ -466,6 +559,7 @@ function unmountChart(idx){
   if(!st) return;
   st.destroyed = true;
   if(st.timer) clearInterval(st.timer);
+  if(st.liveRaf) cancelAnimationFrame(st.liveRaf);
   if(st.scrubTeardown) st.scrubTeardown();
   delete _chartTimers[idx];
 }
@@ -473,6 +567,10 @@ function setChartTf(idx, tf){
   var st = _chartTimers[idx];
   if(!st) return;
   st.tf = tf;
+  if(st.price>0){
+    st.candles=[startObservedCandle(st,st.price)];
+    renderChartSvg(idx,st.candles,st.price);
+  }
   chartTick(idx);
 }
 
@@ -542,7 +640,7 @@ function fetchFriends(idx, mint){
 function activateCard(card){
   var idx = card.dataset.idx, mint = card.dataset.mint, pair = card.dataset.pair;
   var t = ST.tokens[Number(idx)];
-  mountChart(idx, mint, pair, t ? t.chain : 'solana');
+  mountChart(idx, mint, pair, t ? t.chain : 'solana', t ? t.price_usd : 0);
   var done = _lazyDone[idx] || (_lazyDone[idx] = {});
   if(!done.safety){ done.safety = true; fetchSafety(idx, mint); }
   if(!done.friends){ done.friends = true; fetchFriends(idx, mint); }
@@ -551,6 +649,13 @@ function activateCard(card){
 function observeCards(){
   var cards = document.querySelectorAll('.pt-card');
   if(_cardObserver) _cardObserver.disconnect();
+  // Give all cards a synchronous real-price chart. Only cards near the
+  // viewport continue into history/live polling, so this removes blank cards
+  // during a fast scroll without firing thirty chart API calls at once.
+  cards.forEach(function(card){
+    var idx=card.dataset.idx,t=ST.tokens[Number(idx)];
+    primeChart(idx,card.dataset.mint,card.dataset.pair,t?t.chain:'solana',t?t.price_usd:0);
+  });
   if(!('IntersectionObserver' in window)){
     cards.forEach(activateCard);
     return;
@@ -724,7 +829,7 @@ function cardHtml(t, idx){
     +     '<svg class="pt-chart-svg" id="pt-chart-svg-'+idx+'" preserveAspectRatio="none"></svg>'
     +     '<div class="pt-chart-live"><span class="pt-chart-live-dot"></span>LIVE</div>'
     +     '<div class="pt-chart-tfs" id="pt-chart-tfs-'+idx+'">'
-    +       tfPill('1m','1M') + tfPill('5m','5M', true) + tfPill('1h','1H') + tfPill('D','1D')
+    +       tfPill('1m','1M') + tfPill('5m','5M', true) + tfPill('1h','1H') + tfPill('4h','4H') + tfPill('D','1D')
     +     '</div>'
     +     '<div class="pt-chart-axis" id="pt-chart-axis-'+idx+'"></div>'
     +   '</div>'

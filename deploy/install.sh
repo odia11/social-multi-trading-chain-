@@ -1,17 +1,5 @@
 #!/usr/bin/env bash
 # ── OrcAgent — one-shot server setup (Ubuntu/Debian) ──
-#
-# Run this ONCE on a fresh server, as root, from the repo directory:
-#     sudo bash deploy/install.sh
-#
-# It is safe to run again: every step checks before it acts, so a re-run
-# repairs a half-finished setup instead of duplicating it.
-#
-# What it does NOT do, on purpose:
-#   - It never writes your secrets. It creates /etc/orcagent.env from the
-#     template with placeholder values and stops; you fill it in yourself.
-#   - It never touches an existing database. Your live data is copied over
-#     separately (see deploy/README.md) so a mistake here cannot erase it.
 set -euo pipefail
 
 APP_USER=orcagent
@@ -27,46 +15,19 @@ die(){ printf '\n\033[1;31m✗ %s\033[0m\n' "$*"; exit 1; }
 
 say "Installing system packages"
 apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip nginx sqlite3 curl ca-certificates rsync
+apt-get install -y -qq python3 python3-venv python3-pip nginx sqlite3 curl ca-certificates rsync openssl
 
 say "Creating the service user (no login shell — it only runs the app)"
 id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin "$APP_USER"
 
 say "Installing the application into $APP_DIR"
-mkdir -p "$APP_DIR"
-# --delete keeps the deployed copy exactly matching the repo, but never
-# reaches into $DATA_DIR, which lives outside $APP_DIR precisely so that
-# redeploying can't touch the database.
-# 'venv' is excluded for a reason that cost an outage: a virtualenv records
-# the ABSOLUTE path of its own python inside every script it installs. Copying
-# one built in ~/orcagent into /opt/orcagent leaves gunicorn starting with
-#     #!/home/<you>/orcagent/venv/bin/python3
-# and the service user cannot read another user's home, so it fails to exec
-# with "Permission denied" on a file that looks perfectly executable.
-#
-# .secret_key is excluded because --delete would remove it: it is gitignored,
-# so it does not exist in the clone, and rsync deletes anything in $APP_DIR
-# that the source does not have. That is exactly what happened -- every deploy
-# deleted the key that signs login sessions, the next start generated a fresh
-# one, and every user in every browser was logged out and had to reconnect
-# their wallet. The app now keeps the key in DATA_DIR instead, and this
-# exclusion protects any install that still has one here, including long
-# enough for that migration to run once.
 if command -v rsync >/dev/null 2>&1; then
   rsync -a --delete --exclude '.git' --exclude '__pycache__' --exclude '*.db' \
         --exclude 'venv' --exclude '.secret_key' "$REPO_DIR"/ "$APP_DIR"/
-
-# ── stamp which commit this is ──
-# .git is deliberately excluded above, so the deployed copy cannot ask git
-# what it is -- and _app_version() fell back to the time the process started.
-# That is a fine cache-buster and useless as an answer to "which code is
-# actually running", which is the first question in every support round.
-if [ -e "$REPO_DIR/.git" ]; then
-  git -C "$REPO_DIR" rev-parse --short HEAD > "$APP_DIR/VERSION" 2>/dev/null || true
-fi
+  if [ -e "$REPO_DIR/.git" ]; then
+    git -C "$REPO_DIR" rev-parse --short HEAD > "$APP_DIR/VERSION" 2>/dev/null || true
+  fi
 else
-  # Without rsync there is no --delete, so removed files linger. Worth knowing
-  # rather than silently getting a different deploy.
   echo "  rsync not installed — copying without --delete (stale files will remain)"
   find "$REPO_DIR" -mindepth 1 -maxdepth 1 \
        ! -name .git ! -name venv ! -name '__pycache__' \
@@ -74,18 +35,15 @@ else
 fi
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
-say "Creating the data directory ($DATA_DIR)"
-# The app writes its database, logs, backups and heartbeat here. It picks
-# /data automatically when it exists (see _DATA_DIR in dashboard.py), which
-# is what keeps your data outside the deployed code.
+say "Creating and locking down the data directory ($DATA_DIR)"
 mkdir -p "$DATA_DIR/backups"
 chown -R "$APP_USER:$APP_USER" "$DATA_DIR"
+find "$DATA_DIR" -xdev -type d -exec chmod 700 {} +
+find "$DATA_DIR" -xdev -type f -exec chmod 600 {} +
+chmod 700 "$DATA_DIR" "$DATA_DIR/backups"
+echo "  persistent state is owner-only"
 
 say "Building the Python environment"
-# A venv whose scripts point somewhere else is worse than no venv: it looks
-# installed and fails at exec time with a permissions error that says nothing
-# about the real cause. `python3 -m venv` on an existing directory does NOT
-# rewrite those paths, so the only reliable repair is to rebuild it.
 if [ -x "$APP_DIR/venv/bin/gunicorn" ] \
    && ! head -1 "$APP_DIR/venv/bin/gunicorn" | grep -q "^#\!$APP_DIR/"; then
   echo "  existing venv points outside $APP_DIR ($(head -1 "$APP_DIR/venv/bin/gunicorn"))"
@@ -97,15 +55,6 @@ python3 -m venv "$APP_DIR/venv"
 "$APP_DIR/venv/bin/pip" install --quiet -r "$APP_DIR/requirements.txt"
 chown -R "$APP_USER:$APP_USER" "$APP_DIR/venv"
 
-# Checked, not assumed. This is the exact failure that took the site down.
-# The output is CAPTURED rather than discarded: a check that fails without
-# saying why just moves the guesswork one step later, which is the whole
-# problem it exists to solve.
-# `cd "$APP_DIR"` first, in a subshell. sudo carries the CURRENT directory
-# into the target user's session, and this script is normally run from the
-# git clone in someone's home -- which the service user cannot enter. sudo
-# then fails with "can't chdir" before the command runs at all, and the check
-# reports a broken venv that is in fact perfectly fine.
 if ! VENV_ERR="$(cd "$APP_DIR" && sudo -u "$APP_USER" "$APP_DIR/venv/bin/gunicorn" --version 2>&1)"; then
   printf '\n\033[1;31m✗ The service user cannot run %s\033[0m\n' "$APP_DIR/venv/bin/gunicorn"
   echo "  it said: $VENV_ERR"
@@ -118,60 +67,125 @@ echo "  $("$APP_DIR/venv/bin/gunicorn" --version) — runnable by $APP_USER"
 
 say "Preparing the environment file ($ENV_FILE)"
 if [ -f "$ENV_FILE" ]; then
-  echo "  already exists — left untouched so your secrets are not overwritten"
+  echo "  already exists — secrets left untouched"
 else
   cp "$REPO_DIR/deploy/env.example" "$ENV_FILE"
   echo "  created from the template — FILL IT IN before starting the service"
 fi
-# Readable only by root and the service user: this file holds the encryption
-# key that every stored wallet key depends on.
+
+# Product invariant: OrcAgent never advances gas for users. Preserve every
+# secret/value in the production env file, but normalize this one policy flag
+# on every install so an old Railway-era value cannot silently re-enable
+# sponsor spending. verify_live.py sources this same file after deployment.
+sed -i '/^[[:space:]]*ORCAGENT_FRONTS_GAS=/d' "$ENV_FILE"
+printf '\nORCAGENT_FRONTS_GAS=0\n' >> "$ENV_FILE"
+echo "  gas policy enforced: users fund their own native gas"
+
 chown root:"$APP_USER" "$ENV_FILE"
 chmod 640 "$ENV_FILE"
 
 say "Installing the systemd services"
-cp "$REPO_DIR/deploy/orcagent.service"         /etc/systemd/system/orcagent.service
-cp "$REPO_DIR/deploy/orcagent-monitor.service" /etc/systemd/system/orcagent-monitor.service
+cp "$REPO_DIR/deploy/orcagent.service"           /etc/systemd/system/orcagent.service
+cp "$REPO_DIR/deploy/orcagent-monitor.service"   /etc/systemd/system/orcagent-monitor.service
+cp "$REPO_DIR/deploy/orcagent-backup.service"    /etc/systemd/system/orcagent-backup.service
+cp "$REPO_DIR/deploy/orcagent-backup.timer"      /etc/systemd/system/orcagent-backup.timer
+chmod 755 "$APP_DIR/deploy/backup.sh" "$APP_DIR/deploy/security-smoke.sh"
+
+if ! systemd-analyze verify \
+    /etc/systemd/system/orcagent.service \
+    /etc/systemd/system/orcagent-monitor.service \
+    /etc/systemd/system/orcagent-backup.service \
+    /etc/systemd/system/orcagent-backup.timer >/tmp/orcagent-systemd-verify.log 2>&1; then
+  cat /tmp/orcagent-systemd-verify.log
+  die "systemd unit verification failed — production was not restarted"
+fi
+echo "  systemd unit verification passed"
+
 systemctl daemon-reload
 systemctl enable orcagent orcagent-monitor >/dev/null
+systemctl enable --now orcagent-backup.timer >/dev/null
 
-say "Installing the nginx site"
+say "Verifying backup protection"
+systemctl is-enabled --quiet orcagent-backup.timer || die "orcagent-backup.timer is not enabled"
+systemctl is-active --quiet orcagent-backup.timer || die "orcagent-backup.timer is not active"
+if ! systemctl start orcagent-backup.service; then
+  journalctl -u orcagent-backup.service -n 40 --no-pager || true
+  die "encrypted backup service failed its execution test"
+fi
+if [ -f "$DATA_DIR/orcagent.db" ]; then
+  LATEST_BACKUP="$(ls -1t "$DATA_DIR"/backups/daily/orcagent-*.db.gz.enc 2>/dev/null | head -1 || true)"
+  [ -n "$LATEST_BACKUP" ] || die "backup service ran but produced no encrypted backup"
+  echo "  verified encrypted backup: $LATEST_BACKUP"
+fi
+NEXT_BACKUP="$(systemctl list-timers orcagent-backup.timer --no-legend 2>/dev/null | awk '{print $1" "$2" "$3" "$4}' || true)"
+echo "  daily backup timer active${NEXT_BACKUP:+ — next: $NEXT_BACKUP}"
+
+say "Installing nginx security layer"
+mkdir -p /etc/nginx/snippets /etc/nginx/conf.d
+cp "$REPO_DIR/deploy/nginx-security-zones.conf" /etc/nginx/conf.d/orcagent-security-zones.conf
+cp "$REPO_DIR/deploy/nginx-server-security.conf" /etc/nginx/snippets/orcagent-server-security.conf
+chmod 644 /etc/nginx/conf.d/orcagent-security-zones.conf /etc/nginx/snippets/orcagent-server-security.conf
+
 NGINX_SITE=/etc/nginx/sites-available/orcagent
-# certbot rewrites this file IN PLACE to add the certificate and the HTTPS
-# redirect. Copying the template over it would throw all of that away and
-# reload nginx serving plain HTTP -- on a site whose session cookie is Secure,
-# that means nobody can log in. So once a certificate is in there, the file
-# belongs to certbot and this script leaves it alone.
 if [ -f "$NGINX_SITE" ] && grep -q 'ssl_certificate' "$NGINX_SITE"; then
-  echo "  already has a certificate — left untouched so certbot's config survives"
-  echo "  (if you need the template back: certbot delete, then re-run this)"
+  echo "  existing Certbot TLS site preserved"
 else
   cp "$REPO_DIR/deploy/nginx-orcagent.conf" "$NGINX_SITE"
-  echo "  installed (plain HTTP — run certbot afterwards)"
+  echo "  installed plain HTTP template — run certbot on a fresh server"
 fi
+
+if ! grep -qF 'include /etc/nginx/snippets/orcagent-server-security.conf;' "$NGINX_SITE"; then
+  sed -i '/server_name[[:space:]]\+orcagent\.fun[[:space:]]\+www\.orcagent\.fun;/a\    include /etc/nginx/snippets/orcagent-server-security.conf;' "$NGINX_SITE"
+fi
+grep -qF 'include /etc/nginx/snippets/orcagent-server-security.conf;' "$NGINX_SITE" \
+  || die "could not attach nginx security snippet to the OrcAgent server block"
+
+# Certbot-managed production files are preserved above, so explicitly repair
+# the one proxy directive that affects security identity. proxy_add_* trusts
+# any X-Forwarded-For value supplied by the client and would let attackers
+# evade per-IP abuse ceilings/audit attribution. OrcAgent is directly behind
+# this nginx instance, so the socket peer is the authoritative client IP.
+sed -Ei 's#proxy_set_header[[:space:]]+X-Forwarded-For[[:space:]]+\$proxy_add_x_forwarded_for;#proxy_set_header X-Forwarded-For   \$remote_addr;#g' "$NGINX_SITE"
+if grep -q '\$proxy_add_x_forwarded_for' "$NGINX_SITE"; then
+  die "unsafe X-Forwarded-For append is still present in nginx configuration"
+fi
+
 ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/orcagent
 rm -f /etc/nginx/sites-enabled/default
-nginx -t && systemctl reload nginx
+nginx -t || die "nginx security configuration failed validation"
+systemctl reload nginx
+
+NGINX_DUMP="$(nginx -T 2>/dev/null)"
+printf '%s' "$NGINX_DUMP" | grep -q 'limit_conn_zone .*orca_conn' \
+  || die "nginx connection-abuse zone is not loaded"
+printf '%s' "$NGINX_DUMP" | grep -q 'limit_conn orca_conn 80' \
+  || die "nginx OrcAgent connection limit is not active"
+printf '%s' "$NGINX_DUMP" | grep -q 'server_tokens off' \
+  || die "nginx server token suppression is not active"
+printf '%s' "$NGINX_DUMP" | grep -q 'proxy_set_header X-Forwarded-For[[:space:]]*\$remote_addr' \
+  || die "nginx is not enforcing a trusted forwarded client IP"
+echo "  nginx edge hardening active"
 
 cat <<EOF
 
 ────────────────────────────────────────────────────────────
-Setup complete. Three things left, in this order:
+Setup complete.
 
-  1. Fill in your secrets:
-         nano $ENV_FILE
+The application process is sandboxed, startup validates security headers and
+loopback binding, persistent data is owner-only, nginx rejects TRACE/CONNECT,
+strips spoofable forwarded IPs and limits abusive connection fan-out, and
+encrypted restore-verified database backups are scheduled.
 
-     ENCRYPTION_KEY must be EXACTLY the value from Railway.
-     A different key makes every stored wallet key unreadable.
+Gas policy: OrcAgent fronts nothing; every user funds network gas from their
+own trading wallet.
 
-  2. Copy your live database across (see deploy/README.md),
-     otherwise the app starts empty — no users, no trades.
+Useful checks:
+    systemctl status orcagent
+    systemctl status orcagent-backup.timer
+    sudo -u orcagent /opt/orcagent/deploy/security-smoke.sh
 
-  3. Start it:
-         systemctl start orcagent orcagent-monitor
-         systemctl status orcagent
-         journalctl -u orcagent -f
-
-Then point your domain at this server and run:
-         certbot --nginx -d orcagent.fun -d www.orcagent.fun
+On a fresh server, fill $ENV_FILE, copy the live database, start the services,
+then obtain TLS with:
+    certbot --nginx -d orcagent.fun -d www.orcagent.fun
 ────────────────────────────────────────────────────────────
 EOF

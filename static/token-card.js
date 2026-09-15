@@ -11,14 +11,14 @@
 
 // The chains whose trades are denominated in USDC rather than SOL. BSC is
 // handled separately only because it kept its own route.
-var _TC_EVM_CHAINS = ['base', 'arbitrum', 'polygon'];
+var _TC_EVM_CHAINS = ['base', 'arbitrum', 'polygon', 'robinhood'];
 var _TC_ALL_EVM    = ['bsc'].concat(_TC_EVM_CHAINS);
 function _tcIsEvm(chain){ return _TC_ALL_EVM.indexOf(chain) !== -1; }
 // One funding currency on every chain this card can trade. Solana used to be
 // the exception, spending SOL; it is funded with USDC now too, and SOL there
-// is only the network fee. Still a function because the caller reads like a
-// question about the chain, and because Robinhood (funded in USDG) is a chain
-// this card does not reach yet.
+// is only the network fee. Robinhood settles through USDG internally because
+// that chain has no native USDC, but the user still enters and spends USDC;
+// the bridge/conversion remains server-side plumbing.
 function _tcUnit(chain){ return 'USDC'; }
 
 async function _doTrade(sym, pairAddr, side, amount, tokenAddr, chain){

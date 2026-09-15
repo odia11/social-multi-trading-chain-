@@ -1,0 +1,22 @@
+/* Mobile feed share menu: keep the menu inside the viewport and above feed cards. */
+@media(max-width:767px){
+  .fc-share-dd.oa-share-floating{
+    position:fixed!important;
+    top:0;
+    left:0;
+    right:auto!important;
+    bottom:auto!important;
+    z-index:1900!important;
+    min-width:170px;
+    max-width:calc(100vw - 24px);
+    margin:0!important;
+    transform:none!important;
+    box-shadow:0 14px 34px rgba(0,0,0,.72)!important;
+  }
+  .fc-share-dd.oa-share-floating .fc-share-item{
+    min-height:44px;
+    display:flex;
+    align-items:center;
+    padding:10px 14px;
+  }
+}

@@ -233,14 +233,14 @@ function _showWalletOptions(){
 
    So a proven connection also gets a long-lived token, kept here, that is
    exchanged for a fresh session when the cookie is gone. The server stores
-   only its hash and rotates it on every use; Disconnect revokes it
+   only its hash; the credential stays stable until Disconnect revokes it
    everywhere. */
 function _deviceToken(){
   try{ return localStorage.getItem('orca_device_token') || ''; }catch(e){ return ''; }
 }
 function _storeDeviceToken(t){
-  // Private browsing throws on write. No remembering there, but nothing
-  // breaks either.
+  // Browser storage can reject writes; the HttpOnly cookie remains a
+  // separate recovery path.
   try{ if(t) localStorage.setItem('orca_device_token', t); }catch(e){}
 }
 function _clearDeviceToken(){
@@ -265,6 +265,35 @@ function _storePairToken(t){
 function _clearPairToken(){
   try{ localStorage.removeItem('orca_pair'); }catch(e){}
 }
+var _pairedReturnRoute = '';
+function _safeWalletReturnRoute(raw){
+  try{
+    if(typeof raw !== 'string' || !raw || raw.indexOf('\\') !== -1) return '/';
+    var u = new URL(raw, window.location.origin);
+    if(u.origin !== window.location.origin || u.pathname === '/phantom-callback') return '/';
+    return u.pathname + u.search + u.hash;
+  }catch(e){ return '/'; }
+}
+function _currentWalletReturnRoute(){
+  return _safeWalletReturnRoute(window.location.pathname + window.location.search + window.location.hash);
+}
+function _storePairReturnRoute(route){
+  try{ localStorage.setItem('orca_pair_return', _safeWalletReturnRoute(route)); }catch(e){}
+}
+function _takePairReturnRoute(){
+  try{
+    var route = _safeWalletReturnRoute(localStorage.getItem('orca_pair_return') || '/');
+    localStorage.removeItem('orca_pair_return');
+    return route;
+  }catch(e){ return '/'; }
+}
+function _finishPairedReturn(){
+  var route = _pairedReturnRoute;
+  _pairedReturnRoute = '';
+  if(!route) return;
+  var current = _currentWalletReturnRoute();
+  if(route !== current) window.location.replace(route);
+}
 // Ask whether the sign-in that this app started has finished. Returns the
 // wallet, or '' for "not yet" -- which is also what it returns for expired
 // and unknown, so nothing here has to tell those apart.
@@ -279,6 +308,7 @@ async function _claimPairing(){
     }).then(function(x){ return x.json(); }).catch(function(){ return null; });
     if(r && r.ok && r.wallet){
       _clearPairToken();
+      _pairedReturnRoute = _takePairReturnRoute();
       // The session now lives in THIS container. The remembered login is what
       // keeps it there after iOS next clears storage -- without it the app
       // would be back to square one in a week.
@@ -294,16 +324,6 @@ async function _claimPairing(){
 // exactly where it was, so initApp never runs again and the answer would sit
 // on the server unread until the next cold start. Ask whenever the app
 // becomes visible again while a sign-in it started is still outstanding.
-document.addEventListener('visibilitychange', function(){
-  if(document.visibilityState !== 'visible') return;
-  if(!_pairToken() || phantomKey) return;
-  _claimPairing().then(function(w){
-    // Reload rather than patching the screen in place: the app was showing
-    // the connect card, and everything past this point assumes a page that
-    // started out signed in.
-    if(w) window.location.reload();
-  });
-});
 
 // Returns the wallet if a session was restored, '' otherwise.
 //
@@ -326,24 +346,25 @@ document.addEventListener('visibilitychange', function(){
 // worked -- but by then the token was already gone.
 async function _resumeFromDeviceToken(){
   var t = _deviceToken();
-  if(!t) return '';
   var res;
-  try{
-    res = await fetch('/api/session/resume', {
-      method: 'POST', credentials: 'include',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({token: t})
-    });
-  }catch(e){
-    // Never reached the server. The token is almost certainly still good --
-    // keep it and let the next page load try again.
-    return '';
+  for(var attempt=0; attempt<3; attempt++){
+    if(attempt) await new Promise(function(resolve){ setTimeout(resolve, attempt*1000); });
+    try{
+      res = await fetch('/api/session/resume', {
+        method: 'POST', credentials: 'include',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({token: t})
+      });
+      if(res.status !== 429 && res.status < 500) break;
+    }catch(e){ res = null; }
   }
+  if(!res) return '';
   var r = null;
   try{ r = await res.json(); }catch(e){}
   if(res.ok && r && r.ok && r.wallet){
-    // The presented token is spent. Keeping it would sign this browser out
-    // on its next attempt.
+    // Store the credential returned by the server. It is normally the same
+    // stable token; keeping this assignment makes the client compatible with
+    // any future server-side credential upgrade.
     _storeDeviceToken(r.token);
     if(r.csrf_token) _csrfToken = r.csrf_token;
     return r.wallet;
@@ -352,13 +373,9 @@ async function _resumeFromDeviceToken(){
   // already spent -- then dropping it stops every later load retrying
   // something that can never work again.
   //
-  // Unless another tab got there first. The server rotates on every redeem,
-  // so two tabs opening together both present the same token: one is served
-  // and stores the replacement, the other is told 401 for a token that was
-  // valid a moment ago. Clearing then would delete the good replacement the
-  // first tab just stored. If what is in storage is no longer what we sent,
-  // someone else has already moved this on -- leave it alone.
-  if(res.status === 401 && _deviceToken() === t) _clearDeviceToken();
+  // If what is in storage is no longer what we sent, another tab or login
+  // flow has already replaced it -- leave that newer credential alone.
+  if(t && res.status === 401 && _deviceToken() === t) _clearDeviceToken();
   return '';
 }
 
@@ -698,7 +715,9 @@ async function _connectWalletSignedInner(provider, address){
 }
 
 function _phantomMobileV1Connect(){
-  localStorage.removeItem('orca_manual_disconnect');
+  try{ localStorage.removeItem('orca_manual_disconnect'); }catch(e){}
+  var _returnRoute = _currentWalletReturnRoute();
+  if(isStandalonePWA) _storePairReturnRoute(_returnRoute);
   var msgEl=document.getElementById('wallet-install-msg');
   var noteEl=document.getElementById('ob-phantom-note');
   function _setNote(txt,col){
@@ -719,6 +738,10 @@ function _phantomMobileV1Connect(){
         .catch(function(){ return ''; })
     : Promise.resolve('');
   _pairPromise.then(function(_pair){
+  if(isStandalonePWA && !_pair){
+    _setNote('Could not prepare app sign-in — please try again.','var(--red)');
+    return;
+  }
   // Server generates the NaCl keypair — no browser storage needed
   fetch('/api/phantom/init',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({pair:_pair})})
   .then(function(r){return r.json();})
@@ -727,7 +750,13 @@ function _phantomMobileV1Connect(){
       _setNote('Connection init failed — please try again.','var(--red)');
       return;
     }
-    var _cbUrl='https://orcagent.fun/phantom-callback?token='+encodeURIComponent(d.token)+'&_cb='+Date.now();
+    var _cbQuery=new URLSearchParams({
+      token:d.token,
+      source:isStandalonePWA?'pwa':'browser',
+      return_to:_returnRoute,
+      _cb:String(Date.now())
+    });
+    var _cbUrl='https://orcagent.fun/phantom-callback?'+_cbQuery.toString();
     console.log('[phantom] server-side init ok, token=',d.token.slice(0,8)+'…');
     var params=new URLSearchParams({
       app_url:'https://orcagent.fun',
@@ -791,7 +820,8 @@ function _applySolflareDetection(solflareBtn, solflareNote){
 
 /* On load: switch connect screen between Face ID / password / Phantom modes */
 document.addEventListener('DOMContentLoaded',function(){
-  var hasFaceId=!!localStorage.getItem('orca_credential_id');
+  var hasFaceId=false;
+  try{ hasFaceId=!!localStorage.getItem('orca_credential_id'); }catch(e){}
   var bioBtn    =document.getElementById('ob-bio-btn');
   var altLink   =document.getElementById('ob-alt-link');
   var pwdForm   =document.getElementById('ob-pwd-form');
@@ -881,7 +911,7 @@ async function _initCsrf(){
 }
 
 // Fetch CSRF token immediately on page load (before any user interaction)
-_initCsrf();
+var _csrfReady = _initCsrf();
 
 // ── NO INACTIVITY TIMEOUT ──
 // There used to be one here: a warning at 8 minutes and an automatic logout
@@ -915,11 +945,13 @@ function doLogout(){
   _resetBadges();
   _resetMyProfile();
   _copySource=null; _updateCopyPill();
-  document.getElementById('app').style.display='none';
-  document.getElementById('onboard').classList.remove('hide');
+  // Disconnect returns to the public feed. The removed legacy onboarding
+  // must never cover the app merely because the visitor is signed out.
+  guestMode=true;
+  document.getElementById('onboard').classList.add('hide');
+  launchApp().catch(function(e){ console.warn('[guest] launch interrupted',e); });
   document.getElementById('s-sol').innerHTML='<span class="stat-placeholder">——</span>';
   _solCounterDone=false;
-  currentStep=0; showStep(0);
 }
 
 // ── ONBOARDING ──
@@ -931,7 +963,7 @@ function nextStep(n){currentStep=n+1;showStep(currentStep);}
 function gotoSetupGuide(){currentStep=1;showStep(1);}
 
 async function connectWalletOnboard(type){
-  localStorage.removeItem('orca_manual_disconnect');
+  try{ localStorage.removeItem('orca_manual_disconnect'); }catch(e){}
   const isPhantom=type==='phantom';
   const provider=isPhantom?window.solana:window.solflare;
   const name=isPhantom?'Phantom':'Solflare';
@@ -1085,11 +1117,14 @@ function _minimizeGuestBanner(){
 }
 function _guestConnect(){
   _minimizeGuestBanner();
-  var app=document.getElementById('app');
-  if(app) app.style.display='none';
-  var ob=document.getElementById('onboard');
-  if(ob) ob.classList.remove('hide');
-  currentStep=0; showStep(0);
+  // Connect is now an explicit action and opens the approved wallet sheet.
+  // Never resurrect the old full-screen onboarding.
+  if(window.OrcAgentWalletOnboarding &&
+     typeof window.OrcAgentWalletOnboarding.open==='function'){
+    window.OrcAgentWalletOnboarding.open();
+    return;
+  }
+  connectWalletOnboard('phantom');
 }
 function checkGuest(){
   if(!guestMode) return false;
@@ -1197,15 +1232,14 @@ async function launchApp(){
   // ── 1. Verify / silently restore server-side session ────────────
   if(phantomKey){
     try{
-      const sr = await fetch('/api/state').then(r=>r.json()).catch(()=>null);
-      if(!sr || !sr.wallet){
-        // Session expired — re-register before showing the dashboard
-        const _wp=walletType==='Phantom'?window.solana:window.solflare;
-        const wr = await _connectWalletSigned(_wp, phantomKey);
-        if(!wr?.ok && (wr?.msg==='Signature rejected'||(wr?.msg||'').startsWith('Nonce expired'))){
-          showLfToast('🔑','Sign the request in your wallet to log in — please try again','warn');
-        } else if(wr){ settingsHasKey=wr.has_trading_key||false; _isAdmin=wr.is_admin||false; _updateKeyStatus(); if(wr.csrf_token) _csrfToken=wr.csrf_token; }
-      } else {
+      const stateResponse = await fetch('/api/state');
+      const sr = await stateResponse.json().catch(()=>null);
+      if(stateResponse.status === 401){
+        // Restore the proven session first. Never open a signing prompt just
+        // because a deploy, network outage or rate limit interrupted a read.
+        const restored = await _resumeFromDeviceToken();
+        if(restored) _applySessionWallet(restored);
+      } else if(stateResponse.ok && sr && sr.wallet){
         // Pick up any server-side flag changes (key uploaded from another tab, etc.)
         if(typeof sr.is_admin==='boolean') _isAdmin=sr.is_admin;
         if(typeof sr.has_trading_key==='boolean'){ settingsHasKey=sr.has_trading_key; _updateKeyStatus(); }
@@ -2044,7 +2078,12 @@ let _openMints=new Set(); // mints with open positions — drives SELL button vi
 
 // ── PUMP SCANNER ──
 async function fetchPumpScanner(){
-  if(!phantomKey){ document.getElementById('ps-panel').style.display='none'; return; }
+  // The redesigned home no longer renders the legacy pump-scanner panel.
+  // Guest mode still calls this loader, so treat the panel as an optional
+  // enhancement instead of throwing and interrupting the rest of launchApp.
+  const panel=document.getElementById('ps-panel');
+  if(!panel) return;
+  if(!phantomKey){ panel.style.display='none'; return; }
   const r=await fetch('/api/pump-scanner').then(r=>r.json()).catch(()=>null);
   if(r?.ok) renderPumpScanner(r.tokens||[]);
 }
@@ -3345,6 +3384,7 @@ function _inDappBrowser(){ return !!(window.solana||window.solflare); }
 })();
 
 // ── STARTUP: restore session ──
+var _sessionBootstrapComplete = false;
 (async function initApp(){
   // Before concluding that nobody is signed in, ASK.
   //
@@ -3410,8 +3450,25 @@ function _inDappBrowser(){ return !!(window.solana||window.solflare); }
   }
   // Checked AFTER that, so the server stays the authority: a real disconnect
   // clears the session too, and then the fetch above returns nothing anyway.
-  if(localStorage.getItem('orca_manual_disconnect') && !phantomKey){ return; }
-  if(phantomKey){ localStorage.removeItem('orca_manual_disconnect'); }
+  try{
+    if(localStorage.getItem('orca_manual_disconnect') && !phantomKey){
+      guestMode=true;
+      await launchApp();
+      return;
+    }
+    if(phantomKey){ localStorage.removeItem('orca_manual_disconnect'); }
+  }catch(e){ /* Cookie-backed sessions work when browser storage is blocked. */ }
+  // Home can start with an injected session, bypassing /api/session above.
+  // Backfill its recovery credential too (the server rejects read-only users).
+  if(phantomKey && !_deviceToken()){
+    await _csrfReady;
+    try{
+      var remembered = await fetch('/api/session/remember', {
+        method:'POST', credentials:'include', headers:{'X-CSRF-Token':_csrfToken}
+      }).then(function(r){ return r.json(); });
+      if(remembered && remembered.ok) _storeDeviceToken(remembered.token);
+    }catch(e){}
+  }
   // Check extension wallet before using session wallet
   const phantomReady  = window.solana?.isPhantom   && window.solana?.isConnected && window.solana?.publicKey;
   const solflareReady = window.solflare?.isSolflare && window.solflare?.isConnected && window.solflare?.publicKey;
@@ -3464,37 +3521,46 @@ function _inDappBrowser(){ return !!(window.solana||window.solflare); }
   }
   // If Flask session pre-populated phantomKey, go straight to launchApp — no extension
   // re-detection needed, and avoids a redundant /api/wallet/set round-trip.
-  if(phantomKey){ await launchApp(); return; }
+  if(phantomKey){ await launchApp(); _finishPairedReturn(); return; }
 
-  // Extension already connected with no session wallet — register it
-  if(_p && _n){
-    const _pk=_p.publicKey.toString();
-    phantomKey=_pk; walletType=_n;
-    const r=await _connectWalletSigned(_p, _pk);
-    if(!r?.ok && (r?.msg==='Signature rejected'||(r?.msg||'').startsWith('Nonce expired'))){
-      const _m=document.getElementById('wallet-install-msg');
-      if(_m){ _m.textContent='Sign the request in your wallet to log in — please try again'; _m.style.display='block'; }
-      return;
+  // A connected extension is not proof of an OrcAgent session. In particular,
+  // an interrupted recovery must not automatically trigger another signature.
+  // The explicit Connect button remains available when fresh proof is needed.
+  // Signed-out visitors always enter the public feed; no startup gate.
+  guestMode=true;
+  await launchApp();
+})().catch(function(e){
+  console.warn('[auth] startup interrupted; recovery will retry on return', e);
+}).finally(function(){ _sessionBootstrapComplete = true; });
+
+var _sessionReturnPromise = null;
+function _recoverSessionOnReturn(){
+  if(!_sessionBootstrapComplete || document.visibilityState === 'hidden') return;
+  if(_sessionReturnPromise) return _sessionReturnPromise;
+  try{ if(localStorage.getItem('orca_manual_disconnect')) return; }catch(e){}
+  _sessionReturnPromise = (async function(){
+    var me = await fetch('/api/session', {credentials:'include', cache:'no-store'})
+      .then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; });
+    if(!me) return; // A network/server error is not a logout.
+    var wallet = me.authenticated && me.wallet;
+    if(wallet && me.csrf_token) _csrfToken = me.csrf_token;
+    if(!wallet){
+      wallet = await _claimPairing();
+      if(!wallet) wallet = await _resumeFromDeviceToken();
     }
-    if(r?.csrf_token) _csrfToken=r.csrf_token;
-    settingsHasKey=r?.has_trading_key||false; _isAdmin=r?.is_admin||false; _updateKeyStatus();
-    if(r?.success){
-      if(r.status==='new_user'){ gotoSetupGuide(); return; }
-      await launchApp();
-      return;
-    }
-    await launchApp();
-    return;
-  }
-
-  // No wallet detected — leave onboarding visible so user can connect
-  // (skipToApp() is still available for browse-without-connecting)
-})();
-
-window.addEventListener('pageshow', function(event) {
-  if (event.persisted) {
-    launchApp();
-  }
+    if(!wallet) return;
+    _applySessionWallet(wallet);
+    var onboard = document.getElementById('onboard');
+    if(onboard && !onboard.classList.contains('hide')) await launchApp();
+    _finishPairedReturn();
+  })().catch(function(e){ console.warn('[auth] recovery interrupted', e); })
+    .finally(function(){ _sessionReturnPromise = null; });
+  return _sessionReturnPromise;
+}
+document.addEventListener('visibilitychange', _recoverSessionOnReturn);
+window.addEventListener('online', _recoverSessionOnReturn);
+window.addEventListener('pageshow', function(event){
+  if(event.persisted) _recoverSessionOnReturn();
 });
 
 // ── SETTINGS MODAL ──
@@ -6359,37 +6425,27 @@ function _dmBuildMessageEl(m, myId){
     div.className='dm-msg '+(mine?'mine':'theirs')+' trade-share';
     let td={};
     try{ td=JSON.parse(m.message); }catch(_){}
-    const sym=_esc(td.token_symbol||'???');
     const addr=td.token_address||'';
-    const entry=td.entry_price!=null?('$'+Number(td.entry_price).toFixed(8)):'—';
-    const amtSol=td.amount_sol!=null?(Number(td.amount_sol).toFixed(4)+' SOL'):'—';
-    const pnl=td.pnl_pct!=null?td.pnl_pct:null;
     const closed=!!(td.exit_reason);
-    const pnlHtml=pnl!=null
-      ?`<span class="dm-trade-card-val ${pnl>=0?'pos':'neg'}">${pnl>=0?'+':''}${pnl.toFixed(2)}%</span>`
-      :`<span class="dm-trade-card-val">—</span>`;
     const btnId='cp-btn-'+m.id+'_'+Date.now();
     const errId='cp-err-'+m.id+'_'+Date.now();
+    // Use the exact same card renderer as the Home feed/composer. Messages
+    // created before the richer payload existed still render with safe
+    // fallbacks; new ones also show the share-time price and PnL snapshot.
+    const sharedCard=_renderTradeTerminalCard({
+      symbol:td.token_symbol||td.symbol||'???',
+      side:td.side||'BUY',
+      entry_price:Number(td.entry_price||0),
+      exit_price:Number(td.exit_price||td.current_price||0),
+      pnl_pct:td.pnl_pct==null?0:Number(td.pnl_pct),
+      pnl_sol:td.pnl_sol==null?0:Number(td.pnl_sol),
+      pnl_currency:td.pnl_currency||'SOL',
+      amount:Number(td.amount||0),
+      token_address:addr
+    });
     div.innerHTML=`
-      <div class="dm-trade-card${closed?' closed':''}">
-        <div class="dm-trade-card-header">
-          <span class="dm-trade-card-symbol">🟢 ${sym}</span>
-          ${closed?'<span class="dm-trade-card-closed-badge">Trade Closed</span>':''}
-        </div>
-        <div class="dm-trade-card-rows">
-          <div class="dm-trade-card-row">
-            <span class="dm-trade-card-lbl">Entry</span>
-            <span class="dm-trade-card-val">${entry}</span>
-          </div>
-          <div class="dm-trade-card-row">
-            <span class="dm-trade-card-lbl">PnL</span>
-            ${pnlHtml}
-          </div>
-          <div class="dm-trade-card-row">
-            <span class="dm-trade-card-lbl">Size</span>
-            <span class="dm-trade-card-val">${amtSol}</span>
-          </div>
-        </div>
+      <div class="dm-shared-token-card${closed?' closed':''}">
+        ${sharedCard}
         <button class="dm-copy-btn" id="${btnId}" ${closed||mine?'disabled':''} onclick="_dmCopyTrade(this,'${btnId}','${errId}',${_esc(JSON.stringify(addr))},${_esc(JSON.stringify(td.entry_price||0))},${_esc(JSON.stringify(td.amount_sol||0))})">
           ${closed?'Trade Closed':mine?'Your Trade':'⚡ Copy Trade'}
         </button>
@@ -6702,6 +6758,7 @@ function _dmRenderMessages(msgs){
   const myId=_dmMyId;
   container.innerHTML='';
   msgs.forEach(m=>container.appendChild(_dmBuildMessageEl(m, myId)));
+  container.querySelectorAll('.dm-shared-token-card [data-mint]').forEach(_hydrateTradeBanner);
   container.scrollTop=container.scrollHeight;
 }
 
@@ -6709,7 +6766,9 @@ function _dmAppendMessage(m){
   const container=document.getElementById('dm-messages-area');
   const empty=container.querySelector('.dm-chat-empty');
   if(empty) container.removeChild(empty);
-  container.appendChild(_dmBuildMessageEl(m, _dmMyId));
+  const messageEl=_dmBuildMessageEl(m, _dmMyId);
+  container.appendChild(messageEl);
+  messageEl.querySelectorAll('.dm-shared-token-card [data-mint]').forEach(_hydrateTradeBanner);
   container.scrollTop=container.scrollHeight;
 }
 
@@ -7299,57 +7358,119 @@ function selectToken(symbol, mint){
 
 var _mentionTarget = null;
 var _mentionAtPos = -1;
+var _mentionRequest = 0;
+var _mentionCaret = -1;
+var _mentionFrame = 0;
 function _mentionHide(){
   var box = document.getElementById('mention-suggest');
   if(box) box.style.display='none';
   _mentionTarget = null;
+  _mentionAtPos = -1;
+  _mentionCaret = -1;
+  _mentionRequest++; // Late search responses must not reopen a closed list.
+}
+function _mentionPosition(){
+  var el = _mentionTarget;
+  var box = document.getElementById('mention-suggest');
+  if(!el || !box || box.style.display==='none') return;
+  var rect = el.getBoundingClientRect();
+  var vv = window.visualViewport;
+  var top = vv ? vv.offsetTop : 0;
+  var left = vv ? vv.offsetLeft : 0;
+  var width = vv ? vv.width : window.innerWidth;
+  var bottom = top + (vv ? vv.height : window.innerHeight);
+  // The keyboard and nested/document scrolling can move the field entirely
+  // offscreen. Never leave its suggestions floating over unrelated content.
+  if(!el.isConnected || rect.bottom<=top || rect.top>=bottom){ _mentionHide(); return; }
+  var above = Math.max(0, rect.top-top-8);
+  var below = Math.max(0, bottom-rect.bottom-8);
+  box.style.width = Math.max(0,Math.min(rect.width,320,width-16))+'px';
+  box.style.maxHeight = '200px';
+  // Measure rendered rows, not an assumed number of 40px rows.
+  var wanted = Math.min(box.scrollHeight+2,200);
+  var useBelow = below>=wanted || below>=above;
+  var available = useBelow ? below : above;
+  if(available<36){ _mentionHide(); return; }
+  box.style.maxHeight = Math.min(wanted,available)+'px';
+  box.style.left = Math.max(left+8,Math.min(rect.left,left+width-box.offsetWidth-8))+'px';
+  box.style.top = (useBelow ? rect.bottom+6 : rect.top-box.offsetHeight-6)+'px';
+}
+function _mentionSchedulePosition(){
+  if(!_mentionTarget || _mentionFrame) return;
+  _mentionFrame = requestAnimationFrame(function(){ _mentionFrame=0; _mentionPosition(); });
 }
 function _mentionCheck(el){
   var val = el.value;
   var pos = el.selectionStart;
-  var uptoCursor = val.slice(0, pos);
-  var m = uptoCursor.match(/@([a-zA-Z0-9_]*)$/);
+  var m = val.slice(0,pos).match(/@([a-zA-Z0-9_]+)$/);
   if(!m){ _mentionHide(); return; }
-  var partial = m[1];
-  _mentionAtPos = pos - m[0].length;
+  _mentionAtPos = pos-m[0].length;
   _mentionTarget = el;
-  if(partial.length < 1){ _mentionHide(); return; }
-  fetch('/api/users/search?q='+encodeURIComponent(partial)).then(function(r){return r.json();}).then(function(d){
-    var users = (d && d.users) || [];
+  _mentionCaret = pos;
+  var requestId = ++_mentionRequest;
+  fetch('/api/users/search?q='+encodeURIComponent(m[1])).then(function(r){
+    if(!r.ok) throw new Error('Mention search unavailable');
+    return r.json();
+  }).then(function(d){
+    if(requestId!==_mentionRequest || _mentionTarget!==el || document.activeElement!==el
+        || el.value!==val || el.selectionStart!==pos) return;
     var box = document.getElementById('mention-suggest');
-    if(!users.length){ box.style.display='none'; return; }
-    var rect = el.getBoundingClientRect();
-    box.style.left = rect.left+'px';
-    box.style.top = (rect.top - Math.min(users.length,5)*40 - 8)+'px';
-    box.innerHTML = users.map(function(u){
-      return '<div onclick="_mentionSelect(\''+u.username.replace(/'/g,"\\'")+'\')" style="padding:9px 12px;cursor:pointer;color:#eef1f5;border-bottom:1px solid #16191f"><span style="color:#f7b955;font-weight:700">@'+esc(u.username)+'</span></div>';
-    }).join('');
+    if(!box) return;
+    var users = ((d && d.users)||[]).filter(function(u){return /^[a-zA-Z0-9_]+$/.test(u.username||'')});
+    if(!users.length){ _mentionHide(); return; }
+    box.replaceChildren();
+    box.style.boxSizing='border-box';
+    users.forEach(function(u){
+      var row=document.createElement('button');
+      row.type='button';
+      row.style.cssText='display:block;width:100%;padding:10px 12px;text-align:left;background:transparent;border:0;border-bottom:1px solid #21252c;color:#f7b955;font:inherit;font-weight:700;cursor:pointer';
+      row.textContent='@'+u.username;
+      // Keep the textarea focused so iOS does not move the keyboard before
+      // the click selects the suggestion.
+      row.addEventListener('pointerdown',function(e){e.preventDefault()});
+      row.addEventListener('click',function(){_mentionSelect(u.username)});
+      box.appendChild(row);
+    });
     box.style.display='block';
-  }).catch(function(){});
+    _mentionPosition();
+  }).catch(function(){ if(requestId===_mentionRequest) _mentionHide(); });
 }
 function _mentionSelect(username){
   if(!_mentionTarget) return;
   var el = _mentionTarget;
-  var val = el.value;
   var pos = el.selectionStart;
-  var before = val.slice(0, _mentionAtPos);
-  var after = val.slice(pos);
-  el.value = before + '@' + username + ' ' + after;
-  var newPos = (before + '@' + username + ' ').length;
-  el.focus();
-  el.setSelectionRange(newPos, newPos);
+  var before = el.value.slice(0,_mentionAtPos);
+  var after = el.value.slice(pos);
+  el.value = before+'@'+username+' '+after;
+  var newPos = (before+'@'+username+' ').length;
   _mentionHide();
+  el.focus({preventScroll:true});
+  el.setSelectionRange(newPos,newPos);
+  el.dispatchEvent(new Event('input',{bubbles:true}));
 }
-document.addEventListener('input', function(e){
-  if(e.target.id === 'postText' || e.target.classList.contains('fc-reply-inp')){
-    _mentionCheck(e.target);
-  }
+document.addEventListener('input',function(e){
+  if(e.target.id==='postText' || e.target.classList.contains('fc-reply-inp')) _mentionCheck(e.target);
 });
-document.addEventListener('click', function(e){
-  if(!e.target.closest('#mention-suggest') && e.target.id !== 'postText' && !e.target.classList.contains('fc-reply-inp')){
-    _mentionHide();
-  }
+document.addEventListener('click',function(e){
+  if(!e.target.closest('#mention-suggest') && e.target!==_mentionTarget) _mentionHide();
 });
+document.addEventListener('focusout',function(e){
+  if(e.target!==_mentionTarget) return;
+  setTimeout(function(){
+    var box=document.getElementById('mention-suggest');
+    if(document.activeElement!==_mentionTarget && !(box && box.contains(document.activeElement))) _mentionHide();
+  },0);
+});
+document.addEventListener('keydown',function(e){ if(e.key==='Escape') _mentionHide(); });
+document.addEventListener('selectionchange',function(){
+  if(_mentionTarget && document.activeElement===_mentionTarget && _mentionTarget.selectionStart!==_mentionCaret) _mentionCheck(_mentionTarget);
+});
+window.addEventListener('scroll',_mentionSchedulePosition,true);
+window.addEventListener('resize',_mentionSchedulePosition);
+if(window.visualViewport){
+  window.visualViewport.addEventListener('scroll',_mentionSchedulePosition);
+  window.visualViewport.addEventListener('resize',_mentionSchedulePosition);
+}
 function tagUser(){
   document.getElementById('userTagModal').style.display='flex'
   const inp=document.getElementById('userTagSearch')
@@ -9036,118 +9157,28 @@ var _virtObserver = new IntersectionObserver(function(entries){
   });
 }, {rootMargin: '5000px 0px'});
 
-var _bottomHoldTimer = null;
+// Infinite pagination only: scrolling must never replace the feed with page 1.
 var _bottomHoldLastCheck = 0;
 var _BOTTOM_HOLD_THROTTLE_MS = 100;
 function _checkBottomHold() {
-  // scroll fires far more often than this needs to run (up to display refresh
-  // rate on a fling) -- document.documentElement.scrollHeight below forces a
-  // synchronous layout read, so gate it to ~10x/s instead of every tick.
   var now = Date.now();
   if (now - _bottomHoldLastCheck < _BOTTOM_HOLD_THROTTLE_MS) return;
   _bottomHoldLastCheck = now;
   var feedEl = document.getElementById('center-feed');
-  var mainEl = document.getElementById('main-content'); // .wrap -- the actual scroll
-  // container (html/body/#app all have overflow:hidden); window itself never
-  // scrolls in this layout, so window.scrollY/scrollHeight are meaningless here.
-  if (!feedEl || !mainEl || feedEl.offsetParent === null) {
-    if (_bottomHoldTimer) { clearTimeout(_bottomHoldTimer); _bottomHoldTimer = null; }
-    return;
-  }
-  // Skip entirely while the user is actively typing inside the feed (e.g. a
-  // reply box) -- on mobile, focusing an input shrinks the viewport (keyboard)
-  // and auto-scrolls the field into view, which can make the atBottom check
-  // below fire spuriously and then wipe the whole feed DOM (via loadHomeFeed()
-  // -> renderHomeFeed()) out from under the open box.
-  var _activeEl = document.activeElement;
-  if (_activeEl && feedEl.contains(_activeEl) &&
-      (_activeEl.tagName === 'TEXTAREA' || _activeEl.tagName === 'INPUT')) {
-    if (_bottomHoldTimer) { clearTimeout(_bottomHoldTimer); _bottomHoldTimer = null; }
-    return;
-  }
-  // Infinite scroll: once within ~600px of the bottom and there's a next_cursor
-  // from the last fetch, load the next (older) page and append it. Guarded by
-  // _homeFeedLoadingMore so a fast scroll/fling doesn't fire it more than once
-  // per page fetched.
-  var distanceToBottom = mainEl.scrollHeight - (mainEl.scrollTop + mainEl.clientHeight);
+  var mainEl = document.getElementById('main-content');
+  if (!feedEl || !mainEl || feedEl.offsetParent === null) return;
+  // Desktop owns a bounded .wrap scroller. Mobile Home expands that wrapper
+  // and scrolls the document; .wrap.scrollTop is always zero in that layout.
+  var scroller = /^(auto|scroll)$/.test(getComputedStyle(mainEl).overflowY)
+    ? mainEl : (document.scrollingElement || document.documentElement);
+  var distanceToBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
   if (distanceToBottom < 600 && _homeFeedNextCursor && !_homeFeedLoadingMore) {
     loadMoreHomeFeed();
   }
-  var atBottom = (mainEl.scrollTop + mainEl.clientHeight) >= (mainEl.scrollHeight - 40);
-  // Only fall back to the hold-to-refresh-for-new-posts behavior once there's
-  // no older page left to paginate into -- otherwise this would race with
-  // loadMoreHomeFeed() above and wipe the appended pages back to page 1.
-  if (atBottom && !_homeFeedNextCursor) {
-    if (!_bottomHoldTimer) {
-      _bottomHoldTimer = setTimeout(function() {
-        loadHomeFeed(); // refetch + re-render in place instead of a full page reload
-        _bottomHoldTimer = null; // allow the hold-at-bottom check to fire again later
-      }, 2000);
-    }
-  } else {
-    if (_bottomHoldTimer) { clearTimeout(_bottomHoldTimer); _bottomHoldTimer = null; }
-  }
 }
 document.getElementById('main-content')?.addEventListener('scroll', _checkBottomHold, { passive: true });
-
-// ── PULL-TO-REFRESH — home feed (mobile, touch only) ──
-(function(){
-  var feedEl = document.getElementById('center-feed');
-  var mainEl = document.getElementById('main-content'); // .wrap -- see _checkBottomHold above
-  if (!feedEl || !mainEl) return;
-
-  var PTR_THRESHOLD = 70;
-  var _ptrStartY = 0, _ptrActive = false, _ptrPulling = false, _ptrIndicator = null;
-
-  function _ptrEnsureIndicator(){
-    if (_ptrIndicator) return _ptrIndicator;
-    var wrap = document.createElement('div');
-    wrap.id = 'ptr-indicator';
-    wrap.style.cssText = 'display:flex;align-items:center;justify-content:center;height:0;overflow:hidden;transition:height .15s ease';
-    var spin = document.createElement('span');
-    spin.className = 'dm-img-spinner';
-    spin.style.cssText = 'width:20px;height:20px;border-width:2px';
-    wrap.appendChild(spin);
-    feedEl.parentNode.insertBefore(wrap, feedEl);
-    _ptrIndicator = wrap;
-    return wrap;
-  }
-
-  feedEl.addEventListener('touchstart', function(e){
-    // Don't hijack touches that start inside an open reply box (input focus,
-    // text selection, scrolling a long .fc-replies-list) -- _ptrActive stays
-    // false for this whole touch sequence, so touchmove's guard below skips
-    // it too and never calls preventDefault() on it.
-    if (mainEl.scrollTop !== 0 || e.target.closest('.fc-reply-box')) { _ptrActive = false; return; }
-    _ptrStartY = e.touches[0].clientY;
-    _ptrActive = true;
-    _ptrPulling = false;
-  }, { passive: true });
-
-  feedEl.addEventListener('touchmove', function(e){
-    if (!_ptrActive) return;
-    var dy = e.touches[0].clientY - _ptrStartY;
-    if (dy <= 0 || mainEl.scrollTop !== 0) { _ptrActive = false; return; }
-    _ptrPulling = true;
-    e.preventDefault(); // suppress native overscroll bounce while our indicator is dragging
-    var indicator = _ptrEnsureIndicator();
-    indicator.style.height = Math.min(dy, PTR_THRESHOLD) + 'px';
-  }, { passive: false });
-
-  feedEl.addEventListener('touchend', async function(){
-    if (!_ptrActive) return;
-    _ptrActive = false;
-    if (_ptrPulling && _ptrIndicator) {
-      var pulled = parseInt(_ptrIndicator.style.height, 10) || 0;
-      if (pulled >= PTR_THRESHOLD) {
-        _ptrIndicator.style.height = PTR_THRESHOLD + 'px'; // hold open, spinner keeps spinning
-        await loadHomeFeed();
-      }
-      _ptrIndicator.style.height = '0px';
-    }
-    _ptrPulling = false;
-  }, { passive: true });
-})();
+window.addEventListener('scroll', _checkBottomHold, { passive: true });
+// No touch refresh handlers: both swipe directions belong to native scrolling.
 
 function showToken(symbol){
   window.open('https://dexscreener.com/solana/'+symbol,'_blank')
@@ -9534,7 +9565,7 @@ function _renderFeedCard(e){
       +'<span class="fc-like-count" onclick="event.stopPropagation();_fcOpenLikedBy(\''+esc(safePostId)+'\')" title="See who liked this">'+esc(String(e.like_count||0))+'</span>'
     +'</button>'
     +'<div class="fc-react-wrap">'
-    +'<button class="fc-action fc-react-btn" onclick="_feedReactOpen(event,\''+esc(safePostId)+'\')" title="React">+</button>'
+    +'<button class="fc-action fc-emoji-react-btn" onclick="_feedReactOpen(event,\''+esc(safePostId)+'\')" title="Choose emoji" aria-label="Choose emoji" style="width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:0;background:transparent;font-size:22px;line-height:1">😊</button>'
     +'<div class="fc-react-palette" id="rpal-'+esc(safePostId)+'"></div>'
     +'</div>'
     +'<div class="fc-share-wrap">'
@@ -9576,15 +9607,48 @@ function _homeCopyTrade(uid, username){
   else if(typeof openProfileCard==='function') openProfileCard(uid);
 }
 
+function _xShareIntent(postId){
+  var canonical=window.location.origin+'/post/'+encodeURIComponent(postId)+'?xv=8';
+  var text='View this post on OrcAgent @orcagent';
+  return 'https://twitter.com/intent/tweet?text='+encodeURIComponent(text)
+    +'&url='+encodeURIComponent(canonical);
+}
+function _safeXShareUrl(raw){
+  try{
+    var u=new URL(String(raw||''),window.location.origin);
+    var host=u.hostname.toLowerCase();
+    if((host==='twitter.com'||host==='www.twitter.com'||host==='x.com'||host==='www.x.com')
+       && u.pathname==='/intent/tweet') return u.href;
+  }catch(e){}
+  return '';
+}
+function _openXShareFallback(postId, suppliedUrl){
+  var target=_safeXShareUrl(suppliedUrl)||_xShareIntent(postId);
+  window.location.assign(target);
+}
 function _shareToX(event, postId){
-  event.stopPropagation();
-  fetch('/api/feed/share-to-x/'+encodeURIComponent(postId), {method:'POST'})
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if(d.ok) openAlertModal({text:'✓ Shared to X!'});
-      else openAlertModal({text:d.msg || 'Could not share to X'});
+  if(event) event.stopPropagation();
+  fetch('/api/feed/share-to-x/'+encodeURIComponent(postId), {
+    method:'POST',
+    credentials:'include'
+  })
+    .then(function(r){
+      return r.text().then(function(raw){
+        try{return raw?JSON.parse(raw):{};}catch(e){return {};}
+      });
     })
-    .catch(function(){ openAlertModal({text:'Network error — could not share to X'}); });
+    .then(function(d){
+      var directSuccess=!!(d&&(d.ok===true||d.success===true)&&d.fallback!==true);
+      if(directSuccess){
+        openAlertModal({text:'✓ Shared to X!'});
+        return;
+      }
+      // Invalid/expired X credentials must never strand the user behind an
+      // error dialog. X's official composer still shares the permanent post
+      // route, whose Open Graph image is the same OrcAgent token card.
+      _openXShareFallback(postId,d&&d.share_url);
+    })
+    .catch(function(){ _openXShareFallback(postId,''); });
 }
 function _feedToggleRepost(btn, postId){
   if(!btn) return;

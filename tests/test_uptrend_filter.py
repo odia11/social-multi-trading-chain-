@@ -90,7 +90,11 @@ def _run_scanner(sort_mode='trending', **extra_params):
         'ThreadPoolExecutor': __import__('concurrent.futures', fromlist=['ThreadPoolExecutor']).ThreadPoolExecutor,
         '_get_scanner_cached': lambda: list(FIXTURES),
         '_current_wallet': lambda: None,   # skips the friends-query sqlite path entirely
-        '_scanner_get_safety': lambda mint: {'lp_locked_pct': 0, 'mint_authority_active': False, 'freeze_authority_active': False},
+        '_scanner_get_safety': lambda mint, chain='solana', include_lp=False: {
+            'ok': True, 'lp_locked_pct': 100, 'mint_authority_active': False,
+            'freeze_authority_active': False, 'is_honeypot': False,
+        },
+        '_scanner_token_passes_scam_filter': lambda tok, safety: True,
         '_scanner_score': lambda tok, safety: 3,
     }
     exec(_age_buckets_src, namespace)

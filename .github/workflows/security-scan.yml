@@ -10,28 +10,56 @@ jobs:
   security:
     name: Security checks
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      PYTHONPATH: .
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        # actions/checkout v4 pinned to an immutable commit to prevent a
+        # compromised/moved marketplace tag from changing CI code silently.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0   # full history needed for gitleaks
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        # actions/setup-python v5, pinned for the same supply-chain reason.
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.11'
 
       - name: Install dependencies
         run: |
-          pip install --quiet pip-audit bandit
-          pip install --quiet -r requirements.txt || true
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet pip-audit bandit
+          python -m pip install --quiet -r requirements.txt
 
-      # ── 1. pip-audit: known CVEs in dependencies ──────────────────────────
+      - name: Python compile check
+        run: python -m compileall -q .
+
+      - name: OrcAgent security regression checks
+        run: |
+          python tests/test_security_hardening.py
+          python tests/test_authorization_hardening.py
+          python tests/test_idor_hardening.py
+          python tests/test_financial_authorization_hardening.py
+          python tests/test_security_phase2.py
+          python tests/test_auth_replay_runtime.py
+          python tests/test_ssrf_hardening.py
+          python tests/test_stay_connected.py
+          python tests/test_deploy_security.py
+          python tests/test_browser_shared_secret_hardening.py
+          python tests/test_admin_csrf_hardening.py
+          python tests/test_trading_wallet_generator.py
+          python tests/test_no_platform_gas_fronting.py
+          python tests/test_bsc_gasless_trading.py
+          python tests/test_solana_gasless_trading.py
+
       - name: pip-audit
         run: pip-audit --strict -r requirements.txt
 
-      # ── 2. bandit: Python static analysis ─────────────────────────────────
       - name: bandit
         run: |
           bandit -r . \
@@ -40,16 +68,14 @@ jobs:
             --confidence-level medium \
             -f txt
 
-      # ── 3. gitleaks: secret / credential scan ─────────────────────────────
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        # gitleaks-action v2 pinned to the commit already verified in CI.
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── 4. Custom checks: debug flag & CORS origin reflection ─────────────
       - name: Check for debug=True in production code
         run: |
-          # Fail if app.run(debug=True) appears anywhere outside comments
           if grep -rn --include="*.py" 'app\.run.*debug\s*=\s*True' . ; then
             echo "ERROR: debug=True found in Python source — must not reach production."
             exit 1
@@ -58,11 +84,17 @@ jobs:
 
       - name: Check for CORS origin reflection
         run: |
-          # Fail if Access-Control-Allow-Origin is set to a raw request.headers value
-          # (pattern: both the header assignment and request.headers on the same logical line)
           if grep -rn --include="*.py" \
             -E "Access-Control-Allow-Origin.*request\.headers|request\.headers.*Access-Control-Allow-Origin" . ; then
             echo "ERROR: Potential CORS origin reflection detected — use an explicit allowlist."
             exit 1
           fi
           echo "OK: no CORS origin reflection found."
+
+      - name: Check tracked secret files
+        run: |
+          if git ls-files | grep -E '(^|/)(\.env($|\.)|\.secret_key$|id_rsa$|id_ed25519$|.*\.pem$|.*\.key$)' ; then
+            echo "ERROR: secret-like file is tracked by git."
+            exit 1
+          fi
+          echo "OK: no secret-like files tracked."
