@@ -1,9 +1,8 @@
 """Live Market must not block an automatic cross-chain buy in the browser.
 
-A user can hold USDC on one supported chain and buy on another.  The server's
-buy flow owns the auto-bridge.  Therefore the BUY sheet may display the pooled
-USDC spending balance, but must never veto a Robinhood/Base/etc buy merely
-because the destination-chain balance is zero.
+The Live Market controller is IIFE-scoped, so its local balance loader cannot
+be replaced through ``window``.  The production fix therefore normalises the
+summary response before that controller caches/reads it.
 """
 from pathlib import Path
 
@@ -20,18 +19,19 @@ def check(message, condition):
 check('production installs the pooled Live Market balance fix',
       'from live_market_pooled_buy_balance import install' in ENTRY
       and '_install_live_market_pooled_buy_balance(_dashboard)' in ENTRY)
-check('BUY availability uses the wallet-wide total returned by the existing summary endpoint',
-      'summary.total_usdc' in HOTFIX)
+check('BUY availability reads the wallet-wide total returned by the summary endpoint',
+      'body.total_usdc' in HOTFIX and 'pooledTotal(body)' in HOTFIX)
 check('the fallback still totals Solana plus every supported EVM stable balance',
-      'summary.solana_usdc' in HOTFIX
+      'd.solana_usdc' in HOTFIX
       and all(c in HOTFIX for c in ('bsc','base','arbitrum','polygon','robinhood')))
-check('the browser override replaces the old destination-only balance loader',
-      'window._loadSheetBalance = function(_chain)' in HOTFIX)
-check('the server remains the authority for bridging; the fix adds no transfer or signing logic',
-      '_maybe_start_auto_bridge_for_buy' in HOTFIX
-      and 'private_key' not in HOTFIX
-      and 'requests.' not in HOTFIX)
-check('the injected HTML is no-cache so an installed mobile app cannot keep the old veto',
-      "Cache-Control" in HOTFIX and 'no-store' in HOTFIX)
+check('the fix patches fetch before the IIFE controller can cache destination-only balances',
+      'window.fetch = function(input, init)' in HOTFIX
+      and "body.replace('</head>'" in HOTFIX)
+check('every Live Market EVM balance slot receives the pooled buying power',
+      'CHAINS.forEach(function(c){ body.evm_chains[c] = total; })' in HOTFIX)
+check('the server remains authority for bridge/execution; browser patch has no key/signing code',
+      'private_key' not in HOTFIX and 'requests.' not in HOTFIX)
+check('the injected HTML is no-cache so a mobile app cannot keep the old veto',
+      'Cache-Control' in HOTFIX and 'no-store' in HOTFIX)
 
-print('\n6/6 checks passed')
+print('\n7/7 checks passed')
