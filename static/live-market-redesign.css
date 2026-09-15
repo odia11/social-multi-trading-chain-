@@ -142,10 +142,29 @@ body.oa-live-v2 .pt-sheet.sell-mode .pt-pct.on{background:rgba(255,83,104,.12)!i
   flex:0 0 clamp(184px,29vh,232px)!important;gap:6px!important;min-height:184px!important;max-height:232px!important;padding:0 18px 8px!important
  }
  body.oa-live-v2 .pt-key{
-  min-height:48px!important;padding:0!important;border-radius:14px!important;
+  min-height:48px!important;border-radius:14px!important;
   background:#0a1118!important;border-color:#17222d!important;
-  font-size:24px!important;font-weight:620!important;color:#f1f3f6!important
+  font-size:24px!important;font-weight:620!important;color:#f1f3f6!important;
+  /* Centring the BOX is not centring the DIGIT. A digit is drawn from the
+     cap height down to the baseline, and the baseline is not the middle of
+     its line box, so flex-centring leaves every number sitting high with a
+     gap underneath -- measured here at about 2px on a 48px key, which is
+     the difference between a keypad that looks made and one that looks
+     nearly right. Top padding only: min-height decides the key's height, so
+     this moves what is drawn inside it by half the padding and leaves the
+     key itself exactly as designed.
+     0.07em, measured: min-height does not dominate here, so the shift is the
+     whole padding rather than half of it. In a line box of 1em the baseline sits about 0.76em down
+     and a digit reaches about 0.70em above it, putting the ink's middle
+     about 0.085em high -- a property of how sans faces are drawn rather
+     than of one face, which matters because these fonts are fetched at run
+     time and cannot be measured from here. */
+  padding:0.07em 0 0!important
  }
+ /* Both of these are drawn shapes rather than type -- no baseline to be
+    off, so the correction above would push them off instead. */
+ body.oa-live-v2 .pt-key[data-k="."],
+ body.oa-live-v2 .pt-key[data-k="del"]{padding:0!important}
  body.oa-live-v2 .pt-key:active{
   background:rgba(247,185,85,.13)!important;border-color:rgba(247,185,85,.38)!important;
   color:#ffc45b!important;transform:scale(.96)!important
