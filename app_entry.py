@@ -24,6 +24,7 @@ from messages_premium_ui import install as _install_messages_premium_ui
 from live_market_deeplink_fix import install as _install_live_market_deeplink_fix
 from auto_trading_bot_route import install as _install_auto_trading_bot_route
 from multichain_auto_bot import install as _install_multichain_auto_bot
+from live_market_pooled_buy_balance import install as _install_live_market_pooled_buy_balance
 from canonical_domain import install as _install_canonical_domain
 from browser_shared_secret_hardening import install as _install_browser_shared_secret_hardening
 from secret_hygiene import install as _install_secret_hygiene
@@ -111,6 +112,11 @@ _install_solana_gasless_trading(_dashboard)
 # buys continue through Jupiter gasless without demanding a separate SOL
 # reserve after the USDC has arrived.
 _install_cross_chain_budget_guard(_dashboard)
+
+# The Live Market BUY sheet must use the same pooled spending balance as the
+# automatic bridge backend. Otherwise Robinhood (and every empty destination
+# chain) is disabled in the browser before the auto-bridge can even start.
+_install_live_market_pooled_buy_balance(_dashboard)
 
 # The compact amount pill in the shared top bar shows the user's aggregate
 # stablecoin spending balance across every supported chain, formatted as USD.
