@@ -3,7 +3,11 @@
 'use strict';
 var path=location.pathname.replace(/\/+$/,'')||'/';
 if(path!=='/' || !window.matchMedia('(max-width:767px)').matches) return;
-var polish=document.createElement('link');polish.rel='stylesheet';polish.href='/static/home-mobile-polish.css?v=3';document.head.appendChild(polish);
+/* Do not rely on CSS :has() to unlock document scrolling. Older Android
+   WebViews either do not support it or can evaluate it too late, leaving the
+   dashboard's base html{overflow:hidden} rule active for the whole page. */
+document.documentElement.classList.add('oa-home-mobile-root');
+var polish=document.createElement('link');polish.rel='stylesheet';polish.href='/static/home-mobile-polish.css?v=4';document.head.appendChild(polish);
 function money(v){var n=Number(v||0);if(!isFinite(n))n=0;return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:n>=1000?0:2,maximumFractionDigits:n>=1000?0:2}).format(n)}
 function num(v){var n=Number(v||0);return isFinite(n)?n:0}
 function ready(fn){if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fn);else fn()}
@@ -21,5 +25,5 @@ function moveComposer(afterEl){var c=document.getElementById('feed-composer');if
 function keepComposerOpen(c){if(!c)return;var t=document.getElementById('postText');c.classList.add('expanded');if(!t)return;t.addEventListener('focus',function(){c.classList.add('expanded')});t.addEventListener('blur',function(){requestAnimationFrame(function(){c.classList.add('expanded')})});t.addEventListener('input',function(){c.classList.add('expanded')})}
 function feedTabs(afterEl){var nativeTabs=document.querySelector('.feed-tabs');if(nativeTabs)nativeTabs.style.display='none';var old=document.getElementById('oa-m-feed-label');if(old)old.remove();var e=document.createElement('div');e.className='oa-m-feed-label';e.id='oa-m-feed-label';e.innerHTML='<button class="active" data-feed="foryou">For You</button><button data-feed="following">Following</button><button data-feed="trends">Trends</button>';afterEl.insertAdjacentElement('afterend',e);e.addEventListener('click',function(ev){var b=ev.target.closest('button');if(!b)return;if(b.dataset.feed==='trends'){location.href='/live-market';return}e.querySelectorAll('button').forEach(function(x){x.classList.toggle('active',x===b)});var native=document.querySelector('.feed-tab[data-tab="'+b.dataset.feed+'"]');if(native)native.click()});return e}
 function hideLegacyDuplicate(){document.querySelectorAll('.botbar,.feed-bot-card').forEach(function(el){el.classList.add('oa-m-legacy-hidden')})}
-ready(function(){document.body.classList.add('oa-home-mobile');document.documentElement.classList.add('oa-home-mobile-root');var wrap=document.querySelector('.wrap');if(!wrap)return;hideLegacyDuplicate();var hero=buildHero(wrap),bot=buildBot(wrap,hero),pf=buildPortfolio(bot),market=buildMarkets(pf),shortcuts=buildShortcuts(market),composer=moveComposer(shortcuts);keepComposerOpen(composer);if(composer)feedTabs(composer);setTimeout(hideLegacyDuplicate,500)});
+ready(function(){document.body.classList.add('oa-home-mobile');var wrap=document.querySelector('.wrap');if(!wrap)return;hideLegacyDuplicate();var hero=buildHero(wrap),bot=buildBot(wrap,hero),pf=buildPortfolio(bot),market=buildMarkets(pf),shortcuts=buildShortcuts(market),composer=moveComposer(shortcuts);keepComposerOpen(composer);if(composer)feedTabs(composer);setTimeout(hideLegacyDuplicate,500)});
 })();

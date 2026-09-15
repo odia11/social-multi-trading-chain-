@@ -1,0 +1,40 @@
+"""Regression checks for Android/WebView document scrolling.
+
+Home and Portfolio used to depend on :has(body...) to override the dashboard's
+root overflow:hidden rule. Older Android WebViews do not reliably support that
+selector, so the explicit root classes are part of the scroll contract.
+"""
+import pathlib
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+HOME_CSS = (ROOT / 'static' / 'home-mobile.css').read_text(encoding='utf-8')
+HOME_POLISH = (ROOT / 'static' / 'home-mobile-polish.css').read_text(encoding='utf-8')
+HOME_JS = (ROOT / 'static' / 'home-mobile.js').read_text(encoding='utf-8')
+PORTFOLIO_CSS = (ROOT / 'static' / 'portfolio-redesign.css').read_text(encoding='utf-8')
+PORTFOLIO_JS = (ROOT / 'static' / 'portfolio-redesign.js').read_text(encoding='utf-8')
+NAVBAR_JS = (ROOT / 'static' / 'navbar.js').read_text(encoding='utf-8')
+
+
+def test_home_scroll_does_not_require_has_support():
+    assert 'html.oa-home-mobile-root' in HOME_CSS
+    assert 'html.oa-home-mobile-root' in HOME_POLISH
+    assert "document.documentElement.classList.add('oa-home-mobile-root')" in HOME_JS
+    assert 'overflow-y:auto!important' in HOME_CSS
+    assert 'touch-action:pan-y!important' in HOME_CSS
+
+
+def test_portfolio_scroll_does_not_require_has_support():
+    assert 'html.oa-portfolio-root' in PORTFOLIO_CSS
+    assert "document.documentElement.classList.add('oa-portfolio-root')" in PORTFOLIO_JS
+    assert "document.documentElement.classList.add('oa-portfolio-root')" in NAVBAR_JS
+    assert 'overflow-y:auto!important' in PORTFOLIO_CSS
+
+
+def test_route_bootstrap_sets_scroll_classes_before_dynamic_assets():
+    home_class = NAVBAR_JS.index("classList.add('oa-home-mobile-root')")
+    home_css = NAVBAR_JS.index("ensureStyle('/static/home-mobile.css?v=5'")
+    portfolio_class = NAVBAR_JS.index("classList.add('oa-portfolio-root')")
+    portfolio_css = NAVBAR_JS.index("ensureStyle('/static/portfolio-redesign.css?v=5'")
+    assert home_class < home_css
+    assert portfolio_class < portfolio_css

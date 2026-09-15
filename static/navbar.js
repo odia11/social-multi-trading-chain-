@@ -16,6 +16,7 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
 
 (function(){
   if(location.pathname.replace(/\/+$/,'')!=='/wallet') return;
+  document.documentElement.classList.add('oa-portfolio-root');
   var styled=!!document.querySelector('link[href*="portfolio-redesign.css"]');
   if(!styled){
     document.documentElement.classList.add('oa-pf-boot');
@@ -23,8 +24,8 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
     boot.textContent='html.oa-pf-boot,html.oa-pf-boot body{background:#080d12!important}html.oa-pf-boot body{visibility:hidden!important}';
     document.head.appendChild(boot);
   }
-  ensureStyle('/static/portfolio-redesign.css?v=4','portfolio-redesign.css');
-  ensureScript('/static/portfolio-redesign.js?v=4','portfolio-redesign.js');
+  ensureStyle('/static/portfolio-redesign.css?v=5','portfolio-redesign.css');
+  ensureScript('/static/portfolio-redesign.js?v=9','portfolio-redesign.js');
   ensureScript('/static/portfolio-assets.js?v=1','portfolio-assets.js');
 })();
 
@@ -38,8 +39,9 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
 (function(){
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/'||!window.matchMedia('(max-width:767px)').matches)return;
-  ensureStyle('/static/home-mobile.css?v=4','home-mobile.css');
-  ensureScript('/static/home-mobile.js?v=3','home-mobile.js');
+  document.documentElement.classList.add('oa-home-mobile-root');
+  ensureStyle('/static/home-mobile.css?v=5','home-mobile.css');
+  ensureScript('/static/home-mobile.js?v=4','home-mobile.js');
 })();
 
 (function(){

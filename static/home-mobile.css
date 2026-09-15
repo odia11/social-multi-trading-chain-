@@ -1,6 +1,6 @@
 /* OrcAgent mobile Home — screenshot-matched presentation. */
 @media(max-width:767px){
-html:has(body.oa-home-mobile){height:auto!important;min-height:100%!important;overflow-y:auto!important;overflow-x:hidden!important;-webkit-overflow-scrolling:touch!important}
+html.oa-home-mobile-root,html:has(body.oa-home-mobile){height:auto!important;min-height:100%!important;overflow-y:auto!important;overflow-x:hidden!important;-webkit-overflow-scrolling:touch!important;touch-action:pan-y!important}
 body.oa-home-mobile{--oa-gold:#f7b955;--oa-card:#0c131b;--oa-line:rgba(255,255,255,.075);background:#071019!important;color:#eef1f5;height:auto!important;min-height:100dvh!important;overflow-y:auto!important;overflow-x:hidden!important;position:static!important;touch-action:pan-y!important;-webkit-overflow-scrolling:touch!important}
 body.oa-home-mobile #app{background:radial-gradient(circle at 50% -10%,#0d1b25 0,#071019 32%,#050b11 100%)!important;height:auto!important;min-height:100dvh!important;max-height:none!important;overflow:visible!important;position:static!important;padding-bottom:calc(92px + env(safe-area-inset-bottom,0px))}
 body.oa-home-mobile .app-body{display:block!important;overflow:visible!important;height:auto!important;max-height:none!important;min-height:100dvh!important;position:static!important}

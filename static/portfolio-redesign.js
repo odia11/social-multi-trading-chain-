@@ -5,6 +5,7 @@
    and multi-chain values on iOS/PWA. */
 (function(){
 'use strict';
+if(location.pathname.replace(/\/+$/,'')==='/wallet')document.documentElement.classList.add('oa-portfolio-root');
 var _revealed=false;
 function revealPortfolio(){
   if(_revealed)return;
