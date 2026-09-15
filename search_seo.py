@@ -19,7 +19,7 @@ _LOGO_URL = _BASE_URL + "/static/icon-512.png"
 
 _PAGE_META = {
     "/": (
-        "OrcAgent | AI-Powered Social Trading Platform",
+        "OrcAgent — Multi-Chain Social Trading Platform",
         "Trade smarter together with OrcAgent. Discover live crypto markets, automate strategies, follow traders and share trades across multiple chains.",
     ),
     "/live-market": (

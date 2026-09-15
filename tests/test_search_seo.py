@@ -1,9 +1,13 @@
 """SEO output stays canonical, crawlable and privacy-safe."""
+from pathlib import Path
 from types import SimpleNamespace
 
 from flask import Flask
 
 import search_seo
+
+ROOT = Path(__file__).resolve().parents[1]
+DASHBOARD_HTML = (ROOT / "dashboard.html").read_text(encoding="utf-8")
 
 
 def make_app():
@@ -26,9 +30,14 @@ def make_app():
     return app
 
 
+def test_source_title_matches_multichain_product_positioning():
+    assert "<title>OrcAgent — Multi-Chain Social Trading Platform</title>" in DASHBOARD_HTML
+    assert "Solana Trading Terminal" not in DASHBOARD_HTML
+
+
 def test_home_has_complete_search_metadata():
     body = make_app().test_client().get("/").get_data(as_text=True)
-    assert "OrcAgent | AI-Powered Social Trading Platform" in body
+    assert "OrcAgent — Multi-Chain Social Trading Platform" in body
     assert '<link rel="canonical" href="https://orcagent.fun/">' in body
     assert 'name="description"' in body
     assert 'application/ld+json' in body
