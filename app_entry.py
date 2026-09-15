@@ -40,6 +40,7 @@ from upload_hardening import install as _install_upload_hardening
 from bsc_gasless_trading import install as _install_evm_gasless_trading
 from solana_gasless_trading import install as _install_solana_gasless_trading
 from cross_chain_budget_guard import install as _install_cross_chain_budget_guard
+from solana_source_bridge_gasless import install as _install_solana_source_bridge_gasless
 from header_stable_balance import install as _install_header_stable_balance
 from portfolio_multichain_holdings import install as _install_portfolio_multichain_holdings
 from portfolio_trade_history import install as _install_portfolio_trade_history
@@ -112,6 +113,12 @@ _install_solana_gasless_trading(_dashboard)
 # buys continue through Jupiter gasless without demanding a separate SOL
 # reserve after the USDC has arrived.
 _install_cross_chain_budget_guard(_dashboard)
+
+# If an EVM-destination buy is funded by USDC sitting on Solana while that
+# trading wallet has zero SOL, use Jupiter Ultra gasless to turn a small slice
+# of the SAME user-entered USDC ceiling into SOL, then continue the bridge with
+# the remainder. OrcAgent still fronts nothing.
+_install_solana_source_bridge_gasless(_dashboard)
 
 # The Live Market BUY sheet must use the same pooled spending balance as the
 # automatic bridge backend. Otherwise Robinhood (and every empty destination
