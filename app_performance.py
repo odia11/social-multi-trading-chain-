@@ -74,18 +74,14 @@ def install(appmod) -> None:
                 style('home-composer-mobile.css', '/static/home-composer-mobile.css?v=1', ' media="(max-width:767px)"')
                 style('home-desktop.css', '/static/home-desktop.css?v=1', ' media="(min-width:1025px)"')
 
-            # Android/Chromium is much less forgiving than iOS Safari when both
-            # html and body are made independent overflow scrollers. The legacy
-            # dashboard starts with html,body and #app locked to 100dvh +
-            # overflow:hidden, while the route CSS previously changed BOTH html
-            # and body to overflow-y:auto. On Android that can leave no stable
-            # scroll owner (or only a tiny edge area that accepts the gesture).
-            #
-            # For the document-style mobile routes, make body the one and only
-            # native vertical scroller. This is injected last so it wins over
-            # the old route CSS without relying on :has(), JS timing, or browser
-            # sniffing. Modal/search body overflow locks continue to work because
-            # they lock the actual scroll container.
+            # Chromium/Android uses document.documentElement as the root
+            # scrollingElement in standards mode. The previous hotfix made body
+            # the scroll owner while html stayed overflow:hidden; that can still
+            # leave Android with a locked root scroller even though iOS happens
+            # to tolerate the body scroller. Keep exactly ONE vertical scroll
+            # owner, but make it the real standards-mode root: html. Body and the
+            # app shells are allowed to grow naturally and never become nested
+            # vertical scrollers.
             if path in ('/', '/wallet') and 'data-oa-native-mobile-scroll="1"' not in html:
                 tags.append(
                     '<script data-oa-native-mobile-scroll="1">'
@@ -96,17 +92,20 @@ def install(appmod) -> None:
                 tags.append(
                     '<style data-oa-native-mobile-scroll-css="1">'
                     '@media(max-width:767px){'
-                    'html.oa-native-mobile-scroll{height:100%!important;min-height:100%!important;'
-                    'overflow:hidden!important;overscroll-behavior-y:none!important;touch-action:pan-y!important}'
-                    'html.oa-native-mobile-scroll body{height:100dvh!important;min-height:100dvh!important;max-height:100dvh!important;'
-                    'overflow-x:hidden!important;overflow-y:auto!important;position:static!important;'
-                    '-webkit-overflow-scrolling:touch!important;overscroll-behavior-y:none!important;touch-action:pan-y!important}'
-                    'html.oa-native-mobile-scroll body #app{height:auto!important;min-height:100%!important;max-height:none!important;'
+                    'html.oa-native-mobile-scroll{height:auto!important;min-height:100%!important;max-height:none!important;'
+                    'overflow-x:hidden!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important;'
+                    'overscroll-behavior-y:none!important;touch-action:pan-y!important}'
+                    'html.oa-native-mobile-scroll body{height:auto!important;min-height:100dvh!important;max-height:none!important;'
+                    'overflow:visible!important;position:static!important;touch-action:pan-y!important}'
+                    'html.oa-native-mobile-scroll body #app{height:auto!important;min-height:100dvh!important;max-height:none!important;'
                     'overflow:visible!important;position:static!important}'
                     'html.oa-native-mobile-scroll body .app-body,'
                     'html.oa-native-mobile-scroll body .wrap,'
                     'html.oa-native-mobile-scroll body .wlt-center,'
-                    'html.oa-native-mobile-scroll body .wlt-content{height:auto!important;max-height:none!important;overflow:visible!important}'
+                    'html.oa-native-mobile-scroll body .wlt-content{height:auto!important;min-height:0!important;max-height:none!important;overflow:visible!important}'
+                    'html.oa-native-mobile-scroll.oa-modal-open,'
+                    'html.oa-native-mobile-scroll.oa-wallet-actions-open,'
+                    'html.oa-native-mobile-scroll.oa-app-menu-open{overflow:hidden!important}'
                     '}'
                     '</style>'
                 )
