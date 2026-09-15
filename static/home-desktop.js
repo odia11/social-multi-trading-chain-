@@ -1,99 +1,34 @@
-/* Desktop-only OrcAgent home composition.
-   Keeps the current dashboard/feed/search/market components and adds only
-   presentation blocks that reuse real routes and real API data. */
+/* Desktop-only OrcAgent home composition. */
 (function(){
 'use strict';
 var path=location.pathname.replace(/\/+$/,'')||'/';
 if(path!=='/' || !window.matchMedia('(min-width:1025px)').matches) return;
-
-function money(v){
-  var n=Number(v||0); if(!isFinite(n)) n=0;
-  return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2}).format(n);
-}
-function num(v){var n=Number(v||0);return isFinite(n)?n:0;}
-function ready(fn){if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fn);else fn();}
-
-function buildHero(wrap){
-  if(document.getElementById('oa-home-hero')) return;
-  var hero=document.createElement('section');
-  hero.className='oa-home-hero';hero.id='oa-home-hero';
-  hero.innerHTML='<div class="oa-home-hero-copy">'
-    +'<div class="oa-home-eyebrow">ORCAGENT</div>'
-    +'<h1>Smarter Trading.<br><span>Stronger Together.</span></h1>'
-    +'<p>AI-powered trading, live market intelligence, social insights and real-time opportunities — all inside one OrcAgent platform.</p>'
-    +'<a class="oa-home-primary" href="/auto-trading-bot">Start Trading <span>→</span></a>'
-    +'</div>';
-  wrap.insertBefore(hero,wrap.firstChild);
-}
-
-function buildBot(wrap){
-  if(document.getElementById('oa-home-bot')) return;
-  var bot=document.createElement('section');bot.className='oa-home-bot';bot.id='oa-home-bot';
-  bot.innerHTML='<div class="oa-home-bot-icon">◎</div>'
-    +'<div class="oa-home-bot-main">'
-      +'<div class="oa-home-bot-title">Your bot is <span id="oa-home-bot-state">checking…</span><span class="oa-home-bot-dot" id="oa-home-bot-dot"></span></div>'
-      +'<div class="oa-home-bot-meta"><span id="oa-home-bot-open">— open</span><span>•</span><span id="oa-home-bot-pnl">PnL —</span></div>'
-    +'</div>'
-    +'<a class="oa-home-bot-btn" href="/auto-trading-bot" id="oa-home-bot-btn">Open AI Bot</a>';
-  var anchor=wrap.children[1]||null;
-  if(anchor) wrap.insertBefore(bot,anchor); else wrap.appendChild(bot);
-  fetch('/api/bot/status',{credentials:'include'}).then(function(r){return r.json();}).then(function(d){
-    var running=!!(d&&(d.running||d.status==='running'));
-    var state=document.getElementById('oa-home-bot-state'),dot=document.getElementById('oa-home-bot-dot');
-    if(state){state.textContent=running?'running':'idle';state.style.color=running?'#3ad29b':'#8a919c';}
-    if(dot)dot.classList.toggle('running',running);
-    var open=d&&((d.open_positions!=null&&d.open_positions)||(d.positions_open!=null&&d.positions_open));
-    if(open!=null)document.getElementById('oa-home-bot-open').textContent=open+' open';
-    var pnl=d&&(d.pnl_usd!=null?d.pnl_usd:(d.total_pnl_usd!=null?d.total_pnl_usd:null));
-    if(pnl!=null)document.getElementById('oa-home-bot-pnl').textContent='PnL '+money(pnl);
-  }).catch(function(){
-    var state=document.getElementById('oa-home-bot-state');if(state)state.textContent='idle';
-  });
-}
-
-function addFeedLabel(wrap){
-  if(document.getElementById('oa-home-feed-label'))return;
-  var el=document.createElement('div');el.className='oa-home-section-label';el.id='oa-home-feed-label';el.innerHTML='<span>For You</span> &nbsp;&nbsp; Following';
-  var bot=document.getElementById('oa-home-bot');
-  if(bot&&bot.nextSibling)wrap.insertBefore(el,bot.nextSibling);else wrap.appendChild(el);
-}
-
-function buildPortfolio(rail){
-  if(!rail||document.getElementById('oa-portfolio-card'))return;
-  var card=document.createElement('section');card.className='oa-portfolio-card';card.id='oa-portfolio-card';
-  card.innerHTML='<div class="oa-pf-head"><div class="oa-pf-title">Portfolio</div><a class="oa-pf-link" href="/wallet">View all →</a></div>'
-    +'<div class="oa-pf-body"><div class="oa-pf-kicker">Total value</div><div class="oa-pf-value" id="oa-pf-value">$0.00</div>'
-    +'<div class="oa-pf-meta"><span>●</span><span>Live multi-chain balances</span></div><div class="oa-pf-line"></div>'
-    +'<div class="oa-pf-split"><div class="oa-pf-chip"><b>USDC</b><span id="oa-pf-usdc">$0.00</span></div><div class="oa-pf-chip"><b>SOL</b><span id="oa-pf-sol">$0.00</span></div><div class="oa-pf-chip"><b>Other</b><span id="oa-pf-other">$0.00</span></div></div></div>';
-  var cards=rail.querySelectorAll('.rr-card');
-  if(cards.length>0 && cards[0].nextSibling)rail.insertBefore(card,cards[0].nextSibling);else rail.appendChild(card);
-  Promise.allSettled([
-    fetch('/api/wallet/usdc-summary',{credentials:'include'}).then(function(r){return r.json();}),
-    fetch('/api/wallet/tokens',{credentials:'include'}).then(function(r){return r.json();}),
-    fetch('/api/wallet/balance',{credentials:'include'}).then(function(r){return r.json();})
-  ]).then(function(res){
-    var s=res[0].status==='fulfilled'?res[0].value||{}:{};
-    var t=res[1].status==='fulfilled'?res[1].value||{}:{};
-    var b=res[2].status==='fulfilled'?res[2].value||{}:{};
-    var usdc=num(s.total_usdc!=null?s.total_usdc:s.total);
-    var solPrice=num(b.sol_price||s.sol_price||0),solValue=num(b.sol)*solPrice;
-    var tokens=Array.isArray(t.tokens)?t.tokens:[];
-    var other=tokens.reduce(function(sum,x){
-      var sym=String(x.symbol||x.ticker||'').toUpperCase();if(sym==='USDC'||sym==='USDT'||sym==='SOL')return sum;
-      var v=x.usd_value;if(v==null)v=x.value_usd;if(v==null)v=num(x.balance||x.amount)*num(x.price_usd||x.price);return sum+num(v);
-    },0);
-    var total=usdc+solValue+other;
-    document.getElementById('oa-pf-value').textContent=money(total);
-    document.getElementById('oa-pf-usdc').textContent=money(usdc);
-    document.getElementById('oa-pf-sol').textContent=money(solValue);
-    document.getElementById('oa-pf-other').textContent=money(other);
-  }).catch(function(){});
-}
-
-ready(function(){
-  document.body.classList.add('oa-home-desktop');
-  var wrap=document.querySelector('.wrap');
-  if(!wrap)return;
-  buildHero(wrap);buildBot(wrap);addFeedLabel(wrap);buildPortfolio(document.getElementById('right-rail'));
-});
+function money(v){var n=Number(v||0);if(!isFinite(n))n=0;return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2}).format(n)}
+function num(v){var n=Number(v||0);return isFinite(n)?n:0}
+function ready(fn){if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fn);else fn()}
+function icon(name){var map={home:'<path d="M3 11.5 12 4l9 7.5"/><path d="M5 10.5V20h14v-9.5"/>',market:'<path d="M4 19V9"/><path d="M10 19V5"/><path d="M16 19v-7"/><path d="M22 19H2"/>',portfolio:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M16 11h5"/><circle cx="16" cy="12" r="1"/>',bot:'<rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 3v4"/><path d="M8 12h.01M16 12h.01"/><path d="M8 16h8"/>',msg:'<path d="M4 5h16v12H8l-4 3z"/>',group:'<circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2.5 19c.8-3.2 3-5 5.5-5s4.7 1.8 5.5 5"/><path d="M14 15c2.7-.4 5.1 1 6 4"/>',bell:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/>',settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.6v-.1A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.1 15a1.7 1.7 0 0 0-.6-1A1.7 1.7 0 0 0 2.4 13.6H2v-4h.4A1.7 1.7 0 0 0 4.1 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 8.5 4.1a1.7 1.7 0 0 0 1-.6A1.7 1.7 0 0 0 9.9 2.4V2h4v.4a1.7 1.7 0 0 0 1.1 1.7 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 8.5a1.7 1.7 0 0 0 .6 1 1.7 1.7 0 0 0 1.1.4h.4v4h-.4a1.7 1.7 0 0 0-1.7 1.1z"/>',profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21c.7-4.4 3.6-7 8-7s7.3 2.6 8 7"/>',search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>'};return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">'+(map[name]||'')+'</svg>'}
+function buildSidebar(){var sb=document.getElementById('sidebar');if(!sb)return;sb.innerHTML='<div class="oa-desk-side">'
++'<a class="oa-desk-brand" href="/"><span class="oa-desk-logo"></span><span class="oa-desk-brand-copy"><span class="oa-desk-brand-name">OrcAgent</span><span class="oa-desk-brand-sub">Social Trading</span></span></a>'
++'<nav class="oa-desk-nav"><div class="oa-desk-section">Main</div>'
++'<a class="oa-desk-link active" href="/">'+icon('home')+'<span>Home</span></a>'
++'<a class="oa-desk-link" href="/live-market">'+icon('market')+'<span>Live Market</span></a>'
++'<a class="oa-desk-link" href="/wallet">'+icon('portfolio')+'<span>Portfolio</span></a>'
++'<a class="oa-desk-link" href="/auto-trading-bot">'+icon('bot')+'<span>Auto Trading Bot</span></a>'
++'<div class="oa-desk-section">Community</div>'
++'<a class="oa-desk-link" href="/messages">'+icon('msg')+'<span>Messages</span><span class="oa-desk-count" id="oa-desk-msg-count"></span></a>'
++'<a class="oa-desk-link" href="/groups">'+icon('group')+'<span>Groups</span></a>'
++'<a class="oa-desk-link" href="/notifications">'+icon('bell')+'<span>Notifications</span><span class="oa-desk-count" id="oa-desk-notif-count"></span></a>'
++'<a class="oa-desk-link" id="oa-desk-profile-link" href="/profile">'+icon('profile')+'<span>Profile</span></a>'
++'<a class="oa-desk-link" href="/settings">'+icon('settings')+'<span>Settings</span></a></nav>'
++'<button class="oa-desk-post" id="oa-desk-post">Create post</button>'
++'<div class="oa-desk-account"><a class="oa-desk-user" id="oa-desk-user" href="/profile"><span class="oa-desk-avatar" id="oa-desk-avatar">OA</span><span class="oa-desk-user-copy"><span class="oa-desk-user-name" id="oa-desk-user-name">OrcAgent user</span><span class="oa-desk-user-sub" id="oa-desk-user-sub">Connected</span></span></a></div></div>';
+var post=document.getElementById('oa-desk-post');if(post)post.addEventListener('click',function(){var c=document.getElementById('feed-composer')||document.getElementById('postText');if(c)c.scrollIntoView({behavior:'smooth',block:'center'});setTimeout(function(){var t=document.getElementById('postText');if(t)t.focus()},350)});
+Promise.allSettled([fetch('/api/me',{credentials:'include'}).then(function(r){return r.json()}),fetch('/api/messages/unread_count',{credentials:'include'}).then(function(r){return r.json()}),fetch('/api/notifications/mine/unread_count',{credentials:'include'}).then(function(r){return r.json()})]).then(function(res){var me=res[0].status==='fulfilled'?res[0].value||{}:{};if(me.ok){var name=me.username||me.display_name||'OrcAgent user',wallet=me.wallet||'';document.getElementById('oa-desk-user-name').textContent=name;document.getElementById('oa-desk-user-sub').textContent=wallet?wallet.slice(0,5)+'…'+wallet.slice(-4):'Connected';var pl=document.getElementById('oa-desk-profile-link'),ul=document.getElementById('oa-desk-user');if(wallet){pl.href='/profile/'+encodeURIComponent(wallet);ul.href=pl.href}if(me.avatar){document.getElementById('oa-desk-avatar').innerHTML='<img alt="" src="'+String(me.avatar).replace(/"/g,'&quot;')+'">'}else document.getElementById('oa-desk-avatar').textContent=name.slice(0,2).toUpperCase()}
+function badge(id,n){var el=document.getElementById(id);n=Number(n||0);if(!el)return;el.textContent=n>99?'99+':String(n);el.classList.toggle('show',n>0)}var m=res[1].status==='fulfilled'?res[1].value||{}:{},n=res[2].status==='fulfilled'?res[2].value||{}:{};badge('oa-desk-msg-count',m.count);badge('oa-desk-notif-count',n.unread)})}
+function buildHead(wrap){if(document.getElementById('oa-home-head'))return;var h=document.createElement('div');h.id='oa-home-head';h.className='oa-home-head';h.innerHTML='<div class="oa-home-title">Home</div><div class="oa-home-head-actions"><a class="oa-home-head-btn" href="/notifications" aria-label="Notifications">'+icon('bell')+'</a><a class="oa-home-head-btn" href="/live-market" aria-label="Search market">'+icon('search')+'</a></div>';wrap.insertBefore(h,wrap.firstChild)}
+function buildHero(wrap){if(document.getElementById('oa-home-hero'))return;var hero=document.createElement('section');hero.className='oa-home-hero';hero.id='oa-home-hero';hero.innerHTML='<div class="oa-home-hero-copy"><div class="oa-home-eyebrow">ORCAGENT</div><h1>Trade smarter.<br><span>Move together.</span></h1><p>Multi-chain social trading, live market intelligence and automated strategies in one place.</p><a class="oa-home-primary" href="/auto-trading-bot">Start Trading <span>→</span></a></div>';var head=document.getElementById('oa-home-head');wrap.insertBefore(hero,head?head.nextSibling:wrap.firstChild)}
+function buildBot(wrap){if(document.getElementById('oa-home-bot'))return;var bot=document.createElement('section');bot.className='oa-home-bot';bot.id='oa-home-bot';bot.innerHTML='<div class="oa-home-bot-icon">◎</div><div class="oa-home-bot-main"><div class="oa-home-bot-title">Your bot is <span id="oa-home-bot-state">checking…</span><span class="oa-home-bot-dot" id="oa-home-bot-dot"></span></div><div class="oa-home-bot-meta"><span id="oa-home-bot-open">— open</span><span>•</span><span id="oa-home-bot-pnl">PnL —</span></div></div><a class="oa-home-bot-btn" href="/auto-trading-bot">Open Bot</a>';var hero=document.getElementById('oa-home-hero');if(hero&&hero.nextSibling)wrap.insertBefore(bot,hero.nextSibling);else wrap.appendChild(bot);fetch('/api/bot/status',{credentials:'include'}).then(function(r){return r.json()}).then(function(d){var running=!!(d&&(d.running||d.status==='running')),state=document.getElementById('oa-home-bot-state'),dot=document.getElementById('oa-home-bot-dot');if(state){state.textContent=running?'running':'idle';state.style.color=running?'#3ad29b':'#8a919c'}if(dot)dot.classList.toggle('running',running);var open=d&&((d.open_positions!=null&&d.open_positions)||(d.positions_open!=null&&d.positions_open));if(open!=null)document.getElementById('oa-home-bot-open').textContent=open+' open';var pnl=d&&(d.pnl_usd!=null?d.pnl_usd:(d.total_pnl_usd!=null?d.total_pnl_usd:null));if(pnl!=null)document.getElementById('oa-home-bot-pnl').textContent='PnL '+money(pnl)}).catch(function(){var s=document.getElementById('oa-home-bot-state');if(s)s.textContent='idle'})}
+function addFeedLabel(wrap){if(document.getElementById('oa-home-feed-label'))return;var el=document.createElement('div');el.className='oa-home-section-label';el.id='oa-home-feed-label';el.innerHTML='<span>For You</span> &nbsp;&nbsp; Following';var bot=document.getElementById('oa-home-bot');if(bot&&bot.nextSibling)wrap.insertBefore(el,bot.nextSibling);else wrap.appendChild(el)}
+function buildPortfolio(rail){if(!rail||document.getElementById('oa-portfolio-card'))return;var card=document.createElement('section');card.className='oa-portfolio-card';card.id='oa-portfolio-card';card.innerHTML='<div class="oa-pf-head"><div class="oa-pf-title">Portfolio</div><a class="oa-pf-link" href="/wallet">View all →</a></div><div class="oa-pf-body"><div class="oa-pf-kicker">Total value</div><div class="oa-pf-value" id="oa-pf-value">$0.00</div><div class="oa-pf-meta"><span>●</span><span>Live multi-chain balances</span></div><div class="oa-pf-line"></div><div class="oa-pf-split"><div class="oa-pf-chip"><b>USDC</b><span id="oa-pf-usdc">$0.00</span></div><div class="oa-pf-chip"><b>SOL</b><span id="oa-pf-sol">$0.00</span></div><div class="oa-pf-chip"><b>Other</b><span id="oa-pf-other">$0.00</span></div></div></div>';rail.insertBefore(card,rail.children[1]||null);Promise.allSettled([fetch('/api/wallet/usdc-summary',{credentials:'include'}).then(function(r){return r.json()}),fetch('/api/wallet/tokens',{credentials:'include'}).then(function(r){return r.json()}),fetch('/api/wallet/balance',{credentials:'include'}).then(function(r){return r.json()})]).then(function(res){var s=res[0].status==='fulfilled'?res[0].value||{}:{},t=res[1].status==='fulfilled'?res[1].value||{}:{},b=res[2].status==='fulfilled'?res[2].value||{}:{};var usdc=num(s.total_usdc!=null?s.total_usdc:s.total),solValue=num(b.sol)*num(b.sol_price||s.sol_price||0),tokens=Array.isArray(t.tokens)?t.tokens:[],other=tokens.reduce(function(sum,x){var sym=String(x.symbol||x.ticker||'').toUpperCase();if(sym==='USDC'||sym==='USDT'||sym==='SOL')return sum;var v=x.usd_value;if(v==null)v=x.value_usd;if(v==null)v=num(x.balance||x.amount)*num(x.price_usd||x.price);return sum+num(v)},0);document.getElementById('oa-pf-value').textContent=money(usdc+solValue+other);document.getElementById('oa-pf-usdc').textContent=money(usdc);document.getElementById('oa-pf-sol').textContent=money(solValue);document.getElementById('oa-pf-other').textContent=money(other)})}
+ready(function(){document.body.classList.add('oa-home-desktop');buildSidebar();var wrap=document.querySelector('.wrap');if(!wrap)return;buildHead(wrap);buildHero(wrap);buildBot(wrap);addFeedLabel(wrap);buildPortfolio(document.getElementById('right-rail'))})
 })();
