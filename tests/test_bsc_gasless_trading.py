@@ -56,5 +56,21 @@ check('bundled fee marker is chain-scoped and avoids a second ERC20 fee transfer
       and '_record_bundled_fee(' in src)
 check('private keys and signatures are never logged by the adapter',
       'print(' not in src and 'logger.' not in src)
+check('a chain 0x has not onboarded to Gasless yet falls back to real gas '
+      'instead of dead-ending the buy -- ensure_gas above trusted the relay '
+      'sight unseen, so this is what actually funds the wallet when that '
+      'trust turns out to be wrong',
+      'original_ensure(' in src
+      and 'auto_buy_token_address=token_address' in src
+      and 'auto_buy_requested_usdc=float(amount_str)' in src)
+check('...and only swaps the ordinary (non-gasless) way once that funding '
+      'succeeded, never on the strength of the failed gasless attempt alone',
+      'if not gas_ok:' in src
+      and 'return original_execute(wallet, private_key, action, token_address, '
+          'amount_str, chain)' in src)
+check('...deriving the EVM address and user id itself, since gasless failed '
+      'before either was ever looked up for this buy',
+      'evm_address = Account.from_key(private_key).address' in src
+      and 'user_id = d._get_uid(conn, wallet)' in src)
 
 raise SystemExit(0 if all(checks) else 1)
