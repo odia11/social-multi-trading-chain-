@@ -56,9 +56,10 @@ check('...while still ANSWERING with the real currency, so an older page that '
 buy = fn('_solana_buy_flow')
 check('the manual buy funds the trade in the one currency',
       'base=SOLANA_BASE_CURRENCY' in buy)
-check('...spending the configured size directly, with no conversion through a '
-      'SOL price that may not have loaded yet',
-      'spend = round(min(min_trade_usdc, us_usdc), 2)' in buy)
+check('...spending the configured (or requested) size directly, with no '
+      'conversion through a SOL price that may not have loaded yet',
+      'target_usdc = (min_trade_usdc if requested_usdc is None' in buy
+      and 'spend = round(min(target_usdc, us_usdc), 2)' in buy)
 check('...checking the USDC balance for the trade', '_get_solana_usdc_balance' in buy)
 check('...and the SOL balance SEPARATELY, for the network fee. One check '
       'covering both is how a user gets told the wrong currency is short',

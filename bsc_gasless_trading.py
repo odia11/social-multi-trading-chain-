@@ -285,7 +285,38 @@ def install(d):
             state.last_evm_buy = {'chain': chain, 'tx_hash': tx_hash, 'at': time.time()}
             return True, '', tx_hash
         except Exception as exc:
-            return False, d._redact_keys(str(exc))[:500], ''
+            # 0x does not (yet) run the Gasless relayer on every chain in
+            # EVM_CHAINS -- a brand-new chain (Robinhood Chain at its mainnet
+            # launch is the known case; see dashboard.py's gas-sponsor module
+            # comment) can be added to OrcAgent before 0x has onboarded it
+            # there. ensure_gas() above always answers "gas is fine" for a
+            # relayed chain, on the assumption this call will in fact relay
+            # it -- so when it can't, the wallet may hold zero native gas
+            # and nothing has funded it yet. Falling back here, instead of
+            # just reporting the gasless failure, is what actually pays that
+            # debt: ensure real gas the normal way (top-up from this same
+            # USDC, the platform sponsor, or a SOL bootstrap bridge -- see
+            # _ensure_evm_gas's own docstring) and then swap through the
+            # ordinary 0x route once there is gas to broadcast it with.
+            try:
+                evm_address = Account.from_key(private_key).address
+                conn = sqlite3.connect(d.DB_FILE)
+                try:
+                    user_id = d._get_uid(conn, wallet)
+                finally:
+                    conn.close()
+                gas_ok, gas_msg, _bridge_id = original_ensure(
+                    user_id, wallet, private_key, evm_address, chain,
+                    auto_buy_token_address=token_address,
+                    auto_buy_requested_usdc=float(amount_str))
+            except Exception:
+                gas_ok, gas_msg = False, ''
+            if not gas_ok:
+                # Whichever failed last is the more specific reason: ensure_gas
+                # names a concrete deposit/instruction, gasless's own error is
+                # only a fallback when that one has nothing to say.
+                return False, d._redact_keys(gas_msg or str(exc))[:500], ''
+            return original_execute(wallet, private_key, action, token_address, amount_str, chain)
 
     def charge_fee(private_key, wallet, user_id, symbol, usdc_amount, kind,
                    chain='bsc', trade_ts=None, gross_profit=0.0):
