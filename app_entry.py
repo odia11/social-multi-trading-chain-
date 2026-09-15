@@ -10,6 +10,7 @@ import os
 os.environ['ORCAGENT_FRONTS_GAS'] = '0'
 
 import dashboard as _dashboard
+from search_seo import install as _install_search_seo
 from evm_to_solana_bridge import install as _install_evm_to_solana_bridge
 from wallet_deposit_guidance import install as _install_wallet_deposit_guidance
 from app_performance import install as _install_app_performance
@@ -49,6 +50,9 @@ from response_privacy_hardening import install as _install_response_privacy_hard
 from audit_hardening import install as _install_audit_hardening
 from security_monitoring import install as _install_security_monitoring
 from backup_scheduler import install as _install_backup_scheduler
+
+# Register SEO first so its response pass runs last, after preview decorators.
+_install_search_seo(_dashboard)
 
 _install_evm_to_solana_bridge(_dashboard)
 _install_wallet_deposit_guidance(_dashboard)
