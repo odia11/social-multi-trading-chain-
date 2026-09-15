@@ -4,9 +4,9 @@ Home and Portfolio used to depend on :has(body...) to override the dashboard's
 root overflow:hidden rule. Older Android WebViews reject the complete selector
 list when it contains unsupported :has(), so scroll rules use only root classes.
 
-Android Chromium can also behave badly when both html and body are independent
-vertical scrollers. The performance bootstrap therefore makes body the single
-native mobile scroll container on Home and Portfolio before the body is parsed.
+In standards-mode Android Chromium, document.documentElement is the root
+scrollingElement. Keep html as the only vertical document scroller and let body
+and the app shells grow naturally; do not create a second body scroller.
 """
 import pathlib
 
@@ -48,12 +48,14 @@ def test_route_bootstrap_sets_scroll_classes_before_dynamic_assets():
     assert portfolio_class < portfolio_css
 
 
-def test_android_uses_one_native_mobile_scroll_owner():
+def test_android_uses_document_element_as_single_native_scroll_owner():
     assert "if path in ('/', '/wallet')" in APP_PERF
     assert 'oa-native-mobile-scroll' in APP_PERF
-    assert 'html.oa-native-mobile-scroll{height:100%!important' in APP_PERF
-    assert 'overflow:hidden!important' in APP_PERF
-    assert 'html.oa-native-mobile-scroll body{height:100dvh!important' in APP_PERF
+    assert 'html.oa-native-mobile-scroll{height:auto!important' in APP_PERF
     assert 'overflow-y:auto!important' in APP_PERF
-    assert 'html.oa-native-mobile-scroll body #app{height:auto!important' in APP_PERF
+    assert 'html.oa-native-mobile-scroll body{height:auto!important' in APP_PERF
     assert 'overflow:visible!important' in APP_PERF
+    assert 'html.oa-native-mobile-scroll body #app{height:auto!important' in APP_PERF
+    assert 'html.oa-native-mobile-scroll.oa-modal-open' in APP_PERF
+    assert 'html.oa-native-mobile-scroll.oa-wallet-actions-open' in APP_PERF
+    assert 'html.oa-native-mobile-scroll.oa-app-menu-open' in APP_PERF
