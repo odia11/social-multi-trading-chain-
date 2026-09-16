@@ -3,6 +3,7 @@
 Loads route-critical styles before first paint and keeps page-specific scripts
 deferred. The browser should never render legacy markup and restyle it later.
 """
+from flask import g
 
 
 def install(appmod) -> None:
@@ -32,9 +33,20 @@ def install(appmod) -> None:
                 if asset not in html:
                     tags.append(f'<script src="{src}" defer{extra}></script>')
 
+            # This module's own after_request hook is registered before
+            # security_hardening's, so by Flask's LIFO after_request order it
+            # runs AFTER security_hardening has already added nonces to
+            # whatever script tags existed at that point -- any inline
+            # <script> added here would miss that pass and be silently
+            # dropped by the CSP's script-src-elem nonce requirement. Reading
+            # the same per-request nonce security_hardening put in g sidesteps
+            # the ordering entirely.
+            _nonce = getattr(g, 'orca_csp_nonce', '')
+            _nonce_attr = f' nonce="{_nonce}"' if _nonce else ''
+
             if 'data-orca-bfcache-guard="1"' not in html:
                 tags.append(
-                    '<script data-orca-bfcache-guard="1">'
+                    f'<script{_nonce_attr} data-orca-bfcache-guard="1">'
                     '(function(){window.addEventListener("pageshow",function(e){'
                     'if(!e.persisted)return;e.stopImmediatePropagation();'
                     'setTimeout(function(){document.dispatchEvent(new CustomEvent("orca:bfcache-restored"));},0);'
@@ -85,7 +97,7 @@ def install(appmod) -> None:
             # vertical scrollers.
             if path in ('/', '/wallet') and 'data-oa-native-mobile-scroll="1"' not in html:
                 tags.append(
-                    '<script data-oa-native-mobile-scroll="1">'
+                    f'<script{_nonce_attr} data-oa-native-mobile-scroll="1">'
                     '(function(){if(window.matchMedia&&window.matchMedia("(max-width:767px)").matches)'
                     'document.documentElement.classList.add("oa-native-mobile-scroll");})();'
                     '</script>'

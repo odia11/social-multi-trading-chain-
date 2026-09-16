@@ -5,7 +5,7 @@ navigation-style "Start Trading" CTA to use it. The actual bot start/stop
 button on the bot page is deliberately excluded.
 """
 import sqlite3
-from flask import redirect
+from flask import g, redirect
 
 
 def install(dashboard):
@@ -79,7 +79,17 @@ def install(dashboard):
         # bundle that creates a /live-market Start Trading anchor later.
         # Capture phase is deliberate: stop the old target before any bubble
         # handler or SPA navigation controller sees the tap.
-        guard = r'''<script id="oa-auto-bot-route-guard">
+        #
+        # This module's after_request hook is registered before
+        # security_hardening's, so by Flask's LIFO after_request order it
+        # runs AFTER security_hardening has already handed out nonces to the
+        # script tags that existed at that point -- a plain <script> injected
+        # here would be silently dropped by the CSP's script-src-elem nonce
+        # requirement. Reading the same per-request nonce security_hardening
+        # put in g sidesteps the ordering entirely.
+        _nonce = getattr(g, 'orca_csp_nonce', '')
+        _nonce_attr = f' nonce="{_nonce}"' if _nonce else ''
+        guard = '<script' + _nonce_attr + r''' id="oa-auto-bot-route-guard">
 (function(){
   var TARGET='/auto-trading-bot';
   function label(el){return String((el&&el.textContent)||'').replace(/\s+/g,' ').trim().toLowerCase();}
