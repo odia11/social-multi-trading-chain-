@@ -115,6 +115,7 @@ html,body{min-height:100vh;min-height:100dvh;background:var(--bg);font-family:va
     <a class="section-nav-link" data-target="docs" href="#docs">Docs</a>
     <a class="section-nav-link" data-target="fees" href="#fees">Fees</a>
     <a class="section-nav-link" data-target="security" href="#security">Security</a>
+    <a class="section-nav-link" data-target="privacy" href="#privacy">Privacy</a>
     <a class="section-nav-link" data-target="terms" href="#terms">Terms</a>
   </div>
 </div>
@@ -315,6 +316,53 @@ html,body{min-height:100vh;min-height:100dvh;background:var(--bg);font-family:va
       protect you from a token itself losing value, from market volatility,
       or from a signed transaction you approved yourself. Only fund your
       trading wallet with what you're willing to actively trade with.</p>
+    </div>
+  </section>
+
+  <!-- ═══════════ PRIVACY ═══════════ -->
+  <section class="info-section" id="privacy">
+    <div class="section-title"><span class="section-icon">⚿</span> Privacy</div>
+    <div class="info-body">
+      <h3>What's stored</h3>
+      <p>Your wallet address, and the encrypted private key of the
+      server-generated trading wallet described in Security above — encrypted
+      twice before storage, and only ever decrypted in memory, momentarily, to
+      sign a trade. Any username, avatar, and post you choose to add. If you
+      connect X (Twitter) to share trades or use the buzz-discovery feature,
+      the access token X issues for that connection.</p>
+
+      <h3>Remembered logins</h3>
+      <p>Choosing to stay signed in stores a device token in your browser.
+      The server only ever stores its <strong>hash</strong> — the same
+      one-way approach used for the platform's own security checks — so a
+      database leak alone cannot be replayed as a working login.</p>
+
+      <h3>What's not stored</h3>
+      <p>Your seed phrase never leaves your own wallet app — OrcAgent never
+      sees it. A decrypted private key is never written to disk, logged, or
+      shown back to you after the trading wallet is first set up.</p>
+
+      <h3>IP addresses</h3>
+      <p>Used only for rate-limiting and abuse prevention — not for
+      advertising, profiling, or resale. IPs are not retained as part of your
+      permanent account record.</p>
+
+      <h3>Third parties data passes through</h3>
+      <p>Trade routing and pricing: 0x (EVM chains) and Jupiter (Solana).
+      Market data and charts: DexScreener and GeckoTerminal. If an
+      administrator has enabled it, AI-scored token signals and buzz
+      discovery send token/market data (not your wallet or trade history) to
+      Anthropic's API. Web push notifications, if you opt in, are delivered
+      through your browser's own push service. None of this is ad
+      targeting, and OrcAgent does not sell personal data.</p>
+
+      <h3>Backups</h3>
+      <p>Daily database backups are encrypted before they're written to
+      disk, with a key kept separate from the database itself.</p>
+
+      <h3>Questions or deletion requests</h3>
+      <p>There's no self-service "delete my account" button yet — reach an
+      administrator through in-app support to request deletion of your data.</p>
     </div>
   </section>
 
