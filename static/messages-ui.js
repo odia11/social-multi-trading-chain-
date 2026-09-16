@@ -240,10 +240,14 @@ function sharedCard(tr){
   var pnl=num(tr.pnl_sol!=null?tr.pnl_sol:tr.pnl);
   var pct=tr.pnl_pct!=null?num(tr.pnl_pct):(entry&&exit?((exit-entry)/entry*100):0);
   var currency=tr.pnl_currency||'SOL';
-  /* Live Market owns the current token-detail experience. Passing addr uses
-     its existing exact-address startup path, so the right token opens
-     immediately without ever visiting the retired standalone /token page. */
-  var route=mint?'/live-market?addr='+encodeURIComponent(mint):'';
+  /* Live Market owns the current token-detail experience. Passing mint uses
+     its existing exact-address startup path (see live-market-pro.js's own
+     ?mint= deep-link handling, the same one search/wallet/calls/push already
+     use), so the right token opens immediately without ever visiting the
+     retired standalone /token page. This used to pass addr= -- the retired
+     live_market.html's param name, silently ignored by the page that
+     actually replaced it, so tapping this card opened a blank Live Market. */
+  var route=mint?'/live-market?mint='+encodeURIComponent(mint):'';
   var sideClass=side==='BUY'?'buy':'sell';
   var pnlClass=pct>=0?'pos':'neg';
 
