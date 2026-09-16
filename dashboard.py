@@ -7,7 +7,6 @@ import calendar
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from PIL import Image, ImageDraw, ImageFont
-import bcrypt as _bcrypt
 try:
     import nacl.public as _nacl_public
     import nacl.signing as _nacl_signing
@@ -497,7 +496,7 @@ def _refresh_session():
 
 # /api/wallet/set is the auth-bootstrap endpoint — it establishes the session so it
 # cannot require a session-scoped CSRF token. Origin check still protects it.
-_CSRF_EXEMPT_PATHS = frozenset({'/api/wallet/set', '/api/wallet/connect-readonly', '/api/login_password', '/api/connect-wallet', '/api/instant-trade', '/api/phantom/init', '/api/phantom/decrypt'})
+_CSRF_EXEMPT_PATHS = frozenset({'/api/wallet/set', '/api/wallet/connect-readonly', '/api/connect-wallet', '/api/instant-trade', '/api/phantom/init', '/api/phantom/decrypt'})
 
 def csrf_exempt(f):
     """Decorator: mark a view function as exempt from CSRF token validation.
@@ -1523,7 +1522,6 @@ _OWNER_IPS = frozenset(
 
 # Sensitive paths that are hard-blocked for bot/empty User-Agents
 _BOT_BLOCKED_PATHS = frozenset({
-    '/api/login_password',
     '/api/instant-trade',
     '/api/wallet/send',
     '/api/connect-wallet',
@@ -12215,18 +12213,35 @@ def profile_view(wallet_address: str):
         conn.close()
 
 
-_MINT_RE = re.compile(r'^[1-9A-HJ-NP-Za-km-z]{32,44}$')
+_MINT_RE = re.compile(r'^[1-9A-HJ-NP-Za-km-z]{32,44}$')  # == is_valid_solana_address's own pattern
+
+
+def _is_valid_token_address(addr: str) -> bool:
+    """A mint/contract address on any chain this page can show a card for.
+
+    static/token-card.js and /api/token/info/<mint> already auto-detect
+    Solana (base58) vs EVM (0x-hex) from the address format alone -- no
+    chain param needed on this one, unlike the per-chain endpoints below
+    that also need to know WHICH EVM chain. Reused instead of repeating
+    `_MINT_RE.match(x) or is_valid_evm_address(x)` at every call site."""
+    return bool(_MINT_RE.match(addr or '') or is_valid_evm_address(addr or ''))
+
 
 @app.route('/token/<mint_address>')
 def token_detail(mint_address):
     """Every bot-trade link across the app points here. Renders a lean
     standalone page that's just the shared token card (static/token-card.js,
     also used as the modal on /live-market) -- no separate UI/styling to
-    maintain, no busy market table behind it."""
+    maintain, no busy market table behind it.
+
+    Used to redirect every EVM address straight to /history -- the shared
+    card and its metadata/chart APIs are chain-aware, but this route's own
+    guard never was, so a BSC/Base/Arbitrum/Polygon/Robinhood share link
+    (e.g. from a DM trade card) never opened."""
     wallet = _current_wallet()
     if not wallet:
         return redirect('/')
-    if not _MINT_RE.match(mint_address or ''):
+    if not _is_valid_token_address(mint_address):
         return redirect('/history')
     mint_short = mint_address[:4] + '…' + mint_address[-4:] if len(mint_address) >= 8 else mint_address
     return render_template(
@@ -12240,6 +12255,10 @@ def token_detail(mint_address):
 
 @app.route('/api/token/<mint>/candles')
 def api_token_candles(mint):
+    """Solana-only, and left that way: nothing calls this any more --
+    showTokenCard() charts through /api/chart/<mint>?chain=, which already
+    covers every EVM chain too. Kept for any caller outside this repo that
+    might still hit it directly; not worth widening a route nothing here uses."""
     wallet = _current_wallet()
     if not wallet:
         return jsonify({'ok': False, 'candles': []})
@@ -12291,7 +12310,9 @@ def api_token_co_traders(mint):
     wallet = _current_wallet()
     if not wallet:
         return jsonify({'ok': False, 'users': []}), 401
-    if not _MINT_RE.match(mint or ''):
+    # A plain open_positions lookup by address -- chain-agnostic already,
+    # this only ever excluded EVM tokens because the format check did.
+    if not _is_valid_token_address(mint):
         return jsonify({'ok': False, 'users': []}), 400
     try:
         conn = sqlite3.connect(DB_FILE)
@@ -12355,7 +12376,9 @@ def api_token_holders(mint):
     wallet = _current_wallet()
     if not wallet:
         return jsonify({'ok': False, 'holders': [], 'total': 0, 'platform_holders': 0}), 401
-    if not _MINT_RE.match(mint or ''):
+    # An open_positions lookup by address -- chain-agnostic already, this
+    # only ever excluded EVM tokens because the format check did.
+    if not _is_valid_token_address(mint):
         return jsonify({'ok': False, 'holders': [], 'total': 0, 'platform_holders': 0}), 400
     try:
         conn = sqlite3.connect(DB_FILE)
@@ -12422,7 +12445,9 @@ def api_token_feed(mint):
     wallet = _current_wallet()
     if not wallet:
         return jsonify({'ok': False, 'posts': []}), 401
-    if not _MINT_RE.match(mint or ''):
+    # Searches feed_posts by cashtag symbol, not by mint -- chain-agnostic
+    # already, this only ever excluded EVM tokens because the format check did.
+    if not _is_valid_token_address(mint):
         return jsonify({'ok': False, 'posts': []}), 400
     symbol = _sanitize(request.args.get('sym', '').strip())[:32]
     if not symbol:
@@ -12464,6 +12489,14 @@ def api_token_feed(mint):
 @app.route('/api/token/<mint>/safety', methods=['GET'])
 @rate_limit(30, 60)
 def api_token_safety(mint):
+    """Solana-only, and left that way FOR NOW: mint/freeze-authority and
+    LP-lock are SPL-token concepts with no EVM equivalent. An EVM token
+    opened through /token/<address> or a DM share card gets a card with no
+    safety badge rather than a wrong one -- see _check_evm_honeypot() for
+    the chain-aware honeypot check the auto-bot already runs before a trade;
+    wiring an EVM branch here (chain param, GoPlus/honeypot.is dispatch,
+    reshaping its result into mint_authority_active/lp_locked_pct's shape)
+    is real, separate work, not a one-line relax of the address format."""
     wallet = _current_wallet()
     if not wallet:
         return jsonify({'ok': False}), 401
@@ -12863,6 +12896,10 @@ def page_fees():
 @app.route('/security')
 def page_security():
     return redirect('/info#security')
+
+@app.route('/privacy')
+def page_privacy():
+    return redirect('/info#privacy')
 
 # TOS_VERSION gates re-acceptance: bump this string whenever _TOS_CONTENT_HTML
 # changes in a way that requires every user to accept again. Old acceptance
@@ -17023,93 +17060,6 @@ def connect_wallet_readonly():
     return jsonify({'ok': True, 'wallet': address, 'readonly': True,
                     'has_trading_key': False, 'csrf_token': csrf_tok})
 
-# Computed once at import time (bcrypt is deliberately slow -- ~the same cost as
-# a real check, which is the point) so login_password() can run a same-cost dummy
-# comparison for "no such user"/"no password set" instead of skipping bcrypt
-# entirely, which would otherwise leak which case it was via response timing.
-_LOGIN_DUMMY_BCRYPT_HASH = _bcrypt.hashpw(b'orcagent-dummy-password-for-timing', _bcrypt.gensalt(rounds=12))
-
-@app.route('/api/login_password', methods=['POST'])
-@rate_limit(10, 60)
-def login_password():
-    ip   = request.remote_addr or '0.0.0.0'
-    body = request.json or {}
-    username = str(body.get('username', '')).strip()
-    password = str(body.get('password', '')).strip()
-    if not username or not password:
-        return jsonify({'success': False, 'error': 'Username and password required'}), 400
-
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        row = conn.execute(
-            '''SELECT id, wallet_address, COALESCE(username,''), password_hash,
-                      CASE WHEN encrypted_private_key != '' AND encrypted_private_key IS NOT NULL
-                           THEN 1 ELSE 0 END
-               FROM users
-               WHERE username = ? OR wallet_address = ?
-               LIMIT 1''',
-            (username, username)
-        ).fetchone()
-    finally:
-        conn.close()
-
-    # SECURITY FIX (see commit): "no such user" and "user exists but has no
-    # password set" used to return distinct messages (and skip bcrypt entirely,
-    # a timing tell too) -- letting a caller enumerate valid usernames/wallet
-    # addresses by which error they got back. Both now return the identical
-    # generic message and always run a same-cost dummy bcrypt check.
-    if not row or not row[3]:
-        _bcrypt.checkpw(password.encode('utf-8'), _LOGIN_DUMMY_BCRYPT_HASH)
-        _record_ip_failure(ip)
-        return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
-
-    user_id, wallet_address, db_username, password_hash, has_trading_key = row
-
-    try:
-        valid = _bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
-    except Exception:
-        valid = False
-    if not valid:
-        _record_ip_failure(ip)
-        return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
-
-    session.permanent        = True
-    session.modified         = True
-    session['user_id']       = user_id
-    session['wallet']        = wallet_address
-    session['authenticated'] = True
-    csrf_tok = _get_csrf_token()
-    add_user_log(wallet_address, 'Login via password')
-    return jsonify({
-        'success':         True,
-        'redirect':        '/dashboard',
-        'wallet':          wallet_address,
-        'username':        db_username or '',
-        'has_trading_key': bool(has_trading_key),
-        'is_admin':        _is_owner(wallet_address),
-        'csrf_token':      csrf_tok,
-    })
-
-@app.route('/api/set_password', methods=['POST'])
-@rate_limit(10, 60)
-def set_password():
-    wallet = _authenticated_wallet()
-    if not wallet:
-        return jsonify({'success': False, 'error': 'Login required'}), 401
-    body     = request.json or {}
-    password = str(body.get('password', '')).strip()
-    if len(password) < 8:
-        return jsonify({'success': False, 'error': 'Password must be at least 8 characters'}), 400
-    pw_hash = _bcrypt.hashpw(password.encode('utf-8'), _bcrypt.gensalt(rounds=12)).decode('utf-8')
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        conn.execute('UPDATE users SET password_hash=? WHERE wallet_address=?', (pw_hash, wallet))
-        conn.commit()
-    finally:
-        conn.close()
-    add_user_log(wallet, 'Password set/updated')
-    return jsonify({'success': True})
-
 @app.route('/api/auth/nonce', methods=['GET'])
 @rate_limit(20, 60)
 def auth_nonce():
@@ -17877,6 +17827,14 @@ def api_session_resume():
         str(body.get('token', '')).strip(),
         request.cookies.get(DEVICE_COOKIE_NAME, '').strip(),
     ) if t))
+    if not candidates:
+        # A separate line from _redeem_device_token's own "no such token" --
+        # that one means a token was offered and refused; this one means the
+        # browser had nothing to offer at all. Same symptom to the caller
+        # (both end in the one refusal below), different problem to whoever
+        # reads the log.
+        print('[device-session] no remembered login stored — browser offered '
+              'no token or cookie', flush=True)
     wallet, new_token = '', ''
     try:
         for token in candidates:

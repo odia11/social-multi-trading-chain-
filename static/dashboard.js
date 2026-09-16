@@ -152,34 +152,6 @@ async function _webAuthnLogin(){
   }
 }
 
-async function _loginWithPassword(){
-  var userEl=document.getElementById('ob-pwd-user');
-  var passEl=document.getElementById('ob-pwd-pass');
-  var errEl=document.getElementById('ob-pwd-err');
-  var btn=document.getElementById('ob-pwd-btn');
-  if(errEl) errEl.textContent='';
-  var username=(userEl&&userEl.value||'').trim();
-  var password=passEl&&passEl.value||'';
-  if(!username||!password){ if(errEl) errEl.textContent='Please enter your username and password.'; return; }
-  if(btn){ btn.disabled=true; btn.textContent='Logging in…'; }
-  try{
-    var r=await fetch('/api/login_password',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({username:username,password:password})
-    }).then(res=>res.json()).catch(()=>null);
-    if(r&&r.success){
-      if(r.csrf_token) _csrfToken=r.csrf_token;
-      window.location.href='/dashboard';
-    } else {
-      if(errEl) errEl.textContent=(r&&r.error)||'Login failed — check your credentials.';
-    }
-  }catch(e){
-    if(errEl) errEl.textContent='Login failed — please try again.';
-  }finally{
-    if(btn){ btn.disabled=false; btn.textContent='Login & Trade'; }
-  }
-}
-
 function _showWalletOptions(){
   /* Reveal wallet buttons after Face ID failure or "connect a wallet instead" tap */
   var nullEl={style:{},innerHTML:'',textContent:''};
@@ -4233,35 +4205,6 @@ async function openSettings(){
 
 function closeSettings(){
   document.getElementById('settings-modal').classList.remove('open');
-}
-
-async function _setPassword(){
-  var inp=document.getElementById('s-pwd-input');
-  var msg=document.getElementById('s-pwd-msg');
-  var btn=document.getElementById('s-pwd-btn');
-  if(msg){ msg.className='s-msg'; msg.textContent=''; }
-  var password=(inp&&inp.value)||'';
-  if(password.length<8){
-    if(msg){ msg.className='s-msg err'; msg.textContent='Password must be at least 8 characters.'; }
-    return;
-  }
-  if(btn){ btn.disabled=true; btn.textContent='Saving…'; }
-  try{
-    var r=await fetch('/api/set_password',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({password:password})
-    }).then(res=>res.json()).catch(()=>null);
-    if(r&&r.success){
-      if(msg){ msg.className='s-msg ok'; msg.textContent='✓ Password saved — you can now login on mobile without Phantom.'; }
-      if(inp) inp.value='';
-    } else {
-      if(msg){ msg.className='s-msg err'; msg.textContent=(r&&r.error)||'Failed to save password.'; }
-    }
-  }catch(e){
-    if(msg){ msg.className='s-msg err'; msg.textContent='Failed to save password.'; }
-  }finally{
-    if(btn){ btn.disabled=false; btn.textContent='Set Password'; }
-  }
 }
 
 async function saveUsername(){
