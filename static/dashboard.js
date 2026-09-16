@@ -617,10 +617,19 @@ function _applyPhantomDetection(phantomBtn, phantomNote){
     if(lbl) lbl.textContent='Connect Phantom →';
     if(phantomNote){ phantomNote.textContent='Opens Phantom to approve connection'; phantomNote.style.color='var(--muted)'; }
   } else {
-    /* Desktop: not installed — change button to install link */
+    /* Desktop: not installed -- relabel the button, but let it keep calling
+       connectWalletOnboard('phantom') (its original onclick="" attribute)
+       instead of overwriting .onclick to silently window.open() phantom.app.
+       That silent open() is exactly what made "Connect Phantom" look broken
+       from the wallet-onboarding chooser: connectControl()/startConnect()
+       (see mobile-connect-button.js) click this same button programmatically
+       to reach it, .click() doesn't throw either way, so nothing ever
+       reached connectWalletOnboard()'s own "not detected" messaging (already
+       shown as a toast when its usual container isn't visible -- see
+       _showWalletMsg()) and a popup-blocked window.open() left the page
+       looking like the click did nothing at all. */
     var _pLbl=document.getElementById('phantom-ob-label');
     if(_pLbl) _pLbl.textContent='Install Phantom ↗';
-    phantomBtn.onclick=function(){ window.open('https://phantom.app','_blank','noopener'); };
     if(phantomNote) phantomNote.innerHTML='';
   }
 }
@@ -789,6 +798,31 @@ function showStep(n){
 function nextStep(n){currentStep=n+1;showStep(currentStep);}
 function gotoSetupGuide(){currentStep=1;showStep(1);}
 
+function _elementIsVisible(el){
+  while(el && el!==document.body){
+    if(getComputedStyle(el).display==='none') return false;
+    el=el.parentElement;
+  }
+  return !!el;
+}
+/* connectWalletOnboard() writes its status into #wallet-install-msg, a child
+   of #onboard -- the old full-screen connect overlay that "never
+   resurrect[s]" any more (see _guestConnect()'s own comment) but is still
+   in the DOM, permanently display:none, for the handlers underneath it.
+   Whoever calls this function today (the wallet-onboarding.js chooser's
+   "Connect Phantom" option, reached via connectControl()) has no idea that
+   container is invisible, so every message this used to show -- "Phantom
+   not detected", "sign the request", "connection rejected" -- was written
+   where nobody could ever read it. Mirroring it as a toast whenever the
+   real element isn't visible means a click that silently does nothing
+   (indistinguishable from "connecting is broken") gets an answer instead. */
+function _showWalletMsg(msgEl, html, plainText){
+  msgEl.innerHTML=html;
+  msgEl.style.display='block';
+  if(!_elementIsVisible(msgEl) && typeof showLfToast==='function'){
+    showLfToast('👻', plainText, 'warn');
+  }
+}
 async function connectWalletOnboard(type){
   try{ localStorage.removeItem('orca_manual_disconnect'); }catch(e){}
   const isPhantom=type==='phantom';
@@ -803,8 +837,9 @@ async function connectWalletOnboard(type){
     if(isMobile){ if(isPhantom){ _phantomMobileV1Connect(); return; } window.location.href=solflareDeepLink; return; }
     const other=isPhantom?'Solflare':'Phantom';
     const otherUrl=isPhantom?'https://solflare.com':'https://phantom.app';
-    msgEl.innerHTML=name+' wallet not detected. <a href="'+installUrl+'" target="_blank" style="color:var(--blue);text-decoration:underline">Install '+name+'</a> or try <a href="'+otherUrl+'" target="_blank" style="color:var(--blue);text-decoration:underline">'+other+'</a>.';
-    msgEl.style.display='block';
+    _showWalletMsg(msgEl,
+      name+' wallet not detected. <a href="'+installUrl+'" target="_blank" style="color:var(--blue);text-decoration:underline">Install '+name+'</a> or try <a href="'+otherUrl+'" target="_blank" style="color:var(--blue);text-decoration:underline">'+other+'</a>.',
+      name+' wallet not detected — install it from '+installUrl);
     return;
   }
   msgEl.style.display='none';
@@ -812,8 +847,8 @@ async function connectWalletOnboard(type){
     const resp=await provider.connect();
     const pubkey=provider.publicKey||resp?.publicKey;
     if(!pubkey){
-      msgEl.textContent='Could not get wallet address — please try again.';
-      msgEl.style.display='block';
+      _showWalletMsg(msgEl, 'Could not get wallet address — please try again.',
+        'Could not get wallet address — please try again.');
       return;
     }
     phantomKey=pubkey.toString();
@@ -830,8 +865,9 @@ async function connectWalletOnboard(type){
     document.getElementById('wallet-back-btn').style.display='flex';
     const r=await _connectWalletSigned(provider, phantomKey);
     if(!r?.ok && (r?.msg==='Signature rejected'||(r?.msg||'').startsWith('Nonce expired'))){
-      msgEl.textContent='Sign the request in your wallet to log in — please try again';
-      msgEl.style.display='block'; return;
+      _showWalletMsg(msgEl, 'Sign the request in your wallet to log in — please try again',
+        'Sign the request in your wallet to log in — please try again');
+      return;
     }
     if(r?.csrf_token) _csrfToken=r.csrf_token;
     settingsHasKey=r?.has_trading_key||false; _isAdmin=r?.is_admin||false; _updateKeyStatus();
@@ -840,8 +876,8 @@ async function connectWalletOnboard(type){
       await launchApp(); return;
     }
   }catch(e){
-    msgEl.textContent='Connection rejected or failed — please try again.';
-    msgEl.style.display='block';
+    _showWalletMsg(msgEl, 'Connection rejected or failed — please try again.',
+      'Connection rejected or failed — please try again.');
     console.error(e);
   }
 }
