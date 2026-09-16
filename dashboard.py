@@ -1051,6 +1051,19 @@ FEE_RATE_TXN     = 0.0075  # 0.75% transaction fee, charged on BOTH the buy and 
 # the pre-engine path, which swaps the full amount and charges the fee on top
 # -- a way back if the engine misbehaves in production, not an equal option.
 TRADE_ENGINE_MANUAL_EVM = os.getenv('TRADE_ENGINE_MANUAL_EVM', '1').strip() not in ('0', 'false', 'False', '')
+
+# Whether /api/trade/execute will run a SOLANA quote. The quote side has
+# always supported Solana (JupiterProvider is wired into _te_swap_provider);
+# only execution was refused, so a Solana buy skipped the ceiling guarantee,
+# the balance reservation and the idempotency key that the EVM path gets.
+#
+# Defaults OFF. The legacy Solana route works and moves real money, and the
+# swap primitive underneath reports every failure with an empty signature --
+# so the executor has to infer from the subprocess's own step output whether
+# anything was broadcast (see _te_solana_swap_executor). That inference wants
+# watching against real trades before it becomes the default, and a flag that
+# is merely available is a safer way to do that than one that is already on.
+TRADE_ENGINE_SOLANA = os.getenv('TRADE_ENGINE_SOLANA', '0').strip() not in ('0', 'false', 'False', '')
                             # leg of every trade (see _charge_txn_fee()) -- so a full
                             # round-trip pays 1.5% total, split as two separate 0.75%
                             # charges rather than one combined charge at close.
@@ -6472,13 +6485,53 @@ def _execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str,
             marker = ('[fee] buy: requesting quote' if action == 'buy'
                       else 'bps platform fee)')
             capture['fee_bundled'] = (marker in out) and not failed
+            _capture_broadcast_evidence(capture, out)
         return ok, tx_hash, err_msg, token_amount, sol_amount
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as e:
         add_user_log(wallet, 'Swap error: timed out after 120s')
+        # A timeout is the one failure that says nothing about whether the
+        # transaction went out -- the subprocess was killed, not answered. Its
+        # partial stdout is the only evidence either way, so it is read rather
+        # than discarded: without it a swap that really was broadcast is
+        # indistinguishable from one that never left, and a caller that
+        # releases the user's money on that guess lets the same balance be
+        # spent twice.
+        if capture is not None:
+            _capture_broadcast_evidence(
+                capture, (e.stdout.decode('utf-8', 'replace')
+                          if isinstance(e.stdout, bytes) else (e.stdout or '')))
         return False, '', 'timed out after 120s', 0.0, 0.0
     except Exception as e:
         add_user_log(wallet, 'Swap error: ' + str(e)[:80])
         return False, '', str(e)[:200], 0.0, 0.0
+
+
+# orcagent_solana.py prints a numbered step before each stage, and step 5 is
+# the send. Which of those lines made it into stdout is the only honest
+# answer to "could this have been broadcast?" -- see _te_solana_swap_executor
+# for why guessing it wrong is a double-spend rather than a cosmetic error.
+_SOL_SEND_STEP_MARKER = 'Step 5/8'
+_SOL_ONCHAIN_FAIL_MARKER = 'transaction FAILED on-chain'
+
+def _capture_broadcast_evidence(capture: dict, stdout: str) -> None:
+    """Record what the swap subprocess got far enough to do.
+
+    send_attempted  the send stage was entered; a transaction may exist
+    onchain_failed  it landed and the chain rejected it -- definitively no fill
+    signature       the signature, even from a run that then failed
+    """
+    out = stdout or ''
+    capture['send_attempted'] = _SOL_SEND_STEP_MARKER in out
+    capture['onchain_failed'] = _SOL_ONCHAIN_FAIL_MARKER in out
+    sig = ''
+    for line in out.split('\n'):
+        if 'TX:' in line:
+            sig = line.split('TX:')[-1].strip().split()[0] if line.split('TX:')[-1].strip() else ''
+            break
+        if 'solscan.io/tx/' in line:
+            sig = line.split('solscan.io/tx/')[-1].strip().split()[0]
+            break
+    capture['signature'] = sig
 
 def _execute_user_swap(wallet: str, private_key: str, action: str, mint: str, amount_str: str, base: str = 'SOL') -> bool:
     """Execute a Jupiter swap. Returns True only if the subprocess exited 0 with output.
@@ -7819,7 +7872,15 @@ def _te_gas_usd(chain: str) -> Decimal:
     if te_registry.get_chain(chain).kind == 'svm':
         if _sol_price_usd <= 0:
             raise TeQuoteError('SOL price has not loaded yet — cannot price gas')
-        usd = (_TE_SOL_SWAP_FEE * Decimal(str(_sol_price_usd))).quantize(Decimal('0.01'))
+        # ROUND_UP, like the EVM branch below and for the same reason: a
+        # Solana swap fee is around a third of a cent, and quantising it to
+        # the cent the ordinary way rounds it to 0.00 -- which drops a real
+        # cost out of the ceiling entirely, the exact failure this function's
+        # own docstring says it must not allow. The user pays that fee in
+        # their own SOL whether or not the quote counts it, so not counting
+        # it means the ceiling is quietly exceeded rather than held.
+        usd = (_TE_SOL_SWAP_FEE * Decimal(str(_sol_price_usd))
+               ).quantize(Decimal('0.01'), rounding=ROUND_UP)
     else:
         w3 = _get_web3(chain)
         gas_price_wei = Decimal(w3.eth.gas_price)
@@ -7872,6 +7933,31 @@ def _jupiter_quote(input_mint: str, output_mint: str, amount_raw: int) -> dict:
     r.raise_for_status()
     return r.json()
 
+def _te_fee_rate_for(chain: str) -> Decimal:
+    """The platform fee rate that this chain's buy leg actually collects.
+
+    Not a policy switch -- a statement of what the swap underneath really
+    does. On the EVM chains the fee is a separate transfer the app makes
+    itself (_charge_evm_txn_fee), so it is genuinely charged and belongs in
+    the quote. On Solana a USDC-funded BUY collects nothing: the SOL-input
+    fee splice does not apply, and Jupiter's platformFeeBps path is sell-only
+    because that fee comes out of the swap's OUTPUT, which on a buy is the
+    memecoin rather than a currency (see orcagent_solana.py's fee guard and
+    execute_single_swap's docstring, where this is already a disclosed
+    limitation).
+
+    Quoting 0.75% there anyway would put a line in the breakdown that no one
+    ever charges: the user's purchase shrinks by a fee that simply stays in
+    their wallet, and the total they were shown does not describe what
+    happened. Pricing what is really taken is the honest figure, and it is
+    also the one that matches today's production behaviour exactly -- the
+    legacy Solana buy only records a fee when the swap reports it was
+    actually bundled, which on a USDC buy it never is.
+    """
+    if te_registry.get_chain(chain).kind == 'svm':
+        return Decimal('0')
+    return Decimal(str(FEE_RATE_TXN))
+
 def _te_build_and_store_quote(*, uid, wallet, source_chain, dest_chain, token_address,
                               max_spend, taker, mode='manual'):
     """Price a trade and store it exactly as it was priced.
@@ -7894,7 +7980,7 @@ def _te_build_and_store_quote(*, uid, wallet, source_chain, dest_chain, token_ad
         ),
         swap_provider=_te_swap_provider(dest_chain),
         gas_estimator=_te_gas_usd,
-        fee_rate=Decimal(str(FEE_RATE_TXN)),
+        fee_rate=_te_fee_rate_for(dest_chain),
         gas_is_sponsored=lambda c: _te_needs_sponsored_gas(c, taker),
         # Lets the quote replace its conservative pre-swap gas figure with the
         # one 0x reports for the actual route.
@@ -8056,6 +8142,115 @@ def _te_evm_fee_charger(enc_blob: str, wallet: str, symbol: str):
     return charge
 
 
+def _te_solana_swap_executor(enc_blob: str, wallet: str):
+    """An executor for one user's Solana trading wallet.
+
+    Same contract as _te_evm_swap_executor, and the same reason for existing:
+    mapping one swap primitive's answer onto the engine's three outcomes.
+    Solana makes that mapping harder, because _execute_user_swap_ex() reports
+    tx_hash='' for EVERY failure -- a swap that was broadcast and then timed
+    out looks exactly like one that was never built. Releasing the user's
+    claim on that guess is not a cosmetic error: the money may already be
+    gone, and the next trade would spend it a second time.
+
+    So the decision is made on evidence rather than on the empty hash.
+    orcagent_solana.py prints a numbered step before each stage; step 5 is the
+    send. Whether that line reached stdout is what actually distinguishes the
+    three cases (see _capture_broadcast_evidence):
+
+      never reached the send  -> nothing left the wallet; the claim goes back
+      landed, chain rejected  -> definitively no fill; only gas was spent
+      send attempted, no fill -> UNKNOWN; the claim is kept and flagged
+
+    With no evidence at all -- the subprocess died without usable output --
+    the unknown case is assumed. That is the pessimistic direction, and the
+    only safe one: it can cost a user a temporary hold, where the optimistic
+    guess can cost them the balance twice.
+    """
+    def run(plan):
+        # The Solana counterpart of the EVM executor's _ensure_evm_gas call.
+        # Refusing here is a clean not-sent: nothing has been broadcast, so the
+        # reservation is released in full.
+        with _use_key(enc_blob, wallet) as pk:
+            gas_ok, gas_msg = _ensure_solana_gas(wallet, pk)
+            if not gas_ok:
+                return te_execute.SwapOutcome(submitted=False, confirmed=False,
+                                              error=gas_msg or 'not enough SOL for network fees')
+            cap: dict = {}
+            # base='USDC' is the whole point: the PURCHASE, in the currency the
+            # quote priced, not the ceiling and not SOL.
+            ok, tx_hash, err, _token_amt, _base_amt = _execute_user_swap_ex(
+                wallet, pk, 'buy', plan.token_address, str(plan.purchase_usd),
+                base='USDC', capture=cap)
+
+        if ok:
+            return te_execute.SwapOutcome(submitted=True, confirmed=True, tx_hash=tx_hash)
+
+        sig = tx_hash or cap.get('signature') or ''
+        if cap.get('onchain_failed'):
+            # It landed and the chain rejected it. No tokens were bought, so
+            # only the network fee actually left the wallet.
+            return te_execute.SwapOutcome(submitted=True, confirmed=False, reverted=True,
+                                          tx_hash=sig,
+                                          error=err or 'the swap failed on-chain')
+        if cap.get('send_attempted') is False:
+            # Positive evidence that the send stage was never entered.
+            return te_execute.SwapOutcome(submitted=False, confirmed=False,
+                                          error=err or 'the swap was not sent')
+        # Either the send was attempted, or there is no evidence either way.
+        # Both are 'unknown', and unknown keeps the claim.
+        return te_execute.SwapOutcome(
+            submitted=True, confirmed=False, tx_hash=sig,
+            error=err or 'the swap may have been sent but was never confirmed')
+    return run
+
+
+def _te_run_solana_trade(*, quote_id, idem, available, wallet, enc_blob,
+                         symbol, token_address, user_id):
+    """Run one stored quote on Solana, and record the position it opened.
+
+    fee_charger is deliberately None. A USDC-funded Solana buy carries no
+    platform fee today -- orcagent_solana.py's fee splice is SOL-input only
+    and its Jupiter platformFeeBps path is sell-only, so nothing is collected
+    on this leg (see execute_single_swap's own docstring). The quote is priced
+    at a zero fee rate to match (_te_fee_rate_for), so plan.fee_usd is zero
+    and there is nothing for a charger to charge. Passing one that transferred
+    SOL would invent a cost the quote never showed the user -- and charging a
+    fee the quote DID show while the swap also skips it is the double-count
+    this whole engine exists to prevent.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        result = te_execute.execute_trade(
+            conn, quote_id=quote_id, idempotency_key=idem, available_usd=available,
+            swap_executor=_te_solana_swap_executor(enc_blob, wallet),
+            fee_charger=None,
+        )
+        quote_row = te_ledger.load_quote(conn, quote_id)
+    finally:
+        conn.close()
+
+    # Only a COMPLETED trade opens a position, for the same reason as the EVM
+    # path: a swap nobody has seen land must not put a holding on screen that
+    # the user would then try to sell.
+    if result.state == te_ledger.COMPLETED and result.created:
+        purchase = float(quote_row['token_purchase_usd']) if quote_row else 0.0
+        td = get_token_data(token_address)
+        entry_price = float(td['price']) if td and td.get('price') else 0.0
+        _upsert_open_position(user_id, wallet, token_address, {
+            'amount':    (purchase / entry_price) if entry_price > 0 else 0.0,
+            'buy_price': entry_price,
+            'spend':     purchase,
+            'symbol':    symbol,
+            'opened_at': time.time(),
+            # The sell leg routes back into whatever the position was opened
+            # with -- see test_solana_usdc.py. Recorded explicitly so this
+            # engine-opened position sells the same way a legacy one does.
+            'base':      SOLANA_BASE_CURRENCY,
+        }, source='manual', chain='solana')
+    return result
+
+
 def _te_run_evm_trade(*, quote_id, idem, available, wallet, enc_blob, evm_address,
                       symbol, token_address, chain, user_id):
     """Run one stored quote on an EVM chain, and record the position it opened.
@@ -8098,6 +8293,62 @@ def _te_run_evm_trade(*, quote_id, idem, available, wallet, enc_blob, evm_addres
     return result
 
 
+def _api_trade_execute_solana(quote_row, wallet, uid, quote_id, data):
+    """The Solana half of /api/trade/execute.
+
+    Deliberately the same shape as the EVM half above it, because the parts
+    that matter are the same and any drift between them is a difference in
+    how carefully one chain's money is handled: the balance is read
+    server-side (a balance the client sends is a number the client chose),
+    the idempotency key is namespaced to the user, and the response body is
+    identical so the frontend needs no chain-specific branch.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        row = conn.execute(
+            'SELECT encrypted_private_key FROM users WHERE wallet_address=?',
+            (wallet,)).fetchone()
+    finally:
+        conn.close()
+    if not row or not row[0]:
+        return jsonify({'ok': False, 'msg': 'No Solana trading wallet configured'}), 400
+    enc_blob = row[0]
+
+    # The trading wallet, not the session wallet -- a different keypair by
+    # design, and the one the funds are actually on.
+    trading_wallet = _get_trading_wallet_address(wallet) or wallet
+    try:
+        available = Decimal(str(_get_solana_usdc_balance(trading_wallet)))
+    except Exception as e:
+        return jsonify({'ok': False, 'msg': f'Could not read your Solana balance: {e}'}), 502
+
+    client_key = str(data.get('idempotency_key') or '').strip()[:100]
+    idem = f'{uid}:{client_key}' if client_key else f'{uid}:quote:{quote_id}'
+
+    token_address = quote_row['token_address']
+    td = get_token_data(token_address)
+    symbol = (td.get('symbol') or token_address[:8]) if td else token_address[:8]
+
+    try:
+        result = _te_run_solana_trade(
+            quote_id=quote_id, idem=idem, available=available, wallet=wallet,
+            enc_blob=enc_blob, symbol=symbol, token_address=token_address,
+            user_id=uid)
+    except te_execute.QuoteNotUsable as e:
+        return jsonify({'ok': False, 'requote': True, 'msg': str(e)}), 409
+    except te_execute.ExecutionError as e:
+        return jsonify({'ok': False, 'msg': str(e)}), 400
+
+    body = result.to_dict()
+    body['ok'] = result.state == te_ledger.COMPLETED
+    body['symbol'] = symbol
+    body['token_address'] = token_address
+    body['chain'] = 'solana'
+    if not body['ok']:
+        body['msg'] = result.failure_reason or 'The trade did not complete'
+    return jsonify(body), 200
+
+
 @app.route('/api/trade/execute', methods=['POST'])
 @rate_limit(10, 60)
 def api_trade_execute():
@@ -8134,10 +8385,15 @@ def api_trade_execute():
         return jsonify({'ok': False, 'msg': 'That quote is not yours'}), 403
 
     chain = quote_row['destination_chain']
+    if chain == 'solana':
+        if not TRADE_ENGINE_SOLANA:
+            # Refusing is honest; silently falling back to the legacy Solana
+            # route would execute a trade the engine's guarantees do not cover.
+            return jsonify({'ok': False,
+                            'msg': 'The trade engine does not execute solana yet'}), 400
+        return _api_trade_execute_solana(quote_row, wallet, uid, quote_id, data)
     if chain not in EVM_CHAINS:
-        # Solana, bridges and copy trading still run on their existing paths.
-        # Refusing is honest; silently falling back to a legacy path would
-        # execute a trade the engine's guarantees do not cover.
+        # Bridged and copy-trading routes still run on their existing paths.
         return jsonify({'ok': False,
                         'msg': f'The trade engine does not execute {chain} yet'}), 400
 
@@ -8190,6 +8446,55 @@ def api_trade_execute():
     if not body['ok']:
         body['msg'] = result.failure_reason or 'The trade did not complete'
     return jsonify(body), 200
+
+
+# How long a claim may sit in a pre-execution state before it is assumed
+# abandoned. Comfortably longer than a quote lives (30s) plus the slowest
+# realistic execution, so this can only ever catch a trade whose process is
+# genuinely gone.
+TRADE_RESERVATION_REAP_AFTER = 900
+TRADE_RESERVATION_REAP_EVERY = 300
+
+def _trade_reservation_reap_loop():
+    """Release balance claims left behind by a process that died mid-trade.
+
+    reserve() takes a claim on a user's balance BEFORE anything is sent, so a
+    second trade cannot spend the same money (see trade_engine/ledger.py).
+    That claim is normally closed by settle() or release() at the end of
+    execute_trade() -- but a process killed between the two (a deploy, an OOM,
+    a crash) leaves it 'held' with nobody left to close it, and the ledger
+    subtracts it from that user's free balance forever. The money is still in
+    their wallet; the app just refuses to let them trade with it, and nothing
+    in the app could ever give it back.
+
+    reap_stale_reservations() has existed since the ledger was written and was
+    called from nowhere, so this is what makes it real. It deliberately only
+    frees trades that never reached EXECUTING: a trade that was executing may
+    have a swap in flight, and releasing that claim would invite the next
+    trade to spend the same money a second time.
+    """
+    print(f'[trade-reaper] started (every {TRADE_RESERVATION_REAP_EVERY}s, '
+          f'frees pre-execution claims older than {TRADE_RESERVATION_REAP_AFTER}s)', flush=True)
+    while True:
+        time.sleep(TRADE_RESERVATION_REAP_EVERY)
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            freed = te_execute.reap_stale_reservations(
+                conn, older_than_seconds=TRADE_RESERVATION_REAP_AFTER)
+            if freed:
+                # Worth a line each: every one of these is a user who could
+                # not spend their own balance until this ran.
+                print(f'[trade-reaper] released {len(freed)} abandoned '
+                      f'reservation(s): {", ".join(t[:8] for t in freed)}', flush=True)
+        except Exception as e:
+            print(f'[trade-reaper] cycle failed: {e}', flush=True)
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
 
 @app.route('/api/trade/status/<trade_id>', methods=['GET'])
@@ -30764,6 +31069,7 @@ threading.Thread(target=gas_manager.gas_sweep_loop, daemon=True).start()
 import surge_radar
 threading.Thread(target=surge_radar.surge_loop, daemon=True).start()
 threading.Thread(target=_scanner_safety_warm_loop, daemon=True).start()
+threading.Thread(target=_trade_reservation_reap_loop, daemon=True).start()
 # Tells the operator, at a glance, which address to keep funded with native
 # gas on each EVM chain (or that sponsorship is simply off). Never prints the
 # key itself -- only the public address derived from it.
