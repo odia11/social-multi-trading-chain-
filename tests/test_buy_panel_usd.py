@@ -183,9 +183,16 @@ check('the input\'s unit follows the chain. It was hardcoded to SOL, so on BSC '
       '_tcUnit(chain)' in side and "'SOL'" not in side.split('lmtd-sol-input-unit')[1][:80])
 check('an EVM buy is labelled as a spend ceiling here too',
       'You spend at most' in side)
-check('the percentage chips are dropped on EVM chains, because they work off the '
-      'SOL balance and would be percentages of the wrong currency entirely',
-      'isEvm ? \'\'' in side)
+check('percentage chips are no longer dropped on EVM chains, and the panel '
+      'records which chain is active for them to price against',
+      'isEvm ? \'\'' not in side and '_lmtdActiveChain = chain' in side)
+set_pct = tcfn('_lmtdSetPct')
+check('...and they read that chain\'s real USDC balance -- this used to read '
+      'the wallet\'s SOL balance, which has nothing to do with a USDC amount '
+      '(clicking 50% on 2 SOL filled in "1", sent and read server-side as '
+      '$1, not half of whatever that SOL is worth)',
+      '_lmtdUsdcBalances[_lmtdActiveChain]' in set_pct
+      and '_lmtdSolBalance' not in set_pct)
 check('a breakdown area is rendered', 'lmtd-quote' in side)
 check('typing re-prices', 'oninput="_lmtdQuote()"' in side)
 

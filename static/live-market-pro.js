@@ -736,13 +736,13 @@ function tfPill(tf, label, active){
   return '<button class="pt-tf-pill'+(active?' active':'')+'" data-tf="'+tf+'">'+label+'</button>';
 }
 /* Which chain a token/trade lives on -- feeds a token's Buy/Sell routing
-   (confirmBuy/handleSell below) as well as this badge, so a Solana token
-   always spends SOL via /api/instant-trade, BSC always spends USDC via
-   /api/bsc/trade/*, and Base/Arbitrum/Polygon/Robinhood Chain always spend
-   their own chain's USD stablecoin via the generic /api/evm/trade/* (see
-   EVM_TRADE_CHAINS below). Defaults to 'solana' for any candidate that
-   omits it (every pre-multi-chain scanner response), so old cached
-   responses never render as blank/unlabeled. */
+   (confirmBuy/handleSell below) as well as this badge: a Solana token routes
+   through /api/instant-trade, BSC through /api/bsc/trade/*, and
+   Base/Arbitrum/Polygon/Robinhood Chain through the generic /api/evm/trade/*
+   (see EVM_TRADE_CHAINS below) -- every one of them funded in USDC, Solana
+   included (see confirmBuy's own comment). Defaults to 'solana' for any
+   candidate that omits it (every pre-multi-chain scanner response), so old
+   cached responses never render as blank/unlabeled. */
 var EVM_TRADE_CHAINS = {bsc:1, base:1, arbitrum:1, polygon:1, robinhood:1};
 var CHAIN_LABELS = {bsc:'BSC', base:'BASE', arbitrum:'ARB', polygon:'POLY', robinhood:'HOOD'};
 // What the user is told they are spending: USDC, on every chain.
@@ -1950,11 +1950,11 @@ function confirmBuy(idx){
     btn.disabled = true;
     if(_sheetIdx === null) btn.textContent = 'Buying…';
   }
-  // Which chain this token lives on decides both the endpoint and the
-  // currency the entered amount is denominated in: BSC keeps its own
-  // dedicated route, Base/Arbitrum/Polygon share the generic /api/evm/*
-  // route (chain passed in the body), and only a plain Solana token ever
-  // spends SOL via /api/instant-trade -- the three EVM engines can never be
+  // Which chain this token lives on decides only the ENDPOINT -- the entered
+  // amount is always a USDC figure, on every chain including Solana: BSC
+  // keeps its own dedicated route, Base/Arbitrum/Polygon share the generic
+  // /api/evm/* route (chain passed in the body), and a plain Solana token
+  // goes through /api/instant-trade -- the three EVM engines can never be
   // crossed with each other or with Solana here.
   var isBsc = t.chain === 'bsc';
   var isEvm = !!EVM_TRADE_CHAINS[t.chain];

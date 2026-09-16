@@ -82,6 +82,11 @@ var _lmtdLayout     = 'focus';
 var _lmtdTf         = '5m';
 var _lmtdSide       = 'buy';
 var _lmtdSolBalance = 0;
+// Real per-chain USDC balances (solana + every EVM chain), for the quick-
+// percent chips below -- see _lmtdSetPct's own comment for the bug this
+// replaced. Keyed the same as EVM_CHAINS plus 'solana'.
+var _lmtdUsdcBalances = {};
+var _lmtdActiveChain  = 'solana'; // set by _lmtdSidePanelHtml() each render -- which balance _lmtdSetPct() should read
 var _lmtdChart      = null;
 var _lmtdSeries     = null;
 var _lmtdVolSeries  = null;
@@ -109,6 +114,13 @@ var _lmtdHoldersTotal = null; // total from the last /holders fetch; null until 
 function _lmtdFetchBalance(){
   fetch('/api/wallet/balance', {credentials:'include'}).then(function(r){return r.json();}).then(function(d){
     if(d.ok) _lmtdSolBalance = d.sol;
+  }).catch(function(){});
+  // Every chain's real USDC balance in one call (see that endpoint's own
+  // comment) -- what the quick-percent chips actually need, since every buy
+  // on this panel, Solana included, is denominated in USDC.
+  fetch('/api/wallet/usdc-summary', {credentials:'include'}).then(function(r){return r.json();}).then(function(d){
+    if(!d || !d.ok) return;
+    _lmtdUsdcBalances = Object.assign({solana: d.solana_usdc || 0}, d.evm_chains || {});
   }).catch(function(){});
 }
 
@@ -588,30 +600,29 @@ function _lmtdSidePanelHtml(p, sym, addr){
   var buys  = p.txns&&p.txns.h24 ? p.txns.h24.buys : 0;
   var sells = p.txns&&p.txns.h24 ? p.txns.h24.sells : 0;
   var chain = (p && p.chainId) || 'solana';
-  var isEvm = _tcIsEvm(chain);
   var unit  = _tcUnit(chain);
-  // The percentage chips work off the wallet's SOL balance. On an EVM chain
-  // the trade is denominated in USDC, so those percentages would be of the
-  // wrong currency entirely -- they are left out rather than shown against a
-  // balance that has nothing to do with the amount being spent.
-  var pctChipsHtml = isEvm ? ''
-    : (_lmtdSide === 'buy'
-        ? [25,50,75,100].map(function(pct){
-            return '<button class="lmtd-pct-btn" onclick="_lmtdSetPct('+pct+')">'+(pct===100?'MAX':pct+'%')+'</button>';
-          }).join('')
-        : '<button class="lmtd-pct-btn" onclick="_lmtdSetPct(100)">MAX</button>');
+  _lmtdActiveChain = chain; // read by _lmtdSetPct() -- see its own comment
+  // Real per-chain USDC balances are available now (_lmtdUsdcBalances, from
+  // /api/wallet/usdc-summary), so every chain gets working percent chips --
+  // this used to hide them on EVM chains specifically because the only
+  // balance on hand was SOL, which has nothing to do with a USDC amount.
+  // That reasoning applies to Solana buys too now (see _lmtdSetPct), it was
+  // just never extended there.
+  var pctChipsHtml = _lmtdSide === 'buy'
+    ? [25,50,75,100].map(function(pct){
+        return '<button class="lmtd-pct-btn" onclick="_lmtdSetPct('+pct+')">'+(pct===100?'MAX':pct+'%')+'</button>';
+      }).join('')
+    : '<button class="lmtd-pct-btn" onclick="_lmtdSetPct(100)">MAX</button>';
   return ''
     +'<div class="lmtd-side-tabs">'
       +'<button class="lmtd-side-tab buy'+(_lmtdSide==='buy'?' active':'')+'" onclick="_lmtdSetSide(\'buy\')">Buy</button>'
       +'<button class="lmtd-side-tab sell'+(_lmtdSide==='sell'?' active':'')+'" onclick="_lmtdSetSide(\'sell\')">Sell</button>'
     +'</div>'
-    // The unit follows the chain. It was hardcoded to SOL, so on BSC the
-    // field said SOL while the amount was spent as USDC.
-    +(isEvm && _lmtdSide === 'buy'
+    +(_lmtdSide === 'buy'
         ? '<div class="lmtd-spend-label">You spend at most</div>' : '')
     +'<div class="lmtd-sol-input-wrap">'
-      +'<input class="lmtd-sol-input" id="lmtd-sol-input" type="number" min="0.001" step="'
-      +(isEvm?'1':'0.1')+'" value="'+(isEvm?'10':'0.1')+'" oninput="_lmtdQuote()" onclick="event.stopPropagation()">'
+      +'<input class="lmtd-sol-input" id="lmtd-sol-input" type="number" min="0.01" step="1"'
+      +' value="10" oninput="_lmtdQuote()" onclick="event.stopPropagation()">'
       +'<span class="lmtd-sol-input-unit">'+_esc(unit)+'</span>'
     +'</div>'
     +(pctChipsHtml ? '<div class="lmtd-pct-row">'+pctChipsHtml+'</div>' : '')
@@ -763,12 +774,21 @@ function _lmtdSetSide(side){
   _lmtdWireSidePanel(sym, addr);
 }
 
+// Every buy on this panel is denominated in USDC, Solana included -- the
+// input's value is sent to the server as amount_usdc regardless of chain
+// (see confirmBuy()/live-market-pro.js for the EVM/BSC/Solana routing, all
+// three read the same field as a USDC amount). This used to fill in a
+// percentage of _lmtdSolBalance -- the wallet's native SOL holdings -- which
+// has no relationship to a USDC figure at all; clicking 50% on a wallet
+// holding 2 SOL filled in "1", sent and interpreted server-side as $1, not
+// "half of whatever USDC that SOL is worth". Reads the real per-chain USDC
+// balance instead, the same one /wallet shows.
 function _lmtdSetPct(pct){
   var input = document.getElementById('lmtd-sol-input');
   if(!input) return;
-  var bal = _lmtdSolBalance || 0;
-  var amt = pct===100 ? Math.max(0, bal-0.01) : bal*pct/100;
-  input.value = amt.toFixed(4);
+  var bal = _lmtdUsdcBalances[_lmtdActiveChain] || 0;
+  var amt = pct===100 ? bal : bal*pct/100;
+  input.value = amt.toFixed(2);
 }
 
 /* ── holders tab ── */
