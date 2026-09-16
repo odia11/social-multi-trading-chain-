@@ -2597,7 +2597,18 @@ document.addEventListener('DOMContentLoaded', function(){
 
   _prefetchBalances();
   renderSortList();
-  loadWatchlistSet().then(function(){ loadFeed(); });
+  // These two used to be chained (watchlist, then feed) so every card's
+  // star could be right the instant it first painted -- but that meant the
+  // whole feed request couldn't even START until the watchlist round trip
+  // had finished, purely serial for no dependency that actually needs it.
+  // Now both fire at once; watchSet is a global read at render time, so a
+  // card still gets its correct star the moment loadFeed()'s own fetch
+  // resolves UNLESS the watchlist genuinely lost the race, in which case
+  // the next 15s poll (or any interaction) picks it up -- a self-healing
+  // edge case that beats the feed waiting on an unrelated request every
+  // single load.
+  loadWatchlistSet();
+  loadFeed();
   loadSurges();
   loadTape();
   loadTraders();

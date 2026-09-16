@@ -27295,6 +27295,43 @@ def _scanner_get_safety(mint: str, chain: str = 'solana', include_lp: bool = Fal
     return result
 
 
+_SCANNER_SAFETY_WARM_INTERVAL = 20  # a little past _get_scanner_cached()'s own 15s, so most cycles see one fresh candidate batch
+
+def _scanner_safety_warm_loop():
+    """Pre-fills _scanner_safety_cache in the background, so api_market_scanner
+    -- which every Live Market page load blocks on -- almost never has to run
+    a live mint/LP/honeypot check itself.
+
+    That endpoint already checks the cache first and only falls back to a
+    live, network-bound check on a miss; this never changes that fallback or
+    any filtering decision, it just makes a miss rare. Warms both include_lp
+    variants (lp_locked=0 and =1 are different cache keys -- see
+    _scanner_get_safety's own cache_key) so a request with the LP-locked
+    filter on is covered too, not just the default view.
+
+    Reuses _get_scanner_cached() (shares the scanner's own upstream cache, no
+    extra DexScreener load -- see surge_radar.py's _sample_once for the same
+    trick) and its existing 80-candidate cap, so this warms every candidate
+    any sort mode could possibly need rather than guessing which 45."""
+    print(f'[scanner-safety] background warmer started (every {_SCANNER_SAFETY_WARM_INTERVAL}s)', flush=True)
+    while True:
+        try:
+            candidates = _get_scanner_cached()
+            jobs = []
+            for t in candidates:
+                mint, chain = t.get('mint'), t.get('chain') or 'solana'
+                if not mint:
+                    continue
+                jobs.append((mint, chain, False))
+                jobs.append((mint, chain, True))
+            if jobs:
+                with ThreadPoolExecutor(max_workers=12) as ex:
+                    list(ex.map(lambda j: _scanner_get_safety(*j), jobs))
+        except Exception as e:
+            print(f'[scanner-safety] warm cycle failed: {e}', flush=True)
+        time.sleep(_SCANNER_SAFETY_WARM_INTERVAL)
+
+
 def _scanner_token_passes_scam_filter(token: dict, safety: dict) -> bool:
     """Conservative default gate for Live Market discovery.
 
@@ -30726,6 +30763,7 @@ import gas_manager
 threading.Thread(target=gas_manager.gas_sweep_loop, daemon=True).start()
 import surge_radar
 threading.Thread(target=surge_radar.surge_loop, daemon=True).start()
+threading.Thread(target=_scanner_safety_warm_loop, daemon=True).start()
 # Tells the operator, at a glance, which address to keep funded with native
 # gas on each EVM chain (or that sponsorship is simply off). Never prints the
 # key itself -- only the public address derived from it.
