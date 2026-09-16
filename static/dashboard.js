@@ -5412,7 +5412,14 @@ function tipsNext(){
   else{closeTipsModal();}
 }
 (function _checkTipsOnLoad(){
-  if(!localStorage.getItem('orcagent_tips_seen')) setTimeout(openTipsModal,600);
+  // A trading-tips tour makes sense once someone has actually connected --
+  // firing it for a browsing guest just drops a full-screen modal in front
+  // of the page, including the "Connect wallet" link a guest needs to get
+  // past this in the first place. Desktop's home shell made this concrete:
+  // it renders the whole app shell (not the #onboard connect screen) for a
+  // guest too, so this modal's blur+backdrop landed directly over the one
+  // link a disconnected visitor has to reach.
+  if(window.__SESSION_WALLET && !localStorage.getItem('orcagent_tips_seen')) setTimeout(openTipsModal,600);
 }());
 
 // ── SUPPORT CHAT ─────────────────────────────────────────────────────────────
