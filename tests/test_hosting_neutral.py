@@ -20,6 +20,7 @@ http server, while getting it wrong the other way is a hole nobody notices.
 import ast
 import os
 import subprocess
+import re
 import sys
 import tempfile
 
@@ -160,13 +161,18 @@ check('the app still runs as a SINGLE worker. The sell lock and the repeat-buy '
 # so a re-run to pick up a code change would have taken the site down.
 INSTALL = open(REPO + '/deploy/install.sh').read()
 
+# Both of these matched one sentence of console output, and both sentences
+# have since been rewritten while the guards themselves are unchanged. They
+# read the GUARD now -- the condition that does the protecting -- and only
+# then that it is reported, in whatever words.
 check('the installer protects the environment file, which holds the key every '
       'stored wallet depends on',
-      'already exists — secrets left untouched' in INSTALL)
+      re.search(r'if \[ -f "\$ENV_FILE" \]; then\s*\n\s*echo[^\n]*untouched',
+                INSTALL) is not None)
 check("...and now protects certbot's nginx config the same way, instead of "
       'copying a plain-HTTP template over a certificate',
-      "grep -q 'ssl_certificate'" in INSTALL
-      and 'existing Certbot TLS site preserved' in INSTALL)
+      re.search(r"grep -q 'ssl_certificate'[^\n]*\n\s*echo[^\n]*(preserved|untouched)",
+                INSTALL) is not None)
 check('...while still installing the template on a server that has no '
       'certificate yet, so a first run works',
       'nginx-orcagent.conf' in INSTALL and 'else' in INSTALL)

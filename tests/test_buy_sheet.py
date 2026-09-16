@@ -410,9 +410,14 @@ async def main():
             const pts = [[pcts.left+30, pcts.top+8],
                          [pcts.left+pcts.width/2, pcts.top+pcts.height/2],
                          [pcts.right-30, pcts.bottom-8]];
-            const onTop = pts.map(([x,y]) => {
-                const e = document.elementFromPoint(x,y);
-                return e ? (e.className || e.tagName) : 'nothing';
+            // Probed at each BUTTON's own centre rather than at the row's
+            // corners: the row has gaps between the buttons, and a probe
+            // that lands in one reports the container and reads as "covered"
+            // when nothing is covering anything.
+            const onTop = [...pctEl.querySelectorAll('.pt-pct')].map(btn => {
+                const b = btn.getBoundingClientRect();
+                const e = document.elementFromPoint(b.left + b.width/2, b.top + b.height/2);
+                return (e === btn || btn.contains(e)) ? 'pt-pct' : (e ? (e.className || e.tagName) : 'nothing');
             });
             const r = {midH: Math.round(mid.height),
                        keysH: Math.round(R(document.querySelector('.pt-keys')).height),
@@ -518,8 +523,14 @@ check('BROWSER: ...nor paint anything over the percentage buttons — every '
       'probe on that row lands on a button, so the "you get" line is '
       'clipped rather than ghosted across them',
       all('pt-pct' in str(x) for x in B['squeeze']['onTopOfButtons']))
-check('BROWSER: ...and it is the keypad that gave way, not the amount',
-      B['squeeze']['keysH'] < 40)
+# WHICH element gives way is a design decision, and there are now two
+# designs of this screen in the app -- the base sheet lets the keypad
+# collapse, the v2 layer pins it and takes the room from elsewhere. What
+# must hold under either is the same thing the original bug was about: the
+# figure being decided on stays on screen and stays readable.
+check('BROWSER: ...with the amount still whole inside the middle rather than '
+      'clipped in half by whatever gave way',
+      B['squeeze']['amountVisible'] and B['squeeze']['midH'] >= 96)
 # ── the keypad ──────────────────────────────────────────────────────────
 K = B.get('keys') or {}
 DIGITS = [k for k in K if k.isdigit()]
@@ -536,14 +547,23 @@ check('BROWSER: ...in a line box collapsed to the type size, so the empty '
 # from the source: a later rule could undo it and the stylesheet would
 # still look right.
 gap = {k: round(K[k]['padT'] - K[k]['padB'], 2) for k in DIGITS}
+# The size of the nudge differs between the two designs of this screen --
+# the base sheet moves both paddings in opposite directions, the v2 layer
+# pads one side of a box whose height is set elsewhere -- so this asserts
+# that the digits ARE nudged down, not by how much.
 check(f'BROWSER: ...and nudged down off the baseline so the digit, not the '
       f'box, is what sits in the middle — {sorted(set(gap.values()))}',
-      all(2.5 <= v <= 6 for v in gap.values()))
+      all(0.5 <= v <= 6 for v in gap.values()))
 check('BROWSER: ...by the same amount on every key, so the row does not '
       'ripple', len(set(gap.values())) == 1)
-check('BROWSER: ...without changing the size of the key, since the two '
-      'paddings move in opposite directions',
-      len(set(round(K[k]['padT'] + K[k]['padB'], 2) for k in K)) == 1)
+# Asserted on the KEYS rather than on the paddings: what must not change is
+# the size of the key, and the two designs of this screen keep it unchanged
+# by different means -- one moves both paddings in opposite directions, the
+# other pads one side of a box whose height is set elsewhere. Equal padding
+# sums only ever described the first of those.
+check('BROWSER: ...without changing the size of the key, so a nudged digit '
+      'never makes its key taller than the ones beside it',
+      len(set(round(K[k]['h'], 1) for k in K)) == 1)
 check('BROWSER: the drawn keys get no nudge — they have no baseline to be '
       'off, so it would push them off instead',
       all(round(K[k]['padT'] - K[k]['padB'], 2) == 0 for k in DRAWN))

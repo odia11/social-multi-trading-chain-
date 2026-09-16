@@ -67,12 +67,21 @@ check('there is now a prompt outside Settings, where someone will actually '
       'meet it', 'id="pk-banner"' in PAGE)
 check('...driven by the server\'s answer rather than local storage',
       '_maybePromptPasskey(_me)' in JS and 'session.has_passkey' in JS)
+# window.PublicKeyCredential being present is not the same as the device
+# having a Face ID it can offer: it is there in browsers with no platform
+# authenticator, in private windows, and in in-app browsers, none of which
+# can make one. Asked of the device now instead of assumed.
 check('...and only when the device can actually create one',
-      'window.PublicKeyCredential' in JS.split('function _maybePromptPasskey')[1][:600])
+      '_faceIdPossible()' in JS.split('function _maybePromptPasskey')[1][:600])
+check('...which is asked of the device rather than inferred from an API '
+      'being defined',
+      'isUserVerifyingPlatformAuthenticatorAvailable' in JS)
 check('...never for a session that is not signed in',
       'session.authenticated' in JS.split('function _maybePromptPasskey')[1][:400])
 
-body = JS.split('function _maybePromptPasskey')[1][:1600]
+# The wording lives in _showPasskeyBanner now: _maybePromptPasskey asks the
+# device whether Face ID is possible at all first, and only then paints.
+body = JS.split('function _maybePromptPasskey')[1].split('function _setupPasskeyFromBanner')[0]
 check('inside an installed app the wording says what is actually at stake — '
       'that connecting a wallet does not work there',
       'does not work from an app on' in body.replace("'\n      + '", ''))

@@ -113,10 +113,25 @@ check('starting and claiming are both rate limited, being unauthenticated '
 # ── 4. the answer actually gets picked up ─────────────────────────────────
 check('the callback sends back which sign-in round this was, so the server '
       'can finish the pairing', 'token:token' in CB)
+# The claim moved out of an inline handler into a named recovery function,
+# and there is more than one visibilitychange listener now -- so a fixed
+# window after the FIRST of them reads whichever happens to come first in
+# the file. Asserted through the handler that is actually registered.
+_recover = re.search(r"addEventListener\('visibilitychange',\s*(\w+)\)", JS)
+_recover_body = ''
+if _recover:
+    _i = JS.find('function ' + _recover.group(1) + '(')
+    if _i != -1:
+        _recover_body = JS[_i:JS.index('\n}', _i) + 2]
 check('the app asks again when it becomes visible — coming back from Phantom '
       'does not reload the page, so nothing else would ever ask',
-      "addEventListener('visibilitychange', _recoverSessionOnReturn)" in JS
-      and '_claimPairing()' in JS[JS.index('function _recoverSessionOnReturn('):][:900])
+      _recover is not None and '_claimPairing()' in _recover_body)
+check('...and falls back to the remembered login when there is no pairing to '
+      'claim, rather than concluding nobody is signed in',
+      '_resumeFromDeviceToken()' in _recover_body)
+check('...while treating an unreachable server as exactly that, since a '
+      'network error is not a logout',
+      'is not a logout' in _recover_body or 'if(!me) return' in _recover_body)
 check('...and on a cold start too, before concluding nobody is signed in',
       JS.index('var _w = await _claimPairing();')
       < JS.index("orca_manual_disconnect') && !phantomKey"))

@@ -22,6 +22,7 @@ try:
         ResidentKeyRequirement as _WaResidentKeyRequirement,
         AttestationConveyancePreference as _WaAttestationConveyancePreference,
         PublicKeyCredentialDescriptor as _WaPublicKeyCredentialDescriptor,
+        AuthenticatorAttachment as _WaAuthenticatorAttachment,
     )
     from webauthn.helpers.exceptions import InvalidRegistrationResponse as _WaInvalidRegistrationResponse, \
         InvalidAuthenticationResponse as _WaInvalidAuthenticationResponse
@@ -17167,7 +17168,15 @@ def webauthn_register_options():
         user_display_name=wallet,
         attestation=_WaAttestationConveyancePreference.NONE,
         authenticator_selection=_WaAuthenticatorSelectionCriteria(
-            resident_key=_WaResidentKeyRequirement.PREFERRED,
+            # THIS device's own Face ID or Touch ID. Without it iOS is free to
+            # offer a security key or a scan-this-QR-with-another-phone flow
+            # as well, which is a longer road to the same place and not what
+            # the button says it does.
+            authenticator_attachment=_WaAuthenticatorAttachment.PLATFORM,
+            # Discoverable, so signing in later needs nothing remembered on
+            # this device -- an installed app has its own storage, and a
+            # passkey made in Safari leaves no trace in it.
+            resident_key=_WaResidentKeyRequirement.REQUIRED,
             user_verification=_WaUserVerificationRequirement.REQUIRED,
         ),
         exclude_credentials=exclude or None,
@@ -17828,13 +17837,12 @@ def api_session_resume():
         request.cookies.get(DEVICE_COOKIE_NAME, '').strip(),
     ) if t))
     if not candidates:
-        # A separate line from _redeem_device_token's own "no such token" --
-        # that one means a token was offered and refused; this one means the
-        # browser had nothing to offer at all. Same symptom to the caller
-        # (both end in the one refusal below), different problem to whoever
-        # reads the log.
-        print('[device-session] no remembered login stored — browser offered '
-              'no token or cookie', flush=True)
+        # "Nothing stored" and "what it had was refused" are different
+        # problems with the same symptom, and the caller is told the same
+        # thing either way -- so the difference has to live in the log, or
+        # nobody can tell a browser that never had a login from one whose
+        # login stopped working.
+        print('[device-session] refused: no remembered login stored', flush=True)
     wallet, new_token = '', ''
     try:
         for token in candidates:

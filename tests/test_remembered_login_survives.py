@@ -97,13 +97,22 @@ check('the fetch is awaited so its HTTP status is actually available, rather '
       'cannot tell 401 from 503)',
       re.search(r'res\s*=\s*await\s+fetch\(', resume) is not None)
 
-loop_catch = re.search(r'for\s*\([^)]*\)\s*\{.*?\}catch\s*\(\s*e\s*\)\s*\{([^}]*)\}',
-                       resume, re.DOTALL)
-check('a network-level failure returns early WITHOUT clearing -- offline, a '
-      'tunnel, or the seconds a deploy takes to restart the server',
-      loop_catch is not None
-      and '_clearDeviceToken' not in loop_catch.group(1)
-      and re.search(r"if\s*\(\s*!res\s*\)\s*return\s*'';", resume) is not None)
+# The shape changed -- a request that fails is now retried with a backoff
+# before it is given up on -- so this asserts the GUARANTEE rather than the
+# one arrangement of statements that used to provide it: a request that
+# never came back leaves the token exactly where it was.
+net_fail = re.search(r'\}catch\s*\(\s*e\s*\)\s*\{([^}]*)\}', resume)
+check('a network-level failure leaves the token alone -- offline, a tunnel, '
+      'or the seconds a deploy takes to restart the server',
+      net_fail is not None
+      and '_clearDeviceToken' not in net_fail.group(1))
+check('...and leaves without clearing when no answer was ever obtained, '
+      'rather than falling through to the revoked-token path',
+      re.search(r'if\s*\(!res\)\s*return', resume) is not None)
+check('...after retrying first, since a deploy restart is measured in '
+      'seconds and giving up on the first refusal is what logs people out',
+      re.search(r'for\s*\(var attempt', resume) is not None
+      and 'res.status < 500' in resume)
 
 # ── 3. the two-tab rotation race ─────────────────────────────────────────
 check('before clearing, it re-reads storage and only clears while that still '

@@ -71,11 +71,21 @@ check('...and a successful resume is recorded too, so a quiet log means '
 # The response must stay uniform. Distinguishing them to the CALLER is the
 # thing this deliberately does not do.
 resume = code('api_session_resume')
+# Counted jsonify calls before, which broke the moment a THIRD answer was
+# added -- a 503 with Retry-After, so a database lock or a restart leaves
+# the browser holding its credential instead of being told it is dead. That
+# is a different answer to a different situation, not a hint about which
+# refusal happened. What must stay uniform is the REFUSAL, so that is what
+# this reads: one message, and none of the four reasons in it.
+_refusals = re.findall(r"jsonify\(\{'ok': False[^}]*\}\)", resume)
 check('the ANSWER to the caller stays one message for every refusal — the '
       'log is for the operator, not a hint for whoever is guessing',
-      resume.count('jsonify') == 3
-      and 'no longer remembered' in resume
+      'no longer remembered' in resume
+      and len([r for r in _refusals if '401' in resume[resume.index(r):resume.index(r)+80]]) <= 1
       and not any(w in resume for w in ('expired', 'revoked', 'no such')))
+check('...while a server that could not answer says so separately, since a '
+      'restart or a locked database is not a dead login',
+      '503' in resume and 'Retry-After' in resume)
 
 check('a browser that offers no token at all is a separate line, since '
       '"nothing stored" and "what it had was refused" are different problems '

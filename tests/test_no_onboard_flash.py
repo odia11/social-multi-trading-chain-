@@ -39,15 +39,24 @@ def check(name, cond):
     print(('PASS ' if cond else 'FAIL ') + name)
 
 # ── 1. the source itself ──────────────────────────────────────────────────
-onboard_open = HTML.index('<div id="onboard" class="hide" aria-hidden="true">')
+onboard_open = re.search(r'<div id="onboard"[^>]*>', HTML).start()
 hide_call = HTML.index("document.getElementById('onboard').style.display = 'none'")
 first_child = HTML.index('<div class="ob-box">')
 
+# The markup now also starts the screen hidden -- class="hide" and
+# aria-hidden -- so there is nothing to paint even before the script inside
+# it runs. That is a stronger guarantee than the script alone, and it is
+# what the literal '<div id="onboard">' this file used to slice on was
+# tripping over.
+check('#onboard starts hidden in the markup itself, so there is no frame in '
+      'which it could be painted at all',
+      re.search(r'<div id="onboard"[^>]*class="[^"]*\bhide\b', HTML) is not None
+      and re.search(r'<div id="onboard"[^>]*aria-hidden="true"', HTML) is not None)
 check('the hide check is the first thing inside #onboard in the SOURCE',
       onboard_open < hide_call < first_child)
 check('...specifically before #onboard\'s own first real element, not merely '
       'somewhere earlier in the file',
-      HTML[onboard_open:first_child].count('<div id="onboard" class="hide" aria-hidden="true">') == 1)
+      len(re.findall(r'<div id="onboard"[^>]*>', HTML[onboard_open:first_child])) == 1)
 
 check('nothing before #onboard opens reads window.__SESSION_WALLET or '
       'window.__API_SHARED_SECRET -- they are not set yet',
@@ -80,7 +89,7 @@ with app.test_client() as c:
         s['wallet'] = 'WalletFlashTest1234567890'
     rendered = c.get('/').get_data(as_text=True)
 
-r_open = rendered.index('<div id="onboard" class="hide" aria-hidden="true">')
+r_open = re.search(r'<div id="onboard"[^>]*>', rendered).start()
 r_hide = rendered.index("document.getElementById('onboard').style.display = 'none'")
 r_first_child = rendered.index('<div class="ob-box">')
 
@@ -106,7 +115,7 @@ with app.test_client() as c3:
     dash_html = c3.get('/dashboard', follow_redirects=True).get_data(as_text=True)
 check('/dashboard (the other route that injects a real session) carries the '
       'same fix, since both serve the same template',
-      dash_html.index('<div id="onboard" class="hide" aria-hidden="true">')
+      re.search(r'<div id="onboard"[^>]*>', dash_html).start()
       < dash_html.index("document.getElementById('onboard').style.display = 'none'"))
 
 passed = sum(1 for _, ok in checks if ok)
