@@ -35,7 +35,8 @@ control exists to prevent, just moved off the touchscreen.
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = open(REPO + '/templates/live_market_pro.html', encoding='utf-8').read()
 JS = open(REPO + '/static/live-market-pro.js', encoding='utf-8').read()
 CSS = re.sub(r'/\*.*?\*/', '', HTML, flags=re.DOTALL)

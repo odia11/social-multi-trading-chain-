@@ -15,7 +15,7 @@ check('wallet onboarding is installed in production',
       'from wallet_onboarding import install as _install_wallet_onboarding' in entry
       and '_install_wallet_onboarding(_dashboard)' in entry)
 check('guest flow exposes create, import and Phantom choices',
-      'Create New Wallet' in js and 'Import Existing Wallet' in js and 'Connect Phantom' in js)
+      'Create new wallet' in js and 'Import existing wallet' in js and 'Connect Phantom' in js)
 check('new wallet keys are generated in the browser',
       'nacl.sign.keyPair()' in js and 'freshEvmKey()' in js
       and "mode': 'client-generated'" in py)
@@ -29,7 +29,7 @@ check('private keys travel only inside an encrypted request envelope',
       and 'AESGCM(key).decrypt' in py)
 check('new wallet cannot activate until backup is confirmed',
       "body.get('backup_confirmed') is not True" in py
-      and 'I saved both private keys safely.' in js)
+      and 'I saved both private keys securely.' in js)
 check('confirmed wallet becomes a persistent authenticated session',
       "session['wallet'] = sol_address" in py and 'session.permanent = True' in py
       and '_issue_device_token' in py and '_set_device_cookie' in py)
@@ -37,7 +37,7 @@ check('wallet secrets are encrypted before database storage',
       'encrypt(sol_private, sol_address)' in py and 'encrypt(evm_private, sol_address)' in py
       and 'encrypted_private_key_bsc' in py)
 check('import creates a browser-local EVM key when omitted',
-      'OrcAgent created this key securely on your device.' in js
+      'This key was created securely on your device.' in js
       and "EVM private key is required" in py)
 check('onboarding assets are cache-busted',
       'wallet-onboarding.js?v=5' in py and 'wallet-onboarding.css?v=5' in py)

@@ -33,29 +33,55 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --quiet --upgrade pip
-          python -m pip install --quiet pip-audit bandit
+          python -m pip install --quiet pip-audit bandit playwright pytest
           python -m pip install --quiet -r requirements.txt
+
+      - name: Install Playwright browser
+        # Only test_buy_sheet.py needs a real browser; installed here (not in
+        # requirements.txt) since production never needs Chromium.
+        run: python -m playwright install --with-deps chromium
 
       - name: Python compile check
         run: python -m compileall -q .
 
-      - name: OrcAgent security regression checks
+      - name: OrcAgent regression checks
+        # Every tests/test_*.py, not a hand-picked subset -- a script added
+        # here and never added to this list would pass locally and never run
+        # anywhere else. Each runs as its own process (a shared interpreter
+        # would let one test's monkeypatches or module-level state leak into
+        # the next), and every one runs even if an earlier one fails, so a
+        # single red script never hides the rest of the report.
+        #
+        # Two genuinely different styles live in tests/, and running either
+        # one the wrong way gives a false pass, not an error:
+        #   - most files are a standalone script: module-level checks, a
+        #     PASS/FAIL line each, sys.exit(0/1) at the end. `python file.py`
+        #     runs it correctly; pytest collecting it calls sys.exit() during
+        #     import and aborts with an INTERNALERROR.
+        #   - a handful (grep -rL for the pattern below if this count ever
+        #     needs rechecking) are plain pytest: `def test_*():` functions
+        #     with nothing at module level to call them. `python file.py`
+        #     imports it, runs nothing, and exits 0 whether the assertions
+        #     inside are true or not -- a silent, permanent false pass.
+        # Detected per file by asking pytest to collect it: a file with real
+        # pytest tests lists them; a script-style file produces the
+        # INTERNALERROR above and nothing on stdout, so grep finds nothing
+        # either way and this correctly falls through to running it directly.
         run: |
-          python tests/test_security_hardening.py
-          python tests/test_authorization_hardening.py
-          python tests/test_idor_hardening.py
-          python tests/test_financial_authorization_hardening.py
-          python tests/test_security_phase2.py
-          python tests/test_auth_replay_runtime.py
-          python tests/test_ssrf_hardening.py
-          python tests/test_stay_connected.py
-          python tests/test_deploy_security.py
-          python tests/test_browser_shared_secret_hardening.py
-          python tests/test_admin_csrf_hardening.py
-          python tests/test_trading_wallet_generator.py
-          python tests/test_no_platform_gas_fronting.py
-          python tests/test_bsc_gasless_trading.py
-          python tests/test_solana_gasless_trading.py
+          fail=0
+          for f in tests/test_*.py; do
+            echo "── $f ──"
+            if python -m pytest --collect-only -q "$f" 2>/dev/null | grep -q '::test_'; then
+              if ! python -m pytest -q "$f"; then
+                echo "FAILED: $f"
+                fail=1
+              fi
+            elif ! python "$f"; then
+              echo "FAILED: $f"
+              fail=1
+            fi
+          done
+          exit $fail
 
       - name: pip-audit
         run: pip-audit --strict -r requirements.txt

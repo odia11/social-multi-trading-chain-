@@ -30,7 +30,8 @@ the user can be helped, so we do not hand them a chore on a guess.
 import ast
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py').read()
 TREE = ast.parse(SRC)
 

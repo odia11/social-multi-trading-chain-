@@ -28,7 +28,8 @@ import ast
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py').read()
 JS = open(REPO + '/static/dashboard.js').read()
 CB = open(REPO + '/templates/phantom_callback.html').read()
@@ -114,8 +115,8 @@ check('the callback sends back which sign-in round this was, so the server '
       'can finish the pairing', 'token:token' in CB)
 check('the app asks again when it becomes visible — coming back from Phantom '
       'does not reload the page, so nothing else would ever ask',
-      "addEventListener('visibilitychange'" in JS
-      and '_claimPairing()' in JS[JS.index("addEventListener('visibilitychange'"):][:700])
+      "addEventListener('visibilitychange', _recoverSessionOnReturn)" in JS
+      and '_claimPairing()' in JS[JS.index('function _recoverSessionOnReturn('):][:900])
 check('...and on a cold start too, before concluding nobody is signed in',
       JS.index('var _w = await _claimPairing();')
       < JS.index("orca_manual_disconnect') && !phantomKey"))

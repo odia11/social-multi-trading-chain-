@@ -11,7 +11,8 @@ the outside, which is why they need a test that says no.
 import sys
 from decimal import Decimal
 
-sys.path.insert(0, '/home/user/Orc-agent-Solana-chain-')
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trade_engine.costs import (          # noqa: E402
     CostLine, CostError, Quote, price_trade, reconcile, sponsored_gas, money,

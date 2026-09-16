@@ -12,7 +12,8 @@ provides, so there is no network and the numbers are exact.
 import sys
 from decimal import Decimal
 
-sys.path.insert(0, '/home/user/Orc-agent-Solana-chain-')
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trade_engine import registry as R                      # noqa: E402
 from trade_engine.costs import PAYER_ORCAGENT, ZERO         # noqa: E402

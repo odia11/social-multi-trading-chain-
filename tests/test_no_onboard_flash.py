@@ -29,7 +29,8 @@ matters is the byte order the browser receives.
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = open(REPO + '/dashboard.html', encoding='utf-8').read()
 
 checks = []
@@ -38,7 +39,7 @@ def check(name, cond):
     print(('PASS ' if cond else 'FAIL ') + name)
 
 # ── 1. the source itself ──────────────────────────────────────────────────
-onboard_open = HTML.index('<div id="onboard">')
+onboard_open = HTML.index('<div id="onboard" class="hide" aria-hidden="true">')
 hide_call = HTML.index("document.getElementById('onboard').style.display = 'none'")
 first_child = HTML.index('<div class="ob-box">')
 
@@ -46,7 +47,7 @@ check('the hide check is the first thing inside #onboard in the SOURCE',
       onboard_open < hide_call < first_child)
 check('...specifically before #onboard\'s own first real element, not merely '
       'somewhere earlier in the file',
-      HTML[onboard_open:first_child].count('<div id="onboard">') == 1)
+      HTML[onboard_open:first_child].count('<div id="onboard" class="hide" aria-hidden="true">') == 1)
 
 check('nothing before #onboard opens reads window.__SESSION_WALLET or '
       'window.__API_SHARED_SECRET -- they are not set yet',
@@ -79,7 +80,7 @@ with app.test_client() as c:
         s['wallet'] = 'WalletFlashTest1234567890'
     rendered = c.get('/').get_data(as_text=True)
 
-r_open = rendered.index('<div id="onboard">')
+r_open = rendered.index('<div id="onboard" class="hide" aria-hidden="true">')
 r_hide = rendered.index("document.getElementById('onboard').style.display = 'none'")
 r_first_child = rendered.index('<div class="ob-box">')
 
@@ -105,7 +106,7 @@ with app.test_client() as c3:
     dash_html = c3.get('/dashboard', follow_redirects=True).get_data(as_text=True)
 check('/dashboard (the other route that injects a real session) carries the '
       'same fix, since both serve the same template',
-      dash_html.index('<div id="onboard">')
+      dash_html.index('<div id="onboard" class="hide" aria-hidden="true">')
       < dash_html.index("document.getElementById('onboard').style.display = 'none'"))
 
 passed = sum(1 for _, ok in checks if ok)

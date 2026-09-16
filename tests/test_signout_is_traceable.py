@@ -25,7 +25,8 @@ import ast
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py', encoding='utf-8').read()
 INSTALL = open(REPO + '/deploy/install.sh', encoding='utf-8').read()
 TREE = ast.parse(SRC)
@@ -72,7 +73,7 @@ check('...and a successful resume is recorded too, so a quiet log means '
 resume = code('api_session_resume')
 check('the ANSWER to the caller stays one message for every refusal — the '
       'log is for the operator, not a hint for whoever is guessing',
-      resume.count('jsonify') == 2
+      resume.count('jsonify') == 3
       and 'no longer remembered' in resume
       and not any(w in resume for w in ('expired', 'revoked', 'no such')))
 

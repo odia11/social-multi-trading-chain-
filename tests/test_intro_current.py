@@ -20,7 +20,8 @@ Change the code and the intro has to follow.
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = open(REPO + '/dashboard.html', encoding='utf-8').read()
 SRC = open(REPO + '/dashboard.py', encoding='utf-8').read()
 
@@ -35,7 +36,7 @@ def strip(fragment):
 
 
 # The onboarding, as a new wallet actually meets it.
-INTRO = HTML[HTML.index('<div id="onboard">'):HTML.index('<!-- SETTINGS MODAL -->')]
+INTRO = HTML[HTML.index('<div id="onboard" class="hide" aria-hidden="true">'):HTML.index('<!-- SETTINGS MODAL -->')]
 SUB   = strip(HTML[HTML.index('<div class="ob-sub">'):HTML.index('<div class="ob-progress">')])
 STEP1 = strip(HTML[HTML.index('id="step-1"'):HTML.index('id="ob-privkey"')])
 

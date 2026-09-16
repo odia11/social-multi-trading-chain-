@@ -21,7 +21,8 @@ looks exactly like a feed with nothing in it.
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = open(REPO + '/templates/live_market_pro.html').read()
 JS = open(REPO + '/static/live-market-pro.js').read()
 CSS = re.search(r'<style>(.*?)</style>', HTML, re.S).group(1)

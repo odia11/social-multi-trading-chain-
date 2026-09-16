@@ -23,7 +23,7 @@ import subprocess
 import sys
 import tempfile
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py').read()
 
 checks = []
@@ -162,11 +162,11 @@ INSTALL = open(REPO + '/deploy/install.sh').read()
 
 check('the installer protects the environment file, which holds the key every '
       'stored wallet depends on',
-      'left untouched so your secrets are not overwritten' in INSTALL)
+      'already exists — secrets left untouched' in INSTALL)
 check("...and now protects certbot's nginx config the same way, instead of "
       'copying a plain-HTTP template over a certificate',
       "grep -q 'ssl_certificate'" in INSTALL
-      and 'left untouched so certbot' in INSTALL)
+      and 'existing Certbot TLS site preserved' in INSTALL)
 check('...while still installing the template on a server that has no '
       'certificate yet, so a first run works',
       'nginx-orcagent.conf' in INSTALL and 'else' in INSTALL)

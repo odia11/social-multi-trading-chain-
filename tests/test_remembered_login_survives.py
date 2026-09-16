@@ -53,7 +53,8 @@ second tab had rotated it, cleared when genuinely dead.
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JS = open(REPO + '/static/dashboard.js', encoding='utf-8').read()
 
 checks = []
@@ -96,12 +97,13 @@ check('the fetch is awaited so its HTTP status is actually available, rather '
       'cannot tell 401 from 503)',
       re.search(r'res\s*=\s*await\s+fetch\(', resume) is not None)
 
-net_fail = re.search(r'\}catch\s*\(\s*e\s*\)\s*\{([^}]*)\}', resume)
+loop_catch = re.search(r'for\s*\([^)]*\)\s*\{.*?\}catch\s*\(\s*e\s*\)\s*\{([^}]*)\}',
+                       resume, re.DOTALL)
 check('a network-level failure returns early WITHOUT clearing -- offline, a '
       'tunnel, or the seconds a deploy takes to restart the server',
-      net_fail is not None
-      and '_clearDeviceToken' not in net_fail.group(1)
-      and 'return' in net_fail.group(1))
+      loop_catch is not None
+      and '_clearDeviceToken' not in loop_catch.group(1)
+      and re.search(r"if\s*\(\s*!res\s*\)\s*return\s*'';", resume) is not None)
 
 # ── 3. the two-tab rotation race ─────────────────────────────────────────
 check('before clearing, it re-reads storage and only clears while that still '

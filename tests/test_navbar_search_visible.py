@@ -39,7 +39,8 @@ relationship to `.pt-nb-nav a` regresses.
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CSS = open(REPO + '/static/navbar.css', encoding='utf-8').read()
 
 

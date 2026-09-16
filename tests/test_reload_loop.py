@@ -35,7 +35,8 @@ still applies to every other reload in the app.
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JS = open(REPO + '/static/dashboard.js').read()
 
 checks = []

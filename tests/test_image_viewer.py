@@ -25,7 +25,8 @@ import re
 import sys
 from html.parser import HTMLParser
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py').read()
 JS = open(REPO + '/static/dashboard.js').read()
 PAGE = open(REPO + '/dashboard.html').read()
