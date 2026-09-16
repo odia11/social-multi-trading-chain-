@@ -223,7 +223,13 @@ function renderChartSvg(idx, candles, currentPrice){
   var plotW=w-46, step=plotW/Math.max(n,1), bodyW=Math.max(2,Math.min(7,step*.62)), chartHtml='';
   for(var gy=0;gy<5;gy++){
     var yy=(priceH/4)*gy, label=max-((max-min)/4)*gy;
-    chartHtml+='<line x1="0" y1="'+yy.toFixed(2)+'" x2="'+plotW.toFixed(2)+'" y2="'+yy.toFixed(2)+'" stroke="#1a2530" stroke-width="1" vector-effect="non-scaling-stroke"></line>';
+    // Snapped to a half-pixel: a 1px stroke centered on a whole pixel
+    // straddles two rows and renders as a soft 2px blur, which is exactly
+    // what made these read as fuzzy next to TradingView's crisp gridlines.
+    // Pure decoration (not bound to any data point), so this is safe to
+    // round without touching how the candles themselves are placed.
+    var yySnap=Math.round(yy)+0.5;
+    chartHtml+='<line x1="0" y1="'+yySnap+'" x2="'+plotW.toFixed(2)+'" y2="'+yySnap+'" stroke="#1a2530" stroke-width="1" vector-effect="non-scaling-stroke"></line>';
     chartHtml+='<text x="'+(plotW+5).toFixed(2)+'" y="'+Math.max(10,yy+4).toFixed(2)+'" fill="#657180" font-size="9" font-family="monospace">'+fmtPrice(label).replace('$','')+'</text>';
   }
   candles.forEach(function(c,i){
@@ -415,12 +421,24 @@ function drainChartFetchQueue(){
     });
   },wait);
 }
-function fetchChart(mint, tf, pairAddr, chain, state){
+// `priority` jumps a job ahead of every already-queued non-priority one
+// (but behind other priority jobs, so it stays first-in-first-out within
+// each tier) -- a card the user is actually looking at right now shouldn't
+// sit behind ones that were merely pre-warmed 250px early. Total request
+// rate is unchanged; only the order is, which is what actually makes the
+// chart someone is looking at feel instant instead of a coin flip.
+function fetchChart(mint, tf, pairAddr, chain, state, priority){
   var url = '/api/chart/'+encodeURIComponent(mint)+'?tf='+encodeURIComponent(tf);
   if(pairAddr) url += '&pair='+encodeURIComponent(pairAddr);
   if(chain) url += '&chain='+encodeURIComponent(chain);
   return new Promise(function(resolve){
-    _chartFetchQueue.push({url:url,resolve:resolve,state:state});
+    var job = {url:url,resolve:resolve,state:state,priority:!!priority};
+    if(job.priority){
+      var i=0; while(i<_chartFetchQueue.length && _chartFetchQueue[i].priority) i++;
+      _chartFetchQueue.splice(i,0,job);
+    } else {
+      _chartFetchQueue.push(job);
+    }
     drainChartFetchQueue();
   });
 }
@@ -438,8 +456,12 @@ function chartTick(idx){
   var st = _chartTimers[idx];
   if(!st || st.destroyed) return;
   var requestedTf=st.tf;
-  fetchChart(st.mint, requestedTf, st.pair, st.chain, st).then(function(r){
+  fetchChart(st.mint, requestedTf, st.pair, st.chain, st, st.visible).then(function(r){
     if(!st || st.destroyed || st.tf!==requestedTf) return;
+    // Whatever came back, it's an answer -- the placeholder shimmer's job
+    // (marking "not the real chart yet") is done either way.
+    var wrapT=document.getElementById('pt-chart-wrap-'+idx);
+    if(wrapT) wrapT.classList.remove('pt-chart-loading-shimmer');
     if(r && r.candles && r.candles.length){
       // Kept so a live price can redraw this chart without fetching the
       // candles again -- the candles are the shape, the price is the movement.
@@ -532,14 +554,19 @@ function startLivePrices(){
 // the exact prior behavior.
 function primeChart(idx, mint, pairAddr, chain, seedPrice){
   if(_chartTimers[idx]) return _chartTimers[idx];
-  var st = {destroyed:false, mint:mint, pair:pairAddr, chain:(chain||'solana'), seedPrice:Number(seedPrice)||0, tf:'5m', timer:null};
+  var st = {destroyed:false, mint:mint, pair:pairAddr, chain:(chain||'solana'), seedPrice:Number(seedPrice)||0, tf:'5m', timer:null, visible:false};
   _chartTimers[idx] = st;
   // Paint one still-forming candle from the scanner's observed real price.
-  // Provider history replaces it as soon as it arrives.
+  // Provider history replaces it as soon as it arrives. The shimmer marks
+  // that this single flat candle is a placeholder, not the real chart --
+  // cleared the moment chartTick() gets any answer at all, real history or
+  // not (see that function's own comment).
   if(st.seedPrice>0){
     st.price=st.seedPrice;
     st.candles=[startObservedCandle(st,st.seedPrice)];
     renderChartSvg(idx,st.candles,st.seedPrice);
+    var wrap0=document.getElementById('pt-chart-wrap-'+idx);
+    if(wrap0) wrap0.classList.add('pt-chart-loading-shimmer');
   }
   return st;
 }
@@ -663,7 +690,20 @@ function observeCards(){
   _cardObserver = new IntersectionObserver(function(entries){
     entries.forEach(function(entry){
       var idx = entry.target.dataset.idx;
-      if(entry.isIntersecting) activateCard(entry.target);
+      if(entry.isIntersecting){
+        var st = _chartTimers[idx];
+        if(st){
+          // isIntersecting fires as soon as a card enters the 250px prefetch
+          // margin below -- that is NOT the same as actually being on
+          // screen. boundingClientRect is always relative to the true
+          // viewport regardless of rootMargin, so this is the one check
+          // that tells a card someone can see right now from one merely
+          // being warmed up early.
+          var r = entry.boundingClientRect;
+          st.visible = r.bottom > 0 && r.top < (window.innerHeight || document.documentElement.clientHeight);
+        }
+        activateCard(entry.target);
+      }
       else unmountChart(idx);
     });
   }, {rootMargin:'250px 0px', threshold:0.01});
