@@ -73,6 +73,7 @@ def install(appmod) -> None:
                 style('home-mobile-polish.css', '/static/home-mobile-polish.css?v=5', ' media="(max-width:767px)"')
                 style('home-composer-mobile.css', '/static/home-composer-mobile.css?v=1', ' media="(max-width:767px)"')
                 style('home-desktop.css', '/static/home-desktop.css?v=1', ' media="(min-width:1025px)"')
+                script('home-desktop.js', '/static/home-desktop.js?v=1')
 
             # Chromium/Android uses document.documentElement as the root
             # scrollingElement in standards mode. The previous hotfix made body

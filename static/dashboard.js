@@ -729,7 +729,6 @@ function _phantomMobileV1Connect(){
       _cb:String(Date.now())
     });
     var _cbUrl='https://orcagent.fun/phantom-callback?'+_cbQuery.toString();
-    console.log('[phantom] server-side init ok, token=',d.token.slice(0,8)+'…');
     var params=new URLSearchParams({
       app_url:'https://orcagent.fun',
       dapp_encryption_public_key:d.dapp_pk,
@@ -983,7 +982,7 @@ async function connectWalletOnboard(type){
     const other=isPhantom?'Solflare':'Phantom';
     const otherUrl=isPhantom?'https://solflare.com':'https://phantom.app';
     _showWalletMsg(msgEl,
-      name+' wallet not detected. <a href="'+installUrl+'" target="_blank" style="color:var(--blue);text-decoration:underline">Install '+name+'</a> or try <a href="'+otherUrl+'" target="_blank" style="color:var(--blue);text-decoration:underline">'+other+'</a>.',
+      name+' wallet not detected. <a href="'+installUrl+'" target="_blank" rel="noopener noreferrer" style="color:var(--blue);text-decoration:underline">Install '+name+'</a> or try <a href="'+otherUrl+'" target="_blank" rel="noopener noreferrer" style="color:var(--blue);text-decoration:underline">'+other+'</a>.',
       name+' wallet not detected — install it from '+installUrl);
     return;
   }
@@ -2531,7 +2530,7 @@ async function fetchAdminFees(){
   if(!txs.length){tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:16px">No fees collected yet</td></tr>';return;}
   tbody.innerHTML=txs.map(f=>{
     const tx=f.tx||'';
-    const sol=tx?`<a href="https://solscan.io/tx/${esc(tx)}" target="_blank" style="color:var(--blue)">${esc(tx.slice(0,10))}…</a>`:'-';
+    const sol=tx?`<a href="https://solscan.io/tx/${esc(tx)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue)">${esc(tx.slice(0,10))}…</a>`:'-';
     return `<tr>
       <td style="font-size:10px">${esc(f.ts||'')}</td>
       <td style="font-family:monospace">${esc(f.wallet||'')}</td>
@@ -2654,7 +2653,7 @@ async function testFeeTransfer(){
     }
     if(r.ok){
       html+=`<span style="color:var(--green)">${esc(r.msg||'OK')}</span>`;
-      if(r.solscan_url) html+=` &nbsp;<a href="${esc(r.solscan_url)}" target="_blank" style="color:var(--blue)">View on Solscan ↗</a>`;
+      if(r.solscan_url) html+=` &nbsp;<a href="${esc(r.solscan_url)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue)">View on Solscan ↗</a>`;
     } else {
       html+=`<span style="color:var(--red)">✗ ${esc(r.error||'Failed')}</span>`;
       if(r.traceback){
@@ -6371,7 +6370,6 @@ async function _dmFetchMessages(){
   try{
     resp=await fetch('/api/messages/'+_dmPeerId);
     rawText=await resp.text();
-    console.log('GET /api/messages/'+_dmPeerId+' status:',resp.status,'body:',rawText);
     let r;
     try{ r=JSON.parse(rawText); }
     catch(parseErr){
@@ -7299,12 +7297,10 @@ function tagToken(){
       _tokenSearchBound=true
       inp.addEventListener('input',function(){
         const q=this.value
-        console.log('searching:',q)
         if(q.length<1) return
         fetch('/api/market/tokens?q='+encodeURIComponent(q))
         .then(r=>r.json())
         .then(d=>{
-          console.log('results:',d)
           const el=document.getElementById('tokenResults')
           el.innerHTML=d.length?d.map(t=>`
           <div class="_tokResult" data-symbol="${esc(t.symbol)}" style="padding:10px;border-radius:8px;cursor:pointer;color:#eef1f5;background:#0a0b0e;margin-top:4px">
@@ -7832,7 +7828,6 @@ function _renderTradeTerminalCard(t){
       token_address:t.token_address || '',
     };
   }
-  console.log('[trade]', t);
   var isBuy   = (t.side||'BUY').toUpperCase() !== 'SELL';
   var sideCol = isBuy ? '#00d084' : '#ff4757';
   var entryN  = parseFloat(t.entry_price || t.entry || 0);
@@ -8550,7 +8545,6 @@ async function loadHomeFeed(){
     const _tid = setTimeout(()=>_ctl.abort(), 12000);
     const r = await fetch('/api/social/feed?filter=' + filter, {signal:_ctl.signal});
     clearTimeout(_tid);
-    console.log('[feed] status:', r.status);
     if(!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
     if(data && Array.isArray(data.items)){
