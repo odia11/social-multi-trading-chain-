@@ -6770,6 +6770,17 @@ def _bridge_validate_pair(origin_chain: str, origin_token: str, dest_chain: str,
         return f'Unsupported destination token for {dest_chain}'
     return ''
 
+# The minimum SOL a Solana-origin bridge transaction needs to pay its own
+# network fee -- read by _execute_cross_chain_bridge()'s own hard gate below
+# AND by solana_source_bridge_gasless.py's "is a gas bootstrap even needed"
+# check. Those two used to disagree (this gate at 0.002, the other module's
+# default at 0.001 because this constant didn't exist yet): a wallet holding
+# something in between read as "enough" to the bootstrap module, which then
+# skipped straight to retrying the real bridge -- which immediately failed on
+# this same gate with the exact same "deposit SOL manually" message the
+# bootstrap exists to avoid. One shared constant closes that gap for good.
+SOL_BRIDGE_GAS_RESERVE = 0.002
+
 def _execute_cross_chain_bridge(user_id: int, wallet: str, origin_chain: str, dest_chain: str,
                                  origin_token: str, dest_token: str, amount: float,
                                  initiated_by: str = 'user',
@@ -6861,7 +6872,7 @@ def _execute_cross_chain_bridge(user_id: int, wallet: str, origin_chain: str, de
                 _origin_sol = _get_user_sol(origin_address)
             except Exception:
                 _origin_sol = None
-            if _origin_sol is not None and _origin_sol < 0.002:
+            if _origin_sol is not None and _origin_sol < SOL_BRIDGE_GAS_RESERVE:
                 return False, (f'Insufficient SOL for network fees on your Solana trading wallet '
                                f'({_origin_sol:.4f} SOL) — deposit a small amount of SOL first'), None
         else:
