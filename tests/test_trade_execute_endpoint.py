@@ -96,10 +96,16 @@ def fake_fee(pk, wallet, user_id, symbol, usdc_amount, kind, chain='bsc', **kw):
     FEES.append({'symbol': symbol, 'usdc': usdc_amount, 'kind': kind, 'chain': chain})
 d._charge_evm_txn_fee = fake_fee
 
+def _csrf():
+    # A real browser fetches this and sends it back; once the session has a
+    # token the app requires it, so the test has to behave like the browser.
+    return (c.get('/api/csrf-token').get_json() or {}).get('token', '')
+
 def quote(body=None):
     r = c.post('/api/trade/quote', json=body or {'chain': 'base',
                                                  'token_address': '0xTOKEN',
-                                                 'max_spend_usd': '100'})
+                                                 'max_spend_usd': '100'},
+               headers={'X-CSRF-Token': _csrf()})
     return r.get_json()
 
 def execute(body):
@@ -108,7 +114,8 @@ def execute(body):
     # loosened in the app, so the production limit stays exactly as shipped.
     with d._rl_lock:
         d._rl_hits.clear()
-    r = c.post('/api/trade/execute', json=body)
+    r = c.post('/api/trade/execute', json=body,
+               headers={'X-CSRF-Token': _csrf()})
     return r.status_code, r.get_json()
 
 # ── anon ──

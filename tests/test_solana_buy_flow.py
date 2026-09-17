@@ -130,7 +130,11 @@ def buy(body=None, path='/api/manual_buy', keep_window=False):
         # Each case here is a fresh decision, not a double-click; the window
         # itself is exercised on purpose further down.
         d._recent_solana_buys.clear()
-    r = c.post(path, json=body if body is not None else {'mint_address': MINT})
+    # A real browser fetches this and sends it back; once the session has a
+    # token the app requires it, so the test has to behave like the browser.
+    tok = (c.get('/api/csrf-token').get_json() or {}).get('token', '')
+    r = c.post(path, json=body if body is not None else {'mint_address': MINT},
+               headers={'X-CSRF-Token': tok})
     return r.status_code, r.get_json()
 
 # ── the happy path: min_trade_size is 1 USDC, and USDC is a dollar ──

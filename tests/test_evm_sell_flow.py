@@ -102,8 +102,12 @@ def reset(positions=True):
 def sell(body=None, path='/api/evm/trade/sell'):
     with d._rl_lock:
         d._rl_hits.clear()
+    # A real browser fetches this and sends it back; once the session has a
+    # token the app requires it, so the test has to behave like the browser.
+    tok = (c.get('/api/csrf-token').get_json() or {}).get('token', '')
     r = c.post(path, json=body if body is not None
-               else {'chain': 'base', 'token_address': TOKEN})
+               else {'chain': 'base', 'token_address': TOKEN},
+               headers={'X-CSRF-Token': tok})
     return r.status_code, r.get_json()
 
 def trade_rows():
