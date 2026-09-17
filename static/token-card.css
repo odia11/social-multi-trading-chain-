@@ -208,6 +208,7 @@
 @media (prefers-reduced-motion:reduce){.cc-step.now .cc-dot{animation:none}}
 .cc-note{margin-top:10px;font-size:11.5px;line-height:1.5;color:var(--muted,#8a8f9c)}
 .cc-note.bad{color:var(--red,#ff5c5c)}
+.cc-note.where{color:var(--text,#e6e8ee);background:rgba(255,255,255,.04);border-radius:8px;padding:8px 10px;margin-top:6px}
 .cc-tx{display:flex;justify-content:space-between;gap:10px;margin-top:6px;
   font-size:11px;color:var(--muted,#8a8f9c)}
 .cc-tx code{font-size:10.5px}

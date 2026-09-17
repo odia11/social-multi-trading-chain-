@@ -165,8 +165,14 @@ What the states mean when it is not moving:
   outcome, a second bridge attempt refused. Releasing the claim by hand is how
   a bridged balance gets spent twice; find the origin transaction on Basescan
   first and settle what actually happened before touching anything.
-* **FAILED** — nothing was sent, or what was sent reverted before the bridge.
-  The claim is released.
+* **FAILED** — two different things wear this name, and the status endpoint
+  says which in `funds_location` / `funds_note`:
+  * `source` — nothing left Base. The USDC is where it always was, and the
+    claim is released.
+  * `destination` — the bridge delivered and only the purchase failed. The
+    dollars are sitting on Solana as USDC. They are the user's and they are
+    spendable there; the claim is released because the money is safe, not
+    because the trade worked. The buy sheet says so in a sentence.
 
 Do not re-run the live test against a trade that is still open. The
 `trade_crosschain` row is keyed on the trade id precisely so a second bridge

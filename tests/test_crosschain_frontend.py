@@ -170,6 +170,19 @@ check('the only animation respects a reduced-motion preference',
       'prefers-reduced-motion' in CSS)
 
 
+# ── it tells the user where their money is ───────────────────────────────
+# A failed cross-chain trade has two completely different meanings: nothing
+# left the source chain, or the bridge worked and only the purchase did not.
+# In the second case the user's dollars are USDC on the other chain, and the
+# failure line alone would send them looking on the wrong one.
+check('a failed cross-chain trade shows the server\'s sentence about where the '
+      'money actually is, alongside the reason it failed',
+      'funds_note' in CC and 'cc-note where' in CC)
+check('...and it is styled to be read rather than buried in the small print, '
+      'because it is the part that says where somebody\'s dollars are',
+      '.cc-note.where{' in CSS)
+
+
 # ── it cannot leak or spend ──────────────────────────────────────────────
 check('the module sends the CSRF token like every other mutating call',
       "'X-CSRF-Token'" in CC)

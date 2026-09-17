@@ -9425,6 +9425,18 @@ def _api_trade_execute_crosschain(quote_row, wallet, uid, quote_id, data):
     body['chain'] = dest_chain
     body['bridge_required'] = True
     body['progress'] = _cc_progress_message(result.state, dest_chain, symbol)
+    _cc_row = None
+    try:
+        _conn = sqlite3.connect(DB_FILE)
+        try:
+            _cc_row = te_ledger.get_crosschain(_conn, result.trade_id)
+        finally:
+            _conn.close()
+    except Exception:
+        _cc_row = None
+    _loc = _cc_funds_location(result.state, _cc_row or {}, dest_chain, source_chain)
+    body['funds_location'] = _loc['where']
+    body['funds_note'] = _loc['note']
     if not body['ok']:
         body['msg'] = result.failure_reason or 'The trade did not complete'
     return jsonify(body), 200
@@ -9450,6 +9462,69 @@ _CC_PROGRESS = {
     te_ledger.MANUAL_REVIEW:   'This trade needs a person to check it',
     te_ledger.CANCELLED:       'Trade cancelled',
 }
+
+
+def _cc_bridge_delivered(cc: dict) -> bool:
+    """Did the bridge actually hand over the money on the far side?
+
+    Three independent marks, any of which means the delivery happened: the
+    provider said filled, it named a destination transaction, or an amount
+    was recorded as received. A row that predates one of them still answers
+    correctly through the others.
+    """
+    if not cc:
+        return False
+    return bool((cc.get('provider_status') or '') == te_crosschain.BRIDGE_FILLED
+                or (cc.get('destination_tx_hash') or '')
+                or (cc.get('actual_out_raw') or ''))
+
+
+def _cc_funds_location(state: str, cc: dict, dest_chain: str = '',
+                       source_chain: str = '') -> dict:
+    """Where the user's dollars are, said plainly.
+
+    "Trade failed" is the same two words whether nothing left the source
+    chain or the bridge worked and only the purchase did not -- and those are
+    completely different facts about somebody's money. In the second case
+    their dollars are sitting on the OTHER chain, as USDC, and if nobody says
+    so they will look for them where they used to be.
+
+    Returns {'where', 'note'}: a machine-readable location and one sentence
+    for a person. An empty note means there is nothing a user needs to be
+    told beyond the state itself.
+    """
+    dest = SURGE_ALERT_CHAIN_NAMES.get(dest_chain, dest_chain or 'the other chain')
+    src = SURGE_ALERT_CHAIN_NAMES.get(source_chain, source_chain or 'the source chain')
+    delivered = _cc_bridge_delivered(cc)
+    if state == te_ledger.COMPLETED:
+        return {'where': 'spent', 'note': ''}
+    if state == te_ledger.REFUNDED:
+        return {'where': 'source',
+                'note': f'Your USDC is back on {src}.'}
+    if state == te_ledger.REFUND_PENDING:
+        return {'where': 'in_flight',
+                'note': f'The bridge failed and your USDC is on its way back to {src}.'}
+    if state == te_ledger.MANUAL_REVIEW:
+        # Deliberately not guessed. This state exists precisely because what
+        # happened could not be established, and inventing a location here is
+        # worse than saying a person is looking.
+        return {'where': 'unknown',
+                'note': 'Where your USDC ended up is being checked by a person. '
+                        'It has not been lost — the trade is held open until '
+                        'somebody has an answer.'}
+    if state == te_ledger.FAILED:
+        if delivered:
+            return {'where': 'destination',
+                    'note': f'The bridge worked and the purchase did not: your '
+                            f'dollars are on {dest}, as USDC. They are yours and '
+                            f'you can spend them there.'}
+        return {'where': 'source',
+                'note': f'Nothing left {src} — your USDC is where it was.'}
+    if state in (te_ledger.BRIDGING, te_ledger.AWAITING_SOURCE):
+        return {'where': 'in_flight', 'note': ''}
+    if state in (te_ledger.DEST_RECEIVED, te_ledger.SWAPPING, te_ledger.CONFIRMING):
+        return {'where': 'destination', 'note': ''}
+    return {'where': 'source', 'note': ''}
 
 
 def _cc_progress_message(state: str, dest_chain: str, symbol: str) -> str:
@@ -9736,6 +9811,14 @@ def api_trade_status(trade_id):
             'progress':              _cc_progress_message(
                 trade['state'], cc['destination_chain'], symbol or 'your token'),
         })
+        # Where the money is, which "Trade failed" does not say. A bridge that
+        # delivered and a purchase that did not leaves the user holding USDC
+        # on the DESTINATION chain, and they will look for it on the source
+        # one unless somebody tells them otherwise.
+        _loc = _cc_funds_location(trade['state'], cc, cc['destination_chain'],
+                                  cc['source_chain'])
+        body['funds_location'] = _loc['where']
+        body['funds_note'] = _loc['note']
     return jsonify(body)
 
 

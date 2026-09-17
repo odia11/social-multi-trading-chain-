@@ -172,6 +172,28 @@ _c.execute("INSERT INTO trade_crosschain (trade_id, quote_id, user_id, provider,
 _c.commit(); _c.close()
 out['unfinished_after'] = d._crosschain_unfinished_count()
 
+# ── where the money is, at each ending ──
+_filled = {'provider_status': 'bridge_filled', 'destination_tx_hash': '0xDEST',
+           'actual_out_raw': '29700000'}
+_nothing = {'provider_status': 'origin_tx_pending', 'destination_tx_hash': '',
+            'actual_out_raw': ''}
+out['loc'] = {
+    'failed_after_bridge': d._cc_funds_location('FAILED', _filled, 'solana', 'base'),
+    'failed_before_bridge': d._cc_funds_location('FAILED', _nothing, 'solana', 'base'),
+    'completed': d._cc_funds_location('COMPLETED', _filled, 'solana', 'base'),
+    'manual': d._cc_funds_location('MANUAL_REVIEW', _filled, 'solana', 'base'),
+    'refunded': d._cc_funds_location('REFUNDED', _nothing, 'solana', 'base'),
+    'bridging': d._cc_funds_location('BRIDGING', _nothing, 'solana', 'base'),
+}
+# Each mark on its own is enough: a row written before one of them existed
+# still answers correctly through the others.
+out['delivered_by'] = [
+    d._cc_bridge_delivered({'provider_status': 'bridge_filled'}),
+    d._cc_bridge_delivered({'destination_tx_hash': '0xD'}),
+    d._cc_bridge_delivered({'actual_out_raw': '1'}),
+    d._cc_bridge_delivered({}),
+]
+
 print('@@@' + json.dumps(out, default=str))
 '''
 
@@ -328,6 +350,37 @@ check('an empty database has no unfinished cross-chain work, so a deployment '
       R['unfinished_empty'] == 0)
 check('...while a trade left in BRIDGING counts as work this database owes, '
       'whatever the flag says', R['unfinished_after'] == 1)
+
+# ── where the user's money is, when a trade ends badly ───────────────────
+# "Trade failed" is the same two words whether nothing left Base or the
+# bridge worked and only the purchase did not. In the second case the user's
+# dollars are USDC on Solana, and if nobody says so they will look for them
+# on Base.
+loc = R.get('loc') or {}
+check('a trade that failed AFTER the bridge delivered says the dollars are on '
+      'the destination chain, and names it',
+      loc['failed_after_bridge']['where'] == 'destination'
+      and 'Solana' in loc['failed_after_bridge']['note'])
+check('...while one that failed BEFORE anything left says the opposite, so the '
+      'two are never confused',
+      loc['failed_before_bridge']['where'] == 'source'
+      and 'Nothing left' in loc['failed_before_bridge']['note'])
+check('a completed trade says nothing extra — the money is in the token, and '
+      'there is nothing for a user to go looking for',
+      loc['completed']['where'] == 'spent' and loc['completed']['note'] == '')
+check('MANUAL_REVIEW does NOT guess a location. That state exists because '
+      'what happened could not be established, and inventing an answer there '
+      'is worse than saying a person is looking',
+      loc['manual']['where'] == 'unknown'
+      and 'has not been lost' in loc['manual']['note'])
+check('a refund says the money is back where it started', 
+      loc['refunded']['where'] == 'source' and 'Base' in loc['refunded']['note'])
+check('a bridge in flight claims nothing, because in flight is exactly what '
+      'it is', loc['bridging']['where'] == 'in_flight'
+      and loc['bridging']['note'] == '')
+check('delivery is recognised by any of the three marks a row can carry, and '
+      'by none of them on an empty row',
+      R['delivered_by'] == [True, True, True, False])
 
 _src = open(REPO + '/dashboard.py').read()
 check('...and the worker starts on either — the feature being on, OR money '

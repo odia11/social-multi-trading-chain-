@@ -130,12 +130,19 @@
            + '<span class="cc-step-label">' + esc(label) + '</span></li>';
     }).join('');
 
+    // Where the money is. "This trade did not complete" is the same sentence
+    // whether nothing left the source chain or the bridge worked and only the
+    // purchase did not -- and in the second case the user's dollars are on the
+    // OTHER chain. The server says which; this is where they read it.
+    var whereNote = d.funds_note
+      ? '<div class="cc-note where">' + esc(d.funds_note) + '</div>' : '';
+
     var note = '';
     if (failed) {
       note = '<div class="cc-note bad">' + esc(d.failure_reason || 'This trade did not complete')
            + (state === 'MANUAL_REVIEW'
                ? ' <strong>Your funds are still reserved while this is checked.</strong>' : '')
-           + '</div>';
+           + '</div>' + whereNote;
     } else if (refunded) {
       note = '<div class="cc-note">The bridge did not go through and your USDC was returned.</div>';
     } else if (!done) {
