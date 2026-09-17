@@ -144,22 +144,56 @@ check('...while every EVM chain keeps the real rate, which its separate fee '
 
 
 # ── the flag, and the evidence helper ─────────────────────────────────────
-check('Solana execution ships behind a flag that defaults OFF, so the working '
-      'legacy route stays in charge until this is watched against real trades',
-      d.TRADE_ENGINE_SOLANA is False)
+check('Solana runs through the engine by default now that the broadcast '
+      'outcome is reported rather than inferred',
+      d.TRADE_ENGINE_SOLANA is True)
 
+
+# ── the fallback heuristic, for output with no [BROADCAST] markers ────────
 cap = {}
 d._capture_broadcast_evidence(cap, '[TRADE] Step 4/8 — Signing transaction\n')
-check('evidence: stopping before step 5 reads as never sent',
+check('fallback: stopping before step 5 reads as never sent',
       cap['send_attempted'] is False)
 cap = {}
 d._capture_broadcast_evidence(cap, '[TRADE] Step 5/8 — Sending transaction to Solana RPC\n')
-check('evidence: reaching step 5 reads as possibly sent', cap['send_attempted'] is True)
+check('fallback: reaching step 5 reads as possibly sent', cap['send_attempted'] is True)
 cap = {}
 d._capture_broadcast_evidence(
     cap, '[TRADE] Step 5 — submitted, NOT yet confirmed: https://solscan.io/tx/ABC123\n')
-check('evidence: a signature is recovered even from a run that then failed',
+check('fallback: a signature is recovered even from a run that then failed',
       cap['signature'] == 'ABC123')
+
+
+# ── the explicit verdict, which is why the flag can default ON ────────────
+# These four are the whole argument. Without them the executor reads a step
+# number and hopes; with them it reads what the swap actually did.
+cap = {}
+d._capture_broadcast_evidence(
+    cap, '[TRADE] Step 5/8 — Sending transaction to Solana RPC\n'
+         '[BROADCAST] begin\n'
+         '[BROADCAST] rejected insufficient funds for rent\n')
+check('verdict: a node that answered in full and refused it means NOTHING was '
+      'broadcast — the copier/trader gets their entire claim back, even though '
+      'the step-5 line the old heuristic keyed on is right there in the output',
+      cap['send_attempted'] is False)
+
+cap = {}
+d._capture_broadcast_evidence(cap, '[BROADCAST] begin\n[BROADCAST] sent SIGXYZ\n')
+check('verdict: a signature came back, so it is on the network',
+      cap['send_attempted'] is True and cap['signature'] == 'SIGXYZ')
+
+cap = {}
+d._capture_broadcast_evidence(
+    cap, '[BROADCAST] begin\n[BROADCAST] unknown all sendTransaction endpoints failed\n')
+check('verdict: a reply lost in flight is unknown IN FACT — the node may have '
+      'broadcast it — so the claim is kept rather than guessed away',
+      cap['send_attempted'] is True)
+
+cap = {}
+d._capture_broadcast_evidence(cap, '[BROADCAST] begin\n')
+check('verdict: entering the send and never coming back out is the same '
+      'unknown, and gets the same pessimistic answer',
+      cap['send_attempted'] is True)
 
 passed = sum(1 for _, ok in checks if ok)
 print(f'\n{passed}/{len(checks)} checks passed')

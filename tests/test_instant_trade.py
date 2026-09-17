@@ -65,6 +65,15 @@ USDC_BAL = [500.0]
 d._get_solana_usdc_balance = lambda addr: USDC_BAL[0]
 d.add_user_log = lambda *a, **k: None
 d._dex_get = lambda *a, **k: None
+# The BUY leg runs through the trade engine now, which prices the route before
+# spending. Both of its network calls are stubbed here; everything else about
+# the engine -- the ceiling, the reservation, the idempotency key -- is real.
+d._sol_price_usd = 150.0
+d._jupiter_quote = lambda i, o, amt: {
+    'outAmount': '1000000000', 'otherAmountThreshold': '985000000',
+    'priceImpactPct': '0.004'}
+d._ensure_solana_gas = lambda w, pk: (True, '')
+d.get_token_data = lambda a, **k: {'symbol': 'BONK', 'price': 0.02}
 
 KEY_USES = []
 class FakeKey:
@@ -79,7 +88,8 @@ SWAP_RESULT = [(True, '0xSIG', '', 1234.5, 0.049)]
 FEE_BUNDLED = [True]
 SWAP_DELAY = [0.0]
 def fake_swap(wallet, pk, action, mint, amount_str, base='SOL', capture=None):
-    SWAPS.append({'action': action, 'mint': mint, 'amount': amount_str})
+    SWAPS.append({'action': action, 'mint': mint, 'amount': amount_str,
+                  'base': base})
     time.sleep(SWAP_DELAY[0])
     if capture is not None:
         capture['fee_bundled'] = FEE_BUNDLED[0]
@@ -110,7 +120,10 @@ def tokens_row():
     finally:
         conn.close()
 
-BUY = {'symbol': 'BONK', 'token_address': MINT, 'side': 'buy', 'amount_sol': 0.05}
+# $50, not $0.05: the engine takes gas OUT of the amount, and a ceiling
+# smaller than its own costs is refused -- correctly, but it would make
+# this a test of the refusal rather than of the buy.
+BUY = {'symbol': 'BONK', 'token_address': MINT, 'side': 'buy', 'amount_usdc': 50}
 
 # ── a buy ──
 reset()
@@ -227,15 +240,18 @@ check('the buy succeeds', R['buy_status'] == 200 and b['success'])
 check('it goes through the SHARED swap wrapper — the same one every other Solana '
       'trade uses, which is what gets it the network-fee guarantee it used to '
       'skip', len(R['buy_swaps']) == 1 and R['buy_swaps'][0]['action'] == 'buy')
-check('...with the amount and mint from the request',
-      R['buy_swaps'][0]['amount'] == '0.05' and R['buy_swaps'][0]['mint'])
+check('...for the mint in the request, and for LESS than the $50 asked for, '
+      'because the network fee now comes out of that $50 instead of out of '
+      'the wallet\'s SOL on top of it',
+      R['buy_swaps'][0]['mint'] and 0 < float(R['buy_swaps'][0]['amount']) < 50.0)
+check('...and it is funded in USDC', R['buy_swaps'][0].get('base') == 'USDC')
 check('the key is taken through _use_key, so this trade route now reaches the '
       'security log like every other one does', R['buy_key_uses'] >= 1)
 check('the realized fill comes back rather than being re-parsed by hand',
       b['token_amount'] == 1234.5)
-check('the fee is recorded as bundled, on the SOL spent',
-      len(R['buy_fees']) == 1 and R['buy_fees'][0]['bundled'] is True
-      and abs(R['buy_fees'][0]['sol'] - 0.05) < 1e-9)
+check('no platform fee is recorded on the buy — a USDC-funded Solana buy '
+      'collects none, and the quote priced none, so a fee row here would book '
+      'revenue nobody received', R['buy_fees'] == [])
 check('...and the holding is credited', R['tokens_after_buy'])
 
 check('a wallet that cannot pay the network fee now fails with the wrapper\'s own '

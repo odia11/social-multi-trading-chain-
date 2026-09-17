@@ -6706,6 +6706,9 @@ document.addEventListener('click',function(){
   document.querySelectorAll('.ep-palette,.fc-react-palette').forEach(function(p){ p.style.display='none'; });
 });
 
+// amtSol is still accepted so an older cached page keeps calling this with
+// the same arguments, but it is no longer sent: the server spends the
+// copier's own configured size in USDC, not the size on the shared card.
 async function _dmCopyTrade(btn, btnId, errId, tokenAddr, entryPrice, amtSol){
   const errEl=document.getElementById(errId);
   btn.disabled=true;
@@ -6715,7 +6718,7 @@ async function _dmCopyTrade(btn, btnId, errId, tokenAddr, entryPrice, amtSol){
     const resp=await fetch('/api/trades/copy-from-message',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({token_address:tokenAddr,entry_price:entryPrice,amount_sol:amtSol})
+      body:JSON.stringify({token_address:tokenAddr,entry_price:entryPrice})
     });
     const r=await resp.json();
     if(r.ok){
