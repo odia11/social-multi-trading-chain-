@@ -9399,6 +9399,56 @@ def _api_trade_execute_crosschain(quote_row, wallet, uid, quote_id, data):
     # was priced. The balance can have moved since the quote, and this is the
     # last moment the answer is still worth anything.
     gas_req = _cc_gas_requirement(wallet, source_chain, route)
+    if gas_req['required'] and source_chain in EVM_CHAINS:
+        # THE SAME LADDER EVERY OTHER EVM TRADE CLIMBS.
+        #
+        # A same-chain buy on this exact wallet would not have been refused
+        # here: _ensure_evm_gas() would have funded the gas from what the user
+        # already holds -- the sponsor if this deployment runs one, otherwise a
+        # small bridge of their own SOL, otherwise a swap of their own USDC on
+        # the chain. Only a bridge was refusing, and only because it asked a
+        # different question ("is there gas?") instead of the one the rest of
+        # the app asks ("can this wallet get gas?").
+        #
+        # Nothing is fronted by OrcAgent here: every rung of that ladder is
+        # the user's own money, and the trade's own quote carries the cost.
+        _conn_g = sqlite3.connect(DB_FILE)
+        try:
+            _row_g = _conn_g.execute(
+                'SELECT encrypted_private_key_bsc FROM users WHERE wallet_address=?',
+                (wallet,)).fetchone()
+        finally:
+            _conn_g.close()
+        _pk_blob = _row_g[0] if _row_g else ''
+        if uid and _pk_blob:
+            try:
+                with _use_key(_pk_blob, wallet) as _evm_pk:
+                    _ok, _why, _bridge_id = _ensure_evm_gas(
+                        uid, wallet, _evm_pk,
+                        _cc_taker_address(wallet, source_chain), source_chain)
+            except Exception as e:
+                _ok, _why, _bridge_id = False, f'gas top-up failed: {e}', None
+            if _ok:
+                # It worked. Re-read rather than assume: the number that
+                # matters is the one on chain, not the one we hoped for.
+                gas_req = _cc_gas_requirement(wallet, source_chain, route)
+            elif _bridge_id:
+                # A bootstrap bridge is on its way. Minutes, not seconds, and
+                # this quote will have expired by then -- so say that plainly
+                # rather than hold an HTTP request open or pretend it failed.
+                return jsonify({
+                    'ok': False, 'pending_gas': True, 'bridge_id': _bridge_id,
+                    'code': 'GAS_ON_THE_WAY',
+                    'msg': f'Getting {gas_req["symbol"]} for the network fee on '
+                           f'{source_chain} — a small amount of your own SOL is '
+                           f'bridging over. It lands in a minute or two; ask for '
+                           f'a fresh quote then and the trade goes straight '
+                           f'through.'}), 202
+            else:
+                _log_line = (_why or '')[:200]
+                if _log_line:
+                    print(f'[crosschain] gas ladder declined on {source_chain}: '
+                          f'{_log_line}', flush=True)
     if gas_req['required']:
         # Said before anything is signed, with the number they need. OrcAgent
         # does not front it -- see _cc_gas_requirement.
