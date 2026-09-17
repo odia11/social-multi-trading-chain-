@@ -1845,7 +1845,15 @@ function fetchQuote(idx, amt){
     _quotes[idx] = {
       id: d.quote_id, amt: amt,
       expiresAt: Date.now() + (Number(d.expires_in_seconds) || 0) * 1000,
-      purchase: d.token_purchase_usd
+      purchase: d.token_purchase_usd,
+      // A trade that has to move money between chains executes down a
+      // different path, and it cannot be worked out from the token's chain
+      // alone: it depends on where THIS user's dollars happen to be, which
+      // only the server knows.
+      bridge: !!d.bridge_required,
+      sourceChain: d.source_chain || '',
+      gasBlocked: !!d.native_gas_required,
+      gasReason: (d.native_gas && d.native_gas.reason) || ''
     };
     renderQuote(idx, d, t);
   }).catch(function(){
@@ -1853,6 +1861,10 @@ function fetchQuote(idx, amt){
     if(box) box.innerHTML = '<div class="pt-quote-bad">Could not reach the pricing service</div>';
   });
 }
+
+var PT_CHAIN_NAMES = {solana:'Solana', base:'Base', bsc:'BNB Chain',
+                     arbitrum:'Arbitrum', polygon:'Polygon',
+                     robinhood:'Robinhood'};
 
 var COST_LABELS = {
   source_gas:       'Network fee',
@@ -1874,10 +1886,46 @@ function renderQuote(idx, d, t){
     rows += '<div class="pt-quote-row"><span>' + esc(COST_LABELS[k] || k) + '</span>'
           + '<span>-' + esc(Number(kinds[k]).toFixed(2)) + '</span></div>';
   }
+  // Where the money comes FROM, shown only when that is not the obvious
+  // answer. On a same-chain buy the route is noise; on a bridged one it is
+  // the single most surprising thing about the trade.
+  var routeRows = '';
+  if(d.bridge_required){
+    routeRows =
+        '<div class="pt-quote-row"><span>Route</span><span>'
+      +   esc(PT_CHAIN_NAMES[d.source_chain] || d.source_chain) + ' &rarr; '
+      +   esc(PT_CHAIN_NAMES[d.destination_chain] || d.destination_chain)
+      + '</span></div>'
+      + (d.estimated_time_seconds
+          ? '<div class="pt-quote-row"><span>Estimated time</span><span>~'
+            + esc(Math.max(1, Math.round(d.estimated_time_seconds/60))) + ' min</span></div>'
+          : '');
+  }
+
+  // NATIVE GAS. The bridge's first transaction is signed and paid for in the
+  // source chain's own token, and OrcAgent does not cover it -- so if the
+  // wallet cannot pay, that is said here, with the amount, before the button
+  // is pressed rather than after the money has started moving.
+  var gasWarn = '';
+  var g = d.native_gas;
+  if(d.native_gas_required && g){
+    gasWarn =
+        '<div class="pt-quote-bad">You need about '
+      +   esc(Number(g.estimated_native_gas).toFixed(6)) + ' ' + esc(g.symbol)
+      +   ' on ' + esc(PT_CHAIN_NAMES[g.chain] || g.chain)
+      +   ' to pay the network for this transfer — you have '
+      +   esc(Number(g.have).toFixed(6)) + ' ' + esc(g.symbol) + '.'
+      + '</div>'
+      + '<div class="pt-quote-note">That is an estimate, not an exact figure: '
+      + 'the network price moves. OrcAgent does not pay it for you.</div>';
+  }
+
   box.innerHTML =
       '<div class="pt-quote-row pt-quote-top"><span>You spend</span><span>'
     +   esc(Number(d.max_spend_usd).toFixed(2)) + ' ' + esc(cur) + '</span></div>'
+    + routeRows
     + rows
+    + gasWarn
     + '<div class="pt-quote-row pt-quote-get"><span>You get</span><span>'
     +   esc(Number(d.token_purchase_usd).toFixed(2)) + ' ' + esc(cur)
     +   ' of $' + esc(t.symbol || '') + '</span></div>'
@@ -1974,6 +2022,30 @@ function confirmBuy(idx){
   // the same intent. The buy route prices correctly either way, so this is
   // about honouring what was on screen, not about correctness of the total.
   var q = _quotes[idx];
+
+  // A bridged trade does not finish inside this request, so it cannot be run
+  // through the same then()-chain as a same-chain buy: that chain decides
+  // "bought" or "failed" from one response, and the answer here is neither
+  // for another few minutes. It goes to the module that follows a trade
+  // instead -- which also survives the page being closed.
+  if(q && q.bridge && q.id && q.amt === amt && q.expiresAt > Date.now()
+     && window.OrcaCrossChain){
+    if(q.gasBlocked){
+      showMsg(msgEl, q.gasReason || 'You need native gas on the source chain first', false);
+      if(btn){ btn.disabled = false; btn.textContent = 'Buy'; }
+      return;
+    }
+    showMsg(msgEl, 'Starting…', true);
+    window.OrcaCrossChain.execute(q.id, {symbol: t.symbol, token_address: t.mint})
+      .then(function(started){
+        if(btn){ btn.disabled = false; btn.textContent = 'Buy'; }
+        showMsg(msgEl, started
+          ? 'Moving your USDC — this keeps going if you close the page'
+          : 'The trade was not started', !!started);
+      });
+    return;
+  }
+
   if(isEvm && q && q.id && q.amt === amt && q.expiresAt > Date.now()){
     url  = '/api/trade/execute';
     body = {quote_id: q.id};

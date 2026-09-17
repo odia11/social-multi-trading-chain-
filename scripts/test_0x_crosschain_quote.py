@@ -123,6 +123,9 @@ def probe(source: str, dest: str, usd: float, api_key: str) -> dict:
         report.update(ok=False, error=f'unparseable: {e}')
         return report
 
+    # The whole response, redacted, so a test can be built from what the live
+    # API really returns rather than from what its example code suggests.
+    report['raw_response'] = redact(data)
     report['liquidityAvailable'] = data.get('liquidityAvailable')
     report['envelope_keys'] = sorted(data)
     # THE QUESTION THIS SCRIPT EXISTS FOR: which envelope does the live API
@@ -189,6 +192,13 @@ def main():
     ap.add_argument('--route', action='append', default=[],
                     help='source->dest, repeatable. Default: base->solana and back')
     ap.add_argument('--json', action='store_true', help='machine-readable output')
+    ap.add_argument('--save-fixture', metavar='DIR', default='',
+                    help='write the sanitized live response to DIR as a test '
+                         'fixture (tests/fixtures/0x is where the suite reads '
+                         'them from). Addresses and amounts are kept, because '
+                         'those are what the parser is tested against; nothing '
+                         'secret is in a quote response, and it is run through '
+                         'the same redactor as the printed output anyway.')
     args = ap.parse_args()
 
     api_key = os.getenv('ZEROX_API_KEY', '')
@@ -203,7 +213,21 @@ def main():
             print(f'skipping {spec!r}: expected source->dest', file=sys.stderr)
             continue
         src, dst = (p.strip() for p in spec.split('->', 1))
-        reports.append(probe(src, dst, args.amount, api_key))
+        rep = probe(src, dst, args.amount, api_key)
+        reports.append(rep)
+        if args.save_fixture and rep.get('raw_response') is not None:
+            os.makedirs(args.save_fixture, exist_ok=True)
+            path = os.path.join(args.save_fixture,
+                                f'quote_{src}_to_{dst}.json')
+            with open(path, 'w') as fh:
+                json.dump({'route': f'{src}->{dst}',
+                           'captured_at': __import__('datetime').datetime
+                                          .utcnow().isoformat() + 'Z',
+                           'amount_usd': args.amount,
+                           'origin_address': rep['sent_params'].get('originAddress'),
+                           'destination_address': rep['sent_params'].get('destinationAddress'),
+                           'response': rep['raw_response']}, fh, indent=2)
+            print(f'  fixture written: {path}', file=sys.stderr)
 
     if args.json:
         print(json.dumps(reports, indent=2, default=str))
@@ -212,7 +236,7 @@ def main():
             print('\n' + '=' * 68)
             print(f'  {rep["route"]}   ${rep["amount_usd"]}   READ ONLY')
             print('=' * 68)
-            for k in ('http_status', 'liquidityAvailable', 'quote_list_key',
+            for k in ('http_status', 'liquidityAvailable', 'quote_list_key',  # noqa
                       'envelope_keys', 'zid', 'quoteId', 'quoteId_present',
                       'quoteId_equals_zid', 'gasPayer_sent', 'allowanceTarget',
                       'allowanceTarget_is_canonical',

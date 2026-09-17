@@ -200,8 +200,13 @@ q = tcfn('_lmtdQuote')
 check('the card prices through the SAME endpoint as Live Market, so the two '
       'surfaces cannot show different numbers for one trade',
       "'/api/trade/quote'" in TC)
-check('...only for an EVM buy — a Solana buy has no ceiling to price against',
-      '_tcIsEvm(chain)' in q and "_lmtdSide !== 'buy'" in q)
+check('...for every BUY on every chain, not EVM only. The old restriction '
+      'rested on "a Solana buy has no ceiling to price against", which '
+      'stopped being true when Solana moved onto the engine — and was never '
+      'true for a buy that has to bridge INTO Solana from another chain. A '
+      'breakdown that appears on some chains and not others is the one a user '
+      'cannot learn to trust',
+      "_lmtdSide !== 'buy'" in q and '_tcIsEvm(chain)' not in q)
 check('pricing is debounced here too', 'clearTimeout' in q and '450' in q)
 check('the breakdown is priced when the panel opens, not only after a keystroke: '
       'the field carries a default amount, and a breakdown that appeared only on '

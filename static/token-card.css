@@ -171,3 +171,43 @@
   .lmtd-chain-badge{max-width:30px;overflow:hidden;white-space:nowrap}
   .lmtd-live-dot-wrap{max-width:10px;overflow:hidden}
 }
+
+/* ── the route line on a cross-chain quote ── */
+.lmtd-quote-route span:last-child{font-variant-numeric:normal;letter-spacing:.2px}
+
+/* ── a cross-chain trade, followed after the request that started it ──
+   Fixed to the corner rather than inside the buy panel: the panel closes and
+   the trade does not, and a progress bar that disappears with the modal would
+   be telling the user the trade went with it. */
+.cc-progress{position:fixed;right:16px;bottom:16px;z-index:9000;max-width:330px;
+  display:none;font-size:12.5px}
+@media (max-width:520px){
+  .cc-progress{left:12px;right:12px;bottom:12px;max-width:none}
+}
+.cc-card{background:var(--card,#12141a);border:1px solid var(--border,#252833);
+  border-radius:14px;padding:14px 15px;box-shadow:0 10px 34px rgba(0,0,0,.45)}
+.cc-head{display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:10px;font-size:13px}
+.cc-close{background:none;border:0;color:var(--muted,#8a8f9c);font-size:19px;
+  line-height:1;cursor:pointer;padding:0 2px}
+.cc-close:hover{color:var(--text,#e7e9ee)}
+.cc-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}
+.cc-step{display:flex;align-items:center;gap:9px;color:var(--muted,#8a8f9c)}
+.cc-dot{width:8px;height:8px;border-radius:50%;background:var(--border,#2a2e3a);
+  flex:0 0 8px}
+.cc-step.done{color:var(--text,#e7e9ee)}
+.cc-step.done .cc-dot{background:var(--green,#2ecc71)}
+.cc-step.now{color:var(--text,#e7e9ee);font-weight:600}
+/* The step in progress pulses. Everything above it is finished and still, so
+   the only thing moving is the only thing happening. */
+.cc-step.now .cc-dot{background:var(--accent,#4c8dff);
+  animation:cc-pulse 1.25s ease-in-out infinite}
+.cc-step.bad{color:var(--red,#ff5c5c);font-weight:600}
+.cc-step.bad .cc-dot{background:var(--red,#ff5c5c);animation:none}
+@keyframes cc-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.8)}}
+@media (prefers-reduced-motion:reduce){.cc-step.now .cc-dot{animation:none}}
+.cc-note{margin-top:10px;font-size:11.5px;line-height:1.5;color:var(--muted,#8a8f9c)}
+.cc-note.bad{color:var(--red,#ff5c5c)}
+.cc-tx{display:flex;justify-content:space-between;gap:10px;margin-top:6px;
+  font-size:11px;color:var(--muted,#8a8f9c)}
+.cc-tx code{font-size:10.5px}

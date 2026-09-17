@@ -57,6 +57,10 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:'J
 
 <script src="/static/chart-scrub.js?v={{ app_version }}"></script>
 <script src="/static/token-card.js?v={{ app_version }}"></script>
+<!-- Follows a cross-chain trade after the request that started it has
+     already returned. Loaded beside token-card.js because that is where
+     the Buy button lives; it does nothing at all on a same-chain buy. -->
+<script src="/static/crosschain-buy.js?v={{ app_version }}"></script>
 <script>
 'use strict';
 // showTokenCard() -> _lmtdInitChart() needs LightweightCharts, loaded via a
