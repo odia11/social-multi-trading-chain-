@@ -1515,14 +1515,13 @@ def get_bsc_balances(address: str) -> dict:
 # ── PERFORMANCE FEE COLLECTION ──
 def send_sol_fee(from_privkey: str, to_wallet_str: str, amount_sol: float) -> str:
     """Native SOL transfer via System Program — no ATA, no SPL, just lamports."""
-    from solders.keypair import Keypair as _KP
     from solders.pubkey import Pubkey
     from solders.instruction import Instruction, AccountMeta
     from solders.transaction import Transaction
     from solders.hash import Hash as SolHash
 
     SYS_PROG = Pubkey.from_string('11111111111111111111111111111111')
-    keypair  = _KP.from_base58_string(from_privkey)
+    keypair  = _sol_keypair_from_base58(from_privkey)
     sender   = keypair.pubkey()
     receiver = Pubkey.from_string(to_wallet_str)
     lamports = int(amount_sol * 1_000_000_000)
@@ -1612,6 +1611,34 @@ def is_valid_solana_private_key(key: str) -> bool:
         except Exception:
             pass
     return False
+
+def _sol_keypair_from_base58(secret: str):
+    """Parse a base58 Solana key, or raise ValueError. Never panic.
+
+    solders is a Rust extension, and on malformed input it raises
+    pyo3_runtime.PanicException -- which inherits from BaseException, NOT from
+    Exception. So every `except Exception` around a key parse in this file is
+    a guard that does not guard, including the one at import time:
+
+        SOL_GAS_SPONSOR_PRIVATE_KEY="4xQ..."   (quotes included in the value)
+        -> PanicException: InvalidCharacter { character: '"', index: 0 }
+        -> dashboard fails to import at all, with a Rust traceback
+
+    That is a bad way for a stray quote in an environment file to be reported,
+    and a worse way for the app to refuse to boot. This turns it into an
+    ordinary ValueError that the existing handlers already catch.
+
+    KeyboardInterrupt and SystemExit are re-raised untouched: those are not
+    the key being wrong.
+    """
+    from solders.keypair import Keypair as _KP_parse
+    try:
+        return _KP_parse.from_base58_string(secret)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException as e:
+        raise ValueError(f'not a valid base58 Solana key ({type(e).__name__})') from None
+
 
 # ── HONEYPOT GATE (logging only — no IP blocking) ──
 # Owner/trusted IPs — set via env var, comma-separated (e.g. "1.2.3.4,5.6.7.8").
@@ -3605,8 +3632,7 @@ def _get_trading_wallet_address(session_wallet: str) -> str:
         if not row or not row[0]:
             return ''
         with _use_key(row[0], session_wallet) as _pk:
-            from solders.keypair import Keypair as _KP_tw
-            return str(_KP_tw.from_base58_string(_pk).pubkey())
+            return str(_sol_keypair_from_base58(_pk).pubkey())
     except Exception as e:
         print(f'[trading-wallet] derive failed for {session_wallet[:8]}...: {e}', flush=True)
         return ''
@@ -6006,8 +6032,7 @@ def _charge_txn_fee(private_key: str, wallet: str, user_id: int, symbol: str,
             print(f'[fee] → attempting {fee:.6f} SOL {kind_} fee transfer from trading wallet to '
                   f'{_dest_label} {fee_recipient[:10]}... for {sw} {sym}', flush=True)
             try:
-                from solders.keypair import Keypair as _KP_fee
-                signer_pub = str(_KP_fee.from_base58_string(pk).pubkey())
+                signer_pub = str(_sol_keypair_from_base58(pk).pubkey())
                 signer_sol = _get_user_sol(signer_pub)
                 NET_FEE    = 0.000005  # ~5000 lamports for a simple SOL transfer tx
                 if signer_sol < fee + NET_FEE:
@@ -7085,8 +7110,7 @@ def _execute_cross_chain_bridge(user_id: int, wallet: str, origin_chain: str, de
         # wallet, not the trading wallet funds actually live in).
         try:
             if origin_chain == 'solana':
-                from solders.keypair import Keypair as _BridgeSolKP
-                origin_address = str(_BridgeSolKP.from_base58_string(private_key).pubkey())
+                origin_address = str(_sol_keypair_from_base58(private_key).pubkey())
             else:
                 origin_address = _EvmAccount.from_key(private_key).address
         except Exception as e:
@@ -7459,12 +7483,11 @@ def _bridge_sign_send_solana(txn, private_key: str) -> str:
     Solana transactions itself (every other Solana swap goes through that
     file's own subprocess). Verified against 0x-examples' schemas.ts
     SvmTransactionSchema: the base64 string is at txn['details']['serializedTransaction']."""
-    from solders.keypair import Keypair as _BridgeSolKP2
     from solders.transaction import VersionedTransaction as _BridgeVTx
     tx_b64 = (txn.get('details') or {}).get('serializedTransaction') if isinstance(txn, dict) else None
     if not tx_b64:
         raise ValueError('no base64 transaction in quote response')
-    keypair = _BridgeSolKP2.from_base58_string(private_key)
+    keypair = _sol_keypair_from_base58(private_key)
     vtx = _BridgeVTx.from_bytes(base64.b64decode(tx_b64))
     signed_tx = _BridgeVTx(vtx.message, [keypair])
     encoded = base64.b64encode(bytes(signed_tx)).decode()
@@ -10486,8 +10509,7 @@ def _sol_gas_sponsor_address() -> str:
     if not SOL_GAS_SPONSOR_PRIVATE_KEY:
         return ''
     try:
-        from solders.keypair import Keypair as _KP
-        return str(_KP.from_base58_string(SOL_GAS_SPONSOR_PRIVATE_KEY).pubkey())
+        return str(_sol_keypair_from_base58(SOL_GAS_SPONSOR_PRIVATE_KEY).pubkey())
     except Exception as e:
         print(f'[gas-sponsor] SOL_GAS_SPONSOR_PRIVATE_KEY is not a valid Solana key: {type(e).__name__}', flush=True)
         return ''
@@ -10603,8 +10625,7 @@ def _ensure_solana_gas(wallet: str, private_key: str) -> tuple:
     if not ORCAGENT_FRONTS_GAS or not SOL_GAS_SPONSOR_PRIVATE_KEY:
         return True, ''
     try:
-        from solders.keypair import Keypair as _KP
-        trading_address = str(_KP.from_base58_string(private_key).pubkey())
+        trading_address = str(_sol_keypair_from_base58(private_key).pubkey())
     except Exception:
         return True, ''  # can't derive it -- let the swap itself report the real problem
     try:
@@ -11819,12 +11840,11 @@ def user_trader_loop(stop_event, config, wallet: str):
     # Keep only the encrypted blob — never store decrypted key across loop iterations.
     # Each trade decrypts at the moment of signing and clears immediately after.
     try:
-        from solders.keypair import Keypair as _KP_init
         _enc_blob = row[1]
         _test_key = decrypt_private_key(_enc_blob, wallet)
         # Derive the trading wallet address from the keypair (this is where Jupiter
         # creates ATAs and where SOL lands after sells — NOT the Phantom session wallet).
-        _trading_wallet = str(_KP_init.from_base58_string(_test_key).pubkey())
+        _trading_wallet = str(_sol_keypair_from_base58(_test_key).pubkey())
         _test_key = None  # clear immediately
         del _KP_init
     except Exception:
@@ -15183,8 +15203,7 @@ def wallet_page():
         if row and row[1]:
             try:
                 with _use_key(row[1], wallet_address) as _pk:
-                    from solders.keypair import Keypair as _KP_wp
-                    deposit_address = str(_KP_wp.from_base58_string(_pk).pubkey())
+                    deposit_address = str(_sol_keypair_from_base58(_pk).pubkey())
             except InvalidToken:
                 print(f'[wallet] cannot decrypt trading key for {wallet_short}', flush=True)
             except Exception as e:
@@ -20071,8 +20090,7 @@ def wallet_set_key():
         _record_ip_failure(ip)
         return jsonify({'ok': False, 'msg': 'Invalid key format — paste the full base58 key from your wallet'})
     try:
-        from solders.keypair import Keypair as _KP_wsk
-        pasted_address = str(_KP_wsk.from_base58_string(private_key_raw).pubkey())
+        pasted_address = str(_sol_keypair_from_base58(private_key_raw).pubkey())
         if pasted_address == wallet:
             return jsonify({'ok': False, 'msg': 'This is the wallet you connected with — paste the private key of a separate, dedicated trading wallet instead'})
     except Exception:
@@ -26882,8 +26900,7 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
 
     try:
         with _use_key(enc_blob, wallet) as _pk:
-            from solders.keypair import Keypair as _KP
-            trading_wallet = str(_KP.from_base58_string(_pk).pubkey())
+            trading_wallet = str(_sol_keypair_from_base58(_pk).pubkey())
     except InvalidToken:
         return jsonify({'ok': False, 'msg': 'Cannot decrypt trading key — please re-save it in Settings'}), 400
     except Exception as e:
@@ -27163,8 +27180,7 @@ def _insufficient_trade_balance(wallet: str, enc_blob: str):
     required       = max(required, 0.05)
     try:
         with _use_key(enc_blob, wallet) as _pk:
-            from solders.keypair import Keypair as _KP_bal
-            trading_wallet = str(_KP_bal.from_base58_string(_pk).pubkey())
+            trading_wallet = str(_sol_keypair_from_base58(_pk).pubkey())
     except Exception:
         return None, None, None, None  # key errors are surfaced by the loop itself; don't double-block here
     us_sol = _get_user_sol(trading_wallet)
@@ -27476,8 +27492,7 @@ def bot_overview():
         if enc_key:
             try:
                 with _use_key(enc_key, wallet) as _pk:
-                    from solders.keypair import Keypair as _KP_ov
-                    trading_wallet = str(_KP_ov.from_base58_string(_pk).pubkey())
+                    trading_wallet = str(_sol_keypair_from_base58(_pk).pubkey())
                 trading_wallet_short = (trading_wallet[:4] + '...' + trading_wallet[-4:])
                 trading_wallet_sol = _get_user_sol(trading_wallet)
             except Exception:
@@ -27628,8 +27643,7 @@ def api_withdraw():
 
     try:
         with _use_key(enc_blob, wallet) as _pk:
-            from solders.keypair import Keypair as _KP_wd
-            trading_wallet = str(_KP_wd.from_base58_string(_pk).pubkey())
+            trading_wallet = str(_sol_keypair_from_base58(_pk).pubkey())
     except InvalidToken:
         return jsonify({'ok': False, 'error': 'Cannot decrypt trading key — please re-save it in Settings'}), 400
     except Exception as e:
@@ -27917,8 +27931,7 @@ def api_get_tokens():
     if row and row[0]:
         try:
             with _use_key(row[0], wallet) as pk_str:
-                from solders.keypair import Keypair as _KP2
-                trading_pk = str(_KP2.from_base58_string(pk_str).pubkey())
+                trading_pk = str(_sol_keypair_from_base58(pk_str).pubkey())
         except Exception:
             pass
 
@@ -28102,7 +28115,7 @@ def api_claim_sol():
     # Derive the trading keypair once — authority must match the account's owner field
     try:
         with _use_key(enc_blob, wallet) as _pk_tmp:
-            _kp_probe  = _KP.from_base58_string(_pk_tmp)
+            _kp_probe  = _sol_keypair_from_base58(_pk_tmp)
             trading_pk = str(_kp_probe.pubkey())
     except Exception as e:
         return jsonify({'ok': False, 'msg': 'Cannot access trading key — please re-save it in Settings'}), 500
@@ -28225,7 +28238,7 @@ def api_claim_sol():
     other_accs: list = []
     try:
         with _use_key(enc_blob, wallet) as pk_str:
-            kp       = _KP.from_base58_string(pk_str)
+            kp       = _sol_keypair_from_base58(pk_str)
             signer   = kp.pubkey()
 
             if str(signer) != trading_pk:
@@ -28361,7 +28374,7 @@ def api_burn_tokens():
 
     try:
         with _use_key(row[0], wallet) as pk_str:
-            kp     = _KP_bt.from_base58_string(pk_str)
+            kp     = _sol_keypair_from_base58(pk_str)
             signer = kp.pubkey()
     except Exception as e:
         print(f'[burn-tokens] key decrypt error: {_redact_keys(str(e))}', flush=True)
@@ -30781,8 +30794,7 @@ def _recover_uncollected_fees(triggered_by: str = 'manual') -> dict:
             # diagnose it without confusing the wallet owner.
             try:
                 with _use_key(enc_blob, user_wallet) as pk:
-                    from solders.keypair import Keypair as _KP_fr
-                    signer = str(_KP_fr.from_base58_string(pk).pubkey())
+                    signer = str(_sol_keypair_from_base58(pk).pubkey())
                     signer_sol = _get_user_sol(signer)
                     if signer_sol < 0.001:
                         print(f'[fee-recovery] {sw} signer={signer[:6]}...{signer[-4:]} has '
@@ -31746,12 +31758,11 @@ def admin_test_fee():
 
     sig = None
     try:
-        from solders.keypair import Keypair as _KP
         from solders.pubkey import Pubkey as _PK
 
         with _use_key(row[0], wallet) as pk:
             # ── 2. Keypair ──────────────────────────────────────────────────
-            kp     = _KP.from_base58_string(pk)
+            kp     = _sol_keypair_from_base58(pk)
             sender = kp.pubkey()
             _step('Keypair', detail=str(sender)[:8] + '…')
 
