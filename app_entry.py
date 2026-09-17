@@ -93,11 +93,22 @@ _install_owner_money_hardening(_dashboard)
 _install_abuse_rate_hardening(_dashboard)
 _install_upload_hardening(_dashboard)
 
-# Resolve Robinhood Chain's canonical trading stablecoin before any quote,
-# bridge or swap adapter can ask the registry to size USDG amounts. The bridge
-# engine uses require_decimals() during route validation, so leaving USDG at
-# None makes a valid USDC -> USDG -> token route fail before 0x can execute it.
-_install_robinhood_stablecoin_registry(_dashboard)
+# Resolve Robinhood Chain's trading stablecoin before any quote, bridge or
+# swap adapter can ask the registry to size USDG amounts. The bridge engine
+# calls require_decimals() during route validation, so leaving USDG at None
+# makes a valid USDC -> USDG -> token route fail before 0x can execute it.
+#
+# It reads decimals() from the deployed contract, so it needs the Robinhood
+# RPC and can fail. That must not take the app down: a stablecoin's metadata
+# on ONE chain is not a reason to stop Solana and Base from trading. A
+# failure here leaves USDG unverified, which is the state the registry was
+# already in -- Robinhood routes refuse, everything else runs.
+try:
+    _install_robinhood_stablecoin_registry(_dashboard)
+except Exception as _e:
+    print(f'[startup] Robinhood USDG metadata not installed '
+          f'({type(_e).__name__}: {_e}) — Robinhood routes will refuse; every '
+          f'other chain is unaffected', flush=True)
 
 # Every EVM BUY (BNB Chain, Base, Arbitrum, Polygon, Robinhood Chain) uses
 # 0x Gasless: native BNB/ETH/POL is not a prerequisite for a stablecoin-funded
