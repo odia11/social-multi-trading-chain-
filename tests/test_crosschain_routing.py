@@ -117,7 +117,22 @@ if not _os.path.isfile(_fx_path):
 out['econ'] = {}
 if _os.path.isfile(_fx_path):
     _fx = _json.load(open(_fx_path))
-    _data = _fx['response']
+    _data = _json.loads(_json.dumps(_fx['response']))
+    # The captured calldata was truncated when it was saved, and verify_route
+    # now refuses that -- correctly, and BEFORE the economic check, because
+    # safety comes first. This section is about economics, so the leading
+    # arguments are rebuilt at their real values (operator, Base USDC, and
+    # 2000000, exactly the sellAmount) to get past the safety gate and reach
+    # the thing being tested.
+    def _w(v, is_addr=False):
+        return (v.lower().replace('0x', '').rjust(64, '0') if is_addr
+                else format(int(v), '064x'))
+    _data['quotes'][0]['transaction']['details']['data'] = (
+        '0x2213bc0b'
+        + _w('0x7d19077317b7574cd01aafa143e5e09f0f4df466', True)
+        + _w('0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', True)
+        + _w(2000000) + _w('0x7d19077317b7574cd01aafa143e5e09f0f4df466', True)
+        + _w(160) + _w(4) + 'deadbeef'.ljust(64, '0'))
     d.TRADE_ENGINE_CROSSCHAIN = True
     d.CROSSCHAIN_ENABLED_ROUTES = frozenset({'base->solana'})
     d._cc_taker_address = lambda w, c: (_fx['destination_address'] if c == 'solana'

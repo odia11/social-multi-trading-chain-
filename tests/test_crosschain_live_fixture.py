@@ -128,6 +128,15 @@ else:
         print(f'INFO  {name}: ephemeral signer required = {needs_eph}')
 
         # ── the parser, end to end ──
+        # A fixture whose calldata was truncated by the redactor is REFUSED at
+        # the calldata check, which is correct: a transaction that cannot be
+        # fully read is not one to sign. Reported as its own outcome so it is
+        # not confused with the response being unparseable.
+        _raw_data = ((q.get('transaction') or {}).get('details') or {}).get('data') or ''
+        _truncated = 'chars]' in _raw_data
+        if _truncated:
+            print(f'INFO  {name}: calldata was truncated when captured '
+                  f'(saved before the redactor stopped shortening it)')
         try:
             r = provider.get_quote(
                 source_chain=src, destination_chain=dst,
@@ -146,6 +155,13 @@ else:
             print(f'INFO  {name}: route refused as unsupported — {e}')
             check(f'{name}: an unsupported live route is refused cleanly rather '
                   f'than crashing the parser', True)
+        except X.RouteRejected as e:
+            if _truncated:
+                check(f'{name}: the truncated calldata is refused rather than '
+                      f'signed — the response parsed, the BYTES did not, and '
+                      f'those are different failures', True)
+            else:
+                check(f'{name}: the real parser reads the real response — {e}', False)
         except X.CrossChainError as e:
             check(f'{name}: the real parser reads the real response — {e}', False)
 

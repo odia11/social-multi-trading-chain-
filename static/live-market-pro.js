@@ -1899,6 +1899,17 @@ function renderQuote(idx, d, t){
       + (d.estimated_time_seconds
           ? '<div class="pt-quote-row"><span>Estimated time</span><span>~'
             + esc(Math.max(1, Math.round(d.estimated_time_seconds/60))) + ' min</span></div>'
+          : '')
+      // What is GUARANTEED to arrive, next to what is expected. The gap
+      // between them is the bridge's own slippage, and it is the number a
+      // user is entitled to before agreeing rather than after.
+      + (d.bridge_minimum_out_usd
+          ? '<div class="pt-quote-row"><span>Arrives on '
+            + esc(PT_CHAIN_NAMES[d.destination_chain] || d.destination_chain)
+            + '</span><span>' + esc(Number(d.bridge_expected_out_usd).toFixed(2))
+            + ' USDC</span></div>'
+            + '<div class="pt-quote-row"><span>Guaranteed minimum</span><span>'
+            + esc(Number(d.bridge_minimum_out_usd).toFixed(2)) + ' USDC</span></div>'
           : '');
   }
 

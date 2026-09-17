@@ -41,8 +41,45 @@ q = data['quotes'][0]
 ALLOWANCE_HOLDER_CANCUN = '0x0000000000001ff3684f28c67538d4d072c22734'
 
 
-def parse(**over):
+BASE_USDC = R.CHAINS['base'].stable.address
+OPERATOR = '0x7d19077317b7574cd01aafa143e5e09f0f4df466'
+
+
+def _w_addr(a):
+    return a.lower().replace('0x', '').rjust(64, '0')
+
+
+def _w_int(n):
+    return format(int(n), '064x')
+
+
+def full_calldata(token=None, amount=2_000_000, operator=OPERATOR, target=OPERATOR,
+                  selector='0x2213bc0b'):
+    """The live calldata, reconstructed at full length.
+
+    The captured fixture was saved while the redactor still truncated long
+    strings, so its `data` ends mid-argument. That is fine for checking the
+    RESPONSE parses and useless for checking what the transaction does -- so
+    the leading arguments are rebuilt here from the ones the truncation did
+    preserve, at the real values:
+
+        selector 0x2213bc0b   exec(address,address,uint256,address,bytes)
+        operator 0x7d19077317b7574cd01aafa143e5e09f0f4df466
+        token    Base USDC
+        amount   0x1e8480 = 2000000, exactly the sellAmount
+
+    This is used to exercise the validator. It is NOT a transaction and is
+    never signed.
+    """
+    return (selector + _w_addr(operator) + _w_addr(token or BASE_USDC)
+            + _w_int(amount) + _w_addr(target)
+            + _w_int(160) + _w_int(4) + 'deadbeef'.ljust(64, '0'))
+
+
+def parse(_full_calldata=True, **over):
     body = json.loads(json.dumps(data))
+    if _full_calldata and 'quotes.0.transaction.details.data' not in over:
+        body['quotes'][0]['transaction']['details']['data'] = full_calldata()
     for path, value in over.items():
         node = body
         parts = path.split('.')
@@ -120,6 +157,56 @@ check('...which matches 0x\'s own EVM -> Solana example, where the whole trade '
       'is signed with the EVM key and no Solana keypair is created. The '
       'earlier "required: true" was this repository\'s detector, not 0x',
       'ephemeral' not in json.dumps(data).lower())
+
+
+# ── THE CALLDATA: what the transaction would actually do ─────────────────
+# Everything above reads the quote's own FIELDS. This reads the bytes, which
+# is the only account that settles.
+#
+# The selector was verified by keccak, not read off a comment:
+#   keccak("exec(address,address,uint256,address,bytes)")[:4] == 0x2213bc0b
+# That is AllowanceHolder.exec, which pulls `amount` of `token` from the
+# caller, grants `operator` a TRANSIENT allowance for exactly that, calls
+# `target`, and clears it. So the blast radius of the whole transaction is
+# (token, amount) -- two arguments in plain sight at the front.
+check('the live calldata selector is AllowanceHolder.exec, confirmed by '
+      'keccak of the signature rather than by assumption',
+      data['quotes'][0]['transaction']['details']['data'][:10]
+      == X.ALLOWANCE_HOLDER_EXEC_SELECTOR)
+
+_dec = X.decode_allowance_holder_exec(full_calldata())
+check('...the token it would pull is Base USDC, matching the quote',
+      _dec['token'].lower() == BASE_USDC.lower())
+check('...and the amount it would pull is exactly the sellAmount, which is '
+      'the check that would catch a route quoting $2 and encoding $2000 — '
+      'every field-based check passes such a route',
+      _dec['amount'] == 2_000_000 == int(q['sellAmount']))
+
+r_full = parse()
+check('the full-length calldata passes validation end to end',
+      X.verify_source_calldata(r_full)['checked'] is True)
+
+# The saved fixture's own calldata is truncated, and is REFUSED. That is the
+# right answer: a partially readable transaction is not one to sign.
+try:
+    parse(_full_calldata=False)
+    check('...and the truncated captured calldata is refused', False)
+except X.RouteRejected as e:
+    check('...while the truncated captured calldata is REFUSED rather than '
+          'waved through — a transaction that cannot be fully read is not one '
+          'to sign, and the fixture was saved before the redactor stopped '
+          'shortening it', 'truncated' in str(e) or 'not a number' in str(e))
+
+for label, kw in (
+        ('a different token', {'token': '0x4200000000000000000000000000000000000006'}),
+        ('a thousand times the amount', {'amount': 2_000_000_000}),
+        ('an operator that is the token itself', {'operator': BASE_USDC}),
+        ('a different function on the allowance contract', {'selector': '0xa9059cbb'})):
+    try:
+        parse(**{'quotes.0.transaction.details.data': full_calldata(**kw)})
+        check(f'calldata naming {label} is refused', False)
+    except X.RouteRejected:
+        check(f'calldata naming {label} is refused', True)
 
 
 # ── the route, as the engine reads it ────────────────────────────────────

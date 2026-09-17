@@ -75,6 +75,18 @@ check('...and says plainly that OrcAgent does not cover it',
 # ── the same, on the Live Market panel (the busiest buy surface) ────────
 check('the Live Market quote box shows the route when a trade has to bridge',
       'PT_CHAIN_NAMES' in PRO and "'<div class=\"pt-quote-row\"><span>Route</span>" in PRO)
+check('the Live Market quote shows what is GUARANTEED to arrive next to what '
+      'is expected — the gap between them is the bridge\'s own slippage, and a '
+      'user is entitled to it before agreeing rather than after',
+      'bridge_minimum_out_usd' in PRO and 'Guaranteed minimum' in PRO
+      and 'bridge_expected_out_usd' in PRO)
+check('...and the token card shows the same two numbers',
+      'bridge_minimum_out_usd' in TC and 'Guaranteed minimum' in TC)
+check('...both taken as dollars from the server, never converted in the '
+      'browser: the raw amount needs the destination stable\'s decimals, and '
+      'those differ per chain (BSC USDC is 18, everyone else 6), so a client '
+      'doing that conversion can be wrong by a factor of a trillion',
+      'bridge_minimum_out_raw' not in PRO and 'bridge_minimum_out_raw' not in TC)
 check('...and the native-gas requirement, with the amount and what is held',
       'native_gas_required' in PRO and 'estimated_native_gas' in PRO
       and 'OrcAgent does not pay it for you' in PRO)

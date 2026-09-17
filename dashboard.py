@@ -8299,6 +8299,14 @@ def api_trade_quote():
             uid=uid, wallet=wallet, source_chain=source_chain, dest_chain=dest_chain,
             token_address=token_address, max_spend=max_spend, taker=taker,
             mode=str(data.get('mode') or 'manual'))
+    except te_crosschain.NoLiquidity as e:
+        # The provider answered and said it cannot serve this trade. Reported
+        # under its own code so a caller can tell "nobody can bridge this
+        # right now" from "something is wrong" -- a quiet market changes by
+        # the hour, and nothing about it justifies inventing a route.
+        body = {'ok': True, 'can_execute': False, 'reject_reason': str(e)}
+        body.update(e.to_dict())
+        return jsonify(body), 200
     except (TeQuoteError, TeCostError, TeProviderError, te_registry.RegistryError,
             te_crosschain.CrossChainError) as e:
         # A quote that cannot be priced is reported as un-executable with the
@@ -9003,6 +9011,9 @@ def _te_bridge_quoter(wallet: str, quote_key: str):
         if not origin or not dest:
             raise TeQuoteError('no wallet on one side of this route yet')
         amount_raw = te_registry.to_raw(Decimal(str(ceiling_usd)), src.stable)
+        # NoLiquidity is deliberately NOT caught and re-wrapped here: it
+        # carries the chains, the amount and the provider's zid, and flattening
+        # it into a generic quote error throws all of that away.
         route = _te_crosschain_provider().get_quote(
             source_chain=source_chain, destination_chain=dest_chain,
             source_amount_raw=amount_raw, origin_address=origin,

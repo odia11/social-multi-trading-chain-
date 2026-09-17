@@ -724,6 +724,14 @@ function _lmtdFetchQuote(amt, chain){
             ? '<div class="lmtd-quote-row"><span>Estimated time</span><span>~'
               + _esc(Math.max(1, Math.round(d.estimated_time_seconds / 60)))
               + ' min</span></div>'
+            : '')
+        // Expected next to guaranteed. The gap is the bridge's own slippage.
+        + (d.bridge_minimum_out_usd
+            ? '<div class="lmtd-quote-row"><span>Arrives on '
+              + _esc(_tcChainName(d.destination_chain)) + '</span><span>'
+              + _esc(Number(d.bridge_expected_out_usd).toFixed(2)) + ' USDC</span></div>'
+              + '<div class="lmtd-quote-row"><span>Guaranteed minimum</span><span>'
+              + _esc(Number(d.bridge_minimum_out_usd).toFixed(2)) + ' USDC</span></div>'
             : '');
     }
 

@@ -54,6 +54,46 @@ class RouteRejected(CrossChainError):
     """
 
 
+class NoLiquidity(CrossChainError):
+    """The provider answered, correctly, that it cannot serve this trade.
+
+    Its own outcome, and deliberately not RouteRejected or RouteUnsupported.
+    Nothing is wrong: not the response, not this integration, not the
+    provider. There simply is no route at this size right now, which is a
+    fact about a market and can change by the hour.
+
+    Naming it matters because of what must NOT happen next. A quiet market is
+    not a reason to invent a route, fall back to a hand-rolled bridge,
+    substitute a different asset, or record the provider as broken. It is a
+    reason to say so and stop.
+    """
+    code = 'NO_CROSSCHAIN_LIQUIDITY'
+
+    def __init__(self, message, *, source_chain='', destination_chain='',
+                 amount_raw=0, provider='', zid=''):
+        super().__init__(message)
+        self.source_chain = source_chain
+        self.destination_chain = destination_chain
+        self.amount_raw = amount_raw
+        self.provider = provider
+        self.zid = zid
+
+    def to_dict(self) -> dict:
+        return {
+            'code': self.code,
+            'message': str(self),
+            'source_chain': self.source_chain,
+            'destination_chain': self.destination_chain,
+            'amount_raw': str(self.amount_raw),
+            'provider': self.provider,
+            # The provider's own handle for the request. It is the thing 0x
+            # support would ask for, and it is the only identifier a
+            # no-liquidity response carries -- there is no quoteId, because
+            # there is no quote.
+            'zid': self.zid,
+        }
+
+
 class RouteUnsupported(CrossChainError):
     """The route is real and we will not execute it.
 
@@ -421,6 +461,7 @@ class ZeroExCrossChain:
         # verified two-parameter shape had to be used instead. Read by the
         # smoke script so an operator can see which shape the live API takes.
         self.last_quote_id_status_error = ''
+        self._asked_amount = 0
 
     # ── quoting ──────────────────────────────────────────────────────────
     def get_quote(self, *, source_chain: str, destination_chain: str,
@@ -477,6 +518,9 @@ class ZeroExCrossChain:
         if alternative_gas_payer:
             request['gas_payer'] = alternative_gas_payer.strip()
 
+        # Remembered for the no-liquidity answer, which has to be able to say
+        # WHICH amount could not be served -- that is the part that changes.
+        self._asked_amount = source_amount_raw
         try:
             data = self._fetch_quote(**request)
         except Exception as e:
@@ -516,8 +560,12 @@ class ZeroExCrossChain:
         if not data.get('liquidityAvailable'):
             # Not an error in the response -- an absence of liquidity. Kept
             # distinct from a malformed envelope on purpose.
-            raise CrossChainError(
-                f'no bridge route for {source_chain} -> {destination_chain} at this size')
+            raise NoLiquidity(
+                f'no bridge route for {source_chain} -> {destination_chain} at '
+                f'this size',
+                source_chain=source_chain, destination_chain=destination_chain,
+                amount_raw=self._asked_amount, provider=self.name,
+                zid=str(data.get('zid') or ''))
 
         for key in self.QUOTE_LIST_KEYS:
             found = data.get(key)
@@ -537,8 +585,12 @@ class ZeroExCrossChain:
                 f'than parsed on a guess. Verify against the current documentation '
                 f'and add it to QUOTE_LIST_KEYS.')
         if any(k in data for k in self.QUOTE_LIST_KEYS):
-            raise CrossChainError(
-                f'no bridge route for {source_chain} -> {destination_chain} at this size')
+            raise NoLiquidity(
+                f'no bridge route for {source_chain} -> {destination_chain} at '
+                f'this size',
+                source_chain=source_chain, destination_chain=destination_chain,
+                amount_raw=self._asked_amount, provider=self.name,
+                zid=str(data.get('zid') or ''))
         raise RouteRejected(
             f'the response has liquidity but no recognised list of quotes; its keys '
             f'are {sorted(data)[:12]}')
@@ -738,6 +790,10 @@ class ZeroExCrossChain:
             if route.tx_value < 0:
                 raise RouteRejected('route attaches a negative native value')
             self._verify_spender(route, extra_allowed_spenders, settler_lookup)
+            # And finally the bytes themselves. Everything above this line
+            # reads the quote's own fields; this reads what the transaction
+            # will actually do, which is the only account that settles.
+            verify_source_calldata(route)
         else:
             if not route.serialized_transaction:
                 raise RouteRejected(
@@ -932,3 +988,139 @@ def check_solana_tx_version(serialized_b64: str, parse) -> object:
             f'this integration signs {SUPPORTED_SOLANA_TX_VERSIONS} and refuses '
             f'anything else before signing rather than after')
     return tx
+
+
+# ── what the source transaction actually does ────────────────────────────
+# The live Base -> Solana route calls AllowanceHolder with this selector:
+#
+#     0x2213bc0b  exec(address operator, address token, uint256 amount,
+#                      address target, bytes data)
+#
+# verified by keccak against the signature, not read off a comment somewhere.
+#
+# WHY DECODING IT MATTERS MORE THAN CHECKING THE TARGET
+# Knowing tx.to is AllowanceHolder says who is called. It says nothing about
+# what they are asked to do. AllowanceHolder.exec pulls `amount` of `token`
+# from the caller, grants `operator` a TRANSIENT allowance for exactly that,
+# calls `target` with `data`, and clears it again.
+#
+# So the blast radius of the whole transaction is precisely (token, amount) --
+# the two arguments sitting in plain sight at the front of the calldata. A
+# route that quoted 2 USDC and encoded 2000 would be caught here and nowhere
+# else: the quote's own sellAmount field would still say 2, and every check
+# that reads the quote rather than the bytes would pass it.
+#
+# The transient allowance is also why `operator` is not allowlisted. It is a
+# Settler, Settler addresses are explicitly not hardcodeable, and the
+# permission it receives dies with the call. Bounding (token, amount) bounds
+# the loss whoever the operator is.
+ALLOWANCE_HOLDER_EXEC_SELECTOR = '0x2213bc0b'
+
+# What is NOT done here, deliberately: nothing decodes or re-encodes the inner
+# `data` argument, and nothing is rebuilt. Those bytes are the bridge's own
+# call and they are what 0x quoted; a locally reconstructed version is a
+# different transaction wearing the same intent.
+
+
+def _word(body: str, index: int) -> str:
+    start = index * 64
+    word = body[start:start + 64]
+    if len(word) < 64:
+        raise RouteRejected(
+            f'the calldata ends mid-argument at word {index} — it is truncated '
+            f'or malformed, and a partially readable transaction is not one to '
+            f'sign')
+    return word
+
+
+def _word_address(body: str, index: int) -> str:
+    word = _word(body, index)
+    if word[:24] != '0' * 24:
+        raise RouteRejected(
+            f'calldata word {index} is not a clean address — its upper bytes '
+            f'are set, which an ABI-encoded address never has')
+    return '0x' + word[24:]
+
+
+def _word_uint(body: str, index: int) -> int:
+    try:
+        return int(_word(body, index), 16)
+    except ValueError:
+        raise RouteRejected(f'calldata word {index} is not a number')
+
+
+def decode_allowance_holder_exec(calldata: str) -> dict:
+    """Read the four leading arguments of AllowanceHolder.exec.
+
+    Returns {selector, operator, token, amount, target}. The trailing `bytes
+    data` argument is deliberately not decoded: it is the bridge's own call,
+    this integration has no business interpreting it, and every attempt to
+    would be a second implementation of somebody else's protocol.
+    """
+    if not isinstance(calldata, str) or not calldata.startswith('0x'):
+        raise RouteRejected('the transaction has no usable calldata')
+    selector = calldata[:10].lower()
+    if selector != ALLOWANCE_HOLDER_EXEC_SELECTOR:
+        raise RouteRejected(
+            f'the transaction calls {selector} on the allowance contract, not '
+            f'{ALLOWANCE_HOLDER_EXEC_SELECTOR} (exec). This integration signs '
+            f'exec and nothing else — an unrecognised function on a contract '
+            f'that holds allowances is exactly the thing not to sign on trust')
+    body = calldata[10:]
+    return {
+        'selector': selector,
+        'operator': _word_address(body, 0),
+        'token': _word_address(body, 1),
+        'amount': _word_uint(body, 2),
+        'target': _word_address(body, 3),
+    }
+
+
+def verify_source_calldata(route: CrossChainRoute) -> dict:
+    """Check that the bytes agree with the quote they arrived with.
+
+    Only for an EVM source going through a recognised allowance contract.
+    Anything else returns {'checked': False} with the reason, because a check
+    that quietly does nothing is worse than no check.
+    """
+    src = R.get_chain(route.source_chain)
+    if src.kind != 'evm':
+        return {'checked': False, 'reason': 'not an EVM source'}
+    if (route.tx_to or '').lower() not in CANONICAL_ALLOWANCE_TARGETS:
+        # A different execution target is a different ABI. It is not decoded
+        # on a guess; _verify_spender has already refused anything that is not
+        # either canonical or deliberately pinned by an operator.
+        return {'checked': False,
+                'reason': f'target {route.tx_to} is not a published allowance '
+                          f'contract, so its calldata shape is not assumed'}
+
+    decoded = decode_allowance_holder_exec(route.tx_data)
+
+    # THE TOKEN THAT WILL BE PULLED. Must be the source chain's dollar asset,
+    # by address, from the registry.
+    if not _same_address(decoded['token'], src.stable.address):
+        raise RouteRejected(
+            f'the calldata would pull {decoded["token"]} from the wallet, not '
+            f'{src.stable.symbol} at {src.stable.address}. The quote says one '
+            f'asset and the bytes say another; the bytes are what executes')
+
+    # THE AMOUNT THAT WILL BE PULLED. Must be exactly what was quoted. This is
+    # the check that catches a route quoting 2 and encoding 2000.
+    if decoded['amount'] != route.source_amount_raw:
+        raise RouteRejected(
+            f'the calldata would pull {decoded["amount"]} but the quote sold '
+            f'{route.source_amount_raw}. A transaction that spends more than '
+            f'the quote it came with is refused, whatever the difference')
+
+    # The operator receiving the transient allowance must at least be an
+    # address, and must not be the token itself -- that combination would mean
+    # approving the asset contract to move the asset, which is nonsense the
+    # rest of the checks would not otherwise catch.
+    if not _EVM_ADDRESS.match(decoded['operator']):
+        raise RouteRejected(f'the calldata names an unusable operator: {decoded["operator"]}')
+    if _same_address(decoded['operator'], decoded['token']):
+        raise RouteRejected(
+            'the calldata would grant the token contract an allowance over '
+            'itself, which is not a thing any real route does')
+
+    return {'checked': True, **decoded}

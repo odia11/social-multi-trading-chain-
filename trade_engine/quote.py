@@ -43,6 +43,7 @@ from decimal import Decimal, ROUND_UP
 from typing import Callable, Optional
 
 from . import registry as R
+from .crosschain import NoLiquidity as _CrossChainPassthrough
 from .costs import (
     CostLine, CostError, Quote, money, price_trade, sponsored_gas, ZERO,
     KIND_BRIDGE_FEE, KIND_DEST_GAS, KIND_SOURCE_GAS,
@@ -127,6 +128,25 @@ class PricedQuote:
             'cross_chain_provider': self.bridge.get('provider', '') if self.bridge else '',
         })
         if self.bridge:
+            # The guaranteed amount, in dollars, computed here rather than in
+            # the browser. The raw integer needs the destination stable's
+            # decimals to mean anything, and those differ per chain (BSC's
+            # USDC is 18, everyone else's is 6) -- so a client doing the
+            # conversion is a client that can be wrong by a factor of a
+            # trillion on one chain.
+            try:
+                _dst_stable = R.get_chain(self.request.destination_chain).stable
+                _min_raw = int(self.bridge.get('minimum_out_raw') or 0)
+                _exp_raw = int(self.bridge.get('expected_out_raw') or 0)
+                _scale = Decimal(10) ** _dst_stable.require_decimals()
+                body['bridge_minimum_out_usd'] = str(
+                    (Decimal(_min_raw) / _scale).quantize(Decimal('0.01')))
+                body['bridge_expected_out_usd'] = str(
+                    (Decimal(_exp_raw) / _scale).quantize(Decimal('0.01')))
+            except Exception:
+                # A missing decimals value is not a reason to fail a quote;
+                # it is a reason not to show a number nobody can vouch for.
+                pass
             body.update({
                 'bridge_route_id': self.bridge.get('route_id', ''),
                 'bridge_provider': self.bridge.get('bridge_provider', ''),
@@ -197,6 +217,12 @@ def build_quote(
             try:
                 bridge_info = f_bridge.result() or {}
                 bridge_usd = money(bridge_info.get('fee_usd', 0))
+            except _CrossChainPassthrough:
+                # A provider saying "no liquidity right now" already carries
+                # the chains, the amount and its own request id. Wrapping it
+                # in a generic quote error throws all of that away and makes a
+                # quiet market look like a broken integration.
+                raise
             except Exception as e:
                 raise QuoteError(f'no bridge route {src.name} -> {dst.name}: {e}') from e
         elif not same_chain:
