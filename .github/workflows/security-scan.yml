@@ -1,15 +1,23 @@
 name: Security Scan
 
 on:
+  pull_request:
+    branches: [main, dev]
   push:
     branches: [main, dev]
+  workflow_dispatch:
   schedule:
     - cron: '0 6 * * *'   # daily at 06:00 UTC
+
+concurrency:
+  group: security-scan-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   security:
     name: Security checks
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
     env:
@@ -17,15 +25,12 @@ jobs:
 
     steps:
       - name: Checkout
-        # actions/checkout v4 pinned to an immutable commit to prevent a
-        # compromised/moved marketplace tag from changing CI code silently.
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          fetch-depth: 0   # full history needed for gitleaks
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Python
-        # actions/setup-python v5, pinned for the same supply-chain reason.
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.11'
@@ -37,36 +42,12 @@ jobs:
           python -m pip install --quiet -r requirements.txt
 
       - name: Install Playwright browser
-        # Only test_buy_sheet.py needs a real browser; installed here (not in
-        # requirements.txt) since production never needs Chromium.
         run: python -m playwright install --with-deps chromium
 
       - name: Python compile check
         run: python -m compileall -q .
 
       - name: OrcAgent regression checks
-        # Every tests/test_*.py, not a hand-picked subset -- a script added
-        # here and never added to this list would pass locally and never run
-        # anywhere else. Each runs as its own process (a shared interpreter
-        # would let one test's monkeypatches or module-level state leak into
-        # the next), and every one runs even if an earlier one fails, so a
-        # single red script never hides the rest of the report.
-        #
-        # Two genuinely different styles live in tests/, and running either
-        # one the wrong way gives a false pass, not an error:
-        #   - most files are a standalone script: module-level checks, a
-        #     PASS/FAIL line each, sys.exit(0/1) at the end. `python file.py`
-        #     runs it correctly; pytest collecting it calls sys.exit() during
-        #     import and aborts with an INTERNALERROR.
-        #   - a handful (grep -rL for the pattern below if this count ever
-        #     needs rechecking) are plain pytest: `def test_*():` functions
-        #     with nothing at module level to call them. `python file.py`
-        #     imports it, runs nothing, and exits 0 whether the assertions
-        #     inside are true or not -- a silent, permanent false pass.
-        # Detected per file by asking pytest to collect it: a file with real
-        # pytest tests lists them; a script-style file produces the
-        # INTERNALERROR above and nothing on stdout, so grep finds nothing
-        # either way and this correctly falls through to running it directly.
         run: |
           fail=0
           for f in tests/test_*.py; do
@@ -95,7 +76,6 @@ jobs:
             -f txt
 
       - name: gitleaks
-        # gitleaks-action v2 pinned to the commit already verified in CI.
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
