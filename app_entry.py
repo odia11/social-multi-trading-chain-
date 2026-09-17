@@ -38,6 +38,7 @@ from owner_money_hardening import install as _install_owner_money_hardening
 from abuse_rate_hardening import install as _install_abuse_rate_hardening
 from upload_hardening import install as _install_upload_hardening
 from robinhood_stablecoin_registry import install as _install_robinhood_stablecoin_registry
+from evm_stable_gas_bootstrap import install as _install_evm_stable_gas_bootstrap
 from bsc_gasless_trading import install as _install_evm_gasless_trading
 from solana_gasless_trading import install as _install_solana_gasless_trading
 from cross_chain_budget_guard import install as _install_cross_chain_budget_guard
@@ -109,6 +110,12 @@ except Exception as _e:
     print(f'[startup] Robinhood USDG metadata not installed '
           f'({type(_e).__name__}: {_e}) — Robinhood routes will refuse; every '
           f'other chain is unaffected', flush=True)
+
+# Before the normal EVM Gasless BUY adapter captures _ensure_evm_gas, teach
+# the gas ladder to bootstrap native BNB/ETH/POL from the user's OWN USDC/USDG
+# through 0x Gasless. This removes the separate SOL/BNB prerequisite while
+# preserving ORCAGENT_FRONTS_GAS=0: network cost comes from user funds only.
+_install_evm_stable_gas_bootstrap(_dashboard)
 
 # Every EVM BUY (BNB Chain, Base, Arbitrum, Polygon, Robinhood Chain) uses
 # 0x Gasless: native BNB/ETH/POL is not a prerequisite for a stablecoin-funded
