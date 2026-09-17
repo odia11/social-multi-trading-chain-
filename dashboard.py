@@ -9308,6 +9308,26 @@ def _cc_open_position_for(trade_id: str, symbol: str) -> None:
                           source='manual', chain=cc['destination_chain'])
 
 
+def _crosschain_unfinished_count() -> int:
+    """How many cross-chain trades this database is still responsible for.
+
+    Asked at boot, and the reason the worker is not purely a function of the
+    feature flag: a trade in BRIDGING is money on chain with the user's claim
+    still held, and turning the route off -- or finishing a controlled live
+    test with the flag never on in the first place -- must not strand it.
+    """
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            return len(te_ledger.resumable_crosschain(conn, limit=1))
+        finally:
+            conn.close()
+    except Exception:
+        # A database too old or too new to ask is not a reason to refuse to
+        # boot. The flag alone then decides, as it did before.
+        return 0
+
+
 def _crosschain_resume_loop():
     """Every unfinished cross-chain trade, forever, until it finishes.
 
@@ -32402,11 +32422,25 @@ import surge_radar
 threading.Thread(target=surge_radar.surge_loop, daemon=True).start()
 threading.Thread(target=_scanner_safety_warm_loop, daemon=True).start()
 threading.Thread(target=_trade_reservation_reap_loop, daemon=True).start()
-# Only when cross-chain is on. A worker that wakes every 20 seconds to find
-# nothing, forever, on every deployment that will never bridge, is noise --
-# and a thread that exists only when the feature does is one less thing to
-# reason about when it is off.
-if TRADE_ENGINE_CROSSCHAIN:
+# Only when cross-chain is on, OR when this database still has an unfinished
+# bridge in it. A worker that wakes every 20 seconds to find nothing, forever,
+# on every deployment that will never bridge, is noise -- and a thread that
+# exists only when the feature does is one less thing to reason about when it
+# is off.
+#
+# But the flag going off must never strand money that is already moving. A
+# trade in BRIDGING is a real transaction on chain with the user's claim still
+# held, and it is finished by whichever process is running later, not by the
+# one that started it. That happens in two ordinary situations: a route is
+# closed again while a bridge is in flight, and the controlled live test,
+# which runs with the flag off by design. So unfinished work starts the worker
+# on its own, and it stops being started once there is none.
+_cc_unfinished = _crosschain_unfinished_count()
+if TRADE_ENGINE_CROSSCHAIN or _cc_unfinished:
+    if _cc_unfinished and not TRADE_ENGINE_CROSSCHAIN:
+        print(f'[crosschain] resume worker started for {_cc_unfinished} unfinished '
+              f'trade(s) even though cross-chain is off — money already in flight '
+              f'is finished, not abandoned', flush=True)
     threading.Thread(target=_crosschain_resume_loop, daemon=True).start()
 # Tells the operator, at a glance, which address to keep funded with native
 # gas on each EVM chain (or that sponsorship is simply off). Never prints the

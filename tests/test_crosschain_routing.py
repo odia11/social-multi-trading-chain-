@@ -155,6 +155,23 @@ if _os.path.isfile(_fx_path):
     d.CROSSCHAIN_MAX_BRIDGE_COST_PCT = _orig_pct
 out['econ_default_pct'] = d.CROSSCHAIN_MAX_BRIDGE_COST_PCT
 
+# ── the resume worker must outlive the flag ──
+# An empty database has nothing to finish; one with a bridge in flight does,
+# and that is true whether or not the route is open.
+out['unfinished_empty'] = d._crosschain_unfinished_count()
+import sqlite3 as _sq, time as _t
+_c = _sq.connect(d.DB_FILE)
+_c.execute("INSERT INTO trade_executions (trade_id, idempotency_key, quote_id, "
+           "user_id, wallet, mode, state, same_chain, max_spend_usd, created_at, "
+           "updated_at) VALUES ('t-cc','k-cc','q-cc',1,'W','manual','BRIDGING',0,"
+           "'30',?,?)", (_t.time(), _t.time()))
+_c.execute("INSERT INTO trade_crosschain (trade_id, quote_id, user_id, provider, "
+           "source_chain, destination_chain, source_token, destination_token, "
+           "source_amount_raw, created_at, updated_at) VALUES ('t-cc','q-cc',1,'0x',"
+           "'base','solana','0xUSDC','SolUSDC','30000000',?,?)", (_t.time(), _t.time()))
+_c.commit(); _c.close()
+out['unfinished_after'] = d._crosschain_unfinished_count()
+
 print('@@@' + json.dumps(out, default=str))
 '''
 
@@ -298,6 +315,27 @@ if econ:
 check('the default ceiling is a percentage of the trade, so a bridge that is '
       'ruinous on $2 is unremarkable on $200',
       float(R['econ_default_pct']) == 5.0)
+
+
+# ── the resume worker outlives the flag ──────────────────────────────────
+# The controlled live test runs with cross-chain OFF, by design. If the worker
+# only ever started with the flag, a trade left in BRIDGING by that test -- a
+# real transaction on chain, with the user's claim still held -- would sit
+# there until somebody thought to turn a feature on. The same applies to
+# closing a route while a bridge is in flight.
+check('an empty database has no unfinished cross-chain work, so a deployment '
+      'that will never bridge still starts no worker',
+      R['unfinished_empty'] == 0)
+check('...while a trade left in BRIDGING counts as work this database owes, '
+      'whatever the flag says', R['unfinished_after'] == 1)
+
+_src = open(REPO + '/dashboard.py').read()
+check('...and the worker starts on either — the feature being on, OR money '
+      'already in flight. A flag going off must not strand a bridge',
+      'if TRADE_ENGINE_CROSSCHAIN or _cc_unfinished:' in _src)
+check('...and says so in the log when it starts for that second reason, '
+      'because a worker running while the feature is off would otherwise read '
+      'as a bug', 'even though cross-chain is off' in _src)
 
 passed = sum(1 for _, ok in checks if ok)
 print(f'\n{passed}/{len(checks)} checks passed')
