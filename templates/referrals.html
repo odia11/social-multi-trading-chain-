@@ -10,236 +10,205 @@
 <meta name="apple-mobile-web-app-title" content="OrcAgent">
 <link rel="apple-touch-icon" href="/static/icon-180.png?v=6">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=2">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Geist:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'">
-<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Geist:wght@400;500;600;700&display=swap"></noscript>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Geist:wght@400;500;600;700;800&display=swap" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Geist:wght@400;500;600;700;800&display=swap"></noscript>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg:#0a0b0e;
-  --bg2:#101216;
-  --bg3:#16191f;
-  --bg4:#21252c;
-  --border:#21252c;
-  --divider:#16191f;
-  --accent:#f7b955;
-  --amber:#f7b955;
-  --green:#3ad29b;
-  --red:#f76b62;
-  --text:#eef1f5;
-  --muted:#565d68;
-  --sub:#8a919c;
-  --mono:'JetBrains Mono',monospace;
-  --ui:'Geist',sans-serif;
+:root{--bg:#080d11;--panel:#0d1318;--panel2:#111820;--line:#202832;--line2:#2b3440;--gold:#f7b955;--green:#3ad29b;--text:#f2f4f7;--sub:#9aa3af;--muted:#5f6875;--mono:'JetBrains Mono',monospace;--ui:'Geist',sans-serif}
+html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--ui);-webkit-font-smoothing:antialiased}
+body{overflow-x:clip}
+#app{display:flex;justify-content:center}
+.ref-page{width:min(100%,920px);padding:28px 28px 118px}
+
+.ref-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin:0 0 20px}
+.ref-kicker{display:flex;align-items:center;gap:12px}
+.back-link{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:10px;color:var(--text);text-decoration:none;font-size:24px}
+.ref-title{font-size:28px;line-height:1.05;font-weight:800;letter-spacing:-.03em}
+.ref-lead{font-size:15px;color:var(--sub);margin-top:10px;line-height:1.5}
+.ref-lead strong{font-weight:500;color:#cfd5dc}
+.net-pill{display:inline-flex;align-items:center;gap:8px;margin-top:4px;padding:8px 14px;border:1px solid rgba(58,210,155,.42);border-radius:999px;color:var(--green);font:700 11px var(--mono);letter-spacing:.08em;white-space:nowrap}
+.net-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 14px rgba(58,210,155,.55)}
+
+.hero{position:relative;min-height:250px;overflow:hidden;padding:34px 36px;border:1px solid rgba(247,185,85,.28);border-radius:24px;background:radial-gradient(circle at 72% 48%,rgba(247,185,85,.09),transparent 38%),linear-gradient(140deg,#10161b,#090f13 68%);margin-bottom:18px}
+.hero-copy{position:relative;z-index:3;max-width:52%}
+.hero h1{font-size:38px;line-height:1.02;letter-spacing:-.045em;font-weight:800}.hero h1 span{display:block;color:var(--gold)}
+.hero p{margin-top:18px;color:#a8b0bb;line-height:1.52;font-size:15px;max-width:470px}
+.hero-art{position:absolute;right:22px;bottom:-14px;width:310px;height:230px}
+.hero-rings{position:absolute;right:20px;top:18px;width:210px;height:210px;border:2px solid rgba(247,185,85,.52);border-radius:50%;box-shadow:inset 0 0 0 20px rgba(12,18,24,.85),inset 0 0 0 22px #2a3440}
+.hero-face{position:absolute;right:54px;top:52px;width:142px;height:170px;border-radius:48% 48% 44% 44%;background:#020405;border:2px solid #202a35;box-shadow:0 0 0 10px #111923}
+.hero-face:before,.hero-face:after{content:'';position:absolute;top:56px;width:40px;height:18px;background:#eef1f4;border-radius:50% 50% 70% 70%}.hero-face:before{left:20px;transform:rotate(7deg)}.hero-face:after{right:20px;transform:rotate(-7deg)}
+.hero-smile{position:absolute;left:37px;top:106px;width:70px;height:34px;border-radius:0 0 70px 70px;background:#e9edf1}.hero-smile:after{content:'';position:absolute;left:8px;top:0;width:54px;height:13px;border-radius:0 0 50px 50px;background:#050708}
+.hero-bars{position:absolute;left:5px;bottom:0;display:flex;gap:10px;align-items:flex-end}.hero-bars i{display:block;width:13px;border-radius:4px 4px 0 0;background:linear-gradient(#f5c05e,#a56b13)}.hero-bars i:nth-child(1){height:45px}.hero-bars i:nth-child(2){height:82px}.hero-bars i:nth-child(3){height:105px}.hero-bars i:nth-child(4){height:70px}
+.hero-note{position:absolute;right:0;top:18px;color:var(--gold);font:700 15px/1.18 var(--mono);transform:rotate(-7deg);text-align:center}
+
+.card{background:linear-gradient(180deg,#10161c,#0d1217);border:1px solid var(--line);border-radius:22px}
+.ref-card{padding:26px;margin-bottom:18px}
+.card-top{display:flex;align-items:center;justify-content:space-between;gap:12px}.card-title{font-size:18px;font-weight:750}.fee-share{color:var(--gold);font:700 12px var(--mono);letter-spacing:.08em}
+.code-row{display:flex;align-items:center;gap:12px;margin:20px 0 14px}.ref-code{font:800 32px var(--mono);letter-spacing:.07em;color:var(--gold);word-break:break-all}
+.icon-copy{width:42px;height:42px;border:1px solid var(--line2);border-radius:12px;background:#111820;color:#d7dce2;cursor:pointer;font-size:20px}
+.field-label{font-size:12px;color:var(--sub);margin-bottom:8px}
+.link-field{display:flex;align-items:center;gap:10px;background:#121820;border:1px solid var(--line2);border-radius:14px;padding:13px 14px;margin-bottom:14px}.link-text{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9da6b3;font:13px var(--mono)}.link-copy{border:0;background:transparent;color:#d9dfe6;cursor:pointer;font-size:19px}
+.primary{width:100%;height:54px;border:0;border-radius:14px;background:linear-gradient(90deg,#ffc85f,#f5b64c);color:#0a0d10;font-size:16px;font-weight:800;cursor:pointer}.primary:active{transform:translateY(1px)}
+.share-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}.share-btn{display:flex;align-items:center;justify-content:center;gap:8px;height:46px;border:1px solid var(--line);border-radius:13px;background:#10171d;color:#e2e6ea;text-decoration:none;font-size:13px;font-weight:600;cursor:pointer}.share-btn span:first-child{font-size:17px}
+
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}.stat{display:flex;align-items:center;gap:14px;padding:19px 18px;min-width:0}.stat-icon{width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:0 0 46px;background:rgba(247,185,85,.12);color:var(--gold);font-size:22px}.stat-value{font-size:20px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.stat-label{margin-top:4px;color:var(--sub);font-size:12px}
+
+.tabs{display:flex;gap:32px;border-bottom:1px solid var(--line);margin-bottom:0}.tab{appearance:none;border:0;background:transparent;color:var(--sub);font:650 14px var(--ui);padding:0 6px 14px;cursor:pointer;position:relative}.tab.active{color:var(--text)}.tab.active:after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:3px;border-radius:3px;background:var(--gold)}
+.tab-panel{display:none}.tab-panel.active{display:block}
+.list{border-bottom:1px solid var(--line)}
+.person{display:flex;align-items:center;gap:13px;padding:17px 4px;border-bottom:1px solid rgba(32,40,50,.7)}.person:last-child{border-bottom:0}.avatar{width:50px;height:50px;border-radius:50%;object-fit:cover;background:#123650;border:1px solid #28333e;flex:0 0 50px}.avatar-fallback{display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;color:white}.person-main{min-width:0;flex:1}.person-name{font-size:15px;font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.person-sub{font:11px var(--mono);color:var(--muted);margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.person-right{text-align:right;min-width:82px}.earned{color:var(--green);font:700 13px var(--mono)}.earned.zero{color:var(--muted)}.earned-label{font-size:11px;color:var(--sub);margin-top:4px}.profile-arrow{color:#7d8794;text-decoration:none;font-size:24px;margin-left:2px}
+.earning-row{display:grid;grid-template-columns:1.2fr 1fr auto;align-items:center;gap:12px;padding:17px 4px;border-bottom:1px solid rgba(32,40,50,.7)}.earning-row:last-child{border-bottom:0}.earning-user{font:700 12px var(--mono)}.earning-date{font:11px var(--mono);color:var(--muted)}
+.empty{text-align:center;padding:42px 20px;color:var(--sub)}.empty-icon{font-size:38px;margin-bottom:12px}.empty strong{display:block;color:var(--text);font-size:16px;margin-bottom:7px}.empty p{font-size:13px;line-height:1.5}
+
+.invite{display:flex;align-items:center;gap:16px;padding:20px;margin-top:20px;border-color:rgba(247,185,85,.34)}.invite-icon{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(247,185,85,.12);color:var(--gold);font-size:24px}.invite-copy{flex:1;min-width:0}.invite-title{font-weight:750;font-size:15px}.invite-sub{color:var(--sub);font-size:12px;margin-top:4px}.invite-btn{height:44px;padding:0 22px;border:0;border-radius:12px;background:var(--gold);color:#090c0f;font-weight:800;cursor:pointer}
+.ppl-total{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:13px 4px;border-bottom:1px solid var(--line)}.ppl-total-lbl{font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.08em}.ppl-total-val{font:700 14px var(--mono);color:var(--green)}.ppl-total-sub{color:var(--muted);font-weight:500}
+.share-bar{height:4px;border-radius:3px;background:#182029;margin-top:8px;overflow:hidden}.share-fill{height:100%;background:var(--green);border-radius:3px}
+.w-toast{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);z-index:99999;padding:12px 18px;border-radius:12px;background:#0b251a;border:1px solid var(--green);color:var(--green);font-size:13px;font-weight:700;box-shadow:0 12px 30px rgba(0,0,0,.35);white-space:nowrap;transition:opacity .2s}
+
+@media(max-width:700px){
+ .ref-page{padding:22px 22px 118px}.ref-heading{margin-bottom:18px}.ref-title{font-size:26px}.ref-lead{font-size:14px;margin-top:9px}.net-pill{font-size:10px;padding:7px 12px}
+ .hero{min-height:238px;padding:28px 28px;border-radius:22px}.hero-copy{max-width:59%}.hero h1{font-size:33px}.hero p{font-size:13px;margin-top:14px}.hero-art{right:4px;width:260px;height:220px;opacity:.96}.hero-rings{width:190px;height:190px;right:5px;top:24px}.hero-face{right:36px;top:58px;width:130px;height:155px}.hero-note{display:none}
+ .ref-card{padding:22px;border-radius:20px}.ref-code{font-size:28px}.stats{gap:10px}.stat{padding:16px 13px;gap:10px}.stat-icon{width:40px;height:40px;flex-basis:40px;font-size:19px}.stat-value{font-size:17px}.stat-label{font-size:10px}.share-btn{font-size:12px}
 }
-
-/* ── app shell (nav is now the shared navbar component, static/navbar.css) ── */
-html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size:14px;-webkit-font-smoothing:antialiased}
-#app{display:flex}
-
-/* ── center column ── */
-.ref-center{flex:1;min-width:0;display:flex;flex-direction:column}
-
-/* ── center header ── */
-.ref-hdr{
-  display:flex;align-items:flex-start;justify-content:space-between;
-  padding:28px 28px 0;flex-shrink:0;gap:16px;
-}
-.ref-title{font-size:20px;font-weight:600;color:var(--text);margin-bottom:4px}
-.ref-sub{font-size:13px;color:var(--muted)}
-.net-pill{
-  display:inline-flex;align-items:center;gap:6px;
-  font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.08em;
-  color:var(--green);border:1px solid rgba(58,210,155,.35);
-  border-radius:20px;padding:5px 12px;white-space:nowrap;flex-shrink:0;margin-top:4px;
-}
-.net-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0}
-
-/* ── content area ── */
-.ref-content{padding:20px 28px 60px;display:flex;flex-direction:column;gap:14px;max-width:720px}
-
-/* ── referral code / link card ── */
-.dep-card{background:#101216;border:1px solid #16191f;border-radius:14px;padding:18px}
-.dep-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
-.dep-title{font-size:13px;font-weight:600;color:var(--text)}
-.dep-network{font-family:var(--mono);font-size:10px;color:var(--accent);letter-spacing:.06em}
-.ref-code-big{
-  font-family:var(--mono);font-size:28px;font-weight:700;color:var(--accent);
-  letter-spacing:.06em;margin-bottom:14px;
-}
-.dep-label{font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);margin-bottom:6px;text-transform:uppercase}
-.dep-addr{
-  font-family:var(--mono);font-size:12px;color:var(--sub);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  background:#16191f;border:1px solid #21252c;border-radius:8px;padding:10px 12px;
-  margin-bottom:10px;
-}
-.dep-btns{display:flex;gap:7px}
-.dep-btn{
-  flex:1;padding:9px 0;border-radius:8px;cursor:pointer;
-  font-family:var(--ui);font-size:12px;font-weight:600;
-  text-align:center;text-decoration:none;display:inline-block;
-  transition:opacity .15s,border-color .15s,color .15s;border:none;
-}
-.dep-copy{background:var(--amber);color:#0a0b0e;border:1px solid var(--amber)!important}
-.dep-copy:hover{opacity:.85}
-
-/* ── stat cards ── */
-.stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
-.stat-card{background:#101216;border:1px solid #16191f;border-radius:14px;padding:16px 17px;display:flex;flex-direction:column;gap:6px}
-.stat-lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;font-weight:600}
-.stat-val{font-family:var(--mono);font-size:24px;font-weight:700;color:var(--text)}
-.stat-sub{font-family:var(--mono);font-size:12px;color:var(--muted)}
-
-/* ── earnings list ── */
-.act-card{background:#101216;border:1px solid #16191f;border-radius:14px;overflow:hidden}
-.act-hdr{display:flex;align-items:center;justify-content:space-between;padding:16px 18px 14px;border-bottom:1px solid #16191f}
-.act-title{font-size:13px;font-weight:600;color:var(--text)}
-.act-row{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid #16191f}
-.act-row:last-child{border-bottom:none}
-.act-tile{
-  width:40px;height:40px;border-radius:10px;flex-shrink:0;
-  display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;
-  background:rgba(58,210,155,.1);color:var(--green);
-}
-.act-main{flex:1;min-width:0}
-.act-type{font-size:14px;font-weight:600;color:var(--text);font-family:var(--mono)}
-.act-sub{font-size:12px;color:var(--muted);margin-top:2px;font-family:var(--mono)}
-.act-right{text-align:right;flex-shrink:0}
-.act-amt{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--green)}
-
-/* ── state msg ── */
-.state-msg{padding:28px 18px;color:var(--muted);font-size:13px;text-align:center}
-
-/* ── toast ── */
-.w-toast{
-  position:fixed;bottom:28px;left:50%;transform:translateX(-50%);
-  padding:10px 20px;border-radius:10px;font-size:13px;font-family:var(--mono);
-  z-index:9999;white-space:nowrap;pointer-events:none;transition:opacity .25s;
-}
-
-/* ── scrollbar ── */
-::-webkit-scrollbar{width:4px;height:4px}
-::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:#21252c;border-radius:4px}
-
-/* ── responsive ── */
-@media(max-width:600px){
-  html,body{overflow-x:clip}  /* clip, not hidden: hidden makes the root a scroll container, which breaks the sticky navbar */
-  #app{display:block}
-  .ref-hdr{padding:18px 16px 0}
-  .ref-content{padding:16px 14px 60px}
-  .ref-code-big{font-size:22px}
-  .stat-val{font-size:19px}
+@media(max-width:520px){
+ .ref-page{padding:18px 14px 116px}.ref-heading{align-items:center}.back-link{display:none}.ref-kicker{display:block}.ref-title{font-size:24px}.ref-lead strong{display:block}.net-pill{font-size:9px;letter-spacing:.06em;padding:7px 10px}
+ .hero{padding:25px 22px;min-height:220px}.hero-copy{max-width:66%}.hero h1{font-size:29px}.hero p{font-size:12px;max-width:92%}.hero-art{right:-40px;bottom:-24px;transform:scale(.86)}
+ .card-title{font-size:16px}.fee-share{font-size:10px}.code-row{margin:18px 0 12px}.ref-code{font-size:25px}.icon-copy{width:38px;height:38px}.link-field{padding:12px}.primary{height:50px}
+ .share-grid{grid-template-columns:repeat(4,1fr);gap:8px}.share-btn{font-size:0}.share-btn span:first-child{font-size:19px}
+ .stats{grid-template-columns:repeat(3,1fr)}.stat{display:block;text-align:center;padding:14px 7px}.stat-icon{margin:0 auto 8px}.stat-value{font-size:15px}.stat-label{font-size:9px;line-height:1.2}
+ .tabs{gap:22px}.person{gap:10px}.avatar{width:44px;height:44px;flex-basis:44px}.person-name{font-size:13px}.person-sub{font-size:10px}.person-right{min-width:66px}.earned{font-size:11px}.invite{padding:15px;gap:10px}.invite-icon{width:42px;height:42px}.invite-sub{display:none}.invite-btn{padding:0 16px;font-size:12px}
 }
 </style>
 </head>
 <body>
 {{ navbar_html('referrals') }}
 <div id="app">
-
-<!-- ── CENTER COLUMN ── -->
-<div class="ref-center">
-
-  <!-- header -->
-  <div class="ref-hdr">
-    <div>
-      <div class="ref-title">Referrals</div>
-      <div class="ref-sub">Earn 20% of the trading fees from people you invite</div>
-    </div>
-    <span class="net-pill"><span class="net-dot"></span>MULTI-CHAIN · MAINNET</span>
-  </div>
-
-  <!-- scrollable content -->
-  <div class="ref-content">
-
-    <!-- referral code / link card -->
-    <div class="dep-card">
-      <div class="dep-header">
-        <div class="dep-title">Your referral code</div>
-        <div class="dep-network">20% FEE SHARE</div>
-      </div>
-      <div class="ref-code-big" id="ref-code-big">{{ referral_code or '—' }}</div>
-      <div class="dep-label">SHAREABLE LINK</div>
-      <div class="dep-addr" id="ref-link">{{ referral_link }}</div>
-      <div class="dep-btns">
-        <button class="dep-btn dep-copy" onclick="_copyRefLink()">Copy Link</button>
+<main class="ref-page">
+  <header class="ref-heading">
+    <div class="ref-kicker">
+      <a class="back-link" href="/" aria-label="Back">‹</a>
+      <div>
+        <h1 class="ref-title">Referrals</h1>
+        <div class="ref-lead"><strong>Invite friends. Earn rewards.</strong> Earn 20% of the trading fees from people you invite.</div>
       </div>
     </div>
+    <div class="net-pill"><span class="net-dot"></span>MULTI-CHAIN · MAINNET</div>
+  </header>
 
-    <!-- stats -->
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="stat-lbl">Referred Users</div>
-        <div class="stat-val">{{ referred_count }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-lbl">Referral Balance</div>
-        <div class="stat-val">{{ '%.4f'|format(referral_balance) }} SOL</div>
-        {% if referral_balance_usd is not none %}
-        <div class="stat-sub">≈ ${{ '%.2f'|format(referral_balance_usd) }}</div>
-        {% endif %}
-      </div>
+  <section class="hero" aria-label="Referral rewards">
+    <div class="hero-copy">
+      <h1>Trade Together.<span>Earn Together.</span></h1>
+      <p>Invite your friends to OrcAgent and earn 20% of the trading fees they generate. The more you invite, the more you earn.</p>
+    </div>
+    <div class="hero-art" aria-hidden="true">
+      <div class="hero-bars"><i></i><i></i><i></i><i></i></div>
+      <div class="hero-rings"></div>
+      <div class="hero-face"><div class="hero-smile"></div></div>
+      <div class="hero-note">GOOD<br>TRADERS<br>BRING<br>GOOD PEOPLE</div>
+    </div>
+  </section>
+
+  <section class="card ref-card">
+    <div class="card-top">
+      <div class="card-title">Your referral code</div>
+      <div class="fee-share">20% FEE SHARE</div>
+    </div>
+    <div class="code-row">
+      <div class="ref-code" id="ref-code-big">{{ referral_code or '—' }}</div>
+      <button class="icon-copy" type="button" onclick="_copyText(_refCode,'Referral code copied')" aria-label="Copy referral code">▣</button>
+    </div>
+    <div class="field-label">Shareable link</div>
+    <div class="link-field">
+      <div class="link-text" id="ref-link">{{ referral_link }}</div>
+      <button class="link-copy" type="button" onclick="_copyRefLink()" aria-label="Copy referral link">▣</button>
+    </div>
+    <button class="primary" type="button" onclick="_shareReferral()">⌯ &nbsp; Share Link</button>
+    <div class="share-grid">
+      <a class="share-btn" id="share-x" target="_blank" rel="noopener"><span>𝕏</span><span>Twitter</span></a>
+      <a class="share-btn" href="https://discord.com/app" target="_blank" rel="noopener"><span>◉</span><span>Discord</span></a>
+      <a class="share-btn" id="share-telegram" target="_blank" rel="noopener"><span>➤</span><span>Telegram</span></a>
+      <a class="share-btn" id="share-email"><span>✉</span><span>Email</span></a>
+    </div>
+  </section>
+
+  <section class="stats">
+    <div class="card stat"><div class="stat-icon">♟</div><div><div class="stat-value">{{ referred_count }}</div><div class="stat-label">Referred Users</div></div></div>
+    <div class="card stat"><div class="stat-icon">◉</div><div><div class="stat-value">{% if referral_balance_usd is not none %}${{ '%.2f'|format(referral_balance_usd) }}{% else %}{{ '%.4f'|format(referral_balance) }} SOL{% endif %}</div><div class="stat-label">Total Earned</div></div></div>
+    <div class="card stat"><div class="stat-icon">▥</div><div><div class="stat-value">20%</div><div class="stat-label">Fee Share</div></div></div>
+  </section>
+
+  <section class="ref-data">
+    <div class="tabs" role="tablist">
+      <button class="tab active" type="button" data-tab="users">Referred Users</button>
+      <button class="tab" type="button" data-tab="earnings">Earnings History</button>
     </div>
 
-    <!-- earnings list -->
-    <div class="act-card">
-      <div class="act-hdr">
-        <div class="act-title">Referral earnings</div>
+    <div class="tab-panel active" id="tab-users">
+      {% if referred_people %}
+      <div class="ppl-total">
+        <span class="ppl-total-lbl">Earned from these users</span>
+        <span class="ppl-total-val">{{ '%.6f'|format(referred_people_total_sol) }} SOL{% if referred_people_total_usd is not none %} <span class="ppl-total-sub">≈ ${{ '%.2f'|format(referred_people_total_usd) }}</span>{% endif %}</span>
       </div>
-      {% if earnings %}
-      {% for e in earnings %}
-      <div class="act-row">
-        <div class="act-tile">%</div>
-        <div class="act-main">
-          <div class="act-type">{{ e.wallet_short }}</div>
-          <div class="act-sub">{{ e.created_at }}</div>
+      <div class="list">
+        {% for p in referred_people %}
+        <div class="person">
+          {% if p.avatar_url %}<img class="avatar" src="{{ p.avatar_url }}" alt="" loading="lazy">{% else %}<div class="avatar avatar-fallback">{{ p.display[:1]|upper }}</div>{% endif %}
+          <div class="person-main">
+            <div class="person-name">{{ p.display }}</div>
+            <div class="person-sub">{% if p.trades %}{{ p.trades }} fee{{ '' if p.trades == 1 else 's' }}{% else %}no trades yet{% endif %} · joined {{ p.joined_at|string|truncate(10, true, '') }}</div>
+            {% if p.share_pct > 0 %}<div class="share-bar" title="{{ p.share_pct }}% of your referral earnings"><div class="share-fill" style="width:{{ p.share_pct }}%"></div></div>{% endif %}
+          </div>
+          <div class="person-right">
+            <div class="earned{{ ' zero' if not p.earned_sol }}">{{ '%.6f'|format(p.earned_sol) }} SOL</div>
+            <div class="earned-label">{% if p.earned_usd is not none and p.earned_sol %}≈ ${{ '%.2f'|format(p.earned_usd) }}{% else %}Earnings{% endif %}</div>
+          </div>
+          <a class="profile-arrow" href="{{ p.profile_url }}" aria-label="View profile">›</a>
         </div>
-        <div class="act-right">
-          <div class="act-amt">+{{ '%.6f'|format(e.earned_sol) }} SOL</div>
-        </div>
+        {% endfor %}
       </div>
-      {% endfor %}
       {% else %}
-      <div class="state-msg">No referral earnings yet — share your link to start earning</div>
+      <div class="empty"><div class="empty-icon">♟</div><strong>No referrals yet</strong><p>Share your link and start earning rewards when your friends trade.</p></div>
       {% endif %}
     </div>
 
-  </div>
-</div>
+    <div class="tab-panel" id="tab-earnings">
+      {% if earnings %}
+      <div class="list">
+        {% for e in earnings %}
+        <div class="earning-row">
+          <div><div class="earning-user">{{ e.wallet_short }}</div><div class="earning-date">{{ e.created_at }}</div></div>
+          <div class="earning-date">Referral fee</div>
+          <div class="earned">+{{ '%.6f'|format(e.earned_sol) }} SOL</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty"><div class="empty-icon">◉</div><strong>No earnings yet</strong><p>Your referral rewards will appear here after invited users start trading.</p></div>
+      {% endif %}
+    </div>
+  </section>
 
+  <section class="card invite">
+    <div class="invite-icon">♙</div>
+    <div class="invite-copy"><div class="invite-title">Invite more friends</div><div class="invite-sub">Grow the community and increase your earnings.</div></div>
+    <button class="invite-btn" type="button" onclick="_shareReferral()">Invite Now &nbsp;→</button>
+  </section>
+</main>
 </div>
 
 <script>
-var _refLink = {{ referral_link|tojson }};
+var _refLink={{ referral_link|tojson }};
+var _refCode={{ (referral_code or '')|tojson }};
+var _shareText='Join me on OrcAgent — trade together and earn together.';
 
-function _copyRefLink(){
-  if(!_refLink) return;
-  navigator.clipboard.writeText(_refLink).then(function(){
-    _refToast('Link copied', true);
-  }).catch(function(){
-    var el = document.createElement('textarea');
-    el.value = _refLink; el.style.cssText = 'position:fixed;opacity:0';
-    document.body.appendChild(el); el.select();
-    try{ document.execCommand('copy'); _refToast('Link copied', true); }
-    catch(e){ _refToast('Copy failed', false); }
-    document.body.removeChild(el);
-  });
-}
-
-function _refToast(msg, ok){
-  var t = document.createElement('div');
-  t.className = 'w-toast';
-  t.style.background = ok ? '#0a2a1a' : '#2a0a0a';
-  t.style.color = ok ? '#00d084' : '#ff4757';
-  t.style.border = '1px solid ' + (ok ? '#00d084' : '#ff4757');
-  t.textContent = msg;
-  document.body.appendChild(t);
-  setTimeout(function(){ t.style.opacity = '0'; setTimeout(function(){ t.remove(); }, 260); }, 3000);
-}
+function _refToast(msg,ok){var t=document.createElement('div');t.className='w-toast';t.style.background=ok?'#0b251a':'#2a0f11';t.style.color=ok?'#3ad29b':'#f76b62';t.style.borderColor=ok?'#3ad29b':'#f76b62';t.textContent=msg;document.body.appendChild(t);setTimeout(function(){t.style.opacity='0';setTimeout(function(){t.remove()},220)},2200)}
+function _copyText(text,msg){if(!text)return;var fallback=function(){var el=document.createElement('textarea');el.value=text;el.style.cssText='position:fixed;opacity:0';document.body.appendChild(el);el.select();try{document.execCommand('copy');_refToast(msg,true)}catch(e){_refToast('Copy failed',false)}el.remove()};if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){_refToast(msg,true)}).catch(fallback)}else fallback()}
+function _copyRefLink(){_copyText(_refLink,'Referral link copied to clipboard')}
+function _shareReferral(){if(!_refLink)return;if(navigator.share){navigator.share({title:'OrcAgent',text:_shareText,url:_refLink}).catch(function(e){if(e&&e.name!=='AbortError')_copyRefLink()})}else _copyRefLink()}
+(function(){var encLink=encodeURIComponent(_refLink||'');var encText=encodeURIComponent(_shareText);document.getElementById('share-x').href='https://x.com/intent/post?text='+encText+'%20'+encLink;document.getElementById('share-telegram').href='https://t.me/share/url?url='+encLink+'&text='+encText;document.getElementById('share-email').href='mailto:?subject='+encodeURIComponent('Join me on OrcAgent')+'&body='+encText+'%0A%0A'+encLink;document.querySelectorAll('.tab').forEach(function(btn){btn.addEventListener('click',function(){document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active')});document.querySelectorAll('.tab-panel').forEach(function(x){x.classList.remove('active')});btn.classList.add('active');document.getElementById('tab-'+btn.dataset.tab).classList.add('active')})})})();
 </script>
 <script src="/static/auto-refresh.js?v={{ app_version }}"></script>
 <script src="/static/pull-to-refresh.js?v={{ app_version }}"></script>
 <script>initPullToRefresh();</script>
-
 </body>
 </html>
