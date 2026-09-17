@@ -37,6 +37,7 @@ from financial_authorization_hardening import install as _install_financial_auth
 from owner_money_hardening import install as _install_owner_money_hardening
 from abuse_rate_hardening import install as _install_abuse_rate_hardening
 from upload_hardening import install as _install_upload_hardening
+from robinhood_stablecoin_registry import install as _install_robinhood_stablecoin_registry
 from bsc_gasless_trading import install as _install_evm_gasless_trading
 from solana_gasless_trading import install as _install_solana_gasless_trading
 from cross_chain_budget_guard import install as _install_cross_chain_budget_guard
@@ -91,6 +92,12 @@ _install_financial_authorization_hardening(_dashboard)
 _install_owner_money_hardening(_dashboard)
 _install_abuse_rate_hardening(_dashboard)
 _install_upload_hardening(_dashboard)
+
+# Resolve Robinhood Chain's canonical trading stablecoin before any quote,
+# bridge or swap adapter can ask the registry to size USDG amounts. The bridge
+# engine uses require_decimals() during route validation, so leaving USDG at
+# None makes a valid USDC -> USDG -> token route fail before 0x can execute it.
+_install_robinhood_stablecoin_registry(_dashboard)
 
 # Every EVM BUY (BNB Chain, Base, Arbitrum, Polygon, Robinhood Chain) uses
 # 0x Gasless: native BNB/ETH/POL is not a prerequisite for a stablecoin-funded
