@@ -75,38 +75,54 @@ def install(d):
             if signer.lower() != str(evm_address or '').lower():
                 return False, 'EVM trading key does not match the gas destination wallet', None
 
-            w3 = d._get_web3(chain)
-            addr = w3.to_checksum_address(evm_address)
-            have_wei = int(w3.eth.get_balance(addr))
-            need_wei = int(w3.eth.gas_price) * int(d.GAS_TOPUP_TX_GAS_UNITS)
-            if have_wei >= need_wei:
-                return True, '', None
-
-            stable_balance = Decimal(str(d.get_evm_usdc_balance(evm_address, chain)))
-            configured = Decimal(str(getattr(d, 'GAS_TOPUP_USDC_AMOUNT', 2.0) or 2.0))
-            amount = min(configured, stable_balance)
-
-            # 0x documents roughly $1 as the practical minimum on non-mainnet
-            # chains.  Do not burn the user's last cents on a quote that is
-            # expected to be rejected as SELL_AMOUNT_TOO_SMALL.
-            if amount >= _MIN_GASLESS_STABLE:
-                quote, quote_chain = _native_quote(d, private_key, chain, amount)
-                tx_hash = _submit_and_wait(d, private_key, quote, quote_chain)
-
-                # Confirmation from 0x is not enough by itself. Re-read the
-                # chain and only claim success when the native balance really
-                # covers OrcAgent's normal gas threshold.
-                after_wei = int(w3.eth.get_balance(addr))
-                if after_wei >= need_wei:
-                    print(f'[stable-gas] {chain} funded from user stablecoin via 0x gasless '
-                          f'(tx {str(tx_hash)[:18]}...)', flush=True)
+            # SERIALIZED, like every other rung of this ladder.
+            #
+            # dashboard._get_evm_gas_lock exists for exactly the race this
+            # wrapper would otherwise reopen: "a live trade's own pre-trade
+            # check racing the periodic background sweep in gas_manager.py --
+            # can't both see the same stale low balance and each fire off
+            # their own top-up/bootstrap, wasting the user's USDC or SOL on a
+            # redundant swap". The old ladder took that lock; this ran in
+            # front of it and did not, so two callers could each spend the
+            # user's stablecoin on gas they only needed once.
+            #
+            # The lock is released before previous_ensure() below, because
+            # that function takes the same lock and threading.Lock is not
+            # reentrant. A caller arriving right after a successful swap
+            # re-reads the balance inside the lock and simply finds enough.
+            with d._get_evm_gas_lock(wallet, chain):
+                w3 = d._get_web3(chain)
+                addr = w3.to_checksum_address(evm_address)
+                have_wei = int(w3.eth.get_balance(addr))
+                need_wei = int(w3.eth.gas_price) * int(d.GAS_TOPUP_TX_GAS_UNITS)
+                if have_wei >= need_wei:
                     return True, '', None
 
-                # A confirmed small top-up may still be below the conservative
-                # threshold.  The old ladder can now use the non-zero native
-                # balance for its ordinary same-chain top-up if necessary.
-                print(f'[stable-gas] {chain} gasless top-up confirmed but remains below '
-                      f'threshold; continuing user-funded gas ladder', flush=True)
+                stable_balance = Decimal(str(d.get_evm_usdc_balance(evm_address, chain)))
+                configured = Decimal(str(getattr(d, 'GAS_TOPUP_USDC_AMOUNT', 2.0) or 2.0))
+                amount = min(configured, stable_balance)
+
+                # 0x documents roughly $1 as the practical minimum on non-mainnet
+                # chains.  Do not burn the user's last cents on a quote that is
+                # expected to be rejected as SELL_AMOUNT_TOO_SMALL.
+                if amount >= _MIN_GASLESS_STABLE:
+                    quote, quote_chain = _native_quote(d, private_key, chain, amount)
+                    tx_hash = _submit_and_wait(d, private_key, quote, quote_chain)
+
+                    # Confirmation from 0x is not enough by itself. Re-read the
+                    # chain and only claim success when the native balance really
+                    # covers OrcAgent's normal gas threshold.
+                    after_wei = int(w3.eth.get_balance(addr))
+                    if after_wei >= need_wei:
+                        print(f'[stable-gas] {chain} funded from user stablecoin via 0x gasless '
+                              f'(tx {str(tx_hash)[:18]}...)', flush=True)
+                        return True, '', None
+
+                    # A confirmed small top-up may still be below the conservative
+                    # threshold.  The old ladder can now use the non-zero native
+                    # balance for its ordinary same-chain top-up if necessary.
+                    print(f'[stable-gas] {chain} gasless top-up confirmed but remains below '
+                          f'threshold; continuing user-funded gas ladder', flush=True)
         except Exception as exc:
             redact = getattr(d, '_redact_keys', lambda x: x)
             print(f'[stable-gas] {chain} gasless stable-to-native bootstrap unavailable: '

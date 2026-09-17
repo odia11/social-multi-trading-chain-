@@ -28,6 +28,25 @@ check('confirmed gas is re-read from chain before success',
 check('old ladder remains only as fallback',
       'return previous_ensure(' in src)
 
+# ── the race this wrapper sits in front of ───────────────────────────────
+# dashboard._get_evm_gas_lock exists because a live trade's pre-trade check
+# and the background sweep in gas_manager.py can see the same stale low
+# balance at the same time and each fire off their own top-up. The old ladder
+# took that lock. A wrapper running in FRONT of it that does not would spend
+# the user's stablecoin twice for gas they needed once.
+check('the gasless attempt is serialized under the same per-(wallet, chain) '
+      'lock the rest of the ladder uses',
+      'with d._get_evm_gas_lock(wallet, chain):' in src)
+check('...and the lock is released before the fallback, because that function '
+      'takes the same lock and threading.Lock is not reentrant',
+      src.index('with d._get_evm_gas_lock(wallet, chain):')
+      < src.rindex('return previous_ensure(')
+      and 'reentrant' in src)
+check('...with the balance re-read INSIDE the lock, so a caller arriving '
+      'right after a successful swap finds enough gas instead of buying more',
+      src.index('with d._get_evm_gas_lock(wallet, chain):')
+      < src.index('have_wei = int(w3.eth.get_balance(addr))'))
+
 # Integration-order guarantee: app_entry installs this before bsc_gasless so
 # the existing adapter captures this wrapper as its fallback.
 entry = open(os.path.join(REPO, 'app_entry.py')).read()
