@@ -60,6 +60,7 @@ def _persist_prebroadcast_hash(d, tx_hash: str) -> None:
 
 def install(d):
     original_factory = d._te_cc_source_sender
+    original_status_fetcher = d._te_cc_status_fetcher
 
     def source_sender_factory(enc_blob: str, wallet: str, source_chain: str):
         original_sender = original_factory(enc_blob, wallet, source_chain)
@@ -75,6 +76,24 @@ def install(d):
                     if hasattr(_ctx, name):
                         delattr(_ctx, name)
         return send
+
+    def status_fetcher(source_chain: str, source_tx_hash: str,
+                       quote_id: str = ''):
+        try:
+            return original_status_fetcher(source_chain, source_tx_hash, quote_id)
+        except Exception as e:
+            # Returning UNKNOWN keeps the engine in BRIDGING, but unlike an
+            # exception it also lets resume_crosschain_trade reach its normal
+            # deadline check. A provider outage therefore cannot strand a
+            # reservation forever; after the deadline it becomes MANUAL_REVIEW.
+            return d.te_crosschain.CrossChainStatus(
+                status=d.te_crosschain.UNKNOWN,
+                source_on_chain=False,
+                filled=False,
+                failed=False,
+                failure_reason=f'status unavailable: {type(e).__name__}: {e}'[:400],
+                raw={'status_error': type(e).__name__},
+            )
 
     def bridge_sign_send_evm(txn: dict, raw_quote: dict, private_key: str,
                              chain: str, origin_address: str,
@@ -117,7 +136,7 @@ def install(d):
     def bridge_sign_send_solana(txn, private_key: str) -> str:
         from solders.transaction import VersionedTransaction as VTx
 
-        details = txn.get('details') or {} if isinstance(txn, dict) else {}
+        details = (txn.get('details') or {}) if isinstance(txn, dict) else {}
         tx_b64 = details.get('serializedTransaction')
         if not tx_b64:
             raise ValueError('no base64 transaction in quote response')
@@ -146,5 +165,6 @@ def install(d):
         return sent_sig
 
     d._te_cc_source_sender = source_sender_factory
+    d._te_cc_status_fetcher = status_fetcher
     d._bridge_sign_send_evm = bridge_sign_send_evm
     d._bridge_sign_send_solana = bridge_sign_send_solana
