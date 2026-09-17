@@ -105,16 +105,20 @@ def _sweep_solana():
     for user_id, wallet, enc_blob in _users_with_solana_key():
         try:
             with _app._use_key(enc_blob, wallet) as pk:
-                from solders.keypair import Keypair as _KP
-                trading_address = str(_KP.from_base58_string(pk).pubkey())
+                trading_address = str(_app._sol_keypair_from_base58(pk).pubkey())
             if _app._get_user_sol(trading_address) >= _app.SOL_GAS_MIN_BALANCE:
                 continue
-            logger.info('[gas-manager] solana wallet %s... is low on SOL -- rebalancing', wallet[:8])
+            # Same rule as the EVM sweep below: name the address that was
+            # actually read, then whose it is.
+            logger.info('[gas-manager] solana %s… is low on SOL (user %s…) -- rebalancing',
+                        trading_address[:10], wallet[:8])
             ok, msg, _tx = _app._sponsor_solana_gas(user_id, wallet, trading_address)
             if ok:
-                logger.info('[gas-manager] solana wallet %s... topped up with SOL', wallet[:8])
+                logger.info('[gas-manager] solana %s… (user %s…) topped up with SOL',
+                            trading_address[:10], wallet[:8])
             else:
-                logger.info('[gas-manager] solana wallet %s... not topped up this cycle: %s', wallet[:8], msg)
+                logger.info('[gas-manager] solana %s… (user %s…) not topped up this cycle: %s',
+                            trading_address[:10], wallet[:8], msg)
         except Exception as e:
             logger.error('[gas-manager] unexpected error sweeping solana for %s...: %s', wallet[:8], e)
 
@@ -166,7 +170,8 @@ def _sweep_user_chain(user_id: int, wallet: str, evm_address: str, enc_blob: str
     try:
         usdc_bal = _app.get_evm_usdc_balance(evm_address, chain)
     except Exception as e:
-        logger.error('[gas-manager] %s USDC balance check failed for %s...: %s', chain, wallet[:8], e)
+        logger.error('[gas-manager] %s USDC balance check failed for %s… (user %s…): %s',
+                     chain, evm_address[:10], wallet[:8], e)
         return
     if usdc_bal < _MIN_USDC_TO_PROTECT and not _has_open_evm_position(user_id, chain):
         return  # no capital and no open position on this chain -- nothing to protect, never bootstrap speculatively
@@ -174,24 +179,34 @@ def _sweep_user_chain(user_id: int, wallet: str, evm_address: str, enc_blob: str
     if not _needs_gas_precheck(evm_address, chain):
         return  # already fine -- no need to touch the private key at all
 
-    logger.info('[gas-manager] %s wallet %s... is low on gas (USDC balance %.4f) -- rebalancing',
-                chain, wallet[:8], usdc_bal)
+    # The address, then who it belongs to. These lines used to name the
+    # SESSION wallet only -- a base58 Solana address in a line about BNB --
+    # while every check above and below ran against the EVM address. Nothing
+    # was wrong except the label, and the label is what somebody reads at
+    # midnight trying to work out whether the gas check is looking at the
+    # wrong wallet.
+    logger.info('[gas-manager] %s %s… is low on gas (USDC balance %.4f, user %s…) -- rebalancing',
+                chain, evm_address[:10], usdc_bal, wallet[:8])
     try:
         with _app._use_key(enc_blob, wallet) as pk:
             ok, msg, bridge_id = _app._ensure_evm_gas(user_id, wallet, pk, evm_address, chain)
     except Exception as e:
-        logger.error('[gas-manager] %s rebalance for %s... raised: %s', chain, wallet[:8], e)
+        logger.error('[gas-manager] %s rebalance for %s… (user %s…) raised: %s',
+                     chain, evm_address[:10], wallet[:8], e)
         return
 
     if ok:
-        logger.info('[gas-manager] %s wallet %s... gas rebalanced successfully', chain, wallet[:8])
+        logger.info('[gas-manager] %s %s… (user %s…) gas rebalanced successfully',
+                    chain, evm_address[:10], wallet[:8])
     elif bridge_id:
-        logger.info('[gas-manager] %s wallet %s... gas bootstrap bridge in flight (row %s)', chain, wallet[:8], bridge_id)
+        logger.info('[gas-manager] %s %s… (user %s…) gas bootstrap bridge in flight (row %s)',
+                    chain, evm_address[:10], wallet[:8], bridge_id)
     else:
         # _ensure_evm_gas() already surfaces genuine dead ends (e.g. "deposit
         # more SOL/USDC") to the user via add_user_log -- nothing more to do
         # here beyond the server-side record of why this cycle didn't fix it.
-        logger.info('[gas-manager] %s wallet %s... not rebalanced this cycle: %s', chain, wallet[:8], msg)
+        logger.info('[gas-manager] %s %s… (user %s…) not rebalanced this cycle: %s',
+                    chain, evm_address[:10], wallet[:8], msg)
 
 
 def _refill_sponsor_wallet():
