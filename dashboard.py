@@ -1116,6 +1116,22 @@ CROSSCHAIN_ENABLED_ROUTES = frozenset(
 # stops being "slow" and becomes something a person has to find. The deadline
 # is measured from the origin broadcast and stored, so a restart does not
 # hand a stuck bridge a fresh clock.
+# Extra ERC-20 spenders a cross-chain route may ask the user to approve.
+#
+# Permit2 and the two published AllowanceHolder deployments are recognised
+# automatically -- they are fixed, documented addresses. Anything else is
+# refused until it is named here, because an allowance is a standing
+# permission that outlives the transaction that asked for it, and 0x's own
+# guidance is that Settler must NEVER hold one (approvals mis-scoped to a
+# Settler are what an August 2025 exploit drained).
+#
+# The intended workflow: run scripts/test_0x_crosschain_quote.py, read the
+# spender a real route nominates, check what it is, then pin it here.
+#   CROSSCHAIN_ALLOWED_SPENDERS=0xabc...,0xdef...
+CROSSCHAIN_ALLOWED_SPENDERS = frozenset(
+    a.strip().lower() for a in os.getenv('CROSSCHAIN_ALLOWED_SPENDERS', '').split(',')
+    if a.strip())
+
 CROSSCHAIN_POLL_SECONDS = int(os.getenv('CROSSCHAIN_POLL_SECONDS', '20'))
 CROSSCHAIN_DEADLINE_SECONDS = float(os.getenv('CROSSCHAIN_DEADLINE_SECONDS', '3600'))
                             # leg of every trade (see _charge_txn_fee()) -- so a full
@@ -8287,7 +8303,8 @@ def api_trade_quote():
     # needed the quote says so, names the token and the amount, and OrcAgent
     # does not offer to cover it.
     if not quote.same_chain:
-        gas_req = _cc_gas_requirement(wallet, source_chain)
+        gas_req = _cc_gas_requirement(wallet, source_chain,
+                                      _cc_recall_route(f'quote:{quote.quote_id}'))
         body['native_gas_required'] = gas_req['required']
         body['native_gas'] = gas_req
         if gas_req['required']:
@@ -8582,7 +8599,7 @@ def _te_run_evm_trade(*, quote_id, idem, available, wallet, enc_blob, evm_addres
 
 def _cc_fetch_quote(*, origin_chain, destination_chain, sell_token, buy_token,
                     sell_amount, origin_address, destination_address,
-                    slippage_bps, gas_payer):
+                    slippage_bps, gas_payer=None):
     """One GET to 0x's cross-chain quote endpoint. Raises on anything but 200.
 
     Endpoint, headers and parameter names verified against 0x's own published
@@ -8595,23 +8612,11 @@ def _cc_fetch_quote(*, origin_chain, destination_chain, sell_token, buy_token,
         raise RuntimeError('ZEROX_API_KEY is not configured')
     r = requests.get(
         'https://api.0x.org/cross-chain/quotes',
-        params={
-            'originChain':        origin_chain,
-            'destinationChain':   destination_chain,
-            'sellToken':          sell_token,
-            'buyToken':           buy_token,
-            'sellAmount':         str(sell_amount),
-            'sortQuotesBy':       'price',
-            'originAddress':      origin_address,
-            'destinationAddress': destination_address,
-            'slippageBps':        int(slippage_bps),
-            # Stated rather than left to default. The engine only executes
-            # routes the user pays for, and verify_route() refuses anything
-            # else -- asking for it explicitly means a provider that cannot
-            # offer it says so at quote time instead of at signing time.
-            'gasPayer':           gas_payer,
-            'maxNumQuotes':       1,
-        },
+        params=_cc_quote_params(
+            origin_chain=origin_chain, destination_chain=destination_chain,
+            sell_token=sell_token, buy_token=buy_token, sell_amount=sell_amount,
+            origin_address=origin_address, destination_address=destination_address,
+            slippage_bps=slippage_bps, gas_payer=gas_payer),
         headers={'0x-api-key': ZEROX_API_KEY, '0x-version': 'v2'},
         timeout=15,
     )
@@ -8620,7 +8625,56 @@ def _cc_fetch_quote(*, origin_chain, destination_chain, sell_token, buy_token,
     return r.json()
 
 
-def _cc_fetch_status(*, origin_chain, origin_tx_hash):
+def _cc_quote_params(*, origin_chain, destination_chain, sell_token, buy_token,
+                     sell_amount, origin_address, destination_address,
+                     slippage_bps, gas_payer=None) -> dict:
+    """Exactly what goes on the wire for a cross-chain quote.
+
+    Split out from the request so a test can assert on the parameters without
+    a network, and so the smoke script prints the same thing the app sends.
+
+    gasPayer is ABSENT unless there is a real alternative fee payer. 0x's
+    parameter takes the base58 public key of another Solana wallet that pays
+    the fee and co-signs (see 0x-examples/cross-chain-headless-example/src/
+    fromSolanaToEvmWithGasPayer.ts); the self-paid example omits it and the
+    schema marks it optional. There is no documented value meaning "the user
+    pays", so this used to send the literal string 'user' -- a value the API
+    never defined.
+    """
+    params = {
+        'originChain':        origin_chain,
+        'destinationChain':   destination_chain,
+        'sellToken':          sell_token,
+        'buyToken':           buy_token,
+        'sellAmount':         str(sell_amount),
+        'sortQuotesBy':       'price',
+        'originAddress':      origin_address,
+        'destinationAddress': destination_address,
+        'slippageBps':        int(slippage_bps),
+        'maxNumQuotes':       1,
+    }
+    if gas_payer:
+        params['gasPayer'] = gas_payer
+    return params
+
+
+def _cc_status_params(*, origin_chain, origin_tx_hash, quote_id='') -> dict:
+    """Exactly what goes on the wire for a cross-chain status lookup.
+
+    originChain and originTxHash are the verified pair -- 0x's published
+    request schema lists only those two and its example sends only those two.
+    quoteId is added when we have a real one, because a lookup that can name
+    the quote is more precise; the provider adapter retries without it if the
+    endpoint refuses, so an unverified parameter can never be the reason a
+    bridge stops being tracked.
+    """
+    params = {'originChain': origin_chain, 'originTxHash': origin_tx_hash}
+    if quote_id:
+        params['quoteId'] = quote_id
+    return params
+
+
+def _cc_fetch_status(*, origin_chain, origin_tx_hash, quote_id=''):
     """One GET to 0x's cross-chain status endpoint.
 
     originChain + originTxHash, not quoteId -- 0x's prose says otherwise but
@@ -8630,7 +8684,9 @@ def _cc_fetch_status(*, origin_chain, origin_tx_hash):
         raise RuntimeError('ZEROX_API_KEY is not configured')
     r = requests.get(
         'https://api.0x.org/cross-chain/status',
-        params={'originChain': origin_chain, 'originTxHash': origin_tx_hash},
+        params=_cc_status_params(origin_chain=origin_chain,
+                                 origin_tx_hash=origin_tx_hash,
+                                 quote_id=quote_id),
         headers={'0x-api-key': ZEROX_API_KEY, '0x-version': 'v2'},
         timeout=10,
     )
@@ -8639,8 +8695,51 @@ def _cc_fetch_status(*, origin_chain, origin_tx_hash):
     return r.json()
 
 
+def _cc_is_current_settler(chain: str, address: str) -> bool:
+    """Whether `address` is a live 0x Settler on `chain`.
+
+    0x's instruction is explicit: do not hardcode Settler addresses, always
+    query the deployer/registry for the current one. So this asks rather than
+    keeping a list that would go stale and give false assurance.
+
+    ownerOf(feature) on the registry returns the current Settler for each
+    feature number: 2 taker-submitted, 3 metatransactions, 4 intents,
+    5 bridge. A lookup that fails returns False -- NOT because failure means
+    safe, but because this is one of several checks and the spender allowlist
+    is the one that actually grants permission. Failing closed here would let
+    an RPC blip refuse every route.
+    """
+    if not address or chain == 'solana':
+        return False
+    try:
+        w3 = _get_web3(chain)
+        registry = w3.eth.contract(
+            address=w3.to_checksum_address(te_crosschain.ZEROX_SETTLER_REGISTRY),
+            abi=[{'name': 'ownerOf', 'type': 'function', 'stateMutability': 'view',
+                  'inputs': [{'name': 'tokenId', 'type': 'uint256'}],
+                  'outputs': [{'name': '', 'type': 'address'}]}])
+        want = w3.to_checksum_address(address)
+        for feature in (2, 3, 4, 5):
+            try:
+                if registry.functions.ownerOf(feature).call() == want:
+                    return True
+            except Exception:
+                continue
+    except Exception as e:
+        print(f'[crosschain] settler registry lookup unavailable on {chain}: {e}',
+              flush=True)
+    return False
+
+
 def _te_crosschain_provider():
     return te_crosschain.ZeroExCrossChain(_cc_fetch_quote, _cc_fetch_status)
+
+
+def _cc_status_fetcher_with_quote(source_chain: str, source_tx_hash: str,
+                                  quote_id: str = ''):
+    return _te_crosschain_provider().get_status(
+        source_chain=source_chain, source_tx_hash=source_tx_hash,
+        quote_id=quote_id)
 
 
 def _cc_route_enabled(source_chain: str, dest_chain: str) -> bool:
@@ -8713,6 +8812,10 @@ def _cc_usdc_balance(wallet: str, chain: str) -> float:
 # required, and the code says so rather than discovering it at signing time.
 CC_NATIVE_GAS_REQUIRED = 'NATIVE_GAS_REQUIRED'
 CC_ROUTE_NOT_GASLESS = 'ROUTE_NOT_GASLESS'
+# Headroom on the provider's own gas figure. Gas price moves between the quote
+# and the signature; a transaction that runs out of gas mid-bridge is worse
+# than one that was refused for wanting a little more margin.
+CC_GAS_ESTIMATE_MARGIN = float(os.getenv('CROSSCHAIN_GAS_MARGIN', '1.5'))
 
 # What a wallet must hold to pay for one origin-leg transaction. Native units.
 # Deliberately a floor rather than an estimate: it is compared against a live
@@ -8743,33 +8846,89 @@ def _cc_native_balance(wallet: str, chain: str) -> float:
         return 0.0
 
 
-def _cc_gas_requirement(wallet: str, chain: str) -> dict:
+def _cc_route_gas_estimate(chain: str, route) -> float:
+    """The provider's own gas figure for this route, in native units.
+
+    Returns 0.0 when the quote did not give one -- which is a different thing
+    from "no gas needed", and the caller says so.
+
+    Why this is preferred over the floor in CC_MIN_NATIVE: that floor is a
+    number written in this repository. It is a reasonable minimum for
+    refusing an obviously empty wallet, but calling it the gas requirement
+    would be presenting our guess as the provider's answer.
+    """
+    if route is None:
+        return 0.0
+    try:
+        if te_registry.get_chain(chain).kind == 'evm':
+            gas = int(getattr(route, 'tx_gas', 0) or 0)
+            if gas <= 0:
+                return 0.0
+            details = (route.raw.get('transaction') or {}).get('details') or {}
+            price = int(str(details.get('gasPrice') or 0) or 0)
+            if price <= 0:
+                return 0.0
+            return (gas * price) / 1e18
+        # Solana: gasCosts, kept verbatim from the quote.
+        costs = getattr(route, 'gas_costs_raw', None) or {}
+        entries = costs if isinstance(costs, list) else [costs]
+        total = 0
+        for entry in entries:
+            if isinstance(entry, dict) and entry.get('amount') is not None:
+                total += int(str(entry['amount']))
+        return (total / 1e9) if total else 0.0
+    except Exception:
+        return 0.0
+
+
+def _cc_gas_requirement(wallet: str, chain: str, route=None) -> dict:
     """Whether this wallet can pay for the origin transaction itself.
 
     Returns a dict that is always safe to show a user. `required` True means
-    the trade cannot run until they hold some of the chain's own token, and
-    the amount is stated rather than left to them to guess.
+    the trade cannot run until they hold some of the chain's own token.
+
+    THE NUMBER IS AN ESTIMATE AND IS LABELLED ONE.
+    `estimated_native_gas` is the provider's figure when the quote gave one,
+    and otherwise a floor written in this repository -- `source` says which.
+    Neither is exact: gas price moves between quoting and signing, and a
+    Solana fee depends on what accounts the transaction touches. Presenting
+    either as "the exact amount you need" would be a precision this cannot
+    have. The balance is read live, immediately before submission, which is
+    the part that IS reliable.
 
     OrcAgent does not fill this gap. There is no branch below that spends a
     platform wallet, and adding one would make every bridged trade a
     permanent cost rather than a fee.
     """
     cfg = te_registry.get_chain(chain)
-    need = CC_MIN_NATIVE.get(chain, 0.0)
+    floor = CC_MIN_NATIVE.get(chain, 0.0)
+    quoted = _cc_route_gas_estimate(chain, route)
+    # A safety margin on the provider's own number, because gas price moves
+    # between the quote and the signature and a transaction that runs out is
+    # worse than one that was refused.
+    need = max(floor, quoted * CC_GAS_ESTIMATE_MARGIN)
     have = _cc_native_balance(wallet, chain)
     ok = have >= need
+    _source_note = ('from the route quote, with margin' if quoted > 0 else
+                    'a conservative minimum; the quote gave no gas figure')
     return {
         'required': not ok,
         'code': '' if ok else CC_NATIVE_GAS_REQUIRED,
         'chain': chain,
         'symbol': cfg.native.symbol,
-        'needed': need,
+        # Named for what it is. There is no 'exact' key, deliberately.
+        'estimated_native_gas': need,
+        'estimate_source': ('provider_quote' if quoted > 0 else 'orcagent_floor'),
+        'is_estimate': True,
+        'provider_quoted_native_gas': quoted,
+        'needed': need,          # kept for callers written before the rename
         'have': round(have, 9),
         'gasless': False,
         'reason': '' if ok else (
             f'Bridging out of {cfg.display_name} needs a transaction signed and '
             f'paid for in {cfg.native.symbol}. This wallet holds {have:.6f} and '
-            f'about {need} is required. OrcAgent does not pay it for you.'),
+            f'an estimated {need} is required ({_source_note}). It is an '
+            f'estimate, not an exact figure. OrcAgent does not pay it for you.'),
     }
 
 
@@ -8823,12 +8982,15 @@ def _te_bridge_quoter(wallet: str, quote_key: str):
         route = _te_crosschain_provider().get_quote(
             source_chain=source_chain, destination_chain=dest_chain,
             source_amount_raw=amount_raw, origin_address=origin,
-            destination_address=dest, gas_payer='user')
+            destination_address=dest,
+            extra_allowed_spenders=CROSSCHAIN_ALLOWED_SPENDERS,
+            settler_lookup=_cc_is_current_settler)
         _cc_remember_route(quote_key, route)
         return {
             'fee_usd':             route.loss_usd(),
             'provider':            route.provider,
-            'route_id':            route.route_id,
+            'provider_quote_id':   route.quote_id,
+            'provider_zid':        route.zid,
             'bridge_provider':     route.bridge_provider,
             'source_amount_raw':   route.source_amount_raw,
             'expected_out_raw':    route.expected_out_raw,
@@ -8894,17 +9056,38 @@ def _te_cc_source_sender(enc_blob: str, wallet: str, source_chain: str):
     """
     def send(route) -> te_execute.SourceOutcome:
         raw = dict(route.raw or {})
-        # The signer reads issues.allowance off the quote; the top-level
-        # allowanceTarget is what the response actually carries, so the two
-        # are reconciled here rather than in the signer.
+        # ── the spender, checked again at the last possible moment ──
+        # verify_route already passed this address. It is checked a second
+        # time here because this is the line after which an approval is real,
+        # and because the route object travelled through a cache and a
+        # database row to get here. An allowance is a standing permission;
+        # one redundant check costs nothing next to one wrong approval.
         if route.needs_allowance and route.allowance_target:
+            try:
+                _te_crosschain_provider()._verify_spender(
+                    route, CROSSCHAIN_ALLOWED_SPENDERS, _cc_is_current_settler)
+            except te_crosschain.CrossChainError as e:
+                return te_execute.SourceOutcome(
+                    submitted=False, error=f'refusing to approve this spender: {e}'[:400])
             issues = dict(raw.get('issues') or {})
             allowance = dict(issues.get('allowance') or {})
-            allowance.setdefault('spender', route.allowance_target)
+            allowance['spender'] = route.allowance_target
             issues['allowance'] = allowance
             raw['issues'] = issues
         raw.setdefault('sellAmount', str(route.source_amount_raw))
         txn = raw.get('transaction') or {}
+
+        # ── a Solana transaction this process can actually read ──
+        # Checked before the key is decrypted, so a format we cannot parse
+        # fails with the reason rather than as an opaque error with the user's
+        # key in memory.
+        if source_chain == 'solana':
+            try:
+                te_crosschain.check_solana_tx_version(
+                    route.serialized_transaction, _cc_parse_solana_tx)
+            except te_crosschain.CrossChainError as e:
+                return te_execute.SourceOutcome(submitted=False, error=str(e)[:400])
+
         try:
             with _use_key(enc_blob, wallet) as pk:
                 if source_chain == 'solana':
@@ -8929,9 +9112,24 @@ def _te_cc_source_sender(enc_blob: str, wallet: str, source_chain: str):
     return send
 
 
-def _te_cc_status_fetcher(source_chain: str, source_tx_hash: str):
+def _cc_parse_solana_tx(raw: bytes):
+    """Parse provider bytes into a Solana transaction, or raise.
+
+    A thin wrapper so the version gate in trade_engine/crosschain.py stays
+    free of a Solana dependency. The bytes are parsed, never rebuilt: a
+    transaction reconstructed locally to satisfy a parser is not the one the
+    bridge quoted, and signing it would authorise something nobody priced.
+    """
+    from solders.transaction import VersionedTransaction as _VTx
+    return _VTx.from_bytes(raw)
+
+
+def _te_cc_status_fetcher(source_chain: str, source_tx_hash: str,
+                          quote_id: str = ''):
+    """Status for one bridge, naming the quote when the row has a real one."""
     return _te_crosschain_provider().get_status(
-        source_chain=source_chain, source_tx_hash=source_tx_hash)
+        source_chain=source_chain, source_tx_hash=source_tx_hash,
+        quote_id=quote_id)
 
 
 def _te_run_crosschain_trade(*, quote_id, idem, available, wallet, enc_blob,
@@ -9104,7 +9302,10 @@ def _api_trade_execute_crosschain(quote_row, wallet, uid, quote_id, data):
         return jsonify({'ok': False, 'requote': True,
                         'msg': 'This cross-chain route has expired. Request a new quote.'}), 409
 
-    gas_req = _cc_gas_requirement(wallet, source_chain)
+    # Read again here, immediately before submission, against the route that
+    # was priced. The balance can have moved since the quote, and this is the
+    # last moment the answer is still worth anything.
+    gas_req = _cc_gas_requirement(wallet, source_chain, route)
     if gas_req['required']:
         # Said before anything is signed, with the number they need. OrcAgent
         # does not front it -- see _cc_gas_requirement.

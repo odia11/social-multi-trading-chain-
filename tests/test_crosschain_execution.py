@@ -61,7 +61,8 @@ def db():
 
 class FakeRoute:
     provider = '0x'
-    route_id = 'route-1'
+    quote_id = 'quote-1'          # 0x's per-quote quoteId
+    zid = 'zid-1'                 # 0x's top-level request id — a different thing
     source_token = BASE_USDC
     destination_token = SOL_USDC
     source_amount_raw = 100_000_000
@@ -106,7 +107,9 @@ def sender_ok(tx='0xSRC'):
 
 
 def status_of(status, **kw):
-    def fetch(chain, tx):
+    seen = {}
+    def fetch(chain, tx, quote_id=''):
+        seen['quote_id'] = quote_id
         return X.CrossChainStatus(
             status=status,
             source_on_chain=status in X.SOURCE_IS_ON_CHAIN,
@@ -116,6 +119,7 @@ def status_of(status, **kw):
             settled_out_raw=kw.get('settled'),
             failure_reason=kw.get('reason', ''),
             recovery=kw.get('recovery', {}))
+    fetch.seen = seen
     return fetch
 
 
@@ -155,7 +159,7 @@ check('the reservation is taken on the SOURCE chain, which is where the money '
 
 cc = L.get_crosschain(conn, T1)
 check('every identifier needed to pick this trade up again is persisted',
-      cc['route_id'] == 'route-1' and cc['source_tx_hash'] == '0xSRC'
+      cc['provider_quote_id'] == 'quote-1' and cc['source_tx_hash'] == '0xSRC'
       and cc['source_chain'] == 'base' and cc['destination_chain'] == 'solana'
       and cc['minimum_out_raw'] == '99000000' and float(cc['source_sent_at']) > 0)
 
@@ -355,7 +359,7 @@ conn.close()
 
 # provider unreachable after broadcast
 conn, tid = restart_at('q11', stop_state=L.BRIDGING)
-def boom(chain, tx):
+def boom(chain, tx, quote_id=''):
     raise RuntimeError('provider timeout')
 r = E.resume_crosschain_trade(conn, trade_id=tid, status_fetcher=boom,
                               dest_swap_executor=swap_ok())

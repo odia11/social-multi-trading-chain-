@@ -51,6 +51,7 @@ from decimal import Decimal
 from typing import Callable, Optional
 
 from . import ledger as L
+from . import registry as _registry
 from . import subsidy as S
 from .costs import (CostLine, KIND_PLATFORM_FEE, KIND_SOURCE_GAS,
                     PAYER_USER)
@@ -583,7 +584,8 @@ def start_crosschain_trade(conn, *, quote_id: str, idempotency_key: str,
         destination_chain=quote_row['destination_chain'],
         source_token=route.source_token, destination_token=route.destination_token,
         source_amount_raw=route.source_amount_raw, now=clock(),
-        route_id=route.route_id, quoted_out_raw=str(route.expected_out_raw),
+        provider_quote_id=route.quote_id, provider_zid=route.zid,
+        quoted_out_raw=str(route.expected_out_raw),
         minimum_out_raw=str(route.minimum_out_raw),
         estimated_seconds=int(route.estimated_seconds or 0),
         estimated_fees_json=json.dumps(route.fees_raw or {})[:4000])
@@ -660,6 +662,41 @@ def resume_crosschain_trade(conn, *, trade_id: str, status_fetcher: Callable,
         return _progress(conn, trade_id, warnings=warnings)
 
     # ── AWAITING_SOURCE: did anything go out? ────────────────────────────
+    #
+    # THE CRASH WINDOW, DOCUMENTED PRECISELY
+    # Between these two lines in the sender:
+    #
+    #     tx_hash = <sign and broadcast>          <-- money may now be in flight
+    #     L.update_crosschain(..., source_tx_hash=tx_hash)
+    #
+    # a process death leaves an origin transaction on chain that this database
+    # has never heard of. The window is milliseconds wide and it cannot be
+    # closed by ordering alone: something has to be written before the send,
+    # and whatever is written must identify the transaction that the send then
+    # produces.
+    #
+    # WHY IT IS NOT CLOSED HERE, for each chain:
+    #
+    #   EVM. A transaction's hash is knowable before broadcast -- it is the
+    #   hash of the signed bytes -- so the bytes could be persisted first and
+    #   the chain queried afterwards. That is genuinely recoverable and is the
+    #   right fix. It is not done yet because it means restructuring the
+    #   signer to separate signing from sending, and doing that badly is worse
+    #   than the window it closes. Recording the NONCE alone is not enough: a
+    #   nonce tells you whether the account has moved past it, not whether the
+    #   transaction that moved it was ours.
+    #
+    #   Solana. A transaction's signature is the first signature in the signed
+    #   message, so it too is knowable before send. Same conclusion, same
+    #   reason.
+    #
+    # WHAT IS NOT DONE, deliberately: no scanning of recent blocks for
+    # something that looks like ours, and no rebroadcast. Both are heuristics
+    # about money, and the failure mode of a wrong guess here is bridging a
+    # user's balance twice.
+    #
+    # So the window stays, it is narrow, and landing in it costs a person's
+    # attention rather than a user's money.
     if state == L.AWAITING_SOURCE:
         if not cc.get('source_tx_hash'):
             # No hash was ever written. Either the send never happened or the
@@ -678,7 +715,14 @@ def resume_crosschain_trade(conn, *, trade_id: str, status_fetcher: Callable,
     # ── BRIDGING: ask the provider ───────────────────────────────────────
     if state == L.BRIDGING:
         try:
-            status = status_fetcher(cc['source_chain'], cc['source_tx_hash'])
+            # The quote id is passed when there is one. Rows written before
+            # quoteId and zid were told apart have only the old route_id, and
+            # that one is NOT passed: it may hold a zid, and sending a request
+            # id where a quote id is expected is the confusion this split
+            # exists to end. Those rows fall back to the two-parameter lookup,
+            # which is the shape 0x's own example uses.
+            status = status_fetcher(cc['source_chain'], cc['source_tx_hash'],
+                                    cc.get('provider_quote_id') or '')
         except Exception as e:
             # Not being able to ask is not news about the money. Stay put.
             warnings.append(f'status unavailable: {e}')
@@ -732,6 +776,27 @@ def resume_crosschain_trade(conn, *, trade_id: str, status_fetcher: Callable,
 
     # ── DEST_RECEIVED: buy the token ─────────────────────────────────────
     if state == L.DEST_RECEIVED:
+        # THE SECOND-SWAP INVARIANT, checked once more before acting on it.
+        #
+        # This engine's division of labour is: the bridge delivers the
+        # destination chain's DOLLAR asset, and OrcAgent's own swap then buys
+        # the token. The swap below therefore spends the destination stable.
+        # If the bridge delivered anything else -- most dangerously the final
+        # token itself, if a route were ever quoted that ends in it -- then
+        # running the swap would either spend an asset that is not there or
+        # sell the very token the user just received.
+        #
+        # verify_route refuses such a route at quote time. This checks the
+        # PERSISTED row as well, because the row is what a restart acts on and
+        # it may predate that check.
+        dest_cfg = _registry.get_chain(cc['destination_chain'])
+        if (cc['destination_token'] or '').strip().lower() != \
+                dest_cfg.stable.address.lower():
+            return fail(
+                f'the bridge was recorded as delivering {cc["destination_token"]} on '
+                f'{cc["destination_chain"]}, not that chain\'s {dest_cfg.stable.symbol}. '
+                f'Refusing to run a destination swap against an asset this trade did '
+                f'not bridge into', investigate=True, release=False, to=L.MANUAL_REVIEW)
         quote_row = L.load_quote(conn, cc['quote_id']) or {}
         costs = _quoted_costs(quote_row)
         plan = SwapPlan(
@@ -816,7 +881,8 @@ def resume_crosschain_trade(conn, *, trade_id: str, status_fetcher: Callable,
     # ── REFUND_PENDING: has the money come back? ─────────────────────────
     if state == L.REFUND_PENDING:
         try:
-            status = status_fetcher(cc['source_chain'], cc['source_tx_hash'])
+            status = status_fetcher(cc['source_chain'], cc['source_tx_hash'],
+                                    cc.get('provider_quote_id') or '')
         except Exception as e:
             warnings.append(f'status unavailable: {e}')
             return _progress(conn, trade_id, warnings=warnings)

@@ -54,6 +54,43 @@ class RouteRejected(CrossChainError):
     """
 
 
+class RouteUnsupported(CrossChainError):
+    """The route is real and we will not execute it.
+
+    Not a rejection of the response and not an absence of liquidity: 0x
+    offered something this integration cannot carry out safely -- an
+    ephemeral co-signer it has no flow for, a transaction version its
+    libraries cannot parse. Separate so it is obvious in a log that the
+    limitation is ours.
+    """
+
+
+# ── gas: our policy, and their parameter ─────────────────────────────────
+# These are two different things and conflating them is how the literal
+# string 'user' ended up being sent to an API that expects a base58 public
+# key.
+#
+# GAS_POLICY_USER is OUR marker. It means OrcAgent is not paying, which is a
+# product rule and is never transmitted anywhere.
+#
+# The provider's `gasPayer` parameter is something else entirely: 0x's own
+# example (0x-examples, cross-chain-headless-example/src/
+# fromSolanaToEvmWithGasPayer.ts) passes
+#
+#     gasPayer: gasPayerKeypair.publicKey.toBase58()
+#
+# -- the base58 public key of an ALTERNATIVE Solana wallet that pays the fee
+# and co-signs the transaction. The plain self-paid example
+# (fromSolanaToEvm.ts) does not send the parameter at all, and the request
+# schema marks it optional.
+#
+# So when the user pays their own gas the parameter is OMITTED. There is no
+# documented value meaning "the user pays"; inventing one and sending it is
+# either ignored or rejected, and neither is a thing to guess about.
+GAS_POLICY_USER = 'user'
+GAS_POLICY_ALTERNATIVE = 'alternative_payer'
+
+
 # The provider's own status vocabulary, verified against schemas.ts.
 # Anything outside this set is read as UNKNOWN rather than guessed into a
 # terminal state -- a status 0x adds later must fail safe (keep polling),
@@ -81,6 +118,77 @@ SOURCE_IS_ON_CHAIN = frozenset({
 
 _EVM_ADDRESS = re.compile(r'^0x[0-9a-fA-F]{40}$')
 _SVM_ADDRESS = re.compile(r'^[1-9A-HJ-NP-Za-km-z]{32,44}$')
+
+# ── who may be given an ERC-20 allowance ─────────────────────────────────
+# 0x is explicit: NEVER set an allowance on the Settler contract. It neither
+# needs nor supports one, and approvals mis-scoped to a Settler are what an
+# August 2025 exploit drained. The correct spender is the one the API returns
+# through its allowance flow -- allowanceTarget, or issues.allowance.spender.
+#
+# Settler addresses deliberately CANNOT be deny-listed: 0x's own instruction
+# is "do not hardcode any Settler address, always query the deployer/registry
+# for the most recent one", so any list here would go stale and give false
+# assurance. The defence is the other way round -- an ALLOWLIST of the
+# contracts that legitimately hold allowances, which are fixed and published:
+#
+#   Permit2                          same address on every chain
+#   AllowanceHolder (Cancun)         Ethereum, Base, Arbitrum, Polygon, ...
+#   AllowanceHolder (Shanghai)       Mantle and other pre-Cancun chains
+#
+# A cross-chain route may legitimately nominate a bridge contract instead, so
+# the allowlist is extensible by the operator -- see extra_allowed in
+# verify_route. What it is not is open: an unrecognised spender is refused
+# until somebody looks at it.
+CANONICAL_ALLOWANCE_TARGETS = frozenset(a.lower() for a in (
+    '0x000000000022D473030F116dDEE9F6B43aC78BA3',   # Permit2, all chains
+    '0x0000000000001fF3684f28c67538d4D072C22734',   # AllowanceHolder, Cancun
+    '0x0000000000005E88410CcDFaDe4a5EfaE4b49562',   # AllowanceHolder, Shanghai
+))
+
+# The Settler deployer/registry. Not a Settler itself, but approving it would
+# be the same class of mistake, and unlike the Settlers it is a fixed address.
+ZEROX_SETTLER_REGISTRY = '0x00000000000004533Fe15556B1E086BB1A72cEae'.lower()
+
+# Solana transaction versions this integration can parse and sign. `solders`
+# handles legacy and v0; anything else is refused BEFORE signing rather than
+# being discovered as an opaque parse error at broadcast time.
+SUPPORTED_SOLANA_TX_VERSIONS = ('legacy', 0)
+
+# A Solana-origin route may require a freshly generated co-signer whose public
+# key is handed to the provider at quote time and whose private key signs
+# alongside the user's. OrcAgent has no flow for that -- generating,
+# persisting and destroying per-quote key material is its own piece of work,
+# and the parameter's exact name and signing order could not be verified
+# against a reachable specification.
+#
+# So it is DETECTED and REFUSED rather than attempted. These are the key
+# spellings that would indicate it; matching is on a normalised key so a
+# response using a different case or separator is still caught.
+_EPHEMERAL_HINTS = ('solanaephemeralsignerpubkey', 'ephemeralsignerpubkey',
+                    'ephemeralsigner', 'ephemeralsignerpublickey')
+
+
+def _needs_ephemeral_signer(*objects) -> bool:
+    """Whether anything in these response objects asks for a co-signer.
+
+    Looks at key NAMES anywhere in the structure rather than at one expected
+    path, because the point is to notice a requirement this code cannot meet
+    -- and a requirement that moved is still a requirement.
+    """
+    def walk(node, depth=0):
+        if depth > 6:
+            return False
+        if isinstance(node, dict):
+            for k, v in node.items():
+                flat = str(k).replace('_', '').replace('-', '').lower()
+                if flat in _EPHEMERAL_HINTS:
+                    return True
+                if walk(v, depth + 1):
+                    return True
+        elif isinstance(node, list):
+            return any(walk(v, depth + 1) for v in node[:20])
+        return False
+    return any(walk(o) for o in objects)
 
 
 def chain_param(chain: str) -> str:
@@ -131,7 +239,18 @@ class CrossChainRoute:
     twice.
     """
     provider: str
-    route_id: str
+    # ── two identifiers, two meanings, never interchanged ──
+    # quote_id is 0x's `quoteId`, which lives on an individual quote inside
+    # the `quotes` array. zid is the top-level `zid` on the response, which
+    # identifies the REQUEST rather than any one quote it returned.
+    #
+    # They were previously collapsed into a single route_id with
+    # `quoteId or zid`, so a response that happened to omit quoteId silently
+    # produced a route whose "quote id" was really a request id. Anything
+    # later using it as a quote id would be addressing the wrong object.
+    # They are stored apart, and a caller asks for the one it means.
+    quote_id: str
+    zid: str
     source_chain: str
     destination_chain: str
     source_token: str
@@ -139,10 +258,11 @@ class CrossChainRoute:
     source_amount_raw: int
     expected_out_raw: int
     minimum_out_raw: int
-    # Whose native balance pays for the origin transaction. 'user' is the
-    # only value this engine will execute -- see the gas policy in
-    # dashboard's _cc_gas_requirement().
-    gas_payer: str = 'user'
+    # OUR policy marker, never sent anywhere. See GAS_POLICY_USER.
+    gas_policy: str = GAS_POLICY_USER
+    # The base58 public key sent as the provider's `gasPayer`, when there is
+    # an alternative fee payer. Empty means the parameter is omitted.
+    provider_gas_payer: str = ''
     allowance_target: str = ''
     tx_to: str = ''
     tx_data: str = ''
@@ -152,7 +272,15 @@ class CrossChainRoute:
     estimated_seconds: int = 0
     bridge_provider: str = ''
     fees_raw: dict = field(default_factory=dict)
+    # 0x's own gas figures for this route, kept verbatim. They are what makes
+    # a native-gas number an ESTIMATE FROM THE PROVIDER rather than a constant
+    # this repository made up.
+    gas_costs_raw: object = field(default_factory=dict)
     needs_allowance: bool = False
+    # True when the response asks for a co-signer this integration has no
+    # flow for. Carried on the route so the refusal happens once, at
+    # verification, rather than at signing time.
+    ephemeral_signer_required: bool = False
     raw: dict = field(default_factory=dict)
 
     @property
@@ -234,13 +362,28 @@ class ZeroExCrossChain:
     def __init__(self, fetch_quote: Callable, fetch_status: Callable):
         self._fetch_quote = fetch_quote
         self._fetch_status = fetch_status
+        # Set when a status call carrying quoteId was refused and the
+        # verified two-parameter shape had to be used instead. Read by the
+        # smoke script so an operator can see which shape the live API takes.
+        self.last_quote_id_status_error = ''
 
     # ── quoting ──────────────────────────────────────────────────────────
     def get_quote(self, *, source_chain: str, destination_chain: str,
                   source_amount_raw: int, origin_address: str,
                   destination_address: str, slippage_bps: int = 100,
-                  gas_payer: str = 'user') -> CrossChainRoute:
-        """Price one USDC move, and refuse anything that does not check out."""
+                  alternative_gas_payer: str = '',
+                  extra_allowed_spenders: frozenset = frozenset(),
+                  settler_lookup: Optional[Callable] = None) -> CrossChainRoute:
+        """Price one USDC move, and refuse anything that does not check out.
+
+        `alternative_gas_payer` is a base58 Solana public key for the case
+        where some OTHER wallet pays the network fee and co-signs. OrcAgent
+        never passes one -- the user pays their own gas -- so it is empty and
+        the provider's `gasPayer` parameter is OMITTED, which is what 0x's own
+        self-paid example does. Sending a made-up value there instead is how
+        this integration previously transmitted the literal string 'user' to a
+        parameter that expects a public key.
+        """
         if source_chain == destination_chain:
             raise CrossChainError(
                 'a cross-chain quote was asked for a single chain — the caller '
@@ -249,44 +392,105 @@ class ZeroExCrossChain:
         dst = R.get_chain(destination_chain)
         source_amount_raw = _positive_int(source_amount_raw, 'source amount')
 
+        if alternative_gas_payer:
+            # If one is ever passed it has to be a real Solana public key,
+            # because that is the only thing the parameter accepts. And it is
+            # only meaningful on a Solana origin: there is no documented EVM
+            # equivalent, so it is not sent on one.
+            if src.kind != 'svm':
+                raise CrossChainError(
+                    'an alternative gas payer is a Solana-origin concept; there is '
+                    f'no documented equivalent for a {source_chain} origin, so it '
+                    f'is not sent')
+            if not _SVM_ADDRESS.match(alternative_gas_payer.strip()):
+                raise CrossChainError(
+                    'an alternative gas payer must be a base58 Solana public key, '
+                    f'not {alternative_gas_payer!r}')
+
+        request = {
+            'origin_chain': chain_param(source_chain),
+            'destination_chain': chain_param(destination_chain),
+            'sell_token': src.stable.address,
+            'buy_token': dst.stable.address,
+            'sell_amount': str(source_amount_raw),
+            'origin_address': origin_address,
+            'destination_address': destination_address,
+            'slippage_bps': int(slippage_bps),
+        }
+        # Present only when there really is an alternative payer. An optional
+        # parameter that is always sent is not optional.
+        if alternative_gas_payer:
+            request['gas_payer'] = alternative_gas_payer.strip()
+
         try:
-            data = self._fetch_quote(
-                origin_chain=chain_param(source_chain),
-                destination_chain=chain_param(destination_chain),
-                sell_token=src.stable.address,
-                buy_token=dst.stable.address,
-                sell_amount=str(source_amount_raw),
-                origin_address=origin_address,
-                destination_address=destination_address,
-                slippage_bps=int(slippage_bps),
-                gas_payer=gas_payer,
-            )
+            data = self._fetch_quote(**request)
         except Exception as e:
             raise CrossChainError(f'cross-chain quote failed: {e}') from e
 
+        q, data = self._envelope(data, source_chain, destination_chain)
+        route = self._normalise(
+            data, q, source_chain=source_chain, destination_chain=destination_chain,
+            source_amount_raw=source_amount_raw,
+            provider_gas_payer=alternative_gas_payer.strip())
+        self.verify_route(route, expected_recipient=destination_address,
+                          expected_sender=origin_address,
+                          extra_allowed_spenders=extra_allowed_spenders,
+                          settler_lookup=settler_lookup)
+        return route
+
+    # Response envelopes this integration recognises. Exactly one, because
+    # exactly one is verified: `quotes`, from 0x's published Zod schema
+    # (CrossChainQuotesResponseSchema, discriminated on liquidityAvailable).
+    #
+    # It is a named constant rather than an inline literal so that adding a
+    # second shape, if 0x ever documents one, is a deliberate one-line change
+    # made after reading the documentation -- not a permissive parser that
+    # quietly accepts whatever arrives. A response in an unrecognised shape
+    # fails closed and says what it saw, which is what makes the smoke script
+    # in scripts/ able to tell an operator the API has changed.
+    QUOTE_LIST_KEYS = ('quotes',)
+    # Keys that have been SEEN in the wild or suggested but are not verified
+    # against a current published schema. Their presence is reported by name
+    # in the refusal, so nobody has to guess why a response was rejected.
+    QUOTE_LIST_KEYS_UNVERIFIED = ('routes',)
+
+    def _envelope(self, data, source_chain: str, destination_chain: str):
+        """Pull the first quote out of the response, or fail closed."""
         if not isinstance(data, dict):
             raise CrossChainError('the cross-chain API returned a non-object response')
         if not data.get('liquidityAvailable'):
+            # Not an error in the response -- an absence of liquidity. Kept
+            # distinct from a malformed envelope on purpose.
             raise CrossChainError(
                 f'no bridge route for {source_chain} -> {destination_chain} at this size')
-        quotes = data.get('quotes')
-        if not isinstance(quotes, list) or not quotes:
-            raise CrossChainError(
-                f'no bridge route for {source_chain} -> {destination_chain} at this size')
-        q = quotes[0]
-        if not isinstance(q, dict):
-            raise RouteRejected('the first quote in the response is not an object')
 
-        route = self._normalise(
-            data, q, source_chain=source_chain, destination_chain=destination_chain,
-            source_amount_raw=source_amount_raw, gas_payer=gas_payer)
-        self.verify_route(route, expected_recipient=destination_address,
-                          expected_sender=origin_address)
-        return route
+        for key in self.QUOTE_LIST_KEYS:
+            found = data.get(key)
+            if isinstance(found, list) and found:
+                q = found[0]
+                if not isinstance(q, dict):
+                    raise RouteRejected(f'the first entry of {key!r} is not an object')
+                return q, data
+
+        seen = [k for k in self.QUOTE_LIST_KEYS_UNVERIFIED
+                if isinstance(data.get(k), list)]
+        if seen:
+            raise RouteRejected(
+                f'the response carries {seen[0]!r} rather than '
+                f'{self.QUOTE_LIST_KEYS[0]!r}. That may be a current 0x envelope '
+                f'this integration has not been updated for — it is refused rather '
+                f'than parsed on a guess. Verify against the current documentation '
+                f'and add it to QUOTE_LIST_KEYS.')
+        if any(k in data for k in self.QUOTE_LIST_KEYS):
+            raise CrossChainError(
+                f'no bridge route for {source_chain} -> {destination_chain} at this size')
+        raise RouteRejected(
+            f'the response has liquidity but no recognised list of quotes; its keys '
+            f'are {sorted(data)[:12]}')
 
     def _normalise(self, data: dict, q: dict, *, source_chain: str,
                    destination_chain: str, source_amount_raw: int,
-                   gas_payer: str) -> CrossChainRoute:
+                   provider_gas_payer: str) -> CrossChainRoute:
         src = R.get_chain(source_chain)
         dst = R.get_chain(destination_chain)
 
@@ -310,18 +514,50 @@ class ZeroExCrossChain:
         if not isinstance(issues, dict):
             issues = {}
 
+        # The spender the RESPONSE nominates. 0x documents two places it can
+        # appear -- the top-level allowanceTarget, and issues.allowance.spender
+        # -- so both are read and, when both are present, they have to agree.
+        # Taking the tx target as the spender instead is precisely the mistake
+        # that drained approvals to a Settler in August 2025.
+        allowance_issue = issues.get('allowance') if isinstance(
+            issues.get('allowance'), dict) else {}
+        spender_top = str(data.get('allowanceTarget') or '')
+        spender_issue = str(allowance_issue.get('spender') or '')
+        if spender_top and spender_issue and not _same_address(spender_top, spender_issue):
+            raise RouteRejected(
+                f'the response names two different spenders — allowanceTarget '
+                f'{spender_top} and issues.allowance.spender {spender_issue}. One '
+                f'of them is wrong and approving either is a guess')
+
+        # THE TOKENS THE RESPONSE ITSELF NAMES.
+        # These used to be filled in from the registry and then "verified"
+        # against the registry, which is a tautology: the response's own
+        # sellToken and buyToken were never looked at. A route that bridged to
+        # something other than the destination's dollar asset would have
+        # passed, and the destination swap would then have tried to spend an
+        # asset that was not there.
+        #
+        # Empty is allowed and means the response did not echo them; the
+        # registry value stands in, and verify_route's other checks still
+        # apply. A PRESENT and DIFFERENT value is refused.
+        echoed_sell = str(q.get('sellToken') or data.get('sellToken') or '')
+        echoed_buy = str(q.get('buyToken') or data.get('buyToken') or '')
+
         return CrossChainRoute(
             provider=self.name,
-            route_id=str(q.get('quoteId') or data.get('zid') or ''),
+            quote_id=str(q.get('quoteId') or ''),
+            zid=str(data.get('zid') or ''),
             source_chain=source_chain,
             destination_chain=destination_chain,
-            source_token=src.stable.address,
-            destination_token=dst.stable.address,
+            source_token=echoed_sell or src.stable.address,
+            destination_token=echoed_buy or dst.stable.address,
             source_amount_raw=source_amount_raw,
             expected_out_raw=expected_out,
             minimum_out_raw=minimum_out,
-            gas_payer=gas_payer,
-            allowance_target=str(data.get('allowanceTarget') or ''),
+            gas_policy=(GAS_POLICY_ALTERNATIVE if provider_gas_payer
+                        else GAS_POLICY_USER),
+            provider_gas_payer=provider_gas_payer,
+            allowance_target=spender_top or spender_issue,
             tx_to=str(details.get('to') or ''),
             tx_data=str(details.get('data') or ''),
             tx_value=int(str(details.get('value') or 0) or 0),
@@ -329,14 +565,18 @@ class ZeroExCrossChain:
             serialized_transaction=str(details.get('serializedTransaction') or ''),
             estimated_seconds=int(q.get('estimatedTimeSeconds') or 0),
             bridge_provider=str((bridge_step or {}).get('provider') or ''),
+            gas_costs_raw=q.get('gasCosts') if isinstance(q.get('gasCosts'), (dict, list)) else {},
             fees_raw=q.get('fees') if isinstance(q.get('fees'), dict) else {},
-            needs_allowance=bool(issues.get('allowance')),
+            needs_allowance=bool(allowance_issue),
+            ephemeral_signer_required=_needs_ephemeral_signer(q, data),
             raw=q,
         )
 
     # ── the part that stands between a response and the money ────────────
     def verify_route(self, route: CrossChainRoute, *, expected_recipient: str,
-                     expected_sender: str = '') -> None:
+                     expected_sender: str = '',
+                     extra_allowed_spenders: frozenset = frozenset(),
+                     settler_lookup: Optional[Callable] = None) -> None:
         """Refuse a route that is not the one we asked for.
 
         Each check below is a way a forged or corrupted response could take
@@ -356,11 +596,22 @@ class ZeroExCrossChain:
             raise RouteRejected(
                 f'route sells {route.source_token} on {route.source_chain}, but that '
                 f"chain's dollar asset is {src.stable.symbol} at {src.stable.address}")
+        # THE INVARIANT THE DESTINATION SWAP DEPENDS ON.
+        # This engine's design is: source stable -> destination STABLE, and
+        # then OrcAgent's own swap buys the token. That second swap spends the
+        # destination chain's dollar asset, so if the bridge delivered
+        # anything else -- including the final token, if 0x were ever asked
+        # for a route that ends in it -- the swap would try to spend an asset
+        # that is not there, or sell a token the user already holds.
+        #
+        # Checked against what the RESPONSE says it delivers, not against what
+        # we asked for.
         if not _same_address(route.destination_token, dst.stable.address):
             raise RouteRejected(
                 f'route delivers {route.destination_token} on {route.destination_chain}, '
-                f'but that chain\'s dollar asset is {dst.stable.symbol} at '
-                f'{dst.stable.address}')
+                f'but this engine bridges into {dst.stable.symbol} at '
+                f'{dst.stable.address} and then swaps separately. A route ending in '
+                f'anything else would be swapped a second time')
 
         # The recipient. This is the single most important line here: a route
         # that delivers to an address other than the user's own wallet is a
@@ -396,6 +647,19 @@ class ZeroExCrossChain:
                 'route claims to deliver more than it takes in — refusing rather '
                 'than believing a free lunch')
 
+        # ── a co-signer this integration does not have ──
+        # Refused before anything else about the transaction is considered,
+        # because no amount of the rest being correct makes a route we cannot
+        # sign executable.
+        if route.ephemeral_signer_required:
+            raise RouteUnsupported(
+                'this route needs a freshly generated Solana co-signer '
+                '(an ephemeral signer) whose key must be created per quote, '
+                'used to sign alongside the user, and then destroyed. OrcAgent '
+                'has no flow for that, so the route is refused rather than '
+                'half-attempted. Base <-> Solana does not have to use this '
+                'bridge; a route that does not require one is usable')
+
         # The EVM call target and the spender. Approving a spender is handing
         # it the user's USDC, so an address that is not an address at all is
         # refused rather than passed to a contract call.
@@ -404,10 +668,6 @@ class ZeroExCrossChain:
                 raise RouteRejected(f'route has no usable transaction target: {route.tx_to!r}')
             if not route.tx_data.startswith('0x'):
                 raise RouteRejected('route has no usable calldata')
-            if route.allowance_target and not _valid_address(route.source_chain,
-                                                             route.allowance_target):
-                raise RouteRejected(
-                    f'route names an unusable spender: {route.allowance_target!r}')
             # A target that IS the token contract means the calldata is a
             # direct ERC-20 call the bridge has no business making on the
             # user's behalf -- a transfer to wherever the calldata says.
@@ -415,32 +675,116 @@ class ZeroExCrossChain:
                 raise RouteRejected(
                     'route would call the USDC contract itself — that is a token '
                     'transfer wearing a bridge\'s name, not a bridge')
-            if route.tx_value != 0 and src.kind == 'evm':
-                # A USDC bridge spends USDC. Native value attached to the call
-                # is either a protocol fee the quote did not declare or a
-                # mistake; either way it is money leaving outside the ceiling.
-                if route.tx_value < 0:
-                    raise RouteRejected('route attaches a negative native value')
+            if route.tx_value < 0:
+                raise RouteRejected('route attaches a negative native value')
+            self._verify_spender(route, extra_allowed_spenders, settler_lookup)
         else:
             if not route.serialized_transaction:
                 raise RouteRejected(
                     'route has no serialized transaction for a Solana origin leg')
 
-        if route.gas_payer != 'user':
+        # OUR policy marker, checked against OUR policy. Never confused with
+        # the provider's gasPayer parameter, which is a public key and is
+        # omitted entirely when the user pays.
+        if route.gas_policy != GAS_POLICY_USER:
             raise RouteRejected(
-                f'route would have {route.gas_payer} pay the gas — this engine only '
-                f'executes routes the user pays for')
+                f'route is marked {route.gas_policy} — this engine only executes '
+                f'routes the user pays for')
+
+    def _verify_spender(self, route: CrossChainRoute, extra_allowed: frozenset,
+                        settler_lookup: Optional[Callable]) -> None:
+        """Decide whether this address may be given the user's USDC.
+
+        An allowance is not a detail of a transaction; it is a standing
+        permission that outlives it. So the question is never "did the
+        response say so" -- it did, that is where the address came from --
+        but "is this one of the addresses that legitimately holds one".
+        """
+        if not route.needs_allowance and not route.allowance_target:
+            return                      # nothing will be approved
+        spender = (route.allowance_target or '').strip()
+        if not _valid_address(route.source_chain, spender):
+            raise RouteRejected(f'route names an unusable spender: {spender!r}')
+
+        low = spender.lower()
+        if low == ZEROX_SETTLER_REGISTRY:
+            raise RouteRejected(
+                'route would have the user approve the 0x Settler deployer/registry. '
+                'Settler contracts neither need nor support allowances, and '
+                'approvals mis-scoped to one are what an August 2025 exploit drained')
+        if _same_address(spender, route.tx_to) and low not in CANONICAL_ALLOWANCE_TARGETS:
+            # AllowanceHolder is legitimately both spender and call target,
+            # and it is in the allowlist. Anything ELSE that asks to be
+            # approved AND called is asking for a standing permission on the
+            # contract that executes -- which is the Settler shape.
+            raise RouteRejected(
+                f'route would have the user approve {spender}, the same contract the '
+                f'transaction calls, and it is not a recognised allowance contract. '
+                f'That is the shape of approving a Settler')
+
+        if settler_lookup is not None:
+            # 0x says to ask the registry rather than hardcode. Best effort:
+            # a lookup that fails is not evidence of safety, so it does not
+            # grant permission -- the allowlist below still decides.
+            try:
+                if settler_lookup(route.source_chain, spender):
+                    raise RouteRejected(
+                        f'{spender} is a current 0x Settler on {route.source_chain}, '
+                        f'and Settler must never be given an allowance')
+            except RouteRejected:
+                raise
+            except Exception:
+                pass
+
+        if low in CANONICAL_ALLOWANCE_TARGETS:
+            return
+        if low in {a.lower() for a in extra_allowed}:
+            return
+        raise RouteUnsupported(
+            f'{spender} is not a recognised allowance contract on '
+            f'{route.source_chain}. Permit2 and AllowanceHolder are recognised '
+            f'automatically; a bridge that needs its own spender has to be added '
+            f'deliberately (CROSSCHAIN_ALLOWED_SPENDERS) after somebody has '
+            f'looked at what it is. An approval is a standing permission, so it '
+            f'is not granted on the say-so of the response that asked for it')
 
     # ── status ───────────────────────────────────────────────────────────
-    def get_status(self, *, source_chain: str, source_tx_hash: str) -> CrossChainStatus:
-        """Ask what has happened, and never guess when the answer is unfamiliar."""
+    def get_status(self, *, source_chain: str, source_tx_hash: str,
+                   quote_id: str = '') -> CrossChainStatus:
+        """Ask what has happened, and never guess when the answer is unfamiliar.
+
+        `quote_id` is 0x's `quoteId` for the specific quote that was executed
+        -- never the top-level `zid`, which identifies the request. It is sent
+        when we have one, because a status lookup that can name the quote is
+        more precise than one that can only name a transaction.
+
+        It is sent DEFENSIVELY. 0x's published request schema for this
+        endpoint lists only originChain and originTxHash, and its own example
+        sends only those two; the documentation that recommends quoteId could
+        not be reached from the build environment. So the call is made with it
+        and, if the endpoint refuses the request, retried without it. That way
+        an extra parameter can never be the reason a bridge stops being
+        tracked -- which, for a trade holding a user's reservation, is the
+        expensive failure.
+        """
         if not source_tx_hash:
             raise CrossChainError('cannot ask about a bridge with no origin transaction')
-        try:
-            data = self._fetch_status(origin_chain=chain_param(source_chain),
-                                      origin_tx_hash=source_tx_hash)
-        except Exception as e:
-            raise CrossChainError(f'cross-chain status failed: {e}') from e
+        base = {'origin_chain': chain_param(source_chain),
+                'origin_tx_hash': source_tx_hash}
+        data = None
+        if quote_id:
+            try:
+                data = self._fetch_status(quote_id=quote_id, **base)
+            except Exception as e:
+                # Fall back to the shape that IS verified, and say so, rather
+                # than letting an unverified parameter end the tracking.
+                self.last_quote_id_status_error = str(e)[:200]
+                data = None
+        if data is None:
+            try:
+                data = self._fetch_status(**base)
+            except Exception as e:
+                raise CrossChainError(f'cross-chain status failed: {e}') from e
         if not isinstance(data, dict):
             raise CrossChainError('the status endpoint returned a non-object response')
 
@@ -483,3 +827,48 @@ class ZeroExCrossChain:
             recovery=failure.get('recovery') if isinstance(failure.get('recovery'), dict) else {},
             raw=data,
         )
+
+
+# ── Solana transaction versions ──────────────────────────────────────────
+def check_solana_tx_version(serialized_b64: str, parse) -> object:
+    """Parse a provider-returned Solana transaction, or refuse the route.
+
+    `parse` takes raw bytes and returns something with .message.version --
+    solders' VersionedTransaction.from_bytes in production, a stub in a test.
+    Injected so this module stays free of a Solana dependency.
+
+    WHY THIS IS A GATE RATHER THAN A TRY/EXCEPT AT SIGNING TIME
+    A transaction format the local library cannot read has to stop the trade
+    BEFORE a key is decrypted and before anything is broadcast. Discovering it
+    at signing time means the failure happens with the user's key in memory
+    and a reservation held, for a reason nobody can read off the error.
+
+    What is NOT done here, deliberately: no attempt to repair, downgrade or
+    re-serialise the provider's bytes. Those bytes are what the bridge will
+    honour; rebuilding them locally to make a parser happy produces a
+    transaction that is no longer the one that was quoted.
+    """
+    if not serialized_b64:
+        raise RouteRejected('the route carries no serialized transaction')
+    import base64
+    try:
+        raw = base64.b64decode(serialized_b64, validate=True)
+    except Exception as e:
+        raise RouteRejected(f'the serialized transaction is not valid base64: {e}')
+    try:
+        tx = parse(raw)
+    except Exception as e:
+        raise RouteUnsupported(
+            f'this route returned a Solana transaction the local library cannot '
+            f'parse ({type(e).__name__}: {e}). It is refused rather than signed, '
+            f'and its bytes are not rebuilt locally — a reconstructed transaction '
+            f'is not the one that was quoted')
+    version = getattr(getattr(tx, 'message', None), 'version', None)
+    if version is None:
+        version = getattr(tx, 'version', None)
+    if version not in SUPPORTED_SOLANA_TX_VERSIONS:
+        raise RouteUnsupported(
+            f'this route returned a Solana transaction of version {version!r}; '
+            f'this integration signs {SUPPORTED_SOLANA_TX_VERSIONS} and refuses '
+            f'anything else before signing rather than after')
+    return tx

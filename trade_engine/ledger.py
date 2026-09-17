@@ -211,7 +211,21 @@ SCHEMA = [
         quote_id              TEXT NOT NULL,
         user_id               INTEGER NOT NULL,
         provider              TEXT NOT NULL,       -- '0x'
-        route_id              TEXT DEFAULT '',     -- the provider's quoteId
+        -- THREE IDENTIFIERS, THREE MEANINGS. They were one column called
+        -- route_id holding `quoteId or zid`, so a response without a quoteId
+        -- silently stored a REQUEST id under a name meaning quote id, and
+        -- anything later addressing it as a quote id addressed the wrong
+        -- object. Kept apart:
+        --   provider_quote_id  0x's `quoteId`, on the individual quote. This
+        --                      is what a status lookup may name.
+        --   provider_zid       0x's top-level `zid`, identifying the REQUEST.
+        --                      Useful in a support conversation, never a
+        --                      substitute for the quote id.
+        --   route_id           kept for rows written before the split, so old
+        --                      executions still read back. Not written any more.
+        route_id              TEXT DEFAULT '',
+        provider_quote_id     TEXT DEFAULT '',
+        provider_zid          TEXT DEFAULT '',
         source_chain          TEXT NOT NULL,
         destination_chain     TEXT NOT NULL,
         source_token          TEXT NOT NULL,
@@ -245,10 +259,25 @@ SCHEMA = [
 ]
 
 
+# Columns added to a table that may already exist in a deployed database.
+# CREATE TABLE IF NOT EXISTS does nothing to a table that is already there, so
+# a new column needs its own statement -- and SQLite has no ADD COLUMN IF NOT
+# EXISTS, hence the catch.
+_ADD_COLUMNS = [
+    ('trade_crosschain', 'provider_quote_id', "TEXT DEFAULT ''"),
+    ('trade_crosschain', 'provider_zid', "TEXT DEFAULT ''"),
+]
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
     """Create the tables if they are absent. Safe to call on every start."""
     for ddl in SCHEMA:
         conn.execute(ddl)
+    for table, column, decl in _ADD_COLUMNS:
+        try:
+            conn.execute(f'ALTER TABLE {table} ADD COLUMN {column} {decl}')
+        except sqlite3.OperationalError:
+            pass            # already there, which is the usual case
     conn.commit()
 
 
@@ -509,7 +538,7 @@ def release(conn: sqlite3.Connection, trade_id: str, now: Optional[float] = None
 
 # ── cross-chain legs ─────────────────────────────────────────────────────
 _CC_FIELDS = frozenset({
-    'route_id', 'quoted_out_raw', 'minimum_out_raw', 'actual_out_raw',
+    'route_id', 'provider_quote_id', 'provider_zid', 'quoted_out_raw', 'minimum_out_raw', 'actual_out_raw',
     'provider_status', 'source_tx_hash', 'bridge_tx_hash',
     'destination_tx_hash', 'swap_tx_hash', 'estimated_fees_json',
     'actual_fees_json', 'estimated_seconds', 'failure_reason',

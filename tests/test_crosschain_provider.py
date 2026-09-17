@@ -35,7 +35,11 @@ SOL_USDC = R.CHAINS['solana'].stable.address         # 6 decimals
 BSC_USDC = R.CHAINS['bsc'].stable.address            # 18 decimals
 EVM_WALLET = '0x1111111111111111111111111111111111111111'
 SOL_WALLET = '9FzTJNUfMVSPPNEsUDfUHuE1gSE7uDBamcGHq1CseUUZ'
-SPENDER = '0x2222222222222222222222222222222222222222'
+PERMIT2 = '0x000000000022D473030F116dDEE9F6B43aC78BA3'
+ALLOWANCE_HOLDER = '0x0000000000001fF3684f28c67538d4D072C22734'
+SETTLER_REGISTRY = '0x00000000000004533Fe15556B1E086BB1A72cEae'
+RANDOM_SPENDER = '0x2222222222222222222222222222222222222222'
+SPENDER = PERMIT2
 BRIDGE_TO = '0x3333333333333333333333333333333333333333'
 
 SEND = 100_000_000          # 100 USDC at 6 decimals
@@ -58,7 +62,9 @@ def response(**over):
         'transaction': {'details': {'to': BRIDGE_TO, 'data': '0xdeadbeef',
                                     'gas': '210000', 'gasPrice': '1000000',
                                     'value': '0'}},
-        'issues': {},
+        'issues': {'allowance': {'actual': '0', 'spender': SPENDER}},
+        'sellToken': BASE_USDC,
+        'buyToken': SOL_USDC,
     }
     quote.update(over.pop('quote', {}))
     body = {'liquidityAvailable': True, 'allowanceTarget': SPENDER,
@@ -90,11 +96,11 @@ check('Solana goes as the literal string, not as a number — the numeric '
 
 # ── the happy path ───────────────────────────────────────────────────────
 route = get(response())
-check('a well-formed quote is accepted', route.route_id == 'route-abc')
+check('a well-formed quote is accepted', route.quote_id == 'route-abc')
 check('...and carries the spender that would be approved',
-      route.allowance_target == SPENDER)
+      route.allowance_target.lower() == SPENDER.lower())
 check('...and the call target, which is not the same thing',
-      route.tx_to == BRIDGE_TO and route.tx_to != route.allowance_target)
+      route.tx_to == BRIDGE_TO and route.tx_to.lower() != route.allowance_target.lower())
 check('...and both tokens, resolved from the registry rather than from the '
       'response', route.source_token == BASE_USDC and route.destination_token == SOL_USDC)
 check('the bridge cost is what goes in minus what is GUARANTEED out, not a '
@@ -153,7 +159,9 @@ rejected('a route whose call target is the USDC contract itself is refused — '
 
 rejected('a route naming an unusable spender is refused before anything is '
          'approved',
-         response(allowanceTarget='not-an-address'))
+         response(allowanceTarget='not-an-address',
+                  quotes=[dict(response()['quotes'][0],
+                               issues={'allowance': {'spender': 'not-an-address'}})]))
 
 rejected('a route with no usable call target is refused',
          response(quotes=[dict(response()['quotes'][0],
@@ -162,22 +170,25 @@ rejected('a route with no usable call target is refused',
 rejected('a route with a zero sell amount is refused',
          response(quotes=[dict(response()['quotes'][0], buyAmount='0')]))
 
-rejected('a route that would have somebody other than the user pay the gas is '
-         'refused — this engine executes nothing it does not charge for',
-         response(), gas_payer='orcagent')
+
 
 
 # ── fake USDC ────────────────────────────────────────────────────────────
 # The registry is keyed on (chain, address), so there is no code path where a
 # token merely CALLED USDC can be substituted. This proves the adapter reads
 # the address from the registry rather than echoing the response.
-fake = dict(response())
-fake['quotes'] = [dict(response()['quotes'][0], buyToken='FakeUSDCMint111111111111111111111111111111')]
-route = get(fake)
-check('a buyToken the response made up cannot become the destination asset: '
-      'the adapter takes both tokens from the registry, by address, so a '
-      'scam token named USDC has nothing to substitute itself into',
-      route.destination_token == SOL_USDC)
+rejected('a response delivering a token that is NOT the destination chain\'s '
+         'dollar asset is refused. This is the check that stops a second '
+         'destination swap: the engine bridges into the stable and swaps '
+         'separately, so a route ending in anything else would be swapped '
+         'again — and it used to pass, because the destination token was '
+         'filled in from the registry and then compared to the registry',
+         response(quotes=[dict(response()['quotes'][0],
+                               buyToken='FakeUSDCMint111111111111111111111111111111')]))
+rejected('...and one selling something other than the source chain\'s dollar '
+         'asset is refused too',
+         response(quotes=[dict(response()['quotes'][0],
+                               sellToken='0x4444444444444444444444444444444444444444')]))
 
 
 # ── no route at all is not the same as a bad route ───────────────────────
@@ -211,6 +222,7 @@ bsc_route = X.ZeroExCrossChain(
                               'sellAmount': str(100 * 10**18),
                               'buyAmount': str(99_500_000),
                               'minBuyAmount': str(99_000_000),
+                              'sellToken': BSC_USDC, 'buyToken': BASE_USDC,
                               'transaction': {'details': {'to': BRIDGE_TO,
                                                           'data': '0x01', 'value': '0'}},
                               'issues': {}}]},
