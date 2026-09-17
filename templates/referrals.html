@@ -107,6 +107,34 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
 .act-right{text-align:right;flex-shrink:0}
 .act-amt{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--green)}
 
+/* ── referred people ── */
+.ppl-row{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid #16191f}
+.ppl-row:last-child{border-bottom:none}
+.ppl-av{width:40px;height:40px;border-radius:50%;flex-shrink:0;object-fit:cover;
+  background:#16191f;border:1px solid #21252c}
+.ppl-av-fb{width:40px;height:40px;border-radius:50%;flex-shrink:0;display:flex;
+  align-items:center;justify-content:center;font-size:15px;font-weight:700;
+  background:rgba(247,185,85,.12);color:var(--accent);border:1px solid #21252c}
+.ppl-main{flex:1;min-width:0}
+.ppl-name{font-size:14px;font-weight:600;color:var(--text);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.ppl-sub{font-size:11.5px;color:var(--muted);margin-top:2px;font-family:var(--mono)}
+.ppl-bar{height:4px;border-radius:3px;background:#16191f;margin-top:7px;overflow:hidden}
+.ppl-bar-fill{height:100%;background:var(--green);border-radius:3px}
+.ppl-right{text-align:right;flex-shrink:0;display:flex;flex-direction:column;
+  align-items:flex-end;gap:6px}
+.ppl-amt{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--green)}
+.ppl-amt.zero{color:var(--muted)}
+.ppl-amt-sub{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.ppl-btn{display:inline-block;padding:5px 11px;border-radius:8px;font-size:11.5px;
+  font-weight:600;text-decoration:none;color:var(--sub);border:1px solid #21252c;
+  background:transparent;white-space:nowrap}
+.ppl-btn:hover{border-color:var(--accent);color:var(--accent)}
+.ppl-total{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+  padding:12px 18px;border-bottom:1px solid #16191f;background:#0d0f13}
+.ppl-total-lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.ppl-total-val{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--green)}
+
 /* ── state msg ── */
 .state-msg{padding:28px 18px;color:var(--muted);font-size:13px;text-align:center}
 
@@ -179,6 +207,59 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
         <div class="stat-sub">≈ ${{ '%.2f'|format(referral_balance_usd) }}</div>
         {% endif %}
       </div>
+    </div>
+
+    <!-- who they are, and what each of them has earned you -->
+    <div class="act-card" style="margin-bottom:14px">
+      <div class="act-hdr">
+        <div class="act-title">Your referrals</div>
+        <div class="act-title" style="color:var(--muted);font-weight:500">
+          {{ referred_people|length }}
+        </div>
+      </div>
+      {% if referred_people %}
+      <div class="ppl-total">
+        <span class="ppl-total-lbl">Earned from these users</span>
+        <span class="ppl-total-val">
+          {{ '%.6f'|format(referred_people_total_sol) }} SOL{% if referred_people_total_usd is not none %}
+          <span style="color:var(--muted);font-weight:500">≈ ${{ '%.2f'|format(referred_people_total_usd) }}</span>{% endif %}
+        </span>
+      </div>
+      {% for p in referred_people %}
+      <div class="ppl-row">
+        {% if p.avatar_url %}
+        <img class="ppl-av" src="{{ p.avatar_url }}" alt="" loading="lazy">
+        {% else %}
+        <div class="ppl-av-fb">{{ p.display[:1]|upper }}</div>
+        {% endif %}
+        <div class="ppl-main">
+          <div class="ppl-name">{{ p.display }}</div>
+          <div class="ppl-sub">
+            {% if p.trades %}{{ p.trades }} fee{{ '' if p.trades == 1 else 's' }}{% else %}no trades yet{% endif %}
+            · joined {{ p.joined_at|string|truncate(10, true, '') }}
+          </div>
+          {% if p.share_pct > 0 %}
+          <div class="ppl-bar" title="{{ p.share_pct }}% of your referral earnings">
+            <div class="ppl-bar-fill" style="width:{{ p.share_pct }}%"></div>
+          </div>
+          {% endif %}
+        </div>
+        <div class="ppl-right">
+          <div>
+            <div class="ppl-amt{{ ' zero' if not p.earned_sol }}">
+              {{ '+' if p.earned_sol else '' }}{{ '%.6f'|format(p.earned_sol) }} SOL
+            </div>
+            {% if p.earned_usd is not none and p.earned_sol %}
+            <div class="ppl-amt-sub">≈ ${{ '%.2f'|format(p.earned_usd) }}</div>
+            {% endif %}
+          </div>
+          <a class="ppl-btn" href="{{ p.profile_url }}">View profile →</a>
+        </div>
+      </div>
+      {% endfor %}
+      {% else %}
+      <div class="state-msg">Nobody has signed up with your link yet — share it and they show up here</div>
+      {% endif %}
     </div>
 
     <!-- earnings list -->

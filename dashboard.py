@@ -16291,6 +16291,30 @@ def referrals_page():
                 '''SELECT referred_wallet, earned_sol, created_at FROM referral_earnings
                    WHERE referrer_wallet=? ORDER BY created_at DESC LIMIT 100''', (wallet,)
             ).fetchall()
+
+            # WHO those referred users are, and what each of them has earned
+            # you. A count on its own says somebody joined; it does not say
+            # who, or whether any of them ever traded.
+            #
+            # LEFT JOIN, so a referred user who has not traded yet still
+            # appears -- at zero. They are the ones worth knowing about.
+            # The join is pinned to THIS referrer as well as to the user, so
+            # a wallet that somehow appears under two referrers can never
+            # show one of them the other's earnings.
+            people_rows = conn.execute(
+                '''SELECT u.wallet_address, u.username, u.avatar_url, u.created_at,
+                          COALESCE(SUM(re.earned_sol), 0) AS earned,
+                          COUNT(re.id)                    AS trades,
+                          MAX(re.created_at)              AS last_earned
+                     FROM users u
+                     LEFT JOIN referral_earnings re
+                            ON re.referred_wallet = u.wallet_address
+                           AND re.referrer_wallet = ?
+                    WHERE u.referred_by = ?
+                    GROUP BY u.wallet_address
+                    ORDER BY earned DESC, u.created_at DESC
+                    LIMIT 200''', (wallet, wallet)
+            ).fetchall()
         finally:
             conn.close()
 
@@ -16299,6 +16323,29 @@ def referrals_page():
             'earned_sol':   earned,
             'created_at':   created_at,
         } for w, earned, created_at in earnings_rows]
+
+        _people_total = sum(float(r[4] or 0) for r in people_rows)
+        referred_people = [{
+            'wallet':       w,
+            'wallet_short': (w[:4] + '...' + w[-4:]) if len(w) >= 8 else w,
+            'username':     uname or '',
+            # What to call them: their own name if they chose one, otherwise
+            # the short wallet. Never a blank row.
+            'display':      uname or ((w[:4] + '...' + w[-4:]) if len(w) >= 8 else w),
+            'avatar_url':   avatar or '',
+            'joined_at':    joined,
+            'earned_sol':   float(earned or 0),
+            'earned_usd':   (round(float(earned or 0) * _sol_price_usd, 2)
+                             if _sol_price_usd else None),
+            'trades':       int(trades or 0),
+            'last_earned':  last_earned or '',
+            # Each person's share of what you have earned, for the bar. Zero
+            # when nothing has been earned at all, rather than a division by
+            # nothing.
+            'share_pct':    (round(float(earned or 0) / _people_total * 100, 1)
+                             if _people_total > 0 else 0.0),
+            'profile_url':  f'/profile/{w}',
+        } for w, uname, avatar, joined, earned, trades, last_earned in people_rows]
 
         referral_balance_usd = (round(referral_balance * _sol_price_usd, 2)
                                  if _sol_price_usd else None)
@@ -16310,6 +16357,10 @@ def referrals_page():
             referral_code=referral_code,
             referral_link=f'https://orcagent.fun/?ref={referral_code}' if referral_code else '',
             referred_count=referred_count,
+            referred_people=referred_people,
+            referred_people_total_sol=_people_total,
+            referred_people_total_usd=(round(_people_total * _sol_price_usd, 2)
+                                       if _sol_price_usd else None),
             referral_balance=referral_balance,
             referral_balance_usd=referral_balance_usd,
             earnings=earnings,
