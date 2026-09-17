@@ -25,7 +25,7 @@ import sqlite3
 import sys
 import tempfile
 import time
-from decimal import Decimal
+from decimal import Decimal, ROUND_UP
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
@@ -275,6 +275,74 @@ check('pressing execute twice on the live route returns the same trade and '
       a.trade_id == b.trade_id and b.created is False and len(send.seen) == 1)
 check('...and claims the $30 once, not twice', held(conn) == D('30.00'))
 conn.close()
+
+# ═════════════════════════════════════════════════════════════════════════
+#  the invariant the whole destination side rests on
+# ═════════════════════════════════════════════════════════════════════════
+# What the swap spends on the far side must be covered by what the bridge
+# GUARANTEED to deliver -- not by what it expected to. It is, because the
+# bridge fee on the quote comes from minimum_out_raw and is rounded up, so
+# the purchase is the remainder of a ceiling that already assumed the worst
+# delivery.
+#
+# The margin is thin on purpose and it is the reason a plausible-sounding
+# change -- "quote the expected cost, it looks better" -- would quietly break
+# it. These numbers are the live ones.
+_scale = Decimal(10) ** R.CHAINS['solana'].stable.require_decimals()
+_guaranteed = Decimal(ROUTE.minimum_out_raw) / _scale
+_expected = Decimal(ROUTE.expected_out_raw) / _scale
+_will_spend = D('28.44') + D('0.45')                 # purchase + platform fee
+
+check('the bridge cost is taken from the GUARANTEED delivery, not the '
+      'expected one: $30 minus the 29.446652 promised, rounded UP to $0.56 — '
+      'not the $0.26 the expected 29.744092 would have produced, and not the '
+      '$0.55 that rounding to nearest would have',
+      ROUTE.loss_usd() == D('0.56')
+      and (D('30') - _guaranteed).quantize(D('0.01'), rounding=ROUND_UP) == D('0.56')
+      and (D('30') - _expected).quantize(D('0.01'), rounding=ROUND_UP) == D('0.26'))
+check('...so what the destination swap will spend is covered by what the '
+      'bridge promised, and not by what it hoped for',
+      _will_spend <= _guaranteed)
+check('...with $0.56 of headroom, which comes from two places: the bridge fee '
+      'priced off the minimum, and the source-side costs being spent on Base '
+      'rather than on Solana',
+      (_guaranteed - _will_spend).quantize(D('0.01')) == D('0.56'))
+check('...and pricing the same quote off the EXPECTED delivery would hand '
+      'that $0.30 difference back to the purchase, cutting the only margin '
+      'the destination swap has by more than half. It would still fit at $30 '
+      '— which is exactly why a change like that would look harmless',
+      (_guaranteed - (_will_spend + (D('0.56') - D('0.26')))) < (_guaranteed - _will_spend) / 2)
+
+
+# ═════════════════════════════════════════════════════════════════════════
+#  and what happens if a bridge under-delivers anyway
+# ═════════════════════════════════════════════════════════════════════════
+# Below the guaranteed minimum is the provider breaking its own promise. The
+# engine does not send a swap for dollars that are not there and hope.
+conn = fresh_db()
+make_quote(conn, quote_id='live-3')
+r = E.start_crosschain_trade(conn, quote_id='live-3', idempotency_key='live-k3',
+                             available_usd=D('500'), route=ROUTE,
+                             source_sender=sender_ok('0xSHORT'))
+short = swap_ok()
+r = E.resume_crosschain_trade(
+    conn, trade_id=r.trade_id,
+    status_fetcher=status_of('bridge_filled', dest='0xDEST', settled=1_000_000),
+    dest_swap_executor=short)
+
+check('a bridge that delivers $1 against a $29.44 spend does NOT get swapped '
+      'against — the far side would fail with the provider\'s own error and '
+      'the user would be left reading it', short.calls == [])
+check('...it stops for a person instead, because delivering under the '
+      'guaranteed minimum is the provider breaking a promise, not a rounding '
+      'difference', r.state == L.MANUAL_REVIEW)
+check('...and the claim is STILL HELD, because the money is real, it is on '
+      'the far chain, and nothing about it is settled', held(conn) == D('30.00'))
+check('...and the reason names both numbers, so the person reading it does '
+      'not have to reconstruct them',
+      '1' in (r.failure_reason or '') and 'under-delivered' in (r.failure_reason or ''))
+conn.close()
+
 
 passed = sum(1 for _, ok in checks if ok)
 print(f'\n{passed}/{len(checks)} checks passed')

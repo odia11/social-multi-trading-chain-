@@ -809,6 +809,38 @@ def resume_crosschain_trade(conn, *, trade_id: str, status_fetcher: Callable,
             minimum_output_raw=_minimum_output(quote_row),
             mode=quote_row['mode'], same_chain=False,
         )
+
+        # WHAT ARRIVED HAS TO COVER WHAT THIS SWAP WILL SPEND.
+        #
+        # It does, by construction: the bridge fee on the quote is computed
+        # from the GUARANTEED minimum (CrossChainRoute.loss_raw uses
+        # minimum_out_raw) and rounded up, so the purchase is the remainder of
+        # a ceiling that already assumed the worst delivery. On the live $30
+        # route that is $29.44 of spending against $29.446652 guaranteed.
+        #
+        # Which means a shortfall here is not a rounding question -- it is the
+        # bridge delivering less than it promised, or a quote priced off the
+        # EXPECTED amount instead of the minimum. Either way the right answer
+        # is to stop and say so: sending a swap for dollars that are not there
+        # fails on the far side with somebody else's error message, and the
+        # user is left reading it.
+        delivered_raw = int(str(cc.get('actual_out_raw') or 0) or 0)
+        if delivered_raw > 0:
+            scale = Decimal(10) ** dest_cfg.stable.require_decimals()
+            delivered_usd = Decimal(delivered_raw) / scale
+            # Gas on the destination chain is paid in its native token, not in
+            # the dollars the bridge delivered, so only these two count.
+            needed_usd = plan.purchase_usd + plan.fee_usd
+            if delivered_usd < needed_usd:
+                return fail(
+                    f'the bridge delivered {delivered_usd} on '
+                    f'{cc["destination_chain"]} and this trade is about to spend '
+                    f'{needed_usd} there. The quote guaranteed at least '
+                    f'{Decimal(int(cc.get("minimum_out_raw") or 0)) / scale}, so '
+                    f'something under-delivered — refusing to swap dollars that '
+                    f'are not there', investigate=True, release=False,
+                    to=L.MANUAL_REVIEW)
+
         L.transition(conn, trade_id, L.SWAPPING, now=clock())
         try:
             outcome = dest_swap_executor(plan)
