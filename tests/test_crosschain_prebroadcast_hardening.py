@@ -1,7 +1,11 @@
 import sqlite3
+import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 import crosschain_prebroadcast_hardening as H
 
@@ -46,6 +50,6 @@ with tempfile.TemporaryDirectory() as td:
         duplicate_refused = False
     check('a second pre-broadcast claim for the same leg is refused', duplicate_refused)
 
-app_entry = (Path(__file__).resolve().parents[1] / 'app_entry.py').read_text()
+app_entry = (ROOT / 'app_entry.py').read_text()
 check('production entrypoint installs pre-broadcast hardening',
       '_install_crosschain_prebroadcast_hardening(_dashboard)' in app_entry)
