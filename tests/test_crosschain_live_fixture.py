@@ -63,6 +63,33 @@ else:
 
         provider = X.ZeroExCrossChain(lambda **kw: data, lambda **kw: {})
 
+        # ── no liquidity is a real answer, not a parse failure ──
+        # 0x's schema is a discriminated union on liquidityAvailable. When it
+        # is false there is no quotes array, no allowanceTarget and no
+        # transaction -- by design. Treating that as "the parser could not
+        # read it" would mean a quiet market looked like a broken
+        # integration, and the two need completely different responses.
+        if not data.get('liquidityAvailable'):
+            check(f'{name}: a no-liquidity response is reported as NO ROUTE '
+                  f'rather than as a malformed one — they are different facts '
+                  f'and only one of them is a bug',
+                  True)
+            try:
+                provider.get_quote(
+                    source_chain=src, destination_chain=dst,
+                    source_amount_raw=amount_raw, origin_address=origin,
+                    destination_address=recipient)
+                check(f'{name}: ...and the parser refuses it', False)
+            except X.RouteRejected as e:
+                check(f'{name}: ...and it is NOT reported as an invalid '
+                      f'response: {e}', False)
+            except X.CrossChainError as e:
+                check(f'{name}: ...and the parser says so in those terms '
+                      f'("{e}")', 'no bridge route' in str(e))
+            check(f'{name}: ...while still carrying a zid, which is the handle '
+                  f'0x support would ask for', bool(data.get('zid')))
+            continue
+
         # ── the envelope ──
         present = [k for k in ('quotes', 'routes') if isinstance(data.get(k), list)]
         check(f'{name}: the live response uses an envelope this parser accepts '
@@ -77,6 +104,13 @@ else:
         check(f'{name}: ...and a zid at the top level, and they are NOT the '
               f'same value — which is the whole reason they are stored apart',
               bool(data.get('zid')) and q.get('quoteId') != data.get('zid'))
+        # The live pair share a prefix: zid 0x7a0f...88d1, quoteId
+        # 0x7a0f...88d176f4c808. Close enough to look interchangeable at a
+        # glance, which is exactly why `quoteId or zid` was dangerous.
+        check(f'{name}: ...even though they share a prefix, which is how they '
+              f'came to be confused in the first place',
+              not (q.get('quoteId') and data.get('zid')
+                   and q['quoteId'] == data['zid']))
 
         # ── the spender ──
         target = str(data.get('allowanceTarget') or '').lower()

@@ -49,19 +49,30 @@ SECRET_KEYS = ('apikey', 'api_key', 'privatekey', 'private_key', 'secret',
                'seed', 'mnemonic', 'signature', 'encryptionkey')
 
 
-def redact(value, depth=0):
-    """Strip anything that could be a secret, at any depth."""
+def redact(value, depth=0, truncate=True):
+    """Strip anything that could be a secret, at any depth.
+
+    `truncate` shortens long strings, which keeps the PRINTED output readable.
+    It is turned off when saving a fixture: the longest string in a
+    cross-chain quote is the calldata, which is not a secret and IS the thing
+    a parser test most wants to see. The first captured fixture was saved
+    with it on, so its calldata reads "0x2213bc0b...[2954 chars]" -- fine for
+    checking that the response parses, useless for checking what the
+    transaction would actually do.
+    """
     if depth > 8:
         return '...'
     if isinstance(value, dict):
         out = {}
         for k, v in value.items():
             flat = str(k).replace('_', '').replace('-', '').lower()
-            out[k] = '[redacted]' if flat in SECRET_KEYS else redact(v, depth + 1)
+            out[k] = ('[redacted]' if flat in SECRET_KEYS
+                      else redact(v, depth + 1, truncate))
         return out
     if isinstance(value, list):
-        return [redact(v, depth + 1) for v in value[:5]]
-    if isinstance(value, str) and len(value) > 400:
+        items = value[:5] if truncate else value
+        return [redact(v, depth + 1, truncate) for v in items]
+    if truncate and isinstance(value, str) and len(value) > 400:
         return value[:200] + f'... [{len(value)} chars]'
     return value
 
@@ -125,7 +136,8 @@ def probe(source: str, dest: str, usd: float, api_key: str) -> dict:
 
     # The whole response, redacted, so a test can be built from what the live
     # API really returns rather than from what its example code suggests.
-    report['raw_response'] = redact(data)
+    report['raw_response'] = redact(data)                    # for printing
+    report['raw_response_full'] = redact(data, truncate=False)   # for the fixture
     report['liquidityAvailable'] = data.get('liquidityAvailable')
     report['envelope_keys'] = sorted(data)
     # THE QUESTION THIS SCRIPT EXISTS FOR: which envelope does the live API
@@ -237,7 +249,8 @@ def main():
                            'amount_usd': args.amount,
                            'origin_address': rep['sent_params'].get('originAddress'),
                            'destination_address': rep['sent_params'].get('destinationAddress'),
-                           'response': rep['raw_response']}, fh, indent=2)
+                           'response': rep.get('raw_response_full')
+                                       or rep['raw_response']}, fh, indent=2)
             print(f'  fixture written: {path}', file=sys.stderr)
 
     if args.json:

@@ -107,6 +107,40 @@ out['hood_enabled'] = d._cc_route_enabled('robinhood', 'base') or \
 # ── solana platform fee stays zero ──
 out['solana_fee_rate'] = str(d._te_fee_rate_for('solana'))
 
+# ── the economic guard, against the REAL live route ──
+import json as _json, os as _os
+_fx_path = _os.path.join(_os.path.dirname(_os.path.dirname(d.__file__)),
+                         'social-multi-trading-chain-', 'tests', 'fixtures',
+                         '0x', 'quote_base_to_solana.json')
+if not _os.path.isfile(_fx_path):
+    _fx_path = 'tests/fixtures/0x/quote_base_to_solana.json'
+out['econ'] = {}
+if _os.path.isfile(_fx_path):
+    _fx = _json.load(open(_fx_path))
+    _data = _fx['response']
+    d.TRADE_ENGINE_CROSSCHAIN = True
+    d.CROSSCHAIN_ENABLED_ROUTES = frozenset({'base->solana'})
+    d._cc_taker_address = lambda w, c: (_fx['destination_address'] if c == 'solana'
+                                        else _fx['origin_address'])
+    d._te_crosschain_provider = lambda: d.te_crosschain.ZeroExCrossChain(
+        lambda **k: _data, lambda **k: {})
+    from decimal import Decimal as _D
+    _q = d._te_bridge_quoter('W', 'econ-key')
+    try:
+        _q('base', 'solana', _D('2'))
+        out['econ']['two_dollars'] = 'allowed'
+    except Exception as _e:
+        out['econ']['two_dollars'] = str(_e)
+    _orig_pct = d.CROSSCHAIN_MAX_BRIDGE_COST_PCT
+    d.CROSSCHAIN_MAX_BRIDGE_COST_PCT = 50.0
+    try:
+        _r = _q('base', 'solana', _D('2'))
+        out['econ']['loose_limit'] = str(_r['fee_usd'])
+    except Exception as _e:
+        out['econ']['loose_limit'] = 'refused: ' + str(_e)
+    d.CROSSCHAIN_MAX_BRIDGE_COST_PCT = _orig_pct
+out['econ_default_pct'] = d.CROSSCHAIN_MAX_BRIDGE_COST_PCT
+
 print('@@@' + json.dumps(out, default=str))
 '''
 
@@ -221,6 +255,31 @@ check('the Solana platform fee is still quoted at zero, because none is '
       'collected there — cross-chain work is not an excuse to quietly '
       'reintroduce a fee the user does not pay',
       R['solana_fee_rate'] == '0')
+
+
+# ── the economics of the real live route ─────────────────────────────────
+# The first live Base -> Solana quote priced a $2 bridge at $0.22. Safe, and
+# still a bad trade: a bridge's costs are largely fixed, so eleven percent is
+# a fact about the SIZE rather than about the route. A user is told that
+# instead of watching a tenth of their money go into a fee they were shown
+# but did not weigh.
+econ = R.get('econ') or {}
+if econ:
+    check('the real $2 Base -> Solana bridge is refused as uneconomical, with '
+          'the actual cost and percentage in the message',
+          '0.22' in econ.get('two_dollars', '')
+          and '11.0%' in econ.get('two_dollars', ''))
+    check('...and the message tells the user what to do about it rather than '
+          'just saying no',
+          'larger amount' in econ.get('two_dollars', '')
+          or 'bigger trade' in econ.get('two_dollars', ''))
+    check('...and it is a threshold, not a ban: the same route passes when the '
+          'limit is raised, so this is an economic judgement and not a safety '
+          'rule pretending to be one',
+          econ.get('loose_limit') == '0.22')
+check('the default ceiling is a percentage of the trade, so a bridge that is '
+      'ruinous on $2 is unremarkable on $200',
+      float(R['econ_default_pct']) == 5.0)
 
 passed = sum(1 for _, ok in checks if ok)
 print(f'\n{passed}/{len(checks)} checks passed')

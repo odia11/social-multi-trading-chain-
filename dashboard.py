@@ -1132,6 +1132,21 @@ CROSSCHAIN_ALLOWED_SPENDERS = frozenset(
     a.strip().lower() for a in os.getenv('CROSSCHAIN_ALLOWED_SPENDERS', '').split(',')
     if a.strip())
 
+# The most a bridge may cost, as a share of the trade, before the route is
+# refused as not worth doing.
+#
+# This is not a safety rule and is deliberately separate from the ones in
+# verify_route(): a route can be perfectly safe and still a bad idea. The
+# first real Base -> Solana quote from production priced a $2.00 bridge at
+# $0.22 -- eleven percent -- because a bridge's costs are largely fixed and a
+# $2 trade is simply too small to carry them. The same route on $50 costs
+# well under one percent.
+#
+# So the ceiling is proportional. A user who asks to bridge an amount the
+# bridge would eat is told so, with the numbers, instead of watching a tenth
+# of it disappear into a fee they were shown but did not weigh.
+CROSSCHAIN_MAX_BRIDGE_COST_PCT = float(os.getenv('CROSSCHAIN_MAX_BRIDGE_COST_PCT', '5'))
+
 CROSSCHAIN_POLL_SECONDS = int(os.getenv('CROSSCHAIN_POLL_SECONDS', '20'))
 CROSSCHAIN_DEADLINE_SECONDS = float(os.getenv('CROSSCHAIN_DEADLINE_SECONDS', '3600'))
                             # leg of every trade (see _charge_txn_fee()) -- so a full
@@ -8860,7 +8875,17 @@ def _cc_route_gas_estimate(chain: str, route) -> float:
     if route is None:
         return 0.0
     try:
+        costs = getattr(route, 'gas_costs_raw', None) or {}
         if te_registry.get_chain(chain).kind == 'evm':
+            # The live response gives gasCosts.totalNetworkFee in wei -- 0x's
+            # own figure for this route. Preferred over multiplying gasLimit
+            # by gasPrice ourselves: same inputs, but theirs is the one they
+            # stand behind, and the two differ slightly in practice.
+            if isinstance(costs, dict) and costs.get('totalNetworkFee'):
+                try:
+                    return int(str(costs['totalNetworkFee'])) / 1e18
+                except (TypeError, ValueError):
+                    pass
             gas = int(getattr(route, 'tx_gas', 0) or 0)
             if gas <= 0:
                 return 0.0
@@ -8870,7 +8895,6 @@ def _cc_route_gas_estimate(chain: str, route) -> float:
                 return 0.0
             return (gas * price) / 1e18
         # Solana: gasCosts, kept verbatim from the quote.
-        costs = getattr(route, 'gas_costs_raw', None) or {}
         entries = costs if isinstance(costs, list) else [costs]
         total = 0
         for entry in entries:
@@ -8985,9 +9009,24 @@ def _te_bridge_quoter(wallet: str, quote_key: str):
             destination_address=dest,
             extra_allowed_spenders=CROSSCHAIN_ALLOWED_SPENDERS,
             settler_lookup=_cc_is_current_settler)
+        # Priced, safe, and still possibly not worth doing. Checked here
+        # rather than in verify_route because "this response cannot be
+        # trusted" and "this trade is bad value" are different answers and
+        # must not be logged, counted or explained as the same thing.
+        loss = route.loss_usd()
+        ceiling = Decimal(str(ceiling_usd))
+        if ceiling > 0:
+            pct = (loss / ceiling) * 100
+            if pct > Decimal(str(CROSSCHAIN_MAX_BRIDGE_COST_PCT)):
+                raise TeQuoteError(
+                    f'bridging {ceiling} USDC from {source_chain} to {dest_chain} '
+                    f'costs {loss} — {pct.quantize(Decimal("0.1"))}% of the trade. '
+                    f'A bridge\'s costs are mostly fixed, so a larger amount '
+                    f'carries them far better. Try a bigger trade, or buy a token '
+                    f'on a chain you already hold dollars on')
         _cc_remember_route(quote_key, route)
         return {
-            'fee_usd':             route.loss_usd(),
+            'fee_usd':             loss,
             'provider':            route.provider,
             'provider_quote_id':   route.quote_id,
             'provider_zid':        route.zid,

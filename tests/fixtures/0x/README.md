@@ -28,39 +28,62 @@ will fail if the parser cannot read it.
 That is the point: this directory is the seam between "verified against
 published example code" and "verified against the live API".
 
-## Status: one live quote has been run, and the fixture did not arrive here
+## Status: real fixtures captured, and what they settled
 
-A read-only quote was run from the production server and reached the API. The
-findings reported back were:
+Two responses from api.0x.org, captured read-only from the production server
+on 2026-09-17 for $2 each.
 
-    quoteId_present            false
-    allowanceTarget_is_canonical  false
-    ephemeral_signer_required  true
-    engine_accepts             false
+### quote_base_to_solana.json — liquidity available
+The first live evidence this integration has ever had. It settled three
+questions, and all three turned out to be about this repository rather than
+about 0x:
 
-The response file was written on that server and has not been committed, so
-this directory still holds no fixture and the parser has still never seen a
-real response. Three of those four findings cannot be acted on without it:
+| First reported | Actually |
+|---|---|
+| `quoteId_present = false` | quoteId IS present: `0x7a0f...6f4c808` |
+| `allowanceTarget_is_canonical = false` | it IS canonical — AllowanceHolder (Cancun) |
+| `ephemeral_signer_required = true` | the field does not appear in the response at all |
 
-  * the ENVELOPE cannot be confirmed without seeing it
-  * the allowanceTarget cannot be identified without its ADDRESS
-  * the ephemeral-signer flow cannot be built without the FIELD and its shape
+* **Envelope** is `quotes`, which is what the parser accepted all along.
+  `routes` never appeared.
+* **quoteId and zid** are both present and the quoteId is the zid plus eight
+  more hex characters. They look interchangeable at a glance, which is
+  exactly how `quoteId or zid` came to be written and why it was wrong.
+* **allowanceTarget** is `0x0000000000001ff3684f28c67538d4d072c22734` —
+  AllowanceHolder for Cancun-hardfork chains, per 0x-settler's own README,
+  which lists Base among them. It was ALREADY in the allowlist. Nothing was
+  added to make a test pass.
+* **The route calls the contract it asks to approve.** That is the
+  AllowanceHolder pattern and it is legitimate, but only because this address
+  is one 0x publishes. Any other contract doing the same thing is the shape
+  of the Settler mistake and is refused.
+* **No ephemeral signer**, matching 0x's own EVM -> Solana example, which
+  signs with the EVM key alone and creates no Solana keypair.
+* **Bridge provider: relay.**
 
-What HAS been acted on, because it needed no fixture: the detector behind
-`ephemeral_signer_required` had a bug. It answered true for a matching key
-merely EXISTING, whatever its value -- so a declared-but-null
-`solanaEphemeralSignerPubkey` read as "needs a co-signer". 0x's own EVM ->
-Solana example generates no keypair at all, which made a Base -> Solana route
-reporting this suspicious. The detector now requires a non-empty value and
-reports the field and value it found. Re-running the capture will say whether
-that was the cause.
+The genuinely new finding is the economics: **$0.22 to bridge $2.00, eleven
+percent.** A bridge's costs are largely fixed, so that is a fact about the
+size rather than about the route. See `CROSSCHAIN_MAX_BRIDGE_COST_PCT`.
 
-## Getting the fixture here
+### quote_solana_to_base.json — no liquidity
+`liquidityAvailable: false`, with a zid and nothing else. That is the
+documented shape of the discriminated union, not a broken response, and the
+parser reports it as "no bridge route at this size" rather than as malformed.
+Worth re-capturing at a larger amount before concluding anything about the
+direction.
 
-    # on the production server
+### A caveat about the captured calldata
+These were saved while the redactor still truncated long strings, so the
+transaction `data` field reads `0x2213bc0b...[2954 chars]`. Fine for checking
+that the response parses; useless for checking what the transaction would do,
+and it could never be broadcast. Fixtures captured from now on keep the
+calldata in full — it is not a secret, and it is the thing a parser test most
+wants to see.
+
+## Capturing another
+
     python3 scripts/test_0x_crosschain_quote.py --amount 2 \
         --save-fixture tests/fixtures/0x
-    git add tests/fixtures/0x && git commit -m "live 0x fixture" && git push
 
-The script also prints the full sanitized response to stdout now, so pasting
-that back works just as well as the file.
+Read-only: signs nothing, sends nothing, approves nothing, spends nothing.
+The script also prints the full sanitized response to stdout.
