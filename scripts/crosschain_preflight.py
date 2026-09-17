@@ -188,6 +188,20 @@ def main():
     except X.CrossChainError as e:
         report('CALLDATA', FAIL, str(e)[:120])
 
+    # ── 3b. did the provider manage to simulate what it handed back? ──
+    # 0x raises `simulationIncomplete` when it could not dry-run the
+    # transaction -- usually an un-approved token, sometimes the route itself.
+    # The engine does not reject on it (the approve-then-execute sequence
+    # legitimately produces one, and the bytes are checked directly above),
+    # but a route about to carry real money should not be signed off on a
+    # quote the provider itself could not simulate.
+    if route.simulation_incomplete:
+        report('SIMULATION', FAIL,
+               'the provider could not simulate this transaction '
+               '(simulationIncomplete) — approve first, then re-quote')
+    else:
+        report('SIMULATION', PASS, 'the provider raised no simulation warning')
+
     # ── 4. gas ──
     if args.wallet:
         gas = d._cc_gas_requirement(args.wallet, args.source, route)

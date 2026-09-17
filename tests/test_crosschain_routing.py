@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from decimal import Decimal
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -115,44 +116,42 @@ _fx_path = _os.path.join(_os.path.dirname(_os.path.dirname(d.__file__)),
 if not _os.path.isfile(_fx_path):
     _fx_path = 'tests/fixtures/0x/quote_base_to_solana.json'
 out['econ'] = {}
+from decimal import Decimal as _D
 if _os.path.isfile(_fx_path):
     _fx = _json.load(open(_fx_path))
     _data = _json.loads(_json.dumps(_fx['response']))
-    # The captured calldata was truncated when it was saved, and verify_route
-    # now refuses that -- correctly, and BEFORE the economic check, because
-    # safety comes first. This section is about economics, so the leading
-    # arguments are rebuilt at their real values (operator, Base USDC, and
-    # 2000000, exactly the sellAmount) to get past the safety gate and reach
-    # the thing being tested.
-    def _w(v, is_addr=False):
-        return (v.lower().replace('0x', '').rjust(64, '0') if is_addr
-                else format(int(v), '064x'))
-    _data['quotes'][0]['transaction']['details']['data'] = (
-        '0x2213bc0b'
-        + _w('0x7d19077317b7574cd01aafa143e5e09f0f4df466', True)
-        + _w('0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', True)
-        + _w(2000000) + _w('0x7d19077317b7574cd01aafa143e5e09f0f4df466', True)
-        + _w(160) + _w(4) + 'deadbeef'.ljust(64, '0'))
+    # The capture now carries the REAL transaction at full length, so nothing
+    # is rebuilt here: the economic check below runs behind the same calldata
+    # validation a live trade would, on the same bytes 0x sent. The amount
+    # asked for is the amount the capture was taken at -- ask for a different
+    # one and the calldata check refuses the route first, which is the
+    # safety gate doing its job rather than an obstacle to work around.
+    _amount = _D(str(_fx['amount_usd']))
     d.TRADE_ENGINE_CROSSCHAIN = True
     d.CROSSCHAIN_ENABLED_ROUTES = frozenset({'base->solana'})
     d._cc_taker_address = lambda w, c: (_fx['destination_address'] if c == 'solana'
                                         else _fx['origin_address'])
     d._te_crosschain_provider = lambda: d.te_crosschain.ZeroExCrossChain(
         lambda **k: _data, lambda **k: {})
-    from decimal import Decimal as _D
     _q = d._te_bridge_quoter('W', 'econ-key')
+    # At the default 5% ceiling the real $30 route is ALLOWED: $0.56 is 1.9%.
     try:
-        _q('base', 'solana', _D('2'))
-        out['econ']['two_dollars'] = 'allowed'
+        _r = _q('base', 'solana', _amount)
+        out['econ']['at_default'] = str(_r['fee_usd'])
+        out['econ']['at_default_pct'] = str(
+            (_D(str(_r['fee_usd'])) / _amount * 100).quantize(_D('0.01')))
     except Exception as _e:
-        out['econ']['two_dollars'] = str(_e)
+        out['econ']['at_default'] = 'refused: ' + str(_e)
+    # Tighten the ceiling below what this route costs and the same route is
+    # refused, with the real numbers in the message.
     _orig_pct = d.CROSSCHAIN_MAX_BRIDGE_COST_PCT
-    d.CROSSCHAIN_MAX_BRIDGE_COST_PCT = 50.0
+    d.CROSSCHAIN_MAX_BRIDGE_COST_PCT = 1.0
     try:
-        _r = _q('base', 'solana', _D('2'))
-        out['econ']['loose_limit'] = str(_r['fee_usd'])
+        _q2 = d._te_bridge_quoter('W', 'econ-key-tight')
+        _q2('base', 'solana', _amount)
+        out['econ']['tight_limit'] = 'allowed'
     except Exception as _e:
-        out['econ']['loose_limit'] = 'refused: ' + str(_e)
+        out['econ']['tight_limit'] = str(_e)
     d.CROSSCHAIN_MAX_BRIDGE_COST_PCT = _orig_pct
 out['econ_default_pct'] = d.CROSSCHAIN_MAX_BRIDGE_COST_PCT
 
@@ -273,25 +272,29 @@ check('the Solana platform fee is still quoted at zero, because none is '
 
 
 # ── the economics of the real live route ─────────────────────────────────
-# The first live Base -> Solana quote priced a $2 bridge at $0.22. Safe, and
-# still a bad trade: a bridge's costs are largely fixed, so eleven percent is
-# a fact about the SIZE rather than about the route. A user is told that
-# instead of watching a tenth of their money go into a fee they were shown
-# but did not weigh.
+# The first live Base -> Solana quote priced a $2 bridge at $0.22 -- safe, and
+# still a bad trade, because a bridge's costs are largely fixed and eleven
+# percent was a fact about the SIZE rather than about the route. The live $30
+# capture is the other end of that same sentence: $0.56, 1.9%, allowed. So
+# what is pinned here is the THRESHOLD behaving in both directions on real
+# numbers, rather than a route being permanently blessed or banned.
 econ = R.get('econ') or {}
 if econ:
-    check('the real $2 Base -> Solana bridge is refused as uneconomical, with '
-          'the actual cost and percentage in the message',
-          '0.22' in econ.get('two_dollars', '')
-          and '11.0%' in econ.get('two_dollars', ''))
-    check('...and the message tells the user what to do about it rather than '
+    check('the real $30 Base -> Solana bridge is ALLOWED at the default 5% '
+          'ceiling, and costs $0.56 — the same route that ate 11% of $2',
+          econ.get('at_default') == '0.56')
+    check('...which is under two percent of the trade, so the ceiling is doing '
+          'nothing here except standing ready',
+          Decimal(econ.get('at_default_pct') or '0') < Decimal('2'))
+    check('...and it is a threshold, not a blessing: tighten the ceiling below '
+          'what this route costs and the SAME route is refused, with the real '
+          'cost and percentage in the message',
+          '0.56' in econ.get('tight_limit', '')
+          and '1.9%' in econ.get('tight_limit', ''))
+    check('...and the refusal tells the user what to do about it rather than '
           'just saying no',
-          'larger amount' in econ.get('two_dollars', '')
-          or 'bigger trade' in econ.get('two_dollars', ''))
-    check('...and it is a threshold, not a ban: the same route passes when the '
-          'limit is raised, so this is an economic judgement and not a safety '
-          'rule pretending to be one',
-          econ.get('loose_limit') == '0.22')
+          'larger amount' in econ.get('tight_limit', '')
+          or 'bigger trade' in econ.get('tight_limit', ''))
 check('the default ceiling is a percentage of the trade, so a bridge that is '
       'ruinous on $2 is unremarkable on $200',
       float(R['econ_default_pct']) == 5.0)

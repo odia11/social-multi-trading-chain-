@@ -368,6 +368,16 @@ class CrossChainRoute:
     # this repository made up.
     gas_costs_raw: object = field(default_factory=dict)
     needs_allowance: bool = False
+    # 0x sets `simulationIncomplete` when it could NOT simulate the
+    # transaction it is handing back -- most often because the taker has not
+    # approved the token yet, sometimes because the route itself could not be
+    # dry-run. Absent means it did not raise the flag; only an explicit true
+    # sets this. It is recorded rather than used to reject, because the honest
+    # first-trade sequence (approve, then execute) legitimately produces an
+    # unsimulatable quote, and the bytes are checked directly either way by
+    # verify_source_calldata(). Preflight reports it, so a route that is going
+    # to carry real money is never signed off on an unsimulated quote.
+    simulation_incomplete: bool = False
     # What the response said about a co-signer: {required, path, value,
     # reason}. Carried on the route so the refusal happens once, at
     # verification, and can name the exact field it found.
@@ -675,6 +685,8 @@ class ZeroExCrossChain:
             gas_costs_raw=q.get('gasCosts') if isinstance(q.get('gasCosts'), (dict, list)) else {},
             fees_raw=q.get('fees') if isinstance(q.get('fees'), dict) else {},
             needs_allowance=bool(allowance_issue),
+            simulation_incomplete=(q.get('simulationIncomplete') is True
+                                   or data.get('simulationIncomplete') is True),
             ephemeral_signer=ephemeral_signer_requirement(q, data),
             raw=q,
         )

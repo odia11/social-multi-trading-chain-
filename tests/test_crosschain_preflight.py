@@ -89,10 +89,44 @@ if os.path.isfile(bs):
     rc, out = run_preflight(bs)
     check('the preflight runs against the saved Base -> Solana capture with no '
           'network request at all', 'no network request is made' in out)
-    check('...and REFUSES it, because that capture\'s calldata was truncated '
-          'when it was saved. A transaction that cannot be read in full is '
-          'not one to sign, and the preflight is the last place to say so',
-          'FAIL' in out and rc != 0)
+    check('...and every check it can run offline PASSES on the real $30 '
+          'capture: the parser, the spender, the full calldata, the cost '
+          'ceiling, the route policy and the engine\'s own acceptance',
+          all(f'{stage:<22} PASS' in out for stage in
+              ('LIVE QUOTE', 'PARSER', 'SPENDER', 'CALLDATA', 'SIMULATION',
+               'COST LIMIT', 'ROUTE ENABLED', 'ENGINE ACCEPTS'))
+          and 'FAIL' not in out)
+    check('...naming the real spender and the real amount, so the line an '
+          'operator reads is the transaction rather than a summary of it',
+          '0x0000000000001ff3684f28c67538d4d072c22734' in out
+          and 'exec pulls 30000000' in out)
+    check('...and the bridge cost is quoted against the $30 the capture was '
+          'taken at: $0.56, 1.87%, under the 5% ceiling',
+          'bridge 0.56 = 1.87% of $30.0 (limit 5.0%)' in out)
+    check('...and it still does NOT say ready, because the gas check needs a '
+          'real balance and a fixture has none. NOT PROVEN is the honest '
+          'answer and it is not exit code 0',
+          'READY FOR CONTROLLED LIVE TEST: NOT PROVEN' in out and rc != 0)
+
+    # The same capture with 0x's own "I could not simulate this" flag raised.
+    # The engine does not reject on it -- the honest approve-then-execute
+    # sequence produces one -- but preflight is the last stop before real
+    # money, and signing off on a transaction the provider itself could not
+    # dry-run is not something to do quietly.
+    _flagged = json.load(open(bs))
+    _flagged['response']['quotes'][0]['simulationIncomplete'] = True
+    _tmp = os.path.join(tempfile.mkdtemp(), 'quote_flagged.json')
+    json.dump(_flagged, open(_tmp, 'w'))
+    rc2, out2 = run_preflight(_tmp)
+    check('a capture 0x flagged as simulationIncomplete FAILS the simulation '
+          'stage, so nobody signs off a live test on a transaction the '
+          'provider could not dry-run',
+          f'{"SIMULATION":<22} FAIL' in out2)
+    check('...and that alone turns the verdict to NO, even though every other '
+          'stage still passes', 'READY FOR CONTROLLED LIVE TEST: NO' in out2
+          and rc2 != 0)
+    check('...and the line says what to do about it rather than only that it '
+          'failed', 'approve first, then re-quote' in out2)
 
 if os.path.isfile(sb):
     rc, out = run_preflight(sb)
@@ -100,7 +134,7 @@ if os.path.isfile(sb):
           'NO_CROSSCHAIN_LIQUIDITY', 'NO_CROSSCHAIN_LIQUIDITY' in out)
     check('...naming the provider\'s own request id, which is the only handle '
           'a no-liquidity answer carries — there is no quoteId, because there '
-          'is no quote', '0x9eaa1b612fb63ca75bce4b03' in out)
+          'is no quote', '0x2ec25cea152bdbbe58223a3f' in out)
     check('...and says it is a fact about the market rather than a fault, so '
           'nobody goes looking for a bug that is not there',
           'not a fault' in out)

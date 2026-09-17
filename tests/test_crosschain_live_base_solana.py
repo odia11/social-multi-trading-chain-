@@ -1,16 +1,23 @@
-"""The first real Base -> Solana route, pinned.
+"""The real Base -> Solana route at $30, pinned.
 
 This is the actual response api.0x.org returned to the production server on
-2026-09-17, captured read-only. Everything asserted here is a fact about that
-response, not about a schema or an example -- so if 0x changes any of it, this
-is what says so.
+2026-09-17, captured read-only, at $30 and with the transaction calldata saved
+at FULL LENGTH. Everything asserted here is a fact about that response, not
+about a schema or an example -- so if 0x changes any of it, this is what says
+so.
 
 WHY EACH OF THESE IS WORTH PINNING
 Three of the four things the first live run reported turned out to be about
 this repository rather than about 0x: the envelope was right all along, the
-quoteId IS present, and the allowanceTarget IS canonical. The one genuinely
-new fact is the economics -- a $2 bridge costs 11% -- and that is the one a
-user would actually feel.
+quoteId IS present, and the allowanceTarget IS canonical. The fourth was the
+economics, and it was a fact about SIZE: the same route that cost 11% of a $2
+trade costs 1.87% of a $30 one. Both numbers are pinned in this repository's
+history for exactly that reason.
+
+The calldata is the part that matters most here. An earlier capture was saved
+while the redactor still shortened long strings, so its transaction ended
+mid-argument and could only be validated against a reconstruction. This one is
+the real bytes, so every calldata assertion below reads what 0x actually sent.
 """
 import json
 import os
@@ -40,9 +47,11 @@ q = data['quotes'][0]
 
 ALLOWANCE_HOLDER_CANCUN = '0x0000000000001ff3684f28c67538d4d072c22734'
 
-
 BASE_USDC = R.CHAINS['base'].stable.address
 OPERATOR = '0x7d19077317b7574cd01aafa143e5e09f0f4df466'
+SELL_AMOUNT = 30_000_000
+
+LIVE_CALLDATA = q['transaction']['details']['data']
 
 
 def _w_addr(a):
@@ -53,33 +62,29 @@ def _w_int(n):
     return format(int(n), '064x')
 
 
-def full_calldata(token=None, amount=2_000_000, operator=OPERATOR, target=OPERATOR,
-                  selector='0x2213bc0b'):
-    """The live calldata, reconstructed at full length.
+def tamper(word=None, value=None, selector=None):
+    """The live calldata with ONE argument changed.
 
-    The captured fixture was saved while the redactor still truncated long
-    strings, so its `data` ends mid-argument. That is fine for checking the
-    RESPONSE parses and useless for checking what the transaction does -- so
-    the leading arguments are rebuilt here from the ones the truncation did
-    preserve, at the real values:
+    The bytes are real, so a negative test does not have to reconstruct a
+    transaction -- it edits a single 32-byte word of the one 0x sent and
+    leaves everything else exactly as captured. Word 0 is the operator, 1 the
+    token, 2 the amount, 3 the target.
 
-        selector 0x2213bc0b   exec(address,address,uint256,address,bytes)
-        operator 0x7d19077317b7574cd01aafa143e5e09f0f4df466
-        token    Base USDC
-        amount   0x1e8480 = 2000000, exactly the sellAmount
-
-    This is used to exercise the validator. It is NOT a transaction and is
-    never signed.
+    This is used to exercise the validator. The result is NOT a transaction
+    and is never signed.
     """
-    return (selector + _w_addr(operator) + _w_addr(token or BASE_USDC)
-            + _w_int(amount) + _w_addr(target)
-            + _w_int(160) + _w_int(4) + 'deadbeef'.ljust(64, '0'))
+    body = LIVE_CALLDATA[2:]
+    head, args = body[:8], body[8:]
+    if selector is not None:
+        head = selector.replace('0x', '')
+    if word is not None:
+        at = word * 64
+        args = args[:at] + value + args[at + 64:]
+    return '0x' + head + args
 
 
-def parse(_full_calldata=True, **over):
+def parse(**over):
     body = json.loads(json.dumps(data))
-    if _full_calldata and 'quotes.0.transaction.details.data' not in over:
-        body['quotes'][0]['transaction']['details']['data'] = full_calldata()
     for path, value in over.items():
         node = body
         parts = path.split('.')
@@ -88,19 +93,38 @@ def parse(_full_calldata=True, **over):
         node[parts[-1]] = value
     return X.ZeroExCrossChain(lambda **kw: body, lambda **kw: {}).get_quote(
         source_chain='base', destination_chain='solana',
-        source_amount_raw=2_000_000, origin_address=fx['origin_address'],
+        source_amount_raw=SELL_AMOUNT, origin_address=fx['origin_address'],
         destination_address=fx['destination_address'])
 
+
+r0 = parse()
 
 # ── the envelope, settled ────────────────────────────────────────────────
 check('the live envelope is "quotes" — the shape this parser has accepted all '
       'along, and "routes" never appeared',
       isinstance(data.get('quotes'), list) and 'routes' not in data)
+check('the live quote reports liquidity for Base -> Solana',
+      data.get('liquidityAvailable') is True)
+# The live response carries NO simulationIncomplete field at all -- not
+# `false`, absent. That is 0x declining to raise the flag rather than 0x
+# asserting a successful simulation, and the difference is worth pinning: the
+# parser must read "absent" as "not flagged" and never as "simulated", and it
+# must only ever set the route's flag on an explicit true.
+check('the live response raises no simulationIncomplete flag — the field is '
+      'absent rather than false, on the quote and on the envelope alike',
+      q.get('simulationIncomplete') is None
+      and data.get('simulationIncomplete') is None)
+check('...so the parsed route reads simulation_incomplete as False, because '
+      'only an explicit true sets it', r0.simulation_incomplete is False)
+check('...and an explicit true IS carried through, so preflight can refuse to '
+      'sign off a quote the provider could not dry-run',
+      parse(**{'quotes.0.simulationIncomplete': True}).simulation_incomplete is True)
 
 
 # ── the two identifiers ──────────────────────────────────────────────────
-check('the live quote DOES carry a quoteId', q['quoteId'] == '0x7a0f477248b07297e32688d176f4c808')
-check('...and a separate top-level zid', data['zid'] == '0x7a0f477248b07297e32688d1')
+check('the live quote DOES carry a quoteId',
+      q['quoteId'] == '0x07dab35a87e2c7dc4f01b20f76f4c808')
+check('...and a separate top-level zid', data['zid'] == '0x07dab35a87e2c7dc4f01b20f')
 check('...and the quoteId is the zid plus eight more hex characters. They look '
       'interchangeable at a glance, which is precisely how `quoteId or zid` '
       'came to be written and why it was wrong',
@@ -136,7 +160,6 @@ check('the live route calls the very contract it asks to approve — the '
       '0x publishes',
       q['transaction']['details']['to'].lower() == data['allowanceTarget'].lower())
 
-fake = q['transaction']['details']['to']
 try:
     parse(**{'allowanceTarget': '0x2222222222222222222222222222222222222222',
              'quotes.0.issues.allowance.spender': '0x2222222222222222222222222222222222222222',
@@ -169,41 +192,55 @@ check('...which matches 0x\'s own EVM -> Solana example, where the whole trade '
 # caller, grants `operator` a TRANSIENT allowance for exactly that, calls
 # `target`, and clears it. So the blast radius of the whole transaction is
 # (token, amount) -- two arguments in plain sight at the front.
+check('the captured calldata is the FULL transaction, not a shortened one — '
+      'no redaction marker, even length, and long enough to carry the bridge '
+      'payload',
+      LIVE_CALLDATA.startswith('0x') and 'chars]' not in LIVE_CALLDATA
+      and len(LIVE_CALLDATA) == 2954 and (len(LIVE_CALLDATA) - 2) % 2 == 0)
 check('the live calldata selector is AllowanceHolder.exec, confirmed by '
       'keccak of the signature rather than by assumption',
-      data['quotes'][0]['transaction']['details']['data'][:10]
-      == X.ALLOWANCE_HOLDER_EXEC_SELECTOR)
+      LIVE_CALLDATA[:10] == X.ALLOWANCE_HOLDER_EXEC_SELECTOR)
 
-_dec = X.decode_allowance_holder_exec(full_calldata())
+_dec = X.decode_allowance_holder_exec(LIVE_CALLDATA)
+check('...the operator it grants a transient allowance to is 0x\'s settler for '
+      'this route, and it is not the token and not the allowance contract',
+      _dec['operator'].lower() == OPERATOR
+      and _dec['operator'].lower() not in (BASE_USDC.lower(),
+                                           ALLOWANCE_HOLDER_CANCUN))
 check('...the token it would pull is Base USDC, matching the quote',
       _dec['token'].lower() == BASE_USDC.lower())
 check('...and the amount it would pull is exactly the sellAmount, which is '
-      'the check that would catch a route quoting $2 and encoding $2000 — '
+      'the check that would catch a route quoting $30 and encoding $30000 — '
       'every field-based check passes such a route',
-      _dec['amount'] == 2_000_000 == int(q['sellAmount']))
+      _dec['amount'] == SELL_AMOUNT == int(q['sellAmount']))
+check('...and the contract it calls is the same operator, so nothing else is '
+      'named anywhere in the arguments the allowance covers',
+      _dec['target'].lower() == OPERATOR)
 
-r_full = parse()
-check('the full-length calldata passes validation end to end',
-      X.verify_source_calldata(r_full)['checked'] is True)
+check('the real captured calldata passes validation end to end — this is the '
+      'live transaction, not a reconstruction of one',
+      X.verify_source_calldata(r)['checked'] is True)
 
-# The saved fixture's own calldata is truncated, and is REFUSED. That is the
-# right answer: a partially readable transaction is not one to sign.
+# A partially readable transaction is not one to sign. The live capture is
+# complete now, so this is checked by shortening it here rather than by
+# relying on a fixture that happened to be truncated.
 try:
-    parse(_full_calldata=False)
-    check('...and the truncated captured calldata is refused', False)
+    parse(**{'quotes.0.transaction.details.data': LIVE_CALLDATA[:200] + '...[2954 chars]'})
+    check('...while a TRUNCATED calldata is still refused', False)
 except X.RouteRejected as e:
-    check('...while the truncated captured calldata is REFUSED rather than '
-          'waved through — a transaction that cannot be fully read is not one '
-          'to sign, and the fixture was saved before the redactor stopped '
-          'shortening it', 'truncated' in str(e) or 'not a number' in str(e))
+    check('...while a TRUNCATED calldata is still refused rather than waved '
+          'through — a transaction that cannot be fully read is not one to '
+          'sign', 'truncated' in str(e) or 'not a number' in str(e)
+          or 'length' in str(e).lower())
 
 for label, kw in (
-        ('a different token', {'token': '0x4200000000000000000000000000000000000006'}),
-        ('a thousand times the amount', {'amount': 2_000_000_000}),
-        ('an operator that is the token itself', {'operator': BASE_USDC}),
+        ('a different token',
+         {'word': 1, 'value': _w_addr('0x4200000000000000000000000000000000000006')}),
+        ('a thousand times the amount', {'word': 2, 'value': _w_int(30_000_000_000)}),
+        ('an operator that is the token itself', {'word': 0, 'value': _w_addr(BASE_USDC)}),
         ('a different function on the allowance contract', {'selector': '0xa9059cbb'})):
     try:
-        parse(**{'quotes.0.transaction.details.data': full_calldata(**kw)})
+        parse(**{'quotes.0.transaction.details.data': tamper(**kw)})
         check(f'calldata naming {label} is refused', False)
     except X.RouteRejected:
         check(f'calldata naming {label} is refused', True)
@@ -215,17 +252,21 @@ check('it sells Base USDC', r.source_token.lower() == R.CHAINS['base'].stable.ad
 check('...and delivers Solana USDC, so the destination swap has the asset it '
       'is going to spend',
       r.destination_token == R.CHAINS['solana'].stable.address)
-check('the amounts are read exactly', r.source_amount_raw == 2_000_000
-      and r.expected_out_raw == 1_798_148 and r.minimum_out_raw == 1_780_167)
+check('the amounts are read exactly', r.source_amount_raw == SELL_AMOUNT
+      and r.expected_out_raw == 29_744_092 and r.minimum_out_raw == 29_446_652)
 check('an allowance really is needed on this route', r.needs_allowance is True)
 
 
-# ── THE ECONOMICS, which is the genuinely new finding ────────────────────
+# ── THE ECONOMICS, at a size a user would actually trade ─────────────────
 loss = r.loss_usd()
-check('the live bridge cost on a $2 trade is $0.22', str(loss) == '0.22')
-check('...which is ELEVEN PERCENT of the trade. A bridge\'s costs are mostly '
-      'fixed, so the percentage is a fact about the SIZE, not about the route',
-      Decimal('10') < (loss / Decimal('2')) * 100 < Decimal('12'))
+check('the live bridge cost on a $30 trade is $0.56', str(loss) == '0.56')
+pct = (loss / Decimal('30')) * 100
+check('...which is UNDER TWO PERCENT of the trade — the same route that cost '
+      '11% of $2. A bridge\'s costs are mostly fixed, so the percentage is a '
+      'fact about the SIZE, not about the route',
+      Decimal('1.5') < pct < Decimal('2'))
+check('...and it therefore clears the 5% ceiling the engine enforces, which '
+      '$2 did not', pct < Decimal('5'))
 check('...and it is charged to the user, as one line the quote can show',
       [c.kind for c in r.cost_lines()] == ['bridge_fee']
       and r.cost_lines()[0].payer == 'user')
@@ -234,18 +275,20 @@ check('...and it is charged to the user, as one line the quote can show',
 # ── the provider's own gas figure ────────────────────────────────────────
 check('the live response gives gasCosts as an object with totalNetworkFee in '
       'wei, not a list', isinstance(r.gas_costs_raw, dict)
-      and r.gas_costs_raw.get('totalNetworkFee') == '1152682591024')
+      and r.gas_costs_raw.get('totalNetworkFee') == '1231589838153')
+check('...and the gas limit and price are there too, so the estimate is the '
+      'provider\'s own rather than this repository\'s guess',
+      r.gas_costs_raw.get('gasLimit') == '148484'
+      and r.gas_costs_raw.get('gasPrice') == '8204025')
 
 
 # ── the fixture is for PARSING, never for signing ────────────────────────
-# The capture redacts long strings, so the calldata in it is truncated. It is
-# fine for checking that the parser reads the response; it is not a
-# transaction and must never be mistaken for one.
-check('the captured calldata is truncated by the redactor, so this fixture can '
-      'verify parsing but could never be broadcast — worth stating, because a '
-      'fixture that looks executable is a trap',
-      '[' in q['transaction']['details']['data']
-      and 'chars]' in q['transaction']['details']['data'])
+# The calldata is complete and real this time, which makes it MORE useful and
+# no more executable: it is one account's quote, long expired, and nothing in
+# this repository signs from a fixture.
+check('the capture carries the amount it was taken at, so a fixture can never '
+      'be silently read as a different trade size',
+      Decimal(str(fx['amount_usd'])) == Decimal('30'))
 
 
 # ── nothing in the fixture is a secret ───────────────────────────────────
