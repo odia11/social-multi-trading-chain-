@@ -168,27 +168,78 @@ _EPHEMERAL_HINTS = ('solanaephemeralsignerpubkey', 'ephemeralsignerpubkey',
                     'ephemeralsigner', 'ephemeralsignerpublickey')
 
 
-def _needs_ephemeral_signer(*objects) -> bool:
-    """Whether anything in these response objects asks for a co-signer.
+def ephemeral_signer_requirement(*objects) -> dict:
+    """Whether these response objects genuinely ask for a co-signer.
 
-    Looks at key NAMES anywhere in the structure rather than at one expected
-    path, because the point is to notice a requirement this code cannot meet
-    -- and a requirement that moved is still a requirement.
+    Returns {'required': bool, 'path': str, 'value': repr, 'reason': str} so a
+    caller can say WHY rather than only that. The path is what makes a live
+    "required" answer actionable instead of mysterious.
+
+    PRESENCE IS NOT A REQUIREMENT, AND THIS IS THE WHOLE POINT.
+    The first version of this returned True the moment a key with a matching
+    NAME existed anywhere in the response. A response carrying
+    `"solanaEphemeralSignerPubkey": null` -- a field declared by the schema and
+    left empty because this route does not use one -- was therefore read as
+    "this route needs a co-signer we cannot provide", and the route was
+    refused.
+
+    That is not a safe default, it is a broken one: it refuses working routes
+    for a field being mentioned. 0x's own EVM -> Solana example
+    (0x-examples/cross-chain-headless-example/src/fromEvmToSolana.ts) signs
+    the whole trade with the EVM key on Base and passes the Solana side as a
+    destination address only -- no keypair is generated anywhere in it. So a
+    Base -> Solana route reporting "ephemeral signer required" was a strong
+    sign of this bug rather than of the route.
+
+    A requirement now needs a MEANINGFUL value: a non-empty string, a true, a
+    non-empty structure. Null, empty string, false and empty collections are
+    the field being declared and not used.
     """
-    def walk(node, depth=0):
+    EMPTY = (None, '', False, 0)
+
+    def walk(node, path='', depth=0):
         if depth > 6:
-            return False
+            return None
         if isinstance(node, dict):
             for k, v in node.items():
+                here = f'{path}.{k}' if path else str(k)
                 flat = str(k).replace('_', '').replace('-', '').lower()
                 if flat in _EPHEMERAL_HINTS:
-                    return True
-                if walk(v, depth + 1):
-                    return True
+                    if isinstance(v, (dict, list)):
+                        if v:
+                            return (here, v)
+                    elif v not in EMPTY:
+                        return (here, v)
+                    # Declared and empty: this route does not use one.
+                    continue
+                found = walk(v, here, depth + 1)
+                if found:
+                    return found
         elif isinstance(node, list):
-            return any(walk(v, depth + 1) for v in node[:20])
-        return False
-    return any(walk(o) for o in objects)
+            for i, v in enumerate(node[:20]):
+                found = walk(v, f'{path}[{i}]', depth + 1)
+                if found:
+                    return found
+        return None
+
+    for obj in objects:
+        hit = walk(obj)
+        if hit:
+            path, value = hit
+            return {
+                'required': True, 'path': path,
+                'value': repr(value)[:120],
+                'reason': (f'the response carries a non-empty {path}, which is a '
+                           f'co-signer this integration must provide'),
+            }
+    return {'required': False, 'path': '', 'value': '',
+            'reason': 'no non-empty ephemeral-signer field in the response'}
+
+
+def _needs_ephemeral_signer(*objects) -> bool:
+    """Thin bool over ephemeral_signer_requirement(), for callers that only
+    need the answer and not the reasoning."""
+    return ephemeral_signer_requirement(*objects)['required']
 
 
 def chain_param(chain: str) -> str:
@@ -277,10 +328,14 @@ class CrossChainRoute:
     # this repository made up.
     gas_costs_raw: object = field(default_factory=dict)
     needs_allowance: bool = False
-    # True when the response asks for a co-signer this integration has no
-    # flow for. Carried on the route so the refusal happens once, at
-    # verification, rather than at signing time.
-    ephemeral_signer_required: bool = False
+    # What the response said about a co-signer: {required, path, value,
+    # reason}. Carried on the route so the refusal happens once, at
+    # verification, and can name the exact field it found.
+    ephemeral_signer: dict = field(default_factory=lambda: {'required': False})
+
+    @property
+    def ephemeral_signer_required(self) -> bool:
+        return bool((self.ephemeral_signer or {}).get('required'))
     raw: dict = field(default_factory=dict)
 
     @property
@@ -568,7 +623,7 @@ class ZeroExCrossChain:
             gas_costs_raw=q.get('gasCosts') if isinstance(q.get('gasCosts'), (dict, list)) else {},
             fees_raw=q.get('fees') if isinstance(q.get('fees'), dict) else {},
             needs_allowance=bool(allowance_issue),
-            ephemeral_signer_required=_needs_ephemeral_signer(q, data),
+            ephemeral_signer=ephemeral_signer_requirement(q, data),
             raw=q,
         )
 
@@ -652,13 +707,18 @@ class ZeroExCrossChain:
         # because no amount of the rest being correct makes a route we cannot
         # sign executable.
         if route.ephemeral_signer_required:
+            info = route.ephemeral_signer or {}
             raise RouteUnsupported(
-                'this route needs a freshly generated Solana co-signer '
-                '(an ephemeral signer) whose key must be created per quote, '
-                'used to sign alongside the user, and then destroyed. OrcAgent '
-                'has no flow for that, so the route is refused rather than '
-                'half-attempted. Base <-> Solana does not have to use this '
-                'bridge; a route that does not require one is usable')
+                f'this route needs a freshly generated Solana co-signer: '
+                f'{info.get("path") or "an ephemeral signer field"} = '
+                f'{info.get("value") or "?"}. A key would have to be created per '
+                f'quote, used to sign alongside the user, survive a restart and '
+                f'then be destroyed. The field name and signing order could not '
+                f'be verified against a reachable 0x specification, so the route '
+                f'is refused rather than half-attempted — a half-built co-signer '
+                f'strands a bridge mid-flight. Base <-> Solana does not have to '
+                f'use this bridge: 0x\'s own EVM -> Solana example signs with the '
+                f'EVM key alone and needs no co-signer at all')
 
         # The EVM call target and the spender. Approving a spender is handing
         # it the user's USDC, so an address that is not an address at all is

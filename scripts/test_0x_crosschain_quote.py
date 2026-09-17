@@ -167,7 +167,18 @@ def probe(source: str, dest: str, usd: float, api_key: str) -> dict:
             'fees': redact(q.get('fees')),
             'issues': redact(q.get('issues')),
             'needs_allowance': bool((q.get('issues') or {}).get('allowance')),
-            'ephemeral_signer_required': X._needs_ephemeral_signer(q, data),
+        })
+        # WHERE the ephemeral-signer answer came from, not only what it was.
+        # A bare "required: true" is not actionable; the field it was found in
+        # and the value it held are. An earlier version of the detector
+        # answered true for a field merely being PRESENT and empty, which is
+        # exactly the kind of thing this printout makes obvious.
+        eph = X.ephemeral_signer_requirement(q, data)
+        report.update({
+            'ephemeral_signer_required': eph['required'],
+            'ephemeral_signer_field': eph['path'],
+            'ephemeral_signer_value': eph['value'],
+            'ephemeral_signer_reason': eph['reason'],
         })
 
     # Finally: does this response survive the engine's own validation?
@@ -241,7 +252,9 @@ def main():
                       'quoteId_equals_zid', 'gasPayer_sent', 'allowanceTarget',
                       'allowanceTarget_is_canonical',
                       'allowanceTarget_is_settler_registry', 'needs_allowance',
-                      'ephemeral_signer_required', 'bridge_provider',
+                      'ephemeral_signer_required', 'ephemeral_signer_field',
+                      'ephemeral_signer_value', 'ephemeral_signer_reason',
+                      'bridge_provider',
                       'sellToken_echoed', 'buyToken_echoed', 'sellAmount',
                       'buyAmount', 'minBuyAmount', 'estimatedTimeSeconds',
                       'transaction_chain_type', 'transaction_keys', 'gasCosts',
@@ -262,7 +275,19 @@ def main():
         print('    it is before adding it to CROSSCHAIN_ALLOWED_SPENDERS.')
         print('  ephemeral_signer_required true means this route needs a')
         print('    co-signer OrcAgent has no flow for; it will be refused.')
+        print('    Check ephemeral_signer_field/value: if the value is null or')
+        print('    empty the field is merely DECLARED, not required, and the')
+        print('    detector now reads it that way.')
         print('  engine_accepts false is not necessarily bad — read the refusal.')
+        print('\n' + '-' * 68)
+        print('  FULL SANITIZED RESPONSE — paste this back if the fixture file')
+        print('  does not reach the repository. It is the actual thing needed to')
+        print('  finish the integration.')
+        print('-' * 68)
+        for rep in reports:
+            print(f'\n### {rep["route"]}')
+            print(json.dumps(rep.get('raw_response'), indent=2, default=str)[:12000])
+
         print('\n  Nothing was signed, sent, approved or spent.\n')
 
     return 0 if all(r.get('ok') for r in reports) else 1

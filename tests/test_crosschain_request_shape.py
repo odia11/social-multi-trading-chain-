@@ -211,19 +211,49 @@ check('...and the verified shape parses correctly',
 
 
 # ═══ 11-14. ephemeral signer ═════════════════════════════════════════════
+# THE BUG THIS SECTION EXISTS BECAUSE OF.
+# The first detector answered "required" the moment a key with a matching
+# NAME existed anywhere in the response -- whatever its value. So a response
+# carrying `"solanaEphemeralSignerPubkey": null`, a field the schema declares
+# and this route leaves empty, was read as "needs a co-signer we cannot
+# provide" and the route was refused.
+#
+# That is not a safe default. It refuses working routes for a field being
+# mentioned. 0x's own EVM -> Solana example signs the whole trade with the EVM
+# key on Base and generates no keypair at all, so a Base -> Solana route
+# reporting this was a sign of the detector, not of the route.
+for empty in (None, '', False, 0, {}, []):
+    body = quote_body()
+    body['quotes'][0]['issues'] = {'solanaEphemeralSignerPubkey': empty}
+    _, r = capture(body=body)
+    check(f'a DECLARED but empty ephemeral field ({empty!r}) is not a '
+          f'requirement — presence is not a requirement, and reading it as one '
+          f'refuses routes that work',
+          r.ephemeral_signer_required is False)
+
+_req = X.ephemeral_signer_requirement(
+    {'issues': {'solanaEphemeralSignerPubkey': 'SomeRealPubkey111'}})
+check('...while a non-empty value IS a requirement', _req['required'] is True)
+check('...and the answer names the exact field it was found in, so a live '
+      '"required" is actionable instead of mysterious',
+      _req['path'] == 'issues.solanaEphemeralSignerPubkey'
+      and 'SomeRealPubkey111' in _req['value'])
+
 for spelling in ('solanaEphemeralSignerPubkey', 'ephemeralSignerPubkey',
                  'ephemeral_signer_pubkey'):
     body = quote_body()
-    body['quotes'][0]['issues'] = {spelling: True}
+    body['quotes'][0]['issues'] = {spelling: 'RealPubkey1111111111'}
     try:
         capture(body=body)
         check(f'11. a route requiring {spelling} is refused', False)
     except X.RouteUnsupported as e:
-        check(f'11. a route requiring {spelling} is refused rather than '
-              f'half-attempted — OrcAgent has no flow for generating, using '
-              f'and destroying a per-quote co-signer, and pretending otherwise '
-              f'would strand a bridge mid-flight',
-              'ephemeral' in str(e).lower())
+        check(f'11. a route really requiring {spelling} is refused rather '
+              f'than half-attempted — OrcAgent has no flow for generating, '
+              f'using and destroying a per-quote co-signer, and pretending '
+              f'otherwise would strand a bridge mid-flight',
+              'ephemeral' in str(e).lower() or 'co-signer' in str(e).lower())
+        check(f'...and the refusal names the field and the value it found',
+              spelling in str(e) or 'RealPubkey' in str(e))
 
 _cc_src = open(os.path.join(REPO, 'trade_engine/crosschain.py')).read()
 _generates_keys = any(w in _cc_src for w in (

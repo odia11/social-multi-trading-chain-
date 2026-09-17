@@ -424,6 +424,56 @@ conn.close()
 
 
 # ═════════════════════════════════════════════════════════════════════════
+#  a route with NO quoteId — which is what the live API actually returns
+# ═════════════════════════════════════════════════════════════════════════
+# The first live quote from production came back with quoteId_present=false.
+# 0x's published status schema takes only originChain and originTxHash, and
+# its own example sends only those two, so a route without a quoteId is not a
+# degraded case -- it is the documented one. What must not happen is the zid
+# being sent in its place: that identifies the REQUEST, not the quote, and
+# substituting one for the other is the confusion the two columns exist to
+# prevent.
+class NoQuoteIdRoute(FakeRoute):
+    quote_id = ''          # exactly what the live response gave
+    zid = 'ZID-LIVE-9'     # present, and NOT a quote id
+
+
+conn = fresh_db()
+make_quote(conn, quote_id='q17')
+send17 = sender_ok('0xNOQID')
+r = E.start_crosschain_trade(conn, quote_id='q17', idempotency_key='k17',
+                             available_usd=D('500'), route=NoQuoteIdRoute(),
+                             source_sender=send17)
+T17 = r.trade_id
+check('a route with no quoteId still executes — that is the shape the live '
+      'API returns, not a broken one', r.state == L.BRIDGING)
+
+cc17 = L.get_crosschain(conn, T17)
+check('...the empty quote id is stored as empty', cc17['provider_quote_id'] == '')
+check('...and the zid is stored SEPARATELY rather than filling in for it — a '
+      'request id under the name "quote id" is what the split exists to stop',
+      cc17['provider_zid'] == 'ZID-LIVE-9')
+
+st17 = status_of('bridge_pending')
+E.resume_crosschain_trade(conn, trade_id=T17, status_fetcher=st17,
+                          dest_swap_executor=swap_ok())
+check('...and the status lookup sends NO quote id, falling back to the pair '
+      '0x actually documents',
+      st17.seen.get('quote_id') == '')
+check('...and the zid is never sent as one', st17.seen.get('quote_id') != 'ZID-LIVE-9')
+
+# ...and the trade still finishes end to end without one.
+st17b = status_of('bridge_filled', dest='DT17', settled=99_000_000)
+swap17 = swap_ok('0xSWAP17')
+r = E.resume_crosschain_trade(conn, trade_id=T17, status_fetcher=st17b,
+                              dest_swap_executor=swap17)
+check('...and the trade completes without a quoteId ever existing',
+      r.state == L.COMPLETED and len(swap17.calls) == 1)
+check('...releasing the claim as normal', held(conn) == D('0'))
+conn.close()
+
+
+# ═════════════════════════════════════════════════════════════════════════
 #  a same-chain quote must never take this path
 # ═════════════════════════════════════════════════════════════════════════
 conn = fresh_db()
