@@ -84,7 +84,9 @@ BOB   = 'ReferredBob44444444444444444444444444444'
 CAROL = 'ReferredCarol555555555555555555555555555'
 THEIRS= 'ReferredByOther66666666666666666666666666'
 
-check('the page renders', R['status'] == 200 and 'Your referrals' in HTML)
+check('the page renders, with a tab for the people and one for the fees',
+      R['status'] == 200 and 'Referred Users' in HTML
+      and 'Earnings History' in HTML)
 
 # ── who ──────────────────────────────────────────────────────────────────
 check('each referred person is listed by the name they chose',
@@ -109,7 +111,7 @@ check('...and a person who HAS traded says how many fees they generated',
       and re.search(r'1 fee\b', HTML) is not None)
 
 # ── the bar ──────────────────────────────────────────────────────────────
-widths = sorted(float(w) for w in re.findall(r'ppl-bar-fill" style="width:([\d.]+)%', HTML))
+widths = sorted(float(w) for w in re.findall(r'share-fill" style="width:([\d.]+)%', HTML))
 check('each person gets a bar proportional to their share of the total — '
       '0.040 and 0.010 of 0.050 is 80% and 20%',
       widths == [20.0, 80.0])

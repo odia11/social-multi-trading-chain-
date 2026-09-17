@@ -61,6 +61,8 @@ body{overflow-x:clip}
 .empty{text-align:center;padding:42px 20px;color:var(--sub)}.empty-icon{font-size:38px;margin-bottom:12px}.empty strong{display:block;color:var(--text);font-size:16px;margin-bottom:7px}.empty p{font-size:13px;line-height:1.5}
 
 .invite{display:flex;align-items:center;gap:16px;padding:20px;margin-top:20px;border-color:rgba(247,185,85,.34)}.invite-icon{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(247,185,85,.12);color:var(--gold);font-size:24px}.invite-copy{flex:1;min-width:0}.invite-title{font-weight:750;font-size:15px}.invite-sub{color:var(--sub);font-size:12px;margin-top:4px}.invite-btn{height:44px;padding:0 22px;border:0;border-radius:12px;background:var(--gold);color:#090c0f;font-weight:800;cursor:pointer}
+.ppl-total{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:13px 4px;border-bottom:1px solid var(--line)}.ppl-total-lbl{font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.08em}.ppl-total-val{font:700 14px var(--mono);color:var(--green)}.ppl-total-sub{color:var(--muted);font-weight:500}
+.share-bar{height:4px;border-radius:3px;background:#182029;margin-top:8px;overflow:hidden}.share-fill{height:100%;background:var(--green);border-radius:3px}
 .w-toast{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);z-index:99999;padding:12px 18px;border-radius:12px;background:#0b251a;border:1px solid var(--green);color:var(--green);font-size:13px;font-weight:700;box-shadow:0 12px 30px rgba(0,0,0,.35);white-space:nowrap;transition:opacity .2s}
 
 @media(max-width:700px){
@@ -143,6 +145,10 @@ body{overflow-x:clip}
 
     <div class="tab-panel active" id="tab-users">
       {% if referred_people %}
+      <div class="ppl-total">
+        <span class="ppl-total-lbl">Earned from these users</span>
+        <span class="ppl-total-val">{{ '%.6f'|format(referred_people_total_sol) }} SOL{% if referred_people_total_usd is not none %} <span class="ppl-total-sub">≈ ${{ '%.2f'|format(referred_people_total_usd) }}</span>{% endif %}</span>
+      </div>
       <div class="list">
         {% for p in referred_people %}
         <div class="person">
@@ -150,10 +156,11 @@ body{overflow-x:clip}
           <div class="person-main">
             <div class="person-name">{{ p.display }}</div>
             <div class="person-sub">{% if p.trades %}{{ p.trades }} fee{{ '' if p.trades == 1 else 's' }}{% else %}no trades yet{% endif %} · joined {{ p.joined_at|string|truncate(10, true, '') }}</div>
+            {% if p.share_pct > 0 %}<div class="share-bar" title="{{ p.share_pct }}% of your referral earnings"><div class="share-fill" style="width:{{ p.share_pct }}%"></div></div>{% endif %}
           </div>
           <div class="person-right">
-            <div class="earned{{ ' zero' if not p.earned_sol }}">{% if p.earned_usd is not none and p.earned_sol %}${{ '%.2f'|format(p.earned_usd) }}{% else %}{{ '%.4f'|format(p.earned_sol) }} SOL{% endif %}</div>
-            <div class="earned-label">Earnings</div>
+            <div class="earned{{ ' zero' if not p.earned_sol }}">{{ '%.6f'|format(p.earned_sol) }} SOL</div>
+            <div class="earned-label">{% if p.earned_usd is not none and p.earned_sol %}≈ ${{ '%.2f'|format(p.earned_usd) }}{% else %}Earnings{% endif %}</div>
           </div>
           <a class="profile-arrow" href="{{ p.profile_url }}" aria-label="View profile">›</a>
         </div>
