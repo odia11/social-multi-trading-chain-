@@ -38,7 +38,7 @@ import os
 import sys
 import types
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOL = REPO + '/tools/verify_live.py'
 
 os.environ['_VERIFY_LIVE_REEXEC'] = '1'   # no re-exec inside this harness

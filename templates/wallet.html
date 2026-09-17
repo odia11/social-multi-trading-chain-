@@ -112,6 +112,12 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
    really just off-screen. Wraps onto more rows instead on any screen too
    narrow to fit every chain in one. */
 .wlt-bsc-balances{display:flex;flex-wrap:wrap;gap:12px;margin-top:14px;padding-top:14px;border-top:1px solid #16191f}
+.wlt-bsc-bal-scope{font-size:11px;color:var(--muted);margin-top:14px;text-transform:uppercase;letter-spacing:.04em}
+.wlt-bsc-bal-scope+.wlt-bsc-balances{margin-top:4px;padding-top:10px}
+.dep-evm-chain-row{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:11px;color:var(--muted)}
+.dep-evm-chain-row select{background:#0f1216;color:var(--sub);border:1px solid #21252c;border-radius:7px;
+  padding:5px 8px;font-size:11px;font-family:inherit;cursor:pointer}
+.dep-evm-chain-row select:hover{border-color:var(--accent);color:var(--accent)}
 .wlt-bsc-bal-item{flex:1 1 108px;min-width:108px;background:#0a0b0e;border:1px solid #16191f;border-radius:10px;padding:10px 12px}
 .wlt-bsc-bal-lbl{display:block;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#565d68;margin-bottom:4px}
 .wlt-bsc-bal-val{font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:#eef1f5}
@@ -675,7 +681,7 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
         <div class="dep-chain-tabs" id="dep-chain-tabs">
           <button class="dep-chain-tab active" data-chain="sol" onclick="_depSwitchChain('sol')">SOL</button>
           {% if bsc_deposit_address %}
-          <button class="dep-chain-tab" data-chain="bsc" onclick="_depSwitchChain('bsc')">BSC</button>
+          <button class="dep-chain-tab" data-chain="bsc" onclick="_depSwitchChain('bsc')">EVM</button>
           {% endif %}
         </div>
       </div>
@@ -707,13 +713,30 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
             <div class="dep-addr">{{ bsc_deposit_address }}</div>
             <div class="dep-btns">
               <button class="dep-btn dep-copy" onclick="_copyAddrBsc()">Copy Address</button>
-              <a class="dep-btn dep-scan" href="https://bscscan.com/address/{{ bsc_deposit_address }}" target="_blank" rel="noopener">View on BscScan ↗</a>
+              <a class="dep-btn dep-scan" id="dep-evm-scan"
+                 href="https://basescan.org/address/{{ bsc_deposit_address }}"
+                 target="_blank" rel="noopener">View on BaseScan ↗</a>
+            </div>
+            <!-- One address, five chains, five explorers. The link used to be
+                 hardwired to BscScan, so checking a Base deposit showed an
+                 empty page on the wrong chain and looked like the money had
+                 not arrived. -->
+            <div class="dep-evm-chain-row">
+              <label for="dep-evm-chain">Check balance on</label>
+              <select id="dep-evm-chain" onchange="_depEvmExplorer()">
+                <option value="https://basescan.org|BaseScan" selected>Base</option>
+                <option value="https://bscscan.com|BscScan">BNB Chain</option>
+                <option value="https://arbiscan.io|Arbiscan">Arbitrum</option>
+                <option value="https://polygonscan.com|PolygonScan">Polygon</option>
+                <option value="https://robinhoodchain.blockscout.com|Blockscout">Robinhood Chain</option>
+              </select>
             </div>
             <div style="font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5">
-              This is one shared EVM wallet — the same address also receives deposits on Base, Arbitrum, Polygon and Robinhood Chain. You only need USDC here: OrcAgent puts up the network fee for your first trade on a new chain, charges it to that trade, and after that the wallet tops up its own gas from your USDC. If it ever tells you it can't, sending a few cents of that chain's own gas token here (ETH for Base/Arbitrum/Robinhood, POL for Polygon, BNB for BSC) unblocks it immediately.
+              This is one shared EVM wallet — the same address receives deposits on <strong>Base, BNB Chain, Arbitrum, Polygon and Robinhood Chain</strong>. Pick the network deliberately when you send: the address is identical everywhere, and the network decides where the money lands. You only need USDC here: OrcAgent puts up the network fee for your first trade on a new chain, charges it to that trade, and after that the wallet tops up its own gas from your USDC. If it ever tells you it can't, sending a few cents of that chain's own gas token here (ETH for Base/Arbitrum/Robinhood, POL for Polygon, BNB for BSC) unblocks it immediately.
             </div>
           </div>
         </div>
+        <div class="wlt-bsc-bal-scope">On BNB Chain</div>
         <div class="wlt-bsc-balances">
           <div class="wlt-bsc-bal-item">
             <span class="wlt-bsc-bal-lbl">USDC</span>
@@ -962,6 +985,16 @@ function _depSwitchChain(chain){
   var bscPanel = document.getElementById('dep-panel-bsc')
   if(solPanel) solPanel.style.display = (chain === 'sol') ? '' : 'none'
   if(bscPanel) bscPanel.style.display = (chain === 'bsc') ? '' : 'none'
+}
+
+function _depEvmExplorer(){
+  // The address is the same on every EVM chain; only the explorer differs.
+  var sel = document.getElementById('dep-evm-chain')
+  var link = document.getElementById('dep-evm-scan')
+  if(!sel || !link || !_bscAddr) return
+  var parts = String(sel.value).split('|')
+  link.href = parts[0] + '/address/' + _bscAddr
+  link.textContent = 'View on ' + parts[1] + ' ↗'
 }
 
 function _copyAddr(){

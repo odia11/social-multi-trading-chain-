@@ -12,7 +12,7 @@ These run the real functions against a real gzip round-trip and a real
 SQLite file with a real WAL."""
 import gzip, os, re, shutil, sqlite3, sys, tempfile
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC  = open(REPO + '/dashboard.py').read()
 
 checks = []

@@ -43,6 +43,7 @@ from decimal import Decimal, ROUND_UP
 from typing import Callable, Optional
 
 from . import registry as R
+from .crosschain import NoLiquidity as _CrossChainPassthrough
 from .costs import (
     CostLine, CostError, Quote, money, price_trade, sponsored_gas, ZERO,
     KIND_BRIDGE_FEE, KIND_DEST_GAS, KIND_SOURCE_GAS,
@@ -93,6 +94,11 @@ class PricedQuote:
     expires_at: float
     timings_ms: dict = field(default_factory=dict)
     warnings: tuple = ()
+    # The bridge route, when this trade needs one. Empty for same-chain, which
+    # is a meaningful emptiness: a caller reading bridge_required off this
+    # gets the same answer the router acted on, rather than re-deriving it
+    # from the two chain names and possibly disagreeing.
+    bridge: dict = field(default_factory=dict)
 
     def is_expired(self, now: Optional[float] = None) -> bool:
         return (now if now is not None else time.time()) >= self.expires_at
@@ -114,7 +120,41 @@ class PricedQuote:
             'expired': self.is_expired(now),
             'timings_ms': self.timings_ms,
             'warnings': list(self.warnings),
+            # ── cross-chain ──
+            # bridge_required is stated outright rather than left to be
+            # inferred from the two chain names, because a caller that infers
+            # it can disagree with the router that priced it.
+            'bridge_required': not self.same_chain,
+            'cross_chain_provider': self.bridge.get('provider', '') if self.bridge else '',
         })
+        if self.bridge:
+            # The guaranteed amount, in dollars, computed here rather than in
+            # the browser. The raw integer needs the destination stable's
+            # decimals to mean anything, and those differ per chain (BSC's
+            # USDC is 18, everyone else's is 6) -- so a client doing the
+            # conversion is a client that can be wrong by a factor of a
+            # trillion on one chain.
+            try:
+                _dst_stable = R.get_chain(self.request.destination_chain).stable
+                _min_raw = int(self.bridge.get('minimum_out_raw') or 0)
+                _exp_raw = int(self.bridge.get('expected_out_raw') or 0)
+                _scale = Decimal(10) ** _dst_stable.require_decimals()
+                body['bridge_minimum_out_usd'] = str(
+                    (Decimal(_min_raw) / _scale).quantize(Decimal('0.01')))
+                body['bridge_expected_out_usd'] = str(
+                    (Decimal(_exp_raw) / _scale).quantize(Decimal('0.01')))
+            except Exception:
+                # A missing decimals value is not a reason to fail a quote;
+                # it is a reason not to show a number nobody can vouch for.
+                pass
+            body.update({
+                'bridge_route_id': self.bridge.get('route_id', ''),
+                'bridge_provider': self.bridge.get('bridge_provider', ''),
+                'bridge_source_amount_raw': str(self.bridge.get('source_amount_raw', '')),
+                'bridge_expected_out_raw': str(self.bridge.get('expected_out_raw', '')),
+                'bridge_minimum_out_raw': str(self.bridge.get('minimum_out_raw', '')),
+                'estimated_time_seconds': int(self.bridge.get('estimated_seconds') or 0),
+            })
         if self.swap is not None:
             body['expected_output_raw'] = str(self.swap.buy_amount_raw)
             body['minimum_output_raw'] = str(self.swap.min_buy_amount_raw)
@@ -172,9 +212,17 @@ def build_quote(
                 raise QuoteError(f'could not estimate gas on {dst.name}: {e}') from e
 
         bridge_usd = ZERO
+        bridge_info: dict = {}
         if f_bridge is not None:
             try:
-                bridge_usd = money((f_bridge.result() or {}).get('fee_usd', 0))
+                bridge_info = f_bridge.result() or {}
+                bridge_usd = money(bridge_info.get('fee_usd', 0))
+            except _CrossChainPassthrough:
+                # A provider saying "no liquidity right now" already carries
+                # the chains, the amount and its own request id. Wrapping it
+                # in a generic quote error throws all of that away and makes a
+                # quiet market look like a broken integration.
+                raise
             except Exception as e:
                 raise QuoteError(f'no bridge route {src.name} -> {dst.name}: {e}') from e
         elif not same_chain:
@@ -210,13 +258,23 @@ def build_quote(
             quote_id=uuid.uuid4().hex, request=req, priced=provisional, swap=None,
             route=f'{src.name}->{dst.name}', same_chain=same_chain,
             created_at=started, expires_at=started + QUOTE_TTL_SECONDS,
-            timings_ms=timings,
+            timings_ms=timings, bridge=dict(bridge_info),
             warnings=('costs use up the whole budget before any swap is quoted',),
         )
 
     # ── the swap, at that provisional amount ──
     t1 = clock()
-    stable = src.stable
+    # The swap happens on the DESTINATION chain, so it sells that chain's
+    # dollar asset -- not the source chain's.
+    #
+    # This was src.stable, which is correct for a same-chain trade (where they
+    # are the same asset) and silently wrong for every cross-chain one. It is
+    # the exact mistake registry.py exists to prevent: BSC's USDC has 18
+    # decimals and Base's has 6, so a BSC -> Base quote converted the purchase
+    # to raw units at 18 decimals and asked 0x to sell that number on Base,
+    # where it means a trillion times more. It does not raise; it just quotes
+    # a different trade than the one the user asked for.
+    stable = dst.stable
     try:
         sell_raw = R.to_raw(provisional.token_purchase_usd, stable)
     except R.UnknownDecimals as e:
@@ -290,10 +348,13 @@ def build_quote(
         swap=swap,
         route=(f'{src.name} {stable.symbol} -> {swap.provider}'
                if same_chain else
-               f'{src.name} {stable.symbol} -> bridge -> {dst.name} -> {swap.provider}'),
+               f'{src.name} {src.stable.symbol} -> '
+               f'{bridge_info.get("provider") or "bridge"} -> '
+               f'{dst.name} {stable.symbol} -> {swap.provider}'),
         same_chain=same_chain,
         created_at=started,
         expires_at=started + QUOTE_TTL_SECONDS,
         timings_ms=timings,
+        bridge=dict(bridge_info),
         warnings=tuple(warnings),
     )

@@ -179,34 +179,6 @@ async function _webAuthnLogin(){
   }
 }
 
-async function _loginWithPassword(){
-  var userEl=document.getElementById('ob-pwd-user');
-  var passEl=document.getElementById('ob-pwd-pass');
-  var errEl=document.getElementById('ob-pwd-err');
-  var btn=document.getElementById('ob-pwd-btn');
-  if(errEl) errEl.textContent='';
-  var username=(userEl&&userEl.value||'').trim();
-  var password=passEl&&passEl.value||'';
-  if(!username||!password){ if(errEl) errEl.textContent='Please enter your username and password.'; return; }
-  if(btn){ btn.disabled=true; btn.textContent='Logging in…'; }
-  try{
-    var r=await fetch('/api/login_password',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({username:username,password:password})
-    }).then(res=>res.json()).catch(()=>null);
-    if(r&&r.success){
-      if(r.csrf_token) _csrfToken=r.csrf_token;
-      window.location.href='/dashboard';
-    } else {
-      if(errEl) errEl.textContent=(r&&r.error)||'Login failed — check your credentials.';
-    }
-  }catch(e){
-    if(errEl) errEl.textContent='Login failed — please try again.';
-  }finally{
-    if(btn){ btn.disabled=false; btn.textContent='Login & Trade'; }
-  }
-}
-
 function _showWalletOptions(){
   /* Reveal wallet buttons after Face ID failure or "connect a wallet instead" tap */
   var nullEl={style:{},innerHTML:'',textContent:''};
@@ -757,7 +729,6 @@ function _phantomMobileV1Connect(){
       _cb:String(Date.now())
     });
     var _cbUrl='https://orcagent.fun/phantom-callback?'+_cbQuery.toString();
-    console.log('[phantom] server-side init ok, token=',d.token.slice(0,8)+'…');
     var params=new URLSearchParams({
       app_url:'https://orcagent.fun',
       dapp_encryption_public_key:d.dapp_pk,
@@ -789,10 +760,19 @@ function _applyPhantomDetection(phantomBtn, phantomNote){
     if(lbl) lbl.textContent='Connect Phantom →';
     if(phantomNote){ phantomNote.textContent='Opens Phantom to approve connection'; phantomNote.style.color='var(--muted)'; }
   } else {
-    /* Desktop: not installed — change button to install link */
+    /* Desktop: not installed -- relabel the button, but let it keep calling
+       connectWalletOnboard('phantom') (its original onclick="" attribute)
+       instead of overwriting .onclick to silently window.open() phantom.app.
+       That silent open() is exactly what made "Connect Phantom" look broken
+       from the wallet-onboarding chooser: connectControl()/startConnect()
+       (see mobile-connect-button.js) click this same button programmatically
+       to reach it, .click() doesn't throw either way, so nothing ever
+       reached connectWalletOnboard()'s own "not detected" messaging (already
+       shown as a toast when its usual container isn't visible -- see
+       _showWalletMsg()) and a popup-blocked window.open() left the page
+       looking like the click did nothing at all. */
     var _pLbl=document.getElementById('phantom-ob-label');
     if(_pLbl) _pLbl.textContent='Install Phantom ↗';
-    phantomBtn.onclick=function(){ window.open('https://phantom.app','_blank','noopener'); };
     if(phantomNote) phantomNote.innerHTML='';
   }
 }
@@ -962,6 +942,31 @@ function showStep(n){
 function nextStep(n){currentStep=n+1;showStep(currentStep);}
 function gotoSetupGuide(){currentStep=1;showStep(1);}
 
+function _elementIsVisible(el){
+  while(el && el!==document.body){
+    if(getComputedStyle(el).display==='none') return false;
+    el=el.parentElement;
+  }
+  return !!el;
+}
+/* connectWalletOnboard() writes its status into #wallet-install-msg, a child
+   of #onboard -- the old full-screen connect overlay that "never
+   resurrect[s]" any more (see _guestConnect()'s own comment) but is still
+   in the DOM, permanently display:none, for the handlers underneath it.
+   Whoever calls this function today (the wallet-onboarding.js chooser's
+   "Connect Phantom" option, reached via connectControl()) has no idea that
+   container is invisible, so every message this used to show -- "Phantom
+   not detected", "sign the request", "connection rejected" -- was written
+   where nobody could ever read it. Mirroring it as a toast whenever the
+   real element isn't visible means a click that silently does nothing
+   (indistinguishable from "connecting is broken") gets an answer instead. */
+function _showWalletMsg(msgEl, html, plainText){
+  msgEl.innerHTML=html;
+  msgEl.style.display='block';
+  if(!_elementIsVisible(msgEl) && typeof showLfToast==='function'){
+    showLfToast('👻', plainText, 'warn');
+  }
+}
 async function connectWalletOnboard(type){
   try{ localStorage.removeItem('orca_manual_disconnect'); }catch(e){}
   const isPhantom=type==='phantom';
@@ -976,8 +981,9 @@ async function connectWalletOnboard(type){
     if(isMobile){ if(isPhantom){ _phantomMobileV1Connect(); return; } window.location.href=solflareDeepLink; return; }
     const other=isPhantom?'Solflare':'Phantom';
     const otherUrl=isPhantom?'https://solflare.com':'https://phantom.app';
-    msgEl.innerHTML=name+' wallet not detected. <a href="'+installUrl+'" target="_blank" style="color:var(--blue);text-decoration:underline">Install '+name+'</a> or try <a href="'+otherUrl+'" target="_blank" style="color:var(--blue);text-decoration:underline">'+other+'</a>.';
-    msgEl.style.display='block';
+    _showWalletMsg(msgEl,
+      name+' wallet not detected. <a href="'+installUrl+'" target="_blank" rel="noopener noreferrer" style="color:var(--blue);text-decoration:underline">Install '+name+'</a> or try <a href="'+otherUrl+'" target="_blank" rel="noopener noreferrer" style="color:var(--blue);text-decoration:underline">'+other+'</a>.',
+      name+' wallet not detected — install it from '+installUrl);
     return;
   }
   msgEl.style.display='none';
@@ -985,8 +991,8 @@ async function connectWalletOnboard(type){
     const resp=await provider.connect();
     const pubkey=provider.publicKey||resp?.publicKey;
     if(!pubkey){
-      msgEl.textContent='Could not get wallet address — please try again.';
-      msgEl.style.display='block';
+      _showWalletMsg(msgEl, 'Could not get wallet address — please try again.',
+        'Could not get wallet address — please try again.');
       return;
     }
     phantomKey=pubkey.toString();
@@ -1003,8 +1009,9 @@ async function connectWalletOnboard(type){
     document.getElementById('wallet-back-btn').style.display='flex';
     const r=await _connectWalletSigned(provider, phantomKey);
     if(!r?.ok && (r?.msg==='Signature rejected'||(r?.msg||'').startsWith('Nonce expired'))){
-      msgEl.textContent='Sign the request in your wallet to log in — please try again';
-      msgEl.style.display='block'; return;
+      _showWalletMsg(msgEl, 'Sign the request in your wallet to log in — please try again',
+        'Sign the request in your wallet to log in — please try again');
+      return;
     }
     if(r?.csrf_token) _csrfToken=r.csrf_token;
     settingsHasKey=r?.has_trading_key||false; _isAdmin=r?.is_admin||false; _updateKeyStatus();
@@ -1013,8 +1020,8 @@ async function connectWalletOnboard(type){
       await launchApp(); return;
     }
   }catch(e){
-    msgEl.textContent='Connection rejected or failed — please try again.';
-    msgEl.style.display='block';
+    _showWalletMsg(msgEl, 'Connection rejected or failed — please try again.',
+      'Connection rejected or failed — please try again.');
     console.error(e);
   }
 }
@@ -2523,7 +2530,7 @@ async function fetchAdminFees(){
   if(!txs.length){tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:16px">No fees collected yet</td></tr>';return;}
   tbody.innerHTML=txs.map(f=>{
     const tx=f.tx||'';
-    const sol=tx?`<a href="https://solscan.io/tx/${esc(tx)}" target="_blank" style="color:var(--blue)">${esc(tx.slice(0,10))}…</a>`:'-';
+    const sol=tx?`<a href="https://solscan.io/tx/${esc(tx)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue)">${esc(tx.slice(0,10))}…</a>`:'-';
     return `<tr>
       <td style="font-size:10px">${esc(f.ts||'')}</td>
       <td style="font-family:monospace">${esc(f.wallet||'')}</td>
@@ -2646,7 +2653,7 @@ async function testFeeTransfer(){
     }
     if(r.ok){
       html+=`<span style="color:var(--green)">${esc(r.msg||'OK')}</span>`;
-      if(r.solscan_url) html+=` &nbsp;<a href="${esc(r.solscan_url)}" target="_blank" style="color:var(--blue)">View on Solscan ↗</a>`;
+      if(r.solscan_url) html+=` &nbsp;<a href="${esc(r.solscan_url)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue)">View on Solscan ↗</a>`;
     } else {
       html+=`<span style="color:var(--red)">✗ ${esc(r.error||'Failed')}</span>`;
       if(r.traceback){
@@ -4394,35 +4401,6 @@ function closeSettings(){
   document.getElementById('settings-modal').classList.remove('open');
 }
 
-async function _setPassword(){
-  var inp=document.getElementById('s-pwd-input');
-  var msg=document.getElementById('s-pwd-msg');
-  var btn=document.getElementById('s-pwd-btn');
-  if(msg){ msg.className='s-msg'; msg.textContent=''; }
-  var password=(inp&&inp.value)||'';
-  if(password.length<8){
-    if(msg){ msg.className='s-msg err'; msg.textContent='Password must be at least 8 characters.'; }
-    return;
-  }
-  if(btn){ btn.disabled=true; btn.textContent='Saving…'; }
-  try{
-    var r=await fetch('/api/set_password',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({password:password})
-    }).then(res=>res.json()).catch(()=>null);
-    if(r&&r.success){
-      if(msg){ msg.className='s-msg ok'; msg.textContent='✓ Password saved — you can now login on mobile without Phantom.'; }
-      if(inp) inp.value='';
-    } else {
-      if(msg){ msg.className='s-msg err'; msg.textContent=(r&&r.error)||'Failed to save password.'; }
-    }
-  }catch(e){
-    if(msg){ msg.className='s-msg err'; msg.textContent='Failed to save password.'; }
-  }finally{
-    if(btn){ btn.disabled=false; btn.textContent='Set Password'; }
-  }
-}
-
 async function saveUsername(){
   if(!phantomKey){openAlertModal({text:'Connect a wallet first.'});return;}
   const val=document.getElementById('s-username').value.trim();
@@ -5628,7 +5606,14 @@ function tipsNext(){
   else{closeTipsModal();}
 }
 (function _checkTipsOnLoad(){
-  if(!localStorage.getItem('orcagent_tips_seen')) setTimeout(openTipsModal,600);
+  // A trading-tips tour makes sense once someone has actually connected --
+  // firing it for a browsing guest just drops a full-screen modal in front
+  // of the page, including the "Connect wallet" link a guest needs to get
+  // past this in the first place. Desktop's home shell made this concrete:
+  // it renders the whole app shell (not the #onboard connect screen) for a
+  // guest too, so this modal's blur+backdrop landed directly over the one
+  // link a disconnected visitor has to reach.
+  if(window.__SESSION_WALLET && !localStorage.getItem('orcagent_tips_seen')) setTimeout(openTipsModal,600);
 }());
 
 // ── SUPPORT CHAT ─────────────────────────────────────────────────────────────
@@ -6385,7 +6370,6 @@ async function _dmFetchMessages(){
   try{
     resp=await fetch('/api/messages/'+_dmPeerId);
     rawText=await resp.text();
-    console.log('GET /api/messages/'+_dmPeerId+' status:',resp.status,'body:',rawText);
     let r;
     try{ r=JSON.parse(rawText); }
     catch(parseErr){
@@ -6722,6 +6706,9 @@ document.addEventListener('click',function(){
   document.querySelectorAll('.ep-palette,.fc-react-palette').forEach(function(p){ p.style.display='none'; });
 });
 
+// amtSol is still accepted so an older cached page keeps calling this with
+// the same arguments, but it is no longer sent: the server spends the
+// copier's own configured size in USDC, not the size on the shared card.
 async function _dmCopyTrade(btn, btnId, errId, tokenAddr, entryPrice, amtSol){
   const errEl=document.getElementById(errId);
   btn.disabled=true;
@@ -6731,7 +6718,7 @@ async function _dmCopyTrade(btn, btnId, errId, tokenAddr, entryPrice, amtSol){
     const resp=await fetch('/api/trades/copy-from-message',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({token_address:tokenAddr,entry_price:entryPrice,amount_sol:amtSol})
+      body:JSON.stringify({token_address:tokenAddr,entry_price:entryPrice})
     });
     const r=await resp.json();
     if(r.ok){
@@ -7313,12 +7300,10 @@ function tagToken(){
       _tokenSearchBound=true
       inp.addEventListener('input',function(){
         const q=this.value
-        console.log('searching:',q)
         if(q.length<1) return
         fetch('/api/market/tokens?q='+encodeURIComponent(q))
         .then(r=>r.json())
         .then(d=>{
-          console.log('results:',d)
           const el=document.getElementById('tokenResults')
           el.innerHTML=d.length?d.map(t=>`
           <div class="_tokResult" data-symbol="${esc(t.symbol)}" style="padding:10px;border-radius:8px;cursor:pointer;color:#eef1f5;background:#0a0b0e;margin-top:4px">
@@ -7846,7 +7831,6 @@ function _renderTradeTerminalCard(t){
       token_address:t.token_address || '',
     };
   }
-  console.log('[trade]', t);
   var isBuy   = (t.side||'BUY').toUpperCase() !== 'SELL';
   var sideCol = isBuy ? '#00d084' : '#ff4757';
   var entryN  = parseFloat(t.entry_price || t.entry || 0);
@@ -8564,7 +8548,6 @@ async function loadHomeFeed(){
     const _tid = setTimeout(()=>_ctl.abort(), 12000);
     const r = await fetch('/api/social/feed?filter=' + filter, {signal:_ctl.signal});
     clearTimeout(_tid);
-    console.log('[feed] status:', r.status);
     if(!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
     if(data && Array.isArray(data.items)){

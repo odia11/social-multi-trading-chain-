@@ -25,7 +25,7 @@ import re
 import subprocess
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JS = open(REPO + '/static/live-market-pro.js').read()
 HTML = open(REPO + '/templates/live_market_pro.html').read()
 
@@ -183,9 +183,16 @@ check('the input\'s unit follows the chain. It was hardcoded to SOL, so on BSC '
       '_tcUnit(chain)' in side and "'SOL'" not in side.split('lmtd-sol-input-unit')[1][:80])
 check('an EVM buy is labelled as a spend ceiling here too',
       'You spend at most' in side)
-check('the percentage chips are dropped on EVM chains, because they work off the '
-      'SOL balance and would be percentages of the wrong currency entirely',
-      'isEvm ? \'\'' in side)
+check('percentage chips are no longer dropped on EVM chains, and the panel '
+      'records which chain is active for them to price against',
+      'isEvm ? \'\'' not in side and '_lmtdActiveChain = chain' in side)
+set_pct = tcfn('_lmtdSetPct')
+check('...and they read that chain\'s real USDC balance -- this used to read '
+      'the wallet\'s SOL balance, which has nothing to do with a USDC amount '
+      '(clicking 50% on 2 SOL filled in "1", sent and read server-side as '
+      '$1, not half of whatever that SOL is worth)',
+      '_lmtdUsdcBalances[_lmtdActiveChain]' in set_pct
+      and '_lmtdSolBalance' not in set_pct)
 check('a breakdown area is rendered', 'lmtd-quote' in side)
 check('typing re-prices', 'oninput="_lmtdQuote()"' in side)
 
@@ -193,8 +200,13 @@ q = tcfn('_lmtdQuote')
 check('the card prices through the SAME endpoint as Live Market, so the two '
       'surfaces cannot show different numbers for one trade',
       "'/api/trade/quote'" in TC)
-check('...only for an EVM buy — a Solana buy has no ceiling to price against',
-      '_tcIsEvm(chain)' in q and "_lmtdSide !== 'buy'" in q)
+check('...for every BUY on every chain, not EVM only. The old restriction '
+      'rested on "a Solana buy has no ceiling to price against", which '
+      'stopped being true when Solana moved onto the engine — and was never '
+      'true for a buy that has to bridge INTO Solana from another chain. A '
+      'breakdown that appears on some chains and not others is the one a user '
+      'cannot learn to trust',
+      "_lmtdSide !== 'buy'" in q and '_tcIsEvm(chain)' not in q)
 check('pricing is debounced here too', 'clearTimeout' in q and '450' in q)
 check('the breakdown is priced when the panel opens, not only after a keystroke: '
       'the field carries a default amount, and a breakdown that appeared only on '

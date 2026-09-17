@@ -175,12 +175,20 @@ def install(d):
             # source bridge transaction. Keeping the two values coupled made a
             # $1.30 Robinhood buy reserve ~$1+ of SOL before the bridge and fail
             # even though the bridge itself needs only a fraction of that.
-            # The bridge-specific reserve is configurable; 0.001 SOL is the
-            # conservative default and still remains fully user-funded.
-            bridge_reserve = getattr(d, 'SOL_BRIDGE_GAS_RESERVE', 0.001)
-            target_sol = Decimal(str(bridge_reserve or 0.001))
+            #
+            # The fallback below MUST NOT be lower than
+            # _execute_cross_chain_bridge()'s own hard gate on dashboard.py's
+            # SOL_BRIDGE_GAS_RESERVE -- a lower one here is exactly the dead
+            # zone that shipped once already: this "is a top-up even needed"
+            # check reads a wallet's balance as already sufficient, skips the
+            # bootstrap, and the retry immediately dies on the real (higher)
+            # gate with the same "deposit SOL manually" message the bootstrap
+            # exists to avoid. Kept equal to that gate's own default (0.002)
+            # rather than a separately-chosen "conservative" number.
+            bridge_reserve = getattr(d, 'SOL_BRIDGE_GAS_RESERVE', 0.002)
+            target_sol = Decimal(str(bridge_reserve or 0.002))
             if target_sol <= 0:
-                target_sol = Decimal('0.001')
+                target_sol = Decimal('0.002')
             if current_sol >= target_sol:
                 return original(user_id, wallet, evm_address, dest_chain,
                                 token_address, float(ceiling))

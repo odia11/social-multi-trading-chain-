@@ -218,3 +218,22 @@ body.oa-live-v2 .pt-sheet.sell-mode .pt-pct.on{background:rgba(255,83,104,.12)!i
  body.oa-live-v2 .pt-buy-btn,body.oa-live-v2 .pt-sell-btn{min-height:54px!important;border-radius:14px!important;font-size:15px!important}
  body.oa-live-v2 .pt-buy-panel{grid-column:1/-1!important;order:8!important}
 }
+
+/* "Not enough data yet" was an unstyled bare <div> -- plain black text with
+   no sizing, sitting wherever it happened to land in the flow. Centered and
+   muted to read as a real empty state instead of a layout bug. */
+.pt-chart-empty{position:absolute;inset:0 46px 28px 0;display:flex;align-items:center;justify-content:center;color:#565d68;font-size:12px;font-family:'Geist',system-ui,sans-serif}
+
+/* Shown from the moment a card's chart mounts until its first real answer
+   from the server lands (queued behind the shared, deliberately-paced
+   history fetch -- see drainChartFetchQueue()'s own comment for why that
+   pacing exists and must not just be removed). Without this the chart wrap
+   showed nothing but a single flat placeholder candle for however long this
+   card's turn took, which read as broken rather than loading. */
+.pt-chart-wrap{position:relative}
+.pt-chart-loading-shimmer:before{
+  content:"";position:absolute;inset:0;pointer-events:none;z-index:1;
+  background:linear-gradient(100deg,transparent 35%,rgba(247,185,85,.07) 50%,transparent 65%);
+  background-size:200% 100%;animation:pt-chart-shimmer 1.6s ease-in-out infinite;
+}
+@keyframes pt-chart-shimmer{0%{background-position:150% 0}100%{background-position:-50% 0}}

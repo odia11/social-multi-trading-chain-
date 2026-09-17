@@ -18,6 +18,11 @@ Worth stating because the rest of this phase was about the opposite bug: the
 fee itself was already correct here. A bundled Solana buy swaps (spend - fee)
 so the wallet spends exactly what was asked. It is the EVM path that charged
 on top.
+
+This pins the PRE-ENGINE path deliberately (TRADE_ENGINE_SOLANA=0). That path
+still ships as the rollback for the engine, so the three fixes above still
+have to hold in it. The engine path that now serves this route by default is
+covered by test_solana_manual_buy_engine.py.
 """
 import json
 import os
@@ -25,7 +30,7 @@ import subprocess
 import sys
 import tempfile
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 checks = []
 def check(name, cond):
@@ -36,6 +41,12 @@ def check(name, cond):
 PROBE = r'''
 import json, sqlite3, threading, time, sys
 import dashboard as d
+
+# The route below now defaults to the engine. These checks are about the path
+# behind the flag, so it is turned off explicitly rather than left to whatever
+# the default happens to be -- a test that silently changes which code it
+# exercises when a default flips is worse than one that fails.
+d.TRADE_ENGINE_SOLANA = False
 
 out = {}
 d.app.config['TESTING'] = True
@@ -119,7 +130,11 @@ def buy(body=None, path='/api/manual_buy', keep_window=False):
         # Each case here is a fresh decision, not a double-click; the window
         # itself is exercised on purpose further down.
         d._recent_solana_buys.clear()
-    r = c.post(path, json=body if body is not None else {'mint_address': MINT})
+    # A real browser fetches this and sends it back; once the session has a
+    # token the app requires it, so the test has to behave like the browser.
+    tok = (c.get('/api/csrf-token').get_json() or {}).get('token', '')
+    r = c.post(path, json=body if body is not None else {'mint_address': MINT},
+               headers={'X-CSRF-Token': tok})
     return r.status_code, r.get_json()
 
 # ── the happy path: min_trade_size is 1 USDC, and USDC is a dollar ──

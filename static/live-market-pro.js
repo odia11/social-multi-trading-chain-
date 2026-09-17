@@ -223,7 +223,13 @@ function renderChartSvg(idx, candles, currentPrice){
   var plotW=w-46, step=plotW/Math.max(n,1), bodyW=Math.max(2,Math.min(7,step*.62)), chartHtml='';
   for(var gy=0;gy<5;gy++){
     var yy=(priceH/4)*gy, label=max-((max-min)/4)*gy;
-    chartHtml+='<line x1="0" y1="'+yy.toFixed(2)+'" x2="'+plotW.toFixed(2)+'" y2="'+yy.toFixed(2)+'" stroke="#1a2530" stroke-width="1" vector-effect="non-scaling-stroke"></line>';
+    // Snapped to a half-pixel: a 1px stroke centered on a whole pixel
+    // straddles two rows and renders as a soft 2px blur, which is exactly
+    // what made these read as fuzzy next to TradingView's crisp gridlines.
+    // Pure decoration (not bound to any data point), so this is safe to
+    // round without touching how the candles themselves are placed.
+    var yySnap=Math.round(yy)+0.5;
+    chartHtml+='<line x1="0" y1="'+yySnap+'" x2="'+plotW.toFixed(2)+'" y2="'+yySnap+'" stroke="#1a2530" stroke-width="1" vector-effect="non-scaling-stroke"></line>';
     chartHtml+='<text x="'+(plotW+5).toFixed(2)+'" y="'+Math.max(10,yy+4).toFixed(2)+'" fill="#657180" font-size="9" font-family="monospace">'+fmtPrice(label).replace('$','')+'</text>';
   }
   candles.forEach(function(c,i){
@@ -415,12 +421,24 @@ function drainChartFetchQueue(){
     });
   },wait);
 }
-function fetchChart(mint, tf, pairAddr, chain, state){
+// `priority` jumps a job ahead of every already-queued non-priority one
+// (but behind other priority jobs, so it stays first-in-first-out within
+// each tier) -- a card the user is actually looking at right now shouldn't
+// sit behind ones that were merely pre-warmed 250px early. Total request
+// rate is unchanged; only the order is, which is what actually makes the
+// chart someone is looking at feel instant instead of a coin flip.
+function fetchChart(mint, tf, pairAddr, chain, state, priority){
   var url = '/api/chart/'+encodeURIComponent(mint)+'?tf='+encodeURIComponent(tf);
   if(pairAddr) url += '&pair='+encodeURIComponent(pairAddr);
   if(chain) url += '&chain='+encodeURIComponent(chain);
   return new Promise(function(resolve){
-    _chartFetchQueue.push({url:url,resolve:resolve,state:state});
+    var job = {url:url,resolve:resolve,state:state,priority:!!priority};
+    if(job.priority){
+      var i=0; while(i<_chartFetchQueue.length && _chartFetchQueue[i].priority) i++;
+      _chartFetchQueue.splice(i,0,job);
+    } else {
+      _chartFetchQueue.push(job);
+    }
     drainChartFetchQueue();
   });
 }
@@ -438,8 +456,12 @@ function chartTick(idx){
   var st = _chartTimers[idx];
   if(!st || st.destroyed) return;
   var requestedTf=st.tf;
-  fetchChart(st.mint, requestedTf, st.pair, st.chain, st).then(function(r){
+  fetchChart(st.mint, requestedTf, st.pair, st.chain, st, st.visible).then(function(r){
     if(!st || st.destroyed || st.tf!==requestedTf) return;
+    // Whatever came back, it's an answer -- the placeholder shimmer's job
+    // (marking "not the real chart yet") is done either way.
+    var wrapT=document.getElementById('pt-chart-wrap-'+idx);
+    if(wrapT) wrapT.classList.remove('pt-chart-loading-shimmer');
     if(r && r.candles && r.candles.length){
       // Kept so a live price can redraw this chart without fetching the
       // candles again -- the candles are the shape, the price is the movement.
@@ -532,14 +554,19 @@ function startLivePrices(){
 // the exact prior behavior.
 function primeChart(idx, mint, pairAddr, chain, seedPrice){
   if(_chartTimers[idx]) return _chartTimers[idx];
-  var st = {destroyed:false, mint:mint, pair:pairAddr, chain:(chain||'solana'), seedPrice:Number(seedPrice)||0, tf:'5m', timer:null};
+  var st = {destroyed:false, mint:mint, pair:pairAddr, chain:(chain||'solana'), seedPrice:Number(seedPrice)||0, tf:'5m', timer:null, visible:false};
   _chartTimers[idx] = st;
   // Paint one still-forming candle from the scanner's observed real price.
-  // Provider history replaces it as soon as it arrives.
+  // Provider history replaces it as soon as it arrives. The shimmer marks
+  // that this single flat candle is a placeholder, not the real chart --
+  // cleared the moment chartTick() gets any answer at all, real history or
+  // not (see that function's own comment).
   if(st.seedPrice>0){
     st.price=st.seedPrice;
     st.candles=[startObservedCandle(st,st.seedPrice)];
     renderChartSvg(idx,st.candles,st.seedPrice);
+    var wrap0=document.getElementById('pt-chart-wrap-'+idx);
+    if(wrap0) wrap0.classList.add('pt-chart-loading-shimmer');
   }
   return st;
 }
@@ -663,7 +690,20 @@ function observeCards(){
   _cardObserver = new IntersectionObserver(function(entries){
     entries.forEach(function(entry){
       var idx = entry.target.dataset.idx;
-      if(entry.isIntersecting) activateCard(entry.target);
+      if(entry.isIntersecting){
+        var st = _chartTimers[idx];
+        if(st){
+          // isIntersecting fires as soon as a card enters the 250px prefetch
+          // margin below -- that is NOT the same as actually being on
+          // screen. boundingClientRect is always relative to the true
+          // viewport regardless of rootMargin, so this is the one check
+          // that tells a card someone can see right now from one merely
+          // being warmed up early.
+          var r = entry.boundingClientRect;
+          st.visible = r.bottom > 0 && r.top < (window.innerHeight || document.documentElement.clientHeight);
+        }
+        activateCard(entry.target);
+      }
       else unmountChart(idx);
     });
   }, {rootMargin:'250px 0px', threshold:0.01});
@@ -696,13 +736,13 @@ function tfPill(tf, label, active){
   return '<button class="pt-tf-pill'+(active?' active':'')+'" data-tf="'+tf+'">'+label+'</button>';
 }
 /* Which chain a token/trade lives on -- feeds a token's Buy/Sell routing
-   (confirmBuy/handleSell below) as well as this badge, so a Solana token
-   always spends SOL via /api/instant-trade, BSC always spends USDC via
-   /api/bsc/trade/*, and Base/Arbitrum/Polygon/Robinhood Chain always spend
-   their own chain's USD stablecoin via the generic /api/evm/trade/* (see
-   EVM_TRADE_CHAINS below). Defaults to 'solana' for any candidate that
-   omits it (every pre-multi-chain scanner response), so old cached
-   responses never render as blank/unlabeled. */
+   (confirmBuy/handleSell below) as well as this badge: a Solana token routes
+   through /api/instant-trade, BSC through /api/bsc/trade/*, and
+   Base/Arbitrum/Polygon/Robinhood Chain through the generic /api/evm/trade/*
+   (see EVM_TRADE_CHAINS below) -- every one of them funded in USDC, Solana
+   included (see confirmBuy's own comment). Defaults to 'solana' for any
+   candidate that omits it (every pre-multi-chain scanner response), so old
+   cached responses never render as blank/unlabeled. */
 var EVM_TRADE_CHAINS = {bsc:1, base:1, arbitrum:1, polygon:1, robinhood:1};
 var CHAIN_LABELS = {bsc:'BSC', base:'BASE', arbitrum:'ARB', polygon:'POLY', robinhood:'HOOD'};
 // What the user is told they are spending: USDC, on every chain.
@@ -1805,7 +1845,15 @@ function fetchQuote(idx, amt){
     _quotes[idx] = {
       id: d.quote_id, amt: amt,
       expiresAt: Date.now() + (Number(d.expires_in_seconds) || 0) * 1000,
-      purchase: d.token_purchase_usd
+      purchase: d.token_purchase_usd,
+      // A trade that has to move money between chains executes down a
+      // different path, and it cannot be worked out from the token's chain
+      // alone: it depends on where THIS user's dollars happen to be, which
+      // only the server knows.
+      bridge: !!d.bridge_required,
+      sourceChain: d.source_chain || '',
+      gasBlocked: !!d.native_gas_required,
+      gasReason: (d.native_gas && d.native_gas.reason) || ''
     };
     renderQuote(idx, d, t);
   }).catch(function(){
@@ -1813,6 +1861,10 @@ function fetchQuote(idx, amt){
     if(box) box.innerHTML = '<div class="pt-quote-bad">Could not reach the pricing service</div>';
   });
 }
+
+var PT_CHAIN_NAMES = {solana:'Solana', base:'Base', bsc:'BNB Chain',
+                     arbitrum:'Arbitrum', polygon:'Polygon',
+                     robinhood:'Robinhood'};
 
 var COST_LABELS = {
   source_gas:       'Network fee',
@@ -1834,10 +1886,57 @@ function renderQuote(idx, d, t){
     rows += '<div class="pt-quote-row"><span>' + esc(COST_LABELS[k] || k) + '</span>'
           + '<span>-' + esc(Number(kinds[k]).toFixed(2)) + '</span></div>';
   }
+  // Where the money comes FROM, shown only when that is not the obvious
+  // answer. On a same-chain buy the route is noise; on a bridged one it is
+  // the single most surprising thing about the trade.
+  var routeRows = '';
+  if(d.bridge_required){
+    routeRows =
+        '<div class="pt-quote-row"><span>Route</span><span>'
+      +   esc(PT_CHAIN_NAMES[d.source_chain] || d.source_chain) + ' &rarr; '
+      +   esc(PT_CHAIN_NAMES[d.destination_chain] || d.destination_chain)
+      + '</span></div>'
+      + (d.estimated_time_seconds
+          ? '<div class="pt-quote-row"><span>Estimated time</span><span>~'
+            + esc(Math.max(1, Math.round(d.estimated_time_seconds/60))) + ' min</span></div>'
+          : '')
+      // What is GUARANTEED to arrive, next to what is expected. The gap
+      // between them is the bridge's own slippage, and it is the number a
+      // user is entitled to before agreeing rather than after.
+      + (d.bridge_minimum_out_usd
+          ? '<div class="pt-quote-row"><span>Arrives on '
+            + esc(PT_CHAIN_NAMES[d.destination_chain] || d.destination_chain)
+            + '</span><span>' + esc(Number(d.bridge_expected_out_usd).toFixed(2))
+            + ' USDC</span></div>'
+            + '<div class="pt-quote-row"><span>Guaranteed minimum</span><span>'
+            + esc(Number(d.bridge_minimum_out_usd).toFixed(2)) + ' USDC</span></div>'
+          : '');
+  }
+
+  // NATIVE GAS. The bridge's first transaction is signed and paid for in the
+  // source chain's own token, and OrcAgent does not cover it -- so if the
+  // wallet cannot pay, that is said here, with the amount, before the button
+  // is pressed rather than after the money has started moving.
+  var gasWarn = '';
+  var g = d.native_gas;
+  if(d.native_gas_required && g){
+    gasWarn =
+        '<div class="pt-quote-bad">You need about '
+      +   esc(Number(g.estimated_native_gas).toFixed(6)) + ' ' + esc(g.symbol)
+      +   ' on ' + esc(PT_CHAIN_NAMES[g.chain] || g.chain)
+      +   ' to pay the network for this transfer — you have '
+      +   esc(Number(g.have).toFixed(6)) + ' ' + esc(g.symbol) + '.'
+      + '</div>'
+      + '<div class="pt-quote-note">That is an estimate, not an exact figure: '
+      + 'the network price moves. OrcAgent does not pay it for you.</div>';
+  }
+
   box.innerHTML =
       '<div class="pt-quote-row pt-quote-top"><span>You spend</span><span>'
     +   esc(Number(d.max_spend_usd).toFixed(2)) + ' ' + esc(cur) + '</span></div>'
+    + routeRows
     + rows
+    + gasWarn
     + '<div class="pt-quote-row pt-quote-get"><span>You get</span><span>'
     +   esc(Number(d.token_purchase_usd).toFixed(2)) + ' ' + esc(cur)
     +   ' of $' + esc(t.symbol || '') + '</span></div>'
@@ -1910,11 +2009,11 @@ function confirmBuy(idx){
     btn.disabled = true;
     if(_sheetIdx === null) btn.textContent = 'Buying…';
   }
-  // Which chain this token lives on decides both the endpoint and the
-  // currency the entered amount is denominated in: BSC keeps its own
-  // dedicated route, Base/Arbitrum/Polygon share the generic /api/evm/*
-  // route (chain passed in the body), and only a plain Solana token ever
-  // spends SOL via /api/instant-trade -- the three EVM engines can never be
+  // Which chain this token lives on decides only the ENDPOINT -- the entered
+  // amount is always a USDC figure, on every chain including Solana: BSC
+  // keeps its own dedicated route, Base/Arbitrum/Polygon share the generic
+  // /api/evm/* route (chain passed in the body), and a plain Solana token
+  // goes through /api/instant-trade -- the three EVM engines can never be
   // crossed with each other or with Solana here.
   var isBsc = t.chain === 'bsc';
   var isEvm = !!EVM_TRADE_CHAINS[t.chain];
@@ -1934,6 +2033,30 @@ function confirmBuy(idx){
   // the same intent. The buy route prices correctly either way, so this is
   // about honouring what was on screen, not about correctness of the total.
   var q = _quotes[idx];
+
+  // A bridged trade does not finish inside this request, so it cannot be run
+  // through the same then()-chain as a same-chain buy: that chain decides
+  // "bought" or "failed" from one response, and the answer here is neither
+  // for another few minutes. It goes to the module that follows a trade
+  // instead -- which also survives the page being closed.
+  if(q && q.bridge && q.id && q.amt === amt && q.expiresAt > Date.now()
+     && window.OrcaCrossChain){
+    if(q.gasBlocked){
+      showMsg(msgEl, q.gasReason || 'You need native gas on the source chain first', false);
+      if(btn){ btn.disabled = false; btn.textContent = 'Buy'; }
+      return;
+    }
+    showMsg(msgEl, 'Starting…', true);
+    window.OrcaCrossChain.execute(q.id, {symbol: t.symbol, token_address: t.mint})
+      .then(function(started){
+        if(btn){ btn.disabled = false; btn.textContent = 'Buy'; }
+        showMsg(msgEl, started
+          ? 'Moving your USDC — this keeps going if you close the page'
+          : 'The trade was not started', !!started);
+      });
+    return;
+  }
+
   if(isEvm && q && q.id && q.amt === amt && q.expiresAt > Date.now()){
     url  = '/api/trade/execute';
     body = {quote_id: q.id};
@@ -2557,7 +2680,18 @@ document.addEventListener('DOMContentLoaded', function(){
 
   _prefetchBalances();
   renderSortList();
-  loadWatchlistSet().then(function(){ loadFeed(); });
+  // These two used to be chained (watchlist, then feed) so every card's
+  // star could be right the instant it first painted -- but that meant the
+  // whole feed request couldn't even START until the watchlist round trip
+  // had finished, purely serial for no dependency that actually needs it.
+  // Now both fire at once; watchSet is a global read at render time, so a
+  // card still gets its correct star the moment loadFeed()'s own fetch
+  // resolves UNLESS the watchlist genuinely lost the race, in which case
+  // the next 15s poll (or any interaction) picks it up -- a self-healing
+  // edge case that beats the feed waiting on an unrelated request every
+  // single load.
+  loadWatchlistSet();
+  loadFeed();
   loadSurges();
   loadTape();
   loadTraders();

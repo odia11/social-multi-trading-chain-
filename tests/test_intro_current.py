@@ -20,7 +20,8 @@ Change the code and the intro has to follow.
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = open(REPO + '/dashboard.html', encoding='utf-8').read()
 SRC = open(REPO + '/dashboard.py', encoding='utf-8').read()
 

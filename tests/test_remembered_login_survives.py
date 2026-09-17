@@ -53,7 +53,8 @@ second tab had rotated it, cleared when genuinely dead.
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JS = open(REPO + '/static/dashboard.js', encoding='utf-8').read()
 
 checks = []

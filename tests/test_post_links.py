@@ -9,7 +9,8 @@ own.
 The real functions are lifted out of static/dashboard.js and run in node."""
 import json, re, subprocess, sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JS   = open(REPO + '/static/dashboard.js').read()
 
 checks = []

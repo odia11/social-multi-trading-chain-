@@ -15,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 checks = []
 def check(name, cond):
@@ -57,7 +57,10 @@ d._get_0x_quote = fake_0x
 d._te_swap_provider = lambda chain: d.ZeroExProvider(fake_0x)
 
 def post(body):
-    r = c.post('/api/trade/quote', json=body)
+    # A real browser fetches this and sends it back; once the session has a
+    # token the app requires it, so the test has to behave like the browser.
+    tok = (c.get('/api/csrf-token').get_json() or {}).get('token', '')
+    r = c.post('/api/trade/quote', json=body, headers={'X-CSRF-Token': tok})
     try:
         return r.status_code, r.get_json()
     except Exception:

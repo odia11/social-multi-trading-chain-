@@ -303,6 +303,10 @@ const TRADE_DATA = ROWS.map(r => ({
 }));
 
 function applyFilters() {
+  // The filter bar only exists when there are trades to filter (see the
+  // {% if trades %} guard around it); with none, this still runs once at
+  // the bottom of the page and would otherwise throw on the first line.
+  if (!document.getElementById('f-token')) return;
   const tok  = document.getElementById('f-token').value.trim().toLowerCase();
   const res  = document.getElementById('f-result').value;
   const from = document.getElementById('f-from').value;

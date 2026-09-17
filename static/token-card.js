@@ -82,6 +82,11 @@ var _lmtdLayout     = 'focus';
 var _lmtdTf         = '5m';
 var _lmtdSide       = 'buy';
 var _lmtdSolBalance = 0;
+// Real per-chain USDC balances (solana + every EVM chain), for the quick-
+// percent chips below -- see _lmtdSetPct's own comment for the bug this
+// replaced. Keyed the same as EVM_CHAINS plus 'solana'.
+var _lmtdUsdcBalances = {};
+var _lmtdActiveChain  = 'solana'; // set by _lmtdSidePanelHtml() each render -- which balance _lmtdSetPct() should read
 var _lmtdChart      = null;
 var _lmtdSeries     = null;
 var _lmtdVolSeries  = null;
@@ -109,6 +114,13 @@ var _lmtdHoldersTotal = null; // total from the last /holders fetch; null until 
 function _lmtdFetchBalance(){
   fetch('/api/wallet/balance', {credentials:'include'}).then(function(r){return r.json();}).then(function(d){
     if(d.ok) _lmtdSolBalance = d.sol;
+  }).catch(function(){});
+  // Every chain's real USDC balance in one call (see that endpoint's own
+  // comment) -- what the quick-percent chips actually need, since every buy
+  // on this panel, Solana included, is denominated in USDC.
+  fetch('/api/wallet/usdc-summary', {credentials:'include'}).then(function(r){return r.json();}).then(function(d){
+    if(!d || !d.ok) return;
+    _lmtdUsdcBalances = Object.assign({solana: d.solana_usdc || 0}, d.evm_chains || {});
   }).catch(function(){});
 }
 
@@ -588,30 +600,29 @@ function _lmtdSidePanelHtml(p, sym, addr){
   var buys  = p.txns&&p.txns.h24 ? p.txns.h24.buys : 0;
   var sells = p.txns&&p.txns.h24 ? p.txns.h24.sells : 0;
   var chain = (p && p.chainId) || 'solana';
-  var isEvm = _tcIsEvm(chain);
   var unit  = _tcUnit(chain);
-  // The percentage chips work off the wallet's SOL balance. On an EVM chain
-  // the trade is denominated in USDC, so those percentages would be of the
-  // wrong currency entirely -- they are left out rather than shown against a
-  // balance that has nothing to do with the amount being spent.
-  var pctChipsHtml = isEvm ? ''
-    : (_lmtdSide === 'buy'
-        ? [25,50,75,100].map(function(pct){
-            return '<button class="lmtd-pct-btn" onclick="_lmtdSetPct('+pct+')">'+(pct===100?'MAX':pct+'%')+'</button>';
-          }).join('')
-        : '<button class="lmtd-pct-btn" onclick="_lmtdSetPct(100)">MAX</button>');
+  _lmtdActiveChain = chain; // read by _lmtdSetPct() -- see its own comment
+  // Real per-chain USDC balances are available now (_lmtdUsdcBalances, from
+  // /api/wallet/usdc-summary), so every chain gets working percent chips --
+  // this used to hide them on EVM chains specifically because the only
+  // balance on hand was SOL, which has nothing to do with a USDC amount.
+  // That reasoning applies to Solana buys too now (see _lmtdSetPct), it was
+  // just never extended there.
+  var pctChipsHtml = _lmtdSide === 'buy'
+    ? [25,50,75,100].map(function(pct){
+        return '<button class="lmtd-pct-btn" onclick="_lmtdSetPct('+pct+')">'+(pct===100?'MAX':pct+'%')+'</button>';
+      }).join('')
+    : '<button class="lmtd-pct-btn" onclick="_lmtdSetPct(100)">MAX</button>';
   return ''
     +'<div class="lmtd-side-tabs">'
       +'<button class="lmtd-side-tab buy'+(_lmtdSide==='buy'?' active':'')+'" onclick="_lmtdSetSide(\'buy\')">Buy</button>'
       +'<button class="lmtd-side-tab sell'+(_lmtdSide==='sell'?' active':'')+'" onclick="_lmtdSetSide(\'sell\')">Sell</button>'
     +'</div>'
-    // The unit follows the chain. It was hardcoded to SOL, so on BSC the
-    // field said SOL while the amount was spent as USDC.
-    +(isEvm && _lmtdSide === 'buy'
+    +(_lmtdSide === 'buy'
         ? '<div class="lmtd-spend-label">You spend at most</div>' : '')
     +'<div class="lmtd-sol-input-wrap">'
-      +'<input class="lmtd-sol-input" id="lmtd-sol-input" type="number" min="0.001" step="'
-      +(isEvm?'1':'0.1')+'" value="'+(isEvm?'10':'0.1')+'" oninput="_lmtdQuote()" onclick="event.stopPropagation()">'
+      +'<input class="lmtd-sol-input" id="lmtd-sol-input" type="number" min="0.01" step="1"'
+      +' value="10" oninput="_lmtdQuote()" onclick="event.stopPropagation()">'
       +'<span class="lmtd-sol-input-unit">'+_esc(unit)+'</span>'
     +'</div>'
     +(pctChipsHtml ? '<div class="lmtd-pct-row">'+pctChipsHtml+'</div>' : '')
@@ -634,6 +645,11 @@ function _lmtdSidePanelHtml(p, sym, addr){
 var _lmtdQuoteTimer = null;
 var _lmtdQuoteData  = null;
 
+var _TC_CHAIN_NAMES = {solana:'Solana', base:'Base', bsc:'BNB Chain',
+                       arbitrum:'Arbitrum', polygon:'Polygon',
+                       robinhood:'Robinhood'};
+function _tcChainName(c){ return _TC_CHAIN_NAMES[c] || c || ''; }
+
 var _TC_COST_LABELS = {
   source_gas:       'Network fee',
   destination_gas:  'Network fee (destination)',
@@ -649,7 +665,12 @@ function _lmtdQuote(){
   var box = document.getElementById('lmtd-quote');
   if(!box) return;
   var chain = (_lmtdPair && _lmtdPair.chainId) || 'solana';
-  if(!_tcIsEvm(chain) || _lmtdSide !== 'buy'){
+  // Every BUY is priced, on every chain. This used to price EVM only, on the
+  // reasoning that a Solana buy has no ceiling to show -- which stopped being
+  // true when Solana moved onto the engine, and was never true for a buy that
+  // has to bridge INTO Solana from somewhere else. A breakdown that appears
+  // on some chains and not others is the one a user cannot learn to trust.
+  if(_lmtdSide !== 'buy'){
     box.style.display = 'none'; box.innerHTML = ''; return;
   }
   var input = document.getElementById('lmtd-sol-input');
@@ -690,12 +711,58 @@ function _lmtdFetchQuote(amt, chain){
       rows += '<div class="lmtd-quote-row"><span>' + _esc(_TC_COST_LABELS[k] || k)
             + '</span><span>-' + _esc(Number(kinds[k]).toFixed(2)) + '</span></div>';
     }
+
+    // Where the money comes FROM. Shown only when it is not the obvious
+    // answer: on a same-chain buy the route is not information, it is noise.
+    var routeRow = '';
+    if(d.bridge_required){
+      routeRow =
+          '<div class="lmtd-quote-row lmtd-quote-route"><span>Route</span><span>'
+        +   _esc(_tcChainName(d.source_chain)) + ' &rarr; '
+        +   _esc(_tcChainName(d.destination_chain)) + '</span></div>'
+        + (d.estimated_time_seconds
+            ? '<div class="lmtd-quote-row"><span>Estimated time</span><span>~'
+              + _esc(Math.max(1, Math.round(d.estimated_time_seconds / 60)))
+              + ' min</span></div>'
+            : '')
+        // Expected next to guaranteed. The gap is the bridge's own slippage.
+        + (d.bridge_minimum_out_usd
+            ? '<div class="lmtd-quote-row"><span>Arrives on '
+              + _esc(_tcChainName(d.destination_chain)) + '</span><span>'
+              + _esc(Number(d.bridge_expected_out_usd).toFixed(2)) + ' USDC</span></div>'
+              + '<div class="lmtd-quote-row"><span>Guaranteed minimum</span><span>'
+              + _esc(Number(d.bridge_minimum_out_usd).toFixed(2)) + ' USDC</span></div>'
+            : '');
+    }
+
+    // NATIVE GAS, said before the button is pressed rather than after.
+    // The bridge's first transaction is signed and paid for in the source
+    // chain's own token, and OrcAgent does not cover it -- so if the wallet
+    // cannot pay, that is the answer now, with the amount, not a failure
+    // halfway through.
+    var gasWarn = '';
+    var g = d.native_gas;
+    if(d.native_gas_required && g){
+      gasWarn =
+          '<div class="lmtd-quote-bad">'
+        +   'You need about ' + _esc(Number(g.estimated_native_gas).toFixed(6)) + ' '
+        +   _esc(g.symbol) + ' on ' + _esc(_tcChainName(g.chain))
+        +   ' to pay the network for this transfer. You have '
+        +   _esc(Number(g.have).toFixed(6)) + ' ' + _esc(g.symbol) + '.'
+        +   '<div class="lmtd-quote-note">This is an estimate, not an exact '
+        +   'figure — the network price moves. OrcAgent does not pay it for you.'
+        +   '</div>'
+        + '</div>';
+    }
+
     el.innerHTML =
-        '<div class="lmtd-quote-row lmtd-quote-top"><span>You spend</span><span>'
+        '<div class="lmtd-quote-row lmtd-quote-top"><span>You spend at most</span><span>'
       +   _esc(Number(d.max_spend_usd).toFixed(2)) + ' USDC</span></div>'
+      + routeRow
       + rows
-      + '<div class="lmtd-quote-row lmtd-quote-get"><span>You get</span><span>'
+      + '<div class="lmtd-quote-row lmtd-quote-get"><span>Buys</span><span>'
       +   _esc(Number(d.token_purchase_usd).toFixed(2)) + ' USDC worth</span></div>'
+      + gasWarn
       + (kinds.slippage_reserve
           ? '<div class="lmtd-quote-note">The slippage reserve is held back against '
             + 'price movement, not charged. Anything unused stays yours.</div>' : '');
@@ -716,8 +783,28 @@ function _lmtdWireSidePanel(sym, addr){
     var input     = document.getElementById('lmtd-sol-input');
     var amount    = input ? input.value : '0.1';
     var pairAddr  = (_lmtdPair && _lmtdPair.pairAddress) || '';
-    executeTrade(sym, pairAddr, _lmtdSide, amount, addr, btn,
-                 (_lmtdPair && _lmtdPair.chainId) || 'solana');
+    var chain     = (_lmtdPair && _lmtdPair.chainId) || 'solana';
+
+    // A trade that has to bridge runs on the quote the user was just shown --
+    // not on a fresh one, and not through the same-chain route, which has no
+    // bridge to run. Everything else is unchanged.
+    var q = _lmtdQuoteData;
+    if(_lmtdSide === 'buy' && q && q.bridge_required && q.quote_id
+       && window.OrcaCrossChain){
+      if(q.native_gas_required){
+        _toast((q.native_gas && q.native_gas.reason)
+               || 'You need native gas on the source chain first', false);
+        return;
+      }
+      btn.disabled = true;
+      var _label = btn.textContent;
+      btn.textContent = 'Starting…';
+      window.OrcaCrossChain.execute(q.quote_id, {symbol: sym, token_address: addr})
+        .then(function(){ btn.disabled = false; btn.textContent = _label; });
+      return;
+    }
+
+    executeTrade(sym, pairAddr, _lmtdSide, amount, addr, btn, chain);
   });
 }
 
@@ -763,12 +850,21 @@ function _lmtdSetSide(side){
   _lmtdWireSidePanel(sym, addr);
 }
 
+// Every buy on this panel is denominated in USDC, Solana included -- the
+// input's value is sent to the server as amount_usdc regardless of chain
+// (see confirmBuy()/live-market-pro.js for the EVM/BSC/Solana routing, all
+// three read the same field as a USDC amount). This used to fill in a
+// percentage of _lmtdSolBalance -- the wallet's native SOL holdings -- which
+// has no relationship to a USDC figure at all; clicking 50% on a wallet
+// holding 2 SOL filled in "1", sent and interpreted server-side as $1, not
+// "half of whatever USDC that SOL is worth". Reads the real per-chain USDC
+// balance instead, the same one /wallet shows.
 function _lmtdSetPct(pct){
   var input = document.getElementById('lmtd-sol-input');
   if(!input) return;
-  var bal = _lmtdSolBalance || 0;
-  var amt = pct===100 ? Math.max(0, bal-0.01) : bal*pct/100;
-  input.value = amt.toFixed(4);
+  var bal = _lmtdUsdcBalances[_lmtdActiveChain] || 0;
+  var amt = pct===100 ? bal : bal*pct/100;
+  input.value = amt.toFixed(2);
 }
 
 /* ── holders tab ── */

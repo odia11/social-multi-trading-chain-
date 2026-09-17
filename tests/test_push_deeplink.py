@@ -13,7 +13,8 @@ The service worker is executed in node against a fake `clients` registry, so
 these drive the real handler rather than reading it."""
 import json, os, re, subprocess, sys, tempfile
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SW   = open(REPO + '/static/sw.js').read()
 LM   = open(REPO + '/static/live-market-pro.js').read()
 PY_  = open(REPO + '/dashboard.py').read()

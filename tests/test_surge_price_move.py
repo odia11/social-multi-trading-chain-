@@ -14,7 +14,8 @@ The real _evaluate is extracted from surge_radar.py; nothing is stubbed but
 the module-level constants it reads."""
 import re, sys, time
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC  = open(REPO + '/surge_radar.py').read()
 JS   = open(REPO + '/static/live-market-pro.js').read()
 CSS  = open(REPO + '/templates/live_market_pro.html').read()

@@ -10,7 +10,8 @@ radar itself, so it never reaches the alert path at all.
 dashboard is replaced by a stub module before surge_radar imports it."""
 import sys, time, types
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
 checks = []

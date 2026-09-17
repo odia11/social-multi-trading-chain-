@@ -16,7 +16,8 @@ import re
 import sys
 from html.parser import HTMLParser
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INFO = open(REPO + '/templates/info.html').read()
 SRC = open(REPO + '/dashboard.py').read()
 CSS = open(REPO + '/static/navbar.css').read()

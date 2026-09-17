@@ -15,7 +15,8 @@ import ast
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/tools/why_stuck.py').read()
 
 # A sentence a user reads must not depend on where the source happens to

@@ -25,7 +25,8 @@ import ast
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+import os
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py', encoding='utf-8').read()
 INSTALL = open(REPO + '/deploy/install.sh', encoding='utf-8').read()
 TREE = ast.parse(SRC)

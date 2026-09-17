@@ -3,6 +3,7 @@
 Loads route-critical styles before first paint and keeps page-specific scripts
 deferred. The browser should never render legacy markup and restyle it later.
 """
+from flask import g
 
 
 def install(appmod) -> None:
@@ -32,9 +33,20 @@ def install(appmod) -> None:
                 if asset not in html:
                     tags.append(f'<script src="{src}" defer{extra}></script>')
 
+            # This module's own after_request hook is registered before
+            # security_hardening's, so by Flask's LIFO after_request order it
+            # runs AFTER security_hardening has already added nonces to
+            # whatever script tags existed at that point -- any inline
+            # <script> added here would miss that pass and be silently
+            # dropped by the CSP's script-src-elem nonce requirement. Reading
+            # the same per-request nonce security_hardening put in g sidesteps
+            # the ordering entirely.
+            _nonce = getattr(g, 'orca_csp_nonce', '')
+            _nonce_attr = f' nonce="{_nonce}"' if _nonce else ''
+
             if 'data-orca-bfcache-guard="1"' not in html:
                 tags.append(
-                    '<script data-orca-bfcache-guard="1">'
+                    f'<script{_nonce_attr} data-orca-bfcache-guard="1">'
                     '(function(){window.addEventListener("pageshow",function(e){'
                     'if(!e.persisted)return;e.stopImmediatePropagation();'
                     'setTimeout(function(){document.dispatchEvent(new CustomEvent("orca:bfcache-restored"));},0);'
@@ -61,7 +73,7 @@ def install(appmod) -> None:
                 script('portfolio-redesign.js', '/static/portfolio-redesign.js?v=9')
                 script('portfolio-assets.js', '/static/portfolio-assets.js?v=1')
             elif path == '/live-market':
-                style('live-market-redesign.css', '/static/live-market-redesign.css?v=7')
+                style('live-market-redesign.css', '/static/live-market-redesign.css?v=8')
                 style('live-market-final.css', '/static/live-market-final.css?v=4', ' data-oa-live-final="1"')
                 script('live-market-redesign.js', '/static/live-market-redesign.js?v=5')
                 script('live-market-hotfix.js', '/static/live-market-hotfix.js?v=8', ' data-oa-live-hotfix="1"')
@@ -73,6 +85,7 @@ def install(appmod) -> None:
                 style('home-mobile-polish.css', '/static/home-mobile-polish.css?v=5', ' media="(max-width:767px)"')
                 style('home-composer-mobile.css', '/static/home-composer-mobile.css?v=1', ' media="(max-width:767px)"')
                 style('home-desktop.css', '/static/home-desktop.css?v=1', ' media="(min-width:1025px)"')
+                script('home-desktop.js', '/static/home-desktop.js?v=1')
 
             # Chromium/Android uses document.documentElement as the root
             # scrollingElement in standards mode. The previous hotfix made body
@@ -84,7 +97,7 @@ def install(appmod) -> None:
             # vertical scrollers.
             if path in ('/', '/wallet') and 'data-oa-native-mobile-scroll="1"' not in html:
                 tags.append(
-                    '<script data-oa-native-mobile-scroll="1">'
+                    f'<script{_nonce_attr} data-oa-native-mobile-scroll="1">'
                     '(function(){if(window.matchMedia&&window.matchMedia("(max-width:767px)").matches)'
                     'document.documentElement.classList.add("oa-native-mobile-scroll");})();'
                     '</script>'

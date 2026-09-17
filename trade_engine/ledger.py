@@ -52,15 +52,41 @@ QUOTED = 'QUOTED'
 ROUTE_SELECTED = 'ROUTE_SELECTED'
 RESERVED = 'RESERVED'
 EXECUTING = 'EXECUTING'
+# ── the cross-chain leg ───────────────────────────────────────────────────
+# AWAITING_SOURCE is the only state in this machine that means "we may have
+# sent something and do not yet know". A crash here is the expensive one: the
+# origin transaction may be on chain, so it can never be retried blindly, and
+# the reservation must not be released. It exists as its own state precisely
+# so a restart can tell it apart from RESERVED, where nothing has moved.
+AWAITING_SOURCE = 'AWAITING_SOURCE'
 BRIDGING = 'BRIDGING'
+# The bridge settled and the money is on the destination chain, but the swap
+# has not started. Separate from SWAPPING so a restart knows whether a
+# destination transaction may already exist.
+DEST_RECEIVED = 'DEST_RECEIVED'
 SWAPPING = 'SWAPPING'
 CONFIRMING = 'CONFIRMING'
 COMPLETED = 'COMPLETED'
 FAILED = 'FAILED'
 REQUOTE_REQUIRED = 'REQUOTE_REQUIRED'
 CANCELLED = 'CANCELLED'
+# A bridge that failed after the origin leg landed owes the user their money
+# back on the origin chain. That is the provider's job, not a swap, so it gets
+# its own states rather than being called FAILED and forgotten.
+REFUND_PENDING = 'REFUND_PENDING'
+REFUNDED = 'REFUNDED'
+# Everything that needs a person. Terminal for the engine, not for the user:
+# the reservation stays held, because the alternative is releasing a claim on
+# money whose whereabouts nobody has established.
+MANUAL_REVIEW = 'MANUAL_REVIEW'
 
-TERMINAL = frozenset({COMPLETED, FAILED, CANCELLED})
+TERMINAL = frozenset({COMPLETED, FAILED, CANCELLED, REFUNDED, MANUAL_REVIEW})
+
+# States a cross-chain trade can be resumed from after a restart. The
+# recovery worker reads exactly this set; a state not in it is either
+# finished or has never touched the outside world.
+RESUMABLE = frozenset({AWAITING_SOURCE, BRIDGING, DEST_RECEIVED, SWAPPING,
+                       CONFIRMING, REFUND_PENDING})
 
 # Every legal move. Anything absent is a bug in the caller, not a state the
 # trade can reach.
@@ -69,15 +95,21 @@ TRANSITIONS: dict = {
     QUOTED: {ROUTE_SELECTED, REQUOTE_REQUIRED, FAILED, CANCELLED},
     ROUTE_SELECTED: {RESERVED, REQUOTE_REQUIRED, FAILED, CANCELLED},
     RESERVED: {EXECUTING, REQUOTE_REQUIRED, FAILED, CANCELLED},
-    EXECUTING: {BRIDGING, SWAPPING, FAILED},
-    BRIDGING: {SWAPPING, REQUOTE_REQUIRED, FAILED},
-    SWAPPING: {CONFIRMING, FAILED},
-    CONFIRMING: {COMPLETED, FAILED},
+    EXECUTING: {AWAITING_SOURCE, BRIDGING, SWAPPING, FAILED},
+    AWAITING_SOURCE: {BRIDGING, FAILED, MANUAL_REVIEW},
+    BRIDGING: {DEST_RECEIVED, SWAPPING, REQUOTE_REQUIRED, FAILED,
+               REFUND_PENDING, MANUAL_REVIEW},
+    DEST_RECEIVED: {SWAPPING, FAILED, MANUAL_REVIEW},
+    SWAPPING: {CONFIRMING, FAILED, MANUAL_REVIEW},
+    CONFIRMING: {COMPLETED, FAILED, MANUAL_REVIEW},
     # A stale quote is not a dead trade: it can be re-quoted and carry on.
     REQUOTE_REQUIRED: {QUOTED, CANCELLED, FAILED},
+    REFUND_PENDING: {REFUNDED, MANUAL_REVIEW, FAILED},
     COMPLETED: set(),
     FAILED: set(),
     CANCELLED: set(),
+    REFUNDED: set(),
+    MANUAL_REVIEW: set(),
 }
 
 SCHEMA = [
@@ -159,6 +191,81 @@ SCHEMA = [
     )''',
     'CREATE INDEX IF NOT EXISTS idx_reservations_held ON balance_reservations(user_id, chain, status)',
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_reservations_trade ON balance_reservations(trade_id)',
+
+    # Everything a cross-chain trade needs to be picked up again by a process
+    # that was not running when it started.
+    #
+    # WHY IT IS A SEPARATE TABLE AND NOT COLUMNS ON trade_executions
+    # A same-chain trade has none of these, and a schema where two thirds of
+    # the columns are NULL for the common case invites reading one of them
+    # and getting NULL for a reason nobody checked. One row here means "this
+    # trade crosses chains"; no row means it does not, and that is a question
+    # with an answer rather than a column to interpret.
+    #
+    # trade_id is the PRIMARY KEY, so a second attempt to start a bridge for
+    # the same trade collides in the database instead of racing past a SELECT.
+    # That is the same guarantee idempotency_key gives the swap, applied to
+    # the leg that moves money between chains.
+    '''CREATE TABLE IF NOT EXISTS trade_crosschain (
+        trade_id              TEXT PRIMARY KEY,
+        quote_id              TEXT NOT NULL,
+        user_id               INTEGER NOT NULL,
+        provider              TEXT NOT NULL,       -- '0x'
+        -- THREE IDENTIFIERS, THREE MEANINGS. They were one column called
+        -- route_id holding `quoteId or zid`, so a response without a quoteId
+        -- silently stored a REQUEST id under a name meaning quote id, and
+        -- anything later addressing it as a quote id addressed the wrong
+        -- object. Kept apart:
+        --   provider_quote_id  0x's `quoteId`, on the individual quote. This
+        --                      is what a status lookup may name.
+        --   provider_zid       0x's top-level `zid`, identifying the REQUEST.
+        --                      Useful in a support conversation, never a
+        --                      substitute for the quote id.
+        --   route_id           kept for rows written before the split, so old
+        --                      executions still read back. Not written any more.
+        route_id              TEXT DEFAULT '',
+        provider_quote_id     TEXT DEFAULT '',
+        provider_zid          TEXT DEFAULT '',
+        source_chain          TEXT NOT NULL,
+        destination_chain     TEXT NOT NULL,
+        source_token          TEXT NOT NULL,
+        destination_token     TEXT NOT NULL,
+        source_amount_raw     TEXT NOT NULL,
+        quoted_out_raw        TEXT DEFAULT '',
+        minimum_out_raw       TEXT DEFAULT '',
+        actual_out_raw        TEXT DEFAULT '',
+        -- The provider's own status string, kept verbatim. The engine's state
+        -- is the coarse truth; this is what the provider last said, so a
+        -- support question can be answered without re-deriving it.
+        provider_status       TEXT DEFAULT '',
+        source_tx_hash        TEXT DEFAULT '',
+        bridge_tx_hash        TEXT DEFAULT '',
+        destination_tx_hash   TEXT DEFAULT '',
+        swap_tx_hash          TEXT DEFAULT '',
+        estimated_fees_json   TEXT DEFAULT '',
+        actual_fees_json      TEXT DEFAULT '',
+        estimated_seconds     INTEGER DEFAULT 0,
+        failure_reason        TEXT DEFAULT '',
+        poll_attempts         INTEGER DEFAULT 0,
+        -- When the origin transaction was broadcast. The deadline for the
+        -- bridge is measured from here, not from process start, so a restart
+        -- does not reset a trade's clock.
+        source_sent_at        REAL DEFAULT 0,
+        created_at            REAL NOT NULL,
+        updated_at            REAL NOT NULL,
+        FOREIGN KEY (trade_id) REFERENCES trade_executions(trade_id)
+    )''',
+    'CREATE INDEX IF NOT EXISTS idx_crosschain_user ON trade_crosschain(user_id, created_at)',
+]
+
+
+# Columns added to a table that may already exist in a deployed database.
+# CREATE TABLE IF NOT EXISTS does nothing to a table that is already there, so
+# a new column needs its own statement -- and SQLite has no ADD COLUMN IF NOT
+# EXISTS, hence the catch.
+_ADD_COLUMNS = [
+    ('trade_crosschain', 'provider_quote_id', "TEXT DEFAULT ''"),
+    ('trade_crosschain', 'provider_zid', "TEXT DEFAULT ''"),
 ]
 
 
@@ -166,6 +273,11 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     """Create the tables if they are absent. Safe to call on every start."""
     for ddl in SCHEMA:
         conn.execute(ddl)
+    for table, column, decl in _ADD_COLUMNS:
+        try:
+            conn.execute(f'ALTER TABLE {table} ADD COLUMN {column} {decl}')
+        except sqlite3.OperationalError:
+            pass            # already there, which is the usual case
     conn.commit()
 
 
@@ -422,3 +534,97 @@ def release(conn: sqlite3.Connection, trade_id: str, now: Optional[float] = None
         (now if now is not None else time.time(), trade_id))
     conn.commit()
     return _d(row[0])
+
+
+# ── cross-chain legs ─────────────────────────────────────────────────────
+_CC_FIELDS = frozenset({
+    'route_id', 'provider_quote_id', 'provider_zid', 'quoted_out_raw', 'minimum_out_raw', 'actual_out_raw',
+    'provider_status', 'source_tx_hash', 'bridge_tx_hash',
+    'destination_tx_hash', 'swap_tx_hash', 'estimated_fees_json',
+    'actual_fees_json', 'estimated_seconds', 'failure_reason',
+    'poll_attempts', 'source_sent_at',
+})
+
+
+def open_crosschain(conn: sqlite3.Connection, *, trade_id: str, quote_id: str,
+                    user_id: int, provider: str, source_chain: str,
+                    destination_chain: str, source_token: str,
+                    destination_token: str, source_amount_raw,
+                    now: Optional[float] = None, **fields) -> bool:
+    """Record that this trade has a cross-chain leg.
+
+    Returns True if this call created the row. False means one already
+    existed, which is the answer that matters: a second caller must NOT
+    build or broadcast an origin transaction, because the first one may
+    already have. The PRIMARY KEY is what decides it, not a prior read.
+    """
+    ts = now if now is not None else time.time()
+    unknown = set(fields) - _CC_FIELDS
+    if unknown:
+        raise LedgerError(f'cannot set {sorted(unknown)} on a cross-chain leg')
+    cols = ['trade_id', 'quote_id', 'user_id', 'provider', 'source_chain',
+            'destination_chain', 'source_token', 'destination_token',
+            'source_amount_raw', 'created_at', 'updated_at']
+    args = [trade_id, quote_id, user_id, provider, source_chain,
+            destination_chain, source_token, destination_token,
+            str(source_amount_raw), ts, ts]
+    for k, v in fields.items():
+        cols.append(k)
+        args.append(v if isinstance(v, (int, float)) else str(v))
+    try:
+        conn.execute(
+            f'INSERT INTO trade_crosschain ({", ".join(cols)}) '
+            f'VALUES ({", ".join("?" * len(cols))})', args)
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        return False
+
+
+def update_crosschain(conn: sqlite3.Connection, trade_id: str, *,
+                      now: Optional[float] = None, **fields) -> None:
+    """Record what the provider last told us about this leg."""
+    unknown = set(fields) - _CC_FIELDS
+    if unknown:
+        raise LedgerError(f'cannot set {sorted(unknown)} on a cross-chain leg')
+    if not fields:
+        return
+    sets = ['updated_at=?']
+    args = [now if now is not None else time.time()]
+    for k, v in fields.items():
+        sets.append(f'{k}=?')
+        args.append(v if isinstance(v, (int, float)) else str(v))
+    args.append(trade_id)
+    conn.execute(
+        f'UPDATE trade_crosschain SET {", ".join(sets)} WHERE trade_id=?', args)
+    conn.commit()
+
+
+def get_crosschain(conn: sqlite3.Connection, trade_id: str) -> Optional[dict]:
+    row = conn.execute('SELECT * FROM trade_crosschain WHERE trade_id=?',
+                       (trade_id,)).fetchone()
+    if not row:
+        return None
+    cols = [c[0] for c in
+            conn.execute('SELECT * FROM trade_crosschain LIMIT 0').description]
+    return dict(zip(cols, row))
+
+
+def resumable_crosschain(conn: sqlite3.Connection, limit: int = 100) -> list:
+    """Every cross-chain trade a restart is responsible for finishing.
+
+    Selected by the trade's own state rather than by anything the provider
+    said, so a trade whose provider call was never made is still found. The
+    reservation on each of these is deliberately still held -- a process
+    restarting says nothing about where the money went.
+    """
+    rows = conn.execute(
+        'SELECT e.trade_id, e.state, e.user_id, e.wallet, e.quote_id '
+        'FROM trade_executions e '
+        'JOIN trade_crosschain c ON c.trade_id = e.trade_id '
+        'WHERE e.state IN (%s) ORDER BY e.created_at LIMIT ?'
+        % ','.join('?' * len(RESUMABLE)),
+        (*sorted(RESUMABLE), limit)).fetchall()
+    return [{'trade_id': r[0], 'state': r[1], 'user_id': r[2],
+             'wallet': r[3], 'quote_id': r[4]} for r in rows]

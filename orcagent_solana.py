@@ -98,6 +98,12 @@ if _PROXY_SECRET:
     _JUP_HEADERS['X-Proxy-Secret'] = _PROXY_SECRET
 
 
+# How many endpoints died mid-request during the most recent _rpc_post().
+# Zero means every endpoint that was reached answered in full, so a JSON-RPC
+# error is the node's considered verdict rather than a lost reply.
+_LAST_RPC_TRANSPORT_ERRORS = 0
+
+
 def _rpc_post(payload: dict, timeout: int = 30) -> dict:
     """Try each RPC endpoint in order; return first success or raise. This is
     now the ONLY way this file talks to a Solana RPC (every getBalance/
@@ -106,6 +112,8 @@ def _rpc_post(payload: dict, timeout: int = 30) -> dict:
     this failover and everything else hit the single hardcoded SOLANA_RPC
     with no fallback, so a blip on the public mainnet-beta endpoint could
     fail an otherwise-healthy trade for no on-chain reason at all."""
+    global _LAST_RPC_TRANSPORT_ERRORS
+    _LAST_RPC_TRANSPORT_ERRORS = 0
     last_err: object = None
     for rpc in SOLANA_RPCS:
         try:
@@ -115,6 +123,12 @@ def _rpc_post(payload: dict, timeout: int = 30) -> dict:
                 return result
             last_err = result
         except Exception as e:
+            # The request left this process and no reply came back. For a
+            # sendTransaction that is NOT the same as "nothing happened": the
+            # node may have received and broadcast it and only the response
+            # was lost. Counted so the caller can tell a clean rejection from
+            # a genuinely unknown outcome -- see the [BROADCAST] markers.
+            _LAST_RPC_TRANSPORT_ERRORS += 1
             last_err = e
     raise Exception(f'All RPC endpoints failed. Last: {last_err}')
 
@@ -768,6 +782,16 @@ def _execute_swap_inner(input_mint: str, output_mint: str, amount_lamports: int,
 
     # ── Step 5: Send to RPC (with multi-RPC failover) ───────────────────────
     print('[TRADE] Step 5/8 — Sending transaction to Solana RPC', flush=True)
+    # The [BROADCAST] lines below are read by the trade engine's executor to
+    # decide whether the user's reserved balance goes back to them. They are a
+    # contract, not logging: change the wording and _capture_broadcast_evidence
+    # in dashboard.py falls back to guessing from step numbers again.
+    #
+    # begin    the send is about to leave this process
+    # rejected the node answered in full and refused it -- nothing broadcast
+    # sent     a signature came back -- it is on the network
+    # unknown  a reply was lost; it may or may not have been broadcast
+    print('[BROADCAST] begin', flush=True)
     _send_t0 = time.time()
     try:
         rpc_resp = _rpc_post({
@@ -785,23 +809,39 @@ def _execute_swap_inner(input_mint: str, output_mint: str, amount_lamports: int,
         }, timeout=30)
     except Exception:
         print('[TRADE] FAIL Step 5 (sendTransaction):\n' + traceback.format_exc(), flush=True)
+        # Every endpoint either died mid-request or was overloaded. At least
+        # one request may have been received and broadcast before the reply
+        # was lost, so this is genuinely unknown -- never a clean "not sent".
+        print('[BROADCAST] unknown all sendTransaction endpoints failed', flush=True)
         meta['failure_reason'] = 'sendTransaction request failed'
         _log_exec_meta(meta)
         raise
     meta['send_latency_ms'] = round((time.time() - _send_t0) * 1000, 1)
+    # Zero means every endpoint that was reached replied in full, so a refusal
+    # below is the node's verdict on a transaction it did not broadcast.
+    _send_clean = (_LAST_RPC_TRANSPORT_ERRORS == 0)
 
     print(f'[TRADE] Step 5 — RPC response: {rpc_resp}  (send_latency={meta["send_latency_ms"]}ms)', flush=True)
     if 'error' in rpc_resp:
         print(f'[TRADE] RPC ERROR: {rpc_resp["error"]}', flush=True)
+        # skipPreflight is False, so the node simulated this before it would
+        # have broadcast anything. A complete error reply therefore means the
+        # transaction never reached the network and the user's whole claim is
+        # theirs again.
+        print('[BROADCAST] ' + ('rejected ' if _send_clean else 'unknown ')
+              + _clean_rpc_error(rpc_resp['error']), flush=True)
         meta['failure_reason'] = f'sendTransaction error: {_clean_rpc_error(rpc_resp["error"])}'
         _log_exec_meta(meta)
         raise Exception(f'RPC sendTransaction error: {_clean_rpc_error(rpc_resp["error"])}')
     sig = rpc_resp.get('result')
     if not sig:
+        print('[BROADCAST] ' + ('rejected ' if _send_clean else 'unknown ')
+              + 'no signature in sendTransaction response', flush=True)
         meta['failure_reason'] = 'no signature in sendTransaction response'
         _log_exec_meta(meta)
         raise Exception(f'No signature in RPC response: {rpc_resp}')
     meta['signature'] = sig
+    print(f'[BROADCAST] sent {sig}', flush=True)
     print(f'[TRADE] Step 5 — submitted, NOT yet confirmed: https://solscan.io/tx/{sig}', flush=True)
 
     # ── Step 6: Confirm on-chain ─────────────────────────────────────────────

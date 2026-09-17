@@ -24,7 +24,7 @@ import subprocess
 import sys
 import tempfile
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 checks = []
 def check(name, cond):
@@ -96,10 +96,16 @@ def fake_fee(pk, wallet, user_id, symbol, usdc_amount, kind, chain='bsc', **kw):
     FEES.append({'symbol': symbol, 'usdc': usdc_amount, 'kind': kind, 'chain': chain})
 d._charge_evm_txn_fee = fake_fee
 
+def _csrf():
+    # A real browser fetches this and sends it back; once the session has a
+    # token the app requires it, so the test has to behave like the browser.
+    return (c.get('/api/csrf-token').get_json() or {}).get('token', '')
+
 def quote(body=None):
     r = c.post('/api/trade/quote', json=body or {'chain': 'base',
                                                  'token_address': '0xTOKEN',
-                                                 'max_spend_usd': '100'})
+                                                 'max_spend_usd': '100'},
+               headers={'X-CSRF-Token': _csrf()})
     return r.get_json()
 
 def execute(body):
@@ -108,7 +114,8 @@ def execute(body):
     # loosened in the app, so the production limit stays exactly as shipped.
     with d._rl_lock:
         d._rl_hits.clear()
-    r = c.post('/api/trade/execute', json=body)
+    r = c.post('/api/trade/execute', json=body,
+               headers={'X-CSRF-Token': _csrf()})
     return r.status_code, r.get_json()
 
 # ── anon ──
@@ -182,18 +189,29 @@ out['poor_status'], out['poor'] = execute({'quote_id': q7['quote_id'],
 out['poor_swaps'] = len(SWAPS)
 d.get_evm_usdc_balance = lambda addr, chain='bsc': 500.0
 
-# ── a chain the engine does not execute yet ──
+# ── the flag that takes Solana back off the engine ──
 # Quoting Solana needs a live SOL price, which this sandbox has no route to,
 # so the stored quote's chain is rewritten instead. The guard being tested is
 # the endpoint's, and it reads exactly this column.
+#
+# Solana executes through the engine by default now. What is pinned here is
+# the rollback: with the flag off, the endpoint must REFUSE rather than fall
+# through to a legacy path, because the caller asked to execute a stored
+# quote and the legacy path does not honour one.
 q8 = quote()
 conn = sqlite3.connect(d.DB_FILE)
 conn.execute("UPDATE trade_quotes SET destination_chain='solana' WHERE quote_id=?",
              (q8['quote_id'],))
 conn.commit(); conn.close()
 SWAPS.clear()
-out['solana_status'], out['solana'] = execute({'quote_id': q8['quote_id']})
+_flag = d.TRADE_ENGINE_SOLANA
+d.TRADE_ENGINE_SOLANA = False
+try:
+    out['solana_status'], out['solana'] = execute({'quote_id': q8['quote_id']})
+finally:
+    d.TRADE_ENGINE_SOLANA = _flag
 out['solana_swaps'] = len(SWAPS)
+out['solana_flag_default'] = bool(_flag)
 
 out['routes'] = sorted(str(r.rule) for r in d.app.url_map.iter_rules()
                        if str(r.rule).startswith('/api/trade/'))
@@ -297,10 +315,15 @@ check('a trade larger than the wallet balance is refused before any swap is sent
 check('...naming the real balance, which was read on the server and not taken '
       'from the request', '$3' in R['poor']['msg'])
 
-# ── chains the engine does not cover yet ──
-check('a chain the engine does not cover is refused outright rather than quietly '
+# ── the rollback flag ──
+check('Solana executes through the engine by default — the inference that kept '
+      'it off was replaced by an explicit verdict from the swap itself '
+      '(see tests/test_broadcast_marker_contract.py)',
+      R['solana_flag_default'] is True)
+check('...and with the flag off it is refused outright rather than quietly '
       'falling back to a legacy path whose guarantees are the ones being '
-      'replaced',
+      'replaced — the caller asked to execute a stored quote, and the legacy '
+      'path does not honour one',
       R['solana_status'] == 400 and 'does not execute solana' in R['solana']['msg']
       and R['solana_swaps'] == 0)
 
@@ -365,21 +388,22 @@ sells_on_engine = {n for n in ('api_evm_trade_sell', 'api_bsc_trade_sell')
 check('the sells are deliberately NOT on the engine — a buy-shaped quote would '
       'mean inventing numbers for fields a sell does not have', not sells_on_engine)
 
-# The Solana buys are not on the engine either, and for a reason worth
-# recording: the fee was never the problem there. A bundled Solana buy swaps
-# (spend - fee), so the wallet already spends exactly what was asked -- the
-# charged-on-top bug this phase fixed was EVM-only. Their own defects are
-# covered in tests/test_solana_buy_flow.py.
-solana_on_engine = {n for n in ('api_manual_buy', 'api_pump_scanner_buy')
-                    if reaches_engine(n)}
-check('the Solana buys are deliberately NOT on the engine — they already spend '
-      'exactly what was asked, and the engine cannot price Solana without a '
-      'live SOL price and a Jupiter route', not solana_on_engine)
+# The Solana buys ARE on the engine now. They were left off while the fee was
+# the only thing being fixed -- a bundled Solana buy already swapped
+# (spend - fee), so the charged-on-top bug was EVM-only. But the fee was never
+# the whole promise: these routes spent the typed amount in full and paid the
+# network fee out of the wallet's SOL on top, so the real cost of a trade was
+# the number on screen plus a debit in a second asset nobody was shown.
+solana_off_engine = {n for n in ('api_manual_buy', 'api_pump_scanner_buy')
+                     if not reaches_engine(n)}
+check('the Solana buys run through the engine, so the amount typed is the '
+      'maximum that leaves the wallet — network fee included, not added',
+      not solana_off_engine)
 
-# api_instant_trade is Solana too, and off the engine for the same reason --
-# its own defects are covered in tests/test_instant_trade.py.
-check('the Solana one-click route is not on the engine either, for the same '
-      'reason as the other two', not reaches_engine('api_instant_trade'))
+# api_instant_trade is Solana too and goes the same way.
+check('the Solana one-click route is on it as well — a route that skipped the '
+      'ceiling would be the cheapest way to lose it',
+      reaches_engine('api_instant_trade'))
 # Stated separately so the exclusion above is a recorded decision rather
 # than a hole: these routes DO reach the engine when you follow the copy
 # trigger, and that is correct -- it is a copier's EVM buy, which belongs on

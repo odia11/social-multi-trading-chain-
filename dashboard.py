@@ -7,7 +7,6 @@ import calendar
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from PIL import Image, ImageDraw, ImageFont
-import bcrypt as _bcrypt
 try:
     import nacl.public as _nacl_public
     import nacl.signing as _nacl_signing
@@ -58,6 +57,7 @@ from trade_engine import registry as te_registry
 from trade_engine import ledger as te_ledger
 from trade_engine import subsidy as te_subsidy
 from trade_engine import execute as te_execute
+from trade_engine import crosschain as te_crosschain
 from trade_engine.costs import CostError as TeCostError
 from trade_engine.providers import JupiterProvider, ZeroExProvider, ProviderError as TeProviderError
 from trade_engine.quote import QuoteError as TeQuoteError, QuoteRequest, build_quote
@@ -498,7 +498,7 @@ def _refresh_session():
 
 # /api/wallet/set is the auth-bootstrap endpoint — it establishes the session so it
 # cannot require a session-scoped CSRF token. Origin check still protects it.
-_CSRF_EXEMPT_PATHS = frozenset({'/api/wallet/set', '/api/wallet/connect-readonly', '/api/login_password', '/api/connect-wallet', '/api/instant-trade', '/api/phantom/init', '/api/phantom/decrypt'})
+_CSRF_EXEMPT_PATHS = frozenset({'/api/wallet/set', '/api/wallet/connect-readonly', '/api/connect-wallet', '/api/instant-trade', '/api/phantom/init', '/api/phantom/decrypt'})
 
 def csrf_exempt(f):
     """Decorator: mark a view function as exempt from CSRF token validation.
@@ -1052,6 +1052,103 @@ FEE_RATE_TXN     = 0.0075  # 0.75% transaction fee, charged on BOTH the buy and 
 # the pre-engine path, which swaps the full amount and charges the fee on top
 # -- a way back if the engine misbehaves in production, not an equal option.
 TRADE_ENGINE_MANUAL_EVM = os.getenv('TRADE_ENGINE_MANUAL_EVM', '1').strip() not in ('0', 'false', 'False', '')
+
+# The same, for the autonomous bot's EVM entries. Separate from the manual
+# flag on purpose: these are different blast radii. A manual buy is one person
+# pressing a button and watching the result; the bot enters on its own, on
+# five chains, for every user who has it running -- so if one of them has to
+# be rolled back it should not drag the other with it.
+#
+# The bot used to swap min_trade_size in full and then charge the 0.75% fee on
+# top, so an autonomous entry always debited MORE than the size the user
+# configured. It also had no reservation and no idempotency key.
+TRADE_ENGINE_BOT_EVM = os.getenv('TRADE_ENGINE_BOT_EVM', '1').strip() not in ('0', 'false', 'False', '')
+
+# Whether Solana runs through the trade engine -- /api/trade/execute and the
+# Solana copy-trade path both. The quote side has always supported Solana
+# (JupiterProvider is wired into _te_swap_provider); only execution was
+# refused, so a Solana buy skipped the ceiling guarantee, the balance
+# reservation and the idempotency key that the EVM path gets.
+#
+# This defaulted OFF while the executor had to INFER from step numbers in the
+# swap subprocess's output whether a transaction had been broadcast --
+# _execute_user_swap_ex() returns an empty signature for every failure, so a
+# swap that was sent and timed out looked identical to one that was never
+# built. It no longer infers: orcagent_solana.py prints an explicit verdict
+# around sendTransaction ([BROADCAST] sent/rejected/unknown) and
+# _capture_broadcast_evidence reads it. The only case still reported as
+# unknown is a reply genuinely lost in flight, which is unknown in fact and
+# not a guess -- so the default is ON.
+#
+# Set to 0 to take Solana back off the engine. That does NOT restore a
+# SOL-funded copy-trade: it disables Solana copying instead, because the
+# path it would fall back to spent the wrong currency.
+TRADE_ENGINE_SOLANA = os.getenv('TRADE_ENGINE_SOLANA', '1').strip() not in ('0', 'false', 'False', '')
+
+# Whether a trade may bridge USDC from one chain to another to complete
+# itself. OFF by default, and it is meant to stay off until somebody has
+# watched a real bridge finish.
+#
+# The bridge itself is not new -- the standalone Bridge feature has used 0x's
+# Cross-Chain API for a while. What is new is that a TRADE can now own one:
+# the bridge runs inside the engine's state machine, holding the user's
+# reservation from the source transaction all the way to the destination
+# swap, and surviving a restart in between. That is the part with no live
+# mileage on it.
+#
+# It also cannot be verified from the build environment: api.0x.org is
+# unreachable there (the egress proxy answers 403 to CONNECT), so every
+# response shape this depends on was read from 0x's published example code
+# rather than from a live call. A flag that defaults off is the honest
+# position for a route nobody has watched work.
+TRADE_ENGINE_CROSSCHAIN = os.getenv('TRADE_ENGINE_CROSSCHAIN', '0').strip() not in ('0', 'false', 'False', '')
+
+# Which directions are allowed, as 'source->destination' pairs. Empty by
+# default: turning the feature on does not turn on any route. Each pair has
+# to be named, because "0x supports this chain" and "we have seen a trade
+# complete on it" are different claims and only the second one should move
+# somebody's money.
+#   CROSSCHAIN_ROUTES=base->solana,solana->base
+CROSSCHAIN_ENABLED_ROUTES = frozenset(
+    r.strip() for r in os.getenv('CROSSCHAIN_ROUTES', '').split(',') if r.strip())
+
+# How often the resume worker looks, and how long a bridge may take before it
+# stops being "slow" and becomes something a person has to find. The deadline
+# is measured from the origin broadcast and stored, so a restart does not
+# hand a stuck bridge a fresh clock.
+# Extra ERC-20 spenders a cross-chain route may ask the user to approve.
+#
+# Permit2 and the two published AllowanceHolder deployments are recognised
+# automatically -- they are fixed, documented addresses. Anything else is
+# refused until it is named here, because an allowance is a standing
+# permission that outlives the transaction that asked for it, and 0x's own
+# guidance is that Settler must NEVER hold one (approvals mis-scoped to a
+# Settler are what an August 2025 exploit drained).
+#
+# The intended workflow: run scripts/test_0x_crosschain_quote.py, read the
+# spender a real route nominates, check what it is, then pin it here.
+#   CROSSCHAIN_ALLOWED_SPENDERS=0xabc...,0xdef...
+CROSSCHAIN_ALLOWED_SPENDERS = frozenset(
+    a.strip().lower() for a in os.getenv('CROSSCHAIN_ALLOWED_SPENDERS', '').split(',')
+    if a.strip())
+
+# The most a bridge may cost, as a share of the trade, before the route is
+# refused as not worth doing.
+#
+# This is not a safety rule and is deliberately separate from the ones in
+# verify_route(): a route can be perfectly safe and still a bad idea. The
+# first real Base -> Solana quote from production priced a $2.00 bridge at
+# $0.22 -- eleven percent -- because a bridge's costs are largely fixed and a
+# $2 trade is simply too small to carry them. The same route on $50 costs
+# well under one percent.
+#
+# So the ceiling is proportional. A user who asks to bridge an amount the
+# bridge would eat is told so, with the numbers, instead of watching a tenth
+# of it disappear into a fee they were shown but did not weigh.
+CROSSCHAIN_MAX_BRIDGE_COST_PCT = float(os.getenv('CROSSCHAIN_MAX_BRIDGE_COST_PCT', '5'))
+
+CROSSCHAIN_POLL_SECONDS = int(os.getenv('CROSSCHAIN_POLL_SECONDS', '20'))
+CROSSCHAIN_DEADLINE_SECONDS = float(os.getenv('CROSSCHAIN_DEADLINE_SECONDS', '3600'))
                             # leg of every trade (see _charge_txn_fee()) -- so a full
                             # round-trip pays 1.5% total, split as two separate 0.75%
                             # charges rather than one combined charge at close.
@@ -1418,14 +1515,13 @@ def get_bsc_balances(address: str) -> dict:
 # ── PERFORMANCE FEE COLLECTION ──
 def send_sol_fee(from_privkey: str, to_wallet_str: str, amount_sol: float) -> str:
     """Native SOL transfer via System Program — no ATA, no SPL, just lamports."""
-    from solders.keypair import Keypair as _KP
     from solders.pubkey import Pubkey
     from solders.instruction import Instruction, AccountMeta
     from solders.transaction import Transaction
     from solders.hash import Hash as SolHash
 
     SYS_PROG = Pubkey.from_string('11111111111111111111111111111111')
-    keypair  = _KP.from_base58_string(from_privkey)
+    keypair  = _sol_keypair_from_base58(from_privkey)
     sender   = keypair.pubkey()
     receiver = Pubkey.from_string(to_wallet_str)
     lamports = int(amount_sol * 1_000_000_000)
@@ -1516,6 +1612,34 @@ def is_valid_solana_private_key(key: str) -> bool:
             pass
     return False
 
+def _sol_keypair_from_base58(secret: str):
+    """Parse a base58 Solana key, or raise ValueError. Never panic.
+
+    solders is a Rust extension, and on malformed input it raises
+    pyo3_runtime.PanicException -- which inherits from BaseException, NOT from
+    Exception. So every `except Exception` around a key parse in this file is
+    a guard that does not guard, including the one at import time:
+
+        SOL_GAS_SPONSOR_PRIVATE_KEY="4xQ..."   (quotes included in the value)
+        -> PanicException: InvalidCharacter { character: '"', index: 0 }
+        -> dashboard fails to import at all, with a Rust traceback
+
+    That is a bad way for a stray quote in an environment file to be reported,
+    and a worse way for the app to refuse to boot. This turns it into an
+    ordinary ValueError that the existing handlers already catch.
+
+    KeyboardInterrupt and SystemExit are re-raised untouched: those are not
+    the key being wrong.
+    """
+    from solders.keypair import Keypair as _KP_parse
+    try:
+        return _KP_parse.from_base58_string(secret)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException as e:
+        raise ValueError(f'not a valid base58 Solana key ({type(e).__name__})') from None
+
+
 # ── HONEYPOT GATE (logging only — no IP blocking) ──
 # Owner/trusted IPs — set via env var, comma-separated (e.g. "1.2.3.4,5.6.7.8").
 _OWNER_IPS = frozenset(
@@ -1524,7 +1648,6 @@ _OWNER_IPS = frozenset(
 
 # Sensitive paths that are hard-blocked for bot/empty User-Agents
 _BOT_BLOCKED_PATHS = frozenset({
-    '/api/login_password',
     '/api/instant-trade',
     '/api/wallet/send',
     '/api/connect-wallet',
@@ -3509,8 +3632,7 @@ def _get_trading_wallet_address(session_wallet: str) -> str:
         if not row or not row[0]:
             return ''
         with _use_key(row[0], session_wallet) as _pk:
-            from solders.keypair import Keypair as _KP_tw
-            return str(_KP_tw.from_base58_string(_pk).pubkey())
+            return str(_sol_keypair_from_base58(_pk).pubkey())
     except Exception as e:
         print(f'[trading-wallet] derive failed for {session_wallet[:8]}...: {e}', flush=True)
         return ''
@@ -5910,8 +6032,7 @@ def _charge_txn_fee(private_key: str, wallet: str, user_id: int, symbol: str,
             print(f'[fee] → attempting {fee:.6f} SOL {kind_} fee transfer from trading wallet to '
                   f'{_dest_label} {fee_recipient[:10]}... for {sw} {sym}', flush=True)
             try:
-                from solders.keypair import Keypair as _KP_fee
-                signer_pub = str(_KP_fee.from_base58_string(pk).pubkey())
+                signer_pub = str(_sol_keypair_from_base58(pk).pubkey())
                 signer_sol = _get_user_sol(signer_pub)
                 NET_FEE    = 0.000005  # ~5000 lamports for a simple SOL transfer tx
                 if signer_sol < fee + NET_FEE:
@@ -6474,13 +6595,93 @@ def _execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str,
             marker = ('[fee] buy: requesting quote' if action == 'buy'
                       else 'bps platform fee)')
             capture['fee_bundled'] = (marker in out) and not failed
+            _capture_broadcast_evidence(capture, out)
         return ok, tx_hash, err_msg, token_amount, sol_amount
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as e:
         add_user_log(wallet, 'Swap error: timed out after 120s')
+        # A timeout is the one failure that says nothing about whether the
+        # transaction went out -- the subprocess was killed, not answered. Its
+        # partial stdout is the only evidence either way, so it is read rather
+        # than discarded: without it a swap that really was broadcast is
+        # indistinguishable from one that never left, and a caller that
+        # releases the user's money on that guess lets the same balance be
+        # spent twice.
+        if capture is not None:
+            _capture_broadcast_evidence(
+                capture, (e.stdout.decode('utf-8', 'replace')
+                          if isinstance(e.stdout, bytes) else (e.stdout or '')))
         return False, '', 'timed out after 120s', 0.0, 0.0
     except Exception as e:
         add_user_log(wallet, 'Swap error: ' + str(e)[:80])
         return False, '', str(e)[:200], 0.0, 0.0
+
+
+# orcagent_solana.py prints a numbered step before each stage, and step 5 is
+# the send. Which of those lines made it into stdout is the only honest
+# answer to "could this have been broadcast?" -- see _te_solana_swap_executor
+# for why guessing it wrong is a double-spend rather than a cosmetic error.
+_SOL_SEND_STEP_MARKER = 'Step 5/8'
+_SOL_ONCHAIN_FAIL_MARKER = 'transaction FAILED on-chain'
+
+# orcagent_solana.py prints one of these around sendTransaction. They exist so
+# this does not have to be inferred -- see that file's own comment at Step 5.
+_BC_BEGIN = '[BROADCAST] begin'
+_BC_SENT = '[BROADCAST] sent'
+_BC_REJECTED = '[BROADCAST] rejected'
+_BC_UNKNOWN = '[BROADCAST] unknown'
+
+
+def _capture_broadcast_evidence(capture: dict, stdout: str) -> None:
+    """Record what the swap subprocess got far enough to do.
+
+    send_attempted  a transaction may exist on the network
+    onchain_failed  it landed and the chain rejected it -- definitively no fill
+    signature       the signature, even from a run that then failed
+
+    WHY THIS IS NOT JUST A STRING SEARCH FOR "Step 5"
+    _execute_user_swap_ex() returns tx_hash='' for every failure, so the
+    absence of a signature says nothing about whether money moved. Getting
+    send_attempted wrong in the optimistic direction releases a claim on
+    funds that may already be gone, which is how one balance gets spent
+    twice; getting it wrong the other way freezes a user's own money until
+    the reaper runs. So the swap prints an explicit verdict and this reads
+    it. The step-number heuristic below is only the fallback for output that
+    predates those markers, and it can only ever be pessimistic.
+    """
+    out = stdout or ''
+
+    if _BC_SENT in out:
+        # A signature came back from the RPC. It is on the network.
+        capture['send_attempted'] = True
+    elif _BC_REJECTED in out:
+        # The node answered in full and refused it. skipPreflight is off, so
+        # it was simulated and never broadcast: nothing left the wallet.
+        capture['send_attempted'] = False
+    elif _BC_UNKNOWN in out or _BC_BEGIN in out:
+        # Either the swap said outright that it cannot tell, or it entered the
+        # send and never came back out. Both are unknown, and unknown is
+        # treated as sent.
+        capture['send_attempted'] = True
+    else:
+        # No markers at all. Fall back to the step number, which is coarse but
+        # never optimistic: anything at or past the send counts as sent.
+        capture['send_attempted'] = _SOL_SEND_STEP_MARKER in out
+
+    capture['onchain_failed'] = _SOL_ONCHAIN_FAIL_MARKER in out
+
+    sig = ''
+    for line in out.split('\n'):
+        if _BC_SENT in line:
+            rest = line.split(_BC_SENT)[-1].strip()
+            sig = rest.split()[0] if rest else ''
+            break
+        if 'TX:' in line:
+            sig = line.split('TX:')[-1].strip().split()[0] if line.split('TX:')[-1].strip() else ''
+            break
+        if 'solscan.io/tx/' in line:
+            sig = line.split('solscan.io/tx/')[-1].strip().split()[0]
+            break
+    capture['signature'] = sig
 
 def _execute_user_swap(wallet: str, private_key: str, action: str, mint: str, amount_str: str, base: str = 'SOL') -> bool:
     """Execute a Jupiter swap. Returns True only if the subprocess exited 0 with output.
@@ -6725,17 +6926,72 @@ def _bot_scan_evm_entry(user_id: int, wallet: str, positions: dict, chain: str, 
                                  SURGE_ALERT_CHAIN_NAMES.get(chain, chain)))
                 return False
             add_user_log(wallet, f'[bot-{chain}] Best: {symbol} — BUYING (5m:{round(m5,1)}% 1h:{round(h1,1)}%)')
-            buy_ok, buy_err, _tx_hash = _execute_evm_swap(wallet, pk, 'buy', mint, str(min_trade_usdc), chain)
-            if buy_ok:
-                pos['amount']          = min_trade_usdc / float(_td['price'])
-                pos['buy_price']       = float(_td['price'])
-                pos['spend']           = min_trade_usdc
-                pos['symbol']          = symbol
-                pos['chain']           = chain
-                pos['opened_at']       = time.time()
-                pos['entry_liquidity'] = t.get('liquidity_usd', 0)
-                _upsert_open_position(user_id, wallet, mint, pos, source='bot', chain=chain)
-                _charge_evm_txn_fee(pk, wallet, user_id, symbol, min_trade_usdc, 'buy', chain)
+            if not TRADE_ENGINE_BOT_EVM:
+                # Pre-engine path: swaps the full size and charges the fee on
+                # top, so the wallet is debited more than min_trade_usdc.
+                buy_ok, buy_err, _tx_hash = _execute_evm_swap(wallet, pk, 'buy', mint, str(min_trade_usdc), chain)
+                if buy_ok:
+                    pos['amount']          = min_trade_usdc / float(_td['price'])
+                    pos['buy_price']       = float(_td['price'])
+                    pos['spend']           = min_trade_usdc
+                    pos['symbol']          = symbol
+                    pos['chain']           = chain
+                    pos['opened_at']       = time.time()
+                    pos['entry_liquidity'] = t.get('liquidity_usd', 0)
+                    _upsert_open_position(user_id, wallet, mint, pos, source='bot', chain=chain)
+                    _charge_evm_txn_fee(pk, wallet, user_id, symbol, min_trade_usdc, 'buy', chain)
+
+        # ── through the trade engine, outside the key block ──
+        # The bot used to swap min_trade_usdc in full and then charge the
+        # 0.75% fee on top of it, so an autonomous entry always debited more
+        # than the size the user configured -- the one thing the engine
+        # exists to make impossible. It also had no reservation and no
+        # idempotency key, so two cycles overlapping on the same candidate
+        # could both spend the same balance.
+        if TRADE_ENGINE_BOT_EVM:
+            # Read server-side, and read here rather than once per cycle: the
+            # engine claims against this number, so a stale one would let two
+            # entries reserve the same balance.
+            try:
+                _usdc_bal = get_evm_usdc_balance(_evm_addr, chain)
+            except Exception as e:
+                add_user_log(wallet, f'[bot-{chain}] SKIPPING {symbol} — could not read USDC balance: {e}')
+                continue
+            try:
+                _bq = _te_build_and_store_quote(
+                    uid=user_id, wallet=wallet, source_chain=chain, dest_chain=chain,
+                    token_address=mint, max_spend=Decimal(str(min_trade_usdc)),
+                    taker=_evm_addr, mode='bot')
+                _bqbody = _bq.to_dict()
+                if not _bqbody.get('can_execute'):
+                    add_user_log(wallet, f'[bot-{chain}] SKIPPING {symbol} — '
+                                 + (_bqbody.get('reject_reason')
+                                    or 'not executable within the configured size'))
+                    continue
+                _bres = _te_run_evm_trade(
+                    quote_id=_bq.quote_id,
+                    # One entry per quote. A cycle that overlaps the previous
+                    # one cannot buy the same candidate twice.
+                    idem=f'{user_id}:bot:{chain}:{_bq.quote_id}',
+                    available=Decimal(str(_usdc_bal)), wallet=wallet,
+                    enc_blob=enc_blob_evm, evm_address=_evm_addr, symbol=symbol,
+                    token_address=mint, chain=chain, user_id=user_id,
+                    source='bot',
+                    extra_pos={'entry_liquidity': t.get('liquidity_usd', 0),
+                               'chain': chain})
+            except (TeQuoteError, TeCostError, TeProviderError,
+                    te_registry.RegistryError) as e:
+                add_user_log(wallet, f'[bot-{chain}] SKIPPING {symbol} — could not price it: {e}')
+                continue
+            except te_execute.QuoteNotUsable as e:
+                add_user_log(wallet, f'[bot-{chain}] SKIPPING {symbol} — quote expired: {e}')
+                continue
+            except te_execute.ExecutionError as e:
+                add_user_log(wallet, f'[bot-{chain}] ✗ BUY failed — {symbol}: {e}')
+                positions.pop(mint, None)
+                continue
+            buy_ok = (_bres.state == te_ledger.COMPLETED)
+            buy_err = _bres.failure_reason or ''
         if buy_ok:
             return True
         add_user_log(wallet, f'[bot-{chain}] ✗ BUY failed — {symbol}: {buy_err or "unknown error"} — position NOT recorded')
@@ -6771,6 +7027,17 @@ def _bridge_validate_pair(origin_chain: str, origin_token: str, dest_chain: str,
     if dest_token not in _BRIDGE_SUPPORTED_TOKENS[dest_chain]:
         return f'Unsupported destination token for {dest_chain}'
     return ''
+
+# The minimum SOL a Solana-origin bridge transaction needs to pay its own
+# network fee -- read by _execute_cross_chain_bridge()'s own hard gate below
+# AND by solana_source_bridge_gasless.py's "is a gas bootstrap even needed"
+# check. Those two used to disagree (this gate at 0.002, the other module's
+# default at 0.001 because this constant didn't exist yet): a wallet holding
+# something in between read as "enough" to the bootstrap module, which then
+# skipped straight to retrying the real bridge -- which immediately failed on
+# this same gate with the exact same "deposit SOL manually" message the
+# bootstrap exists to avoid. One shared constant closes that gap for good.
+SOL_BRIDGE_GAS_RESERVE = 0.002
 
 def _execute_cross_chain_bridge(user_id: int, wallet: str, origin_chain: str, dest_chain: str,
                                  origin_token: str, dest_token: str, amount: float,
@@ -6843,8 +7110,7 @@ def _execute_cross_chain_bridge(user_id: int, wallet: str, origin_chain: str, de
         # wallet, not the trading wallet funds actually live in).
         try:
             if origin_chain == 'solana':
-                from solders.keypair import Keypair as _BridgeSolKP
-                origin_address = str(_BridgeSolKP.from_base58_string(private_key).pubkey())
+                origin_address = str(_sol_keypair_from_base58(private_key).pubkey())
             else:
                 origin_address = _EvmAccount.from_key(private_key).address
         except Exception as e:
@@ -6863,7 +7129,7 @@ def _execute_cross_chain_bridge(user_id: int, wallet: str, origin_chain: str, de
                 _origin_sol = _get_user_sol(origin_address)
             except Exception:
                 _origin_sol = None
-            if _origin_sol is not None and _origin_sol < 0.002:
+            if _origin_sol is not None and _origin_sol < SOL_BRIDGE_GAS_RESERVE:
                 return False, (f'Insufficient SOL for network fees on your Solana trading wallet '
                                f'({_origin_sol:.4f} SOL) — deposit a small amount of SOL first'), None
         else:
@@ -7103,24 +7369,67 @@ def _execute_auto_buy_after_bridge(bridge_id: int, user_id: int, wallet: str, de
                 _finish('failed', {'error': _gas_refusal_message(
                     _gas_msg, 'buy', SURGE_ALERT_CHAIN_NAMES.get(dest_chain, dest_chain))})
                 return
-            buy_ok, buy_err, buy_tx_hash = _execute_evm_swap(
-                wallet, private_key, 'buy', token_address, str(amount_usdc), dest_chain)
-            if not buy_ok:
-                _finish('failed', {'error': buy_err or 'Swap failed'})
-                return
-
             td          = get_token_data(token_address)
             entry_price = float(td['price']) if td and td.get('price') else 0.0
             symbol      = (td.get('symbol') or token_address[:8]) if td else token_address[:8]
-            pos = {
-                'amount':    (amount_usdc / entry_price) if entry_price > 0 else 0.0,
-                'buy_price': entry_price,
-                'spend':     amount_usdc,
-                'symbol':    symbol,
-                'opened_at': time.time(),
-            }
-            _upsert_open_position(user_id, wallet, token_address, pos, source='manual', chain=dest_chain)
-            _charge_evm_txn_fee(private_key, wallet, user_id, symbol, amount_usdc, 'buy', dest_chain)
+
+            if not TRADE_ENGINE_MANUAL_EVM:
+                # Pre-engine ride-along: swaps the full amount and charges the
+                # fee on top, so the bridged USDC does not stretch to cover it.
+                buy_ok, buy_err, buy_tx_hash = _execute_evm_swap(
+                    wallet, private_key, 'buy', token_address, str(amount_usdc), dest_chain)
+                if not buy_ok:
+                    _finish('failed', {'error': buy_err or 'Swap failed'})
+                    return
+                _upsert_open_position(user_id, wallet, token_address, {
+                    'amount':    (amount_usdc / entry_price) if entry_price > 0 else 0.0,
+                    'buy_price': entry_price,
+                    'spend':     amount_usdc,
+                    'symbol':    symbol,
+                    'opened_at': time.time(),
+                }, source='manual', chain=dest_chain)
+                _charge_evm_txn_fee(private_key, wallet, user_id, symbol, amount_usdc, 'buy', dest_chain)
+
+        # ── through the engine, outside the key block ──
+        # The buy the user actually asked for, finishing minutes later on the
+        # other side of a bridge. It gets the same ceiling as if they had
+        # pressed Buy on an already-funded wallet -- which matters more here
+        # than anywhere else: this path spends exactly what a bridge just
+        # delivered, and the pre-engine version swapped all of it and then
+        # needed MORE for the fee, out of a wallet that had by definition just
+        # been topped up to this amount and no further.
+        #
+        # The engine decrypts the key itself, so this is deliberately not
+        # nested inside the block above: one decryption, one key-access audit
+        # entry, and the key is gone again before the swap is even built.
+        if TRADE_ENGINE_MANUAL_EVM:
+            _bq = _te_build_and_store_quote(
+                uid=user_id, wallet=wallet, source_chain=dest_chain,
+                dest_chain=dest_chain, token_address=token_address,
+                max_spend=Decimal(str(amount_usdc)), taker=evm_address,
+                mode='manual')
+            _bqbody = _bq.to_dict()
+            if not _bqbody.get('can_execute'):
+                _finish('failed', {'error': _bqbody.get('reject_reason')
+                                   or 'This trade cannot be done within the bridged amount'})
+                return
+            _bres = _te_run_evm_trade(
+                quote_id=_bq.quote_id,
+                # Keyed on the bridge, so a status loop that sees the same
+                # bridge fill twice cannot buy twice.
+                idem=f'{user_id}:bridge:{bridge_id}:{_bq.quote_id}',
+                available=Decimal(str(available)), wallet=wallet,
+                enc_blob=row[0], evm_address=evm_address, symbol=symbol,
+                token_address=token_address, chain=dest_chain, user_id=user_id)
+            if _bres.state != te_ledger.COMPLETED:
+                _finish('failed', {'error': _bres.failure_reason or 'Swap failed',
+                                   'tx_hash': _bres.tx_hash})
+                return
+            buy_tx_hash = _bres.tx_hash
+            # What was actually bought, which is less than what arrived --
+            # gas and the fee came out of it. Reporting amount_usdc here would
+            # tell the user they bought more than they hold.
+            amount_usdc = float(_bqbody.get('token_purchase_usd') or amount_usdc)
     except Exception as e:
         _finish('failed', {'error': _redact_keys(str(e))[:300]})
         return
@@ -7174,12 +7483,11 @@ def _bridge_sign_send_solana(txn, private_key: str) -> str:
     Solana transactions itself (every other Solana swap goes through that
     file's own subprocess). Verified against 0x-examples' schemas.ts
     SvmTransactionSchema: the base64 string is at txn['details']['serializedTransaction']."""
-    from solders.keypair import Keypair as _BridgeSolKP2
     from solders.transaction import VersionedTransaction as _BridgeVTx
     tx_b64 = (txn.get('details') or {}).get('serializedTransaction') if isinstance(txn, dict) else None
     if not tx_b64:
         raise ValueError('no base64 transaction in quote response')
-    keypair = _BridgeSolKP2.from_base58_string(private_key)
+    keypair = _sol_keypair_from_base58(private_key)
     vtx = _BridgeVTx.from_bytes(base64.b64decode(tx_b64))
     signed_tx = _BridgeVTx(vtx.message, [keypair])
     encoded = base64.b64encode(bytes(signed_tx)).decode()
@@ -7810,7 +8118,15 @@ def _te_gas_usd(chain: str) -> Decimal:
     if te_registry.get_chain(chain).kind == 'svm':
         if _sol_price_usd <= 0:
             raise TeQuoteError('SOL price has not loaded yet — cannot price gas')
-        usd = (_TE_SOL_SWAP_FEE * Decimal(str(_sol_price_usd))).quantize(Decimal('0.01'))
+        # ROUND_UP, like the EVM branch below and for the same reason: a
+        # Solana swap fee is around a third of a cent, and quantising it to
+        # the cent the ordinary way rounds it to 0.00 -- which drops a real
+        # cost out of the ceiling entirely, the exact failure this function's
+        # own docstring says it must not allow. The user pays that fee in
+        # their own SOL whether or not the quote counts it, so not counting
+        # it means the ceiling is quietly exceeded rather than held.
+        usd = (_TE_SOL_SWAP_FEE * Decimal(str(_sol_price_usd))
+               ).quantize(Decimal('0.01'), rounding=ROUND_UP)
     else:
         w3 = _get_web3(chain)
         gas_price_wei = Decimal(w3.eth.gas_price)
@@ -7863,6 +8179,31 @@ def _jupiter_quote(input_mint: str, output_mint: str, amount_raw: int) -> dict:
     r.raise_for_status()
     return r.json()
 
+def _te_fee_rate_for(chain: str) -> Decimal:
+    """The platform fee rate that this chain's buy leg actually collects.
+
+    Not a policy switch -- a statement of what the swap underneath really
+    does. On the EVM chains the fee is a separate transfer the app makes
+    itself (_charge_evm_txn_fee), so it is genuinely charged and belongs in
+    the quote. On Solana a USDC-funded BUY collects nothing: the SOL-input
+    fee splice does not apply, and Jupiter's platformFeeBps path is sell-only
+    because that fee comes out of the swap's OUTPUT, which on a buy is the
+    memecoin rather than a currency (see orcagent_solana.py's fee guard and
+    execute_single_swap's docstring, where this is already a disclosed
+    limitation).
+
+    Quoting 0.75% there anyway would put a line in the breakdown that no one
+    ever charges: the user's purchase shrinks by a fee that simply stays in
+    their wallet, and the total they were shown does not describe what
+    happened. Pricing what is really taken is the honest figure, and it is
+    also the one that matches today's production behaviour exactly -- the
+    legacy Solana buy only records a fee when the swap reports it was
+    actually bundled, which on a USDC buy it never is.
+    """
+    if te_registry.get_chain(chain).kind == 'svm':
+        return Decimal('0')
+    return Decimal(str(FEE_RATE_TXN))
+
 def _te_build_and_store_quote(*, uid, wallet, source_chain, dest_chain, token_address,
                               max_spend, taker, mode='manual'):
     """Price a trade and store it exactly as it was priced.
@@ -7877,6 +8218,15 @@ def _te_build_and_store_quote(*, uid, wallet, source_chain, dest_chain, token_ad
     move once a user has been given it.
     """
     _te_ensure_decimals(dest_chain)
+    if source_chain != dest_chain:
+        # The bridge has to be priced against the SOURCE chain's dollar asset
+        # too -- its decimals decide the raw amount 0x is asked to move.
+        _te_ensure_decimals(source_chain)
+    # A cross-chain quote needs a bridge price, and the route it gets back is
+    # kept so execution signs THAT route rather than a fresh one at a
+    # different price. Keyed on the quote so a second quote cannot hand its
+    # route to the first one's execution.
+    _route_key = f'{uid}:{source_chain}:{dest_chain}:{token_address}:{max_spend}'
     quote = build_quote(
         QuoteRequest(
             user_id=uid, wallet=wallet, source_chain=source_chain,
@@ -7885,12 +8235,20 @@ def _te_build_and_store_quote(*, uid, wallet, source_chain, dest_chain, token_ad
         ),
         swap_provider=_te_swap_provider(dest_chain),
         gas_estimator=_te_gas_usd,
-        fee_rate=Decimal(str(FEE_RATE_TXN)),
+        fee_rate=_te_fee_rate_for(dest_chain),
+        bridge_quoter=(None if source_chain == dest_chain
+                       else _te_bridge_quoter(wallet, _route_key)),
         gas_is_sponsored=lambda c: _te_needs_sponsored_gas(c, taker),
         # Lets the quote replace its conservative pre-swap gas figure with the
         # one 0x reports for the actual route.
         gas_from_native=lambda c, native: native * _te_native_price_usd(c),
     )
+    if source_chain != dest_chain:
+        # Re-key the held route onto the quote id now that there is one, so
+        # execution can find it by the only identifier it will be given.
+        _held = _cc_recall_route(_route_key)
+        if _held is not None:
+            _cc_remember_route(f'quote:{quote.quote_id}', _held)
     conn = sqlite3.connect(DB_FILE)
     try:
         te_ledger.save_quote(conn, quote)
@@ -7950,18 +8308,57 @@ def api_trade_quote():
     if not taker:
         return jsonify({'ok': False, 'msg': f'No {chain_cfg.display_name} wallet yet'}), 400
 
+    # ── which chain's money funds this ──
+    # Asked for only when the caller did not say. A caller that names a source
+    # chain gets the one it named; the router is for the buy panel, which asks
+    # for a token and should not have to know where the user's dollars are.
+    routing = {}
+    if not str(data.get('source_chain') or '').strip():
+        routing = _cc_pick_source_chain(wallet, dest_chain, float(max_spend))
+        source_chain = routing['source_chain']
+
     try:
         quote = _te_build_and_store_quote(
             uid=uid, wallet=wallet, source_chain=source_chain, dest_chain=dest_chain,
             token_address=token_address, max_spend=max_spend, taker=taker,
             mode=str(data.get('mode') or 'manual'))
-    except (TeQuoteError, TeCostError, TeProviderError, te_registry.RegistryError) as e:
+    except te_crosschain.NoLiquidity as e:
+        # The provider answered and said it cannot serve this trade. Reported
+        # under its own code so a caller can tell "nobody can bridge this
+        # right now" from "something is wrong" -- a quiet market changes by
+        # the hour, and nothing about it justifies inventing a route.
+        body = {'ok': True, 'can_execute': False, 'reject_reason': str(e)}
+        body.update(e.to_dict())
+        return jsonify(body), 200
+    except (TeQuoteError, TeCostError, TeProviderError, te_registry.RegistryError,
+            te_crosschain.CrossChainError) as e:
         # A quote that cannot be priced is reported as un-executable with the
         # real reason, not as a server error and never as a zero-cost route.
         return jsonify({'ok': True, 'can_execute': False, 'reject_reason': str(e)}), 200
 
     body = quote.to_dict()
     body['ok'] = True
+    body['source_chain'] = source_chain
+    if routing:
+        body['routing_reason'] = routing.get('reason', '')
+
+    # ── native gas, stated before execution rather than discovered during it ──
+    # Requirement: never quietly turn "100 USDC" into "100 USDC plus gas from
+    # a balance the screen said nothing about". A bridge origin leg is a real
+    # signed transaction paid for in the chain's own token, so when one is
+    # needed the quote says so, names the token and the amount, and OrcAgent
+    # does not offer to cover it.
+    if not quote.same_chain:
+        gas_req = _cc_gas_requirement(wallet, source_chain,
+                                      _cc_recall_route(f'quote:{quote.quote_id}'))
+        body['native_gas_required'] = gas_req['required']
+        body['native_gas'] = gas_req
+        if gas_req['required']:
+            body['can_execute'] = False
+            body['reject_reason'] = gas_req['reason']
+            body['reject_code'] = gas_req['code']
+    else:
+        body['native_gas_required'] = False
     return jsonify(body)
 
 
@@ -8047,8 +8444,141 @@ def _te_evm_fee_charger(enc_blob: str, wallet: str, symbol: str):
     return charge
 
 
+def _te_solana_swap_executor(enc_blob: str, wallet: str, fill_sink: dict = None):
+    """An executor for one user's Solana trading wallet.
+
+    Same contract as _te_evm_swap_executor, and the same reason for existing:
+    mapping one swap primitive's answer onto the engine's three outcomes.
+    Solana makes that mapping harder, because _execute_user_swap_ex() reports
+    tx_hash='' for EVERY failure -- a swap that was broadcast and then timed
+    out looks exactly like one that was never built. Releasing the user's
+    claim on that guess is not a cosmetic error: the money may already be
+    gone, and the next trade would spend it a second time.
+
+    So the decision is made on what the swap SAYS it did rather than on the
+    empty hash. orcagent_solana.py prints an explicit verdict around
+    sendTransaction and _capture_broadcast_evidence reads it:
+
+      rejected by the node    -> nothing left the wallet; the claim goes back
+      landed, chain rejected  -> definitively no fill; only gas was spent
+      a signature came back   -> it is on the network
+      a reply was lost        -> UNKNOWN; the claim is kept and flagged
+
+    Only the last of those is a judgement call, and it is unknown in fact
+    rather than for want of information: the node may have received and
+    broadcast the transaction before the reply went missing. Unknown keeps
+    the claim, which is the pessimistic direction and the only safe one -- it
+    can cost a user a temporary hold, where the optimistic guess can cost
+    them the balance twice.
+
+    fill_sink, when given, receives the realized token amount and base amount
+    the swap reported. The engine's own outcome does not carry them (it
+    reasons about money, not tokens) and a caller that keeps its own holdings
+    ledger needs the fill.
+    """
+    def run(plan):
+        # The Solana counterpart of the EVM executor's _ensure_evm_gas call.
+        # Refusing here is a clean not-sent: nothing has been broadcast, so the
+        # reservation is released in full.
+        with _use_key(enc_blob, wallet) as pk:
+            gas_ok, gas_msg = _ensure_solana_gas(wallet, pk)
+            if not gas_ok:
+                return te_execute.SwapOutcome(submitted=False, confirmed=False,
+                                              error=gas_msg or 'not enough SOL for network fees')
+            cap: dict = {}
+            # base='USDC' is the whole point: the PURCHASE, in the currency the
+            # quote priced, not the ceiling and not SOL.
+            ok, tx_hash, err, _token_amt, _base_amt = _execute_user_swap_ex(
+                wallet, pk, 'buy', plan.token_address, str(plan.purchase_usd),
+                base='USDC', capture=cap)
+
+        if fill_sink is not None:
+            fill_sink.update({'token_amount': _token_amt, 'base_amount': _base_amt,
+                              'signature': tx_hash or cap.get('signature') or '',
+                              'error': err})
+
+        if ok:
+            return te_execute.SwapOutcome(submitted=True, confirmed=True, tx_hash=tx_hash)
+
+        sig = tx_hash or cap.get('signature') or ''
+        if cap.get('onchain_failed'):
+            # It landed and the chain rejected it. No tokens were bought, so
+            # only the network fee actually left the wallet.
+            return te_execute.SwapOutcome(submitted=True, confirmed=False, reverted=True,
+                                          tx_hash=sig,
+                                          error=err or 'the swap failed on-chain')
+        if cap.get('send_attempted') is False:
+            # Positive evidence that the send stage was never entered.
+            return te_execute.SwapOutcome(submitted=False, confirmed=False,
+                                          error=err or 'the swap was not sent')
+        # Either the send was attempted, or there is no evidence either way.
+        # Both are 'unknown', and unknown keeps the claim.
+        return te_execute.SwapOutcome(
+            submitted=True, confirmed=False, tx_hash=sig,
+            error=err or 'the swap may have been sent but was never confirmed')
+    return run
+
+
+def _te_run_solana_trade(*, quote_id, idem, available, wallet, enc_blob,
+                         symbol, token_address, user_id,
+                         source: str = 'manual', copy_of_wallet: str = None,
+                         extra_pos: dict = None, fill_sink: dict = None):
+    """Run one stored quote on Solana, and record the position it opened.
+
+    fee_charger is deliberately None. A USDC-funded Solana buy carries no
+    platform fee today -- orcagent_solana.py's fee splice is SOL-input only
+    and its Jupiter platformFeeBps path is sell-only, so nothing is collected
+    on this leg (see execute_single_swap's own docstring). The quote is priced
+    at a zero fee rate to match (_te_fee_rate_for), so plan.fee_usd is zero
+    and there is nothing for a charger to charge. Passing one that transferred
+    SOL would invent a cost the quote never showed the user -- and charging a
+    fee the quote DID show while the swap also skips it is the double-count
+    this whole engine exists to prevent.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        result = te_execute.execute_trade(
+            conn, quote_id=quote_id, idempotency_key=idem, available_usd=available,
+            swap_executor=_te_solana_swap_executor(enc_blob, wallet, fill_sink),
+            fee_charger=None,
+        )
+        quote_row = te_ledger.load_quote(conn, quote_id)
+    finally:
+        conn.close()
+
+    # Only a COMPLETED trade opens a position, for the same reason as the EVM
+    # path: a swap nobody has seen land must not put a holding on screen that
+    # the user would then try to sell.
+    if result.state == te_ledger.COMPLETED and result.created:
+        purchase = float(quote_row['token_purchase_usd']) if quote_row else 0.0
+        td = get_token_data(token_address)
+        entry_price = float(td['price']) if td and td.get('price') else 0.0
+        _pos = {
+            'amount':    (purchase / entry_price) if entry_price > 0 else 0.0,
+            'buy_price': entry_price,
+            'spend':     purchase,
+            'symbol':    symbol,
+            'opened_at': time.time(),
+            # The sell leg routes back into whatever the position was opened
+            # with -- see test_solana_usdc.py. Recorded explicitly so this
+            # engine-opened position sells the same way a legacy one does.
+            'base':      SOLANA_BASE_CURRENCY,
+        }
+        # Anything the caller tracks alongside the trade -- entry liquidity,
+        # the entry risk snapshot. setdefault, so a caller cannot overwrite
+        # the spend with the amount it asked for instead of the amount bought.
+        for _k, _v in (extra_pos or {}).items():
+            _pos.setdefault(_k, _v)
+        _upsert_open_position(user_id, wallet, token_address, _pos,
+                              source=source, copy_of_wallet=copy_of_wallet,
+                              chain='solana')
+    return result
+
+
 def _te_run_evm_trade(*, quote_id, idem, available, wallet, enc_blob, evm_address,
-                      symbol, token_address, chain, user_id):
+                      symbol, token_address, chain, user_id,
+                      source: str = 'manual', copy_of_wallet: str = None,
+                      extra_pos: dict = None):
     """Run one stored quote on an EVM chain, and record the position it opened.
 
     One function so /api/trade/execute and any legacy route forwarded onto the
@@ -8079,14 +8609,1056 @@ def _te_run_evm_trade(*, quote_id, idem, available, wallet, enc_blob, evm_addres
         purchase = float(quote_row['token_purchase_usd']) if quote_row else 0.0
         td = get_token_data(token_address)
         entry_price = float(td['price']) if td and td.get('price') else 0.0
-        _upsert_open_position(user_id, wallet, token_address, {
+        _pos = {
             'amount':    (purchase / entry_price) if entry_price > 0 else 0.0,
             'buy_price': entry_price,
             'spend':     purchase,
             'symbol':    symbol,
             'opened_at': time.time(),
-        }, source='manual', chain=chain)
+        }
+        # Anything the caller tracks on top of the trade itself -- the bot's
+        # entry liquidity and risk snapshot, for instance. Merged rather than
+        # overwritten so a caller cannot accidentally restate the spend as the
+        # amount it asked for instead of the amount that was bought.
+        for _k, _v in (extra_pos or {}).items():
+            _pos.setdefault(_k, _v)
+        _upsert_open_position(user_id, wallet, token_address, _pos,
+                              source=source, copy_of_wallet=copy_of_wallet,
+                              chain=chain)
     return result
+
+
+# ═════════════════════════════════════════════════════════════════════════
+#  CROSS-CHAIN, THROUGH THE ENGINE
+# ═════════════════════════════════════════════════════════════════════════
+# The bridge already worked and was already persistent -- in its own table,
+# with its own status strings, outside everything the engine guarantees. So a
+# bridged trade got recovery but no ceiling, no reservation and no
+# idempotency, while the buy on the far side got all three. This is the join.
+#
+# WHAT IS DELIBERATELY NOT REPLACED
+# _execute_cross_chain_bridge() and _bridge_status_loop() stay exactly as they
+# are. They serve the standalone Bridge feature -- a user moving their own
+# USDC between chains with no trade attached -- which is a different product
+# and has no ceiling to enforce. Deleting a working path to make a point is
+# not the same as fixing one.
+
+def _cc_fetch_quote(*, origin_chain, destination_chain, sell_token, buy_token,
+                    sell_amount, origin_address, destination_address,
+                    slippage_bps, gas_payer=None):
+    """One GET to 0x's cross-chain quote endpoint. Raises on anything but 200.
+
+    Endpoint, headers and parameter names verified against 0x's own published
+    example (0xProject/0x-examples, cross-chain-headless-example/src/
+    {crossChainClient.ts,schemas.ts,config.ts}). docs.0x.org and api.0x.org
+    are both unreachable from the build environment, so that example is the
+    primary source used -- current, but not the same as a live call.
+    """
+    if not ZEROX_API_KEY:
+        raise RuntimeError('ZEROX_API_KEY is not configured')
+    r = requests.get(
+        'https://api.0x.org/cross-chain/quotes',
+        params=_cc_quote_params(
+            origin_chain=origin_chain, destination_chain=destination_chain,
+            sell_token=sell_token, buy_token=buy_token, sell_amount=sell_amount,
+            origin_address=origin_address, destination_address=destination_address,
+            slippage_bps=slippage_bps, gas_payer=gas_payer),
+        headers={'0x-api-key': ZEROX_API_KEY, '0x-version': 'v2'},
+        timeout=15,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f'HTTP {r.status_code}: {r.text[:300]}')
+    return r.json()
+
+
+def _cc_quote_params(*, origin_chain, destination_chain, sell_token, buy_token,
+                     sell_amount, origin_address, destination_address,
+                     slippage_bps, gas_payer=None) -> dict:
+    """Exactly what goes on the wire for a cross-chain quote.
+
+    Split out from the request so a test can assert on the parameters without
+    a network, and so the smoke script prints the same thing the app sends.
+
+    gasPayer is ABSENT unless there is a real alternative fee payer. 0x's
+    parameter takes the base58 public key of another Solana wallet that pays
+    the fee and co-signs (see 0x-examples/cross-chain-headless-example/src/
+    fromSolanaToEvmWithGasPayer.ts); the self-paid example omits it and the
+    schema marks it optional. There is no documented value meaning "the user
+    pays", so this used to send the literal string 'user' -- a value the API
+    never defined.
+    """
+    params = {
+        'originChain':        origin_chain,
+        'destinationChain':   destination_chain,
+        'sellToken':          sell_token,
+        'buyToken':           buy_token,
+        'sellAmount':         str(sell_amount),
+        'sortQuotesBy':       'price',
+        'originAddress':      origin_address,
+        'destinationAddress': destination_address,
+        'slippageBps':        int(slippage_bps),
+        'maxNumQuotes':       1,
+    }
+    if gas_payer:
+        params['gasPayer'] = gas_payer
+    return params
+
+
+def _cc_status_params(*, origin_chain, origin_tx_hash, quote_id='') -> dict:
+    """Exactly what goes on the wire for a cross-chain status lookup.
+
+    originChain and originTxHash are the verified pair -- 0x's published
+    request schema lists only those two and its example sends only those two.
+    quoteId is added when we have a real one, because a lookup that can name
+    the quote is more precise; the provider adapter retries without it if the
+    endpoint refuses, so an unverified parameter can never be the reason a
+    bridge stops being tracked.
+    """
+    params = {'originChain': origin_chain, 'originTxHash': origin_tx_hash}
+    if quote_id:
+        params['quoteId'] = quote_id
+    return params
+
+
+def _cc_fetch_status(*, origin_chain, origin_tx_hash, quote_id=''):
+    """One GET to 0x's cross-chain status endpoint.
+
+    originChain + originTxHash, not quoteId -- 0x's prose says otherwise but
+    its own working example sends exactly these two.
+    """
+    if not ZEROX_API_KEY:
+        raise RuntimeError('ZEROX_API_KEY is not configured')
+    r = requests.get(
+        'https://api.0x.org/cross-chain/status',
+        params=_cc_status_params(origin_chain=origin_chain,
+                                 origin_tx_hash=origin_tx_hash,
+                                 quote_id=quote_id),
+        headers={'0x-api-key': ZEROX_API_KEY, '0x-version': 'v2'},
+        timeout=10,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f'HTTP {r.status_code}: {r.text[:300]}')
+    return r.json()
+
+
+def _cc_is_current_settler(chain: str, address: str) -> bool:
+    """Whether `address` is a live 0x Settler on `chain`.
+
+    0x's instruction is explicit: do not hardcode Settler addresses, always
+    query the deployer/registry for the current one. So this asks rather than
+    keeping a list that would go stale and give false assurance.
+
+    ownerOf(feature) on the registry returns the current Settler for each
+    feature number: 2 taker-submitted, 3 metatransactions, 4 intents,
+    5 bridge. A lookup that fails returns False -- NOT because failure means
+    safe, but because this is one of several checks and the spender allowlist
+    is the one that actually grants permission. Failing closed here would let
+    an RPC blip refuse every route.
+    """
+    if not address or chain == 'solana':
+        return False
+    try:
+        w3 = _get_web3(chain)
+        registry = w3.eth.contract(
+            address=w3.to_checksum_address(te_crosschain.ZEROX_SETTLER_REGISTRY),
+            abi=[{'name': 'ownerOf', 'type': 'function', 'stateMutability': 'view',
+                  'inputs': [{'name': 'tokenId', 'type': 'uint256'}],
+                  'outputs': [{'name': '', 'type': 'address'}]}])
+        want = w3.to_checksum_address(address)
+        for feature in (2, 3, 4, 5):
+            try:
+                if registry.functions.ownerOf(feature).call() == want:
+                    return True
+            except Exception:
+                continue
+    except Exception as e:
+        print(f'[crosschain] settler registry lookup unavailable on {chain}: {e}',
+              flush=True)
+    return False
+
+
+def _te_crosschain_provider():
+    return te_crosschain.ZeroExCrossChain(_cc_fetch_quote, _cc_fetch_status)
+
+
+def _cc_status_fetcher_with_quote(source_chain: str, source_tx_hash: str,
+                                  quote_id: str = ''):
+    return _te_crosschain_provider().get_status(
+        source_chain=source_chain, source_tx_hash=source_tx_hash,
+        quote_id=quote_id)
+
+
+def _cc_route_enabled(source_chain: str, dest_chain: str) -> bool:
+    """Whether this particular direction may run.
+
+    Two gates, not one. The master flag turns the feature on at all; the
+    route list decides which pairs. A route is enabled by being named, never
+    by existing -- because "0x lists this chain" and "we have watched a real
+    trade complete on it" are different facts, and only the second one is a
+    reason to move a user's money.
+    """
+    if not TRADE_ENGINE_CROSSCHAIN:
+        return False
+    return f'{source_chain}->{dest_chain}' in CROSSCHAIN_ENABLED_ROUTES
+
+
+def _cc_taker_address(wallet: str, chain: str) -> str:
+    """The address that holds this user's USDC on `chain`.
+
+    Solana and the EVM chains are different keypairs; every EVM chain shares
+    one. Returning the wrong one here would quote a bridge to somebody else's
+    wallet, which verify_route() would then refuse -- correctly, but far too
+    late to be useful.
+    """
+    if chain == 'solana':
+        return _get_trading_wallet_address(wallet) or wallet
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        uid = _get_uid(conn, wallet)
+        return ensure_bsc_wallet(conn, uid, wallet) if uid else ''
+    finally:
+        conn.close()
+
+
+def _cc_usdc_balance(wallet: str, chain: str) -> float:
+    """This user's spendable dollar balance on one chain, read server-side."""
+    addr = _cc_taker_address(wallet, chain)
+    if not addr:
+        return 0.0
+    try:
+        if chain == 'solana':
+            return float(_get_solana_usdc_balance(addr))
+        return float(get_evm_usdc_balance(addr, chain))
+    except Exception as e:
+        print(f'[crosschain] balance read failed on {chain}: {e}', flush=True)
+        return 0.0
+
+
+# ── the gas question, answered honestly per chain ────────────────────────
+# Requirement: OrcAgent must never permanently subsidise gas, and must never
+# claim a route is gasless when it is not.
+#
+# WHAT IS ACTUALLY TRUE TODAY, per chain:
+#
+#   EVM same-chain buys  — 0x Gasless. The user signs an EIP-712 message and
+#                          0x's relayer submits it, taking its cost out of
+#                          the trade. No native balance needed. Real.
+#   Solana same-chain    — _ensure_solana_gas() tops the wallet up from the
+#                          platform sponsor when one is configured, and this
+#                          deployment configures none (ORCAGENT_FRONTS_GAS=0,
+#                          SOL_GAS_SPONSOR_PRIVATE_KEY empty). So a Solana
+#                          buy needs the user's own SOL for the network fee.
+#   EVM bridge origin    — a real transaction the user signs and pays for in
+#                          the chain's native token. 0x's cross-chain quote
+#                          takes a gasPayer parameter, but the only value
+#                          this engine will execute is 'user'.
+#   Solana bridge origin — same: a signed transaction paying SOL.
+#
+# So the honest answer for a bridge origin leg is that native gas IS
+# required, and the code says so rather than discovering it at signing time.
+CC_NATIVE_GAS_REQUIRED = 'NATIVE_GAS_REQUIRED'
+CC_ROUTE_NOT_GASLESS = 'ROUTE_NOT_GASLESS'
+# Headroom on the provider's own gas figure. Gas price moves between the quote
+# and the signature; a transaction that runs out of gas mid-bridge is worse
+# than one that was refused for wanting a little more margin.
+CC_GAS_ESTIMATE_MARGIN = float(os.getenv('CROSSCHAIN_GAS_MARGIN', '1.5'))
+
+# What a wallet must hold to pay for one origin-leg transaction. Native units.
+# Deliberately a floor rather than an estimate: it is compared against a live
+# balance to decide whether to refuse, and refusing a trade that would have
+# worked costs a user far less than accepting one that strands their money
+# half-bridged.
+CC_MIN_NATIVE = {
+    'solana':    0.002,
+    'bsc':       0.0008,
+    'base':      0.00015,
+    'arbitrum':  0.00015,
+    'polygon':   0.15,
+    'robinhood': 0.00015,
+}
+
+
+def _cc_native_balance(wallet: str, chain: str) -> float:
+    addr = _cc_taker_address(wallet, chain)
+    if not addr:
+        return 0.0
+    try:
+        if chain == 'solana':
+            return float(_get_user_sol(addr))
+        w3 = _get_web3(chain)
+        return float(w3.from_wei(w3.eth.get_balance(w3.to_checksum_address(addr)), 'ether'))
+    except Exception as e:
+        print(f'[crosschain] native balance read failed on {chain}: {e}', flush=True)
+        return 0.0
+
+
+def _cc_route_gas_estimate(chain: str, route) -> float:
+    """The provider's own gas figure for this route, in native units.
+
+    Returns 0.0 when the quote did not give one -- which is a different thing
+    from "no gas needed", and the caller says so.
+
+    Why this is preferred over the floor in CC_MIN_NATIVE: that floor is a
+    number written in this repository. It is a reasonable minimum for
+    refusing an obviously empty wallet, but calling it the gas requirement
+    would be presenting our guess as the provider's answer.
+    """
+    if route is None:
+        return 0.0
+    try:
+        costs = getattr(route, 'gas_costs_raw', None) or {}
+        if te_registry.get_chain(chain).kind == 'evm':
+            # The live response gives gasCosts.totalNetworkFee in wei -- 0x's
+            # own figure for this route. Preferred over multiplying gasLimit
+            # by gasPrice ourselves: same inputs, but theirs is the one they
+            # stand behind, and the two differ slightly in practice.
+            if isinstance(costs, dict) and costs.get('totalNetworkFee'):
+                try:
+                    return int(str(costs['totalNetworkFee'])) / 1e18
+                except (TypeError, ValueError):
+                    pass
+            gas = int(getattr(route, 'tx_gas', 0) or 0)
+            if gas <= 0:
+                return 0.0
+            details = (route.raw.get('transaction') or {}).get('details') or {}
+            price = int(str(details.get('gasPrice') or 0) or 0)
+            if price <= 0:
+                return 0.0
+            return (gas * price) / 1e18
+        # Solana: gasCosts, kept verbatim from the quote.
+        entries = costs if isinstance(costs, list) else [costs]
+        total = 0
+        for entry in entries:
+            if isinstance(entry, dict) and entry.get('amount') is not None:
+                total += int(str(entry['amount']))
+        return (total / 1e9) if total else 0.0
+    except Exception:
+        return 0.0
+
+
+def _cc_gas_requirement(wallet: str, chain: str, route=None) -> dict:
+    """Whether this wallet can pay for the origin transaction itself.
+
+    Returns a dict that is always safe to show a user. `required` True means
+    the trade cannot run until they hold some of the chain's own token.
+
+    THE NUMBER IS AN ESTIMATE AND IS LABELLED ONE.
+    `estimated_native_gas` is the provider's figure when the quote gave one,
+    and otherwise a floor written in this repository -- `source` says which.
+    Neither is exact: gas price moves between quoting and signing, and a
+    Solana fee depends on what accounts the transaction touches. Presenting
+    either as "the exact amount you need" would be a precision this cannot
+    have. The balance is read live, immediately before submission, which is
+    the part that IS reliable.
+
+    OrcAgent does not fill this gap. There is no branch below that spends a
+    platform wallet, and adding one would make every bridged trade a
+    permanent cost rather than a fee.
+    """
+    cfg = te_registry.get_chain(chain)
+    floor = CC_MIN_NATIVE.get(chain, 0.0)
+    quoted = _cc_route_gas_estimate(chain, route)
+    # A safety margin on the provider's own number, because gas price moves
+    # between the quote and the signature and a transaction that runs out is
+    # worse than one that was refused.
+    need = max(floor, quoted * CC_GAS_ESTIMATE_MARGIN)
+    have = _cc_native_balance(wallet, chain)
+    ok = have >= need
+    _source_note = ('from the route quote, with margin' if quoted > 0 else
+                    'a conservative minimum; the quote gave no gas figure')
+    return {
+        'required': not ok,
+        'code': '' if ok else CC_NATIVE_GAS_REQUIRED,
+        'chain': chain,
+        'symbol': cfg.native.symbol,
+        # Named for what it is. There is no 'exact' key, deliberately.
+        'estimated_native_gas': need,
+        'estimate_source': ('provider_quote' if quoted > 0 else 'orcagent_floor'),
+        'is_estimate': True,
+        'provider_quoted_native_gas': quoted,
+        'needed': need,          # kept for callers written before the rename
+        'have': round(have, 9),
+        'gasless': False,
+        'reason': '' if ok else (
+            f'Bridging out of {cfg.display_name} needs a transaction signed and '
+            f'paid for in {cfg.native.symbol}. This wallet holds {have:.6f} and '
+            f'an estimated {need} is required ({_source_note}). It is an '
+            f'estimate, not an exact figure. OrcAgent does not pay it for you.'),
+    }
+
+
+# ── quoting a bridge, for build_quote ────────────────────────────────────
+# Held for the life of a quote so execution signs the route that was priced,
+# not a fresh one at a different price. Keyed by quote id; a route nobody
+# executes falls out when the quote expires.
+_CC_ROUTES: dict = {}
+_CC_ROUTES_LOCK = threading.Lock()
+CC_ROUTE_TTL = 180.0
+
+
+def _cc_remember_route(key: str, route) -> None:
+    now = time.time()
+    with _CC_ROUTES_LOCK:
+        _CC_ROUTES[key] = (now, route)
+        for k, (ts, _r) in list(_CC_ROUTES.items()):
+            if now - ts > CC_ROUTE_TTL:
+                _CC_ROUTES.pop(k, None)
+
+
+def _cc_recall_route(key: str):
+    with _CC_ROUTES_LOCK:
+        entry = _CC_ROUTES.get(key)
+    if not entry:
+        return None
+    ts, route = entry
+    return None if (time.time() - ts) > CC_ROUTE_TTL else route
+
+
+def _te_bridge_quoter(wallet: str, quote_key: str):
+    """The bridge_quoter build_quote() calls, bound to one user.
+
+    Returns the engine's view of the bridge: one USD figure, which is the
+    difference between what goes in and what is GUARANTEED out. Not a sum of
+    the provider's fee objects -- those are denominated in several different
+    tokens and none of them is a total, so adding them up means inventing
+    exchange rates. The in-minus-out figure already contains every one of
+    them and needs no rate at all.
+    """
+    def quoter(source_chain: str, dest_chain: str, ceiling_usd) -> dict:
+        if not _cc_route_enabled(source_chain, dest_chain):
+            raise TeQuoteError(
+                f'{source_chain} -> {dest_chain} is not an enabled cross-chain route')
+        src = te_registry.get_chain(source_chain)
+        origin = _cc_taker_address(wallet, source_chain)
+        dest = _cc_taker_address(wallet, dest_chain)
+        if not origin or not dest:
+            raise TeQuoteError('no wallet on one side of this route yet')
+        amount_raw = te_registry.to_raw(Decimal(str(ceiling_usd)), src.stable)
+        # NoLiquidity is deliberately NOT caught and re-wrapped here: it
+        # carries the chains, the amount and the provider's zid, and flattening
+        # it into a generic quote error throws all of that away.
+        route = _te_crosschain_provider().get_quote(
+            source_chain=source_chain, destination_chain=dest_chain,
+            source_amount_raw=amount_raw, origin_address=origin,
+            destination_address=dest,
+            extra_allowed_spenders=CROSSCHAIN_ALLOWED_SPENDERS,
+            settler_lookup=_cc_is_current_settler)
+        # Priced, safe, and still possibly not worth doing. Checked here
+        # rather than in verify_route because "this response cannot be
+        # trusted" and "this trade is bad value" are different answers and
+        # must not be logged, counted or explained as the same thing.
+        loss = route.loss_usd()
+        ceiling = Decimal(str(ceiling_usd))
+        if ceiling > 0:
+            pct = (loss / ceiling) * 100
+            if pct > Decimal(str(CROSSCHAIN_MAX_BRIDGE_COST_PCT)):
+                raise TeQuoteError(
+                    f'bridging {ceiling} USDC from {source_chain} to {dest_chain} '
+                    f'costs {loss} — {pct.quantize(Decimal("0.1"))}% of the trade. '
+                    f'A bridge\'s costs are mostly fixed, so a larger amount '
+                    f'carries them far better. Try a bigger trade, or buy a token '
+                    f'on a chain you already hold dollars on')
+        _cc_remember_route(quote_key, route)
+        return {
+            'fee_usd':             loss,
+            'provider':            route.provider,
+            'provider_quote_id':   route.quote_id,
+            'provider_zid':        route.zid,
+            'bridge_provider':     route.bridge_provider,
+            'source_amount_raw':   route.source_amount_raw,
+            'expected_out_raw':    route.expected_out_raw,
+            'minimum_out_raw':     route.minimum_out_raw,
+            'estimated_seconds':   route.estimated_seconds,
+        }
+    return quoter
+
+
+# ── the router: which chain's USDC funds this trade ──────────────────────
+def _cc_pick_source_chain(wallet: str, dest_chain: str, amount_usd: float) -> dict:
+    """Decide where the money comes from, and say why.
+
+    The order is not a preference, it is a cost argument:
+
+      1. The destination chain itself, whenever it can cover the trade. A
+         bridge that does not happen costs nothing, takes no time and cannot
+         get stuck halfway.
+      2. Otherwise the single chain with the largest balance that can cover
+         it on its own.
+
+    What it deliberately does NOT do is split a trade across two chains to
+    make one work. Twenty dollars on Solana plus thirty bridged from Base is
+    two executions, two failure modes and two things to recover, in exchange
+    for bridging thirty dollars instead of fifty. That trade is worth making
+    when bridging is expensive and reliable; it is not worth making the first
+    time bridging works at all.
+    """
+    dest_balance = _cc_usdc_balance(wallet, dest_chain)
+    if dest_balance >= amount_usd:
+        return {'source_chain': dest_chain, 'bridge_required': False,
+                'source_balance': dest_balance,
+                'reason': 'the destination chain already holds enough'}
+
+    candidates = []
+    for chain in list(EVM_CHAINS) + ['solana']:
+        if chain == dest_chain:
+            continue
+        if not _cc_route_enabled(chain, dest_chain):
+            continue
+        bal = _cc_usdc_balance(wallet, chain)
+        if bal >= amount_usd:
+            candidates.append((bal, chain))
+    if not candidates:
+        return {'source_chain': dest_chain, 'bridge_required': False,
+                'source_balance': dest_balance, 'insufficient': True,
+                'reason': 'no single chain holds enough for this trade'}
+    candidates.sort(reverse=True)
+    bal, chain = candidates[0]
+    return {'source_chain': chain, 'bridge_required': True, 'source_balance': bal,
+            'reason': f'{chain} holds {bal:.2f} and {dest_chain} holds {dest_balance:.2f}'}
+
+
+# ── executing the origin leg ─────────────────────────────────────────────
+def _te_cc_source_sender(enc_blob: str, wallet: str, source_chain: str):
+    """Sign and broadcast the bridge's origin transaction, once.
+
+    Reuses the same signers the standalone Bridge feature uses, so there is
+    one implementation of "sign what 0x returned" rather than a second one
+    that can drift. What is different here is the reporting: a failure has to
+    say whether anything may have gone out, because the engine releases the
+    user's claim on one answer and keeps it on the other.
+    """
+    def send(route) -> te_execute.SourceOutcome:
+        raw = dict(route.raw or {})
+        # ── the spender, checked again at the last possible moment ──
+        # verify_route already passed this address. It is checked a second
+        # time here because this is the line after which an approval is real,
+        # and because the route object travelled through a cache and a
+        # database row to get here. An allowance is a standing permission;
+        # one redundant check costs nothing next to one wrong approval.
+        if route.needs_allowance and route.allowance_target:
+            try:
+                _te_crosschain_provider()._verify_spender(
+                    route, CROSSCHAIN_ALLOWED_SPENDERS, _cc_is_current_settler)
+            except te_crosschain.CrossChainError as e:
+                return te_execute.SourceOutcome(
+                    submitted=False, error=f'refusing to approve this spender: {e}'[:400])
+            issues = dict(raw.get('issues') or {})
+            allowance = dict(issues.get('allowance') or {})
+            allowance['spender'] = route.allowance_target
+            issues['allowance'] = allowance
+            raw['issues'] = issues
+        raw.setdefault('sellAmount', str(route.source_amount_raw))
+        txn = raw.get('transaction') or {}
+
+        # ── a Solana transaction this process can actually read ──
+        # Checked before the key is decrypted, so a format we cannot parse
+        # fails with the reason rather than as an opaque error with the user's
+        # key in memory.
+        if source_chain == 'solana':
+            try:
+                te_crosschain.check_solana_tx_version(
+                    route.serialized_transaction, _cc_parse_solana_tx)
+            except te_crosschain.CrossChainError as e:
+                return te_execute.SourceOutcome(submitted=False, error=str(e)[:400])
+
+        try:
+            with _use_key(enc_blob, wallet) as pk:
+                if source_chain == 'solana':
+                    tx_hash = _bridge_sign_send_solana(txn, pk)
+                else:
+                    tx_hash = _bridge_sign_send_evm(
+                        txn, raw, pk, source_chain,
+                        _cc_taker_address(wallet, source_chain), route.source_token)
+        except Exception as e:
+            # Did it go out? A signing error did not; a send that timed out
+            # may have. The two are not distinguishable from the exception
+            # alone, so the expensive assumption is the safe one.
+            msg = f'{type(e).__name__}: {e}'
+            never_sent = isinstance(e, (ValueError, KeyError))
+            return te_execute.SourceOutcome(
+                submitted=False, error=_redact_keys(msg)[:400], unknown=not never_sent)
+        if not tx_hash:
+            return te_execute.SourceOutcome(
+                submitted=False, error='the bridge returned no transaction hash',
+                unknown=True)
+        return te_execute.SourceOutcome(submitted=True, tx_hash=str(tx_hash))
+    return send
+
+
+def _cc_parse_solana_tx(raw: bytes):
+    """Parse provider bytes into a Solana transaction, or raise.
+
+    A thin wrapper so the version gate in trade_engine/crosschain.py stays
+    free of a Solana dependency. The bytes are parsed, never rebuilt: a
+    transaction reconstructed locally to satisfy a parser is not the one the
+    bridge quoted, and signing it would authorise something nobody priced.
+    """
+    from solders.transaction import VersionedTransaction as _VTx
+    return _VTx.from_bytes(raw)
+
+
+def _te_cc_status_fetcher(source_chain: str, source_tx_hash: str,
+                          quote_id: str = ''):
+    """Status for one bridge, naming the quote when the row has a real one."""
+    return _te_crosschain_provider().get_status(
+        source_chain=source_chain, source_tx_hash=source_tx_hash,
+        quote_id=quote_id)
+
+
+def _te_run_crosschain_trade(*, quote_id, idem, available, wallet, enc_blob,
+                             source_chain, route, symbol, token_address, user_id):
+    """Start one cross-chain trade and return as soon as the bridge is moving.
+
+    Not finished when this returns, and does not say it is: the trade sits in
+    BRIDGING with the user's claim still held, and _crosschain_resume_loop()
+    takes it from there -- in this process or in whichever one is running an
+    hour from now.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        return te_execute.start_crosschain_trade(
+            conn, quote_id=quote_id, idempotency_key=idem,
+            available_usd=available, route=route,
+            source_sender=_te_cc_source_sender(enc_blob, wallet, source_chain))
+    finally:
+        conn.close()
+
+
+# ── destination swap, once the money lands ───────────────────────────────
+def _te_cc_dest_swap_executor(user_id: int, wallet: str, dest_chain: str, symbol: str):
+    """The buy on the far side, using whichever executor that chain already has.
+
+    No third implementation of "swap on a chain". The Solana and EVM
+    executors are the same ones a same-chain trade uses, so a fix to either
+    lands here too.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        row = conn.execute(
+            'SELECT encrypted_private_key, encrypted_private_key_bsc, bsc_wallet_address '
+            'FROM users WHERE id=?', (user_id,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        raise te_execute.ExecutionError('the user this trade belongs to no longer exists')
+    sol_blob, evm_blob, evm_address = row[0], row[1], row[2]
+    if dest_chain == 'solana':
+        if not sol_blob:
+            raise te_execute.ExecutionError('no Solana trading wallet configured')
+        return _te_solana_swap_executor(sol_blob, wallet)
+    if not evm_blob:
+        raise te_execute.ExecutionError(f'no EVM trading wallet configured')
+    return _te_evm_swap_executor(evm_blob, wallet, evm_address)
+
+
+def _crosschain_resume_once(limit: int = 25) -> int:
+    """Push every unfinished cross-chain trade one step forward.
+
+    Everything it needs comes out of the database. Nothing is held in this
+    process between calls, which is the whole point: the process that
+    finishes a trade is usually not the one that started it.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        pending = te_ledger.resumable_crosschain(conn, limit=limit)
+    finally:
+        conn.close()
+    moved = 0
+    for row in pending:
+        trade_id = row['trade_id']
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            try:
+                cc = te_ledger.get_crosschain(conn, trade_id) or {}
+                quote_row = te_ledger.load_quote(conn, cc.get('quote_id') or '') or {}
+                td = get_token_data(quote_row.get('token_address') or '')
+                symbol = (td or {}).get('symbol') or 'token'
+                before = row['state']
+                result = te_execute.resume_crosschain_trade(
+                    conn, trade_id=trade_id,
+                    status_fetcher=_te_cc_status_fetcher,
+                    dest_swap_executor=_te_cc_dest_swap_executor(
+                        row['user_id'], row['wallet'],
+                        cc.get('destination_chain') or '', symbol),
+                    fee_charger=None,
+                    deadline_seconds=CROSSCHAIN_DEADLINE_SECONDS)
+            finally:
+                conn.close()
+            if result.state != before:
+                moved += 1
+                print(f'[crosschain] {trade_id[:8]} {before} -> {result.state}'
+                      + (f' ({result.failure_reason[:120]})' if result.failure_reason else ''),
+                      flush=True)
+            # A completed cross-chain buy opens the position the user is
+            # holding. Done here rather than inside the engine because the
+            # engine deals in money and this app's positions deal in tokens.
+            if result.state == te_ledger.COMPLETED:
+                _cc_open_position_for(trade_id, symbol)
+        except Exception as e:
+            print(f'[crosschain] {trade_id[:8]} resume failed: '
+                  f'{_redact_keys(str(e))[:200]}', flush=True)
+    return moved
+
+
+def _cc_open_position_for(trade_id: str, symbol: str) -> None:
+    """Record the holding a finished cross-chain buy produced."""
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        cc = te_ledger.get_crosschain(conn, trade_id)
+        trade = te_ledger.get_trade(conn, trade_id)
+        quote_row = te_ledger.load_quote(conn, cc['quote_id']) if cc else None
+    finally:
+        conn.close()
+    if not (cc and trade and quote_row):
+        return
+    token_address = quote_row['token_address']
+    us = get_user_state(trade['wallet'])
+    if (us['positions'].get(token_address) or {}).get('amount', 0) > 0:
+        return                      # already recorded; resume is idempotent here too
+    purchase = float(quote_row['token_purchase_usd'] or 0)
+    td = get_token_data(token_address)
+    entry_price = float(td['price']) if td and td.get('price') else 0.0
+    pos = {
+        'amount':    (purchase / entry_price) if entry_price > 0 else 0.0,
+        'buy_price': entry_price,
+        'spend':     purchase,
+        'symbol':    symbol,
+        'opened_at': time.time(),
+    }
+    if cc['destination_chain'] == 'solana':
+        pos['base'] = SOLANA_BASE_CURRENCY
+    _upsert_open_position(trade['user_id'], trade['wallet'], token_address, pos,
+                          source='manual', chain=cc['destination_chain'])
+
+
+def _crosschain_unfinished_count() -> int:
+    """How many cross-chain trades this database is still responsible for.
+
+    Asked at boot, and the reason the worker is not purely a function of the
+    feature flag: a trade in BRIDGING is money on chain with the user's claim
+    still held, and turning the route off -- or finishing a controlled live
+    test with the flag never on in the first place -- must not strand it.
+    """
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            return len(te_ledger.resumable_crosschain(conn, limit=1))
+        finally:
+            conn.close()
+    except Exception:
+        # A database too old or too new to ask is not a reason to refuse to
+        # boot. The flag alone then decides, as it did before.
+        return 0
+
+
+def _crosschain_resume_loop():
+    """Every unfinished cross-chain trade, forever, until it finishes.
+
+    Started at boot, so a deploy in the middle of a bridge is a pause rather
+    than a loss. The first pass happens immediately on start for exactly that
+    reason: a trade that was mid-flight when the process went down should not
+    wait a full interval to be picked up.
+    """
+    print(f'[crosschain] resume worker started (every {CROSSCHAIN_POLL_SECONDS}s, '
+          f'gives up on a bridge after {CROSSCHAIN_DEADLINE_SECONDS}s)', flush=True)
+    while True:
+        try:
+            _crosschain_resume_once()
+        except Exception as e:
+            print(f'[crosschain] resume pass failed: {_redact_keys(str(e))[:200]}',
+                  flush=True)
+        time.sleep(CROSSCHAIN_POLL_SECONDS)
+
+
+def _api_trade_execute_crosschain(quote_row, wallet, uid, quote_id, data):
+    """The cross-chain half of /api/trade/execute.
+
+    Returns as soon as the origin transaction is away. That is not a partial
+    success being dressed up: the response says which state the trade is in
+    and that it is not finished, and /api/trade/status/<trade_id> follows it
+    the rest of the way. A bridge takes minutes, and an HTTP request that
+    waits for one is a request that times out and leaves a caller guessing
+    whether it happened.
+    """
+    source_chain = quote_row['source_chain']
+    dest_chain = quote_row['destination_chain']
+    if not _cc_route_enabled(source_chain, dest_chain):
+        return jsonify({'ok': False,
+                        'msg': f'{source_chain} to {dest_chain} is not an enabled '
+                               f'cross-chain route'}), 400
+
+    # The route that was PRICED, not a fresh one. Re-quoting here would sign a
+    # bridge at a price the user never saw, which is the whole thing a stored
+    # quote exists to prevent.
+    route = _cc_recall_route(f'quote:{quote_id}')
+    if route is None:
+        return jsonify({'ok': False, 'requote': True,
+                        'msg': 'This cross-chain route has expired. Request a new quote.'}), 409
+
+    # Read again here, immediately before submission, against the route that
+    # was priced. The balance can have moved since the quote, and this is the
+    # last moment the answer is still worth anything.
+    gas_req = _cc_gas_requirement(wallet, source_chain, route)
+    if gas_req['required'] and source_chain in EVM_CHAINS:
+        # THE SAME LADDER EVERY OTHER EVM TRADE CLIMBS.
+        #
+        # A same-chain buy on this exact wallet would not have been refused
+        # here: _ensure_evm_gas() would have funded the gas from what the user
+        # already holds -- the sponsor if this deployment runs one, otherwise a
+        # small bridge of their own SOL, otherwise a swap of their own USDC on
+        # the chain. Only a bridge was refusing, and only because it asked a
+        # different question ("is there gas?") instead of the one the rest of
+        # the app asks ("can this wallet get gas?").
+        #
+        # Nothing is fronted by OrcAgent here: every rung of that ladder is
+        # the user's own money, and the trade's own quote carries the cost.
+        _conn_g = sqlite3.connect(DB_FILE)
+        try:
+            _row_g = _conn_g.execute(
+                'SELECT encrypted_private_key_bsc FROM users WHERE wallet_address=?',
+                (wallet,)).fetchone()
+        finally:
+            _conn_g.close()
+        _pk_blob = _row_g[0] if _row_g else ''
+        if uid and _pk_blob:
+            try:
+                with _use_key(_pk_blob, wallet) as _evm_pk:
+                    _ok, _why, _bridge_id = _ensure_evm_gas(
+                        uid, wallet, _evm_pk,
+                        _cc_taker_address(wallet, source_chain), source_chain)
+            except Exception as e:
+                _ok, _why, _bridge_id = False, f'gas top-up failed: {e}', None
+            if _ok:
+                # It worked. Re-read rather than assume: the number that
+                # matters is the one on chain, not the one we hoped for.
+                gas_req = _cc_gas_requirement(wallet, source_chain, route)
+            elif _bridge_id:
+                # A bootstrap bridge is on its way. Minutes, not seconds, and
+                # this quote will have expired by then -- so say that plainly
+                # rather than hold an HTTP request open or pretend it failed.
+                return jsonify({
+                    'ok': False, 'pending_gas': True, 'bridge_id': _bridge_id,
+                    'code': 'GAS_ON_THE_WAY',
+                    'msg': f'Getting {gas_req["symbol"]} for the network fee on '
+                           f'{source_chain} — a small amount of your own SOL is '
+                           f'bridging over. It lands in a minute or two; ask for '
+                           f'a fresh quote then and the trade goes straight '
+                           f'through.'}), 202
+            else:
+                _log_line = (_why or '')[:200]
+                if _log_line:
+                    print(f'[crosschain] gas ladder declined on {source_chain}: '
+                          f'{_log_line}', flush=True)
+    if gas_req['required']:
+        # Said before anything is signed, with the number they need. OrcAgent
+        # does not front it -- see _cc_gas_requirement.
+        return jsonify({'ok': False, 'msg': gas_req['reason'],
+                        'code': gas_req['code'], 'native_gas': gas_req}), 400
+
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        row = conn.execute(
+            'SELECT encrypted_private_key, encrypted_private_key_bsc FROM users '
+            'WHERE wallet_address=?', (wallet,)).fetchone()
+    finally:
+        conn.close()
+    enc_blob = (row[0] if source_chain == 'solana' else (row[1] if row else '')) if row else ''
+    if not enc_blob:
+        return jsonify({'ok': False,
+                        'msg': f'No {source_chain} trading wallet configured'}), 400
+
+    # Read server-side, on the SOURCE chain -- that is where the money leaves
+    # from and therefore what the claim is taken against.
+    available = Decimal(str(_cc_usdc_balance(wallet, source_chain)))
+
+    client_key = str(data.get('idempotency_key') or '').strip()[:100]
+    idem = f'{uid}:{client_key}' if client_key else f'{uid}:quote:{quote_id}'
+
+    td = get_token_data(quote_row['token_address'])
+    symbol = (td.get('symbol') or quote_row['token_address'][:8]) if td else \
+        quote_row['token_address'][:8]
+
+    try:
+        result = _te_run_crosschain_trade(
+            quote_id=quote_id, idem=idem, available=available, wallet=wallet,
+            enc_blob=enc_blob, source_chain=source_chain, route=route,
+            symbol=symbol, token_address=quote_row['token_address'], user_id=uid)
+    except te_execute.QuoteNotUsable as e:
+        return jsonify({'ok': False, 'requote': True, 'msg': str(e)}), 409
+    except te_execute.ExecutionError as e:
+        return jsonify({'ok': False, 'msg': str(e)}), 400
+
+    body = result.to_dict()
+    # ok means "this request did what it was asked", not "the trade is done".
+    # finished/completed say the rest, so a caller cannot read one as the other.
+    body['ok'] = result.state not in (te_ledger.FAILED, te_ledger.CANCELLED)
+    body['symbol'] = symbol
+    body['token_address'] = quote_row['token_address']
+    body['source_chain'] = source_chain
+    body['chain'] = dest_chain
+    body['bridge_required'] = True
+    body['progress'] = _cc_progress_message(result.state, dest_chain, symbol)
+    _cc_row = None
+    try:
+        _conn = sqlite3.connect(DB_FILE)
+        try:
+            _cc_row = te_ledger.get_crosschain(_conn, result.trade_id)
+        finally:
+            _conn.close()
+    except Exception:
+        _cc_row = None
+    _loc = _cc_funds_location(result.state, _cc_row or {}, dest_chain, source_chain)
+    body['funds_location'] = _loc['where']
+    body['funds_note'] = _loc['note']
+    if not body['ok']:
+        body['msg'] = result.failure_reason or 'The trade did not complete'
+    return jsonify(body), 200
+
+
+# What a user is told at each step. Kept in one place so the buy sheet and the
+# status endpoint cannot describe the same state differently.
+_CC_PROGRESS = {
+    te_ledger.CREATED:         'Preparing route',
+    te_ledger.QUOTED:          'Preparing route',
+    te_ledger.ROUTE_SELECTED:  'Preparing route',
+    te_ledger.RESERVED:        'Preparing route',
+    te_ledger.EXECUTING:       'Waiting for wallet signature',
+    te_ledger.AWAITING_SOURCE: 'Sending the source transaction',
+    te_ledger.BRIDGING:        'Moving your USDC to {chain}',
+    te_ledger.DEST_RECEIVED:   'Funds received on {chain}',
+    te_ledger.SWAPPING:        'Buying {symbol}',
+    te_ledger.CONFIRMING:      'Confirming your purchase',
+    te_ledger.COMPLETED:       'Trade complete',
+    te_ledger.FAILED:          'Trade failed',
+    te_ledger.REFUND_PENDING:  'The bridge failed — your USDC is being returned',
+    te_ledger.REFUNDED:        'Your USDC was returned',
+    te_ledger.MANUAL_REVIEW:   'This trade needs a person to check it',
+    te_ledger.CANCELLED:       'Trade cancelled',
+}
+
+
+def _cc_bridge_delivered(cc: dict) -> bool:
+    """Did the bridge actually hand over the money on the far side?
+
+    Three independent marks, any of which means the delivery happened: the
+    provider said filled, it named a destination transaction, or an amount
+    was recorded as received. A row that predates one of them still answers
+    correctly through the others.
+    """
+    if not cc:
+        return False
+    return bool((cc.get('provider_status') or '') == te_crosschain.BRIDGE_FILLED
+                or (cc.get('destination_tx_hash') or '')
+                or (cc.get('actual_out_raw') or ''))
+
+
+def _cc_funds_location(state: str, cc: dict, dest_chain: str = '',
+                       source_chain: str = '') -> dict:
+    """Where the user's dollars are, said plainly.
+
+    "Trade failed" is the same two words whether nothing left the source
+    chain or the bridge worked and only the purchase did not -- and those are
+    completely different facts about somebody's money. In the second case
+    their dollars are sitting on the OTHER chain, as USDC, and if nobody says
+    so they will look for them where they used to be.
+
+    Returns {'where', 'note'}: a machine-readable location and one sentence
+    for a person. An empty note means there is nothing a user needs to be
+    told beyond the state itself.
+    """
+    dest = SURGE_ALERT_CHAIN_NAMES.get(dest_chain, dest_chain or 'the other chain')
+    src = SURGE_ALERT_CHAIN_NAMES.get(source_chain, source_chain or 'the source chain')
+    delivered = _cc_bridge_delivered(cc)
+    if state == te_ledger.COMPLETED:
+        return {'where': 'spent', 'note': ''}
+    if state == te_ledger.REFUNDED:
+        return {'where': 'source',
+                'note': f'Your USDC is back on {src}.'}
+    if state == te_ledger.REFUND_PENDING:
+        return {'where': 'in_flight',
+                'note': f'The bridge failed and your USDC is on its way back to {src}.'}
+    if state == te_ledger.MANUAL_REVIEW:
+        # Deliberately not guessed. This state exists precisely because what
+        # happened could not be established, and inventing a location here is
+        # worse than saying a person is looking.
+        return {'where': 'unknown',
+                'note': 'Where your USDC ended up is being checked by a person. '
+                        'It has not been lost — the trade is held open until '
+                        'somebody has an answer.'}
+    if state == te_ledger.FAILED:
+        if delivered:
+            return {'where': 'destination',
+                    'note': f'The bridge worked and the purchase did not: your '
+                            f'dollars are on {dest}, as USDC. They are yours and '
+                            f'you can spend them there.'}
+        return {'where': 'source',
+                'note': f'Nothing left {src} — your USDC is where it was.'}
+    if state in (te_ledger.BRIDGING, te_ledger.AWAITING_SOURCE):
+        return {'where': 'in_flight', 'note': ''}
+    if state in (te_ledger.DEST_RECEIVED, te_ledger.SWAPPING, te_ledger.CONFIRMING):
+        return {'where': 'destination', 'note': ''}
+    return {'where': 'source', 'note': ''}
+
+
+def _cc_progress_message(state: str, dest_chain: str, symbol: str) -> str:
+    name = SURGE_ALERT_CHAIN_NAMES.get(dest_chain, dest_chain)
+    return _CC_PROGRESS.get(state, state).format(chain=name, symbol=symbol)
+
+
+def _api_trade_execute_solana(quote_row, wallet, uid, quote_id, data):
+    """The Solana half of /api/trade/execute.
+
+    Deliberately the same shape as the EVM half above it, because the parts
+    that matter are the same and any drift between them is a difference in
+    how carefully one chain's money is handled: the balance is read
+    server-side (a balance the client sends is a number the client chose),
+    the idempotency key is namespaced to the user, and the response body is
+    identical so the frontend needs no chain-specific branch.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        row = conn.execute(
+            'SELECT encrypted_private_key FROM users WHERE wallet_address=?',
+            (wallet,)).fetchone()
+    finally:
+        conn.close()
+    if not row or not row[0]:
+        return jsonify({'ok': False, 'msg': 'No Solana trading wallet configured'}), 400
+    enc_blob = row[0]
+
+    # The trading wallet, not the session wallet -- a different keypair by
+    # design, and the one the funds are actually on.
+    trading_wallet = _get_trading_wallet_address(wallet) or wallet
+    try:
+        available = Decimal(str(_get_solana_usdc_balance(trading_wallet)))
+    except Exception as e:
+        return jsonify({'ok': False, 'msg': f'Could not read your Solana balance: {e}'}), 502
+
+    client_key = str(data.get('idempotency_key') or '').strip()[:100]
+    idem = f'{uid}:{client_key}' if client_key else f'{uid}:quote:{quote_id}'
+
+    token_address = quote_row['token_address']
+    td = get_token_data(token_address)
+    symbol = (td.get('symbol') or token_address[:8]) if td else token_address[:8]
+
+    try:
+        result = _te_run_solana_trade(
+            quote_id=quote_id, idem=idem, available=available, wallet=wallet,
+            enc_blob=enc_blob, symbol=symbol, token_address=token_address,
+            user_id=uid)
+    except te_execute.QuoteNotUsable as e:
+        return jsonify({'ok': False, 'requote': True, 'msg': str(e)}), 409
+    except te_execute.ExecutionError as e:
+        return jsonify({'ok': False, 'msg': str(e)}), 400
+
+    body = result.to_dict()
+    body['ok'] = result.state == te_ledger.COMPLETED
+    body['symbol'] = symbol
+    body['token_address'] = token_address
+    body['chain'] = 'solana'
+    if not body['ok']:
+        body['msg'] = result.failure_reason or 'The trade did not complete'
+    return jsonify(body), 200
 
 
 @app.route('/api/trade/execute', methods=['POST'])
@@ -8125,10 +9697,23 @@ def api_trade_execute():
         return jsonify({'ok': False, 'msg': 'That quote is not yours'}), 403
 
     chain = quote_row['destination_chain']
+
+    # ── cross-chain first ──
+    # Checked on the stored quote's own same_chain column, not on the two
+    # chain names: that column is what the ceiling was priced against and what
+    # the state machine will enforce, so it is the one that decides.
+    if not quote_row['same_chain']:
+        return _api_trade_execute_crosschain(quote_row, wallet, uid, quote_id, data)
+
+    if chain == 'solana':
+        if not TRADE_ENGINE_SOLANA:
+            # Refusing is honest; silently falling back to the legacy Solana
+            # route would execute a trade the engine's guarantees do not cover.
+            return jsonify({'ok': False,
+                            'msg': 'The trade engine does not execute solana yet'}), 400
+        return _api_trade_execute_solana(quote_row, wallet, uid, quote_id, data)
     if chain not in EVM_CHAINS:
-        # Solana, bridges and copy trading still run on their existing paths.
-        # Refusing is honest; silently falling back to a legacy path would
-        # execute a trade the engine's guarantees do not cover.
+        # Bridged and copy-trading routes still run on their existing paths.
         return jsonify({'ok': False,
                         'msg': f'The trade engine does not execute {chain} yet'}), 400
 
@@ -8183,6 +9768,55 @@ def api_trade_execute():
     return jsonify(body), 200
 
 
+# How long a claim may sit in a pre-execution state before it is assumed
+# abandoned. Comfortably longer than a quote lives (30s) plus the slowest
+# realistic execution, so this can only ever catch a trade whose process is
+# genuinely gone.
+TRADE_RESERVATION_REAP_AFTER = 900
+TRADE_RESERVATION_REAP_EVERY = 300
+
+def _trade_reservation_reap_loop():
+    """Release balance claims left behind by a process that died mid-trade.
+
+    reserve() takes a claim on a user's balance BEFORE anything is sent, so a
+    second trade cannot spend the same money (see trade_engine/ledger.py).
+    That claim is normally closed by settle() or release() at the end of
+    execute_trade() -- but a process killed between the two (a deploy, an OOM,
+    a crash) leaves it 'held' with nobody left to close it, and the ledger
+    subtracts it from that user's free balance forever. The money is still in
+    their wallet; the app just refuses to let them trade with it, and nothing
+    in the app could ever give it back.
+
+    reap_stale_reservations() has existed since the ledger was written and was
+    called from nowhere, so this is what makes it real. It deliberately only
+    frees trades that never reached EXECUTING: a trade that was executing may
+    have a swap in flight, and releasing that claim would invite the next
+    trade to spend the same money a second time.
+    """
+    print(f'[trade-reaper] started (every {TRADE_RESERVATION_REAP_EVERY}s, '
+          f'frees pre-execution claims older than {TRADE_RESERVATION_REAP_AFTER}s)', flush=True)
+    while True:
+        time.sleep(TRADE_RESERVATION_REAP_EVERY)
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            freed = te_execute.reap_stale_reservations(
+                conn, older_than_seconds=TRADE_RESERVATION_REAP_AFTER)
+            if freed:
+                # Worth a line each: every one of these is a user who could
+                # not spend their own balance until this ran.
+                print(f'[trade-reaper] released {len(freed)} abandoned '
+                      f'reservation(s): {", ".join(t[:8] for t in freed)}', flush=True)
+        except Exception as e:
+            print(f'[trade-reaper] cycle failed: {e}', flush=True)
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+
 @app.route('/api/trade/status/<trade_id>', methods=['GET'])
 @rate_limit(60, 60)
 def api_trade_status(trade_id):
@@ -8205,9 +9839,11 @@ def api_trade_status(trade_id):
             # so trade ids cannot be probed for.
             return jsonify({'ok': False, 'msg': 'No such trade'}), 404
         drift = te_ledger.cost_drift(conn, str(trade_id))
+        cc = te_ledger.get_crosschain(conn, str(trade_id))
+        quote_row = te_ledger.load_quote(conn, trade['quote_id']) if cc else None
     finally:
         conn.close()
-    return jsonify({
+    body = {
         'ok': True,
         'trade_id': trade['trade_id'],
         'state': trade['state'],
@@ -8219,7 +9855,44 @@ def api_trade_status(trade_id):
         'failure_reason': trade['failure_reason'] or '',
         'needs_investigation': bool(trade['needs_investigation']),
         'costs': drift,
-    })
+        'bridge_required': not bool(trade['same_chain']),
+    }
+    if cc:
+        # A page that was refreshed mid-bridge reconnects here, by trade id,
+        # and picks the trade up where it actually is -- rather than starting
+        # a second one because the first one's tab was closed.
+        symbol = ''
+        if quote_row:
+            td = get_token_data(quote_row['token_address'])
+            symbol = (td or {}).get('symbol') or ''
+        body.update({
+            'cross_chain_provider':  cc['provider'],
+            'bridge_route_id':       cc['route_id'] or '',
+            'source_chain':          cc['source_chain'],
+            'destination_chain':     cc['destination_chain'],
+            'bridge_status':         cc['provider_status'] or '',
+            'source_tx_hash':        cc['source_tx_hash'] or '',
+            'bridge_tx_hash':        cc['bridge_tx_hash'] or '',
+            'destination_tx_hash':   cc['destination_tx_hash'] or '',
+            'swap_tx_hash':          cc['swap_tx_hash'] or '',
+            'quoted_out_raw':        cc['quoted_out_raw'] or '',
+            'minimum_out_raw':       cc['minimum_out_raw'] or '',
+            'actual_received_raw':   cc['actual_out_raw'] or '',
+            'estimated_seconds':     cc['estimated_seconds'] or 0,
+            'estimated_fees':        cc['estimated_fees_json'] or '',
+            'actual_fees':           cc['actual_fees_json'] or '',
+            'progress':              _cc_progress_message(
+                trade['state'], cc['destination_chain'], symbol or 'your token'),
+        })
+        # Where the money is, which "Trade failed" does not say. A bridge that
+        # delivered and a purchase that did not leaves the user holding USDC
+        # on the DESTINATION chain, and they will look for it on the source
+        # one unless somebody tells them otherwise.
+        _loc = _cc_funds_location(trade['state'], cc, cc['destination_chain'],
+                                  cc['source_chain'])
+        body['funds_location'] = _loc['where']
+        body['funds_note'] = _loc['note']
+    return jsonify(body)
 
 
 # ── CROSS-CHAIN BRIDGE (0x Cross-Chain API) ─────────────────────────────────
@@ -8886,8 +10559,7 @@ def _sol_gas_sponsor_address() -> str:
     if not SOL_GAS_SPONSOR_PRIVATE_KEY:
         return ''
     try:
-        from solders.keypair import Keypair as _KP
-        return str(_KP.from_base58_string(SOL_GAS_SPONSOR_PRIVATE_KEY).pubkey())
+        return str(_sol_keypair_from_base58(SOL_GAS_SPONSOR_PRIVATE_KEY).pubkey())
     except Exception as e:
         print(f'[gas-sponsor] SOL_GAS_SPONSOR_PRIVATE_KEY is not a valid Solana key: {type(e).__name__}', flush=True)
         return ''
@@ -9003,8 +10675,7 @@ def _ensure_solana_gas(wallet: str, private_key: str) -> tuple:
     if not ORCAGENT_FRONTS_GAS or not SOL_GAS_SPONSOR_PRIVATE_KEY:
         return True, ''
     try:
-        from solders.keypair import Keypair as _KP
-        trading_address = str(_KP.from_base58_string(private_key).pubkey())
+        trading_address = str(_sol_keypair_from_base58(private_key).pubkey())
     except Exception:
         return True, ''  # can't derive it -- let the swap itself report the real problem
     try:
@@ -10219,12 +11890,11 @@ def user_trader_loop(stop_event, config, wallet: str):
     # Keep only the encrypted blob — never store decrypted key across loop iterations.
     # Each trade decrypts at the moment of signing and clears immediately after.
     try:
-        from solders.keypair import Keypair as _KP_init
         _enc_blob = row[1]
         _test_key = decrypt_private_key(_enc_blob, wallet)
         # Derive the trading wallet address from the keypair (this is where Jupiter
         # creates ATAs and where SOL lands after sells — NOT the Phantom session wallet).
-        _trading_wallet = str(_KP_init.from_base58_string(_test_key).pubkey())
+        _trading_wallet = str(_sol_keypair_from_base58(_test_key).pubkey())
         _test_key = None  # clear immediately
         del _KP_init
     except Exception:
@@ -11321,6 +12991,13 @@ def _trigger_copy_buy(buyer_wallet: str, mint: str, price: float, symbol: str,
     if chain and chain != 'solana':
         _trigger_copy_buy_evm(buyer_wallet, mint, symbol, chain)
         return
+    if not TRADE_ENGINE_SOLANA:
+        # The engine is the only USDC-denominated Solana copy path. The route
+        # this used to take spent SOL while reading a USD-denominated setting,
+        # so turning the engine off disables Solana copying rather than
+        # falling back to it.
+        print('[copy-trade] solana copying is off (TRADE_ENGINE_SOLANA=0)', flush=True)
+        return
 
     def _run():
         try:
@@ -11337,6 +13014,22 @@ def _trigger_copy_buy(buyer_wallet: str, mint: str, price: float, symbol: str,
         except Exception as e:
             print(f'[copy-trade] DB error: {e}', flush=True)
             return
+
+        # What makes this ONE entry by the leader rather than "some time they
+        # held this token". Two sightings of the same entry produce the same
+        # value, so the idempotency key below collapses them; a later re-entry
+        # after an exit produces a different one, so it is copyable again.
+        # Falls back to a coarse clock bucket only when the leader's position
+        # cannot be read -- which dedupes a fast double-trigger but not one
+        # that straddles a bucket edge, so it is the weaker answer, not the
+        # intended one.
+        try:
+            _entry_id = str(int(float((get_user_state(buyer_wallet)['positions'].get(mint) or {})
+                                      .get('opened_at') or 0))) or '0'
+        except Exception:
+            _entry_id = '0'
+        if _entry_id == '0':
+            _entry_id = 't' + str(int(time.time() // 300))
 
         for c_uid, c_wallet, c_enc, c_min_usdc, c_copy_amount, c_max_positions, c_daily_loss_limit in rows:
             try:
@@ -11362,54 +13055,95 @@ def _trigger_copy_buy(buyer_wallet: str, mint: str, price: float, symbol: str,
                 if c_us['positions'].get(mint, {}).get('amount', 0) > 0:
                     continue  # already holding
 
-                # Decrypt key to get trading wallet address for balance check
-                try:
-                    from solders.keypair import Keypair as _KP_ct
-                    with _use_key(c_enc, c_wallet) as _pk:
-                        trading_wallet = str(_KP_ct.from_base58_string(_pk).pubkey())
-                except Exception:
-                    add_user_log(c_wallet, f'[copy] Skip {symbol}: cannot decrypt key')
-                    continue
+                trading_wallet = _get_trading_wallet_address(c_wallet) or c_wallet
 
-                c_sol = _get_user_sol(trading_wallet)
-                if c_sol < 0.01:
-                    add_user_log(c_wallet, f'[copy] Skip {symbol}: insufficient SOL ({c_sol})')
+                # USDC, not SOL. copy_amount is a USD figure -- it is the same
+                # column _trigger_copy_buy_evm() spends as USDC, and the
+                # settings screen labels it in dollars. Reading it as SOL here
+                # meant a copier who set 10 tried to spend 10 SOL, capped at
+                # 90% of their balance, so the cap silently became the trade
+                # size and the number they chose never applied at all.
+                try:
+                    c_usdc = float(_get_solana_usdc_balance(trading_wallet))
+                except Exception as e:
+                    add_user_log(c_wallet, f'[copy] Skip {symbol}: could not read USDC balance ({e})')
                     continue
 
                 if c_copy_amount and float(c_copy_amount) > 0:
-                    spend = round(min(float(c_copy_amount), c_sol * 0.9), 4)
+                    spend = round(float(c_copy_amount), 2)
                 else:
-                    min_spend_sol = (float(c_min_usdc or 1.0) / _sol_price_usd) if _sol_price_usd > 0 else 0.02
-                    spend = round(min(min_spend_sol, c_sol * 0.5), 4)
-                if spend < 0.001:
+                    spend = round(float(c_min_usdc or 1.0), 2)
+                if spend < 0.01:
+                    continue
+                # The spend is never raised to fit the balance and never
+                # trimmed to fit it either: the engine takes this as a
+                # ceiling and refuses outright if it does not fit, rather
+                # than quietly buying a different size than the copier set.
+                if c_usdc < spend:
+                    add_user_log(c_wallet, f'[copy] Skip {symbol}: needs {spend:.2f} USDC, '
+                                           f'wallet has {c_usdc:.2f}')
                     continue
 
                 # Dynamic risk management (section 5): a copier didn't pick this
                 # token themselves -- they're following whoever they copy -- so
                 # this is as much an autonomous entry as the main bot loop's own
                 # picks, and gets the same hard price-impact/slippage gate.
-                _impact = _check_price_impact(mint, spend)
+                # Priced on the USDC route, because that is the route the
+                # swap will actually take -- quoting the SOL one would gate
+                # this trade on a pool it never touches.
+                _impact = _check_price_impact(mint, spend, input_mint=USDC_MINT,
+                                              input_decimals=6)
                 if not _impact['ok'] or _impact['price_impact_pct'] > MAX_ENTRY_PRICE_IMPACT_PCT:
-                    add_user_log(c_wallet, f'[copy] Skip {symbol}: price impact too high or no route for {spend} SOL')
+                    add_user_log(c_wallet, f'[copy] Skip {symbol}: price impact too high or '
+                                           f'no route for {spend:.2f} USDC')
                     continue
 
-                with _use_key(c_enc, c_wallet) as _pk:
-                    ok, _entry_price, _tok_amt = _buy_and_get_realized(c_wallet, _pk, mint, spend, price)
-                if not ok:
-                    add_user_log(c_wallet, f'[copy] {symbol} buy tx failed')
+                # Through the engine, exactly like the copier's own Buy button
+                # and like _trigger_copy_buy_evm(). What that buys them: spend
+                # is a ceiling rather than a swap size, the balance is claimed
+                # in the database before anything is sent, and the idempotency
+                # key means a leader's trade seen twice cannot buy twice.
+                _idem = f'{c_uid}:copy:{buyer_wallet}:{mint}:{_entry_id}'
+                try:
+                    _q = _te_build_and_store_quote(
+                        uid=c_uid, wallet=c_wallet, source_chain='solana',
+                        dest_chain='solana', token_address=mint,
+                        max_spend=Decimal(str(spend)), taker=c_wallet, mode='copy')
+                    _qbody = _q.to_dict()
+                    if not _qbody.get('can_execute'):
+                        # Priced, and it does not fit inside what the copier
+                        # set aside. Reported, never trimmed to fit.
+                        add_user_log(c_wallet, f'[copy] Skip {symbol}: '
+                                               f'{_qbody.get("reject_reason") or "route not executable"}')
+                        continue
+                    _res = _te_run_solana_trade(
+                        quote_id=_q.quote_id, idem=_idem, available=Decimal(str(c_usdc)),
+                        wallet=c_wallet, enc_blob=c_enc, symbol=symbol,
+                        token_address=mint, user_id=c_uid,
+                        source='copy', copy_of_wallet=buyer_wallet)
+                except (TeQuoteError, TeCostError, TeProviderError,
+                        te_registry.RegistryError) as e:
+                    add_user_log(c_wallet, f'[copy] Skip {symbol}: could not price it — {e}')
+                    continue
+                except te_execute.QuoteNotUsable as e:
+                    add_user_log(c_wallet, f'[copy] Skip {symbol}: quote no longer usable — {e}')
+                    continue
+                except te_execute.ExecutionError as e:
+                    add_user_log(c_wallet, f'[copy] {symbol} not copied — {e}')
                     continue
 
-                pos = c_us['positions'].get(mint, {'amount': 0.0, 'buy_price': 0.0, 'spend': 0.0})
-                pos['amount']          = pos.get('amount', 0.0) + _tok_amt
-                pos['buy_price']       = _entry_price
-                pos['spend']           = pos.get('spend', 0.0) + spend
-                pos['symbol']          = symbol
-                pos['opened_at']       = time.time()
-                pos['entry_liquidity'] = liquidity
-                pos.update(_snapshot_entry_risk(c_wallet, _entry_price))
-                _upsert_open_position(c_uid, c_wallet, mint, pos, source='copy', copy_of_wallet=buyer_wallet)
-                _charge_txn_fee(_pk, c_wallet, c_uid, symbol, spend, 'buy', bundled=True)
-                add_user_log(c_wallet, f'[copy] {c_short} COPY BUY {symbol} {spend} SOL (copying {buyer_wallet[:6]}…{buyer_wallet[-4:]})')
+                if _res.state != te_ledger.COMPLETED:
+                    add_user_log(c_wallet, f'[copy] {symbol} buy did not complete — '
+                                           f'{_res.failure_reason or _res.state}')
+                    continue
+                if not _res.created:
+                    continue  # already copied this leader's entry
+                # No _charge_txn_fee here. A USDC-funded Solana buy collects no
+                # platform fee (see _te_run_solana_trade), and the quote is
+                # priced at a zero rate to match -- charging one would take
+                # money the copier was never shown.
+                add_user_log(c_wallet, f'[copy] {c_short} COPY BUY {symbol} {spend:.2f} USDC '
+                                       f'(copying {buyer_wallet[:6]}…{buyer_wallet[-4:]})')
             except Exception as e:
                 print(f'[copy-trade] error for {c_wallet[:6]}: {e}', flush=True)
 
@@ -12216,18 +13950,35 @@ def profile_view(wallet_address: str):
         conn.close()
 
 
-_MINT_RE = re.compile(r'^[1-9A-HJ-NP-Za-km-z]{32,44}$')
+_MINT_RE = re.compile(r'^[1-9A-HJ-NP-Za-km-z]{32,44}$')  # == is_valid_solana_address's own pattern
+
+
+def _is_valid_token_address(addr: str) -> bool:
+    """A mint/contract address on any chain this page can show a card for.
+
+    static/token-card.js and /api/token/info/<mint> already auto-detect
+    Solana (base58) vs EVM (0x-hex) from the address format alone -- no
+    chain param needed on this one, unlike the per-chain endpoints below
+    that also need to know WHICH EVM chain. Reused instead of repeating
+    `_MINT_RE.match(x) or is_valid_evm_address(x)` at every call site."""
+    return bool(_MINT_RE.match(addr or '') or is_valid_evm_address(addr or ''))
+
 
 @app.route('/token/<mint_address>')
 def token_detail(mint_address):
     """Every bot-trade link across the app points here. Renders a lean
     standalone page that's just the shared token card (static/token-card.js,
     also used as the modal on /live-market) -- no separate UI/styling to
-    maintain, no busy market table behind it."""
+    maintain, no busy market table behind it.
+
+    Used to redirect every EVM address straight to /history -- the shared
+    card and its metadata/chart APIs are chain-aware, but this route's own
+    guard never was, so a BSC/Base/Arbitrum/Polygon/Robinhood share link
+    (e.g. from a DM trade card) never opened."""
     wallet = _current_wallet()
     if not wallet:
         return redirect('/')
-    if not _MINT_RE.match(mint_address or ''):
+    if not _is_valid_token_address(mint_address):
         return redirect('/history')
     mint_short = mint_address[:4] + '…' + mint_address[-4:] if len(mint_address) >= 8 else mint_address
     return render_template(
@@ -12241,6 +13992,10 @@ def token_detail(mint_address):
 
 @app.route('/api/token/<mint>/candles')
 def api_token_candles(mint):
+    """Solana-only, and left that way: nothing calls this any more --
+    showTokenCard() charts through /api/chart/<mint>?chain=, which already
+    covers every EVM chain too. Kept for any caller outside this repo that
+    might still hit it directly; not worth widening a route nothing here uses."""
     wallet = _current_wallet()
     if not wallet:
         return jsonify({'ok': False, 'candles': []})
@@ -12292,7 +14047,9 @@ def api_token_co_traders(mint):
     wallet = _current_wallet()
     if not wallet:
         return jsonify({'ok': False, 'users': []}), 401
-    if not _MINT_RE.match(mint or ''):
+    # A plain open_positions lookup by address -- chain-agnostic already,
+    # this only ever excluded EVM tokens because the format check did.
+    if not _is_valid_token_address(mint):
         return jsonify({'ok': False, 'users': []}), 400
     try:
         conn = sqlite3.connect(DB_FILE)
@@ -12356,7 +14113,9 @@ def api_token_holders(mint):
     wallet = _current_wallet()
     if not wallet:
         return jsonify({'ok': False, 'holders': [], 'total': 0, 'platform_holders': 0}), 401
-    if not _MINT_RE.match(mint or ''):
+    # An open_positions lookup by address -- chain-agnostic already, this
+    # only ever excluded EVM tokens because the format check did.
+    if not _is_valid_token_address(mint):
         return jsonify({'ok': False, 'holders': [], 'total': 0, 'platform_holders': 0}), 400
     try:
         conn = sqlite3.connect(DB_FILE)
@@ -12423,7 +14182,9 @@ def api_token_feed(mint):
     wallet = _current_wallet()
     if not wallet:
         return jsonify({'ok': False, 'posts': []}), 401
-    if not _MINT_RE.match(mint or ''):
+    # Searches feed_posts by cashtag symbol, not by mint -- chain-agnostic
+    # already, this only ever excluded EVM tokens because the format check did.
+    if not _is_valid_token_address(mint):
         return jsonify({'ok': False, 'posts': []}), 400
     symbol = _sanitize(request.args.get('sym', '').strip())[:32]
     if not symbol:
@@ -12465,6 +14226,14 @@ def api_token_feed(mint):
 @app.route('/api/token/<mint>/safety', methods=['GET'])
 @rate_limit(30, 60)
 def api_token_safety(mint):
+    """Solana-only, and left that way FOR NOW: mint/freeze-authority and
+    LP-lock are SPL-token concepts with no EVM equivalent. An EVM token
+    opened through /token/<address> or a DM share card gets a card with no
+    safety badge rather than a wrong one -- see _check_evm_honeypot() for
+    the chain-aware honeypot check the auto-bot already runs before a trade;
+    wiring an EVM branch here (chain param, GoPlus/honeypot.is dispatch,
+    reshaping its result into mint_authority_active/lp_locked_pct's shape)
+    is real, separate work, not a one-line relax of the address format."""
     wallet = _current_wallet()
     if not wallet:
         return jsonify({'ok': False}), 401
@@ -12864,6 +14633,10 @@ def page_fees():
 @app.route('/security')
 def page_security():
     return redirect('/info#security')
+
+@app.route('/privacy')
+def page_privacy():
+    return redirect('/info#privacy')
 
 # TOS_VERSION gates re-acceptance: bump this string whenever _TOS_CONTENT_HTML
 # changes in a way that requires every user to accept again. Old acceptance
@@ -13480,8 +15253,7 @@ def wallet_page():
         if row and row[1]:
             try:
                 with _use_key(row[1], wallet_address) as _pk:
-                    from solders.keypair import Keypair as _KP_wp
-                    deposit_address = str(_KP_wp.from_base58_string(_pk).pubkey())
+                    deposit_address = str(_sol_keypair_from_base58(_pk).pubkey())
             except InvalidToken:
                 print(f'[wallet] cannot decrypt trading key for {wallet_short}', flush=True)
             except Exception as e:
@@ -14519,6 +16291,30 @@ def referrals_page():
                 '''SELECT referred_wallet, earned_sol, created_at FROM referral_earnings
                    WHERE referrer_wallet=? ORDER BY created_at DESC LIMIT 100''', (wallet,)
             ).fetchall()
+
+            # WHO those referred users are, and what each of them has earned
+            # you. A count on its own says somebody joined; it does not say
+            # who, or whether any of them ever traded.
+            #
+            # LEFT JOIN, so a referred user who has not traded yet still
+            # appears -- at zero. They are the ones worth knowing about.
+            # The join is pinned to THIS referrer as well as to the user, so
+            # a wallet that somehow appears under two referrers can never
+            # show one of them the other's earnings.
+            people_rows = conn.execute(
+                '''SELECT u.wallet_address, u.username, u.avatar_url, u.created_at,
+                          COALESCE(SUM(re.earned_sol), 0) AS earned,
+                          COUNT(re.id)                    AS trades,
+                          MAX(re.created_at)              AS last_earned
+                     FROM users u
+                     LEFT JOIN referral_earnings re
+                            ON re.referred_wallet = u.wallet_address
+                           AND re.referrer_wallet = ?
+                    WHERE u.referred_by = ?
+                    GROUP BY u.wallet_address
+                    ORDER BY earned DESC, u.created_at DESC
+                    LIMIT 200''', (wallet, wallet)
+            ).fetchall()
         finally:
             conn.close()
 
@@ -14527,6 +16323,29 @@ def referrals_page():
             'earned_sol':   earned,
             'created_at':   created_at,
         } for w, earned, created_at in earnings_rows]
+
+        _people_total = sum(float(r[4] or 0) for r in people_rows)
+        referred_people = [{
+            'wallet':       w,
+            'wallet_short': (w[:4] + '...' + w[-4:]) if len(w) >= 8 else w,
+            'username':     uname or '',
+            # What to call them: their own name if they chose one, otherwise
+            # the short wallet. Never a blank row.
+            'display':      uname or ((w[:4] + '...' + w[-4:]) if len(w) >= 8 else w),
+            'avatar_url':   avatar or '',
+            'joined_at':    joined,
+            'earned_sol':   float(earned or 0),
+            'earned_usd':   (round(float(earned or 0) * _sol_price_usd, 2)
+                             if _sol_price_usd else None),
+            'trades':       int(trades or 0),
+            'last_earned':  last_earned or '',
+            # Each person's share of what you have earned, for the bar. Zero
+            # when nothing has been earned at all, rather than a division by
+            # nothing.
+            'share_pct':    (round(float(earned or 0) / _people_total * 100, 1)
+                             if _people_total > 0 else 0.0),
+            'profile_url':  f'/profile/{w}',
+        } for w, uname, avatar, joined, earned, trades, last_earned in people_rows]
 
         referral_balance_usd = (round(referral_balance * _sol_price_usd, 2)
                                  if _sol_price_usd else None)
@@ -14538,6 +16357,10 @@ def referrals_page():
             referral_code=referral_code,
             referral_link=f'https://orcagent.fun/?ref={referral_code}' if referral_code else '',
             referred_count=referred_count,
+            referred_people=referred_people,
+            referred_people_total_sol=_people_total,
+            referred_people_total_usd=(round(_people_total * _sol_price_usd, 2)
+                                       if _sol_price_usd else None),
             referral_balance=referral_balance,
             referral_balance_usd=referral_balance_usd,
             earnings=earnings,
@@ -17024,93 +18847,6 @@ def connect_wallet_readonly():
     return jsonify({'ok': True, 'wallet': address, 'readonly': True,
                     'has_trading_key': False, 'csrf_token': csrf_tok})
 
-# Computed once at import time (bcrypt is deliberately slow -- ~the same cost as
-# a real check, which is the point) so login_password() can run a same-cost dummy
-# comparison for "no such user"/"no password set" instead of skipping bcrypt
-# entirely, which would otherwise leak which case it was via response timing.
-_LOGIN_DUMMY_BCRYPT_HASH = _bcrypt.hashpw(b'orcagent-dummy-password-for-timing', _bcrypt.gensalt(rounds=12))
-
-@app.route('/api/login_password', methods=['POST'])
-@rate_limit(10, 60)
-def login_password():
-    ip   = request.remote_addr or '0.0.0.0'
-    body = request.json or {}
-    username = str(body.get('username', '')).strip()
-    password = str(body.get('password', '')).strip()
-    if not username or not password:
-        return jsonify({'success': False, 'error': 'Username and password required'}), 400
-
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        row = conn.execute(
-            '''SELECT id, wallet_address, COALESCE(username,''), password_hash,
-                      CASE WHEN encrypted_private_key != '' AND encrypted_private_key IS NOT NULL
-                           THEN 1 ELSE 0 END
-               FROM users
-               WHERE username = ? OR wallet_address = ?
-               LIMIT 1''',
-            (username, username)
-        ).fetchone()
-    finally:
-        conn.close()
-
-    # SECURITY FIX (see commit): "no such user" and "user exists but has no
-    # password set" used to return distinct messages (and skip bcrypt entirely,
-    # a timing tell too) -- letting a caller enumerate valid usernames/wallet
-    # addresses by which error they got back. Both now return the identical
-    # generic message and always run a same-cost dummy bcrypt check.
-    if not row or not row[3]:
-        _bcrypt.checkpw(password.encode('utf-8'), _LOGIN_DUMMY_BCRYPT_HASH)
-        _record_ip_failure(ip)
-        return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
-
-    user_id, wallet_address, db_username, password_hash, has_trading_key = row
-
-    try:
-        valid = _bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
-    except Exception:
-        valid = False
-    if not valid:
-        _record_ip_failure(ip)
-        return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
-
-    session.permanent        = True
-    session.modified         = True
-    session['user_id']       = user_id
-    session['wallet']        = wallet_address
-    session['authenticated'] = True
-    csrf_tok = _get_csrf_token()
-    add_user_log(wallet_address, 'Login via password')
-    return jsonify({
-        'success':         True,
-        'redirect':        '/dashboard',
-        'wallet':          wallet_address,
-        'username':        db_username or '',
-        'has_trading_key': bool(has_trading_key),
-        'is_admin':        _is_owner(wallet_address),
-        'csrf_token':      csrf_tok,
-    })
-
-@app.route('/api/set_password', methods=['POST'])
-@rate_limit(10, 60)
-def set_password():
-    wallet = _authenticated_wallet()
-    if not wallet:
-        return jsonify({'success': False, 'error': 'Login required'}), 401
-    body     = request.json or {}
-    password = str(body.get('password', '')).strip()
-    if len(password) < 8:
-        return jsonify({'success': False, 'error': 'Password must be at least 8 characters'}), 400
-    pw_hash = _bcrypt.hashpw(password.encode('utf-8'), _bcrypt.gensalt(rounds=12)).decode('utf-8')
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        conn.execute('UPDATE users SET password_hash=? WHERE wallet_address=?', (pw_hash, wallet))
-        conn.commit()
-    finally:
-        conn.close()
-    add_user_log(wallet, 'Password set/updated')
-    return jsonify({'success': True})
-
 @app.route('/api/auth/nonce', methods=['GET'])
 @rate_limit(20, 60)
 def auth_nonce():
@@ -18455,8 +20191,7 @@ def wallet_set_key():
         _record_ip_failure(ip)
         return jsonify({'ok': False, 'msg': 'Invalid key format — paste the full base58 key from your wallet'})
     try:
-        from solders.keypair import Keypair as _KP_wsk
-        pasted_address = str(_KP_wsk.from_base58_string(private_key_raw).pubkey())
+        pasted_address = str(_sol_keypair_from_base58(private_key_raw).pubkey())
         if pasted_address == wallet:
             return jsonify({'ok': False, 'msg': 'This is the wallet you connected with — paste the private key of a separate, dedicated trading wallet instead'})
     except Exception:
@@ -20185,14 +21920,69 @@ def api_instant_trade():
             else:
                 amount_str = str(amount_token) if amount_token > 0 else '0'
             swap_info = {}
-            with _use_key(enc_blob, wallet) as pk:
-                # One wrapper for every Solana swap in the app: it guarantees
-                # the gas top-up, routes the fee to the right recipient, parses
-                # the realized fill, and reports whether the platform fee
-                # actually rode along.
-                ok, sig, err_msg, token_amount, sol_amount = _execute_user_swap_ex(
-                    wallet, pk, side, token_address, amount_str,
-                    base=SOLANA_BASE_CURRENCY, capture=swap_info)
+            if side == 'buy' and TRADE_ENGINE_SOLANA:
+                # ── the buy goes through the engine ──
+                # This route already funded trades in USDC. What it did not do
+                # was fold the network fee into the amount: the typed USDC was
+                # spent in full and the SOL fee came out of a second balance on
+                # top, so a trade really cost more than the figure on screen.
+                # It also had no reservation and no idempotency key -- only the
+                # 15-second repeat window above, which is a UI guard rather
+                # than a guarantee two requests cannot claim the same balance.
+                #
+                # The sell leg stays exactly as it was: the engine prices a
+                # SPEND against a ceiling, and a sell has no spend.
+                _fill: dict = {}
+                try:
+                    _q = _te_build_and_store_quote(
+                        uid=uid, wallet=wallet, source_chain='solana',
+                        dest_chain='solana', token_address=token_address,
+                        max_spend=Decimal(str(amount_sol)), taker=wallet,
+                        mode='manual')
+                    _qb = _q.to_dict()
+                    if not _qb.get('can_execute'):
+                        _recent_solana_buys.pop((wallet, token_address), None)
+                        return jsonify({'error': _qb.get('reject_reason')
+                                        or 'This trade cannot be done within that amount'}), 400
+                    _res = _te_run_solana_trade(
+                        quote_id=_q.quote_id, idem=f'{uid}:quote:{_q.quote_id}',
+                        available=Decimal(str(current_usdc)), wallet=wallet,
+                        enc_blob=enc_blob, symbol=symbol,
+                        token_address=token_address, user_id=uid,
+                        fill_sink=_fill)
+                except (TeQuoteError, TeCostError, TeProviderError,
+                        te_registry.RegistryError) as e:
+                    _recent_solana_buys.pop((wallet, token_address), None)
+                    return jsonify({'error': f'Could not price this trade: {e}'}), 502
+                except te_execute.QuoteNotUsable as e:
+                    _recent_solana_buys.pop((wallet, token_address), None)
+                    return jsonify({'error': str(e), 'requote': True}), 409
+                except te_execute.ExecutionError as e:
+                    _recent_solana_buys.pop((wallet, token_address), None)
+                    return jsonify({'error': str(e)}), 400
+
+                ok = (_res.state == te_ledger.COMPLETED)
+                sig = _res.tx_hash or _fill.get('signature') or ''
+                err_msg = _res.failure_reason or _fill.get('error') or ''
+                token_amount = float(_fill.get('token_amount') or 0.0)
+                sol_amount = float(_fill.get('base_amount') or 0.0)
+                # Everything below records the trade against amount_sol. That
+                # has to become what was actually spent, or the holdings ledger
+                # and the trades row would both book the ceiling.
+                if ok:
+                    amount_sol = float(_qb['token_purchase_usd'])
+                # No platform fee is charged on this leg and none was quoted,
+                # so nothing rode along to record.
+                swap_info['fee_bundled'] = False
+            else:
+                with _use_key(enc_blob, wallet) as pk:
+                    # One wrapper for every Solana swap in the app: it guarantees
+                    # the gas top-up, routes the fee to the right recipient, parses
+                    # the realized fill, and reports whether the platform fee
+                    # actually rode along.
+                    ok, sig, err_msg, token_amount, sol_amount = _execute_user_swap_ex(
+                        wallet, pk, side, token_address, amount_str,
+                        base=SOLANA_BASE_CURRENCY, capture=swap_info)
 
             if not ok:
                 if side == 'buy':
@@ -24899,73 +26689,40 @@ def copy_trade_from_message():
         return jsonify({'ok': False, 'msg': 'Connect a wallet first'}), 401
     body = request.json or {}
     token_address = str(body.get('token_address', '')).strip()
-    amount_sol    = float(body.get('amount_sol', 0) or 0)
     if not is_valid_solana_address(token_address):
         return jsonify({'ok': False, 'msg': 'Invalid token address'}), 400
-    if amount_sol <= 0:
-        return jsonify({'ok': False, 'msg': 'amount_sol must be greater than 0'}), 400
-    if _sec_check_state.get('trading_paused'):
-        return jsonify({'ok': False, 'msg': 'Trading suspended — contact admin to resume.'}), 503
+
+    # THE AMOUNT IS NOT THE CLIENT'S TO SEND.
+    # This route used to take amount_sol from the request body, and the page
+    # filled it in from the SHARED TRADE CARD -- so a copier spent the size
+    # the original trader used, denominated in SOL, out of a SOL balance the
+    # rest of the app stopped funding trades from. Three separate problems in
+    # one number: someone else's size, the wrong currency, and a spend the
+    # browser got to choose.
+    #
+    # What a copier spends is what they configured, in dollars, exactly as
+    # _trigger_copy_buy() spends it when the bot copies for them. amount_sol
+    # is read from nowhere now; an old page still sending it is simply
+    # ignored rather than refused, so the button keeps working.
     conn = sqlite3.connect(DB_FILE)
     try:
-        c = conn.cursor()
-        c.execute('SELECT id, encrypted_private_key, min_trade_size FROM users WHERE wallet_address=?', (wallet,))
-        row = c.fetchone()
-        bl = c.execute('SELECT 1 FROM user_blacklist WHERE user_id=? AND mint=?',
-                       (row[0], token_address)).fetchone() if row else None
+        row = conn.execute('SELECT copy_amount FROM users WHERE wallet_address=?',
+                           (wallet,)).fetchone()
     finally:
         conn.close()
-    if not row or not row[1]:
-        return jsonify({'ok': False, 'msg': 'No trading key saved — add it in Settings first'}), 400
-    if bl:
-        return jsonify({'ok': False, 'msg': 'This token is on your avoid list'}), 400
-    enc_blob = row[1]
-    us = get_user_state(wallet)
-    open_pos     = sum(1 for p in us['positions'].values() if p.get('amount', 0) > 0)
-    already_held = us['positions'].get(token_address, {}).get('amount', 0) > 0
-    if open_pos >= 5 and not already_held:
-        return jsonify({'ok': False, 'msg': 'Max 5 positions reached — sell one first'}), 400
-    token_data = get_token_data(token_address)
-    if not token_data or token_data['price'] <= 0:
-        return jsonify({'ok': False, 'msg': 'Could not fetch a live price for this token'}), 400
-    try:
-        with _use_key(enc_blob, wallet) as _pk:
-            from solders.keypair import Keypair as _KP_ct
-            trading_wallet = str(_KP_ct.from_base58_string(_pk).pubkey())
-    except InvalidToken:
-        return jsonify({'ok': False, 'msg': 'Cannot decrypt trading key — please re-save it in Settings'}), 400
-    except Exception as e:
-        print(f'[copy-trade] key error for {wallet[:6]}...{wallet[-4:]}: {type(e).__name__}: {e}', flush=True)
-        return jsonify({'ok': False, 'msg': 'Cannot decrypt trading key — please re-save it in Settings'}), 400
-    us_sol = _get_user_sol(trading_wallet)
-    if us_sol < 0.01:
-        return jsonify({'ok': False, 'low_balance': True, 'trading_wallet': trading_wallet,
-                        'msg': '⚠️ Insufficient SOL balance — send SOL to your trading wallet first'}), 400
-    spend = round(min(amount_sol, us_sol), 4)
-    if spend < 0.001:
-        return jsonify({'ok': False, 'msg': 'Insufficient SOL balance to copy this trade'}), 400
-    with _use_key(enc_blob, wallet) as _pk:
-        ok, _entry_price, _tok_amt = _buy_and_get_realized(wallet, _pk, token_address, spend, token_data['price'])
-    if not ok:
-        return jsonify({'ok': False, 'msg': 'Buy transaction failed — check logs for details'}), 500
-    pos = us['positions'].get(token_address, {'amount': 0.0, 'buy_price': 0.0, 'spend': 0.0})
-    pos['amount']          = pos.get('amount', 0.0) + _tok_amt
-    pos['buy_price']       = _entry_price
-    pos['spend']           = pos.get('spend', 0.0) + spend
-    pos['symbol']          = token_data['symbol'] or token_address[:8]
-    pos['opened_at']       = time.time()
-    pos['entry_liquidity'] = float(token_data.get('liquidity', 0) or 0)
-    pos.update(_snapshot_entry_risk(wallet, _entry_price))
-    _upsert_open_position(row[0], wallet, token_address, pos, source='manual')
-    _charge_txn_fee(_pk, wallet, row[0], pos['symbol'], spend, 'buy', bundled=True)
-    short = wallet[:6] + '...' + wallet[-4:]
-    add_user_log(wallet, '[' + short + '] COPY TRADE: ' + pos['symbol'] +
-                 ' for ' + str(spend) + ' SOL @ $' + str(token_data['price']))
-    _trigger_copy_buy(wallet, token_address, token_data['price'], pos['symbol'],
-                      float(token_data.get('liquidity', 0) or 0))
-    note = '' if us.get('trader_running') else ' — start the bot for automatic TP/SL'
-    return jsonify({'ok': True, 'success': True, 'trade_id': None, 'symbol': pos['symbol'],
-                    'spend': spend, 'msg': 'Copied ' + pos['symbol'] + note})
+    _copy_amount = float(row[0]) if row and row[0] else 0.0
+
+    # Everything else -- the trading key, the blacklist, the position cap, the
+    # balances, the ceiling, the reservation, the idempotency key -- is the one
+    # Solana buy flow. This route had its own copy of all of it, which is how
+    # it was still charging _charge_txn_fee(bundled=True) unconditionally: the
+    # fix that stopped booking fees nobody collected landed there, not here.
+    return _solana_buy_flow(
+        wallet, token_address,
+        log_label='COPY TRADE',
+        enforce_position_cap=True,
+        idle_note=' — start the bot for automatic TP/SL',
+        requested_usdc=(_copy_amount if _copy_amount > 0 else None))
 
 
 @app.route('/api/comments/<int:profile_uid>', methods=['GET'])
@@ -25244,8 +27001,7 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
 
     try:
         with _use_key(enc_blob, wallet) as _pk:
-            from solders.keypair import Keypair as _KP
-            trading_wallet = str(_KP.from_base58_string(_pk).pubkey())
+            trading_wallet = str(_sol_keypair_from_base58(_pk).pubkey())
     except InvalidToken:
         return jsonify({'ok': False, 'msg': 'Cannot decrypt trading key — please re-save it in Settings'}), 400
     except Exception as e:
@@ -25331,40 +27087,103 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
         # Claimed before the swap, not after: a swap takes seconds, and the
         # second click arrives during it.
         _recent_solana_buys[(wallet, mint)] = time.time()
-        with _use_key(enc_blob, wallet) as _pk:
-            ok, entry_price, tok_amt = _buy_and_get_realized(
-                wallet, _pk, mint, spend, token_data['price'],
-                base=SOLANA_BASE_CURRENCY, capture=swap_info)
-            if not ok:
-                # Nothing was bought, so nothing is being double-clicked.
-                # Holding the window here would make a user wait 15s to retry
-                # a buy that never happened.
+        _symbol = token_data['symbol'] or mint[:8]
+
+        if TRADE_ENGINE_SOLANA:
+            # ── through the trade engine ──
+            # This route already funded the trade in USDC, so the currency was
+            # never the problem here. What it did not do was fold the network
+            # fee into the amount: the user's USDC was spent in full and the
+            # SOL gas came out of a second balance on top, so the real cost of
+            # a trade was the number on screen PLUS whatever the network
+            # charged. It also had no reservation and no idempotency key --
+            # only a 15-second repeat window, which is a UI guard, not a
+            # guarantee two requests cannot claim the same balance.
+            try:
+                _q = _te_build_and_store_quote(
+                    uid=user_id, wallet=wallet, source_chain='solana',
+                    dest_chain='solana', token_address=mint,
+                    max_spend=Decimal(str(spend)), taker=wallet, mode='manual')
+                _qb = _q.to_dict()
+                if not _qb.get('can_execute'):
+                    _recent_solana_buys.pop((wallet, mint), None)
+                    return jsonify({'ok': False,
+                                    'msg': _qb.get('reject_reason')
+                                    or 'This trade cannot be done within that amount'}), 400
+                _res = _te_run_solana_trade(
+                    quote_id=_q.quote_id, idem=f'{user_id}:quote:{_q.quote_id}',
+                    available=Decimal(str(us_usdc)), wallet=wallet,
+                    enc_blob=enc_blob, symbol=_symbol, token_address=mint,
+                    user_id=user_id, source='manual',
+                    extra_pos={'entry_liquidity': float(token_data.get('liquidity', 0) or 0),
+                               **_snapshot_entry_risk(wallet, float(token_data['price']))})
+            except (TeQuoteError, TeCostError, TeProviderError,
+                    te_registry.RegistryError) as e:
                 _recent_solana_buys.pop((wallet, mint), None)
-                return jsonify({'ok': False, 'msg': 'Buy transaction failed — check logs for details'}), 500
+                return jsonify({'ok': False, 'msg': f'Could not price this trade: {e}'}), 502
+            except te_execute.QuoteNotUsable as e:
+                _recent_solana_buys.pop((wallet, mint), None)
+                return jsonify({'ok': False, 'requote': True, 'msg': str(e)}), 409
+            except te_execute.ExecutionError as e:
+                _recent_solana_buys.pop((wallet, mint), None)
+                return jsonify({'ok': False, 'msg': str(e)}), 400
 
-            pos = us['positions'].get(mint, {'amount': 0.0, 'buy_price': 0.0, 'spend': 0.0})
-            pos['amount']          = pos.get('amount', 0.0) + tok_amt
-            pos['buy_price']       = entry_price
-            pos['spend']           = pos.get('spend', 0.0) + spend
-            pos['symbol']          = token_data['symbol'] or mint[:8]
-            pos['opened_at']       = time.time()
-            pos['entry_liquidity'] = float(token_data.get('liquidity', 0) or 0)
-            # Recorded so the SELL routes back into the same currency this buy
-            # spent. Without it the position defaults to SOL and would be sold
-            # into SOL, mis-stating the profit on every USDC trade.
-            pos['base']            = SOLANA_BASE_CURRENCY
-            pos.update(_snapshot_entry_risk(wallet, entry_price))
-            _upsert_open_position(user_id, wallet, mint, pos, source='manual')
+            if _res.state != te_ledger.COMPLETED:
+                # Nothing was bought, so nothing is being double-clicked.
+                _recent_solana_buys.pop((wallet, mint), None)
+                return jsonify({'ok': False,
+                                'msg': _res.failure_reason or 'Buy transaction failed',
+                                'tx_hash': _res.tx_hash,
+                                'needs_investigation': _res.needs_investigation}), 502
 
-            # Only when the fee really rode along inside the swap. Recording
-            # one that did not would book revenue nobody received and pay a
-            # referral cut on it.
-            if swap_info.get('fee_bundled'):
-                _charge_txn_fee(_pk, wallet, user_id, pos['symbol'], spend, 'buy', bundled=True)
-            else:
-                print(f'[fee] {wallet[:6]}... {pos["symbol"]} buy: the platform fee was '
-                      f'NOT collected inside the swap, so nothing is recorded for it',
-                      flush=True)
+            # What the user actually spent, which is the purchase -- not the
+            # amount they typed, which the costs came out of.
+            spend = float(_qb['token_purchase_usd'])
+            entry_price = float(token_data['price'])
+            pos = get_user_state(wallet)['positions'].get(mint) or {}
+            tok_amt = float(pos.get('amount', 0.0) or 0.0)
+            pos.setdefault('symbol', _symbol)
+            # No fee is charged on this leg and none is quoted (_te_fee_rate_for
+            # returns zero for Solana), so there is nothing to record.
+            swap_info['fee_bundled'] = False
+        else:
+            # ── the pre-engine path ──
+            # Spends the typed amount in full; the SOL network fee comes out
+            # of a second balance on top of it.
+            with _use_key(enc_blob, wallet) as _pk:
+                ok, entry_price, tok_amt = _buy_and_get_realized(
+                    wallet, _pk, mint, spend, token_data['price'],
+                    base=SOLANA_BASE_CURRENCY, capture=swap_info)
+                if not ok:
+                    # Nothing was bought, so nothing is being double-clicked.
+                    # Holding the window here would make a user wait 15s to retry
+                    # a buy that never happened.
+                    _recent_solana_buys.pop((wallet, mint), None)
+                    return jsonify({'ok': False, 'msg': 'Buy transaction failed — check logs for details'}), 500
+
+                pos = us['positions'].get(mint, {'amount': 0.0, 'buy_price': 0.0, 'spend': 0.0})
+                pos['amount']          = pos.get('amount', 0.0) + tok_amt
+                pos['buy_price']       = entry_price
+                pos['spend']           = pos.get('spend', 0.0) + spend
+                pos['symbol']          = token_data['symbol'] or mint[:8]
+                pos['opened_at']       = time.time()
+                pos['entry_liquidity'] = float(token_data.get('liquidity', 0) or 0)
+                # Recorded so the SELL routes back into the same currency this buy
+                # spent. Without it the position defaults to SOL and would be sold
+                # into SOL, mis-stating the profit on every USDC trade.
+                pos['base']            = SOLANA_BASE_CURRENCY
+                pos.update(_snapshot_entry_risk(wallet, entry_price))
+                _upsert_open_position(user_id, wallet, mint, pos, source='manual')
+
+                # Only when the fee really rode along inside the swap. Recording
+                # one that did not would book revenue nobody received and pay a
+                # referral cut on it.
+                if swap_info.get('fee_bundled'):
+                    _charge_txn_fee(_pk, wallet, user_id, pos['symbol'], spend, 'buy', bundled=True)
+                else:
+                    print(f'[fee] {wallet[:6]}... {pos["symbol"]} buy: the platform fee was '
+                          f'NOT collected inside the swap, so nothing is recorded for it',
+                          flush=True)
 
     short = wallet[:6] + '...' + wallet[-4:]
     add_user_log(wallet, '[' + short + '] ' + log_label + ': ' + pos['symbol'] +
@@ -25462,8 +27281,7 @@ def _insufficient_trade_balance(wallet: str, enc_blob: str):
     required       = max(required, 0.05)
     try:
         with _use_key(enc_blob, wallet) as _pk:
-            from solders.keypair import Keypair as _KP_bal
-            trading_wallet = str(_KP_bal.from_base58_string(_pk).pubkey())
+            trading_wallet = str(_sol_keypair_from_base58(_pk).pubkey())
     except Exception:
         return None, None, None, None  # key errors are surfaced by the loop itself; don't double-block here
     us_sol = _get_user_sol(trading_wallet)
@@ -25775,8 +27593,7 @@ def bot_overview():
         if enc_key:
             try:
                 with _use_key(enc_key, wallet) as _pk:
-                    from solders.keypair import Keypair as _KP_ov
-                    trading_wallet = str(_KP_ov.from_base58_string(_pk).pubkey())
+                    trading_wallet = str(_sol_keypair_from_base58(_pk).pubkey())
                 trading_wallet_short = (trading_wallet[:4] + '...' + trading_wallet[-4:])
                 trading_wallet_sol = _get_user_sol(trading_wallet)
             except Exception:
@@ -25927,8 +27744,7 @@ def api_withdraw():
 
     try:
         with _use_key(enc_blob, wallet) as _pk:
-            from solders.keypair import Keypair as _KP_wd
-            trading_wallet = str(_KP_wd.from_base58_string(_pk).pubkey())
+            trading_wallet = str(_sol_keypair_from_base58(_pk).pubkey())
     except InvalidToken:
         return jsonify({'ok': False, 'error': 'Cannot decrypt trading key — please re-save it in Settings'}), 400
     except Exception as e:
@@ -26216,8 +28032,7 @@ def api_get_tokens():
     if row and row[0]:
         try:
             with _use_key(row[0], wallet) as pk_str:
-                from solders.keypair import Keypair as _KP2
-                trading_pk = str(_KP2.from_base58_string(pk_str).pubkey())
+                trading_pk = str(_sol_keypair_from_base58(pk_str).pubkey())
         except Exception:
             pass
 
@@ -26401,7 +28216,7 @@ def api_claim_sol():
     # Derive the trading keypair once — authority must match the account's owner field
     try:
         with _use_key(enc_blob, wallet) as _pk_tmp:
-            _kp_probe  = _KP.from_base58_string(_pk_tmp)
+            _kp_probe  = _sol_keypair_from_base58(_pk_tmp)
             trading_pk = str(_kp_probe.pubkey())
     except Exception as e:
         return jsonify({'ok': False, 'msg': 'Cannot access trading key — please re-save it in Settings'}), 500
@@ -26524,7 +28339,7 @@ def api_claim_sol():
     other_accs: list = []
     try:
         with _use_key(enc_blob, wallet) as pk_str:
-            kp       = _KP.from_base58_string(pk_str)
+            kp       = _sol_keypair_from_base58(pk_str)
             signer   = kp.pubkey()
 
             if str(signer) != trading_pk:
@@ -26660,7 +28475,7 @@ def api_burn_tokens():
 
     try:
         with _use_key(row[0], wallet) as pk_str:
-            kp     = _KP_bt.from_base58_string(pk_str)
+            kp     = _sol_keypair_from_base58(pk_str)
             signer = kp.pubkey()
     except Exception as e:
         print(f'[burn-tokens] key decrypt error: {_redact_keys(str(e))}', flush=True)
@@ -27332,6 +29147,43 @@ def _scanner_get_safety(mint: str, chain: str = 'solana', include_lp: bool = Fal
     with _scanner_safety_lock:
         _scanner_safety_cache[cache_key] = (time.time(), result)
     return result
+
+
+_SCANNER_SAFETY_WARM_INTERVAL = 20  # a little past _get_scanner_cached()'s own 15s, so most cycles see one fresh candidate batch
+
+def _scanner_safety_warm_loop():
+    """Pre-fills _scanner_safety_cache in the background, so api_market_scanner
+    -- which every Live Market page load blocks on -- almost never has to run
+    a live mint/LP/honeypot check itself.
+
+    That endpoint already checks the cache first and only falls back to a
+    live, network-bound check on a miss; this never changes that fallback or
+    any filtering decision, it just makes a miss rare. Warms both include_lp
+    variants (lp_locked=0 and =1 are different cache keys -- see
+    _scanner_get_safety's own cache_key) so a request with the LP-locked
+    filter on is covered too, not just the default view.
+
+    Reuses _get_scanner_cached() (shares the scanner's own upstream cache, no
+    extra DexScreener load -- see surge_radar.py's _sample_once for the same
+    trick) and its existing 80-candidate cap, so this warms every candidate
+    any sort mode could possibly need rather than guessing which 45."""
+    print(f'[scanner-safety] background warmer started (every {_SCANNER_SAFETY_WARM_INTERVAL}s)', flush=True)
+    while True:
+        try:
+            candidates = _get_scanner_cached()
+            jobs = []
+            for t in candidates:
+                mint, chain = t.get('mint'), t.get('chain') or 'solana'
+                if not mint:
+                    continue
+                jobs.append((mint, chain, False))
+                jobs.append((mint, chain, True))
+            if jobs:
+                with ThreadPoolExecutor(max_workers=12) as ex:
+                    list(ex.map(lambda j: _scanner_get_safety(*j), jobs))
+        except Exception as e:
+            print(f'[scanner-safety] warm cycle failed: {e}', flush=True)
+        time.sleep(_SCANNER_SAFETY_WARM_INTERVAL)
 
 
 def _scanner_token_passes_scam_filter(token: dict, safety: dict) -> bool:
@@ -29043,8 +30895,7 @@ def _recover_uncollected_fees(triggered_by: str = 'manual') -> dict:
             # diagnose it without confusing the wallet owner.
             try:
                 with _use_key(enc_blob, user_wallet) as pk:
-                    from solders.keypair import Keypair as _KP_fr
-                    signer = str(_KP_fr.from_base58_string(pk).pubkey())
+                    signer = str(_sol_keypair_from_base58(pk).pubkey())
                     signer_sol = _get_user_sol(signer)
                     if signer_sol < 0.001:
                         print(f'[fee-recovery] {sw} signer={signer[:6]}...{signer[-4:]} has '
@@ -30008,12 +31859,11 @@ def admin_test_fee():
 
     sig = None
     try:
-        from solders.keypair import Keypair as _KP
         from solders.pubkey import Pubkey as _PK
 
         with _use_key(row[0], wallet) as pk:
             # ── 2. Keypair ──────────────────────────────────────────────────
-            kp     = _KP.from_base58_string(pk)
+            kp     = _sol_keypair_from_base58(pk)
             sender = kp.pubkey()
             _step('Keypair', detail=str(sender)[:8] + '…')
 
@@ -30765,6 +32615,28 @@ import gas_manager
 threading.Thread(target=gas_manager.gas_sweep_loop, daemon=True).start()
 import surge_radar
 threading.Thread(target=surge_radar.surge_loop, daemon=True).start()
+threading.Thread(target=_scanner_safety_warm_loop, daemon=True).start()
+threading.Thread(target=_trade_reservation_reap_loop, daemon=True).start()
+# Only when cross-chain is on, OR when this database still has an unfinished
+# bridge in it. A worker that wakes every 20 seconds to find nothing, forever,
+# on every deployment that will never bridge, is noise -- and a thread that
+# exists only when the feature does is one less thing to reason about when it
+# is off.
+#
+# But the flag going off must never strand money that is already moving. A
+# trade in BRIDGING is a real transaction on chain with the user's claim still
+# held, and it is finished by whichever process is running later, not by the
+# one that started it. That happens in two ordinary situations: a route is
+# closed again while a bridge is in flight, and the controlled live test,
+# which runs with the flag off by design. So unfinished work starts the worker
+# on its own, and it stops being started once there is none.
+_cc_unfinished = _crosschain_unfinished_count()
+if TRADE_ENGINE_CROSSCHAIN or _cc_unfinished:
+    if _cc_unfinished and not TRADE_ENGINE_CROSSCHAIN:
+        print(f'[crosschain] resume worker started for {_cc_unfinished} unfinished '
+              f'trade(s) even though cross-chain is off — money already in flight '
+              f'is finished, not abandoned', flush=True)
+    threading.Thread(target=_crosschain_resume_loop, daemon=True).start()
 # Tells the operator, at a glance, which address to keep funded with native
 # gas on each EVM chain (or that sponsorship is simply off). Never prints the
 # key itself -- only the public address derived from it.

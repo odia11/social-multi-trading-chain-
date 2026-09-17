@@ -22,7 +22,7 @@ import subprocess
 import sys
 import tempfile
 
-sys.path.insert(0, '/home/user/Orc-agent-Solana-chain-')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PIL import Image                                             # noqa: E402
 
 checks = []
@@ -57,7 +57,7 @@ def photo(w, h, seed=7):
 # functions are needed, so they are pulled out of the source without importing
 # the app.
 import ast, types                                                 # noqa: E402
-SRC = open('/home/user/Orc-agent-Solana-chain-/dashboard.py').read()
+SRC = open(os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + '/dashboard.py').read()
 tree = ast.parse(SRC)
 wanted = {'_shrink_image_data_uri', '_shrink_image_bytes'}
 mod = types.ModuleType('shrinker')
