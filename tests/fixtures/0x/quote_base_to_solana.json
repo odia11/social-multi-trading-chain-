@@ -1,0 +1,95 @@
+{
+  "route": "base->solana",
+  "captured_at": "2026-09-17T10:41:50.284492Z",
+  "amount_usd": 2.0,
+  "origin_address": "0xABf40AADf960e20B4283dc5A06387A429Ba02456",
+  "destination_address": "9FzTJNUfMVSPPNEsUDfUHuE1gSE7uDBamcGHq1CseUUZ",
+  "response": {
+    "liquidityAvailable": true,
+    "allowanceTarget": "0x0000000000001ff3684f28c67538d4d072c22734",
+    "originChainId": 8453,
+    "originChain": "base",
+    "destinationChainId": 999999999991,
+    "destinationChain": "solana",
+    "sellToken": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+    "buyToken": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "issues": {
+      "allowance": {
+        "actual": "0",
+        "spender": "0x0000000000001ff3684f28c67538d4d072c22734"
+      },
+      "balance": {
+        "token": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+        "actual": "0",
+        "expected": "2000000"
+      },
+      "simulationIncomplete": false,
+      "invalidSwapSourcesPassed": [],
+      "invalidBridgesPassed": []
+    },
+    "zid": "0x7a0f477248b07297e32688d1",
+    "quotes": [
+      {
+        "sellAmount": "2000000",
+        "buyAmount": "1798148",
+        "minBuyAmount": "1780167",
+        "fees": {
+          "integratorFee": null,
+          "integratorFees": null,
+          "zeroExFee": {
+            "amount": "3000",
+            "token": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+            "type": "volume",
+            "collectedBy": null
+          },
+          "providerAppFee": null,
+          "bridgeNativeFee": null
+        },
+        "gasCosts": {
+          "chainType": "evm",
+          "gasPrice": "7644630",
+          "gasLimit": "148448",
+          "totalNetworkFee": "1152682591024"
+        },
+        "steps": [
+          {
+            "type": "bridge",
+            "originChainId": 8453,
+            "destinationChainId": 999999999991,
+            "sellToken": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+            "buyToken": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "sellAmount": "1997000",
+            "buyAmount": "1798148",
+            "minBuyAmount": "1780167",
+            "provider": "relay",
+            "estimatedTimeSeconds": 1
+          }
+        ],
+        "transaction": {
+          "chainType": "evm",
+          "details": {
+            "to": "0x0000000000001ff3684f28c67538d4d072c22734",
+            "data": "0x2213bc0b0000000000000000000000007d19077317b7574cd01aafa143e5e09f0f4df466000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda0291300000000000000000000000000000000000000000000000000000000001e84... [2954 chars]",
+            "gas": "148448",
+            "gasPrice": "7644630",
+            "value": "0"
+          }
+        },
+        "estimatedTimeSeconds": 1,
+        "issues": {
+          "allowance": {
+            "actual": "0",
+            "spender": "0x0000000000001ff3684f28c67538d4d072c22734"
+          },
+          "balance": {
+            "token": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+            "actual": "0",
+            "expected": "2000000"
+          },
+          "simulationIncomplete": false
+        },
+        "quoteId": "0x7a0f477248b07297e32688d176f4c808"
+      }
+    ]
+  }
+}
