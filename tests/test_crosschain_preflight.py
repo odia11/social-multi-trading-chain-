@@ -213,6 +213,38 @@ check('...and lists are not truncated in the saved form either, so a response '
       'with several quotes keeps all of them',
       smoke.redact({'q': [1, 2, 3, 4, 5, 6, 7]}, truncate=False)['q'] == [1, 2, 3, 4, 5, 6, 7])
 
+# ═══ a wrong --wallet is caught here, not by 0x ════════════════════════
+# What happened on the server: the EVM trading address was passed as
+# --wallet, because that is the address the app shows you. It resolves to an
+# empty Base origin and an EVM-shaped Solana recipient, and 0x answered
+# HTTP 400 INPUT_INVALID -- which reads like a broken integration and is
+# nothing of the kind.
+_env_bad = dict(os.environ)
+_env_bad.update({'DATA_DIR': tempfile.mkdtemp(), 'SECRET_KEY': 'x' * 32,
+                 'ENCRYPTION_KEY': 'K' * 43 + '=', 'DEV': '1',
+                 # Never used: the run stops before any request is built.
+                 'ZEROX_API_KEY': 'unused-the-run-stops-first'})
+_bad = subprocess.run(
+    [sys.executable, PREFLIGHT, '--amount', '30',
+     '--wallet', '0xb8943eDe34bE9BC7907e511260CBbBC251A47e22'],
+    cwd=REPO, env=_env_bad, capture_output=True, text=True, timeout=300)
+
+check('an EVM address passed as the session wallet fails at ADDRESSES — '
+      'before a request is built, rather than as someone else\'s HTTP 400',
+      f'{"ADDRESSES":<22} FAIL' in _bad.stdout
+      and 'LIVE QUOTE' not in _bad.stdout)
+check('...naming both halves: no Base trading wallet for this account, and a '
+      'recipient that is not a Solana address',
+      'no Base trading wallet' in _bad.stdout
+      and 'is not a Solana address' in _bad.stdout)
+check('...and saying which address --wallet actually wants, with the query '
+      'that finds it — the answer, not just the complaint',
+      'SESSION wallet' in _bad.stdout and 'bsc_wallet_address' in _bad.stdout)
+check('...and the verdict is NO, with a non-zero exit',
+      'READY FOR CONTROLLED LIVE TEST: NO' in _bad.stdout
+      and _bad.returncode != 0)
+
+
 # ═══ the one script that DOES spend money, and how hard it is to ═══════
 # ═══ run by accident                                              ═══════
 LIVE = os.path.join(REPO, 'scripts', 'crosschain_live_test.py')

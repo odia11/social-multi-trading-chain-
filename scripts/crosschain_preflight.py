@@ -136,6 +136,34 @@ def main():
         print('  no network request is made in this mode')
     print()
 
+    # ── 0. do these addresses even belong to these chains? ──
+    # Checked before the request rather than after it. A wrong --wallet (the
+    # EVM trading address instead of the session wallet is the easy mistake,
+    # because that is the one the app shows you) resolves to an empty or
+    # EVM-shaped Solana recipient, and 0x answers HTTP 400 INPUT_INVALID --
+    # which reads like a broken integration and is nothing of the kind.
+    def _shape_ok(addr, chain_cfg):
+        rx = X._SVM_ADDRESS if chain_cfg.kind == 'svm' else X._EVM_ADDRESS
+        return bool(addr) and bool(rx.match(addr))
+
+    bad = [(label, addr, cfg) for label, addr, cfg in
+           (('origin', origin, src), ('recipient', recipient, dst))
+           if not _shape_ok(addr, cfg)]
+    if bad:
+        for label, addr, cfg in bad:
+            what = (f'is empty — this account has no {cfg.display_name} trading '
+                    f'wallet yet' if not addr else
+                    f'{addr!r} is not a {cfg.display_name} address')
+            report('ADDRESSES', FAIL, f'{label} {what}')
+        if args.wallet:
+            print()
+            print('  --wallet takes the SESSION wallet: the address you sign in')
+            print('  with, not the trading address the app shows you. Find it with:')
+            print("      sqlite3 <db> \"SELECT id, wallet_address FROM users "
+                  "WHERE lower(bsc_wallet_address)=lower('<the 0x... you see>');\"")
+        return verdict()
+    report('ADDRESSES', PASS, f'{origin[:10]}… -> {recipient[:10]}…')
+
     amount_raw = int(args.amount * (10 ** src.stable.require_decimals()))
     provider = d._te_crosschain_provider()
 
