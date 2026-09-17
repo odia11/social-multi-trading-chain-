@@ -42,6 +42,7 @@ from evm_stable_gas_bootstrap import install as _install_evm_stable_gas_bootstra
 from bsc_gasless_trading import install as _install_evm_gasless_trading
 from solana_gasless_trading import install as _install_solana_gasless_trading
 from cross_chain_budget_guard import install as _install_cross_chain_budget_guard
+from crosschain_prebroadcast_hardening import install as _install_crosschain_prebroadcast_hardening
 from solana_source_bridge_gasless import install as _install_solana_source_bridge_gasless
 from header_stable_balance import install as _install_header_stable_balance
 from portfolio_multichain_holdings import install as _install_portfolio_multichain_holdings
@@ -138,6 +139,12 @@ _install_solana_gasless_trading(_dashboard)
 # buys continue through Jupiter gasless without demanding a separate SOL
 # reserve after the USDC has arrived.
 _install_cross_chain_budget_guard(_dashboard)
+
+# Persist the signed origin transaction identity before the network send. A
+# crash can then never leave an in-flight bridge with no hash/signature to
+# recover from, so recovery never has to choose between a blind resend and a
+# permanently ambiguous transaction.
+_install_crosschain_prebroadcast_hardening(_dashboard)
 
 # If an EVM-destination buy is funded by USDC sitting on Solana while that
 # trading wallet has zero SOL, use Jupiter Ultra gasless to turn a small slice
