@@ -50,6 +50,28 @@ with tempfile.TemporaryDirectory() as td:
         duplicate_refused = False
     check('a second pre-broadcast claim for the same leg is refused', duplicate_refused)
 
+
+class FakeStatus:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+def broken_status(*args, **kwargs):
+    raise TimeoutError('provider unavailable')
+
+
+fake_install = SimpleNamespace(
+    _te_cc_source_sender=lambda *a, **k: (lambda route: None),
+    _te_cc_status_fetcher=broken_status,
+    te_crosschain=SimpleNamespace(UNKNOWN='unknown', CrossChainStatus=FakeStatus),
+)
+H.install(fake_install)
+status = fake_install._te_cc_status_fetcher('base', '0xabc', 'q1')
+check('provider status outages become UNKNOWN instead of aborting recovery',
+      status.status == 'unknown' and not status.filled and not status.failed)
+check('status-outage reason remains available for diagnostics',
+      'TimeoutError' in status.failure_reason)
+
 app_entry = (ROOT / 'app_entry.py').read_text()
 check('production entrypoint installs pre-broadcast hardening',
       '_install_crosschain_prebroadcast_hardening(_dashboard)' in app_entry)
