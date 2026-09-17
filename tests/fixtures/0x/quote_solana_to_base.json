@@ -1,0 +1,11 @@
+{
+  "route": "solana->base",
+  "captured_at": "2026-09-17T10:41:51.472819Z",
+  "amount_usd": 2.0,
+  "origin_address": "9FzTJNUfMVSPPNEsUDfUHuE1gSE7uDBamcGHq1CseUUZ",
+  "destination_address": "0xABf40AADf960e20B4283dc5A06387A429Ba02456",
+  "response": {
+    "liquidityAvailable": false,
+    "zid": "0x9eaa1b612fb63ca75bce4b03"
+  }
+}
