@@ -1,6 +1,13 @@
 """Regression checks for user-funded EVM gas bootstrap."""
+import os
+import sys
 from decimal import Decimal
 from types import SimpleNamespace
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO not in sys.path:
+    sys.path.insert(0, REPO)
+os.chdir(REPO)
 
 import evm_stable_gas_bootstrap as m
 
@@ -23,7 +30,7 @@ check('old ladder remains only as fallback',
 
 # Integration-order guarantee: app_entry installs this before bsc_gasless so
 # the existing adapter captures this wrapper as its fallback.
-entry = open('app_entry.py').read()
+entry = open(os.path.join(REPO, 'app_entry.py')).read()
 bootstrap_at = entry.index('_install_evm_stable_gas_bootstrap(_dashboard)')
 gasless_at = entry.index('_install_evm_gasless_trading(_dashboard)')
 check('stable bootstrap installs before the EVM Gasless BUY adapter', bootstrap_at < gasless_at)
