@@ -57,6 +57,7 @@ from trade_engine import registry as te_registry
 from trade_engine import ledger as te_ledger
 from trade_engine import subsidy as te_subsidy
 from trade_engine import execute as te_execute
+from trade_engine import crosschain as te_crosschain
 from trade_engine.costs import CostError as TeCostError
 from trade_engine.providers import JupiterProvider, ZeroExProvider, ProviderError as TeProviderError
 from trade_engine.quote import QuoteError as TeQuoteError, QuoteRequest, build_quote
@@ -1083,6 +1084,40 @@ TRADE_ENGINE_BOT_EVM = os.getenv('TRADE_ENGINE_BOT_EVM', '1').strip() not in ('0
 # SOL-funded copy-trade: it disables Solana copying instead, because the
 # path it would fall back to spent the wrong currency.
 TRADE_ENGINE_SOLANA = os.getenv('TRADE_ENGINE_SOLANA', '1').strip() not in ('0', 'false', 'False', '')
+
+# Whether a trade may bridge USDC from one chain to another to complete
+# itself. OFF by default, and it is meant to stay off until somebody has
+# watched a real bridge finish.
+#
+# The bridge itself is not new -- the standalone Bridge feature has used 0x's
+# Cross-Chain API for a while. What is new is that a TRADE can now own one:
+# the bridge runs inside the engine's state machine, holding the user's
+# reservation from the source transaction all the way to the destination
+# swap, and surviving a restart in between. That is the part with no live
+# mileage on it.
+#
+# It also cannot be verified from the build environment: api.0x.org is
+# unreachable there (the egress proxy answers 403 to CONNECT), so every
+# response shape this depends on was read from 0x's published example code
+# rather than from a live call. A flag that defaults off is the honest
+# position for a route nobody has watched work.
+TRADE_ENGINE_CROSSCHAIN = os.getenv('TRADE_ENGINE_CROSSCHAIN', '0').strip() not in ('0', 'false', 'False', '')
+
+# Which directions are allowed, as 'source->destination' pairs. Empty by
+# default: turning the feature on does not turn on any route. Each pair has
+# to be named, because "0x supports this chain" and "we have seen a trade
+# complete on it" are different claims and only the second one should move
+# somebody's money.
+#   CROSSCHAIN_ROUTES=base->solana,solana->base
+CROSSCHAIN_ENABLED_ROUTES = frozenset(
+    r.strip() for r in os.getenv('CROSSCHAIN_ROUTES', '').split(',') if r.strip())
+
+# How often the resume worker looks, and how long a bridge may take before it
+# stops being "slow" and becomes something a person has to find. The deadline
+# is measured from the origin broadcast and stored, so a restart does not
+# hand a stuck bridge a fresh clock.
+CROSSCHAIN_POLL_SECONDS = int(os.getenv('CROSSCHAIN_POLL_SECONDS', '20'))
+CROSSCHAIN_DEADLINE_SECONDS = float(os.getenv('CROSSCHAIN_DEADLINE_SECONDS', '3600'))
                             # leg of every trade (see _charge_txn_fee()) -- so a full
                             # round-trip pays 1.5% total, split as two separate 0.75%
                             # charges rather than one combined charge at close.
@@ -8129,6 +8164,15 @@ def _te_build_and_store_quote(*, uid, wallet, source_chain, dest_chain, token_ad
     move once a user has been given it.
     """
     _te_ensure_decimals(dest_chain)
+    if source_chain != dest_chain:
+        # The bridge has to be priced against the SOURCE chain's dollar asset
+        # too -- its decimals decide the raw amount 0x is asked to move.
+        _te_ensure_decimals(source_chain)
+    # A cross-chain quote needs a bridge price, and the route it gets back is
+    # kept so execution signs THAT route rather than a fresh one at a
+    # different price. Keyed on the quote so a second quote cannot hand its
+    # route to the first one's execution.
+    _route_key = f'{uid}:{source_chain}:{dest_chain}:{token_address}:{max_spend}'
     quote = build_quote(
         QuoteRequest(
             user_id=uid, wallet=wallet, source_chain=source_chain,
@@ -8138,11 +8182,19 @@ def _te_build_and_store_quote(*, uid, wallet, source_chain, dest_chain, token_ad
         swap_provider=_te_swap_provider(dest_chain),
         gas_estimator=_te_gas_usd,
         fee_rate=_te_fee_rate_for(dest_chain),
+        bridge_quoter=(None if source_chain == dest_chain
+                       else _te_bridge_quoter(wallet, _route_key)),
         gas_is_sponsored=lambda c: _te_needs_sponsored_gas(c, taker),
         # Lets the quote replace its conservative pre-swap gas figure with the
         # one 0x reports for the actual route.
         gas_from_native=lambda c, native: native * _te_native_price_usd(c),
     )
+    if source_chain != dest_chain:
+        # Re-key the held route onto the quote id now that there is one, so
+        # execution can find it by the only identifier it will be given.
+        _held = _cc_recall_route(_route_key)
+        if _held is not None:
+            _cc_remember_route(f'quote:{quote.quote_id}', _held)
     conn = sqlite3.connect(DB_FILE)
     try:
         te_ledger.save_quote(conn, quote)
@@ -8202,18 +8254,48 @@ def api_trade_quote():
     if not taker:
         return jsonify({'ok': False, 'msg': f'No {chain_cfg.display_name} wallet yet'}), 400
 
+    # ── which chain's money funds this ──
+    # Asked for only when the caller did not say. A caller that names a source
+    # chain gets the one it named; the router is for the buy panel, which asks
+    # for a token and should not have to know where the user's dollars are.
+    routing = {}
+    if not str(data.get('source_chain') or '').strip():
+        routing = _cc_pick_source_chain(wallet, dest_chain, float(max_spend))
+        source_chain = routing['source_chain']
+
     try:
         quote = _te_build_and_store_quote(
             uid=uid, wallet=wallet, source_chain=source_chain, dest_chain=dest_chain,
             token_address=token_address, max_spend=max_spend, taker=taker,
             mode=str(data.get('mode') or 'manual'))
-    except (TeQuoteError, TeCostError, TeProviderError, te_registry.RegistryError) as e:
+    except (TeQuoteError, TeCostError, TeProviderError, te_registry.RegistryError,
+            te_crosschain.CrossChainError) as e:
         # A quote that cannot be priced is reported as un-executable with the
         # real reason, not as a server error and never as a zero-cost route.
         return jsonify({'ok': True, 'can_execute': False, 'reject_reason': str(e)}), 200
 
     body = quote.to_dict()
     body['ok'] = True
+    body['source_chain'] = source_chain
+    if routing:
+        body['routing_reason'] = routing.get('reason', '')
+
+    # ── native gas, stated before execution rather than discovered during it ──
+    # Requirement: never quietly turn "100 USDC" into "100 USDC plus gas from
+    # a balance the screen said nothing about". A bridge origin leg is a real
+    # signed transaction paid for in the chain's own token, so when one is
+    # needed the quote says so, names the token and the amount, and OrcAgent
+    # does not offer to cover it.
+    if not quote.same_chain:
+        gas_req = _cc_gas_requirement(wallet, source_chain)
+        body['native_gas_required'] = gas_req['required']
+        body['native_gas'] = gas_req
+        if gas_req['required']:
+            body['can_execute'] = False
+            body['reject_reason'] = gas_req['reason']
+            body['reject_code'] = gas_req['code']
+    else:
+        body['native_gas_required'] = False
     return jsonify(body)
 
 
@@ -8483,6 +8565,627 @@ def _te_run_evm_trade(*, quote_id, idem, available, wallet, enc_blob, evm_addres
     return result
 
 
+# ═════════════════════════════════════════════════════════════════════════
+#  CROSS-CHAIN, THROUGH THE ENGINE
+# ═════════════════════════════════════════════════════════════════════════
+# The bridge already worked and was already persistent -- in its own table,
+# with its own status strings, outside everything the engine guarantees. So a
+# bridged trade got recovery but no ceiling, no reservation and no
+# idempotency, while the buy on the far side got all three. This is the join.
+#
+# WHAT IS DELIBERATELY NOT REPLACED
+# _execute_cross_chain_bridge() and _bridge_status_loop() stay exactly as they
+# are. They serve the standalone Bridge feature -- a user moving their own
+# USDC between chains with no trade attached -- which is a different product
+# and has no ceiling to enforce. Deleting a working path to make a point is
+# not the same as fixing one.
+
+def _cc_fetch_quote(*, origin_chain, destination_chain, sell_token, buy_token,
+                    sell_amount, origin_address, destination_address,
+                    slippage_bps, gas_payer):
+    """One GET to 0x's cross-chain quote endpoint. Raises on anything but 200.
+
+    Endpoint, headers and parameter names verified against 0x's own published
+    example (0xProject/0x-examples, cross-chain-headless-example/src/
+    {crossChainClient.ts,schemas.ts,config.ts}). docs.0x.org and api.0x.org
+    are both unreachable from the build environment, so that example is the
+    primary source used -- current, but not the same as a live call.
+    """
+    if not ZEROX_API_KEY:
+        raise RuntimeError('ZEROX_API_KEY is not configured')
+    r = requests.get(
+        'https://api.0x.org/cross-chain/quotes',
+        params={
+            'originChain':        origin_chain,
+            'destinationChain':   destination_chain,
+            'sellToken':          sell_token,
+            'buyToken':           buy_token,
+            'sellAmount':         str(sell_amount),
+            'sortQuotesBy':       'price',
+            'originAddress':      origin_address,
+            'destinationAddress': destination_address,
+            'slippageBps':        int(slippage_bps),
+            # Stated rather than left to default. The engine only executes
+            # routes the user pays for, and verify_route() refuses anything
+            # else -- asking for it explicitly means a provider that cannot
+            # offer it says so at quote time instead of at signing time.
+            'gasPayer':           gas_payer,
+            'maxNumQuotes':       1,
+        },
+        headers={'0x-api-key': ZEROX_API_KEY, '0x-version': 'v2'},
+        timeout=15,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f'HTTP {r.status_code}: {r.text[:300]}')
+    return r.json()
+
+
+def _cc_fetch_status(*, origin_chain, origin_tx_hash):
+    """One GET to 0x's cross-chain status endpoint.
+
+    originChain + originTxHash, not quoteId -- 0x's prose says otherwise but
+    its own working example sends exactly these two.
+    """
+    if not ZEROX_API_KEY:
+        raise RuntimeError('ZEROX_API_KEY is not configured')
+    r = requests.get(
+        'https://api.0x.org/cross-chain/status',
+        params={'originChain': origin_chain, 'originTxHash': origin_tx_hash},
+        headers={'0x-api-key': ZEROX_API_KEY, '0x-version': 'v2'},
+        timeout=10,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f'HTTP {r.status_code}: {r.text[:300]}')
+    return r.json()
+
+
+def _te_crosschain_provider():
+    return te_crosschain.ZeroExCrossChain(_cc_fetch_quote, _cc_fetch_status)
+
+
+def _cc_route_enabled(source_chain: str, dest_chain: str) -> bool:
+    """Whether this particular direction may run.
+
+    Two gates, not one. The master flag turns the feature on at all; the
+    route list decides which pairs. A route is enabled by being named, never
+    by existing -- because "0x lists this chain" and "we have watched a real
+    trade complete on it" are different facts, and only the second one is a
+    reason to move a user's money.
+    """
+    if not TRADE_ENGINE_CROSSCHAIN:
+        return False
+    return f'{source_chain}->{dest_chain}' in CROSSCHAIN_ENABLED_ROUTES
+
+
+def _cc_taker_address(wallet: str, chain: str) -> str:
+    """The address that holds this user's USDC on `chain`.
+
+    Solana and the EVM chains are different keypairs; every EVM chain shares
+    one. Returning the wrong one here would quote a bridge to somebody else's
+    wallet, which verify_route() would then refuse -- correctly, but far too
+    late to be useful.
+    """
+    if chain == 'solana':
+        return _get_trading_wallet_address(wallet) or wallet
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        uid = _get_uid(conn, wallet)
+        return ensure_bsc_wallet(conn, uid, wallet) if uid else ''
+    finally:
+        conn.close()
+
+
+def _cc_usdc_balance(wallet: str, chain: str) -> float:
+    """This user's spendable dollar balance on one chain, read server-side."""
+    addr = _cc_taker_address(wallet, chain)
+    if not addr:
+        return 0.0
+    try:
+        if chain == 'solana':
+            return float(_get_solana_usdc_balance(addr))
+        return float(get_evm_usdc_balance(addr, chain))
+    except Exception as e:
+        print(f'[crosschain] balance read failed on {chain}: {e}', flush=True)
+        return 0.0
+
+
+# ── the gas question, answered honestly per chain ────────────────────────
+# Requirement: OrcAgent must never permanently subsidise gas, and must never
+# claim a route is gasless when it is not.
+#
+# WHAT IS ACTUALLY TRUE TODAY, per chain:
+#
+#   EVM same-chain buys  — 0x Gasless. The user signs an EIP-712 message and
+#                          0x's relayer submits it, taking its cost out of
+#                          the trade. No native balance needed. Real.
+#   Solana same-chain    — _ensure_solana_gas() tops the wallet up from the
+#                          platform sponsor when one is configured, and this
+#                          deployment configures none (ORCAGENT_FRONTS_GAS=0,
+#                          SOL_GAS_SPONSOR_PRIVATE_KEY empty). So a Solana
+#                          buy needs the user's own SOL for the network fee.
+#   EVM bridge origin    — a real transaction the user signs and pays for in
+#                          the chain's native token. 0x's cross-chain quote
+#                          takes a gasPayer parameter, but the only value
+#                          this engine will execute is 'user'.
+#   Solana bridge origin — same: a signed transaction paying SOL.
+#
+# So the honest answer for a bridge origin leg is that native gas IS
+# required, and the code says so rather than discovering it at signing time.
+CC_NATIVE_GAS_REQUIRED = 'NATIVE_GAS_REQUIRED'
+CC_ROUTE_NOT_GASLESS = 'ROUTE_NOT_GASLESS'
+
+# What a wallet must hold to pay for one origin-leg transaction. Native units.
+# Deliberately a floor rather than an estimate: it is compared against a live
+# balance to decide whether to refuse, and refusing a trade that would have
+# worked costs a user far less than accepting one that strands their money
+# half-bridged.
+CC_MIN_NATIVE = {
+    'solana':    0.002,
+    'bsc':       0.0008,
+    'base':      0.00015,
+    'arbitrum':  0.00015,
+    'polygon':   0.15,
+    'robinhood': 0.00015,
+}
+
+
+def _cc_native_balance(wallet: str, chain: str) -> float:
+    addr = _cc_taker_address(wallet, chain)
+    if not addr:
+        return 0.0
+    try:
+        if chain == 'solana':
+            return float(_get_user_sol(addr))
+        w3 = _get_web3(chain)
+        return float(w3.from_wei(w3.eth.get_balance(w3.to_checksum_address(addr)), 'ether'))
+    except Exception as e:
+        print(f'[crosschain] native balance read failed on {chain}: {e}', flush=True)
+        return 0.0
+
+
+def _cc_gas_requirement(wallet: str, chain: str) -> dict:
+    """Whether this wallet can pay for the origin transaction itself.
+
+    Returns a dict that is always safe to show a user. `required` True means
+    the trade cannot run until they hold some of the chain's own token, and
+    the amount is stated rather than left to them to guess.
+
+    OrcAgent does not fill this gap. There is no branch below that spends a
+    platform wallet, and adding one would make every bridged trade a
+    permanent cost rather than a fee.
+    """
+    cfg = te_registry.get_chain(chain)
+    need = CC_MIN_NATIVE.get(chain, 0.0)
+    have = _cc_native_balance(wallet, chain)
+    ok = have >= need
+    return {
+        'required': not ok,
+        'code': '' if ok else CC_NATIVE_GAS_REQUIRED,
+        'chain': chain,
+        'symbol': cfg.native.symbol,
+        'needed': need,
+        'have': round(have, 9),
+        'gasless': False,
+        'reason': '' if ok else (
+            f'Bridging out of {cfg.display_name} needs a transaction signed and '
+            f'paid for in {cfg.native.symbol}. This wallet holds {have:.6f} and '
+            f'about {need} is required. OrcAgent does not pay it for you.'),
+    }
+
+
+# ── quoting a bridge, for build_quote ────────────────────────────────────
+# Held for the life of a quote so execution signs the route that was priced,
+# not a fresh one at a different price. Keyed by quote id; a route nobody
+# executes falls out when the quote expires.
+_CC_ROUTES: dict = {}
+_CC_ROUTES_LOCK = threading.Lock()
+CC_ROUTE_TTL = 180.0
+
+
+def _cc_remember_route(key: str, route) -> None:
+    now = time.time()
+    with _CC_ROUTES_LOCK:
+        _CC_ROUTES[key] = (now, route)
+        for k, (ts, _r) in list(_CC_ROUTES.items()):
+            if now - ts > CC_ROUTE_TTL:
+                _CC_ROUTES.pop(k, None)
+
+
+def _cc_recall_route(key: str):
+    with _CC_ROUTES_LOCK:
+        entry = _CC_ROUTES.get(key)
+    if not entry:
+        return None
+    ts, route = entry
+    return None if (time.time() - ts) > CC_ROUTE_TTL else route
+
+
+def _te_bridge_quoter(wallet: str, quote_key: str):
+    """The bridge_quoter build_quote() calls, bound to one user.
+
+    Returns the engine's view of the bridge: one USD figure, which is the
+    difference between what goes in and what is GUARANTEED out. Not a sum of
+    the provider's fee objects -- those are denominated in several different
+    tokens and none of them is a total, so adding them up means inventing
+    exchange rates. The in-minus-out figure already contains every one of
+    them and needs no rate at all.
+    """
+    def quoter(source_chain: str, dest_chain: str, ceiling_usd) -> dict:
+        if not _cc_route_enabled(source_chain, dest_chain):
+            raise TeQuoteError(
+                f'{source_chain} -> {dest_chain} is not an enabled cross-chain route')
+        src = te_registry.get_chain(source_chain)
+        origin = _cc_taker_address(wallet, source_chain)
+        dest = _cc_taker_address(wallet, dest_chain)
+        if not origin or not dest:
+            raise TeQuoteError('no wallet on one side of this route yet')
+        amount_raw = te_registry.to_raw(Decimal(str(ceiling_usd)), src.stable)
+        route = _te_crosschain_provider().get_quote(
+            source_chain=source_chain, destination_chain=dest_chain,
+            source_amount_raw=amount_raw, origin_address=origin,
+            destination_address=dest, gas_payer='user')
+        _cc_remember_route(quote_key, route)
+        return {
+            'fee_usd':             route.loss_usd(),
+            'provider':            route.provider,
+            'route_id':            route.route_id,
+            'bridge_provider':     route.bridge_provider,
+            'source_amount_raw':   route.source_amount_raw,
+            'expected_out_raw':    route.expected_out_raw,
+            'minimum_out_raw':     route.minimum_out_raw,
+            'estimated_seconds':   route.estimated_seconds,
+        }
+    return quoter
+
+
+# ── the router: which chain's USDC funds this trade ──────────────────────
+def _cc_pick_source_chain(wallet: str, dest_chain: str, amount_usd: float) -> dict:
+    """Decide where the money comes from, and say why.
+
+    The order is not a preference, it is a cost argument:
+
+      1. The destination chain itself, whenever it can cover the trade. A
+         bridge that does not happen costs nothing, takes no time and cannot
+         get stuck halfway.
+      2. Otherwise the single chain with the largest balance that can cover
+         it on its own.
+
+    What it deliberately does NOT do is split a trade across two chains to
+    make one work. Twenty dollars on Solana plus thirty bridged from Base is
+    two executions, two failure modes and two things to recover, in exchange
+    for bridging thirty dollars instead of fifty. That trade is worth making
+    when bridging is expensive and reliable; it is not worth making the first
+    time bridging works at all.
+    """
+    dest_balance = _cc_usdc_balance(wallet, dest_chain)
+    if dest_balance >= amount_usd:
+        return {'source_chain': dest_chain, 'bridge_required': False,
+                'source_balance': dest_balance,
+                'reason': 'the destination chain already holds enough'}
+
+    candidates = []
+    for chain in list(EVM_CHAINS) + ['solana']:
+        if chain == dest_chain:
+            continue
+        if not _cc_route_enabled(chain, dest_chain):
+            continue
+        bal = _cc_usdc_balance(wallet, chain)
+        if bal >= amount_usd:
+            candidates.append((bal, chain))
+    if not candidates:
+        return {'source_chain': dest_chain, 'bridge_required': False,
+                'source_balance': dest_balance, 'insufficient': True,
+                'reason': 'no single chain holds enough for this trade'}
+    candidates.sort(reverse=True)
+    bal, chain = candidates[0]
+    return {'source_chain': chain, 'bridge_required': True, 'source_balance': bal,
+            'reason': f'{chain} holds {bal:.2f} and {dest_chain} holds {dest_balance:.2f}'}
+
+
+# ── executing the origin leg ─────────────────────────────────────────────
+def _te_cc_source_sender(enc_blob: str, wallet: str, source_chain: str):
+    """Sign and broadcast the bridge's origin transaction, once.
+
+    Reuses the same signers the standalone Bridge feature uses, so there is
+    one implementation of "sign what 0x returned" rather than a second one
+    that can drift. What is different here is the reporting: a failure has to
+    say whether anything may have gone out, because the engine releases the
+    user's claim on one answer and keeps it on the other.
+    """
+    def send(route) -> te_execute.SourceOutcome:
+        raw = dict(route.raw or {})
+        # The signer reads issues.allowance off the quote; the top-level
+        # allowanceTarget is what the response actually carries, so the two
+        # are reconciled here rather than in the signer.
+        if route.needs_allowance and route.allowance_target:
+            issues = dict(raw.get('issues') or {})
+            allowance = dict(issues.get('allowance') or {})
+            allowance.setdefault('spender', route.allowance_target)
+            issues['allowance'] = allowance
+            raw['issues'] = issues
+        raw.setdefault('sellAmount', str(route.source_amount_raw))
+        txn = raw.get('transaction') or {}
+        try:
+            with _use_key(enc_blob, wallet) as pk:
+                if source_chain == 'solana':
+                    tx_hash = _bridge_sign_send_solana(txn, pk)
+                else:
+                    tx_hash = _bridge_sign_send_evm(
+                        txn, raw, pk, source_chain,
+                        _cc_taker_address(wallet, source_chain), route.source_token)
+        except Exception as e:
+            # Did it go out? A signing error did not; a send that timed out
+            # may have. The two are not distinguishable from the exception
+            # alone, so the expensive assumption is the safe one.
+            msg = f'{type(e).__name__}: {e}'
+            never_sent = isinstance(e, (ValueError, KeyError))
+            return te_execute.SourceOutcome(
+                submitted=False, error=_redact_keys(msg)[:400], unknown=not never_sent)
+        if not tx_hash:
+            return te_execute.SourceOutcome(
+                submitted=False, error='the bridge returned no transaction hash',
+                unknown=True)
+        return te_execute.SourceOutcome(submitted=True, tx_hash=str(tx_hash))
+    return send
+
+
+def _te_cc_status_fetcher(source_chain: str, source_tx_hash: str):
+    return _te_crosschain_provider().get_status(
+        source_chain=source_chain, source_tx_hash=source_tx_hash)
+
+
+def _te_run_crosschain_trade(*, quote_id, idem, available, wallet, enc_blob,
+                             source_chain, route, symbol, token_address, user_id):
+    """Start one cross-chain trade and return as soon as the bridge is moving.
+
+    Not finished when this returns, and does not say it is: the trade sits in
+    BRIDGING with the user's claim still held, and _crosschain_resume_loop()
+    takes it from there -- in this process or in whichever one is running an
+    hour from now.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        return te_execute.start_crosschain_trade(
+            conn, quote_id=quote_id, idempotency_key=idem,
+            available_usd=available, route=route,
+            source_sender=_te_cc_source_sender(enc_blob, wallet, source_chain))
+    finally:
+        conn.close()
+
+
+# ── destination swap, once the money lands ───────────────────────────────
+def _te_cc_dest_swap_executor(user_id: int, wallet: str, dest_chain: str, symbol: str):
+    """The buy on the far side, using whichever executor that chain already has.
+
+    No third implementation of "swap on a chain". The Solana and EVM
+    executors are the same ones a same-chain trade uses, so a fix to either
+    lands here too.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        row = conn.execute(
+            'SELECT encrypted_private_key, encrypted_private_key_bsc, bsc_wallet_address '
+            'FROM users WHERE id=?', (user_id,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        raise te_execute.ExecutionError('the user this trade belongs to no longer exists')
+    sol_blob, evm_blob, evm_address = row[0], row[1], row[2]
+    if dest_chain == 'solana':
+        if not sol_blob:
+            raise te_execute.ExecutionError('no Solana trading wallet configured')
+        return _te_solana_swap_executor(sol_blob, wallet)
+    if not evm_blob:
+        raise te_execute.ExecutionError(f'no EVM trading wallet configured')
+    return _te_evm_swap_executor(evm_blob, wallet, evm_address)
+
+
+def _crosschain_resume_once(limit: int = 25) -> int:
+    """Push every unfinished cross-chain trade one step forward.
+
+    Everything it needs comes out of the database. Nothing is held in this
+    process between calls, which is the whole point: the process that
+    finishes a trade is usually not the one that started it.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        pending = te_ledger.resumable_crosschain(conn, limit=limit)
+    finally:
+        conn.close()
+    moved = 0
+    for row in pending:
+        trade_id = row['trade_id']
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            try:
+                cc = te_ledger.get_crosschain(conn, trade_id) or {}
+                quote_row = te_ledger.load_quote(conn, cc.get('quote_id') or '') or {}
+                td = get_token_data(quote_row.get('token_address') or '')
+                symbol = (td or {}).get('symbol') or 'token'
+                before = row['state']
+                result = te_execute.resume_crosschain_trade(
+                    conn, trade_id=trade_id,
+                    status_fetcher=_te_cc_status_fetcher,
+                    dest_swap_executor=_te_cc_dest_swap_executor(
+                        row['user_id'], row['wallet'],
+                        cc.get('destination_chain') or '', symbol),
+                    fee_charger=None,
+                    deadline_seconds=CROSSCHAIN_DEADLINE_SECONDS)
+            finally:
+                conn.close()
+            if result.state != before:
+                moved += 1
+                print(f'[crosschain] {trade_id[:8]} {before} -> {result.state}'
+                      + (f' ({result.failure_reason[:120]})' if result.failure_reason else ''),
+                      flush=True)
+            # A completed cross-chain buy opens the position the user is
+            # holding. Done here rather than inside the engine because the
+            # engine deals in money and this app's positions deal in tokens.
+            if result.state == te_ledger.COMPLETED:
+                _cc_open_position_for(trade_id, symbol)
+        except Exception as e:
+            print(f'[crosschain] {trade_id[:8]} resume failed: '
+                  f'{_redact_keys(str(e))[:200]}', flush=True)
+    return moved
+
+
+def _cc_open_position_for(trade_id: str, symbol: str) -> None:
+    """Record the holding a finished cross-chain buy produced."""
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        cc = te_ledger.get_crosschain(conn, trade_id)
+        trade = te_ledger.get_trade(conn, trade_id)
+        quote_row = te_ledger.load_quote(conn, cc['quote_id']) if cc else None
+    finally:
+        conn.close()
+    if not (cc and trade and quote_row):
+        return
+    token_address = quote_row['token_address']
+    us = get_user_state(trade['wallet'])
+    if (us['positions'].get(token_address) or {}).get('amount', 0) > 0:
+        return                      # already recorded; resume is idempotent here too
+    purchase = float(quote_row['token_purchase_usd'] or 0)
+    td = get_token_data(token_address)
+    entry_price = float(td['price']) if td and td.get('price') else 0.0
+    pos = {
+        'amount':    (purchase / entry_price) if entry_price > 0 else 0.0,
+        'buy_price': entry_price,
+        'spend':     purchase,
+        'symbol':    symbol,
+        'opened_at': time.time(),
+    }
+    if cc['destination_chain'] == 'solana':
+        pos['base'] = SOLANA_BASE_CURRENCY
+    _upsert_open_position(trade['user_id'], trade['wallet'], token_address, pos,
+                          source='manual', chain=cc['destination_chain'])
+
+
+def _crosschain_resume_loop():
+    """Every unfinished cross-chain trade, forever, until it finishes.
+
+    Started at boot, so a deploy in the middle of a bridge is a pause rather
+    than a loss. The first pass happens immediately on start for exactly that
+    reason: a trade that was mid-flight when the process went down should not
+    wait a full interval to be picked up.
+    """
+    print(f'[crosschain] resume worker started (every {CROSSCHAIN_POLL_SECONDS}s, '
+          f'gives up on a bridge after {CROSSCHAIN_DEADLINE_SECONDS}s)', flush=True)
+    while True:
+        try:
+            _crosschain_resume_once()
+        except Exception as e:
+            print(f'[crosschain] resume pass failed: {_redact_keys(str(e))[:200]}',
+                  flush=True)
+        time.sleep(CROSSCHAIN_POLL_SECONDS)
+
+
+def _api_trade_execute_crosschain(quote_row, wallet, uid, quote_id, data):
+    """The cross-chain half of /api/trade/execute.
+
+    Returns as soon as the origin transaction is away. That is not a partial
+    success being dressed up: the response says which state the trade is in
+    and that it is not finished, and /api/trade/status/<trade_id> follows it
+    the rest of the way. A bridge takes minutes, and an HTTP request that
+    waits for one is a request that times out and leaves a caller guessing
+    whether it happened.
+    """
+    source_chain = quote_row['source_chain']
+    dest_chain = quote_row['destination_chain']
+    if not _cc_route_enabled(source_chain, dest_chain):
+        return jsonify({'ok': False,
+                        'msg': f'{source_chain} to {dest_chain} is not an enabled '
+                               f'cross-chain route'}), 400
+
+    # The route that was PRICED, not a fresh one. Re-quoting here would sign a
+    # bridge at a price the user never saw, which is the whole thing a stored
+    # quote exists to prevent.
+    route = _cc_recall_route(f'quote:{quote_id}')
+    if route is None:
+        return jsonify({'ok': False, 'requote': True,
+                        'msg': 'This cross-chain route has expired. Request a new quote.'}), 409
+
+    gas_req = _cc_gas_requirement(wallet, source_chain)
+    if gas_req['required']:
+        # Said before anything is signed, with the number they need. OrcAgent
+        # does not front it -- see _cc_gas_requirement.
+        return jsonify({'ok': False, 'msg': gas_req['reason'],
+                        'code': gas_req['code'], 'native_gas': gas_req}), 400
+
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        row = conn.execute(
+            'SELECT encrypted_private_key, encrypted_private_key_bsc FROM users '
+            'WHERE wallet_address=?', (wallet,)).fetchone()
+    finally:
+        conn.close()
+    enc_blob = (row[0] if source_chain == 'solana' else (row[1] if row else '')) if row else ''
+    if not enc_blob:
+        return jsonify({'ok': False,
+                        'msg': f'No {source_chain} trading wallet configured'}), 400
+
+    # Read server-side, on the SOURCE chain -- that is where the money leaves
+    # from and therefore what the claim is taken against.
+    available = Decimal(str(_cc_usdc_balance(wallet, source_chain)))
+
+    client_key = str(data.get('idempotency_key') or '').strip()[:100]
+    idem = f'{uid}:{client_key}' if client_key else f'{uid}:quote:{quote_id}'
+
+    td = get_token_data(quote_row['token_address'])
+    symbol = (td.get('symbol') or quote_row['token_address'][:8]) if td else \
+        quote_row['token_address'][:8]
+
+    try:
+        result = _te_run_crosschain_trade(
+            quote_id=quote_id, idem=idem, available=available, wallet=wallet,
+            enc_blob=enc_blob, source_chain=source_chain, route=route,
+            symbol=symbol, token_address=quote_row['token_address'], user_id=uid)
+    except te_execute.QuoteNotUsable as e:
+        return jsonify({'ok': False, 'requote': True, 'msg': str(e)}), 409
+    except te_execute.ExecutionError as e:
+        return jsonify({'ok': False, 'msg': str(e)}), 400
+
+    body = result.to_dict()
+    # ok means "this request did what it was asked", not "the trade is done".
+    # finished/completed say the rest, so a caller cannot read one as the other.
+    body['ok'] = result.state not in (te_ledger.FAILED, te_ledger.CANCELLED)
+    body['symbol'] = symbol
+    body['token_address'] = quote_row['token_address']
+    body['source_chain'] = source_chain
+    body['chain'] = dest_chain
+    body['bridge_required'] = True
+    body['progress'] = _cc_progress_message(result.state, dest_chain, symbol)
+    if not body['ok']:
+        body['msg'] = result.failure_reason or 'The trade did not complete'
+    return jsonify(body), 200
+
+
+# What a user is told at each step. Kept in one place so the buy sheet and the
+# status endpoint cannot describe the same state differently.
+_CC_PROGRESS = {
+    te_ledger.CREATED:         'Preparing route',
+    te_ledger.QUOTED:          'Preparing route',
+    te_ledger.ROUTE_SELECTED:  'Preparing route',
+    te_ledger.RESERVED:        'Preparing route',
+    te_ledger.EXECUTING:       'Waiting for wallet signature',
+    te_ledger.AWAITING_SOURCE: 'Sending the source transaction',
+    te_ledger.BRIDGING:        'Moving your USDC to {chain}',
+    te_ledger.DEST_RECEIVED:   'Funds received on {chain}',
+    te_ledger.SWAPPING:        'Buying {symbol}',
+    te_ledger.CONFIRMING:      'Confirming your purchase',
+    te_ledger.COMPLETED:       'Trade complete',
+    te_ledger.FAILED:          'Trade failed',
+    te_ledger.REFUND_PENDING:  'The bridge failed — your USDC is being returned',
+    te_ledger.REFUNDED:        'Your USDC was returned',
+    te_ledger.MANUAL_REVIEW:   'This trade needs a person to check it',
+    te_ledger.CANCELLED:       'Trade cancelled',
+}
+
+
+def _cc_progress_message(state: str, dest_chain: str, symbol: str) -> str:
+    name = SURGE_ALERT_CHAIN_NAMES.get(dest_chain, dest_chain)
+    return _CC_PROGRESS.get(state, state).format(chain=name, symbol=symbol)
+
+
 def _api_trade_execute_solana(quote_row, wallet, uid, quote_id, data):
     """The Solana half of /api/trade/execute.
 
@@ -8575,6 +9278,14 @@ def api_trade_execute():
         return jsonify({'ok': False, 'msg': 'That quote is not yours'}), 403
 
     chain = quote_row['destination_chain']
+
+    # ── cross-chain first ──
+    # Checked on the stored quote's own same_chain column, not on the two
+    # chain names: that column is what the ceiling was priced against and what
+    # the state machine will enforce, so it is the one that decides.
+    if not quote_row['same_chain']:
+        return _api_trade_execute_crosschain(quote_row, wallet, uid, quote_id, data)
+
     if chain == 'solana':
         if not TRADE_ENGINE_SOLANA:
             # Refusing is honest; silently falling back to the legacy Solana
@@ -8709,9 +9420,11 @@ def api_trade_status(trade_id):
             # so trade ids cannot be probed for.
             return jsonify({'ok': False, 'msg': 'No such trade'}), 404
         drift = te_ledger.cost_drift(conn, str(trade_id))
+        cc = te_ledger.get_crosschain(conn, str(trade_id))
+        quote_row = te_ledger.load_quote(conn, trade['quote_id']) if cc else None
     finally:
         conn.close()
-    return jsonify({
+    body = {
         'ok': True,
         'trade_id': trade['trade_id'],
         'state': trade['state'],
@@ -8723,7 +9436,36 @@ def api_trade_status(trade_id):
         'failure_reason': trade['failure_reason'] or '',
         'needs_investigation': bool(trade['needs_investigation']),
         'costs': drift,
-    })
+        'bridge_required': not bool(trade['same_chain']),
+    }
+    if cc:
+        # A page that was refreshed mid-bridge reconnects here, by trade id,
+        # and picks the trade up where it actually is -- rather than starting
+        # a second one because the first one's tab was closed.
+        symbol = ''
+        if quote_row:
+            td = get_token_data(quote_row['token_address'])
+            symbol = (td or {}).get('symbol') or ''
+        body.update({
+            'cross_chain_provider':  cc['provider'],
+            'bridge_route_id':       cc['route_id'] or '',
+            'source_chain':          cc['source_chain'],
+            'destination_chain':     cc['destination_chain'],
+            'bridge_status':         cc['provider_status'] or '',
+            'source_tx_hash':        cc['source_tx_hash'] or '',
+            'bridge_tx_hash':        cc['bridge_tx_hash'] or '',
+            'destination_tx_hash':   cc['destination_tx_hash'] or '',
+            'swap_tx_hash':          cc['swap_tx_hash'] or '',
+            'quoted_out_raw':        cc['quoted_out_raw'] or '',
+            'minimum_out_raw':       cc['minimum_out_raw'] or '',
+            'actual_received_raw':   cc['actual_out_raw'] or '',
+            'estimated_seconds':     cc['estimated_seconds'] or 0,
+            'estimated_fees':        cc['estimated_fees_json'] or '',
+            'actual_fees':           cc['actual_fees_json'] or '',
+            'progress':              _cc_progress_message(
+                trade['state'], cc['destination_chain'], symbol or 'your token'),
+        })
+    return jsonify(body)
 
 
 # ── CROSS-CHAIN BRIDGE (0x Cross-Chain API) ─────────────────────────────────
@@ -31409,6 +32151,12 @@ import surge_radar
 threading.Thread(target=surge_radar.surge_loop, daemon=True).start()
 threading.Thread(target=_scanner_safety_warm_loop, daemon=True).start()
 threading.Thread(target=_trade_reservation_reap_loop, daemon=True).start()
+# Only when cross-chain is on. A worker that wakes every 20 seconds to find
+# nothing, forever, on every deployment that will never bridge, is noise --
+# and a thread that exists only when the feature does is one less thing to
+# reason about when it is off.
+if TRADE_ENGINE_CROSSCHAIN:
+    threading.Thread(target=_crosschain_resume_loop, daemon=True).start()
 # Tells the operator, at a glance, which address to keep funded with native
 # gas on each EVM chain (or that sponsorship is simply off). Never prints the
 # key itself -- only the public address derived from it.
