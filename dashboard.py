@@ -14530,6 +14530,16 @@ def referrals_page():
             # pinned to THIS referrer as well as to the user, so a wallet that
             # somehow sits under two referrers can never show one of them the
             # other's earnings.
+            # What they have earned in total, over every fee ever split to
+            # them. The card above the list is labelled "Total Earned" and was
+            # showing referral_balance, which is what is still UNCLAIMED -- so
+            # a referrer who had been paid out read "$0.00 total earned" with
+            # a list of earnings right underneath it.
+            earned_total = conn.execute(
+                'SELECT COALESCE(SUM(earned_sol), 0) FROM referral_earnings '
+                'WHERE referrer_wallet=?', (wallet,)
+            ).fetchone()[0] or 0.0
+
             people_rows = conn.execute(
                 '''SELECT u.wallet_address, u.username, u.avatar_url, u.created_at,
                           COALESCE(SUM(re.earned_sol), 0) AS earned,
@@ -14586,6 +14596,9 @@ def referrals_page():
             referral_code=referral_code,
             referral_link=f'https://orcagent.fun/?ref={referral_code}' if referral_code else '',
             referred_count=referred_count,
+            referral_earned_total=float(earned_total),
+            referral_earned_total_usd=(round(float(earned_total) * _sol_price_usd, 2)
+                                       if _sol_price_usd else None),
             referred_people=referred_people,
             referred_people_total_sol=_people_total,
             referred_people_total_usd=(round(_people_total * _sol_price_usd, 2)

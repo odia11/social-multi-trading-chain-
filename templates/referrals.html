@@ -18,7 +18,7 @@
 html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--ui);-webkit-font-smoothing:antialiased}
 body{overflow-x:clip}
 #app{display:flex;justify-content:center}
-.ref-page{width:min(100%,920px);padding:28px 28px 118px}
+.ref-page{width:min(100%,920px);padding:28px 28px 48px}
 
 .ref-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin:0 0 20px}
 .ref-kicker{display:flex;align-items:center;gap:12px}
@@ -66,12 +66,12 @@ body{overflow-x:clip}
 .w-toast{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);z-index:99999;padding:12px 18px;border-radius:12px;background:#0b251a;border:1px solid var(--green);color:var(--green);font-size:13px;font-weight:700;box-shadow:0 12px 30px rgba(0,0,0,.35);white-space:nowrap;transition:opacity .2s}
 
 @media(max-width:700px){
- .ref-page{padding:22px 22px 118px}.ref-heading{margin-bottom:18px}.ref-title{font-size:26px}.ref-lead{font-size:14px;margin-top:9px}.net-pill{font-size:10px;padding:7px 12px}
+ .ref-page{padding:22px 22px 28px}.ref-heading{margin-bottom:18px}.ref-title{font-size:26px}.ref-lead{font-size:14px;margin-top:9px}.net-pill{font-size:10px;padding:7px 12px}
  .hero{min-height:238px;padding:28px 28px;border-radius:22px}.hero-copy{max-width:59%}.hero h1{font-size:33px}.hero p{font-size:13px;margin-top:14px}.hero-art{right:4px;width:260px;height:220px;opacity:.96}.hero-rings{width:190px;height:190px;right:5px;top:24px}.hero-face{right:36px;top:58px;width:130px;height:155px}.hero-note{display:none}
  .ref-card{padding:22px;border-radius:20px}.ref-code{font-size:28px}.stats{gap:10px}.stat{padding:16px 13px;gap:10px}.stat-icon{width:40px;height:40px;flex-basis:40px;font-size:19px}.stat-value{font-size:17px}.stat-label{font-size:10px}.share-btn{font-size:12px}
 }
 @media(max-width:520px){
- .ref-page{padding:18px 14px 116px}.ref-heading{align-items:center}.back-link{display:none}.ref-kicker{display:block}.ref-title{font-size:24px}.ref-lead strong{display:block}.net-pill{font-size:9px;letter-spacing:.06em;padding:7px 10px}
+ .ref-page{padding:18px 14px 24px}.ref-heading{align-items:center}.back-link{display:none}.ref-kicker{display:block}.ref-title{font-size:24px}.ref-lead strong{display:block}.net-pill{font-size:9px;letter-spacing:.06em;padding:7px 10px}
  .hero{padding:25px 22px;min-height:220px}.hero-copy{max-width:66%}.hero h1{font-size:29px}.hero p{font-size:12px;max-width:92%}.hero-art{right:-40px;bottom:-24px;transform:scale(.86)}
  .card-title{font-size:16px}.fee-share{font-size:10px}.code-row{margin:18px 0 12px}.ref-code{font-size:25px}.icon-copy{width:38px;height:38px}.link-field{padding:12px}.primary{height:50px}
  .share-grid{grid-template-columns:repeat(4,1fr);gap:8px}.share-btn{font-size:0}.share-btn span:first-child{font-size:19px}
@@ -133,7 +133,12 @@ body{overflow-x:clip}
 
   <section class="stats">
     <div class="card stat"><div class="stat-icon">♟</div><div><div class="stat-value">{{ referred_count }}</div><div class="stat-label">Referred Users</div></div></div>
-    <div class="card stat"><div class="stat-icon">◉</div><div><div class="stat-value">{% if referral_balance_usd is not none %}${{ '%.2f'|format(referral_balance_usd) }}{% else %}{{ '%.4f'|format(referral_balance) }} SOL{% endif %}</div><div class="stat-label">Total Earned</div></div></div>
+    {# "Total Earned" is what it says: every fee ever split to this referrer.
+       It used to show referral_balance, which is what is still UNCLAIMED, so
+       somebody who had been paid out read $0.00 with their earnings listed
+       right underneath. Both numbers matter, so both are here -- the total on
+       the card, the unclaimed amount under it when there is any. #}
+    <div class="card stat"><div class="stat-icon">◉</div><div><div class="stat-value">{% if referral_earned_total_usd is not none %}${{ '%.2f'|format(referral_earned_total_usd) }}{% else %}{{ '%.4f'|format(referral_earned_total) }} SOL{% endif %}</div><div class="stat-label">Total Earned{% if referral_balance and referral_balance > 0 %} · {{ '%.4f'|format(referral_balance) }} SOL unclaimed{% endif %}</div></div></div>
     <div class="card stat"><div class="stat-icon">▥</div><div><div class="stat-value">20%</div><div class="stat-label">Fee Share</div></div></div>
   </section>
 

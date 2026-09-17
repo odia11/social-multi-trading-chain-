@@ -126,6 +126,29 @@ check('...and the 5 SOL another referrer earned from MY referral is not '
       'referrer can never be shown another\'s earnings',
       '5.000000' not in HTML and '5.010000' not in HTML)
 
+# ── the page must not pad for the bottom bar a second time ───────────────
+# static/mobile-bottom-nav.css already does it for every page below 767px:
+#     body{padding-bottom:calc(118px + env(safe-area-inset-bottom,0px))}
+# This page was adding its own 116-124px on top, so the gap under the last
+# card was about 240px of nothing on a phone.
+TPL = open(os.path.join(REPO, 'templates', 'referrals.html')).read()
+_pads = re.findall(r'\.ref-page\{[^}]*?padding:\s*([^;}]+)', TPL)
+check('the page still sets its own padding', len(_pads) >= 3)
+check('...and none of it is a second clearance for the bottom navigation, '
+      'which one stylesheet already owns',
+      not any(re.search(r'(1[0-9]{2}px|safe-area-inset-bottom)', p) for p in _pads))
+
+# ── the headline number has to mean what its label says ──────────────────
+# "Total Earned" showed referral_balance, which is what is still UNCLAIMED.
+# A referrer who had been paid out read $0.00 with their earnings listed
+# directly underneath.
+check('"Total Earned" is the sum of every fee split to this referrer, not '
+      'the unclaimed balance',
+      'referral_earned_total' in TPL and 'Total Earned' in TPL)
+check('...and the unclaimed balance is still shown, beside it, when there is '
+      'any — both numbers matter and they are not the same number',
+      'unclaimed' in TPL and 'referral_balance' in TPL)
+
 passed = sum(1 for _, ok in checks if ok)
 print(f'\n{passed}/{len(checks)} checks passed')
 sys.exit(0 if passed == len(checks) else 1)
