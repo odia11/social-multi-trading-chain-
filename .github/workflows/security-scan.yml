@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main, dev]
   push:
-    branches: [main, dev]
+    branches: [main, dev, claude/live-route-kopen-usdc-wimg24]
   workflow_dispatch:
   schedule:
     - cron: '0 6 * * *'   # daily at 06:00 UTC
