@@ -32,7 +32,18 @@ def real_error(fn):
         return e
 
 # ── a genuinely read-only database file ──
-db = tempfile.mktemp(suffix='.db')
+# In a directory of OUR OWN. This used to put the database straight in /tmp
+# and then chmod its parent -- which is /tmp itself -- down to 0500 and back
+# up to 0700. On CI that is simply not permitted and the whole file failed:
+#
+#     PermissionError: [Errno 1] Operation not permitted: '/tmp'
+#
+# Anywhere it DID run as root it was worse than a failure: it left /tmp as
+# 0700 root-owned instead of 1777, so every other user and service on that
+# machine lost its scratch directory. A test must never chmod a directory it
+# did not create.
+_dir = tempfile.mkdtemp(prefix='sqlite-reason-')
+db = os.path.join(_dir, 'readonly.db')
 c = sqlite3.connect(db); c.execute('CREATE TABLE t (v TEXT)'); c.commit(); c.close()
 os.chmod(db, stat.S_IRUSR)
 os.chmod(os.path.dirname(db), stat.S_IRUSR | stat.S_IXUSR)
@@ -42,6 +53,11 @@ def _w():
     finally: conn.close()
 e_ro = real_error(_w)
 os.chmod(os.path.dirname(db), stat.S_IRWXU)
+check('the directory this test chmods is one it created itself — never a '
+      'shared one like /tmp, which every other user and service on the '
+      'machine also needs',
+      os.path.dirname(db) == _dir
+      and os.path.realpath(_dir) != os.path.realpath(tempfile.gettempdir()))
 check('a real read-only database raises OperationalError, not something else',
       e_ro is not None)
 msg, code = reason(e_ro)
@@ -54,6 +70,7 @@ check('...with a 500, because retrying is pointless — it is not the user\'s pr
 c = sqlite3.connect(db)
 e_tab = real_error(lambda: c.execute('INSERT INTO nope VALUES (1)'))
 c.close(); os.chmod(db, stat.S_IRWXU); os.unlink(db)
+os.rmdir(_dir)
 check('a real missing table is recognised as a schema problem',
       e_tab is not None and 'schema' in reason(e_tab)[0].lower())
 
