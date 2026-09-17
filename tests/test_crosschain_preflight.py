@@ -213,6 +213,40 @@ check('...and lists are not truncated in the saved form either, so a response '
       'with several quotes keeps all of them',
       smoke.redact({'q': [1, 2, 3, 4, 5, 6, 7]}, truncate=False)['q'] == [1, 2, 3, 4, 5, 6, 7])
 
+# ═══ the one script that DOES spend money, and how hard it is to ═══════
+# ═══ run by accident                                              ═══════
+LIVE = os.path.join(REPO, 'scripts', 'crosschain_live_test.py')
+LSRC = open(LIVE).read()
+
+_env = dict(os.environ)
+_env.update({'DATA_DIR': tempfile.mkdtemp(), 'SECRET_KEY': 'x' * 32,
+             'ENCRYPTION_KEY': 'K' * 43 + '=', 'DEV': '1'})
+_p = subprocess.run([sys.executable, LIVE, '--wallet', 'W', '--token', 'T'],
+                    cwd=REPO, env=_env, capture_output=True, text=True,
+                    timeout=300)
+check('the live-money script refuses to do anything without the flag that '
+      'says you know it spends real money — and refuses BEFORE it imports '
+      'the app, so nothing is even connected to',
+      _p.returncode == 2 and 'Refusing to run' in _p.stderr
+      and 'dashboard' not in _p.stdout)
+
+_p2 = subprocess.run([sys.executable, LIVE, '--wallet', 'W', '--token', 'T',
+                      '--amount', '50',
+                      '--i-understand-this-spends-real-money'],
+                     cwd=REPO, env=_env, capture_output=True, text=True,
+                     timeout=300)
+check('...and refuses an amount above its own ceiling, which has to be raised '
+      'deliberately rather than by default',
+      _p2.returncode == 2 and 'above the 5.0 ceiling' in _p2.stderr)
+
+check('...and says up front that a small trade will be refused as '
+      'uneconomical, with the live figures, rather than letting somebody type '
+      '"yes" and then read a refusal that looks like a broken route',
+      'args.amount < 6' in LSRC and '$0.56 at $30' in LSRC)
+check('...and it still enables the route in its own process only, so running '
+      'it changes nothing for anybody else',
+      'IN THIS PROCESS ONLY' in LSRC)
+
 passed = sum(1 for _, ok in checks if ok)
 print(f'\n{passed}/{len(checks)} checks passed')
 sys.exit(0 if passed == len(checks) else 1)

@@ -20,11 +20,21 @@ happens, with the transaction hashes.
     python3 scripts/crosschain_live_test.py \
         --wallet <the session wallet of your test account> \
         --token  <a Solana token mint> \
-        --amount 2 \
+        --amount 30 --max-usd 30 \
         --i-understand-this-spends-real-money
 
 Use a wallet you control and are willing to lose the amount from. Do not run
 this against a real user's account.
+
+ABOUT THE SIZE
+The ceiling flags are deliberately small, and a small cross-chain trade is
+the one thing this route will not do. The live captures say why: the same
+Base -> Solana bridge cost $0.22 on $2 (eleven percent) and $0.56 on $30
+(under two). A bridge's costs are mostly fixed, so CROSSCHAIN_MAX_BRIDGE_COST_PCT
+refuses anything under roughly $6 on those figures -- before anything is
+signed, and with the numbers in the message. A first live test therefore runs
+at about $30, which means raising --max-usd deliberately. That is the guard
+working, not an obstacle to route around.
 """
 import argparse
 import os
@@ -104,6 +114,16 @@ def main():
           f'{gas["estimate_source"]})')
     print(f'  token              {args.token}')
     print('=' * 70)
+
+    # Said before the confirmation rather than after it. A small trade is
+    # refused at pricing, so nothing is lost either way -- but being told
+    # "uneconomical" only after typing yes reads like a bug in the route.
+    if args.amount < 6:
+        print(f'  NOTE  ${args.amount} is likely to be refused as uneconomical: '
+              f'on the live captures\n        this bridge costs about $0.22 at $2 '
+              f'and $0.56 at $30, against a\n        {d.CROSSCHAIN_MAX_BRIDGE_COST_PCT}% '
+              f'ceiling. Nothing is signed when that happens.')
+        print('=' * 70)
 
     if src_usdc < args.amount:
         print(f'\nNot enough USDC on {args.source}. Nothing was sent.', file=sys.stderr)
