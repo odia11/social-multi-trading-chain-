@@ -18,3 +18,28 @@ checks = {
 for label, ok in checks.items():
     print(('PASS' if ok else 'FAIL') + ' - ' + label)
     assert ok, label
+
+# ── the page has to be a PAGE ────────────────────────────────────────────
+# The first attempt at this feature replaced the 975-line redesigned profile
+# with a 238-line fragment that stopped mid-CSS: no </style>, no body, no tip
+# button, nothing. It rendered as a blank page and this file's own first
+# check failed. So: assert the document is whole, and that the redesign it
+# was written against is still the one being edited.
+_whole = {
+    'the document is complete, not truncated mid-style':
+        PROFILE.count('</style>') >= 1 and PROFILE.rstrip().endswith('</html>'),
+    'the redesigned profile is what the tip sits on, not an older copy':
+        'profile-v2.css' in PROFILE,
+    'the page a visitor sees is still there: follow, message, the stats':
+        'pf-follow-btn' in PROFILE and '/messages/' in PROFILE,
+    'the tip sheet cannot be redirected — the recipient is rendered by the '
+    'server and there is no recipient field to type into':
+        'id="tip-amount"' in PROFILE and 'name="to_address"' not in PROFILE,
+    'the tip is sent with the CSRF token, like every other mutating call':
+        "'X-CSRF-Token':_csrf" in PROFILE,
+    'a lost connection does not invite a second transfer':
+        'check your wallet before sending again' in PROFILE,
+}
+for label, ok in _whole.items():
+    print(('PASS' if ok else 'FAIL') + ' - ' + label)
+    assert ok, label
