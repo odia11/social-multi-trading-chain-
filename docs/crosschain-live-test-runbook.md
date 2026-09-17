@@ -58,8 +58,19 @@ before it has been watched once.
 ## Step 1 — preflight, with a real wallet
 
 ```
-python3 scripts/crosschain_preflight.py --amount 30 --wallet <session wallet>
+sudo bash /opt/orcagent/deploy/preflight.sh
 ```
+
+That is the whole command. It reads `/etc/orcagent.env` the way systemd does,
+picks the owner's account (or takes a session wallet as its first argument and
+an amount as its second), drops to the user the app runs as, and runs the
+preflight.
+
+It also catches the mistake that is easy to make: passing the EVM **trading**
+address, which is the one the app puts on screen. That is not the session
+wallet, and sent to 0x it comes back as `HTTP 400 INPUT_INVALID` — which reads
+like a broken integration and is nothing of the kind. The wrapper recognises
+it and tells you which address to use instead.
 
 Read-only: it asks 0x for a live quote and runs it through every check the
 engine would, printing one line per stage. It signs nothing and touches no
