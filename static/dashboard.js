@@ -9383,9 +9383,18 @@ function _renderFeedCard(e){
     e = Object.assign({}, e, orig, {
       id: (e.repost_of||'').replace(/^[a-z]/,''), // numeric part of the original's id, for legacy fields that expect it
       type: orig.kind === 't' ? 'trade' : 'text',
+      // A repost has two identities: the reposter belongs ONLY in the green
+      // banner above; the card itself always belongs to the original author.
+      user_id: orig.user_id || 0,
+      username: orig.username || orig.wallet || 'Trader',
+      wallet: orig.wallet || '',
+      wallet_full: orig.wallet_full || orig.wallet || '',
+      avatar_url: orig.avatar_url || '',
+      verified: !!orig.verified,
+      team_role: orig.team_role || 'user',
       like_count: e.like_count, reply_count: e.reply_count, view_count: e.view_count,
       repost_count: e.repost_count, reposted_by_me: e.reposted_by_me, liked_by_me: e.liked_by_me,
-      is_own: (orig.wallet && orig.wallet === (typeof phantomKey!=='undefined'?phantomKey:null)),
+      is_own: !!(orig.wallet_full && orig.wallet_full === (typeof phantomKey!=='undefined'?phantomKey:null)),
     });
     e.__safePostIdOverride = (e.repost_of || '');
   }

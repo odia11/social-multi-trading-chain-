@@ -19969,26 +19969,37 @@ def social_feed():
             if rp_ids:
                 ph_rp = ','.join('?' * len(rp_ids))
                 for r2 in conn.execute(f'''
-                    SELECT fp.id, fp.wallet, fp.content, fp.created_at, u.username, u.avatar_url, u.is_verified, fp.image_url
+                    SELECT fp.id, fp.wallet, fp.content, fp.created_at, u.id, u.username, u.avatar_url, u.is_verified, fp.image_url
                     FROM feed_posts fp LEFT JOIN users u ON fp.wallet = u.wallet_address
                     WHERE fp.id IN ({ph_rp})''', rp_ids):
+                    _ow = r2[1] or ''
+                    _oshort = (_ow[:6] + '...' + _ow[-4:]) if len(_ow) >= 10 else _ow
                     originals['p' + str(r2[0])] = {
-                        'kind': 'p', 'wallet': r2[1] or '', 'content': r2[2] or '', 'created_at': r2[3] or '',
-                        'username': r2[4] or '', 'avatar_url': r2[5] or '', 'verified': bool(r2[6]),
-                        'image_url': r2[7] or '',
+                        'kind': 'p', 'user_id': r2[4] or 0,
+                        'wallet': _oshort, 'wallet_full': _ow,
+                        'content': r2[2] or '', 'created_at': r2[3] or '',
+                        'username': r2[5] or _oshort,
+                        'avatar_url': r2[6] or '', 'verified': bool(r2[7]),
+                        'image_url': r2[8] or '',
                     }
             if rt_ids:
                 ph_rt = ','.join('?' * len(rt_ids))
                 for r2 in conn.execute(f'''
-                    SELECT t.id, u.wallet_address, t.token, t.timestamp, u.username, u.avatar_url, u.is_verified,
+                    SELECT t.id, u.id, u.wallet_address, t.token, t.timestamp, u.username, u.avatar_url, u.is_verified,
                            t.entry_price, t.exit_price
                     FROM trades t LEFT JOIN users u ON t.user_id = u.id
                     WHERE t.id IN ({ph_rt})''', rt_ids):
-                    pnl = round((r2[8] - r2[7]) / r2[7] * 100, 2) if r2[7] and r2[8] else 0
+                    pnl = round((r2[9] - r2[8]) / r2[8] * 100, 2) if r2[8] and r2[9] else 0
+                    _ow = r2[2] or ''
+                    _oshort = (_ow[:6] + '...' + _ow[-4:]) if len(_ow) >= 10 else _ow
                     originals['t' + str(r2[0])] = {
-                        'kind': 't', 'wallet': r2[1] or '', 'content': '', 'created_at': r2[3] or '',
-                        'username': r2[4] or '', 'avatar_url': r2[5] or '', 'verified': bool(r2[6]),
-                        'symbol': r2[2] or '', 'pnl_pct': pnl, 'entry_price': r2[7] or 0, 'exit_price': r2[8] or 0,
+                        'kind': 't', 'user_id': r2[1] or 0,
+                        'wallet': _oshort, 'wallet_full': _ow,
+                        'content': '', 'created_at': r2[4] or '',
+                        'username': r2[5] or _oshort,
+                        'avatar_url': r2[6] or '', 'verified': bool(r2[7]),
+                        'symbol': r2[3] or '', 'pnl_pct': pnl,
+                        'entry_price': r2[8] or 0, 'exit_price': r2[9] or 0,
                     }
         # view_count lives on feed_posts/trades directly (not the shared post_id-keyed
         # tables above), so it needs its own per-kind SELECT rather than one IN query.
