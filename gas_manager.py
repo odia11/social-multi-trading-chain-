@@ -195,20 +195,11 @@ def _sweep_user_chain(user_id: int, wallet: str, evm_address: str, enc_blob: str
 
 
 def _refill_sponsor_wallet():
-    """Keeps the platform's own gas sponsor wallet solvent: trading fees land
-    there as USDC, grants go out as native gas, so it periodically converts
-    some of that fee income back into gas (see dashboard._refill_gas_sponsor).
-    A no-op when sponsorship isn't configured or the sponsor is still flush."""
-    for chain in _app.EVM_CHAINS:
-        try:
-            refilled, msg = _app._refill_gas_sponsor(chain)
-        except Exception as e:
-            logger.error('[gas-manager] sponsor refill on %s raised: %s', chain, e)
-            continue
-        if refilled:
-            logger.info('[gas-manager] sponsor wallet refilled with gas on %s from fee income', chain)
-        elif msg:
-            logger.error('[gas-manager] sponsor wallet could not be refilled on %s: %s', chain, msg)
+    """Disabled by policy: gas sponsor wallets are funded manually.
+
+    Trading fee revenue must never be diverted or converted to refill them.
+    """
+    return
 
 
 def sweep_once():

@@ -1043,8 +1043,8 @@ print(f'[startup] JUPITER_PROXY_URL = {(JUPITER_PROXY[:40] + "...") if len(JUPIT
 # loading the page (and therefore never seeing this value). Skipped entirely when unset,
 # so local/dev deployments without the env var keep working unchanged.
 API_SHARED_SECRET  = os.environ.get('API_SHARED_SECRET', '')
-FEE_RATE_DEFAULT = 0.05  # 5% performance fee on profitable trades only
-FEE_RATE_TXN     = 0.0075  # 0.75% transaction fee, charged on BOTH the buy and the sell
+FEE_RATE_DEFAULT = 0.0   # legacy performance-fee setting disabled permanently
+FEE_RATE_TXN     = 0.0075  # ONLY platform fee: 0.75% on BOTH buy and sell
 
 # Whether the manual EVM buy runs through the trade engine, where the amount
 # a user enters is the MAXIMUM they spend and the purchase is what remains
@@ -1057,13 +1057,9 @@ TRADE_ENGINE_MANUAL_EVM = os.getenv('TRADE_ENGINE_MANUAL_EVM', '1').strip() not 
                             # charges rather than one combined charge at close.
 
 def _get_fee_rate():
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        row = conn.execute("SELECT value FROM platform_settings WHERE key='fee_rate'").fetchone()
-        conn.close()
-        return float(row[0]) if row else FEE_RATE_DEFAULT
-    except Exception:
-        return FEE_RATE_DEFAULT
+    # Legacy performance-fee hook. Performance fees are disabled; OrcAgent
+    # charges only FEE_RATE_TXN (0.75%) on each buy and sell leg.
+    return 0.0
 FEE_WALLET       = 'HC5ahspSox3XRmDbzXjXVoAASuY89RCmGUKwp87FRJS5'  # fixed fee recipient (independent of admin role)
 # BSC fee recipient -- a *separate* constant from FEE_WALLET on purpose: that's a
 # base58 Solana address and is not a valid EVM recipient in any sense (wrong
@@ -2825,7 +2821,7 @@ def run_migrations():
         "ALTER TABLE open_positions ADD COLUMN chain TEXT DEFAULT 'solana'",
         "ALTER TABLE fees ADD COLUMN chain TEXT DEFAULT 'solana'",
         # Which wallet this fee was actually paid to -- the normal fee wallet,
-        # or the gas sponsor wallet on the trades where that one still needed
+        # Fee recipient is always the normal revenue wallet.
         # topping up (see _evm_fee_recipient). Blank on every pre-existing row,
         # which predates the sponsor wallet existing at all, so those are all
         # normal fee-wallet income by definition.
@@ -5938,7 +5934,7 @@ def _charge_txn_fee(private_key: str, wallet: str, user_id: int, symbol: str,
         else:
             # Wait for the buy/sell TX to confirm on-chain before we try to spend from that balance
             time.sleep(12)
-            _dest_label = 'gas sponsor wallet' if fee_recipient == _sol_gas_sponsor_address() else 'fee wallet'
+            _dest_label = 'fee wallet'
             print(f'[fee] → attempting {fee:.6f} SOL {kind_} fee transfer from trading wallet to '
                   f'{_dest_label} {fee_recipient[:10]}... for {sw} {sym}', flush=True)
             try:
@@ -8951,16 +8947,8 @@ def _sol_gas_sponsor_needs_funding() -> bool:
     return needs
 
 def _sol_fee_recipient() -> str:
-    """Where a Solana trading fee is actually sent -- the Solana gas sponsor
-    wallet while that one is still below its target, otherwise the normal
-    FEE_WALLET. Exactly the same rule as _evm_fee_recipient, and the reason
-    the Solana gas wallet keeps itself funded out of fee income instead of
-    the operator topping it up by hand.
-
-    Solana needs no conversion step on the way: its trading fees are charged
-    in SOL, which IS the gas token, so routing them here is all it takes.
-    (The EVM chains charge in USDC and convert -- see _refill_gas_sponsor.)"""
-    return _sol_gas_sponsor_address() if _sol_gas_sponsor_needs_funding() else FEE_WALLET
+    """All Solana platform fees go directly to the revenue fee wallet."""
+    return FEE_WALLET
 
 def _sponsor_solana_gas(user_id: int, wallet: str, trading_address: str) -> tuple:
     """Sends SOL_GAS_SPONSOR_GRANT from the platform's Solana sponsor wallet
@@ -9538,36 +9526,15 @@ def _gas_sponsor_needs_funding(chain: str) -> bool:
     return needs
 
 def _evm_fee_recipient(chain: str) -> str:
-    """Where an EVM chain's USDC trading fee is actually sent.
-
-    The gas sponsor wallet is a working wallet, not a revenue wallet: it
-    only ever needs enough to keep fronting users their native gas (see
-    _sponsor_evm_gas). So a fee goes there only while it's actually short --
-    below its target gas balance with no fee income already queued to
-    convert -- and every other fee goes to EVM_CHAIN_FEE_WALLET, the normal
-    revenue wallet, exactly as before.
-
-    Routing whole fees this way rather than splitting each one in two keeps
-    it at ONE transfer per trade: a split would mean two ERC20 transfers,
-    doubling the gas the user's own wallet pays on every single trade to
-    move the same total amount.
-
-    With no sponsor configured, or no fee wallet configured, this is simply
-    whichever one exists."""
-    sponsor = _gas_sponsor_address()
-    if not sponsor:
-        return EVM_CHAIN_FEE_WALLET
-    if not EVM_CHAIN_FEE_WALLET:
-        return sponsor
-    return sponsor if _gas_sponsor_needs_funding(chain) else EVM_CHAIN_FEE_WALLET
+    """All EVM platform fees go directly to the normal revenue fee wallet."""
+    return EVM_CHAIN_FEE_WALLET
 
 def _charge_evm_txn_fee(private_key: str, wallet: str, user_id: int, symbol: str,
                          usdc_amount: float, kind: str, chain: str = 'bsc',
                          trade_ts: str = None, gross_profit: float = 0.0):
     """EVM equivalent of _charge_txn_fee(): same FEE_RATE_TXN (0.75%), charged on
     BOTH the buy and the sell leg regardless of profit -- but the fee itself is
-    USDC, sent to _evm_fee_recipient() (the normal fee wallet, or the gas
-    sponsor wallet while that one is still short on gas) via
+    USDC, sent directly to the normal EVM revenue fee wallet via
     _send_evm_usdc_fee()'s web3 build/sign/send_raw_transaction flow instead of
     a SOL transfer. Shares the fees/referral_earnings tables with the Solana
     path, tagged with `chain` so a USDC amount is never mistaken for a SOL one
@@ -9590,7 +9557,7 @@ def _charge_evm_txn_fee(private_key: str, wallet: str, user_id: int, symbol: str
         sw = (wlt[:6] + '...' + wlt[-4:]) if len(wlt) >= 10 else wlt
         # Wait for the buy/sell TX to confirm on-chain before we try to spend from that balance
         time.sleep(12)
-        _dest_label = 'gas sponsor wallet' if fee_recipient == _gas_sponsor_address() else 'fee wallet'
+        _dest_label = 'fee wallet'
         print(f'[{chn}-fee] → attempting {fee:.6f} USDC {kind_} fee transfer from trading wallet to '
               f'{_dest_label} {fee_recipient[:10]}... for {sw} {sym}', flush=True)
         tx_sig  = None
@@ -28949,9 +28916,9 @@ def admin_fee_stats():
         collected = round(float((c.fetchone() or (0,))[0]), 4)
         c.execute(f'SELECT COALESCE(SUM(fee_amount),0) FROM fees WHERE {ok_f} AND timestamp LIKE ?', (today + '%',))
         today_sol = round(float((c.fetchone() or (0,))[0]), 4)
-        # Pending = 5% of profitable trades not yet paid
-        c.execute('''SELECT COALESCE(SUM(t.pnl * 0.05), 0) FROM trades t
-                     WHERE t.pnl > 0 AND (t.fee_paid IS NULL OR t.fee_paid = 0)''')
+        # Pending = actual unpaid 0.75% transaction fees already recorded on trades.
+        c.execute('''SELECT COALESCE(SUM(t.fee_amount), 0) FROM trades t
+                     WHERE (t.fee_paid IS NULL OR t.fee_paid = 0)''')
         pending = round(float((c.fetchone() or (0,))[0]), 4)
         conn.close()
         return jsonify({'ok': True, 'collected': collected, 'pending': pending, 'today': today_sol})
@@ -29549,7 +29516,7 @@ def _recover_uncollected_fees(triggered_by: str = 'manual') -> dict:
             conn2.execute(
                 '''INSERT INTO fees (user_wallet, token, gross_profit, fee_amount, fee_tx, status)
                    VALUES (?,?,?,?,?,?)''',
-                (user_wallet, '[recovery]', total_fee / _get_fee_rate(), total_fee, tx_sig, 'ok'))
+                (user_wallet, '[recovery]', 0.0, total_fee, tx_sig, 'ok'))
             # Referral payout (20% of the fee just actually collected) -- the normal
             # per-trade path (_charge_txn_fee/_do_fee) credits this on every successful
             # send, but a trade recovered here (its original attempt failed or never ran)
@@ -29999,8 +29966,8 @@ def admin_revenue():
         today_sol = round(float(c.fetchone()[0] or 0), 4)
         c.execute('SELECT COALESCE(SUM(fee_amount),0) FROM fees WHERE status="failed" OR fee_tx LIKE "FAILED:%"')
         failed = round(float(c.fetchone()[0] or 0), 4)
-        c.execute('''SELECT COALESCE(SUM(t.pnl * 0.05), 0) FROM trades t
-                     WHERE t.pnl > 0 AND (t.fee_paid IS NULL OR t.fee_paid = 0)''')
+        c.execute('''SELECT COALESCE(SUM(t.fee_amount), 0) FROM trades t
+                     WHERE (t.fee_paid IS NULL OR t.fee_paid = 0)''')
         pending = round(float(c.fetchone()[0] or 0), 4)
         c.execute('''SELECT user_wallet, token, gross_profit, fee_amount, fee_tx, timestamp, status
                      FROM fees ORDER BY timestamp DESC LIMIT 200''')
@@ -30036,7 +30003,7 @@ def admin_settings_get():
         conn.close()
     return jsonify({
         'ok': True,
-        'fee':           round(float(rows.get('fee_rate', FEE_RATE_DEFAULT)) * 100, 4),
+        'fee':           round(FEE_RATE_TXN * 100, 4),
         'max_positions': float(rows.get('max_positions_per_user', 5)),
         'min_deposit':   float(rows.get('min_deposit', 0.1)),
         'rate_limit':    int(float(rows.get('rate_limit', 20))),
