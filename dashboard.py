@@ -20148,13 +20148,89 @@ def api_swap_quote():
         if out_amount_raw <= 0:
             return jsonify({'ok': False, 'msg': 'No route found'}), 502
         to_decimals = 9 if to_mint == SOL_MINT else _get_token_decimals_rpc(to_mint)
+        min_out_raw = int(q.get('otherAmountThreshold', 0) or 0)
         return jsonify({
-            'ok':               True,
-            'out_amount':       out_amount_raw / (10 ** to_decimals),
-            'price_impact_pct': float(q.get('priceImpactPct', 0) or 0),
+            'ok':                  True,
+            'out_amount':          out_amount_raw / (10 ** to_decimals),
+            'min_out_amount':      (min_out_raw / (10 ** to_decimals)) if min_out_raw > 0 else 0,
+            'price_impact_pct':    float(q.get('priceImpactPct', 0) or 0),
+            'slippage_bps':        300,
+            'network_reserve_sol': SOL_NETWORK_RESERVE if from_mint == SOL_MINT else 0,
         })
     except Exception as e:
         return jsonify({'ok': False, 'msg': str(e)[:150]}), 502
+
+
+@app.route('/api/wallet/convert-sol-usdc', methods=['POST'])
+@rate_limit(5, 60)
+def api_wallet_convert_sol_usdc():
+    """User-confirmed SOL -> USDC conversion in the user's trading wallet."""
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'error': 'Not logged in'}), 401
+
+    data = request.get_json(silent=True) or {}
+    try:
+        amount_sol = float(data.get('amount_sol', 0) or 0)
+    except (TypeError, ValueError):
+        amount_sol = 0.0
+    if not math.isfinite(amount_sol) or amount_sol <= 0:
+        return jsonify({'ok': False, 'error': 'Enter a valid SOL amount'}), 400
+    if amount_sol > 500:
+        return jsonify({'ok': False, 'error': 'Amount is too large'}), 400
+
+    fetch_user_balances(wallet)
+    current_sol = float(get_user_state(wallet).get('sol', 0) or 0)
+    max_convert = max(0.0, current_sol - SOL_NETWORK_RESERVE)
+    if amount_sol > max_convert + 1e-9:
+        return jsonify({
+            'ok': False,
+            'error': (f'Keep at least {SOL_NETWORK_RESERVE:.3f} SOL for network fees. '
+                      f'You can convert up to {max_convert:.6f} SOL right now.'),
+            'sol_balance': current_sol,
+            'max_convert_sol': max_convert,
+            'network_reserve_sol': SOL_NETWORK_RESERVE,
+        }), 400
+
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        row = conn.execute(
+            'SELECT id, encrypted_private_key FROM users WHERE wallet_address=?',
+            (wallet,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row or not row[1]:
+        return jsonify({'ok': False, 'error': 'No trading wallet is configured'}), 400
+    uid, enc_blob = row
+
+    lock = _get_solana_buy_lock(wallet, USDC_MINT)
+    with lock:
+        last = _recent_solana_buys.get((wallet, USDC_MINT), 0)
+        if time.time() - last < SOLANA_BUY_REPEAT_WINDOW:
+            return jsonify({'ok': False, 'error': 'A SOL -> USDC conversion was just submitted. Wait a moment.'}), 429
+        _recent_solana_buys[(wallet, USDC_MINT)] = time.time()
+        capture = {}
+        with _use_key(enc_blob, wallet) as pk:
+            ok, sig, err_msg, usdc_received, sol_spent = _execute_user_swap_ex(
+                wallet, pk, 'buy', USDC_MINT, str(amount_sol),
+                base='SOL', capture=capture
+            )
+        if not ok or not sig:
+            _recent_solana_buys.pop((wallet, USDC_MINT), None)
+            return jsonify({'ok': False, 'error': (err_msg or 'SOL -> USDC swap failed')[-200:]}), 500
+
+    _log_security_event('sol_to_usdc', wallet,
+                        f'amount_sol={amount_sol:.8f} tx={sig[:16]}...')
+    add_user_log(wallet, f'Converted {amount_sol:.6f} SOL to {usdc_received:.2f} USDC')
+    return jsonify({
+        'ok': True,
+        'signature': sig,
+        'sol_spent': sol_spent if sol_spent else amount_sol,
+        'usdc_received': usdc_received,
+        'network_reserve_sol': SOL_NETWORK_RESERVE,
+    })
+
 
 @app.route('/api/instant-trade', methods=['POST', 'OPTIONS'])
 @rate_limit(10, 60)

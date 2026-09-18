@@ -103,6 +103,21 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
 
 /* ── deposit card ── */
 .dep-card{background:#101216;border:1px solid rgba(255,255,255,.06);border-radius:18px;padding:18px;box-shadow:0 1px 0 rgba(255,255,255,.03) inset}
+/* SOL -> USDC funding card */
+.sol-usdc-card{background:linear-gradient(135deg,rgba(247,185,85,.09),#101216 55%);border:1px solid rgba(247,185,85,.22);border-radius:18px;padding:18px;box-shadow:0 1px 0 rgba(255,255,255,.03) inset}
+.sol-usdc-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+.sol-usdc-title{font-size:14px;font-weight:750;color:var(--text);margin-bottom:4px}
+.sol-usdc-copy{font-size:12px;color:var(--muted);line-height:1.5;max-width:430px}
+.sol-usdc-balances{display:flex;gap:10px;margin:14px 0}
+.sol-usdc-stat{flex:1;background:#0a0b0e;border:1px solid #1a1d23;border-radius:11px;padding:10px 12px}
+.sol-usdc-stat span{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+.sol-usdc-stat b{font-family:var(--mono);font-size:14px;color:var(--text)}
+.sol-usdc-btn{width:100%;border:1px solid rgba(247,185,85,.45);background:linear-gradient(180deg,#f7c568,#f7b955);color:#101216;border-radius:12px;padding:12px 14px;font:700 13px var(--ui);cursor:pointer}
+.sol-usdc-note{font-size:10.5px;color:var(--muted);margin-top:9px;line-height:1.45}
+.sw-review-summary{display:none;margin:10px 0 12px;padding:12px;border:1px solid rgba(247,185,85,.2);background:rgba(247,185,85,.06);border-radius:12px}
+.sw-review-summary.show{display:block}
+.sw-review-line{display:flex;justify-content:space-between;gap:14px;font-size:11.5px;padding:5px 0;color:var(--muted)}
+.sw-review-line b{color:var(--text);font-family:var(--mono);font-weight:600;text-align:right}
 /* flex-wrap + a min-width floor on each tile: with 6 chains (Solana + 5
    EVM) this row no longer fits unwrapped on a phone-width screen, and a
    bare flex:1 item won't shrink below its own content's width by default
@@ -638,6 +653,21 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
       </div>
     </div>
 
+    <div class="sol-usdc-card">
+      <div class="sol-usdc-head">
+        <div>
+          <div class="sol-usdc-title">Convert SOL to USDC</div>
+          <div class="sol-usdc-copy">Fund the Solana trading balance without leaving Portfolio. OrcAgent keeps 0.005 SOL aside for network fees.</div>
+        </div>
+      </div>
+      <div class="sol-usdc-balances">
+        <div class="sol-usdc-stat"><span>SOL available</span><b id="convert-sol-bal">—</b></div>
+        <div class="sol-usdc-stat"><span>Solana USDC</span><b id="convert-usdc-bal">—</b></div>
+      </div>
+      <button class="sol-usdc-btn" onclick="openSwapModalToUsdc()">Swap SOL → USDC</button>
+      <div class="sol-usdc-note">You review the live Jupiter quote before confirming. Network costs and slippage are paid from your own funds.</div>
+    </div>
+
     <!-- combined USDC balance across every chain this app trades on -- the
          "one balance, many chains" view apps like fomo.family show, except
          here it's an honest sum of real per-chain wallet balances, not an
@@ -663,8 +693,6 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
         </div>
         <span id="usdc-evm-tiles" style="display:contents"></span>
       </div>
-      <button onclick="openSwapModalToUsdc()" title="Convert SOL to USDC"
-              style="background:none;border:none;color:#f7b955;font-size:12px;font-weight:700;cursor:pointer;padding:0;margin-top:12px;text-decoration:underline dotted">Convert SOL to USDC →</button>
     </div>
 
     <!-- unified deposit card — tabs per chain, so adding more chains later
@@ -888,11 +916,17 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
     <!-- rate + slippage -->
     <div class="sw-info-row">
       <span id="sw-rate-lbl">—</span>
-      <span>Slippage 0.5%</span>
+      <span>Slippage 3.0%</span>
     </div>
 
-    <!-- confirm -->
-    <button class="sw-review-btn" id="sw-confirm-btn" onclick="_execSwap()">Review swap</button>
+    <div class="sw-review-summary" id="sw-review-summary">
+      <div class="sw-review-line"><span>You pay</span><b id="sw-review-pay">—</b></div>
+      <div class="sw-review-line"><span>Expected</span><b id="sw-review-receive">—</b></div>
+      <div class="sw-review-line"><span>Minimum received</span><b id="sw-review-min">—</b></div>
+      <div class="sw-review-line"><span>SOL kept for network fees</span><b>0.005 SOL</b></div>
+    </div>
+
+    <button class="sw-review-btn" id="sw-confirm-btn" onclick="_swReviewOrConfirm()">Review swap</button>
 
     <!-- token picker overlay -->
     <div class="sw-picker" id="sw-picker">
@@ -1537,6 +1571,10 @@ function openSwapModal(toMintOverride){
   if(outEl) outEl.textContent='0'
   var rateEl=document.getElementById('sw-rate-lbl')
   if(rateEl) rateEl.textContent='—'
+  _swLastQuote=null
+  _swReviewReady=false
+  var rev=document.getElementById('sw-review-summary'); if(rev) rev.classList.remove('show')
+  var cbtn=document.getElementById('sw-confirm-btn'); if(cbtn){cbtn.disabled=false;cbtn.textContent='Review swap'}
   var fuEl=document.getElementById('sw-from-usd')
   if(fuEl) fuEl.textContent='≈ $—'
   var tuEl=document.getElementById('sw-to-usd')
@@ -1681,7 +1719,7 @@ function _swSetMax(){
   var amt=0
   if(_swFromMint==='__SOL__'){
     var solEl=document.getElementById('sol')
-    amt=parseFloat((solEl?solEl.textContent:'0')||0)
+    amt=Math.max(0,parseFloat((solEl?solEl.textContent:'0')||0)-SOL_FEE_RESERVE)
   } else {
     var spl=window._wTokens||_allSpl||[]
     var tok=spl.find(function(t){return t.mint===_swFromMint})
@@ -1716,12 +1754,17 @@ function _swFmtOut(v){
 }
 var _swQuoteDebounce=null
 var _swQuoteSeq=0
+var _swLastQuote=null
+var _swReviewReady=false
 async function _swUpdateEst(){
   var spl=window._wTokens||_allSpl||[]
   var amtEl=document.getElementById('sw-amt-inp')
   var outEl=document.getElementById('sw-out-amt')
   var rateEl=document.getElementById('sw-rate-lbl')
   var amt=parseFloat((amtEl||{}).value)||0
+  _swReviewReady=false
+  var _reviewEl=document.getElementById('sw-review-summary'); if(_reviewEl) _reviewEl.classList.remove('show')
+  var _reviewBtn=document.getElementById('sw-confirm-btn'); if(_reviewBtn&&!_reviewBtn.disabled) _reviewBtn.textContent='Review swap'
   var fromIsSOL=_swFromMint==='__SOL__'
   var toIsSOL=_swToMint==='__SOL__'
   var solPx=window._wSolPrice||0
@@ -1768,6 +1811,7 @@ async function _swUpdateEst(){
       var qd=await qr.json()
       if(seq!==_swQuoteSeq) return // stale -- user kept typing or changed tokens since this fired
       if(qd.ok&&qd.out_amount>0){
+        _swLastQuote=qd
         if(outEl) outEl.textContent=_swFmtOut(qd.out_amount)
         if(toUsdEl&&toPx>0) toUsdEl.textContent='≈ $'+(qd.out_amount*toPx).toFixed(2)
         var impact=qd.price_impact_pct?' · impact '+(qd.price_impact_pct*100).toFixed(2)+'%':''
@@ -1777,6 +1821,35 @@ async function _swUpdateEst(){
       // never block "Review swap" over a quote-preview hiccup.
     }catch(e){}
   },400)
+}
+
+function _swReviewOrConfirm(){
+  var amt=parseFloat((document.getElementById('sw-amt-inp')||{}).value)||0
+  if(amt<=0){_wToast('Enter an amount',false);return}
+  var usdcMint='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+  if(_swFromMint!=='__SOL__'||_swToMint!==usdcMint){
+    _execSwap()
+    return
+  }
+  var max=Math.max(0,parseFloat((document.getElementById('sol')||{}).textContent||0)-SOL_FEE_RESERVE)
+  if(amt>max+1e-9){_wToast('Keep 0.005 SOL for network fees. Max: '+max.toFixed(6)+' SOL',false);return}
+  if(!_swLastQuote||!_swLastQuote.ok||!_swLastQuote.out_amount){
+    _wToast('Waiting for a live Jupiter quote…',false)
+    _swUpdateEst()
+    return
+  }
+  if(!_swReviewReady){
+    document.getElementById('sw-review-pay').textContent=amt.toFixed(6)+' SOL'
+    document.getElementById('sw-review-receive').textContent=_swFmtOut(_swLastQuote.out_amount)+' USDC'
+    document.getElementById('sw-review-min').textContent=
+      (_swLastQuote.min_out_amount>0?_swFmtOut(_swLastQuote.min_out_amount):'—')+' USDC'
+    document.getElementById('sw-review-summary').classList.add('show')
+    var btn=document.getElementById('sw-confirm-btn')
+    if(btn) btn.textContent='Confirm SOL → USDC'
+    _swReviewReady=true
+    return
+  }
+  _execSwap()
 }
 
 async function _execSwap(){
@@ -1791,6 +1864,7 @@ async function _execSwap(){
   if(fromIsSOL&&!_swToMint){_wToast('Select a token to receive',false);return}
   if(btn){btn.disabled=true;btn.textContent='Swapping…'}
   var payload
+  var isSolToUsdc=fromIsSOL&&_swToMint==='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
   if(fromIsSOL){
     payload={side:'buy',token_address:_swToMint,symbol:(toTok||{}).symbol||'',amount_sol:amt}
   } else {
@@ -1804,24 +1878,26 @@ async function _execSwap(){
     payload={side:'sell',token_address:_swFromMint,symbol:(fromTok||{}).symbol||'',amount_token:amountToken}
   }
   try{
-    var r=await fetch('/api/instant-trade',{
+    var r=await fetch(isSolToUsdc?'/api/wallet/convert-sol-usdc':'/api/instant-trade',{
       method:'POST',credentials:'include',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(payload)
+      headers:{'Content-Type':'application/json','X-CSRF-Token':_csrf},
+      body:JSON.stringify(isSolToUsdc?{amount_sol:amt}:payload)
     })
     var d=await r.json()
     if(d.success||d.ok){
       _closeSwapModal()
       var sym=fromIsSOL?(toTok||{}).symbol||'token':(fromTok||{}).symbol||'token'
-      _wToast('⚡ '+(fromIsSOL?'Bought':'Sold')+' '+sym,true)
-      setTimeout(function(){loadTokens(true);loadBalance();_loadActivity()},1500)
+      _wToast(isSolToUsdc
+        ?('✓ Converted '+amt.toFixed(4)+' SOL to '+parseFloat(d.usdc_received||0).toFixed(2)+' USDC')
+        :('⚡ '+(fromIsSOL?'Bought':'Sold')+' '+sym),true)
+      setTimeout(function(){loadTokens(true);loadBalance();loadUsdcSummary();_loadActivity()},1500)
     } else {
       _wToast('Swap failed: '+(d.error||d.msg||'Unknown error'),false)
-      if(btn){btn.disabled=false;btn.textContent='Review swap'}
+      if(btn){btn.disabled=false;btn.textContent=_swReviewReady?'Confirm SOL → USDC':'Review swap'}
     }
   }catch(e){
     _wToast('Network error',false)
-    if(btn){btn.disabled=false;btn.textContent='Review swap'}
+    if(btn){btn.disabled=false;btn.textContent=_swReviewReady?'Confirm SOL → USDC':'Review swap'}
   }
 }
 
@@ -2108,6 +2184,8 @@ function loadBalance(){
     // Kept so the Send modal's MAX has a figure to work from; it opens
     // without fetching anything of its own.
     if(d.sol!=null) _solBalanceCache=parseFloat(d.sol)
+    var _cSol=document.getElementById('convert-sol-bal')
+    if(_cSol&&d.sol!=null) _cSol.textContent=Math.max(0,parseFloat(d.sol)-SOL_FEE_RESERVE).toFixed(4)+' SOL'
     if(d.in_positions_sol!=null) document.getElementById('inpos').textContent=parseFloat(d.in_positions_sol).toFixed(4)+' SOL'
     _balanceLoadedOnce=true
   }).catch(function(){
@@ -2151,6 +2229,8 @@ function loadUsdcSummary(){
     var _availEl=document.getElementById('avail')
     if(_availEl) _availEl.textContent=_tot
     document.getElementById('usdc-sol-val').textContent='$'+parseFloat(d.solana_usdc).toFixed(2)
+    var _cUsdc=document.getElementById('convert-usdc-bal')
+    if(_cUsdc) _cUsdc.textContent='$'+parseFloat(d.solana_usdc).toFixed(2)
     // evm_chains is {chain: usdc_balance} for every chain in EVM_CHAINS
     // (dashboard.py) -- rendered generically so a future chain added there
     // shows up here without a template change.
