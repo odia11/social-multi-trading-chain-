@@ -617,6 +617,13 @@ function _updateFaceIdStatus(){
 
 /* Mobile deep-link constants — used by wallet detection below */
 const isMobile=/iPhone|iPad|Android/i.test(navigator.userAgent);
+function _phantomBrowseConnectUrl(){
+  var returnRoute = _currentWalletReturnRoute();
+  var target = new URL(returnRoute || '/', 'https://orcagent.fun');
+  target.searchParams.set('phantom_connect', '1');
+  target.searchParams.set('return_to', returnRoute || '/');
+  return 'https://phantom.app/ul/browse/' + encodeURIComponent(target.toString());
+}
 const phantomDeepLink='https://phantom.app/ul/browse/'+encodeURIComponent('https://orcagent.fun');
 const solflareDeepLink='https://solflare.com/ul/v1/browse/'+encodeURIComponent('https://orcagent.fun');
 /* Installed PWA (standalone display-mode): Phantom's connect deep link
@@ -973,7 +980,7 @@ async function connectWalletOnboard(type){
 
   if(!check){
     /* On mobile without the extension, use deep link */
-    if(isMobile){ if(isPhantom){ _phantomMobileV1Connect(); return; } window.location.href=solflareDeepLink; return; }
+    if(isMobile){ if(isPhantom){ window.location.href=_phantomBrowseConnectUrl(); return; } window.location.href=solflareDeepLink; return; }
     const other=isPhantom?'Solflare':'Phantom';
     const otherUrl=isPhantom?'https://solflare.com':'https://phantom.app';
     msgEl.innerHTML=name+' wallet not detected. <a href="'+installUrl+'" target="_blank" style="color:var(--blue);text-decoration:underline">Install '+name+'</a> or try <a href="'+otherUrl+'" target="_blank" style="color:var(--blue);text-decoration:underline">'+other+'</a>.';
@@ -1018,6 +1025,36 @@ async function connectWalletOnboard(type){
     console.error(e);
   }
 }
+
+// If a mobile user arrived through Phantom's in-app browser, complete the
+// connection there using Phantom's injected provider. This avoids the fragile
+// two-hop connect -> signMessage deeplink callback flow used by ordinary
+// mobile browsers.
+(function _autoConnectInsidePhantomBrowser(){
+  try{
+    var u = new URL(window.location.href);
+    if(u.searchParams.get('phantom_connect') !== '1') return;
+    var returnTo = u.searchParams.get('return_to') || '/';
+    u.searchParams.delete('phantom_connect');
+    u.searchParams.delete('return_to');
+    var clean = u.pathname + (u.searchParams.toString() ? '?'+u.searchParams.toString() : '') + u.hash;
+    history.replaceState(null, '', clean);
+    var attempts = 0;
+    var timer = setInterval(function(){
+      attempts += 1;
+      if(window.solana && window.solana.isPhantom){
+        clearInterval(timer);
+        connectWalletOnboard('phantom').then(function(){
+          if(phantomKey && returnTo && returnTo !== '/') window.location.replace(returnTo);
+        }).catch(function(e){ console.error('[phantom-browser-connect]', e); });
+      }else if(attempts >= 20){
+        clearInterval(timer);
+        var msgEl=document.getElementById('wallet-install-msg');
+        if(msgEl){msgEl.textContent='Open this page inside Phantom and tap Connect again.';msgEl.style.display='block';}
+      }
+    }, 250);
+  }catch(e){ console.error('[phantom-browser-connect:init]', e); }
+})();
 
 function resetWallet(){
   phantomKey=null; walletType=null;

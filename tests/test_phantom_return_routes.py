@@ -14,6 +14,12 @@ def check(name, condition):
     checks.append((name, bool(condition)))
     print(('PASS ' if condition else 'FAIL ') + name)
 
+check('new mobile Phantom users are opened inside Phantom browser instead of the legacy two-hop callback',
+      'window.location.href=_phantomBrowseConnectUrl(); return;' in JS)
+check('Phantom in-app browser auto-runs the normal signed provider login',
+      "u.searchParams.get('phantom_connect') !== '1'" in JS
+      and "window.solana && window.solana.isPhantom" in JS
+      and "connectWalletOnboard('phantom')" in JS)
 check('mobile connect records whether login started in the installed app',
       "source:isStandalonePWA?'pwa':'browser'" in JS)
 check('mobile connect sends the original same-app route through Phantom',
