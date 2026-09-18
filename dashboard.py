@@ -2182,19 +2182,21 @@ def init_db():
     # Every user must have a visible avatar everywhere in OrcAgent.
     # Existing/null avatars are backfilled to the standard OrcAgent avatar,
     # and triggers keep new users / removed avatars on the same fallback.
-    _default_user_avatar = '/static/icon-180.png?v=6'
-    c.execute("UPDATE users SET avatar_url=? WHERE avatar_url IS NULL OR TRIM(avatar_url)=''", (_default_user_avatar,))
-    c.execute('''CREATE TRIGGER IF NOT EXISTS trg_users_default_avatar_insert
+    _default_user_avatar = '/static/orcagent-default-avatar.svg'
+    c.execute("UPDATE users SET avatar_url=? WHERE avatar_url IS NULL OR TRIM(avatar_url)='' OR avatar_url='/static/icon-180.png?v=6'", (_default_user_avatar,))
+    c.execute('DROP TRIGGER IF EXISTS trg_users_default_avatar_insert')
+    c.execute('DROP TRIGGER IF EXISTS trg_users_default_avatar_update')
+    c.execute('''CREATE TRIGGER trg_users_default_avatar_insert
                  AFTER INSERT ON users
                  WHEN NEW.avatar_url IS NULL OR TRIM(NEW.avatar_url)=''
                  BEGIN
-                   UPDATE users SET avatar_url='/static/icon-180.png?v=6' WHERE id=NEW.id;
+                   UPDATE users SET avatar_url='/static/orcagent-default-avatar.svg' WHERE id=NEW.id;
                  END''')
-    c.execute('''CREATE TRIGGER IF NOT EXISTS trg_users_default_avatar_update
+    c.execute('''CREATE TRIGGER trg_users_default_avatar_update
                  AFTER UPDATE OF avatar_url ON users
                  WHEN NEW.avatar_url IS NULL OR TRIM(NEW.avatar_url)=''
                  BEGIN
-                   UPDATE users SET avatar_url='/static/icon-180.png?v=6' WHERE id=NEW.id;
+                   UPDATE users SET avatar_url='/static/orcagent-default-avatar.svg' WHERE id=NEW.id;
                  END''')
     try:
         c.execute('ALTER TABLE users ADD COLUMN bio TEXT DEFAULT NULL')
