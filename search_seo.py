@@ -35,8 +35,8 @@ _PAGE_META = {
         "Join crypto trading groups, discuss market opportunities and share insights with the OrcAgent community.",
     ),
     "/info": (
-        "About OrcAgent | Multi-Chain Social Trading",
-        "Learn how OrcAgent combines live markets, social trading, trade sharing, portfolio tools and automated strategies.",
+        "About, Security & Privacy | OrcAgent",
+        "Learn what OrcAgent is, how its multi-chain social trading platform works, how security and privacy are handled, current fees, contact details and terms.",
     ),
 }
 _SITEMAP_PATHS = tuple(_PAGE_META)

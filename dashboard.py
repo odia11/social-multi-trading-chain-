@@ -12923,6 +12923,14 @@ _TOS_CONTENT_HTML = '''
 def page_terms():
     return redirect('/info#terms')
 
+@app.route('/privacy')
+def page_privacy():
+    return redirect('/info#privacy')
+
+@app.route('/contact')
+def page_contact():
+    return redirect('/info#contact')
+
 @app.route('/api/tos/status')
 @rate_limit(60, 60)
 def api_tos_status():
