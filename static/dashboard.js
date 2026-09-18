@@ -622,7 +622,8 @@ function _phantomBrowseConnectUrl(){
   var target = new URL(returnRoute || '/', 'https://orcagent.fun');
   target.searchParams.set('phantom_connect', '1');
   target.searchParams.set('return_to', returnRoute || '/');
-  return 'https://phantom.app/ul/browse/' + encodeURIComponent(target.toString());
+  return 'https://phantom.app/ul/browse/' + encodeURIComponent(target.toString())
+    + '?ref=' + encodeURIComponent(window.location.origin);
 }
 const phantomDeepLink='https://phantom.app/ul/browse/'+encodeURIComponent('https://orcagent.fun');
 const solflareDeepLink='https://solflare.com/ul/v1/browse/'+encodeURIComponent('https://orcagent.fun');

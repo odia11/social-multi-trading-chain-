@@ -16,6 +16,8 @@ def check(name, condition):
 
 check('new mobile Phantom users are opened inside Phantom browser instead of the legacy two-hop callback',
       'window.location.href=_phantomBrowseConnectUrl(); return;' in JS)
+check('Phantom browse link includes encoded ref origin required by the mobile in-app browser',
+      "'?ref=' + encodeURIComponent(window.location.origin)" in JS)
 check('Phantom in-app browser auto-runs the normal signed provider login',
       "u.searchParams.get('phantom_connect') !== '1'" in JS
       and "window.solana && window.solana.isPhantom" in JS
