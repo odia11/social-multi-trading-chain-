@@ -2193,19 +2193,19 @@ def init_db():
                     OR avatar_url LIKE '/avatar/default/%'""")
     c.execute('DROP TRIGGER IF EXISTS trg_users_default_avatar_insert')
     c.execute('DROP TRIGGER IF EXISTS trg_users_default_avatar_update')
-    c.execute("""CREATE TRIGGER trg_users_default_avatar_insert
+    c.execute("""CREATE TRIGGER IF NOT EXISTS trg_users_default_avatar_insert
                  AFTER INSERT ON users
                  WHEN NEW.avatar_url IS NULL OR TRIM(NEW.avatar_url)=''
                  BEGIN
                    UPDATE users SET avatar_url='/avatar/default/' || NEW.wallet_address WHERE id=NEW.id;
                  END""")
-    c.execute("""CREATE TRIGGER trg_users_default_avatar_update
+    c.execute("""CREATE TRIGGER IF NOT EXISTS trg_users_default_avatar_update
                  AFTER UPDATE OF avatar_url ON users
                  WHEN NEW.avatar_url IS NULL OR TRIM(NEW.avatar_url)=''
                  BEGIN
                    UPDATE users SET avatar_url='/avatar/default/' || NEW.wallet_address WHERE id=NEW.id;
                  END""")
-    c.execute('''CREATE TRIGGER trg_users_default_avatar_update
+    c.execute('''CREATE TRIGGER IF NOT EXISTS trg_users_default_avatar_update
                  AFTER UPDATE OF avatar_url ON users
                  WHEN NEW.avatar_url IS NULL OR TRIM(NEW.avatar_url)=''
                  BEGIN
