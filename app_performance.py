@@ -69,7 +69,7 @@ def install(appmod) -> None:
                 style('groups-redesign.css', '/static/groups-redesign.css?v=1')
                 script('groups-redesign.js', '/static/groups-redesign.js?v=1')
             elif path == '/':
-                style('home-mobile.css', '/static/home-mobile.css?v=6', ' media="(max-width:767px)"')
+                style('home-mobile.css', '/static/home-mobile.css?v=7', ' media="(max-width:767px)"')
                 style('home-mobile-polish.css', '/static/home-mobile-polish.css?v=5', ' media="(max-width:767px)"')
                 style('home-composer-mobile.css', '/static/home-composer-mobile.css?v=1', ' media="(max-width:767px)"')
                 style('home-desktop.css', '/static/home-desktop.css?v=1', ' media="(min-width:1025px)"')
