@@ -6114,22 +6114,21 @@ def _record_user_trade(user_id: int, us: dict, symbol: str, entry: float, exit_p
     # separate transfer left for users to notice leaving their wallet, just record it.
     # EVM: _charge_evm_txn_fee sends a real separate on-chain USDC/USDG transfer --
     # that chain's swap (0x) has no equivalent bundled-platform-fee mechanism.
-    if wallet and private_key and chain == 'solana' and base == 'USDC':
-        # orcagent_solana.py's execute_single_swap() doesn't bundle a platform
-        # fee into a USDC-denominated swap yet (its own docstring: "a disclosed
-        # v1 limitation, not a bug" -- bundling one would need a raw SPL-token-
-        # transfer instruction it doesn't build). bundled=True below would
-        # otherwise fabricate a fee record for money nothing actually
-        # collected, so this mode charges no fee rather than lying about it.
-        print(f'[fee] {short_w} {symbol} sell — USDC-based Solana trade, no platform fee bundled (not yet supported for this mode)', flush=True)
-    elif wallet and private_key:
-        if chain == 'solana':
-            _charge_txn_fee(private_key, wallet, user_id, symbol, swap_sol_amount, 'sell',
-                             trade_ts=now.strftime('%Y-%m-%dT%H:%M:%SZ'), gross_profit=pnl, bundled=True)
+    if wallet and private_key:
+        _fee_ts = now.strftime('%Y-%m-%dT%H:%M:%SZ')
+        if chain == 'solana' and base == 'USDC':
+            gross_proceeds = (swap_sol_amount / (1.0 - FEE_RATE_TXN)) if swap_sol_amount > 0 else 0.0
+            fee_amount = _record_bundled_stable_fee(
+                wallet, user_id, symbol, gross_proceeds, 'sell', 'solana', trade_ts=_fee_ts)
+        elif chain == 'solana':
+            gross_proceeds = (swap_sol_amount / (1.0 - FEE_RATE_TXN)) if swap_sol_amount > 0 else 0.0
+            _charge_txn_fee(private_key, wallet, user_id, symbol, gross_proceeds, 'sell',
+                            trade_ts=_fee_ts, gross_profit=pnl, bundled=True)
+            fee_amount = round(gross_proceeds * FEE_RATE_TXN, 6)
         else:
-            _charge_evm_txn_fee(private_key, wallet, user_id, symbol, swap_sol_amount, 'sell', chain,
-                                 trade_ts=now.strftime('%Y-%m-%dT%H:%M:%SZ'), gross_profit=pnl)
-        fee_amount = round(swap_sol_amount * FEE_RATE_TXN, 6)
+            gross_proceeds = (swap_sol_amount / (1.0 - FEE_RATE_TXN)) if swap_sol_amount > 0 else 0.0
+            fee_amount = _record_bundled_stable_fee(
+                wallet, user_id, symbol, gross_proceeds, 'sell', chain, trade_ts=_fee_ts)
     else:
         print(f'[fee] {short_w} {symbol} no fee — no private key available (sell may have failed)', flush=True)
 
@@ -6763,7 +6762,7 @@ def _bot_scan_evm_entry(user_id: int, wallet: str, positions: dict, chain: str, 
                 pos['opened_at']       = time.time()
                 pos['entry_liquidity'] = t.get('liquidity_usd', 0)
                 _upsert_open_position(user_id, wallet, mint, pos, source='bot', chain=chain)
-                _charge_evm_txn_fee(pk, wallet, user_id, symbol, min_trade_usdc, 'buy', chain)
+                _record_bundled_stable_fee(wallet, user_id, symbol, min_trade_usdc, 'buy', chain)
         if buy_ok:
             return True
         add_user_log(wallet, f'[bot-{chain}] ✗ BUY failed — {symbol}: {buy_err or "unknown error"} — position NOT recorded')
@@ -7148,7 +7147,7 @@ def _execute_auto_buy_after_bridge(bridge_id: int, user_id: int, wallet: str, de
                 'opened_at': time.time(),
             }
             _upsert_open_position(user_id, wallet, token_address, pos, source='manual', chain=dest_chain)
-            _charge_evm_txn_fee(private_key, wallet, user_id, symbol, amount_usdc, 'buy', dest_chain)
+            _record_bundled_stable_fee(wallet, user_id, symbol, amount_usdc, 'buy', dest_chain)
     except Exception as e:
         _finish('failed', {'error': _redact_keys(str(e))[:300]})
         return
@@ -7695,7 +7694,7 @@ _ERC20_FULL_ABI = _ERC20_MIN_ABI + [
 SWAP_REVERTED_MSG = 'Swap transaction reverted on-chain'
 SWAP_UNCONFIRMED_PREFIX = 'UNCONFIRMED'
 
-def _get_0x_quote(sell_token: str, buy_token: str, sell_amount_raw: int, taker: str, chain: str = 'bsc') -> dict:
+def _get_0x_quote(sell_token: str, buy_token: str, sell_amount_raw: int, taker: str, chain: str = 'bsc', apply_platform_fee: bool = False) -> dict:
     """sell_amount_raw is already in the sell token's smallest unit (respect
     its own decimals -- see the 18-vs-6-decimal USDC note earlier). 0x's
     Swap API v2 (this same allowance-holder endpoint) covers every chain in
@@ -7706,15 +7705,23 @@ def _get_0x_quote(sell_token: str, buy_token: str, sell_amount_raw: int, taker: 
     keeps quoting on BSC exactly as before."""
     if not ZEROX_API_KEY:
         raise RuntimeError('ZEROX_API_KEY not configured')
+    _params = {
+        'chainId': EVM_CHAINS[chain]['zerox_chain_id'],
+        'sellToken': sell_token,
+        'buyToken': buy_token,
+        'sellAmount': str(sell_amount_raw),
+        'taker': taker,
+    }
+    if apply_platform_fee:
+        _fee_token = EVM_CHAINS[chain]['usdc']
+        _params.update({
+            'swapFeeRecipient': EVM_CHAIN_FEE_WALLET,
+            'swapFeeBps': str(int(round(FEE_RATE_TXN * 10000))),
+            'swapFeeToken': _fee_token,
+        })
     r = requests.get(
         'https://api.0x.org/swap/allowance-holder/quote',
-        params={
-            'chainId': EVM_CHAINS[chain]['zerox_chain_id'],
-            'sellToken': sell_token,
-            'buyToken': buy_token,
-            'sellAmount': str(sell_amount_raw),
-            'taker': taker,
-        },
+        params=_params,
         headers={'0x-api-key': ZEROX_API_KEY, '0x-version': 'v2'},
         timeout=15,
     )
@@ -8037,8 +8044,9 @@ def _te_evm_swap_executor(enc_blob: str, wallet: str, evm_address: str):
                         SURGE_ALERT_CHAIN_NAMES.get(plan.chain, plan.chain)))
             # The PURCHASE, not the ceiling. This single argument is the
             # difference between the engine and every legacy endpoint.
+            gross_swap_usd = plan.purchase_usd + plan.fee_usd
             ok, err, tx_hash = _execute_evm_swap(
-                wallet, pk, 'buy', plan.token_address, str(plan.purchase_usd), plan.chain)
+                wallet, pk, 'buy', plan.token_address, str(gross_swap_usd), plan.chain)
 
         if ok:
             return te_execute.SwapOutcome(submitted=True, confirmed=True, tx_hash=tx_hash)
@@ -8054,26 +8062,41 @@ def _te_evm_swap_executor(enc_blob: str, wallet: str, evm_address: str):
 
 
 def _te_evm_fee_charger(enc_blob: str, wallet: str, symbol: str):
-    """Charges the platform fee that was already inside the user's ceiling.
+    """Record the 0.75% fee already collected atomically by 0x.
 
-    Reported as PENDING, never as collected. _charge_evm_txn_fee() hands the
-    transfer to a background thread and returns before it has happened, so
-    there is nothing here that could honestly claim the money arrived --
-    whether it did is written to the fees table by that thread, which is
-    where collections are tracked.
-
-    The amount passed is the PURCHASE. The legacy path passes the full amount
-    the user typed and so charges 0.75% of a number the user never agreed to
-    spend; here the fee is 0.75% of what is actually being bought, which is
-    what the quote already subtracted from the ceiling.
+    The EVM swap quote contains swapFeeRecipient/swapFeeBps/swapFeeToken, so
+    a confirmed swap cannot exist without its platform fee. No second transfer
+    is sent from the user's wallet.
     """
     def charge(plan, outcome):
-        with _use_key(enc_blob, wallet) as pk:
-            _charge_evm_txn_fee(pk, wallet, plan.user_id, symbol,
-                                float(plan.purchase_usd), 'buy', plan.chain)
-        return te_execute.FeeOutcome(charged=False, pending=True, usd=plan.fee_usd)
+        fee = float(plan.fee_usd)
+        recipient = _evm_fee_recipient(plan.chain)
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            conn.execute(
+                'INSERT INTO fees (user_wallet, token, gross_profit, fee_amount, fee_tx, status, kind, chain, recipient) '
+                'VALUES (?,?,?,?,?,?,?,?,?)',
+                (wallet, symbol, 0.0, fee, '0x-bundled:' + str(outcome.tx_hash or ''),
+                 'ok', 'buy', plan.chain, recipient))
+            # Existing referral policy is a share of the already-collected fee,
+            # never an additional user charge.
+            ref_row = conn.execute(
+                'SELECT referred_by FROM users WHERE wallet_address=?', (wallet,)).fetchone()
+            if ref_row and ref_row[0] and fee > 0:
+                earned = round(fee * 0.20, 6)
+                conn.execute(
+                    'INSERT INTO referral_earnings '
+                    '(referrer_wallet, referred_wallet, trade_fee_sol, earned_sol) VALUES (?,?,?,?)',
+                    (ref_row[0], wallet, fee, earned))
+                conn.execute(
+                    'UPDATE users SET referral_balance=referral_balance+? WHERE wallet_address=?',
+                    (earned, ref_row[0]))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f'[fee] EVM bundled fee audit write failed: {e}', flush=True)
+        return te_execute.FeeOutcome(charged=True, pending=False, usd=plan.fee_usd)
     return charge
-
 
 def _te_run_evm_trade(*, quote_id, idem, available, wallet, enc_blob, evm_address,
                       symbol, token_address, chain, user_id):
@@ -8461,7 +8484,7 @@ def _execute_evm_swap(wallet: str, private_key: str, action: str, token_address:
         sell_amount_raw = int(float(amount_str) * (10 ** sell_decimals))
 
         try:
-            quote = _get_0x_quote(sell_token, buy_token, sell_amount_raw, wallet_cs, chain)
+            quote = _get_0x_quote(sell_token, buy_token, sell_amount_raw, wallet_cs, chain, apply_platform_fee=True)
         except RuntimeError as e:
             # _get_0x_quote's own "ZEROX_API_KEY not configured" is already specific
             print(f'[{chain}-swap] {e}', flush=True)
@@ -8489,7 +8512,7 @@ def _execute_evm_swap(wallet: str, private_key: str, action: str, token_address:
                 return False, msg, ''
             # Re-quote after approving -- the first quote's tx.data assumed the
             # allowance issue was still open; a stale quote can revert on-chain.
-            quote = _get_0x_quote(sell_token, buy_token, sell_amount_raw, wallet_cs, chain)
+            quote = _get_0x_quote(sell_token, buy_token, sell_amount_raw, wallet_cs, chain, apply_platform_fee=True)
 
         txn = quote.get('transaction')
         if not txn:
@@ -9528,6 +9551,49 @@ def _gas_sponsor_needs_funding(chain: str) -> bool:
 def _evm_fee_recipient(chain: str) -> str:
     """All EVM platform fees go directly to the normal revenue fee wallet."""
     return EVM_CHAIN_FEE_WALLET
+
+
+def _record_bundled_stable_fee(wallet: str, user_id: int, symbol: str,
+                               gross_amount: float, kind: str, chain: str,
+                               trade_ts: str = None, tx_hash: str = 'bundled-in-swap'):
+    """Record a stablecoin fee that was already collected atomically in the swap."""
+    fee = round(float(gross_amount or 0) * FEE_RATE_TXN, 6)
+    if fee <= 0:
+        return 0.0
+    recipient = FEE_WALLET if chain == 'solana' else EVM_CHAIN_FEE_WALLET
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        conn.execute(
+            'INSERT INTO fees (user_wallet, token, gross_profit, fee_amount, fee_tx, status, kind, chain, recipient) '
+            'VALUES (?,?,?,?,?,?,?,?,?)',
+            (wallet, symbol, 0.0, fee, tx_hash or 'bundled-in-swap', 'ok',
+             kind, chain, recipient))
+        if kind == 'sell' and trade_ts:
+            row = conn.execute(
+                'SELECT id FROM trades WHERE user_id=? AND timestamp=? AND (fee_paid IS NULL OR fee_paid=0) '
+                'ORDER BY rowid LIMIT 1', (user_id, trade_ts)).fetchone()
+            if row:
+                conn.execute('UPDATE trades SET fee_paid=1 WHERE id=?', (row[0],))
+        # Existing referral policy: paid from the already-collected platform fee,
+        # never an additional charge to the trader.
+        ref = conn.execute(
+            'SELECT referred_by FROM users WHERE wallet_address=?', (wallet,)).fetchone()
+        if ref and ref[0]:
+            earned = round(fee * 0.20, 6)
+            conn.execute(
+                'INSERT INTO referral_earnings '
+                '(referrer_wallet, referred_wallet, trade_fee_sol, earned_sol, chain) VALUES (?,?,?,?,?)',
+                (ref[0], wallet, fee, earned, chain))
+            conn.execute(
+                'UPDATE users SET referral_balance=referral_balance+? WHERE wallet_address=?',
+                (earned, ref[0]))
+        conn.commit()
+    finally:
+        conn.close()
+    print(f'[{chain}-fee] ✓ {wallet[:6]}... {symbol} {kind} {fee:.6f} '
+          f'collected atomically → {recipient[:10]}...', flush=True)
+    return fee
+
 
 def _charge_evm_txn_fee(private_key: str, wallet: str, user_id: int, symbol: str,
                          usdc_amount: float, kind: str, chain: str = 'bsc',
@@ -11033,11 +11099,8 @@ def user_trader_loop(stop_event, config, wallet: str):
                                 if _solana_base == 'SOL':
                                     _charge_txn_fee(_pk, wallet, user_id, label, spend, 'buy', bundled=True)
                                 else:
-                                    # See _record_user_trade()'s matching guard on the sell
-                                    # side: orcagent_solana.py bundles no platform fee into a
-                                    # USDC-denominated swap yet, so charging one here would
-                                    # fabricate a fee record for money nothing collected.
-                                    print(f'[fee] {short} {label} buy — USDC-based Solana trade, no platform fee bundled (not yet supported for this mode)', flush=True)
+                                    _record_bundled_stable_fee(
+                                        wallet, user_id, label, spend, 'buy', 'solana')
                                 open_pos += 1
                                 _trigger_copy_buy(wallet, bmint, best['price'], label, float(best.get('liquidity', 0) or 0))
                             else:
@@ -14152,7 +14215,7 @@ def _legacy_evm_trade_buy(wallet, enc_blob, user_id, evm_address, chain,
             'symbol':    symbol,
             'opened_at': time.time(),
         }, source='manual', chain=chain)
-        _charge_evm_txn_fee(pk, wallet, user_id, symbol, amount_usdc, 'buy', chain)
+        _record_bundled_stable_fee(wallet, user_id, symbol, amount_usdc, 'buy', chain)
     # Same as the engine path above, including why is_copy has to be there.
     if not is_copy and not get_user_state(wallet)['positions'].get(
             token_address, {}).get('copy_of_wallet'):
@@ -14419,10 +14482,11 @@ def _evm_sell_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM
 
             # 0.75% on the sell leg's USDC amount, not on profit -- same model
             # as _record_user_trade()'s Solana sell-leg fee call.
-            _charge_evm_txn_fee(pk, wallet, user_id, symbol, proceeds_usdc, 'sell', chain,
-                                trade_ts=ts, gross_profit=pnl)
 
-        fee_amount = round(proceeds_usdc * FEE_RATE_TXN, 6)
+        gross_proceeds = (proceeds_usdc / (1.0 - FEE_RATE_TXN)) if proceeds_usdc > 0 else 0.0
+        fee_amount = _record_bundled_stable_fee(
+            wallet, user_id, symbol, gross_proceeds, 'sell', chain, trade_ts=ts,
+            tx_hash='0x-bundled:' + str(sell_tx_hash or ''))
         # Same trades-table insert + badge recalc as _record_user_trade(), so
         # EVM sells count toward PnL history, badges and profile stats.
         try:
@@ -20715,10 +20779,17 @@ def api_instant_trade():
             # assert bundled=True regardless -- writing a fees row and paying a
             # 20% referral cut on money nobody collected.
             if swap_info.get('fee_bundled'):
-                with _use_key(enc_blob, wallet) as pk:
-                    _charge_txn_fee(pk, wallet, uid, symbol,
-                                    amount_sol if side == 'buy' else sol_recorded,
-                                    side, bundled=True)
+                if SOLANA_BASE_CURRENCY == 'USDC':
+                    _gross = (amount_sol if side == 'buy'
+                              else ((sol_recorded / (1.0 - FEE_RATE_TXN)) if sol_recorded > 0 else 0.0))
+                    _record_bundled_stable_fee(
+                        wallet, uid, symbol, _gross, side, 'solana',
+                        tx_hash='bundled-in-swap')
+                else:
+                    with _use_key(enc_blob, wallet) as pk:
+                        _gross = (amount_sol if side == 'buy'
+                                  else ((sol_recorded / (1.0 - FEE_RATE_TXN)) if sol_recorded > 0 else 0.0))
+                        _charge_txn_fee(pk, wallet, uid, symbol, _gross, side, bundled=True)
             else:
                 print(f'[fee] {wallet[:6]}... {symbol} {side}: the platform fee was NOT '
                       f'collected inside the swap, so nothing is recorded for it',
@@ -25784,7 +25855,11 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
             # one that did not would book revenue nobody received and pay a
             # referral cut on it.
             if swap_info.get('fee_bundled'):
-                _charge_txn_fee(_pk, wallet, user_id, pos['symbol'], spend, 'buy', bundled=True)
+                if SOLANA_BASE_CURRENCY == 'USDC':
+                    _record_bundled_stable_fee(
+                        wallet, user_id, pos['symbol'], spend, 'buy', 'solana')
+                else:
+                    _charge_txn_fee(_pk, wallet, user_id, pos['symbol'], spend, 'buy', bundled=True)
             else:
                 print(f'[fee] {wallet[:6]}... {pos["symbol"]} buy: the platform fee was '
                       f'NOT collected inside the swap, so nothing is recorded for it',

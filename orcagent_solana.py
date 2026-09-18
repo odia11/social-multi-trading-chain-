@@ -316,7 +316,8 @@ def _resolve_alts(addresses):
 
 
 def _execute_buy_with_bundled_fee(mint: str, spend_lamports: int, fee_lamports: int,
-                                   wallet_address: str, private_key: str, fee_wallet: str) -> tuple:
+                                   wallet_address: str, private_key: str, fee_wallet: str,
+                                   input_mint: str = SOL_MINT) -> tuple:
     """Buy `mint` with (spend_lamports - fee_lamports) SOL, with the
     fee_lamports transfer to fee_wallet spliced into the SAME transaction as
     the swap -- so the wallet still spends exactly spend_lamports total, but
@@ -360,7 +361,7 @@ def _execute_buy_with_bundled_fee(mint: str, spend_lamports: int, fee_lamports: 
     _quote_t0 = time.time()
     r = requests.get(
         JUPITER_QUOTE,
-        params={'inputMint': SOL_MINT, 'outputMint': mint, 'amount': net_lamports, 'slippageBps': 300},
+        params={'inputMint': input_mint, 'outputMint': mint, 'amount': net_lamports, 'slippageBps': 300},
         headers=_JUP_HEADERS, timeout=15,
     )
     if r.status_code != 200:
@@ -407,16 +408,32 @@ def _execute_buy_with_bundled_fee(mint: str, spend_lamports: int, fee_lamports: 
     if not instructions:
         raise Exception('swap-instructions returned no instructions')
 
-    # Our fee transfer -- plain System Program transfer, appended after the
-    # swap itself so it doesn't interfere with the swap's own account setup.
-    instructions.append(Instruction(
-        program_id=Pubkey.from_string(SYSTEM_PROGRAM),
-        accounts=[
-            AccountMeta(payer, is_signer=True, is_writable=True),
-            AccountMeta(Pubkey.from_string(fee_wallet), is_signer=False, is_writable=True),
-        ],
-        data=struct.pack('<IQ', 2, fee_lamports),
-    ))
+    # Platform fee transfer, appended to the same transaction as the swap.
+    if input_mint == SOL_MINT:
+        instructions.append(Instruction(
+            program_id=Pubkey.from_string(SYSTEM_PROGRAM),
+            accounts=[
+                AccountMeta(payer, is_signer=True, is_writable=True),
+                AccountMeta(Pubkey.from_string(fee_wallet), is_signer=False, is_writable=True),
+            ],
+            data=struct.pack('<IQ', 2, fee_lamports),
+        ))
+    elif input_mint == USDC_MINT:
+        fee_ata = _ensure_fee_ata(keypair, fee_wallet, USDC_MINT)
+        source_ata = _get_ata(str(payer), USDC_MINT)
+        instructions.append(Instruction(
+            program_id=Pubkey.from_string(TOKEN_PROGRAM),
+            accounts=[
+                AccountMeta(Pubkey.from_string(source_ata), is_signer=False, is_writable=True),
+                AccountMeta(Pubkey.from_string(USDC_MINT), is_signer=False, is_writable=False),
+                AccountMeta(Pubkey.from_string(fee_ata), is_signer=False, is_writable=True),
+                AccountMeta(payer, is_signer=True, is_writable=False),
+            ],
+            data=bytes([12]) + struct.pack('<Q', fee_lamports) + bytes([6]),
+        ))
+    else:
+        raise Exception('unsupported bundled buy fee input mint')
+
 
     alt_accounts = _resolve_alts(swi.get('addressLookupTableAddresses') or [])
 
@@ -614,7 +631,7 @@ def _execute_swap_inner(input_mint: str, output_mint: str, amount_lamports: int,
         try:
             fee_account = _ensure_fee_ata(keypair, fee_wallet, output_mint)
         except Exception as e:
-            print(f'[fee] could not prepare platform-fee account, swap proceeds without it: {e}', flush=True)
+            raise Exception(f'platform-fee account unavailable; refusing fee-less sell: {e}')
 
     # ── Step 1: Jupiter quote ────────────────────────────────────────────────
     print(f'[TRADE] Step 1/8 — Requesting {direction} quote for {label} ({amount_lamports} lamports)'
@@ -898,29 +915,17 @@ def execute_swap(input_mint: str, output_mint: str, amount_lamports: int,
     bad/missing fee account, on-chain simulation, whatever), retry the exact
     same swap once with no fee attached at all, rather than letting a
     fee-related problem fail a real user's trade."""
-    if fee_wallet and fee_bps > 0 and input_mint == SOL_MINT:
-        # Buy (SOL -> token): fee is spliced into the swap's own transaction
-        # as a plain SOL transfer -- see _execute_buy_with_bundled_fee()'s
-        # docstring for why this can't use Jupiter's platformFeeBps like the
-        # sell leg does.
+    if fee_wallet and fee_bps > 0 and input_mint in (SOL_MINT, USDC_MINT) and output_mint not in _BASE_MINTS:
         wallet_address = wallet_address or WALLET_ADDRESS
         private_key    = private_key    or PRIVATE_KEY
         fee_lamports   = int(amount_lamports * fee_bps / 10000)
-        try:
-            return _execute_buy_with_bundled_fee(output_mint, amount_lamports, fee_lamports,
-                                                  wallet_address, private_key, fee_wallet)
-        except Exception as e:
-            print(f'[fee] bundled buy fee failed ({e}) — retrying as a normal buy, no fee this time', flush=True)
-            return _execute_swap_inner(input_mint, output_mint, amount_lamports, wallet_address, private_key)
-    try:
-        return _execute_swap_inner(input_mint, output_mint, amount_lamports,
-                                    wallet_address, private_key, fee_wallet, fee_bps)
-    except Exception as e:
-        if fee_wallet and fee_bps > 0:
-            print(f'[fee] swap with platform fee failed ({e}) — retrying once without it', flush=True)
-            return _execute_swap_inner(input_mint, output_mint, amount_lamports,
-                                        wallet_address, private_key, fee_wallet='', fee_bps=0)
-        raise
+        return _execute_buy_with_bundled_fee(
+            output_mint, amount_lamports, fee_lamports,
+            wallet_address, private_key, fee_wallet, input_mint=input_mint)
+    # Fee collection is mandatory when requested. Never retry a successful
+    # user trade without the platform fee.
+    return _execute_swap_inner(input_mint, output_mint, amount_lamports,
+                               wallet_address, private_key, fee_wallet, fee_bps)
 
 
 # ── SINGLE SWAP ENTRY POINT (called from dashboard subprocess) ───────────────
