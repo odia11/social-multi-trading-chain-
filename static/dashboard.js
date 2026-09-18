@@ -9565,7 +9565,7 @@ function _renderFeedCard(e){
       +'<span class="fc-like-count" onclick="event.stopPropagation();_fcOpenLikedBy(\''+esc(safePostId)+'\')" title="See who liked this">'+esc(String(e.like_count||0))+'</span>'
     +'</button>'
     +'<div class="fc-react-wrap">'
-    +'<button class="fc-action fc-emoji-react-btn" onclick="_feedReactOpen(event,\''+esc(safePostId)+'\')" title="Choose emoji" aria-label="Choose emoji" style="width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:0;background:transparent;font-size:22px;line-height:1">😊</button>'
+    +'<button class="fc-action fc-emoji-react-btn" id="rbtn-'+esc(safePostId)+'" onclick="_feedReactOpen(event,\''+esc(safePostId)+'\')" title="Choose emoji" aria-label="Choose emoji" style="display:inline-flex;align-items:center;gap:5px;padding:4px 6px;margin:-4px -6px;border:0;background:transparent;font-size:22px;line-height:1">😊<span class="fc-react-count" id="rcount-'+esc(safePostId)+'" style="font-size:13px;color:#8a919c;font-family:JetBrains Mono,monospace">0</span></button>'
     +'<div class="fc-react-palette" id="rpal-'+esc(safePostId)+'"></div>'
     +'</div>'
     +'<div class="fc-share-wrap">'
@@ -9578,7 +9578,6 @@ function _renderFeedCard(e){
     +'</div>'
     +'<span class="fc-view-count" title="Views">'+esc(_fmtViewCount(e.view_count))+'</span>'
     +'</div>'
-    +'<div class="fc-reactions" id="rpills-'+esc(safePostId)+'"></div>'
     +'<div class="fc-reply-box" id="rbox-'+esc(safePostId)+'" onclick="event.stopPropagation()">'
     +'<div class="fc-reply-inner">'
     +'<div class="fc-reply-card" id="rcard-'+esc(safePostId)+'">'
@@ -9806,18 +9805,12 @@ async function _feedReactSend(postId, emoji){
 }
 
 function _feedRenderPills(postId, counts, mine){
-  var el = document.getElementById('rpills-'+postId);
-  if(!el) return;
-  var mineSet = new Set(mine || []);
-  var html = '';
-  _FEED_EMOJIS.forEach(function(emoji){
-    var n = (counts && counts[emoji]) || 0;
-    if(!n) return;
-    var cls = mineSet.has(emoji) ? ' mine' : '';
-    html += '<button class="fc-reaction-pill'+cls+'" onclick="event.stopPropagation();_feedReactSend(\''+postId+'\',\''+emoji+'\')">'
-      + emoji+'<span class="rp-count">'+n+'</span></button>';
-  });
-  el.innerHTML = html;
+  var countEl = document.getElementById('rcount-'+postId);
+  var btn = document.getElementById('rbtn-'+postId);
+  var total = 0;
+  Object.keys(counts || {}).forEach(function(emoji){ total += Number(counts[emoji]) || 0; });
+  if(countEl) countEl.textContent = String(total);
+  if(btn) btn.classList.toggle('reacted', Array.isArray(mine) && mine.length > 0);
 }
 
 
