@@ -73,9 +73,9 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
 .pf-joined-tag{font-size:12px;color:#565d68;display:flex;align-items:center;gap:5px}
 .pf-bio-text{font-size:14px;color:#8a919c;line-height:1.6;margin-bottom:14px;max-width:480px}
 .pf-action-row{display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap}
-.pf-btn-primary{background:#f7b955;color:#0a0b0e;border:none;border-radius:10px;padding:9px 20px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Geist',system-ui,sans-serif;transition:opacity .15s;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+.pf-btn-primary{background:#f7b955;color:#0a0b0e;border:none;border-radius:10px;padding:9px 20px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Geist',system-ui,sans-serif;transition:opacity .15s;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap}
 .pf-btn-primary:hover{opacity:.85}
-.pf-btn-secondary{background:transparent;color:#eef1f5;border:1px solid #21252c;border-radius:10px;padding:9px 20px;font-size:13px;font-weight:600;cursor:pointer;font-family:'Geist',system-ui,sans-serif;transition:border-color .15s,color .15s;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+.pf-btn-secondary{background:transparent;color:#eef1f5;border:1px solid #21252c;border-radius:10px;padding:9px 20px;font-size:13px;font-weight:600;cursor:pointer;font-family:'Geist',system-ui,sans-serif;transition:border-color .15s,color .15s;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap}
 .pf-follows-you{display:inline-flex;align-items:center;padding:6px 12px;border-radius:8px;background:#16191f;color:#8a919c;font-size:11px;font-weight:600;align-self:center}
 .pf-btn-secondary:hover{border-color:#565d68;color:#eef1f5}
 .pf-btn-icon{background:transparent;color:#565d68;border:1px solid #21252c;border-radius:10px;padding:9px 12px;font-size:14px;cursor:pointer;transition:border-color .15s,color .15s;display:inline-flex;align-items:center;justify-content:center}
@@ -185,6 +185,9 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
   .pf-name-row{justify-content:center}
   .pf-meta-row{justify-content:center}
   .pf-bio-text{max-width:100%}
+  /* The wrapping of this row is owned by static/profile-v2.css, which is the
+     stylesheet this page's design comes from. Two places deciding one layout
+     is how the tip button ended up 167px wide while Message shrank to 59. */
   .pf-action-row{justify-content:center}
 
   /* stats + content */
@@ -244,24 +247,59 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
 #banner-lightbox.open{display:flex}
 #banner-lightbox-img{max-width:90vw;max-height:90vh;border-radius:12px;object-fit:contain;pointer-events:none}
 /* ── TIP USDC ── */
-.pf-btn-tip{background:transparent;color:#f7b955;border:1px solid #f7b955;border-radius:10px;padding:9px 20px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Geist',system-ui,sans-serif;transition:background .15s,color .15s,box-shadow .15s;display:inline-flex;align-items:center;gap:7px}
+.pf-btn-tip{background:transparent;color:#f7b955;border:1px solid #f7b955;border-radius:12px;padding:11px 22px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Geist',system-ui,sans-serif;transition:background .15s,box-shadow .15s;display:inline-flex;align-items:center;gap:8px}
 .pf-btn-tip:hover{background:rgba(247,185,85,.09);box-shadow:0 0 0 3px rgba(247,185,85,.07)}
 .tip-back{display:none;position:fixed;inset:0;z-index:10030;background:rgba(0,0,0,.72);backdrop-filter:blur(7px);align-items:flex-end;justify-content:center;padding:18px}
 .tip-back.open{display:flex}
-.tip-sheet{width:min(560px,100%);background:#0d1116;border:1px solid #252b33;border-radius:24px;padding:20px;box-shadow:0 -18px 70px rgba(0,0,0,.55);max-height:min(760px,92vh);overflow-y:auto}
-.tip-handle{width:42px;height:4px;border-radius:999px;background:#343b45;margin:0 auto 14px}
+.tip-sheet{width:min(560px,100%);background:#0d1116;border:1px solid #252b33;border-radius:24px;padding:20px;box-shadow:0 -18px 70px rgba(0,0,0,.55);max-height:min(860px,94vh);overflow-y:auto}
+.tip-handle{width:42px;height:4px;border-radius:999px;background:#343b45;margin:0 auto 16px}
 .tip-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
-.tip-title{font-size:22px;font-weight:700;letter-spacing:-.02em}.tip-close{border:0;background:none;color:#8a919c;font-size:30px;line-height:1;cursor:pointer;padding:2px 6px}
-.tip-user{display:flex;align-items:center;gap:12px;border:1px solid #20262e;background:#10151b;border-radius:16px;padding:13px;margin-bottom:18px}
-.tip-user img,.tip-user-fallback{width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid rgba(247,185,85,.35)}
-.tip-user-fallback{display:flex;align-items:center;justify-content:center;background:#16191f;color:#f7b955;font-weight:800}
-.tip-user-main{min-width:0;flex:1}.tip-user-name{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tip-user-handle{font:12px 'JetBrains Mono',monospace;color:#68717d;margin-top:2px}
-.tip-label{display:block;font-size:12px;font-weight:600;color:#c8ced6;margin:14px 0 7px}.tip-input-wrap{display:flex;align-items:center;border:1px solid #2a313a;background:#10151b;border-radius:13px;padding:0 14px}.tip-input{min-width:0;flex:1;background:none;border:0;outline:none;color:#eef1f5;font-size:28px;font-weight:600;padding:13px 0;font-family:'JetBrains Mono',monospace}.tip-input-sym{font-size:14px;color:#a0a8b3;font-weight:600}
-.tip-presets{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:10px}.tip-preset{border:1px solid #252b33;background:#10151b;color:#eef1f5;border-radius:11px;padding:10px 4px;font-size:12px;font-weight:650;cursor:pointer}.tip-preset:hover,.tip-preset.active{background:#f7b955;color:#0a0b0e;border-color:#f7b955}
-.tip-network{display:flex;align-items:center;gap:10px;border:1px solid #252b33;background:#10151b;border-radius:13px;padding:12px 14px;color:#eef1f5}.tip-sol{width:27px;height:27px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#0b0d12;color:#9b7cff;font-weight:900;font-size:11px}.tip-network small{display:block;color:#68717d;margin-top:1px}
-.tip-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#10151b;border:1px solid #252b33;border-radius:14px;padding:14px;margin-top:14px}.tip-summary-left{color:#8a919c;font-size:13px}.tip-summary-val{text-align:right;font-weight:750}
-.tip-submit{width:100%;border:0;border-radius:13px;background:#f7b955;color:#0a0b0e;font-size:15px;font-weight:800;padding:14px 16px;margin-top:12px;cursor:pointer}.tip-submit:disabled{opacity:.5;cursor:not-allowed}.tip-note{text-align:center;color:#68717d;font-size:11px;margin-top:10px}.tip-msg{min-height:20px;margin-top:10px;text-align:center;font-size:12px}.tip-msg.err{color:#ff4d6a}.tip-msg.ok{color:#3ad29b}
-@media(max-width:600px){.tip-back{padding:0;align-items:flex-end}.tip-sheet{border-radius:24px 24px 0 0;padding:16px 16px calc(22px + env(safe-area-inset-bottom,0px))}.tip-presets{gap:6px}.tip-preset{padding:10px 2px}.pf-action-row .pf-btn-tip{flex:1;justify-content:center;min-width:145px}}
+.tip-title{font-size:23px;font-weight:750;letter-spacing:-.02em}
+.tip-close{border:0;background:none;color:#8a919c;font-size:26px;line-height:1;cursor:pointer;padding:2px 6px}
+/* who you are tipping, so nobody sends to the wrong profile */
+.tip-user{display:flex;align-items:flex-start;gap:13px;border:1px solid #20262e;background:#10151b;border-radius:18px;padding:15px;margin-bottom:20px}
+.tip-user img,.tip-user-fallback{width:54px;height:54px;border-radius:50%;object-fit:cover;border:2px solid rgba(247,185,85,.35);flex-shrink:0}
+.tip-user-fallback{display:flex;align-items:center;justify-content:center;background:#16191f;color:#f7b955;font-weight:800;font-size:19px}
+.tip-user-main{min-width:0;flex:1}
+.tip-user-top{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.tip-user-name{font-size:16px;font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tip-user-handle{font:12.5px 'JetBrains Mono',monospace;color:#68717d;margin-top:3px}
+.tip-user-bio{font-size:13px;color:#aeb6c0;margin-top:6px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.tip-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-size:10.5px;font-weight:800;letter-spacing:.04em;border:1px solid rgba(58,210,155,.45);color:#3ad29b}
+.tip-verified{color:#f7b955;display:inline-flex}
+.tip-label{display:block;font-size:13px;font-weight:600;color:#c8ced6;margin:16px 0 8px}
+.tip-input-wrap{display:flex;align-items:center;border:1px solid #2a313a;background:#10151b;border-radius:14px;padding:0 16px}
+.tip-input{min-width:0;flex:1;background:none;border:0;outline:none;color:#eef1f5;font-size:30px;font-weight:600;padding:14px 0;font-family:'JetBrains Mono',monospace}
+.tip-input::-webkit-outer-spin-button,.tip-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.tip-input[type=number]{-moz-appearance:textfield}
+.tip-input-sym{font-size:14px;color:#a0a8b3;font-weight:600}
+.tip-approx{font:12px 'JetBrains Mono',monospace;color:#68717d;margin-top:8px}
+.tip-presets{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;margin-top:12px}
+.tip-preset{border:1px solid #252b33;background:#10151b;color:#eef1f5;border-radius:12px;padding:12px 4px;font-size:13px;font-weight:700;cursor:pointer}
+.tip-preset:hover{border-color:rgba(247,185,85,.5)}
+.tip-preset.active{background:#f7b955;color:#0a0b0e;border-color:#f7b955}
+.tip-network{display:flex;align-items:center;gap:11px;border:1px solid #252b33;background:#10151b;border-radius:14px;padding:13px 15px;color:#eef1f5;font-size:14px;font-weight:600}
+.tip-sol{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#0b0d12;color:#9b7cff;font-weight:900;font-size:10px;flex-shrink:0}
+.tip-network small{display:block;color:#68717d;font-weight:500;margin-top:2px;font-size:11.5px}
+.tip-msg-wrap{position:relative}
+.tip-message{width:100%;resize:none;background:#10151b;color:#eef1f5;border:1px solid #252b33;border-radius:14px;padding:13px 15px 26px;font-family:inherit;font-size:14px;outline:none;min-height:74px}
+.tip-message:focus,.tip-input-wrap:focus-within{border-color:rgba(247,185,85,.65)}
+.tip-count{position:absolute;right:13px;bottom:10px;font:11px 'JetBrains Mono',monospace;color:#68717d;pointer-events:none}
+.tip-summary{display:flex;align-items:center;gap:13px;background:#10151b;border:1px solid #252b33;border-radius:16px;padding:16px;margin-top:18px}
+.tip-usdc-mark{width:38px;height:38px;border-radius:50%;background:#2775ca;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;flex-shrink:0}
+.tip-summary-left{color:#c8ced6;font-size:14px;font-weight:600;flex:1}
+.tip-summary-val{text-align:right;font-weight:800;font-size:16px}
+.tip-summary-usd{display:block;color:#68717d;font-size:11.5px;font-weight:500;margin-top:3px;font-family:'JetBrains Mono',monospace}
+.tip-submit{width:100%;border:0;border-radius:14px;background:#f7b955;color:#0a0b0e;font-size:16px;font-weight:800;padding:16px;margin-top:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px}
+.tip-submit:disabled{opacity:.5;cursor:not-allowed}
+.tip-note{display:flex;align-items:center;justify-content:center;gap:7px;color:#68717d;font-size:12px;margin-top:12px}
+.tip-info{display:flex;align-items:flex-start;gap:12px;border:1px solid #252b33;background:#10151b;border-radius:16px;padding:15px;margin-top:14px}
+.tip-info-mark{width:34px;height:34px;border-radius:10px;background:rgba(247,185,85,.12);color:#f7b955;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
+.tip-info strong{display:block;font-size:14px;font-weight:750}
+.tip-info p{color:#8a919c;font-size:12.5px;margin-top:3px;line-height:1.45}
+.tip-msg-line{min-height:20px;margin-top:10px;text-align:center;font-size:12.5px}
+.tip-msg-line.err{color:#ff4d6a}.tip-msg-line.ok{color:#3ad29b}
+@media(max-width:600px){.tip-back{padding:0;align-items:flex-end}.tip-sheet{border-radius:24px 24px 0 0;padding:16px 16px calc(22px + env(safe-area-inset-bottom,0px))}.tip-presets{gap:7px}.tip-preset{padding:11px 2px;font-size:12px}}
 </style>
 <link rel="stylesheet" href="/static/profile-v2.css?v={{ app_version }}">
 </head>
@@ -999,56 +1037,95 @@ async function _removeBanner(){
 <script>initPullToRefresh();</script>
 
 <!-- ── TIP USDC ──────────────────────────────────────────────────────────
-     Sends USDC on Solana straight to this profile's wallet, through the
-     same authenticated, CSRF-protected endpoint the Portfolio withdraw uses.
-     The recipient is the PROFILE's wallet, rendered server-side -- never a
-     field anybody can type into, so a tip cannot be redirected by editing
-     the page. The mint is pinned to canonical Solana USDC for the same
-     reason. -->
+     USDC on Solana, straight to the wallet this profile belongs to, through
+     the same authenticated CSRF-protected endpoint Portfolio withdraw uses.
+     The recipient is rendered by the server; there is no field to type one
+     into, so a tip cannot be redirected by editing the page. -->
 <div class="tip-back" id="tip-back" onclick="if(event.target===this)_closeTip()">
-  <div class="tip-sheet" role="dialog" aria-modal="true" aria-label="Send a tip">
+  <div class="tip-sheet" role="dialog" aria-modal="true" aria-label="Tip USDC">
     <div class="tip-handle"></div>
     <div class="tip-head">
-      <div class="tip-title">Send a tip</div>
+      <div class="tip-title">Tip USDC</div>
       <button class="tip-close" type="button" onclick="_closeTip()" aria-label="Close">&times;</button>
     </div>
+
     <div class="tip-user">
       {% if avatar_url %}<img src="{{ avatar_url }}" alt="">{% else %}<img src="{{ _default_avatar }}" alt="">{% endif %}
       <div class="tip-user-main">
-        <div class="tip-user-name">{{ display_name }}</div>
-        <div class="tip-user-handle">{{ wallet_short }}</div>
+        <div class="tip-user-top">
+          <span class="tip-user-name">{{ display_name }}</span>
+          {% if is_verified %}<span class="tip-verified" title="Verified">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 1.8 3-.3 1 2.8 2.6 1.5-1 2.9 1 2.9-2.6 1.5-1 2.8-3-.3L12 22l-2.4-1.8-3 .3-1-2.8L3 16.2l1-2.9-1-2.9 2.6-1.5 1-2.8 3 .3z"/><path d="M10.6 14.6l-2.2-2.2-1.1 1.1 3.3 3.3 5.6-5.6-1.1-1.1z" fill="#0d1116"/></svg>
+          </span>{% endif %}
+          {# Only a role that means something. Everybody is a "user", and a
+             badge every profile carries is not a badge. #}
+          {% if team_role and team_role|lower not in ('user', 'member', 'none') %}
+          <span class="tip-badge">{{ team_role|upper }}</span>{% endif %}
+        </div>
+        {% if username %}<div class="tip-user-handle">@{{ username }}</div>
+        {% else %}<div class="tip-user-handle">{{ wallet_short }}</div>{% endif %}
+        {% if bio %}<div class="tip-user-bio">{{ bio }}</div>{% endif %}
       </div>
     </div>
+
     <label class="tip-label" for="tip-amount">Amount</label>
     <div class="tip-input-wrap">
       <input class="tip-input" id="tip-amount" type="number" inputmode="decimal" min="0" step="0.01"
-             placeholder="0.00" oninput="_tipTouched()">
+             placeholder="0" oninput="_tipTouched()">
       <span class="tip-input-sym">USDC</span>
     </div>
+    <div class="tip-approx" id="tip-approx">&asymp; $0.00</div>
     <div class="tip-presets">
       {% for v in [1, 5, 10, 25, 50] %}
       <button class="tip-preset" type="button" onclick="_tipPreset({{ v }}, this)">${{ v }}</button>
       {% endfor %}
     </div>
+
     <label class="tip-label">Network</label>
     <div class="tip-network">
       <span class="tip-sol">SOL</span>
-      <div>Solana<small>USDC is sent on Solana. The network fee comes out of your own SOL.</small></div>
+      <div>Solana (USDC)<small>Sent on Solana. The network fee comes out of your own SOL.</small></div>
     </div>
+
+    <label class="tip-label" for="tip-message">Add a message (optional)</label>
+    <div class="tip-msg-wrap">
+      <textarea class="tip-message" id="tip-message" maxlength="100"
+                placeholder="Keep going!" oninput="_tipCount()"></textarea>
+      <span class="tip-count" id="tip-count">0/100</span>
+    </div>
+
     <div class="tip-summary">
-      <span class="tip-summary-left">They receive</span>
-      <span class="tip-summary-val" id="tip-receives">0.00 USDC</span>
+      <span class="tip-usdc-mark">$</span>
+      <span class="tip-summary-left">You send</span>
+      <span class="tip-summary-val"><span id="tip-send-val">0.00</span> USDC
+        <span class="tip-summary-usd" id="tip-send-usd">&asymp; $0.00</span></span>
     </div>
-    <button class="tip-submit" id="tip-submit" type="button" onclick="_sendTip()" disabled>Send tip</button>
-    <div class="tip-msg" id="tip-msg"></div>
-    <div class="tip-note">Tips are final. There is no way to reverse one once it is sent.</div>
+
+    <button class="tip-submit" id="tip-submit" type="button" onclick="_sendTip()" disabled>
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>
+      <span id="tip-submit-label">Tip USDC</span>
+    </button>
+    <div class="tip-note">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      Funds are sent directly to the user's wallet.
+    </div>
+    <div class="tip-msg-line" id="tip-msg"></div>
+
+    <div class="tip-info">
+      <span class="tip-info-mark">&#9889;</span>
+      <div>
+        <strong>Instant. Secure. On-Chain.</strong>
+        <p>Your tip is sent directly to their USDC wallet. It cannot be reversed once it is sent.</p>
+      </div>
+    </div>
   </div>
 </div>
 
 <script>
-// The wallet this profile belongs to, written by the server. A tip goes
-// here and nowhere else.
+// The wallet this profile belongs to, written by the server. A tip goes here
+// and nowhere else -- there is no recipient field on the page to change.
 var _tipRecipient = {{ wallet|tojson }};
+var _tipPeerId    = {{ user_id|tojson }};
 var _tipMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';   // canonical Solana USDC
 var _tipSending = false;
 
@@ -1060,22 +1137,49 @@ function _tipAmount(){
   var v = parseFloat(_tipEl('tip-amount').value);
   return (isFinite(v) && v > 0) ? v : 0;
 }
+
+// USDC is a dollar, so the dollar figure is the same number. It is shown
+// anyway because the design asks the question "how much is that?" and a
+// blank answer reads as a missing price rather than as one-to-one.
 function _tipTouched(){
-  var a = _tipAmount();
-  _tipEl('tip-receives').textContent = a.toFixed(2) + ' USDC';
+  var a = _tipAmount(), fixed = a.toFixed(2);
+  _tipEl('tip-approx').textContent = '\u2248 $' + fixed;
+  _tipEl('tip-send-val').textContent = fixed;
+  _tipEl('tip-send-usd').textContent = '\u2248 $' + fixed;
+  _tipEl('tip-submit-label').textContent = a > 0 ? ('Tip ' + (+a) + ' USDC') : 'Tip USDC';
   _tipEl('tip-submit').disabled = !(a > 0) || _tipSending;
   Array.prototype.forEach.call(document.querySelectorAll('.tip-preset'),
-    function(b){ b.classList.remove('active'); });
+    function(b){ b.classList.toggle('active', parseFloat(b.textContent.slice(1)) === a); });
 }
+
 function _tipPreset(v, btn){
   _tipEl('tip-amount').value = v;
   _tipTouched();
-  if(btn) btn.classList.add('active');
 }
+
+function _tipCount(){
+  _tipEl('tip-count').textContent = _tipEl('tip-message').value.length + '/100';
+}
+
 function _tipSay(text, ok){
   var m = _tipEl('tip-msg');
   m.textContent = text;
-  m.className = 'tip-msg ' + (ok ? 'ok' : 'err');
+  m.className = 'tip-msg-line ' + (ok ? 'ok' : 'err');
+}
+
+// The note travels as a direct message, AFTER the transfer has been
+// confirmed. A Solana transfer carries no memo here, so a message field that
+// only looked like it sent something would be decoration -- and a message
+// delivered for a tip that failed would be worse.
+function _tipSendNote(amount){
+  var note = (_tipEl('tip-message').value || '').trim();
+  if(!note || !_tipPeerId) return;
+  fetch('/api/messages/' + _tipPeerId, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','X-CSRF-Token':_csrf},
+    body: JSON.stringify({message_type:'text',
+                          message: 'Tipped ' + amount.toFixed(2) + ' USDC \u2014 ' + note})
+  }).catch(function(){ /* the money arrived; a missing note is not worth an alarm */ });
 }
 
 function _sendTip(){
@@ -1083,7 +1187,7 @@ function _sendTip(){
   if(!(amount > 0) || _tipSending) return;
   _tipSending = true;
   _tipEl('tip-submit').disabled = true;
-  _tipSay('Sending…', true);
+  _tipSay('Sending\u2026', true);
   fetch('/api/wallet/send-token', {
     method: 'POST',
     headers: {'Content-Type':'application/json','X-CSRF-Token':_csrf},
@@ -1097,13 +1201,14 @@ function _sendTip(){
     .then(function(d){
       if(d && d.ok){
         _tipSay('Sent ' + amount.toFixed(2) + ' USDC', true);
-        setTimeout(function(){ _tipSending = false; _closeTip(); }, 1400);
+        _tipSendNote(amount);
+        setTimeout(function(){ _tipSending = false; _closeTip(); }, 1500);
         return;
       }
       _tipSending = false;
       _tipEl('tip-submit').disabled = false;
       // The server's own reason, which knows whether the balance was short,
-      // the limit was hit, or the same tip was already sent a moment ago.
+      // the limit was hit, or the same tip went out a moment ago.
       _tipSay((d && (d.error || d.msg)) || 'The tip did not go through', false);
     })
     .catch(function(){
@@ -1111,7 +1216,7 @@ function _sendTip(){
       // inviting a second transfer.
       _tipSending = false;
       _tipEl('tip-submit').disabled = false;
-      _tipSay('Connection lost before an answer came back — check your wallet before sending again', false);
+      _tipSay('Connection lost before an answer came back \u2014 check your wallet before sending again', false);
     });
 }
 </script>
