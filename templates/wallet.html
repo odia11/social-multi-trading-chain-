@@ -113,6 +113,7 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
 .sol-usdc-stat span{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
 .sol-usdc-stat b{font-family:var(--mono);font-size:14px;color:var(--text)}
 .sol-usdc-btn{width:100%;border:1px solid rgba(247,185,85,.45);background:linear-gradient(180deg,#f7c568,#f7b955);color:#101216;border-radius:12px;padding:12px 14px;font:700 13px var(--ui);cursor:pointer}
+.sol-usdc-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.sol-usdc-btn.secondary{background:#15181e;color:var(--text);border-color:#2a2f38}
 .sol-usdc-note{font-size:10.5px;color:var(--muted);margin-top:9px;line-height:1.45}
 .sw-review-summary{display:none;margin:10px 0 12px;padding:12px;border:1px solid rgba(247,185,85,.2);background:rgba(247,185,85,.06);border-radius:12px}
 .sw-review-summary.show{display:block}
@@ -656,16 +657,19 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
     <div class="sol-usdc-card">
       <div class="sol-usdc-head">
         <div>
-          <div class="sol-usdc-title">Convert SOL to USDC</div>
-          <div class="sol-usdc-copy">Fund the Solana trading balance without leaving Portfolio. OrcAgent keeps 0.005 SOL aside for network fees.</div>
+          <div class="sol-usdc-title">Convert assets</div>
+          <div class="sol-usdc-copy">Swap between the native gas token and the trading stablecoin on Solana, BSC, Base, Arbitrum, Polygon or Robinhood Chain.</div>
         </div>
       </div>
       <div class="sol-usdc-balances">
         <div class="sol-usdc-stat"><span>SOL available</span><b id="convert-sol-bal">—</b></div>
         <div class="sol-usdc-stat"><span>Solana USDC</span><b id="convert-usdc-bal">—</b></div>
       </div>
-      <button class="sol-usdc-btn" onclick="openSwapModalToUsdc()">Swap SOL → USDC</button>
-      <div class="sol-usdc-note">You review the live Jupiter quote before confirming. Network costs and slippage are paid from your own funds.</div>
+      <div class="sol-usdc-actions">
+        <button class="sol-usdc-btn" onclick="_modalConvert()">Convert assets</button>
+        <button class="sol-usdc-btn secondary" onclick="_modalBridge()">Bridge USDC</button>
+      </div>
+      <div class="sol-usdc-note">Same-chain conversions use Jupiter on Solana and 0x on EVM chains. Cross-chain USDC uses the Bridge flow. You always review the live quote before confirming.</div>
     </div>
 
     <!-- combined USDC balance across every chain this app trades on -- the
@@ -1274,6 +1278,161 @@ function _execSend(){
   }).catch(function(){
     if(btn) btn.disabled=false
     _err('Network error')
+  })
+}
+
+// ── same-chain native ↔ stable convert modal ───────────────────────────────
+var _CONVERT_CHAINS=[
+  {v:'solana',label:'Solana',native:'SOL',stable:'USDC'},
+  {v:'bsc',label:'BSC',native:'BNB',stable:'USDC'},
+  {v:'base',label:'Base',native:'ETH',stable:'USDC'},
+  {v:'arbitrum',label:'Arbitrum',native:'ETH',stable:'USDC'},
+  {v:'polygon',label:'Polygon',native:'POL',stable:'USDC'},
+  {v:'robinhood',label:'Robinhood Chain',native:'ETH',stable:'USDC'}
+]
+var _convertQuote=null
+var _convertBalance=null
+
+function _convertCfg(){
+  var el=document.getElementById('cv-chain')
+  var v=el?el.value:'solana'
+  return _CONVERT_CHAINS.find(function(c){return c.v===v})||_CONVERT_CHAINS[0]
+}
+function _convertDirection(){
+  var el=document.getElementById('cv-direction')
+  return el?el.value:'native_to_stable'
+}
+function _convertOptions(selected){
+  return _CONVERT_CHAINS.map(function(c){
+    return '<option value="'+c.v+'"'+(c.v===selected?' selected':'')+'>'+c.label+'</option>'
+  }).join('')
+}
+function _modalConvert(){
+  _convertQuote=null
+  _convertBalance=null
+  _showModal(
+    '<div class="w-modal-title">Convert assets</div>'
+    +'<div class="w-modal-note" style="margin-top:0">Swap on the same chain. To move USDC between chains, use Bridge instead.</div>'
+    +'<div class="br-form-card">'
+      +'<div class="br-form-box" style="flex:1">'
+        +'<div class="br-form-box-lbl">Network</div>'
+        +'<select class="br-form-select" id="cv-chain" onchange="_convertChanged()">'+_convertOptions('solana')+'</select>'
+      +'</div>'
+      +'<div class="br-form-box" style="flex:1">'
+        +'<div class="br-form-box-lbl">Direction</div>'
+        +'<select class="br-form-select" id="cv-direction" onchange="_convertChanged()">'
+          +'<option value="native_to_stable">Native → USDC</option>'
+          +'<option value="stable_to_native">USDC → Native</option>'
+        +'</select>'
+      +'</div>'
+    +'</div>'
+    +'<div class="br-form-amount-wrap">'
+      +'<input class="br-form-amount-inp" id="cv-amount" type="number" placeholder="0.00" min="0.000001" step="any" oninput="_convertQuote=null;document.getElementById(\'cv-quote\').innerHTML=\'\'">'
+      +'<span class="br-form-amount-sym" id="cv-from-sym">SOL</span>'
+    +'</div>'
+    +'<div class="br-bal-row"><span id="cv-balance">Balance: —</span></div>'
+    +'<div class="w-modal-btns" style="margin-top:14px">'
+      +'<button class="w-modal-btn w-modal-secondary" onclick="_closeModal()">Cancel</button>'
+      +'<button class="w-modal-btn w-modal-primary" id="cv-quote-btn" onclick="_convertGetQuote()">Get Quote</button>'
+    +'</div>'
+    +'<div id="cv-quote"></div>'
+  )
+  _convertChanged()
+}
+function _convertChanged(){
+  _convertQuote=null
+  var q=document.getElementById('cv-quote'); if(q) q.innerHTML=''
+  var cfg=_convertCfg(), dir=_convertDirection()
+  var from=dir==='native_to_stable'?cfg.native:cfg.stable
+  var to=dir==='native_to_stable'?cfg.stable:cfg.native
+  var sym=document.getElementById('cv-from-sym'); if(sym) sym.textContent=from
+  var dirEl=document.getElementById('cv-direction')
+  if(dirEl){
+    dirEl.options[0].text=cfg.native+' → '+cfg.stable
+    dirEl.options[1].text=cfg.stable+' → '+cfg.native
+  }
+  _convertLoadBalance()
+}
+function _convertLoadBalance(){
+  var cfg=_convertCfg(), dir=_convertDirection()
+  var txt=document.getElementById('cv-balance')
+  if(!txt) return
+  txt.textContent='Balance: …'
+  if(cfg.v==='solana'){
+    var native=parseFloat((document.getElementById('sol')||{}).textContent||0)
+    var stable=_usdcSummaryCache?parseFloat(_usdcSummaryCache.solana_usdc||0):0
+    _convertBalance=dir==='native_to_stable'?native:stable
+    txt.textContent='Balance: '+_convertBalance.toFixed(4)+' '+(dir==='native_to_stable'?'SOL':'USDC')
+    return
+  }
+  fetch('/api/evm/'+cfg.v+'/balance',{credentials:'include'})
+    .then(function(r){return r.json()})
+    .then(function(d){
+      if(!d.ok) throw new Error(d.msg||'balance unavailable')
+      var native=parseFloat(d.native_balance||0), stable=parseFloat(d.usdc||0)
+      _convertBalance=dir==='native_to_stable'?native:stable
+      txt.textContent='Balance: '+_convertBalance.toFixed(6)+' '+(dir==='native_to_stable'?cfg.native:cfg.stable)
+    })
+    .catch(function(){txt.textContent='Balance: unavailable'})
+}
+function _convertGetQuote(){
+  var cfg=_convertCfg(), dir=_convertDirection()
+  var amount=parseFloat((document.getElementById('cv-amount')||{}).value)||0
+  var out=document.getElementById('cv-quote')
+  if(!(amount>0)){out.innerHTML='<div class="w-modal-note" style="color:var(--red)">Enter an amount greater than 0.</div>';return}
+  if(_convertBalance!=null&&amount>_convertBalance+1e-12){
+    out.innerHTML='<div class="w-modal-note" style="color:var(--red)">Amount exceeds your available balance.</div>';return
+  }
+  var btn=document.getElementById('cv-quote-btn')
+  btn.disabled=true;btn.textContent='Getting quote…'
+  out.innerHTML='<div class="w-modal-note">Fetching live quote…</div>'
+  var qs=new URLSearchParams({chain:cfg.v,direction:dir,amount:amount})
+  fetch('/api/wallet/convert/quote?'+qs.toString(),{credentials:'include'})
+    .then(function(r){return r.json()})
+    .then(function(d){
+      if(!d.ok){out.innerHTML='<div class="w-modal-note" style="color:var(--red)">'+esc(d.msg||'Quote unavailable')+'</div>';return}
+      _convertQuote={chain:cfg.v,direction:dir,amount:amount,from_symbol:d.from_symbol,to_symbol:d.to_symbol}
+      var min=d.min_out_amount>0?parseFloat(d.min_out_amount).toFixed(6):'—'
+      var receive=parseFloat(d.out_amount||0).toFixed(6)
+      var impact=(parseFloat(d.price_impact_pct||0)*100).toFixed(3)+'%'
+      var reserve=d.network_reserve_native>0
+        ?parseFloat(d.network_reserve_native).toFixed(6)+' '+cfg.native
+        :'—'
+      out.innerHTML=
+        '<div class="w-modal-label" style="margin-top:16px">REVIEW</div>'
+        +'<div class="br-quote-card">'
+          +'<div class="br-quote-row"><span class="br-quote-row-lbl">You send</span><span class="br-quote-row-val">'+amount+' '+esc(d.from_symbol)+'</span></div>'
+          +'<div class="br-quote-row"><span class="br-quote-row-lbl">Expected</span><span class="br-quote-row-val accent">≈ '+receive+' '+esc(d.to_symbol)+'</span></div>'
+          +'<div class="br-quote-row"><span class="br-quote-row-lbl">Minimum received</span><span class="br-quote-row-val">'+min+' '+esc(d.to_symbol)+'</span></div>'
+          +'<div class="br-quote-row"><span class="br-quote-row-lbl">Price impact</span><span class="br-quote-row-val">'+impact+'</span></div>'
+          +'<div class="br-quote-row"><span class="br-quote-row-lbl">Network reserve</span><span class="br-quote-row-val">'+reserve+'</span></div>'
+        +'</div>'
+        +'<div class="w-modal-note">Network fees are paid from your own wallet. OrcAgent does not advance funds for this conversion.</div>'
+        +'<div class="w-modal-btns"><button class="w-modal-btn w-modal-primary" onclick="_convertConfirm()">Confirm '+esc(d.from_symbol)+' → '+esc(d.to_symbol)+'</button></div>'
+    })
+    .catch(function(){out.innerHTML='<div class="w-modal-note" style="color:var(--red)">Network error — try again</div>'})
+    .finally(function(){btn.disabled=false;btn.textContent='Get Quote'})
+}
+function _convertConfirm(){
+  if(!_convertQuote) return
+  var out=document.getElementById('cv-quote')
+  out.innerHTML='<div class="w-modal-note">Signing and submitting…</div>'
+  fetch('/api/wallet/convert',{
+    method:'POST',credentials:'include',
+    headers:{'Content-Type':'application/json','X-CSRF-Token':_csrf},
+    body:JSON.stringify(_convertQuote)
+  }).then(function(r){return r.json()}).then(function(d){
+    if(!d.ok){
+      out.innerHTML='<div class="w-modal-note" style="color:var(--red)">'+esc(d.msg||'Conversion failed')+'</div>'
+      return
+    }
+    _wToast('✓ Conversion confirmed',true)
+    _closeModal()
+    setTimeout(function(){
+      loadBalance();loadUsdcSummary();loadTokens(true);_loadActivity()
+    },1500)
+  }).catch(function(){
+    out.innerHTML='<div class="w-modal-note" style="color:var(--red)">Network error — check your activity before retrying.</div>'
   })
 }
 

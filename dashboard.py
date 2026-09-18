@@ -20161,6 +20161,239 @@ def api_swap_quote():
         return jsonify({'ok': False, 'msg': str(e)[:150]}), 502
 
 
+
+@app.route('/api/wallet/convert/quote', methods=['GET'])
+@rate_limit(30, 60)
+def api_wallet_convert_quote():
+    """Read-only live quote for same-chain native <-> stable conversions."""
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'msg': 'Not authenticated'}), 401
+
+    chain = str(request.args.get('chain', 'solana')).strip().lower()
+    direction = str(request.args.get('direction', '')).strip().lower()
+    if chain != 'solana' and chain not in EVM_CHAINS:
+        return jsonify({'ok': False, 'msg': f'Unsupported chain {chain!r}'}), 400
+    if direction not in ('native_to_stable', 'stable_to_native'):
+        return jsonify({'ok': False, 'msg': 'Invalid conversion direction'}), 400
+    try:
+        amount = float(request.args.get('amount', 0) or 0)
+    except (TypeError, ValueError):
+        amount = 0.0
+    if not math.isfinite(amount) or amount <= 0:
+        return jsonify({'ok': False, 'msg': 'Enter an amount greater than 0'}), 400
+
+    try:
+        if chain == 'solana':
+            input_mint = SOL_MINT if direction == 'native_to_stable' else USDC_MINT
+            output_mint = USDC_MINT if direction == 'native_to_stable' else SOL_MINT
+            input_decimals = 9 if input_mint == SOL_MINT else 6
+            output_decimals = 9 if output_mint == SOL_MINT else 6
+            amount_raw = int(amount * (10 ** input_decimals))
+            jup_url = (JUPITER_PROXY + '/quote') if JUPITER_PROXY else 'https://api.jup.ag/swap/v1/quote'
+            headers = {'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 OrcAgent/1.0'}
+            if PROXY_SECRET:
+                headers['X-Proxy-Secret'] = PROXY_SECRET
+            r = requests.get(jup_url, params={
+                'inputMint': input_mint,
+                'outputMint': output_mint,
+                'amount': amount_raw,
+                'slippageBps': 300,
+            }, headers=headers, timeout=10)
+            if r.status_code != 200:
+                return jsonify({'ok': False, 'msg': f'Quote unavailable (HTTP {r.status_code})'}), 502
+            q = r.json()
+            out_raw = int(q.get('outAmount', 0) or 0)
+            min_raw = int(q.get('otherAmountThreshold', 0) or 0)
+            if out_raw <= 0:
+                return jsonify({'ok': False, 'msg': 'No route found'}), 502
+            return jsonify({
+                'ok': True,
+                'chain': chain,
+                'direction': direction,
+                'from_symbol': 'SOL' if direction == 'native_to_stable' else 'USDC',
+                'to_symbol': 'USDC' if direction == 'native_to_stable' else 'SOL',
+                'out_amount': out_raw / (10 ** output_decimals),
+                'min_out_amount': (min_raw / (10 ** output_decimals)) if min_raw > 0 else 0,
+                'price_impact_pct': float(q.get('priceImpactPct', 0) or 0),
+                'slippage_bps': 300,
+                'network_reserve_native': SOL_NETWORK_RESERVE,
+            })
+
+        cfg = EVM_CHAINS[chain]
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            row = conn.execute(
+                'SELECT bsc_wallet_address FROM users WHERE wallet_address=?',
+                (wallet,)
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row or not row[0]:
+            return jsonify({'ok': False, 'msg': 'No EVM trading wallet configured'}), 400
+        evm_address = row[0]
+
+        w3 = _get_web3(chain)
+        stable_contract = w3.eth.contract(
+            address=w3.to_checksum_address(cfg['usdc']), abi=_ERC20_MIN_ABI)
+        stable_decimals = int(stable_contract.functions.decimals().call())
+        if direction == 'native_to_stable':
+            sell_token, buy_token = BNB_NATIVE_ADDR, cfg['usdc']
+            sell_raw = int(amount * (10 ** 18))
+            out_decimals = stable_decimals
+        else:
+            sell_token, buy_token = cfg['usdc'], BNB_NATIVE_ADDR
+            sell_raw = int(amount * (10 ** stable_decimals))
+            out_decimals = 18
+
+        quote = _get_0x_quote(
+            sell_token, buy_token, sell_raw,
+            w3.to_checksum_address(evm_address), chain)
+        out_raw = int(quote.get('buyAmount', 0) or 0)
+        min_raw = int(quote.get('minBuyAmount', 0) or 0)
+        if out_raw <= 0:
+            return jsonify({'ok': False, 'msg': 'No route found'}), 502
+        gas_reserve = float(w3.from_wei(
+            w3.eth.gas_price * GAS_CONVERT_RESERVE_UNITS, 'ether'))
+        return jsonify({
+            'ok': True,
+            'chain': chain,
+            'direction': direction,
+            'from_symbol': cfg['native_symbol'] if direction == 'native_to_stable' else user_currency_label(chain),
+            'to_symbol': user_currency_label(chain) if direction == 'native_to_stable' else cfg['native_symbol'],
+            'out_amount': out_raw / (10 ** out_decimals),
+            'min_out_amount': (min_raw / (10 ** out_decimals)) if min_raw > 0 else 0,
+            'price_impact_pct': float(quote.get('priceImpactPct', 0) or 0),
+            'network_reserve_native': gas_reserve,
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'msg': _redact_keys(str(e))[:180]}), 502
+
+
+@app.route('/api/wallet/convert', methods=['POST'])
+@rate_limit(5, 60)
+def api_wallet_convert():
+    """User-confirmed same-chain native <-> stable conversion."""
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'msg': 'Not authenticated'}), 401
+    data = request.get_json(silent=True) or {}
+    chain = str(data.get('chain', 'solana')).strip().lower()
+    direction = str(data.get('direction', '')).strip().lower()
+    if chain != 'solana' and chain not in EVM_CHAINS:
+        return jsonify({'ok': False, 'msg': f'Unsupported chain {chain!r}'}), 400
+    if direction not in ('native_to_stable', 'stable_to_native'):
+        return jsonify({'ok': False, 'msg': 'Invalid conversion direction'}), 400
+    try:
+        amount = float(data.get('amount', 0) or 0)
+    except (TypeError, ValueError):
+        amount = 0.0
+    if not math.isfinite(amount) or amount <= 0:
+        return jsonify({'ok': False, 'msg': 'Enter an amount greater than 0'}), 400
+
+    if chain == 'solana':
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            row = conn.execute(
+                'SELECT encrypted_private_key FROM users WHERE wallet_address=?',
+                (wallet,)
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row or not row[0]:
+            return jsonify({'ok': False, 'msg': 'No Solana trading wallet configured'}), 400
+        enc_blob = row[0]
+        fetch_user_balances(wallet)
+        current_sol = float(get_user_state(wallet).get('sol', 0) or 0)
+        trading_wallet = _get_trading_wallet_address(wallet) or wallet
+
+        if direction == 'native_to_stable':
+            max_convert = max(0.0, current_sol - SOL_NETWORK_RESERVE)
+            if amount > max_convert + 1e-9:
+                return jsonify({'ok': False, 'msg':
+                    f'Keep at least {SOL_NETWORK_RESERVE:.3f} SOL for network fees. '
+                    f'Maximum now: {max_convert:.6f} SOL'}), 400
+            with _use_key(enc_blob, wallet) as pk:
+                ok, sig, err, received, spent = _execute_user_swap_ex(
+                    wallet, pk, 'buy', USDC_MINT, str(amount), base='SOL')
+            from_sym, to_sym = 'SOL', 'USDC'
+            amount_out = received
+        else:
+            usdc_bal = _get_solana_usdc_balance(trading_wallet)
+            if amount > usdc_bal + 1e-9:
+                return jsonify({'ok': False, 'msg':
+                    f'Not enough USDC — available {usdc_bal:.2f}'}), 400
+            if current_sol < SOL_NETWORK_RESERVE:
+                return jsonify({'ok': False, 'msg':
+                    f'At least {SOL_NETWORK_RESERVE:.3f} SOL is needed for network fees before converting USDC to SOL'}), 400
+            with _use_key(enc_blob, wallet) as pk:
+                ok, sig, err, sold_amount, received_sol = _execute_user_swap_ex(
+                    wallet, pk, 'sell', USDC_MINT, str(amount), base='SOL')
+            from_sym, to_sym = 'USDC', 'SOL'
+            amount_out = received_sol
+        if not ok or not sig:
+            return jsonify({'ok': False, 'msg': (err or 'Conversion failed')[-200:]}), 502
+        _log_security_event('wallet_convert', wallet,
+                            f'{chain}:{direction} amount={amount} tx={sig[:16]}...')
+        add_user_log(wallet, f'Converted {amount:.6f} {from_sym} to {to_sym}')
+        return jsonify({'ok': True, 'chain': chain, 'direction': direction,
+                        'from_symbol': from_sym, 'to_symbol': to_sym,
+                        'amount_in': amount, 'amount_out': amount_out,
+                        'tx_hash': sig})
+
+    cfg = EVM_CHAINS[chain]
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        row = conn.execute(
+            'SELECT encrypted_private_key_bsc, bsc_wallet_address FROM users WHERE wallet_address=?',
+            (wallet,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row or not row[0] or not row[1]:
+        return jsonify({'ok': False, 'msg': 'No EVM trading wallet configured'}), 400
+    enc_blob, evm_address = row
+    try:
+        w3 = _get_web3(chain)
+        native_bal = get_evm_native_balance(evm_address, chain)
+        stable_bal = get_evm_usdc_balance(evm_address, chain)
+        reserve_native = float(w3.from_wei(
+            w3.eth.gas_price * GAS_CONVERT_RESERVE_UNITS, 'ether'))
+    except Exception as e:
+        return jsonify({'ok': False, 'msg': f'Balance check failed: {_redact_keys(str(e))[:140]}'}), 502
+
+    native_symbol = cfg['native_symbol']
+    stable_label = user_currency_label(chain)
+    with _use_key(enc_blob, wallet) as pk:
+        if direction == 'native_to_stable':
+            max_convert = max(0.0, native_bal - reserve_native)
+            if amount > max_convert + 1e-12:
+                return jsonify({'ok': False, 'msg':
+                    f'Keep enough {native_symbol} for network fees. Maximum now: {max_convert:.8f} {native_symbol}'}), 400
+            ok, err, tx_hash = _execute_evm_native_to_usdc(
+                wallet, pk, chain, amount)
+            from_sym, to_sym = native_symbol, stable_label
+        else:
+            if amount > stable_bal + 1e-9:
+                return jsonify({'ok': False, 'msg':
+                    f'Not enough {stable_label} — available {stable_bal:.2f}'}), 400
+            if native_bal <= 0:
+                return jsonify({'ok': False, 'msg':
+                    f'A small amount of {native_symbol} is needed to pay the network fee for this conversion'}), 400
+            ok, err, tx_hash = _execute_evm_gas_topup(
+                wallet, pk, chain, amount)
+            from_sym, to_sym = stable_label, native_symbol
+    if not ok or not tx_hash:
+        return jsonify({'ok': False, 'msg': err or 'Conversion failed'}), 502
+    _log_security_event('wallet_convert', wallet,
+                        f'{chain}:{direction} amount={amount} tx={tx_hash[:16]}...')
+    add_user_log(wallet, f'Converted {amount:.6f} {from_sym} to {to_sym} on {chain}')
+    return jsonify({'ok': True, 'chain': chain, 'direction': direction,
+                    'from_symbol': from_sym, 'to_symbol': to_sym,
+                    'amount_in': amount, 'tx_hash': tx_hash})
+
+
+
 @app.route('/api/wallet/convert-sol-usdc', methods=['POST'])
 @rate_limit(5, 60)
 def api_wallet_convert_sol_usdc():
