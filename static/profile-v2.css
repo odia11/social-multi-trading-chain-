@@ -43,8 +43,8 @@
 .oa-profile-v2 .pf-meta-sep{color:#353a43}
 .oa-profile-v2 .pf-follows-you{padding:4px 9px;border:1px solid var(--pf-line);border-radius:999px;background:var(--pf-surface-2);color:#9299a4;font-size:10px}
 .oa-profile-v2 .pf-bio-text{margin:0 0 14px;max-width:610px;color:#abb1ba;font-size:14px;line-height:1.55}
-.oa-profile-v2 .pf-action-row{display:flex;gap:8px;margin:0 0 18px;flex-wrap:nowrap}
-.oa-profile-v2 .pf-btn-primary,.oa-profile-v2 .pf-btn-secondary,.oa-profile-v2 .pf-btn-icon{min-height:42px;border-radius:11px;font-family:inherit;transition:.16s ease}
+.oa-profile-v2 .pf-action-row{display:flex;gap:8px;margin:0 0 18px;flex-wrap:wrap}
+.oa-profile-v2 .pf-btn-primary,.oa-profile-v2 .pf-btn-secondary,.oa-profile-v2 .pf-btn-tip,.oa-profile-v2 .pf-btn-icon{min-height:42px;border-radius:11px;font-family:inherit;transition:.16s ease}
 .oa-profile-v2 .pf-btn-primary{padding:9px 18px;border:1px solid rgba(247,185,85,.52);background:rgba(247,185,85,.08);color:var(--pf-gold)}
 .oa-profile-v2 .pf-btn-primary[data-following="false"]{background:var(--pf-gold);color:#090b0e;border-color:var(--pf-gold)}
 .oa-profile-v2 .pf-btn-primary:hover{border-color:var(--pf-gold);opacity:1;transform:translateY(-1px)}
@@ -102,7 +102,7 @@
   .oa-profile-v2 .pf-display-name{font-size:24px}
   .oa-profile-v2 .pf-meta-row{row-gap:6px}
   .oa-profile-v2 .pf-action-row{width:100%}
-  .oa-profile-v2 .pf-btn-primary,.oa-profile-v2 .pf-btn-secondary{padding-inline:14px;flex:1;justify-content:center;min-width:0}
+  .oa-profile-v2 .pf-btn-primary,.oa-profile-v2 .pf-btn-secondary,.oa-profile-v2 .pf-btn-tip{padding-inline:14px;flex:1 1 132px;justify-content:center;min-width:0}
   .oa-profile-v2 .pf-btn-icon{flex:0 0 42px}
   .oa-profile-v2 .pf-follow-row{margin-inline:4px}
   .oa-profile-v2 .pf-follow-item{padding:13px 4px;flex-direction:column;align-items:center;gap:1px}
@@ -121,7 +121,7 @@
 
 @media (max-width:380px){
   .oa-profile-v2 .pf-main{padding-inline:10px}
-  .oa-profile-v2 .pf-btn-primary,.oa-profile-v2 .pf-btn-secondary{font-size:12px;padding-inline:10px}
+  .oa-profile-v2 .pf-btn-primary,.oa-profile-v2 .pf-btn-secondary,.oa-profile-v2 .pf-btn-tip{font-size:12px;padding-inline:10px;flex-basis:118px}
   .oa-profile-v2 .pf-tile{padding-inline:7px}
   .oa-profile-v2 .pf-tile-val{font-size:16px}
 }
