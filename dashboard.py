@@ -44,7 +44,7 @@ except ImportError:
     _COMPRESS_OK = False
 from contextlib import contextmanager
 from flask import Flask, jsonify, request, session, render_template, redirect, make_response, send_from_directory, g
-from markupsafe import Markup
+from markupsafe import Markup, escape
 import gzip
 import shutil
 import traceback
@@ -2182,16 +2182,29 @@ def init_db():
     # Every user must have a visible avatar everywhere in OrcAgent.
     # Existing/null avatars are backfilled to the standard OrcAgent avatar,
     # and triggers keep new users / removed avatars on the same fallback.
-    _default_user_avatar = '/static/orcagent-default-avatar.svg'
-    c.execute("UPDATE users SET avatar_url=? WHERE avatar_url IS NULL OR TRIM(avatar_url)='' OR avatar_url='/static/icon-180.png?v=6'", (_default_user_avatar,))
+
+    # Users without a custom photo use a dynamic dark/gold initials avatar.
+    # Username wins (CJ -> CJ); otherwise use the first two wallet characters.
+    c.execute("""UPDATE users
+                 SET avatar_url='/avatar/default/' || wallet_address
+                 WHERE avatar_url IS NULL OR TRIM(avatar_url)=''
+                    OR avatar_url='/static/icon-180.png?v=6'
+                    OR avatar_url='/static/orcagent-default-avatar.svg'
+                    OR avatar_url LIKE '/avatar/default/%'""")
     c.execute('DROP TRIGGER IF EXISTS trg_users_default_avatar_insert')
     c.execute('DROP TRIGGER IF EXISTS trg_users_default_avatar_update')
-    c.execute('''CREATE TRIGGER trg_users_default_avatar_insert
+    c.execute("""CREATE TRIGGER trg_users_default_avatar_insert
                  AFTER INSERT ON users
                  WHEN NEW.avatar_url IS NULL OR TRIM(NEW.avatar_url)=''
                  BEGIN
-                   UPDATE users SET avatar_url='/static/orcagent-default-avatar.svg' WHERE id=NEW.id;
-                 END''')
+                   UPDATE users SET avatar_url='/avatar/default/' || NEW.wallet_address WHERE id=NEW.id;
+                 END""")
+    c.execute("""CREATE TRIGGER trg_users_default_avatar_update
+                 AFTER UPDATE OF avatar_url ON users
+                 WHEN NEW.avatar_url IS NULL OR TRIM(NEW.avatar_url)=''
+                 BEGIN
+                   UPDATE users SET avatar_url='/avatar/default/' || NEW.wallet_address WHERE id=NEW.id;
+                 END""")
     c.execute('''CREATE TRIGGER trg_users_default_avatar_update
                  AFTER UPDATE OF avatar_url ON users
                  WHEN NEW.avatar_url IS NULL OR TRIM(NEW.avatar_url)=''
@@ -18734,6 +18747,37 @@ def save_username():
         conn.close()
     return jsonify({'ok': True, 'username': username})
 
+# ── DEFAULT USER AVATAR ──
+@app.route('/avatar/default/<wallet>', methods=['GET'])
+def default_user_avatar(wallet):
+    wallet = str(wallet or '').strip()
+    username = ''
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        row = conn.execute(
+            'SELECT COALESCE(username, "") FROM users WHERE wallet_address=?',
+            (wallet,)
+        ).fetchone()
+        conn.close()
+        username = str(row[0] or '').strip() if row else ''
+    except Exception:
+        username = ''
+
+    source = username or wallet or 'OA'
+    initials = source[:2].upper()
+    safe = str(escape(initials))
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="User avatar">
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#252a32"/><stop offset="1" stop-color="#11151b"/></linearGradient></defs>
+<circle cx="64" cy="64" r="62" fill="url(#bg)" stroke="#f7b955" stroke-opacity=".72" stroke-width="4"/>
+<circle cx="64" cy="64" r="54" fill="none" stroke="#f7b955" stroke-opacity=".18" stroke-width="2"/>
+<text x="64" y="69" text-anchor="middle" dominant-baseline="middle" fill="#f7b955" font-family="Arial,Helvetica,sans-serif" font-size="40" font-weight="700">{safe}</text>
+</svg>"""
+    resp = make_response(svg)
+    resp.headers['Content-Type'] = 'image/svg+xml; charset=utf-8'
+    resp.headers['Cache-Control'] = 'private, max-age=60'
+    return resp
+
+
 # ── AVATAR ──
 @app.route('/api/avatar', methods=['POST'])
 @rate_limit(10, 60)
@@ -18769,7 +18813,8 @@ def save_avatar():
         conn.commit()
     finally:
         conn.close()
-    return jsonify({'ok': True, 'avatar_url': avatar_data})
+    effective_avatar = avatar_data or f'/avatar/default/{wallet}'
+    return jsonify({'ok': True, 'avatar_url': effective_avatar})
 
 # ── PROFILE BANNER ──
 @app.route('/api/banner', methods=['POST'])
