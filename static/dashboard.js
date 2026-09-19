@@ -649,11 +649,15 @@ function _faceIdPossible(){
 
 function _prepareSettingsPasskey(){
   var panel=document.getElementById('st-passkey-settings');
-  if(!panel || !phantomKey) return;
+  if(!panel) return;
+  panel.style.display='block';
+  if(!phantomKey) return;
   _faceIdPossible().then(function(can){
-    if(!phantomKey) return;
-    panel.style.display=can?'block':'none';
     if(can) _prefetchPasskeyOptions(); // before the user taps Setup
+    else {
+      var msg=document.getElementById('st-passkey-msg');
+      if(msg) msg.textContent='Passkey unavailable here; try Safari on orcagent.fun.';
+    }
   });
 }
 function _setupSettingsPasskey(){
@@ -1524,6 +1528,10 @@ async function launchApp(){
   document.getElementById('onboard').classList.add('hide');
   document.getElementById('app').style.display='block';
   if(/^#post-[pt]\d+$/.test(location.hash)) _handleNotifDeepLink();
+  if(location.hash==='#settings'){
+    history.replaceState(null,'',location.pathname+location.search);
+    _sbNav('settings');
+  }
   const _spos=document.getElementById('s-pos'); if(_spos) _spos.textContent='0/5';
   if(phantomKey){
     const _dsb=document.getElementById('deposit-sol-btn'); if(_dsb) _dsb.style.display='';

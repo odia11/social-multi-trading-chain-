@@ -14700,31 +14700,12 @@ def referrals_page():
 
 @app.route('/settings')
 def settings_page():
+    # Use the current dashboard Settings, including account passkeys and
+    # optional app lock. The legacy settings.html is missing that UI.
     wallet = _authenticated_wallet()
     if not wallet:
-        return redirect('/?connect=1')
-    wallet_short = (wallet[:4] + '...' + wallet[-4:]) if len(wallet) >= 8 else wallet
-    x_handle = x_share_trade = x_share_badge = None
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        xrow = conn.execute(
-            'SELECT x_handle, share_on_big_trade, share_on_badge FROM x_connections WHERE wallet_address=?',
-            (wallet,)
-        ).fetchone()
-        if xrow:
-            x_handle, x_share_trade, x_share_badge = xrow[0], bool(xrow[1]), bool(xrow[2])
-    finally:
-        conn.close()
-    return _render_no_cache(
-        'settings.html',
-        wallet=wallet,
-        wallet_short=wallet_short,
-        is_admin=_is_owner(wallet),
-        csrf_token=_get_csrf_token(),
-        x_handle=x_handle,
-        x_share_trade=x_share_trade,
-        x_share_badge=x_share_badge,
-    )
+        return redirect('/?connect=1#settings')
+    return redirect('/#settings')
 
 
 @app.route('/promote')
