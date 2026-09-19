@@ -797,7 +797,7 @@ async function _setupFaceID(opts){
     } else if(e.name === 'InvalidStateError'){
       // Not a failure: this device already has one. Saying so and recording
       // it locally beats telling somebody to try something they have done.
-      _show('A passkey already exists on this device. Use Unlock with passkey to sign in.',true);
+      _show('A passkey may already be saved in Apple Passwords, but OrcAgent has not confirmed it. Open Apple Passwords → Passkeys → orcagent.fun, remove ONLY the incomplete OrcAgent passkey, then try Set up passkey again.',false);
     } else if(e.name === 'SecurityError'){
       _show('Face ID cannot be set up from this address. Open OrcAgent at '
             + 'orcagent.fun and try again.', false);

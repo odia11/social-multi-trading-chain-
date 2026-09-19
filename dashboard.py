@@ -2566,6 +2566,15 @@ def init_db():
         FOREIGN KEY (user_id) REFERENCES users(id)
     )''')
     c.execute('CREATE INDEX IF NOT EXISTS idx_webauthn_cred ON webauthn_credentials(credential_id)')
+    # Registration challenges must survive concurrent Flask cookie writes
+    # while iOS is showing the Apple Passwords / Face ID sheet.
+    c.execute('''CREATE TABLE IF NOT EXISTS webauthn_registration_challenges (
+        challenge_hash TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        wallet_address TEXT NOT NULL,
+        created_at REAL NOT NULL
+    )''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_web_reg_chal_created ON webauthn_registration_challenges(created_at)')
     # Per-account opt-in app-screen lock; OFF unless explicitly enabled.
     c.execute('''CREATE TABLE IF NOT EXISTS app_lock_preferences (
         wallet_address TEXT PRIMARY KEY,
@@ -17317,6 +17326,58 @@ def _webauthn_expected_origins():
     return list(_CORS_ALLOWLIST)
 
 _WEBAUTHN_CHALLENGE_TTL_S = 120  # generous slack for a biometric prompt to complete
+_WEBAUTHN_REGISTRATION_TTL_S = 600  # Apple Passwords setup / first-time Face ID can take minutes
+
+
+def _store_webauthn_registration_challenge(challenge_bytes, user_id, wallet):
+    import hashlib
+    digest = hashlib.sha256(challenge_bytes).hexdigest()
+    with sqlite3.connect(DB_FILE, timeout=10) as conn:
+        conn.execute('DELETE FROM webauthn_registration_challenges WHERE created_at < ?',
+                     (time.time() - _WEBAUTHN_REGISTRATION_TTL_S,))
+        conn.execute(
+            '''INSERT OR REPLACE INTO webauthn_registration_challenges
+               (challenge_hash, user_id, wallet_address, created_at) VALUES (?,?,?,?)''',
+            (digest, user_id, wallet, time.time()))
+
+
+def _consume_webauthn_registration_challenge(credential, user_id, wallet):
+    import hashlib
+    # Client data is untrusted until verify_registration_response validates
+    # the challenge, RP, origin, user verification, and attestation. It serves
+    # only as a lookup key for this user's one-time DB challenge.
+    try:
+        client_data = (credential.get('response') or {}).get('clientDataJSON') or ''
+        raw = _webauthn.base64url_to_bytes(client_data)
+        decoded = json.loads(raw.decode('utf-8'))
+        if decoded.get('type') != 'webauthn.create':
+            return None
+        challenge = _webauthn.base64url_to_bytes(decoded['challenge'])
+        digest = hashlib.sha256(challenge).hexdigest()
+    except (ValueError, TypeError, KeyError, UnicodeDecodeError):
+        return None
+    conn = sqlite3.connect(DB_FILE, timeout=10, isolation_level=None)
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        row = conn.execute(
+            '''SELECT created_at FROM webauthn_registration_challenges
+               WHERE challenge_hash=? AND user_id=? AND wallet_address=?''',
+            (digest, user_id, wallet)).fetchone()
+        if not row:
+            conn.rollback()
+            return None
+        conn.execute('DELETE FROM webauthn_registration_challenges WHERE challenge_hash=?',
+                     (digest,))
+        conn.commit()
+        if time.time() - row[0] > _WEBAUTHN_REGISTRATION_TTL_S:
+            return None
+        return challenge
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
 
 def _webauthn_store_challenge(session_key, challenge_bytes):
     session[session_key] = {'c': _webauthn.helpers.bytes_to_base64url(challenge_bytes), 't': time.time()}
@@ -17373,7 +17434,7 @@ def webauthn_register_options():
         ),
         exclude_credentials=exclude or None,
     )
-    _webauthn_store_challenge('webauthn_reg_challenge', options.challenge)
+    _store_webauthn_registration_challenge(options.challenge, user_id, wallet)
     return _webauthn.options_to_json(options), 200, {'Content-Type': 'application/json'}
 
 @app.route('/api/auth/webauthn/register', methods=['POST'])
@@ -17387,11 +17448,11 @@ def webauthn_register():
     if not user_id or not wallet:
         return jsonify({'success': False, 'msg': 'Login required before setting up Face ID'}), 401
 
-    challenge = _webauthn_pop_challenge('webauthn_reg_challenge')
+    body = request.get_json(silent=True) or {}
+    challenge = _consume_webauthn_registration_challenge(body, user_id, wallet)
     if not challenge:
-        return jsonify({'success': False, 'msg': 'Registration expired — please try again'}), 400
-
-    body = request.json or {}
+        return jsonify({'success': False,
+                        'msg': 'Registration expired or already used — please try again'}), 400
     try:
         verification = _webauthn.verify_registration_response(
             credential=body,
