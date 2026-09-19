@@ -3720,6 +3720,7 @@ if (window.__SESSION_WALLET) {
     <div id="s-faceid-prompt" style="display:none;margin-top:14px;padding:14px 16px;background:rgba(247,185,85,.07);border:1px solid rgba(247,185,85,.22);border-radius:10px">
       <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>Sign in faster with a passkey?</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.5">Next time, unlock with Face ID, fingerprint or your device screen lock.</div>
+      <div style="font-size:11px;color:#f7b955;line-height:1.5;margin-bottom:12px">On iPhone, save the passkey in Apple Passwords / iCloud Keychain, not Microsoft Authenticator.</div>
       <div style="display:flex;gap:8px">
         <button id="s-faceid-prompt-btn" onclick="_setupFaceID()" style="flex:1;padding:10px;background:var(--accent);color:#0a0b0e;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;transition:opacity .15s">Set up passkey</button>
         <button onclick="document.getElementById('s-faceid-prompt').style.display='none'" style="padding:10px 16px;background:var(--bg3);border:1px solid var(--border2);border-radius:7px;color:var(--muted);font-size:12px;cursor:pointer">Maybe later</button>
@@ -4692,6 +4693,7 @@ __IMAGE_LIGHTBOX__
         <div id="st-passkey-settings" style="display:none;margin-top:15px;padding:14px;border:1px solid rgba(247,185,85,.26);border-radius:12px;background:rgba(247,185,85,.06)">
           <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:5px">Secure device unlock</div>
           <div style="font-size:11.5px;color:var(--muted);line-height:1.5;margin-bottom:11px">Sign in with Face ID, fingerprint or your device screen lock. You can add a passkey for this device without changing your wallet.</div>
+          <div style="font-size:11.5px;color:#f7b955;line-height:1.5;margin-bottom:11px">iPhone: choose Apple Passwords / iCloud Keychain when saving your passkey. Microsoft Authenticator may not support OrcAgent passkeys. Go to iPhone Settings → General → AutoFill &amp; Passwords → enable Passwords (and turn off Authenticator as the passkey provider if it keeps opening). Then try again.</div>
           <button type="button" id="st-passkey-btn" onclick="_setupSettingsPasskey()" style="min-height:44px;width:100%;border:0;border-radius:9px;background:var(--accent);color:#0a0b0e;font-weight:700">Set up passkey</button>
           <div id="st-passkey-msg" aria-live="polite" style="min-height:16px;font-size:11px;margin-top:8px;color:var(--muted)"></div>
         </div>
