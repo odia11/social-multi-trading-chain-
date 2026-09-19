@@ -7932,26 +7932,25 @@ function _renderTradeTerminalCard(t){
       + ' style="display:none;font-size:11px;margin-top:6px;padding-top:6px;'
       + 'border-top:1px solid #1a1f2e;line-height:1.5"></div>';
   }
-  return '<div data-mint="'+esc(t.token_address||'')+'" style="position:relative;overflow:hidden;background:#0d1117;border:1px solid #1a1f2e;border-radius:10px;padding:14px 16px;margin:8px 0 10px;font-family:\'JetBrains Mono\',monospace;cursor:pointer" onclick="event.stopPropagation();showTokenCard('+symJs+','+mintJs+')">'
-    +'<div data-cc="banner" class="tc-banner" style="position:absolute;inset:0;background-size:cover;background-position:center"></div>'
-    +'<div style="position:absolute;inset:0;background:linear-gradient(to bottom,rgba(13,17,23,0.55),rgba(13,17,23,0.92))"></div>'
-    +'<div style="position:relative;z-index:1">'
-    +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
-    +'<div style="flex:1;min-width:0">'
-    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">'
-    +'<span style="color:'+sideCol+';font-weight:700;font-size:11px;border:1px solid '+sideCol+'33;border-radius:4px;padding:1px 5px">'+(isBuy?'BUY':'SELL')+'</span>'
-    +'<span style="color:#eef1f5;font-weight:700;font-size:15px">$'+sym+'</span>'
-    +dur
+  // One complete card shared by the composer and the published feed.
+  // Keep every value in normal layout flow; the percentage cannot cover prices.
+  return '<div class="oa-home-trade-card" data-mint="'+esc(t.token_address||'')+'" role="link" tabindex="0" onclick="event.stopPropagation();showTokenCard('+symJs+','+mintJs+')" >'
+    +'<div data-cc="banner" class="tc-banner oa-home-trade-banner"></div>'
+    +'<div class="oa-home-trade-shade"></div>'
+    +'<div class="oa-home-trade-content">'
+      +'<div class="oa-home-trade-title">'
+        +'<span class="oa-home-trade-side" style="color:'+sideCol+';border-color:'+sideCol+'">'+(isBuy?'BUY':'SELL')+'</span>'
+        +'<strong>$'+sym+'</strong>'+dur
+      +'</div>'
+      +'<div class="oa-home-trade-main">'
+        +'<div class="oa-home-trade-prices"><div><b>Entry</b> <span>'+entry+'</span></div><div><b>Now</b> <span>'+exit_p+'</span></div></div>'
+        +'<div class="oa-home-trade-pct" style="color:'+pctCol+'">'+pctStr+'</div>'
+      +'</div>'
+      +'<div class="oa-home-trade-profit">'+solStr+'</div>'
+      +amtStr+fumbleSlot
+      +'<div class="oa-home-trade-footer">View token <span aria-hidden="true">→</span></div>'
     +'</div>'
-    +'<div style="color:#8a919c;font-size:11px;margin-bottom:5px">$'+esc(String(t.entry_price||entryN||'—'))+' → $'+esc(String(t.exit_price||exitN||'—'))+'</div>'
-    +'<div style="color:#f7b955;font-size:12px;font-weight:600">'+solStr+'</div>'
-    +amtStr
-    +fumbleSlot
-    +'</div>'
-    +'<div style="font-size:26px;font-weight:700;color:'+pctCol+';line-height:1;text-align:right;padding-left:14px;align-self:center">'+pctStr+'</div>'
-    +'</div>'
-    +'</div>'
-    +'</div>';
+  +'</div>';
 }
 
 // mint -> header image URL (or null once confirmed there isn't one), so
@@ -8066,6 +8065,8 @@ function _renderComposerTradePreview(){
   if(!prev || !card || !_composerTrade) return;
   prev.style.display = 'block';
   card.innerHTML = _renderTradeTerminalCard(_composerTrade);
+  var bannerCard = card.querySelector('.oa-home-trade-card');
+  if(bannerCard) _hydrateTradeBanner(bannerCard);
 }
 
 function _clearComposerTrade(){
