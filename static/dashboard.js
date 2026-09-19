@@ -7940,14 +7940,13 @@ function _renderTradeTerminalCard(t){
     +'<div class="oa-home-trade-content">'
       +'<div class="oa-home-trade-title">'
         +'<span class="oa-home-trade-side" style="color:'+sideCol+';border-color:'+sideCol+'">'+(isBuy?'BUY':'SELL')+'</span>'
-        +'<strong>$'+sym+'</strong>'+dur
+        +'<strong>$'+sym+'</strong>'
       +'</div>'
       +'<div class="oa-home-trade-main">'
         +'<div class="oa-home-trade-prices"><div><b>Entry</b> <span>'+entry+'</span></div><div><b>Now</b> <span>'+exit_p+'</span></div></div>'
         +'<div class="oa-home-trade-pct" style="color:'+pctCol+'">'+pctStr+'</div>'
       +'</div>'
       +'<div class="oa-home-trade-profit">'+solStr+'</div>'
-      +amtStr+fumbleSlot
       +'<div class="oa-home-trade-footer">View token <span aria-hidden="true">→</span></div>'
     +'</div>'
   +'</div>';

@@ -685,13 +685,19 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
 #composer-trade-preview,#composer-trade-card{box-sizing:border-box;min-width:0;max-width:100%;width:100%}
 #composer-trade-preview>button{z-index:4!important;background:rgba(10,12,17,.84)!important;border-radius:50%;width:25px;height:25px;top:13px!important;right:10px!important;color:#eef1f5!important}
 @container (max-width:420px){
- .oa-home-trade-content{padding:14px 13px 11px}
- .oa-home-trade-title{gap:6px;padding-right:20px}
+ .oa-home-trade-content{padding:13px 14px 10px}
+ .oa-home-trade-title{gap:7px;margin-bottom:10px;padding-right:22px}
  .oa-home-trade-title strong{font-size:16px}
- .oa-home-trade-prices{font-size:12px}
- .oa-home-trade-main{grid-template-columns:minmax(0,1fr);gap:7px;align-items:start}
- .oa-home-trade-pct{text-align:left;font-size:clamp(24px,8vw,33px)}
+ .oa-home-trade-main{grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
+ .oa-home-trade-prices{font-size:11px;gap:5px}
+ .oa-home-trade-prices b{margin-right:2px}
+ .oa-home-trade-pct{font-size:clamp(20px,7.4cqw,30px);text-align:right;white-space:nowrap}
  .oa-home-trade-profit{margin-top:9px;font-size:14px}
+ .oa-home-trade-footer{margin-top:11px;padding-top:9px}
+}
+@container (max-width:285px){
+ .oa-home-trade-main{grid-template-columns:minmax(0,1fr)}
+ .oa-home-trade-pct{text-align:left}
 }
 @media(max-width:420px){.oa-home-trade-content{padding:14px 13px 11px}}
 
