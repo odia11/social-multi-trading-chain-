@@ -2566,6 +2566,12 @@ def init_db():
         FOREIGN KEY (user_id) REFERENCES users(id)
     )''')
     c.execute('CREATE INDEX IF NOT EXISTS idx_webauthn_cred ON webauthn_credentials(credential_id)')
+    # Per-account opt-in app-screen lock; OFF unless explicitly enabled.
+    c.execute('''CREATE TABLE IF NOT EXISTS app_lock_preferences (
+        wallet_address TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
     # ── remembered wallet connections ──
     # A signed-in wallet should stay signed in. The session cookie alone
     # cannot promise that: iOS clears storage for sites left unused for a
@@ -17505,6 +17511,88 @@ def webauthn_login():
         'is_admin':        _is_owner(wallet_address),
         'csrf_token':      csrf_tok,
     })
+
+# ── Optional app screen-lock, per authenticated wallet ────────────────────
+@app.route('/api/auth/app-lock', methods=['GET', 'POST'])
+@rate_limit(30, 60)
+def api_app_lock_preference():
+    wallet = _authenticated_wallet()
+    user_id = session.get('user_id')
+    if not wallet or not user_id:
+        return jsonify({'ok': False, 'msg': 'Sign in required'}), 401
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        has_passkey = bool(_WEBAUTHN_OK) and conn.execute(
+            'SELECT 1 FROM webauthn_credentials WHERE user_id=? LIMIT 1',
+            (user_id,)).fetchone() is not None
+        if request.method == 'GET':
+            row = conn.execute(
+                'SELECT enabled FROM app_lock_preferences WHERE wallet_address=?',
+                (wallet,)).fetchone()
+            return jsonify({'ok': True, 'enabled': bool(row and row[0]),
+                            'has_passkey': has_passkey})
+        data = request.get_json(silent=True) or {}
+        if type(data.get('enabled')) is not bool:
+            return jsonify({'ok': False, 'msg': 'enabled must be a boolean'}), 400
+        enabled = data['enabled']
+        if enabled and not has_passkey:
+            return jsonify({'ok': False, 'msg': 'Set up a passkey before enabling app lock'}), 409
+        conn.execute(
+            '''INSERT INTO app_lock_preferences(wallet_address, enabled)
+               VALUES (?, ?) ON CONFLICT(wallet_address) DO UPDATE SET
+               enabled=excluded.enabled, updated_at=CURRENT_TIMESTAMP''',
+            (wallet, int(enabled)))
+        conn.commit()
+        return jsonify({'ok': True, 'enabled': enabled, 'has_passkey': has_passkey})
+    finally:
+        conn.close()
+
+
+@app.route('/api/auth/app-lock/unlock', methods=['POST'])
+@rate_limit(15, 60)
+def api_app_lock_unlock():
+    # Reverify the *same account* without changing the wallet session.
+    if not _WEBAUTHN_OK:
+        return jsonify({'ok': False, 'msg': 'Passkeys unavailable'}), 503
+    wallet = _authenticated_wallet()
+    user_id = session.get('user_id')
+    if not wallet or not user_id:
+        return jsonify({'ok': False, 'msg': 'Session expired; sign in again'}), 401
+    challenge = _webauthn_pop_challenge('webauthn_login_challenge')
+    if not challenge:
+        return jsonify({'ok': False, 'msg': 'Unlock expired; try again'}), 400
+    body = request.get_json(silent=True) or {}
+    credential_id = str(body.get('id') or '').strip()
+    if not credential_id:
+        return jsonify({'ok': False, 'msg': 'Choose a passkey'}), 400
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        credential = conn.execute(
+            '''SELECT id, public_key, sign_count
+               FROM webauthn_credentials WHERE credential_id=? AND user_id=?''',
+            (credential_id, user_id)).fetchone()
+        if not credential:
+            return jsonify({'ok': False, 'msg': 'Use the passkey for this OrcAgent account'}), 403
+        cred_row_id, public_key, sign_count = credential
+        try:
+            verification = _webauthn.verify_authentication_response(
+                credential=body, expected_challenge=challenge,
+                expected_rp_id=WEBAUTHN_RP_ID,
+                expected_origin=_webauthn_expected_origins(),
+                credential_public_key=_webauthn.base64url_to_bytes(public_key),
+                credential_current_sign_count=sign_count,
+                require_user_verification=True,
+            )
+        except Exception as exc:
+            _log_security_event('app_lock_unlock_fail', wallet, type(exc).__name__)
+            return jsonify({'ok': False, 'msg': 'Device verification failed'}), 401
+        conn.execute('UPDATE webauthn_credentials SET sign_count=? WHERE id=?',
+                     (verification.new_sign_count, cred_row_id))
+        conn.commit()
+        return jsonify({'ok': True, 'wallet': wallet})
+    finally:
+        conn.close()
+
 
 # ── remembering a proven wallet connection ────────────────────────────────
 # The rule these three functions exist to keep: connecting a wallet once

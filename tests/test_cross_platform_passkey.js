@@ -21,7 +21,7 @@ async function scenario(ua,stored){
         assert(!options.publicKey.allowCredentials,'Passkey discovery must not be limited to localStorage ID');
         return new Promise(r=>getResolve=r);}
     }},
-    window:{PublicKeyCredential:function(){}},
+    window:{PublicKeyCredential:function(){},addEventListener(){}},
     location:{reload(){reloads++}},
     localStorage:local,
     document:{getElementById:id=>els[id],addEventListener(name,fn){ctx.boot=fn}},
@@ -100,6 +100,7 @@ async function scenario(ua,stored){
     _waOptionsFromJSON:x=>x,
     _waCredentialToJSON:()=>({id:cred.id}),
     _keepPasskeyOptionsFresh(){},_updateFaceIdStatus(){},
+    _appLockLoad:async()=>{},_refreshAppLockControl(){},
     _faceIdPossible:()=>{throw new Error('Capability must be prefetched before tapping')},
     _csrfToken:'csrf-value',
     window:{PublicKeyCredential:function(){}},

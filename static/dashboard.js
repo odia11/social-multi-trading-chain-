@@ -204,6 +204,180 @@ async function _webAuthnLogin(){
   }
 }
 
+/* ── Optional per-account app-screen lock ─────────────────────────────────
+   This is an opt-in privacy screen, not a transaction-signing substitute.
+   A fresh server-verified assertion by THIS wallet's passkey clears it.
+   The existing wallet session and device recovery token are NOT revoked. */
+var _appLockEnabled=false, _appLockHasPasskey=false, _appLockBusy=false;
+var _appLockHiddenAt=0, _appLockPrefLoadedFor='', _appLockPromise=null;
+var _appLockLoginTimer=null;
+function _appLockCacheKey(wallet){
+  return 'orca_app_lock_'+wallet;
+}
+function _appLockCached(wallet){
+  try{ return localStorage.getItem(_appLockCacheKey(wallet))==='1'; }catch(e){return false;}
+}
+function _appLockCache(wallet,enabled){
+  try{ localStorage.setItem(_appLockCacheKey(wallet),enabled?'1':'0'); }catch(e){}
+}
+function _appLockElement(){return document.getElementById('oa-app-lock');}
+function _appLockVisible(){
+  var el=_appLockElement();
+  return !!el && el.style.display==='flex';
+}
+function _appLockShow(){
+  if(!_appLockEnabled || !phantomKey || _appLockBusy) return;
+  var el=_appLockElement();
+  if(!el || _appLockVisible()) return;
+  el.style.display='flex';
+  el.setAttribute('aria-hidden','false');
+  var msg=document.getElementById('oa-app-lock-msg');
+  if(msg) msg.textContent='';
+  var app=document.getElementById('app');
+  if(app) app.setAttribute('inert','');
+  // Get the challenge before the tap; otherwise iOS loses user activation.
+  var btn=document.getElementById('oa-app-lock-btn');
+  if(btn){btn.disabled=true;btn.textContent='Preparing secure unlock…';}
+  _prefetchPasskeyLoginOptions().then(function(opts){
+    if(!btn || !_appLockVisible() || _appLockBusy) return;
+    btn.disabled=!opts;
+    btn.textContent=opts?'Unlock OrcAgent':'Retry secure unlock';
+    if(!opts) btn.disabled=false;
+  });
+  if(_appLockLoginTimer) clearInterval(_appLockLoginTimer);
+  _appLockLoginTimer=setInterval(function(){
+    if(!_appLockBusy && _appLockVisible()) _prefetchPasskeyLoginOptions();
+  },70000);
+}
+function _appLockHide(){
+  var el=_appLockElement();
+  if(el){el.style.display='none';el.setAttribute('aria-hidden','true');}
+  var app=document.getElementById('app');
+  if(app) app.removeAttribute('inert');
+  if(_appLockLoginTimer){clearInterval(_appLockLoginTimer);_appLockLoginTimer=null;}
+  _appLockHiddenAt=0;
+  if(/^#post-[pt]\\d+$/.test(location.hash)) _handleNotifDeepLink();
+}
+async function _appLockLoad(onStartup){
+  if(!phantomKey || guestMode) return;
+  var wallet=phantomKey;
+  // The local value is just a startup-screen cache. Server owns the setting.
+  _appLockEnabled=_appLockCached(wallet);
+  if(_appLockEnabled && onStartup) _appLockShow();
+  try{
+    var res=await fetch('/api/auth/app-lock',{credentials:'include',cache:'no-store'});
+    var data=res.ok ? await res.json() : null;
+    if(res.status===401){
+      // Session was lost, not a biometric failure. Don't strand the user
+      // behind a lock they cannot verify without an authenticated wallet.
+      _appLockEnabled=false;
+      _appLockHide();
+      return;
+    }
+    if(!data || !data.ok || wallet!==phantomKey) return;
+    _appLockEnabled=!!data.enabled;
+    _appLockHasPasskey=!!data.has_passkey;
+    _appLockPrefLoadedFor=wallet;
+    _appLockCache(wallet,_appLockEnabled);
+    if(!_appLockEnabled) _appLockHide();
+    else if(onStartup) _appLockShow();
+  }catch(e){console.warn('[app-lock] preference unavailable; using prior setting');}
+}
+function _refreshAppLockControl(){
+  var panel=document.getElementById('st-app-lock-row');
+  var toggle=document.getElementById('st-app-lock-toggle');
+  var status=document.getElementById('st-app-lock-status');
+  if(!panel || !phantomKey) return;
+  panel.style.display='';
+  if(toggle) toggle.checked=_appLockEnabled;
+  if(status) status.textContent=_appLockHasPasskey
+    ? (_appLockEnabled?'On — OrcAgent locks when reopened.':'Off — the app stays open on return.')
+    : 'Set up a passkey above before turning on app lock.';
+  if(toggle) toggle.disabled=!_appLockHasPasskey;
+}
+async function _setAppLockPreference(enabled){
+  var toggle=document.getElementById('st-app-lock-toggle');
+  var status=document.getElementById('st-app-lock-status');
+  if(toggle) toggle.disabled=true;
+  if(status) status.textContent='Saving…';
+  var saveError='';
+  try{
+    var res=await fetch('/api/auth/app-lock',{
+      method:'POST',credentials:'include',
+      headers:{'Content-Type':'application/json','X-CSRF-Token':_csrfToken},
+      body:JSON.stringify({enabled:!!enabled})
+    });
+    var data=await res.json();
+    if(!res.ok || !data.ok) throw new Error(data.msg||'Unable to save app lock setting');
+    _appLockEnabled=!!data.enabled;
+    _appLockHasPasskey=!!data.has_passkey;
+    _appLockCache(phantomKey,_appLockEnabled);
+    if(!_appLockEnabled) _appLockHide();
+  }catch(e){
+    saveError=e.message||'Unable to save app lock setting.';
+  }finally{
+    _refreshAppLockControl();
+    if(saveError && status) status.textContent=saveError;
+  }
+}
+async function _unlockOrcAgent(){
+  if(_appLockBusy || !_appLockVisible()) return;
+  var btn=document.getElementById('oa-app-lock-btn');
+  var msg=document.getElementById('oa-app-lock-msg');
+  if(msg) msg.textContent='';
+  if(btn){btn.disabled=true;btn.textContent='Verifying…';}
+  _appLockBusy=true;
+  _pkLoginBusy=true; // don't replace the one-time challenge during Face ID
+  try{
+    var fresh=_pkLoginOpts && Date.now()-_pkLoginAt<PK_OPTS_FRESH_MS;
+    // Never await a network round trip then call WebAuthn: iOS requires
+    // navigator.credentials.get() from the same user-tap activation.
+    var opts=fresh ? _pkLoginOpts : null;
+    if(!opts){
+      _pkLoginBusy=false;
+      opts=await _prefetchPasskeyLoginOptions();
+      _pkLoginBusy=true;
+      if(!opts) throw new Error('Unlock unavailable — try again when online.');
+      if(msg) msg.textContent='Ready — tap Unlock again.';
+      return;
+    }
+    if(!opts.challenge) throw new Error('Unlock unavailable — try again when online.');
+    _pkLoginOpts=null;
+    var credential=await navigator.credentials.get({publicKey:_waOptionsFromJSON(opts)});
+    if(!credential) throw new Error('No passkey selected.');
+    var res=await fetch('/api/auth/app-lock/unlock',{
+      method:'POST',credentials:'include',
+      headers:{'Content-Type':'application/json','X-CSRF-Token':_csrfToken},
+      body:JSON.stringify(_waCredentialToJSON(credential))
+    });
+    var result=await res.json().catch(function(){return null});
+    if(!res.ok || !result || !result.ok || result.wallet!==phantomKey)
+      throw new Error((result&&result.msg)||'Unable to unlock this account.');
+    _appLockHide();
+  }catch(e){
+    if(msg) msg.textContent=e.name==='NotAllowedError'
+      ? 'Unlock cancelled — tap the button to try again.'
+      : (e.message||'Could not unlock; please try again.');
+  }finally{
+    _appLockBusy=false;
+    _pkLoginBusy=false;
+    if(btn){btn.disabled=false;btn.textContent='Unlock OrcAgent';}
+    if(_appLockVisible()) _prefetchPasskeyLoginOptions();
+  }
+}
+document.addEventListener('visibilitychange',function(){
+  if(document.visibilityState==='hidden'){
+    _appLockHiddenAt=Date.now();
+    // Cover the UI before OS/app-switcher snapshots it.
+    if(!_appLockBusy) _appLockShow();
+  }else if(document.visibilityState==='visible'){
+    if(_appLockEnabled && _appLockHiddenAt && !_appLockBusy) _appLockShow();
+  }
+});
+window.addEventListener('pageshow',function(event){
+  if(event.persisted && _appLockEnabled && phantomKey && !_appLockBusy) _appLockShow();
+});
+
 async function _loginWithPassword(){
   var userEl=document.getElementById('ob-pwd-user');
   var passEl=document.getElementById('ob-pwd-pass');
@@ -600,6 +774,7 @@ async function _setupFaceID(opts){
       _show('✓ Passkey saved — unlock with this device next time.',true);
       _updateFaceIdStatus();
       if(opts.onDone) opts.onDone();
+      _appLockLoad().then(_refreshAppLockControl);
       setTimeout(function(){ var p=document.getElementById('s-faceid-prompt'); if(p) p.style.display='none'; },2500);
     } else {
       _show('Registration failed: '+((r&&r.msg)||'unknown error'),false);
@@ -1171,6 +1346,7 @@ function disconnectWallet(){
     fetch('/api/logout',{method:'POST',credentials:'include'}).finally(function(){
       phantomKey=null; walletType=null; guestMode=false;
       localStorage.removeItem('orca_credential_id');
+      _appLockEnabled=false; _appLockHide();
       // Disconnect has to mean disconnected. Leaving the token behind would
       // let the very next page load sign this browser straight back in.
       _clearDeviceToken();
@@ -1344,6 +1520,7 @@ async function launchApp(){
 
   // ── 2. Show dashboard ──────────────────────────────────────────
   if(phantomKey) guestMode = false;
+  if(phantomKey) await _appLockLoad(true);
   document.getElementById('onboard').classList.add('hide');
   document.getElementById('app').style.display='block';
   if(/^#post-[pt]\d+$/.test(location.hash)) _handleNotifDeepLink();
@@ -4214,6 +4391,7 @@ function _sbNav(section){
     _sbSetActive('sbn-settings');
     loadSettingsPage();
     _prepareSettingsPasskey();
+    _appLockLoad().then(_refreshAppLockControl);
   } else if(section==='notifications'){
     if(_dmOpen) closeMessagesView();
     if(_gcOpen) closeCommunityView();
