@@ -621,7 +621,20 @@ function _renderComposer(g){
 }
 
 function _renderMentionText(content){
-  return esc(content).replace(/@([a-zA-Z0-9_]+)/g, '<span class="gd-mention">@$1</span>');
+  // Escape ordinary text and mentions as before; only OrcAgent canonical
+  // post links become same-tab anchors to the exact p/t post.
+  var input=String(content==null?'':content),out='',last=0,m;
+  var pattern=/https?:\/\/(?:www\.)?orcagent\.fun\/post\/([pt]\d+)(?:\?[^\s<>"']*)?/gi;
+  function safeMentions(s){
+    return esc(s).replace(/@([a-zA-Z0-9_]+)/g,'<span class="gd-mention">@$1</span>');
+  }
+  while((m=pattern.exec(input))!==null){
+    out+=safeMentions(input.slice(last,m.index));
+    out+='<a href="/post/'+m[1]+'" style="color:#f7b955;text-decoration:underline"'
+      +' onclick="event.stopPropagation()">View post on OrcAgent →</a>';
+    last=m.index+m[0].length;
+  }
+  return out+safeMentions(input.slice(last));
 }
 
 // Self-contained port of _renderTradeTerminalCard() in static/dashboard.js --

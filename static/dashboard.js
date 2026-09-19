@@ -1295,6 +1295,7 @@ async function launchApp(){
   if(phantomKey) guestMode = false;
   document.getElementById('onboard').classList.add('hide');
   document.getElementById('app').style.display='block';
+  if(/^#post-[pt]\d+$/.test(location.hash)) _handleNotifDeepLink();
   const _spos=document.getElementById('s-pos'); if(_spos) _spos.textContent='0/5';
   if(phantomKey){
     const _dsb=document.getElementById('deposit-sol-btn'); if(_dsb) _dsb.style.display='';
@@ -1794,7 +1795,13 @@ function _fcLinkHtml(url){
   // enough path to recognise it, exactly as the platforms people came from do.
   var label = url.replace(/^https?:\/\//i,'').replace(/\/$/,'');
   if(label.length > 42) label = label.slice(0, 41) + '…';
-  return '<a href="'+esc(href)+'" target="_blank" rel="noopener noreferrer nofollow" '
+  var isOrcaPost=false;
+  try{
+    var parsed=new URL(href,location.origin);
+    isOrcaPost=(parsed.hostname==='orcagent.fun'||parsed.hostname==='www.orcagent.fun'
+                ||parsed.origin===location.origin) && /^\/post\/[pt]\d+$/.test(parsed.pathname);
+  }catch(e){}
+  return '<a href="'+esc(href)+'"'+(isOrcaPost?'':' target="_blank" rel="noopener noreferrer nofollow"')+' '
        + 'onclick="event.stopPropagation()" '
        + 'style="color:#f7b955;text-decoration:none;word-break:break-word">'+esc(label)+'</a>'
        + esc(trail);
@@ -4603,6 +4610,8 @@ function _fadeIn(el){
 
 function _clearStalePostHash(){
   if(/^#post-/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
+  _activeDeepLinkedPost = null;
+  _lastDeepLinkHash = null;
 }
 
 // ── DAILY LEADERBOARD ──
@@ -8607,6 +8616,14 @@ async function loadHomeFeed(){
     const data = await r.json();
     if(data && Array.isArray(data.items)){
       _homeFeedData = data.items;
+      // A permalink must not disappear when the initial feed or an auto-refresh
+      // resolves after the single-post request. Keep the exact shared item first.
+      if(_activeDeepLinkedPost && location.hash === '#post-'+_activeDeepLinkedPost.id){
+        _homeFeedData = _homeFeedData.filter(function(item){
+          return (item.id ? 'p'+item.id : (item.trade_id ? 't'+item.trade_id : '')) !== _activeDeepLinkedPost.id;
+        });
+        _homeFeedData.unshift(_activeDeepLinkedPost.post);
+      }
       _homeFeedNextCursor = data.next_cursor || null;
       try{
         renderHomeFeed();
@@ -9096,7 +9113,19 @@ function renderHomeFeed(appendItems){
     // Trades no longer auto-appear as if personally posted in the regular
     // feed — they only show in the explicit Live Trades ticker above, or as
     // a real post if the user chose to share one via the notifications page.
-    items = items.filter(function(i){ return i.type!=='trade'; });
+    items = items.filter(function(i){
+      return i.type!=='trade' || !!(_activeDeepLinkedPost && location.hash === '#post-'+_activeDeepLinkedPost.id
+        && (i.trade_id ? 't'+i.trade_id : (i.id ? 'p'+i.id : '')) === _activeDeepLinkedPost.id);
+    });
+  }
+  // The exact permalink target is always shown, even when Following or Live
+  // Trades is selected and its normal filter would remove this post.
+  if(!appendItems && _activeDeepLinkedPost
+     && location.hash === '#post-'+_activeDeepLinkedPost.id){
+    items = items.filter(function(i){
+      return (i.id ? 'p'+i.id : (i.trade_id ? 't'+i.trade_id : '')) !== _activeDeepLinkedPost.id;
+    });
+    items.unshift(_activeDeepLinkedPost.post);
   }
   if(!items.length){
     if(!appendItems) el.innerHTML = '<div class="fc-empty">No activity yet — start trading to appear in the feed.</div>';
@@ -9929,47 +9958,57 @@ function _feedToggleReply(btn, postId){
   }
 }
 
-/* ── Notification deep-linking: #post-<id> jumps straight to that post ── */
+/* ── Canonical post deep-links: preserve the post through auth/feed loading ── */
 var _lastDeepLinkHash = null;
+var _pendingDeepLinkHash = null;
+var _activeDeepLinkedPost = null; // {id, post}; survives feed refreshes
+
 window.addEventListener('hashchange', function(){
-  if(!/^#post-/.test(location.hash)) return;
-  // If we're not currently on the Home view, switching there also runs
-  // loadHomeFeed() -> renderHomeFeed() -> _handleNotifDeepLink(), which
-  // does the actual jump once the feed is loaded.
-  if(_dmOpen || _gcOpen || document.getElementById('dash-wallet')?.style.display==='block'){
-    _sbNav('dashboard');
-  } else {
+  if(/^#post-[pt]\d+$/.test(location.hash)){
     _handleNotifDeepLink();
+  }else{
+    _lastDeepLinkHash = null;
+    _activeDeepLinkedPost = null;
   }
 });
 function _handleNotifDeepLink(){
-  var m = /^#post-(.+)$/.exec(location.hash);
-  if(!m) return;
-  if(location.hash === _lastDeepLinkHash) return;
-  _lastDeepLinkHash = location.hash;
-  // Set by _markOneRead() in notifications.html right before its <a href>
-  // navigates here -- the only way a notification's type survives the full
-  // page load from /notifications to / (they're separate pages, not SPA
-  // routes). Not set for a plain in-feed card click, or for a push
-  // notification opened in a new tab (no sessionStorage carry-over there).
-  var notifType = sessionStorage.getItem('_notifJumpType') || null;
-  sessionStorage.removeItem('_notifJumpType');
-  _jumpToPost(decodeURIComponent(m[1]), notifType);
+  var match = /^#post-([pt]\d+)$/.exec(location.hash);
+  if(!match) return;
+  var hash = location.hash;
+  var app = document.getElementById('app');
+  // No "handled" flag until the application AND target card are visible.
+  // This also covers links opened before wallet/session recovery or ToS.
+  if(!app || app.style.display==='none') return;
+  if(_pendingDeepLinkHash===hash) return;
+  if(_lastDeepLinkHash===hash && document.getElementById('fc-card-'+match[1])) return;
+  var notifType = null;
+  try{
+    notifType=sessionStorage.getItem('_notifJumpType')||null;
+    sessionStorage.removeItem('_notifJumpType');
+  }catch(e){}
+  _pendingDeepLinkHash=hash;
+  _jumpToPost(match[1],notifType).then(function(opened){
+    if(opened && location.hash===hash) _lastDeepLinkHash=hash;
+  }).catch(function(err){
+    console.error('[post-deeplink] failed to open',match[1],err);
+  }).finally(function(){
+    if(_pendingDeepLinkHash===hash) _pendingDeepLinkHash=null;
+  });
 }
 
 function _fcCardClick(ev, postId){
   var ae = document.activeElement;
-  if (ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT')) {
-    return; // gebruiker is actief aan het typen, negeer card-klik
-  }
+  if (ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT')) return;
   if(ev.target.closest('a, button, input, textarea, select')) return;
   var rbox = document.getElementById('rbox-'+postId);
   if(rbox && rbox.classList.contains('open')){
     var openedAt = Number(rbox.dataset.openedAt || 0);
-    if (Date.now() - openedAt < 400) return; // net geopend, negeer sluit-tik
+    if (Date.now() - openedAt < 400) return;
     rbox.classList.remove('open');
     if(location.hash === '#post-'+postId){
       history.pushState(null, '', location.pathname + location.search);
+      _activeDeepLinkedPost = null;
+      _lastDeepLinkHash = null;
     }
     return;
   }
@@ -9978,42 +10017,63 @@ function _fcCardClick(ev, postId){
 }
 
 async function _jumpToPost(postId, notifType){
-  var card = document.getElementById('fc-card-'+postId);
-  if(!card){
+  if(!/^[pt]\d+$/.test(String(postId||''))) return false;
+  var app=document.getElementById('app');
+  if(!app || app.style.display==='none') return false;
+
+  // A permalink may be opened from a chat, wallet or group screen. Switch to
+  // Home first; those screens hide the entire feed, so scrolling alone fails.
+  if(_dmOpen || _gcOpen || document.getElementById('dash-wallet')?.style.display==='block'){
+    _sbNav('dashboard');
+    // closeMessagesView/openCommunityView clear stale hashes during normal nav.
+    history.replaceState(null,'','#post-'+postId);
+  }
+
+  var card=document.getElementById('fc-card-'+postId);
+  if(!card || card.dataset.virtualized==='1'){
     try{
-      var r = await fetch('/api/feed/post/'+encodeURIComponent(postId));
-      var d = await r.json();
+      var r=await fetch('/api/feed/post/'+encodeURIComponent(postId), {credentials:'include'});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      var d=await r.json();
       if(d && d.ok && d.post){
-        _homeFeedData = (_homeFeedData||[]).filter(function(i){
-          var pid = i.id ? 'p'+i.id : (i.trade_id ? 't'+i.trade_id : null);
-          return pid !== postId;
+        _activeDeepLinkedPost={id:postId,post:d.post};
+        _homeFeedData=(_homeFeedData||[]).filter(function(i){
+          return (i.id ? 'p'+i.id : (i.trade_id ? 't'+i.trade_id : '')) !== postId;
         });
         _homeFeedData.unshift(d.post);
         renderHomeFeed();
-        card = document.getElementById('fc-card-'+postId);
+        card=document.getElementById('fc-card-'+postId);
       }
-    }catch(err){ console.error('[notif-deeplink] failed to fetch post', postId, err); }
+    }catch(err){ console.error('[post-deeplink] failed to fetch post',postId,err); }
+  }else if(_feedPostById[postId]){
+    _activeDeepLinkedPost={id:postId,post:_feedPostById[postId]};
   }
-  if(!card) return;
-  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  card.scrollIntoView({behavior: reduceMotion ? 'auto' : 'smooth', block: 'center'});
+  if(!card) return false;
+  if(card.dataset.virtualized==='1') _revirtualizeCard(card);
+  // One frame allows the inserted card and mobile scroller to lay out before
+  // scrolling; auto instead of smooth gets the user to their post immediately.
+  await new Promise(function(resolve){requestAnimationFrame(resolve)});
+  if(!document.contains(card)) return false;
+  card.scrollIntoView({behavior:'auto',block:'center'});
   card.classList.add('fc-card-highlight');
-  setTimeout(function(){ card.classList.remove('fc-card-highlight'); }, 2200);
-  var rbox = document.getElementById('rbox-'+postId);
-  if(rbox && notifType === 'reply'){ rbox.classList.add('open'); rbox.dataset.openedAt = Date.now(); }
-  if(!rbox || !rbox.dataset.repliesLoaded){
-    if(rbox) rbox.dataset.repliesLoaded = '1';
+  setTimeout(function(){card.classList.remove('fc-card-highlight')},2200);
+  var rbox=document.getElementById('rbox-'+postId);
+  if(rbox && notifType==='reply'){
+    rbox.classList.add('open');
+    rbox.dataset.openedAt=Date.now();
+  }
+  if(rbox && !rbox.dataset.repliesLoaded){
+    rbox.dataset.repliesLoaded='1';
     _feedLoadReplies(postId);
   }
-  // Landing here from a "someone replied" notification is also "having seen
-  // it" -- same has-new clearing _feedToggleReply() does on a manual open.
-  var replyBtn = card.querySelector('.fc-reply-btn');
+  var replyBtn=card.querySelector('.fc-reply-btn');
   if(replyBtn && replyBtn.classList.contains('has-new')){
     replyBtn.classList.remove('has-new');
-    var dot = replyBtn.querySelector('.fc-reply-new-dot');
+    var dot=replyBtn.querySelector('.fc-reply-new-dot');
     if(dot) dot.remove();
-    _fcMarkRepliesSeen(postId, replyBtn.getAttribute('data-last-reply'));
+    _fcMarkRepliesSeen(postId,replyBtn.getAttribute('data-last-reply'));
   }
+  return true;
 }
 
 // ── "new reply on your post" tracking (localStorage, per post) ──
