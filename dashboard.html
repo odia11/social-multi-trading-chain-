@@ -3627,23 +3627,7 @@ if (window.__SESSION_WALLET) {
       <!-- Hidden compat elements -->
       <div id="mobile-deeplink-section" style="display:none"></div>
 
-      <!-- Device passkey: Face ID / Touch ID on Apple, fingerprint / screen lock on Android -->
-      <button class="ob-btn" onclick="_webAuthnLogin()" id="ob-bio-btn"
-        style="display:none;background:var(--accent);color:#0a0b0e;flex-direction:column;gap:10px;padding:22px 16px;height:auto;border-radius:14px">
-        <svg width="38" height="38" viewBox="0 0 38 38" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 12V6h6"/><path d="M34 12V6h-6"/>
-          <path d="M4 26v6h6"/><path d="M34 26v6h-6"/>
-          <line x1="14" y1="16" x2="14" y2="18.5"/>
-          <line x1="24" y1="16" x2="24" y2="18.5"/>
-          <path d="M19 18.5v3.5"/>
-          <path d="M15 26c1.2 1.8 6.8 1.8 8 0"/>
-        </svg>
-        <span id="ob-bio-label" style="font-size:15px;font-weight:700">Unlock with passkey</span>
-      </button>
-      <div id="ob-bio-err" style="font-size:11px;color:var(--red);text-align:center;min-height:16px;margin-top:-2px"></div>
-      <button id="ob-alt-link" onclick="_showWalletOptions()" style="display:none;background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;padding:2px 0 8px;text-decoration:underline;font-family:var(--ui)">or connect a wallet instead</button>
-
-      <!-- Wallet connect buttons (shown when no Face ID, or via "connect a wallet instead") -->
+      <!-- Standard wallet connect buttons -->
       <div id="ob-wallet-btns">
         <button class="ob-btn ob-wallet-btn" id="phantom-ob-btn" onclick="connectWalletOnboard('phantom')">
           <svg width="18" height="18" viewBox="0 0 128 128" fill="none"><path d="M64 0C28.7 0 0 28.7 0 64s28.7 64 64 64 64-28.7 64-64S99.3 0 64 0z" fill="#AB9FF2"/><path d="M108.2 64.8c0 20.5-16.6 37.1-37.1 37.1-9.7 0-18.5-3.7-25.1-9.8l-11.7 9c-1.4 1.1-3.4.1-3.4-1.7V64.8c0-20.5 16.6-37.1 37.1-37.1S108.2 44.3 108.2 64.8z" fill="white"/></svg>
@@ -3715,18 +3699,6 @@ if (window.__SESSION_WALLET) {
     <div style="height:14px"></div>
     <div class="s-msg" id="s-msg"></div>
     <button class="s-save" id="s-save-btn" onclick="saveSettings()" disabled>SAVE SETTINGS</button>
-
-    <!-- Face ID setup prompt — revealed after private key is saved -->
-    <div id="s-faceid-prompt" style="display:none;margin-top:14px;padding:14px 16px;background:rgba(247,185,85,.07);border:1px solid rgba(247,185,85,.22);border-radius:10px">
-      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>Sign in faster with a passkey?</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.5">Next time, unlock with Face ID, fingerprint or your device screen lock.</div>
-      <div style="font-size:11px;color:#f7b955;line-height:1.5;margin-bottom:12px">On iPhone, save the passkey in Apple Passwords / iCloud Keychain, not Microsoft Authenticator.</div>
-      <div style="display:flex;gap:8px">
-        <button id="s-faceid-prompt-btn" onclick="_setupFaceID()" style="flex:1;padding:10px;background:var(--accent);color:#0a0b0e;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;transition:opacity .15s">Set up passkey</button>
-        <button onclick="document.getElementById('s-faceid-prompt').style.display='none'" style="padding:10px 16px;background:var(--bg3);border:1px solid var(--border2);border-radius:7px;color:var(--muted);font-size:12px;cursor:pointer">Maybe later</button>
-      </div>
-      <div id="s-faceid-prompt-msg" style="font-size:11px;margin-top:8px;min-height:14px"></div>
-    </div>
 
   </div>
 </div>
@@ -3873,27 +3845,6 @@ __IMAGE_LIGHTBOX__
        in dashboard.py's _get_index_base_html() (dashboard.html isn't Jinja-rendered),
        see the __NAVBAR__ replace() there. -->
   __NAVBAR__
-
-  <!-- PASSKEY PROMPT — the way back in.
-       An app added to the home screen cannot complete the Phantom deeplink:
-       it opens Safari, and the session lands there instead. So once a
-       standalone app loses its session there is no route back at all, and
-       the connect screen can only tell you to go and open the site in a
-       browser. A passkey is the one credential that works inside it.
-       Hidden until _maybePromptPasskey() has confirmed the server says this
-       wallet has none and the device can create one. -->
-  <div id="pk-banner" style="display:none;margin:10px 12px 0;padding:12px 14px;background:rgba(247,185,85,.07);border:1px solid rgba(247,185,85,.22);border-radius:12px">
-    <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--text);margin-bottom:5px">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:0 0 15px;color:var(--accent)"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-      <span id="pk-banner-title">Stay signed in</span>
-    </div>
-    <div id="pk-banner-sub" style="font-size:11.5px;color:var(--muted);line-height:1.5;margin-bottom:11px"></div>
-    <div style="display:flex;gap:8px">
-      <button id="pk-banner-btn" onclick="_setupPasskeyFromBanner()" style="flex:1;min-height:44px;padding:11px;background:var(--accent);color:#0a0b0e;border:none;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer">Set up passkey</button>
-      <button onclick="_dismissPasskeyBanner()" style="min-height:44px;padding:11px 15px;background:var(--bg3);border:1px solid var(--border2);border-radius:9px;color:var(--muted);font-size:12.5px;cursor:pointer">Not now</button>
-    </div>
-    <div id="pk-banner-msg" style="font-size:11px;margin-top:8px;min-height:14px"></div>
-  </div>
 
   <!-- DASHBOARD UTILITY ROW — owner-only admin/health toggles for the in-page
        panels below. Hidden by default and only ever shown to an owner
@@ -4690,26 +4641,6 @@ __IMAGE_LIGHTBOX__
         <div class="st-wallet-btns">
           <button class="st-manage-btn" onclick="_openManage()">Manage</button>
         </div>
-        <div id="st-passkey-settings" style="display:block;margin-top:15px;padding:14px;border:1px solid rgba(247,185,85,.26);border-radius:12px;background:rgba(247,185,85,.06)">
-          <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:5px">Secure device unlock</div>
-          <div style="font-size:11.5px;color:var(--muted);line-height:1.5;margin-bottom:11px">Sign in with Face ID, fingerprint or your device screen lock. You can add a passkey for this device without changing your wallet.</div>
-          <div style="font-size:11.5px;color:#f7b955;line-height:1.5;margin-bottom:11px">iPhone: choose Apple Passwords / iCloud Keychain when saving your passkey. Microsoft Authenticator may not support OrcAgent passkeys. Go to iPhone Settings → General → AutoFill &amp; Passwords → enable Passwords (and turn off Authenticator as the passkey provider if it keeps opening). Then try again.</div>
-          <button type="button" id="st-passkey-btn" onclick="_setupSettingsPasskey()" style="min-height:44px;width:100%;border:0;border-radius:9px;background:var(--accent);color:#0a0b0e;font-weight:700">Set up passkey</button>
-          <div id="st-passkey-msg" aria-live="polite" style="min-height:16px;font-size:11px;margin-top:8px;color:var(--muted)"></div>
-        </div>
-        <div id="st-app-lock-row" style="display:block;margin-top:12px;padding:12px 14px;border:1px solid var(--border2);border-radius:12px">
-          <div class="st-tog-row" style="margin:0">
-            <div>
-              <div class="st-tog-label">Lock OrcAgent on reopen</div>
-              <div class="st-tog-sub">Optional Face ID, fingerprint or device unlock when returning to OrcAgent. Does not log out your wallet.</div>
-            </div>
-            <label class="st-toggle" aria-label="Lock OrcAgent on reopen">
-              <input type="checkbox" id="st-app-lock-toggle" disabled onchange="_setAppLockPreference(this.checked)">
-              <span class="st-track"></span>
-            </label>
-          </div>
-          <div id="st-app-lock-status" aria-live="polite" style="color:var(--muted);font-size:11px;margin-top:6px"></div>
-        </div>
       </div>
 
 
@@ -4808,25 +4739,6 @@ if (window.__SESSION_WALLET) {
 <script src="/static/alert-modal.js?v=__ASSET_VER__"></script>
 <script src="/static/push-subscribe.js?v=__ASSET_VER__"></script>
 <script src="/static/chart-scrub.js?v=__ASSET_VER__"></script>
-<style>
-#oa-app-lock{position:fixed;inset:0;z-index:2147483600;display:none;align-items:center;justify-content:center;box-sizing:border-box;padding:max(30px,env(safe-area-inset-top)) 22px max(30px,env(safe-area-inset-bottom));background:#0b0d11;color:#f5f5f5;font-family:system-ui,-apple-system,sans-serif;touch-action:none}
-#oa-app-lock .oa-lock-box{width:min(100%,410px);text-align:center;border:1px solid rgba(247,185,85,.32);border-radius:22px;padding:38px 25px;background:#13161b;box-shadow:0 24px 100px rgba(0,0,0,.7)}
-#oa-app-lock .oa-lock-symbol{font-size:44px;line-height:1;margin-bottom:15px;color:#f7b955}
-#oa-app-lock h2{font-size:26px;line-height:1.2;margin:0 0 10px;color:#f5f5f5}
-#oa-app-lock p{font-size:14px;line-height:1.55;color:#b7bec9;margin:0 0 24px}
-#oa-app-lock button{width:100%;min-height:50px;background:#f7b955;border:0;border-radius:12px;font-size:15px;font-weight:800;color:#0a0b0e;cursor:pointer}
-#oa-app-lock button:disabled{opacity:.6;cursor:wait}
-#oa-app-lock-msg{min-height:18px;margin:15px 0 0;font-size:12px;color:#f77e76;overflow-wrap:anywhere}
-</style>
-<div id="oa-app-lock" role="dialog" aria-modal="true" aria-labelledby="oa-app-lock-title" aria-hidden="true">
-  <div class="oa-lock-box">
-    <div class="oa-lock-symbol" aria-hidden="true">◈</div>
-    <h2 id="oa-app-lock-title">OrcAgent locked</h2>
-    <p>Your session is still connected. Verify with your device to return to OrcAgent.</p>
-    <button type="button" id="oa-app-lock-btn" onclick="_unlockOrcAgent()">Unlock OrcAgent</button>
-    <div id="oa-app-lock-msg" role="status" aria-live="polite"></div>
-  </div>
-</div>
 <script src="/static/dashboard.js?v=__ASSET_VER__"></script>
 
 <!-- ── TOKEN DETAIL PANEL ── -->

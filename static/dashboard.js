@@ -72,341 +72,6 @@ async function connectReadonlyAddress(){
   finally{ if(btn){ btn.disabled=false; btn.textContent='CONNECT (read-only) →'; } }
 }
 
-/* ── WebAuthn base64url <-> ArrayBuffer helpers ──
-   Server (py_webauthn) speaks base64url JSON for challenge/id/response fields
-   (see webauthn_register_options()/webauthn_login_options() in dashboard.py);
-   navigator.credentials.create()/.get() need real ArrayBuffers instead. These
-   two directions are the only thing standing between the two, so getting them
-   right is what makes verification actually work end-to-end. ── */
-function _waB64uEncode(buf){
-  var bytes=new Uint8Array(buf), bin='';
-  for(var i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
-  return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-}
-function _waB64uDecode(str){
-  str=str.replace(/-/g,'+').replace(/_/g,'/');
-  while(str.length%4) str+='=';
-  var bin=atob(str), bytes=new Uint8Array(bin.length);
-  for(var i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
-  return bytes.buffer;
-}
-function _waOptionsFromJSON(opt){
-  var out=Object.assign({},opt);
-  out.challenge=_waB64uDecode(opt.challenge);
-  if(opt.user) out.user=Object.assign({},opt.user,{id:_waB64uDecode(opt.user.id)});
-  ['excludeCredentials','allowCredentials'].forEach(function(k){
-    if(Array.isArray(opt[k])) out[k]=opt[k].map(function(c){ return Object.assign({},c,{id:_waB64uDecode(c.id)}); });
-  });
-  return out;
-}
-function _waCredentialToJSON(cred){
-  var r=cred.response;
-  var out={id:cred.id, rawId:_waB64uEncode(cred.rawId), type:cred.type, response:{clientDataJSON:_waB64uEncode(r.clientDataJSON)}};
-  if(r.attestationObject) out.response.attestationObject=_waB64uEncode(r.attestationObject);
-  if(r.authenticatorData)  out.response.authenticatorData=_waB64uEncode(r.authenticatorData);
-  if(r.signature)          out.response.signature=_waB64uEncode(r.signature);
-  if(r.userHandle)         out.response.userHandle=_waB64uEncode(r.userHandle);
-  return out;
-}
-
-/* Signing in has the same problem the setup did: asking the server for a
-   challenge after the tap spends the tap's user activation, and iOS then
-   refuses to show the sheet. Fetched when the button appears instead. */
-var _pkLoginOpts = null, _pkLoginAt = 0;
-var _pkLoginPromise = null, _pkLoginRefreshTimer = null, _pkLoginBusy = false;
-function _prefetchPasskeyLoginOptions(){
-  if(_pkLoginBusy) return Promise.resolve(_pkLoginOpts);
-  if(_pkLoginPromise) return _pkLoginPromise;
-  var optionUrl=(typeof _appLockEnabled!=='undefined' && _appLockEnabled
-                 && typeof phantomKey!=='undefined' && phantomKey)
-    ? '/api/auth/webauthn/login/options?app_lock=1'
-    : '/api/auth/webauthn/login/options';
-  _pkLoginPromise = fetch(optionUrl, {credentials:'include',cache:'no-store'})
-    .then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(d){
-      if(d && d.challenge){ _pkLoginOpts = d; _pkLoginAt = Date.now(); return d; }
-      return null;
-    })
-    .catch(function(){ return null; })
-    .finally(function(){ _pkLoginPromise = null; });
-  return _pkLoginPromise;
-}
-function _passkeyDeviceLabel(){
-  var ua=navigator.userAgent||'';
-  if(/Android/i.test(ua)) return 'Unlock with fingerprint or screen lock';
-  if(/iPhone/i.test(ua)) return 'Unlock with Face ID';
-  if(/iPad|Macintosh/i.test(ua)) return 'Unlock with Face ID / Touch ID';
-  return 'Unlock with passkey';
-}
-function _refreshPasskeyLoginButton(){
-  var label=document.getElementById('ob-bio-label');
-  if(label) label.textContent=_passkeyDeviceLabel();
-}
-function _keepPasskeyLoginReady(){
-  if(_pkLoginRefreshTimer) clearInterval(_pkLoginRefreshTimer);
-  _prefetchPasskeyLoginOptions();
-  _pkLoginRefreshTimer=setInterval(function(){
-    var ob=document.getElementById('onboard');
-    if(_pkLoginBusy) return; // do not invalidate an ongoing passkey assertion
-    if(ob && !ob.classList.contains('hide')) _prefetchPasskeyLoginOptions();
-    else{ clearInterval(_pkLoginRefreshTimer); _pkLoginRefreshTimer=null; }
-  },70000); // less than the server's 120s challenge TTL
-}
-
-async function _webAuthnLogin(){
-  var errEl=document.getElementById('ob-bio-err');
-  var btn=document.getElementById('ob-bio-btn');
-  var label=document.getElementById('ob-bio-label');
-  if(errEl) errEl.textContent='';
-  if(!window.PublicKeyCredential){
-    if(errEl) errEl.textContent='WebAuthn not supported on this device.';
-    _showWalletOptions(); return;
-  }
-  if(btn) btn.disabled=true;
-  if(label) label.textContent='Authenticating…';
-  var failed=false, _retryable=false, startedAt=0;
-  try{
-    var fresh = _pkLoginOpts && (Date.now() - _pkLoginAt) < PK_OPTS_FRESH_MS;
-    var opt = fresh ? _pkLoginOpts : await _prefetchPasskeyLoginOptions();
-    _pkLoginOpts = null;                 // one challenge, one attempt
-    if(!opt||!opt.challenge){ if(errEl) errEl.textContent='Passkey unavailable — try connecting your wallet instead.'; failed=true; return; }
-    _pkLoginBusy = true;                  // stop background challenge refresh
-    var startedAt = Date.now();
-    var cred=await navigator.credentials.get({publicKey:_waOptionsFromJSON(opt)});
-    if(!cred){ if(errEl) errEl.textContent='Passkey verification failed.'; failed=true; return; }
-    var r=await fetch('/api/auth/webauthn/login',{
-      method:'POST',credentials:'include',
-      headers:{'Content-Type':'application/json','X-CSRF-Token':_csrfToken},
-      body:JSON.stringify(_waCredentialToJSON(cred))
-    }).then(res=>res.json()).catch(()=>null);
-    if(r&&r.success){
-      try{ localStorage.setItem('orca_credential_id',cred.id); }catch(e){} // .id is already base64url, same encoding the server just verified
-      location.reload();
-    } else {
-      if(errEl) errEl.textContent=(r&&r.msg)||'Passkey verification failed — try connecting your wallet instead.';
-      failed=true;
-    }
-  }catch(e){
-    // Same two meanings as on the setup side: dismissed, or never shown.
-    var quick = (Date.now() - (typeof startedAt === 'number' ? startedAt : 0)) < 700;
-    var em = e.name==='NotAllowedError'
-             ? (quick ? 'The device unlock prompt did not open. Tap Unlock once more.'
-                      : 'Device unlock cancelled — tap again, or connect your wallet instead.')
-           : e.name==='SecurityError' ? 'This address cannot use your passkey. Open OrcAgent at orcagent.fun.'
-           : 'Auth failed: '+(e.message||e.name);
-    if(errEl) errEl.textContent=em;
-    if(e.name==='NotAllowedError'){ _prefetchPasskeyLoginOptions(); _retryable=true; }
-    failed=true;
-  }finally{
-    _pkLoginBusy=false;
-    if(btn) btn.disabled=false;
-    _refreshPasskeyLoginButton();
-    // A prompt that was dismissed or never opened is not a reason to take
-    // the Face ID button away -- the whole fix is that tapping again works.
-    // Only a real dead end falls back to the wallet buttons.
-    if(failed && !_retryable) _showWalletOptions();
-  }
-}
-
-/* ── Optional per-account app-screen lock ─────────────────────────────────
-   This is an opt-in privacy screen, not a transaction-signing substitute.
-   A fresh server-verified assertion by THIS wallet's passkey clears it.
-   The existing wallet session and device recovery token are NOT revoked. */
-var _appLockEnabled=false, _appLockHasPasskey=false, _appLockBusy=false;
-var _appLockHiddenAt=0, _appLockPrefLoadedFor='', _appLockPromise=null;
-var _appLockLoginTimer=null, _appLockAutoTried=false;
-function _appLockCacheKey(wallet){
-  return 'orca_app_lock_'+wallet;
-}
-function _appLockCached(wallet){
-  try{ return localStorage.getItem(_appLockCacheKey(wallet))==='1'; }catch(e){return false;}
-}
-function _appLockCache(wallet,enabled){
-  try{ localStorage.setItem(_appLockCacheKey(wallet),enabled?'1':'0'); }catch(e){}
-}
-function _appLockElement(){return document.getElementById('oa-app-lock');}
-function _appLockVisible(){
-  var el=_appLockElement();
-  return !!el && el.style.display==='flex';
-}
-function _appLockShow(){
-  if(!_appLockEnabled || !phantomKey || _appLockBusy) return;
-  var el=_appLockElement();
-  if(!el || _appLockVisible()) return;
-  _appLockAutoTried=false;
-  el.style.display='flex';
-  el.setAttribute('aria-hidden','false');
-  var msg=document.getElementById('oa-app-lock-msg');
-  if(msg) msg.textContent='';
-  var app=document.getElementById('app');
-  if(app) app.setAttribute('inert','');
-  // Use a fresh, account-bound challenge for THIS lock cycle, not any
-  // general-login options that may be cached from the onboarding screen.
-  _pkLoginOpts=null;
-  var btn=document.getElementById('oa-app-lock-btn');
-  if(btn){btn.disabled=true;btn.textContent='Preparing secure unlock…';}
-  _prefetchPasskeyLoginOptions().then(function(opts){
-    if(!btn || !_appLockVisible() || _appLockBusy) return;
-    btn.disabled=!opts;
-    btn.textContent=opts?'Unlock OrcAgent':'Retry secure unlock';
-    if(!opts) btn.disabled=false;
-  });
-  if(_appLockLoginTimer) clearInterval(_appLockLoginTimer);
-  _appLockLoginTimer=setInterval(function(){
-    if(!_appLockBusy && _appLockVisible()) _prefetchPasskeyLoginOptions();
-  },70000);
-}
-// Best-effort automatic WebAuthn on resume. Safari owns the native passkey
-// confirmation UI; if it requires a user tap, the regular unlock button stays.
-function _appLockTryAutomatic(){
-  if(!_appLockVisible() || !_appLockEnabled || _appLockAutoTried ||
-     _appLockBusy || document.visibilityState!=='visible') return;
-  var ready=_pkLoginOpts && Date.now()-_pkLoginAt<PK_OPTS_FRESH_MS;
-  if(!ready){
-    if(_pkLoginPromise) _pkLoginPromise.then(function(){
-      if(_appLockVisible() && !_appLockAutoTried) _appLockTryAutomatic();
-    });
-    return;
-  }
-  _appLockAutoTried=true;
-  _unlockOrcAgent(true);
-}
-function _appLockHide(){
-  var el=_appLockElement();
-  if(el){el.style.display='none';el.setAttribute('aria-hidden','true');}
-  var app=document.getElementById('app');
-  if(app) app.removeAttribute('inert');
-  if(_appLockLoginTimer){clearInterval(_appLockLoginTimer);_appLockLoginTimer=null;}
-  _appLockHiddenAt=0;
-  if(/^#post-[pt]\d+$/.test(location.hash)) _handleNotifDeepLink();
-}
-async function _appLockLoad(onStartup){
-  if(!phantomKey || guestMode) return;
-  var wallet=phantomKey;
-  // The local value is just a startup-screen cache. Server owns the setting.
-  _appLockEnabled=_appLockCached(wallet);
-  if(_appLockEnabled && onStartup) _appLockShow();
-  try{
-    var res=await fetch('/api/auth/app-lock',{credentials:'include',cache:'no-store'});
-    var data=res.ok ? await res.json() : null;
-    if(res.status===401){
-      // Session was lost, not a biometric failure. Don't strand the user
-      // behind a lock they cannot verify without an authenticated wallet.
-      _appLockEnabled=false;
-      _appLockHide();
-      return;
-    }
-    if(!data || !data.ok || wallet!==phantomKey) return;
-    _appLockEnabled=!!data.enabled;
-    _appLockHasPasskey=!!data.has_passkey;
-    _appLockPrefLoadedFor=wallet;
-    _appLockCache(wallet,_appLockEnabled);
-    if(!_appLockEnabled) _appLockHide();
-    else if(onStartup) _appLockShow();
-  }catch(e){console.warn('[app-lock] preference unavailable; using prior setting');}
-}
-function _refreshAppLockControl(){
-  var panel=document.getElementById('st-app-lock-row');
-  var toggle=document.getElementById('st-app-lock-toggle');
-  var status=document.getElementById('st-app-lock-status');
-  if(!panel || !phantomKey) return;
-  panel.style.display='';
-  if(toggle) toggle.checked=_appLockEnabled;
-  if(status) status.textContent=_appLockHasPasskey
-    ? (_appLockEnabled?'On — OrcAgent locks when reopened.':'Off — the app stays open on return.')
-    : 'Set up a passkey above before turning on app lock.';
-  if(toggle) toggle.disabled=!_appLockHasPasskey;
-}
-async function _setAppLockPreference(enabled){
-  var toggle=document.getElementById('st-app-lock-toggle');
-  var status=document.getElementById('st-app-lock-status');
-  if(toggle) toggle.disabled=true;
-  if(status) status.textContent='Saving…';
-  var saveError='';
-  try{
-    var res=await fetch('/api/auth/app-lock',{
-      method:'POST',credentials:'include',
-      headers:{'Content-Type':'application/json','X-CSRF-Token':_csrfToken},
-      body:JSON.stringify({enabled:!!enabled})
-    });
-    var data=await res.json();
-    if(!res.ok || !data.ok) throw new Error(data.msg||'Unable to save app lock setting');
-    _appLockEnabled=!!data.enabled;
-    _appLockHasPasskey=!!data.has_passkey;
-    _appLockCache(phantomKey,_appLockEnabled);
-    if(!_appLockEnabled) _appLockHide();
-  }catch(e){
-    saveError=e.message||'Unable to save app lock setting.';
-  }finally{
-    _refreshAppLockControl();
-    if(saveError && status) status.textContent=saveError;
-  }
-}
-async function _unlockOrcAgent(auto){
-  if(_appLockBusy || !_appLockVisible()) return;
-  var btn=document.getElementById('oa-app-lock-btn');
-  var msg=document.getElementById('oa-app-lock-msg');
-  if(msg) msg.textContent='';
-  if(btn){btn.disabled=true;btn.textContent='Verifying…';}
-  _appLockBusy=true;
-  _pkLoginBusy=true; // don't replace the one-time challenge during Face ID
-  try{
-    var fresh=_pkLoginOpts && Date.now()-_pkLoginAt<PK_OPTS_FRESH_MS;
-    // Never await a network round trip then call WebAuthn: iOS requires
-    // navigator.credentials.get() from the same user-tap activation.
-    var opts=fresh ? _pkLoginOpts : null;
-    if(!opts){
-      _pkLoginBusy=false;
-      opts=await _prefetchPasskeyLoginOptions();
-      _pkLoginBusy=true;
-      if(!opts) throw new Error('Unlock unavailable — try again when online.');
-      if(msg) msg.textContent='Ready — tap Unlock again.';
-      return;
-    }
-    if(!opts.challenge) throw new Error('Unlock unavailable — try again when online.');
-    _pkLoginOpts=null;
-    var credential=await navigator.credentials.get({publicKey:_waOptionsFromJSON(opts)});
-    if(!credential) throw new Error('No passkey selected.');
-    var res=await fetch('/api/auth/app-lock/unlock',{
-      method:'POST',credentials:'include',
-      headers:{'Content-Type':'application/json','X-CSRF-Token':_csrfToken},
-      body:JSON.stringify(_waCredentialToJSON(credential))
-    });
-    var result=await res.json().catch(function(){return null});
-    if(!res.ok || !result || !result.ok || result.wallet!==phantomKey)
-      throw new Error((result&&result.msg)||'Unable to unlock this account.');
-    _appLockHide();
-  }catch(e){
-    if(msg) msg.textContent=e.name==='NotAllowedError'
-      ? (auto ? 'Tap Unlock OrcAgent if Face ID did not open automatically.'
-              : 'Unlock cancelled — tap the button to try again.')
-      : (e.message||'Could not unlock; please try again.');
-  }finally{
-    _appLockBusy=false;
-    _pkLoginBusy=false;
-    if(btn){btn.disabled=false;btn.textContent='Unlock OrcAgent';}
-    if(_appLockVisible()) _prefetchPasskeyLoginOptions();
-  }
-}
-document.addEventListener('visibilitychange',function(){
-  if(document.visibilityState==='hidden'){
-    _appLockHiddenAt=Date.now();
-    // Cover the UI before OS/app-switcher snapshots it.
-    if(!_appLockBusy) _appLockShow();
-  }else if(document.visibilityState==='visible'){
-    if(_appLockEnabled && _appLockHiddenAt && !_appLockBusy){
-      _appLockShow();
-      _appLockTryAutomatic();
-    }
-  }
-});
-window.addEventListener('pageshow',function(event){
-  if(event.persisted && _appLockEnabled && phantomKey && !_appLockBusy){
-    _appLockShow();
-    _appLockTryAutomatic();
-  }
-});
-
 async function _loginWithPassword(){
   var userEl=document.getElementById('ob-pwd-user');
   var passEl=document.getElementById('ob-pwd-pass');
@@ -605,270 +270,6 @@ async function _resumeFromDeviceToken(){
   // flow has already replaced it -- leave that newer credential alone.
   if(t && res.status === 401 && _deviceToken() === t) _clearDeviceToken();
   return '';
-}
-
-/* ── the way back into an installed app ──
-   A home-screen app cannot complete the Phantom deeplink: it opens Safari,
-   and the session lands there instead. Once such an app loses its session
-   there is no route back — the connect screen can only tell you to go and
-   open the site in a browser. A passkey is the one credential that works
-   inside it, and the code for it has been here all along behind a prompt
-   that was never shown: #s-faceid-prompt sits inside Settings at
-   display:none, and nothing anywhere sets it visible.
-
-   Shown from the SERVER's answer, not localStorage. An installed app has its
-   own storage, so a passkey registered in Safari leaves no trace there — the
-   client cannot tell "no passkey" from "not this context". */
-/* ── having the challenge in hand BEFORE the tap ──
-   navigator.credentials.create() has to run while the tap that asked for it
-   is still the browser's current user activation. Fetching the challenge
-   first spends that activation on a network round trip, and iOS then
-   refuses the call outright -- with NotAllowedError, the same error it
-   raises when somebody dismisses the sheet. So the screen said "Setup
-   cancelled." for a sheet that had never appeared, and no amount of tapping
-   ever produced a different answer.
-
-   The challenge is fetched ahead of the tap instead, and kept fresh while
-   the prompt is on screen. The server holds one for 120 seconds; this
-   replaces it well inside that, and never while a prompt is actually open,
-   since fetching another would invalidate the one being answered. */
-var _pkOpts = null, _pkOptsAt = 0, _pkOptsTimer = null, _pkBusy = false, _pkOptsPromise = null;
-var PK_OPTS_FRESH_MS = 80000;      // the server's own window is 120s
-
-function _pkOptsFresh(){
-  return !!_pkOpts && (Date.now() - _pkOptsAt) < PK_OPTS_FRESH_MS;
-}
-function _prefetchPasskeyOptions(){
-  if(_pkBusy) return Promise.resolve(_pkOpts);
-  if(_pkOptsPromise) return _pkOptsPromise;
-  _pkOptsPromise = fetch('/api/auth/webauthn/register/options', {credentials:'include',cache:'no-store'})
-    .then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(d){
-      if(d && d.challenge){ _pkOpts = d; _pkOptsAt = Date.now(); }
-      return (d && d.challenge) ? d : null;
-    })
-    .catch(function(){ return null; })
-    .finally(function(){ _pkOptsPromise = null; });
-  return _pkOptsPromise;
-}
-function _keepPasskeyOptionsFresh(on){
-  if(_pkOptsTimer){ clearInterval(_pkOptsTimer); _pkOptsTimer = null; }
-  if(!on) return;
-  _prefetchPasskeyOptions();
-  _pkOptsTimer = setInterval(_prefetchPasskeyOptions, PK_OPTS_FRESH_MS);
-}
-
-/* Whether this device can make a Face ID / Touch ID passkey at all.
-   window.PublicKeyCredential alone does not answer that: it is present in
-   browsers with no platform authenticator, in private windows, and inside
-   in-app browsers where passkeys do not work -- so the banner offered a
-   button that could only ever fail. */
-var _platformPasskeyStatus=null;
-function _faceIdPossible(){
-  if(!window.PublicKeyCredential
-     || !PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable){
-    return Promise.resolve(false);
-  }
-  try{
-    return PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
-      .then(function(ok){ _platformPasskeyStatus=!!ok; return !!ok; })
-      .catch(function(){ _platformPasskeyStatus=false; return false; });
-  }catch(e){ return Promise.resolve(false); }
-}
-
-function _prepareSettingsPasskey(){
-  var panel=document.getElementById('st-passkey-settings');
-  if(!panel) return;
-  panel.style.display='block';
-  if(!phantomKey) return;
-  _faceIdPossible().then(function(can){
-    if(can) _prefetchPasskeyOptions(); // before the user taps Setup
-    else {
-      var msg=document.getElementById('st-passkey-msg');
-      if(msg) msg.textContent='Passkey unavailable here; try Safari on orcagent.fun.';
-    }
-  });
-}
-function _setupSettingsPasskey(){
-  _setupFaceID({
-    btn:document.getElementById('st-passkey-btn'),
-    msg:document.getElementById('st-passkey-msg'),
-    btnLabel:'Set up passkey'
-  });
-}
-function _passkeyBannerDismissed(){
-  try{ return localStorage.getItem('orca_pk_prompt_off') === '1'; }catch(e){ return false; }
-}
-function _dismissPasskeyBanner(){
-  var b = document.getElementById('pk-banner');
-  if(b) b.style.display = 'none';
-  _keepPasskeyOptionsFresh(false);     // nothing on screen to keep ready for
-  try{ localStorage.setItem('orca_pk_prompt_off', '1'); }catch(e){}
-}
-function _maybePromptPasskey(session){
-  var b = document.getElementById('pk-banner');
-  if(!b || !session || !session.authenticated) return;
-  if(session.has_passkey) return;            // already has the way back
-  // Asked of the device rather than assumed. A browser with no platform
-  // authenticator, a private window, or an in-app browser all have
-  // window.PublicKeyCredential and none of them can make a Face ID passkey
-  // -- offering the button there is offering something that can only fail.
-  _faceIdPossible().then(function(can){
-    if(can) _showPasskeyBanner(b, session);
-  });
-}
-function _showPasskeyBanner(b, session){
-  // Inside an installed app the reminder is not a convenience, so it is not
-  // dismissible-forever there: losing the session locks the person out.
-  // Read through a guard: this function is defined above the const that holds
-  // it, so a caller that ran earlier than expected would hit the temporal
-  // dead zone and throw instead of simply not prompting.
-  var standalone = false;
-  try{ standalone = isStandalonePWA; }catch(e){ standalone = false; }
-  if(_passkeyBannerDismissed() && !standalone) return;
-  // The challenge has to be in hand before the tap -- see the note above
-  // _pkOpts. Started here, when the banner appears, and kept fresh for as
-  // long as it is on screen.
-  _keepPasskeyOptionsFresh(true);
-  var t = document.getElementById('pk-banner-title');
-  var sub = document.getElementById('pk-banner-sub');
-  if(standalone){
-    if(t) t.textContent = 'Set up a passkey for easy sign-in';
-    if(sub) sub.textContent = 'Connecting a wallet does not work from an app on '
-      + 'your home screen — it opens the browser instead. Your passkey is how you get '
-      + 'back in here if you are ever signed out.';
-  } else {
-    if(sub) sub.textContent = 'Sign in with your device passkey instead of reconnecting your '
-      + 'wallet each time — and it keeps working if you add OrcAgent to your home screen.';
-  }
-  var bannerBtn=document.getElementById('pk-banner-btn');
-  if(bannerBtn) bannerBtn.textContent='Set up passkey';
-  b.style.display = '';
-}
-function _setupPasskeyFromBanner(){
-  var btn = document.getElementById('pk-banner-btn');
-  var msg = document.getElementById('pk-banner-msg');
-  _setupFaceID({btn: btn, msg: msg, onDone: function(){
-    var b = document.getElementById('pk-banner');
-    if(b) setTimeout(function(){ b.style.display = 'none'; }, 2000);
-  }});
-}
-
-async function _setupFaceID(opts){
-  // The banner and the Settings prompt both drive this; each passes its own
-  // button and message element rather than the function guessing which
-  // surface it is reporting into.
-  opts = opts || {};
-  var wallet=phantomKey;
-  var btn=opts.btn||document.getElementById('s-faceid-prompt-btn');
-  var msg=opts.msg||document.getElementById('s-faceid-prompt-msg');
-  function _show(text,ok){
-    if(!msg) return;
-    msg.style.color=ok?'var(--green)':'var(--red)';
-    msg.textContent=text;
-  }
-  if(!wallet){ _show('Connect a wallet first.',false); return; }
-  if(!window.PublicKeyCredential){
-    _show('This browser cannot use Face ID. Open OrcAgent in Safari and try '
-          + 'again.',false); return; }
-  // The banner/Settings page checked this BEFORE the tap. Avoid an extra
-  // asynchronous capability request here: Safari may lose user activation
-  // before navigator.credentials.create() gets to show Face ID.
-  if(_platformPasskeyStatus===false ||
-     (_platformPasskeyStatus===null && !(await _faceIdPossible()))){
-    // Said once, plainly, instead of a button that fails every time.
-    _show('This device has no Face ID or Touch ID available to websites. It '
-          + 'needs a screen lock turned on, and a normal browser window — '
-          + 'private windows and in-app browsers cannot do it.',false);
-    return;
-  }
-  if(btn){ btn.disabled=true; btn.textContent='Setting up…'; }
-  if(msg){ msg.style.color='var(--muted)'; msg.textContent=''; }
-  _pkBusy = true;
-  var started = Date.now();
-  try{
-    // Prefetched where possible: asking the server for a challenge HERE
-    // spends the tap's user activation on a network round trip, and iOS then
-    // refuses the call without ever showing the sheet.
-    var opt = _pkOptsFresh() ? _pkOpts : await _prefetchPasskeyOptions();
-    _pkOpts = null;                     // one challenge, one attempt
-    if(!opt||!opt.challenge){ _show((opt&&opt.msg)||'Could not start Face ID setup.',false); return; }
-    started = Date.now();
-    var cred=await navigator.credentials.create({publicKey:_waOptionsFromJSON(opt)});
-    if(!cred){ _show('Registration failed — please try again.',false); return; }
-    var r=await fetch('/api/auth/webauthn/register',{
-      method:'POST',credentials:'include',
-      headers:{'Content-Type':'application/json','X-CSRF-Token':_csrfToken},
-      body:JSON.stringify(_waCredentialToJSON(cred))
-    }).then(res=>res.json()).catch(()=>null);
-    if(r&&r.success){
-      try{ localStorage.setItem('orca_credential_id',cred.id); }catch(e){}
-      _keepPasskeyOptionsFresh(false);
-      _show('✓ Passkey saved — unlock with this device next time.',true);
-      _updateFaceIdStatus();
-      if(opts.onDone) opts.onDone();
-      _appLockLoad().then(_refreshAppLockControl);
-      setTimeout(function(){ var p=document.getElementById('s-faceid-prompt'); if(p) p.style.display='none'; },2500);
-    } else {
-      _show('Registration failed: '+((r&&r.msg)||'unknown error'),false);
-    }
-  }catch(e){
-    // NotAllowedError means two completely different things: somebody
-    // dismissed the sheet, or the sheet never appeared at all. The time
-    // tells them apart -- nobody reads and dismisses a Face ID prompt in
-    // half a second -- and being told you cancelled something you never saw
-    // is what made this look broken rather than merely refused.
-    if(e.name === 'NotAllowedError'){
-      if(Date.now() - started < 700){
-        _show('The Face ID prompt did not open. Tap Set up Face ID once more '
-              + '— it usually works on the second try.', false);
-        _prefetchPasskeyOptions();      // ready for that second tap
-      } else {
-        _show('Cancelled. Tap Set up Face ID whenever you are ready.', false);
-        _prefetchPasskeyOptions();
-      }
-    } else if(e.name === 'InvalidStateError'){
-      // Not a failure: this device already has one. Saying so and recording
-      // it locally beats telling somebody to try something they have done.
-      _show('A passkey may already be saved in Apple Passwords, but OrcAgent has not confirmed it. Open Apple Passwords → Passkeys → orcagent.fun, remove ONLY the incomplete OrcAgent passkey, then try Set up passkey again.',false);
-    } else if(e.name === 'SecurityError'){
-      _show('Face ID cannot be set up from this address. Open OrcAgent at '
-            + 'orcagent.fun and try again.', false);
-    } else if(e.name === 'ConstraintError' || e.name === 'NotSupportedError'){
-      // The passkey has to be one the device can find on its own later --
-      // an installed app has its own storage and cannot be told which one
-      // to use. A device that will not store one says so here rather than
-      // leaving somebody with a login that works in Safari and nowhere else.
-      _show('This device will not save a passkey for OrcAgent. Check that a '
-            + 'screen lock and iCloud Keychain are turned on, then try again.',
-            false);
-    } else {
-      _show('Setup failed: '+(e.message||e.name), false);
-    }
-  }finally{
-    _pkBusy = false;
-    if(btn){ btn.disabled=false; btn.textContent=opts.btnLabel||'Set up passkey'; }
-  }
-}
-
-async function _removeFaceId(){
-  if(!(await openConfirmModal({text:'Remove saved Face ID login from this device?',danger:true}))) return;
-  localStorage.removeItem('orca_credential_id');
-  var msg=document.getElementById('s-faceid-msg');
-  if(msg){ msg.style.color='var(--muted)'; msg.textContent='Face ID removed.'; }
-  _updateFaceIdStatus();
-}
-
-function _updateFaceIdStatus(){
-  var has=!!localStorage.getItem('orca_credential_id');
-  var status=document.getElementById('s-faceid-status');
-  var btn=document.getElementById('s-faceid-btn');
-  var removeBtn=document.getElementById('s-faceid-remove-btn');
-  var bioBtn=document.getElementById('ob-bio-btn');
-  if(status) status.textContent=has?'Face ID is set up on this device.':'Not set up.';
-  if(btn) btn.textContent=has?'Update Face ID':'Setup Face ID login';
-  if(removeBtn) removeBtn.style.display=has?'':'none';
-  if(bioBtn) bioBtn.style.display=has?'':'none';
 }
 
 /* Mobile deep-link constants — used by wallet detection below */
@@ -1082,41 +483,20 @@ function _applySolflareDetection(solflareBtn, solflareNote){
   }, 400);
 }
 
-/* On load: switch connect screen between Face ID / password / Phantom modes */
+/* Wallet connect always remains the normal sign-in option. */
 document.addEventListener('DOMContentLoaded',function(){
-  var hasLocalPasskey=false;
-  try{
-    var stored=localStorage.getItem('orca_credential_id');
-    hasLocalPasskey=!!stored && stored!=='1';
-  }catch(e){}
-  var bioBtn=document.getElementById('ob-bio-btn');
-  var altLink=document.getElementById('ob-alt-link');
-  var pwdForm=document.getElementById('ob-pwd-form');
   var wbtns=document.getElementById('ob-wallet-btns');
   var phantomBtn=document.getElementById('phantom-ob-btn');
-  var phantomNote=document.getElementById('ob-phantom-note');
   var solflareBtn=document.getElementById('solflare-ob-btn');
-  var skipBtn=document.getElementById('ob-skip-btn');
+  var note=document.getElementById('ob-phantom-note');
+  var pwdForm=document.getElementById('ob-pwd-form');
   var nullEl={style:{},innerHTML:'',textContent:''};
   if(pwdForm) pwdForm.style.display='none';
-  _refreshPasskeyLoginButton();
-
-  // A discoverable passkey is tied to the OrcAgent domain, NOT to a
-  // localStorage credential ID. Safari, PWA and Android may have different
-  // storage even on the same phone. Always offer the option on capable
-  // devices, while still allowing Phantom/Solflare as the fallback.
-  _faceIdPossible().then(function(can){
-    if(bioBtn) bioBtn.style.display=can?'flex':'none';
-    if(altLink) altLink.style.display=can&&hasLocalPasskey?'':'none';
-    if(wbtns) wbtns.style.display=can&&hasLocalPasskey?'none':'block';
-    if(!can || !hasLocalPasskey){
-      if(phantomBtn) phantomBtn.style.display='flex';
-      if(solflareBtn) solflareBtn.style.display='flex';
-      _applyPhantomDetection(phantomBtn,phantomNote||nullEl);
-      _applySolflareDetection(solflareBtn,nullEl);
-    }
-    if(can) _keepPasskeyLoginReady();
-  });
+  if(wbtns) wbtns.style.display='block';
+  if(phantomBtn) phantomBtn.style.display='flex';
+  if(solflareBtn) solflareBtn.style.display='flex';
+  _applyPhantomDetection(phantomBtn,note||nullEl);
+  _applySolflareDetection(solflareBtn,nullEl);
 });
 
 // ── CSRF TOKEN ──
@@ -1196,7 +576,7 @@ var _csrfReady = _initCsrf();
 //
 // What replaces it as protection is per-action, not per-session: the trading
 // key never leaves the server, sensitive actions can be put behind Face ID or
-// a passkey, and Disconnect revokes every remembered login on every device at
+// an authenticator prompt, and Disconnect revokes remembered login on every device at
 // once. A timer that signs out someone reading the feed protects nothing that
 // those do not protect better, and it cost every single user their session
 // several times a day.
@@ -1378,8 +758,6 @@ function disconnectWallet(){
   var _doLogout=function(){
     fetch('/api/logout',{method:'POST',credentials:'include'}).finally(function(){
       phantomKey=null; walletType=null; guestMode=false;
-      localStorage.removeItem('orca_credential_id');
-      _appLockEnabled=false; _appLockHide();
       // Disconnect has to mean disconnected. Leaving the token behind would
       // let the very next page load sign this browser straight back in.
       _clearDeviceToken();
@@ -1553,10 +931,8 @@ async function launchApp(){
 
   // ── 2. Show dashboard ──────────────────────────────────────────
   if(phantomKey) guestMode = false;
-  if(phantomKey) await _appLockLoad(true);
   document.getElementById('onboard').classList.add('hide');
   document.getElementById('app').style.display='block';
-  if(_appLockVisible()) _appLockTryAutomatic();
   if(/^#post-[pt]\d+$/.test(location.hash)) _handleNotifDeepLink();
   if(location.hash==='#settings'){
     history.replaceState(null,'',location.pathname+location.search);
@@ -3742,21 +3118,6 @@ var _sessionBootstrapComplete = false;
             .then(function(r){ return r.json(); }).catch(function(){ return _me; });
         }
       }
-      if(_me) _maybePromptPasskey(_me);
-    }catch(e){}
-  } else {
-    // The prompt used to live ONLY inside the branch above, which runs when
-    // the page has no wallet in hand yet. So the moment a wallet was
-    // remembered -- which is the normal state for anyone already using the
-    // app -- the offer of a passkey was skipped entirely, and the people
-    // most likely to be locked out later were exactly the ones never asked.
-    // Whether to prompt is the server's answer about the session, not a
-    // question of whether this page happens to know a wallet address.
-    try{
-      fetch('/api/session', {credentials:'include'})
-        .then(function(r){ return r.json(); })
-        .then(function(me){ if(me) _maybePromptPasskey(me); })
-        .catch(function(){});
     }catch(e){}
   }
   // Checked AFTER that, so the server stays the authority: a real disconnect
@@ -4428,8 +3789,6 @@ function _sbNav(section){
     }
     _sbSetActive('sbn-settings');
     loadSettingsPage();
-    _prepareSettingsPasskey();
-    _appLockLoad().then(_refreshAppLockControl);
   } else if(section==='notifications'){
     if(_dmOpen) closeMessagesView();
     if(_gcOpen) closeCommunityView();
@@ -4700,7 +4059,6 @@ async function openSettings(){
     settingsHasKey=false;
     _updateKeyStatus();
   }
-  _updateFaceIdStatus();
 }
 
 function closeSettings(){
