@@ -57,11 +57,45 @@ function ensureHomeComposerStyles(){
   if(here()!=='/'||document.getElementById('oa-home-composer-mobile-css'))return;
   var css=document.createElement('link');css.id='oa-home-composer-mobile-css';css.rel='stylesheet';css.href='/static/home-composer-mobile.css?v=1';document.head.appendChild(css);
 }
+/* Dock to the *visible* viewport when mobile browser chrome expands/collapses.
+   CSS bottom:0 anchors the layout viewport; on some iOS/Android builds its
+   bottom is different from visualViewport's bottom and leaves a gap. Correct
+   only a measured gap, never change the document scroll owner. */
+var _dockFrame=0;
+function _dockBottomNav(){
+  var nav=document.getElementById('oa-bottom-nav'),vv=window.visualViewport;
+  if(!nav||!vv||!window.matchMedia('(max-width:767px)').matches)return;
+  if(nav.getClientRects().length===0)return;
+  var visibleBottom=vv.offsetTop+vv.height;
+  var gap=visibleBottom-nav.getBoundingClientRect().bottom;
+  if(Math.abs(gap)<1.5)return;
+  var old=Number(nav.dataset.oaDockShift||0),next=old+gap;
+  // An on-screen keyboard is not a footer gap: don't move the nav over input.
+  if(!Number.isFinite(next)||Math.abs(next)>120)return;
+  nav.dataset.oaDockShift=String(next);
+  nav.style.setProperty('transform','translate3d(0,'+next+'px,0)','important');
+}
+function _scheduleBottomDock(){
+  if(_dockFrame)return;
+  _dockFrame=requestAnimationFrame(function(){_dockFrame=0;_dockBottomNav()});
+}
+function _observeBottomDock(){
+  if(!window.visualViewport)return;
+  window.visualViewport.addEventListener('resize',_scheduleBottomDock,{passive:true});
+  window.visualViewport.addEventListener('scroll',_scheduleBottomDock,{passive:true});
+  window.addEventListener('resize',_scheduleBottomDock,{passive:true});
+  window.addEventListener('orientationchange',_scheduleBottomDock,{passive:true});
+  window.addEventListener('pageshow',_scheduleBottomDock,{passive:true});
+  var sheet=document.querySelector('link[href*="mobile-bottom-nav.css"]');
+  if(sheet)sheet.addEventListener('load',_scheduleBottomDock,{once:true});
+  _scheduleBottomDock();
+  setTimeout(_scheduleBottomDock,250);
+}
 function build(){if(document.getElementById('oa-bottom-nav'))return;ensureHomeComposerStyles();var nav=document.createElement('nav');nav.id='oa-bottom-nav';nav.className='oa-bottom-nav';nav.setAttribute('aria-label','Mobile navigation');var p=here(),wallet=p==='/wallet';nav.innerHTML='<a href="/" class="'+(p==='/'?'active':'')+'">'+icon('home')+'<span class="oa-nav-label">Home</span></a>'+
 '<a href="/live-market" class="'+(p==='/live-market'?'active':'')+'">'+icon('market')+'<span class="oa-nav-label">Live Market</span></a>'+centerHtml(p)+
 '<a href="/wallet" class="'+(wallet?'active':'')+'">'+icon('portfolio')+'<span class="oa-nav-label">Portfolio</span></a>'+
 '<button type="button" class="oa-menu-btn" aria-label="Open menu">'+icon('menu')+'<span class="oa-nav-label">Menu</span></button>';
-document.body.appendChild(nav);var btn=nav.querySelector('.oa-menu-btn');if(btn)btn.addEventListener('click',openAppMenu);var postBtn=nav.querySelector('.oa-post-main');if(postBtn)postBtn.addEventListener('click',openSocialComposer);buildWalletSheet();buildAppMenu();
+document.body.appendChild(nav);var btn=nav.querySelector('.oa-menu-btn');if(btn)btn.addEventListener('click',openAppMenu);var postBtn=nav.querySelector('.oa-post-main');if(postBtn)postBtn.addEventListener('click',openSocialComposer);buildWalletSheet();buildAppMenu();_observeBottomDock();
 if(p==='/'&&((new URLSearchParams(location.search)).get('compose')==='1'||location.hash==='#feed-composer'))requestAnimationFrame(function(){requestAnimationFrame(function(){focusSocialComposer(0)})})
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',build,{once:true});else build();
