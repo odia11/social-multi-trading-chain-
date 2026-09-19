@@ -8616,17 +8616,22 @@ async function loadHomeFeed(){
     const data = await r.json();
     if(data && Array.isArray(data.items)){
       _homeFeedData = data.items;
-      // A permalink must not disappear when the initial feed or an auto-refresh
-      // resolves after the single-post request. Keep the exact shared item first.
-      if(_activeDeepLinkedPost && location.hash === '#post-'+_activeDeepLinkedPost.id){
-        _homeFeedData = _homeFeedData.filter(function(item){
-          return (item.id ? 'p'+item.id : (item.trade_id ? 't'+item.trade_id : '')) !== _activeDeepLinkedPost.id;
-        });
-        _homeFeedData.unshift(_activeDeepLinkedPost.post);
-      }
+      // The shared post is merged at its chronological position only when
+      // rendering. Never move an old post ahead of newer feed updates.
       _homeFeedNextCursor = data.next_cursor || null;
       try{
+        // If the target was already opened while this feed request was
+        // loading, keep it in view after the chronological re-render.
+        var linkedId=_activeDeepLinkedPost && location.hash==='#post-'+_activeDeepLinkedPost.id
+          ? _activeDeepLinkedPost.id : '';
+        var oldLinked=linkedId && document.getElementById('fc-card-'+linkedId);
+        var keepLinkedInView=oldLinked && oldLinked.getBoundingClientRect().bottom>0
+          && oldLinked.getBoundingClientRect().top<window.innerHeight;
         renderHomeFeed();
+        if(keepLinkedInView){
+          var freshLinked=document.getElementById('fc-card-'+linkedId);
+          if(freshLinked) freshLinked.scrollIntoView({behavior:'auto',block:'center'});
+        }
         _handleNotifDeepLink();
       }catch(e){
         console.error('[feed] render error:', e);
@@ -8660,7 +8665,20 @@ async function loadMoreHomeFeed(){
     if(data && Array.isArray(data.items)){
       _homeFeedData = _homeFeedData.concat(data.items);
       _homeFeedNextCursor = data.next_cursor || null;
-      renderHomeFeed(data.items); // append only the new page, not a full rebuild
+      if(_activeDeepLinkedPost && location.hash==='#post-'+_activeDeepLinkedPost.id){
+        // Older pages may contain posts between the latest page and the
+        // linked post. Reposition that post by timestamp as they arrive.
+        var oldCard=document.getElementById('fc-card-'+_activeDeepLinkedPost.id);
+        var inView=oldCard && oldCard.getBoundingClientRect().bottom>0
+                   && oldCard.getBoundingClientRect().top<window.innerHeight;
+        renderHomeFeed();
+        if(inView){
+          var linkedCard=document.getElementById('fc-card-'+_activeDeepLinkedPost.id);
+          if(linkedCard) linkedCard.scrollIntoView({behavior:'auto',block:'center'});
+        }
+      } else {
+        renderHomeFeed(data.items); // normal feed retains fast append-only paging
+      }
     }
   }catch(e){
     console.error('[feed] load-more error:', e);
@@ -9102,7 +9120,7 @@ setInterval(function(){
 function renderHomeFeed(appendItems){
   const el = document.getElementById('center-feed');
   if(!el) return;
-  if(!_homeFeedData||!_homeFeedData.length){
+  if((!_homeFeedData||!_homeFeedData.length) && !_activeDeepLinkedPost){
     el.innerHTML='<p style="color:#565d68;padding:20px">No posts yet</p>';
     return;
   }
@@ -9118,15 +9136,9 @@ function renderHomeFeed(appendItems){
         && (i.trade_id ? 't'+i.trade_id : (i.id ? 'p'+i.id : '')) === _activeDeepLinkedPost.id);
     });
   }
-  // The exact permalink target is always shown, even when Following or Live
-  // Trades is selected and its normal filter would remove this post.
-  if(!appendItems && _activeDeepLinkedPost
-     && location.hash === '#post-'+_activeDeepLinkedPost.id){
-    items = items.filter(function(i){
-      return (i.id ? 'p'+i.id : (i.trade_id ? 't'+i.trade_id : '')) !== _activeDeepLinkedPost.id;
-    });
-    items.unshift(_activeDeepLinkedPost.post);
-  }
+  // A permalink opens the target at its ORIGINAL chronological position.
+  // Keep the normal latest-first order; never pin an older share to the top.
+  if(!appendItems) items = _insertLinkedPostChronologically(items);
   if(!items.length){
     if(!appendItems) el.innerHTML = '<div class="fc-empty">No activity yet — start trading to appear in the feed.</div>';
     return;
@@ -9963,6 +9975,41 @@ var _lastDeepLinkHash = null;
 var _pendingDeepLinkHash = null;
 var _activeDeepLinkedPost = null; // {id, post}; survives feed refreshes
 
+function _insertLinkedPostChronologically(items){
+  if(!_activeDeepLinkedPost || location.hash !== '#post-'+_activeDeepLinkedPost.id)
+    return items;
+  var linked=_activeDeepLinkedPost.post;
+  if(!linked) return items;
+  var postId=_activeDeepLinkedPost.id;
+  // If the post is in the feed already, respect the server's original order.
+  if(items.some(function(i){
+    return (i.id ? 'p'+i.id : (i.trade_id ? 't'+i.trade_id : ''))===postId;
+  })) return items;
+  var result=items.slice();
+  var raw=linked.created_at||linked.timestamp||linked.opened_at||'';
+  var linkedStamp=String(raw).replace(' ','T');
+  if(linkedStamp && !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(linkedStamp)) linkedStamp+='Z';
+  var linkedTime=Date.parse(linkedStamp);
+  var index=result.length;
+  if(Number.isFinite(linkedTime)){
+    for(var n=0;n<result.length;n++){
+      var candidate=result[n];
+      var candidateRaw=candidate.created_at||candidate.timestamp||candidate.opened_at||'';
+      var candidateStamp=String(candidateRaw).replace(' ','T');
+      if(candidateStamp && !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(candidateStamp)) candidateStamp+='Z';
+      var candidateTime=Date.parse(candidateStamp);
+      if(Number.isFinite(candidateTime) && candidateTime < linkedTime){
+        index=n;
+        break;
+      }
+    }
+  }
+  // A post older than the current first page appears BELOW every newer post,
+  // not at the top, while scrollIntoView() still opens it immediately.
+  result.splice(index,0,linked);
+  return result;
+}
+
 window.addEventListener('hashchange', function(){
   if(/^#post-[pt]\d+$/.test(location.hash)){
     _handleNotifDeepLink();
@@ -10037,10 +10084,8 @@ async function _jumpToPost(postId, notifType){
       var d=await r.json();
       if(d && d.ok && d.post){
         _activeDeepLinkedPost={id:postId,post:d.post};
-        _homeFeedData=(_homeFeedData||[]).filter(function(i){
-          return (i.id ? 'p'+i.id : (i.trade_id ? 't'+i.trade_id : '')) !== postId;
-        });
-        _homeFeedData.unshift(d.post);
+        // Do not mutate the normal feed. renderHomeFeed() inserts this
+        // permalink at its timestamp position, after all newer posts.
         renderHomeFeed();
         card=document.getElementById('fc-card-'+postId);
       }

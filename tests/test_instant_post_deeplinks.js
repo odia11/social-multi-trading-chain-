@@ -38,11 +38,45 @@ async function run(id){
   assert.equal(scrolled,1,'Do not reopen already visible post');
   console.log('PASS instant exact post',id);
 }
+
+function postChronologyRegression(){
+  const block=js.slice(js.indexOf('/* ── Canonical post deep-links:'),js.indexOf('// ── "new reply on your post" tracking'));
+  const ctx={
+    location:{hash:'#post-p449'},window:{addEventListener(){}},
+    document:{},console,Date,Number,Array
+  };
+  vm.createContext(ctx);vm.runInContext(block,ctx);
+  const recent={id:500,created_at:'2026-09-19 07:18:00'};
+  const middle={id:460,created_at:'2026-09-19T06:00:00Z'};
+  const old={id:449,created_at:'2026-09-18 07:00:00'};
+  const older={id:420,created_at:'2026-09-17T07:00:00+00:00'};
+  const ids=items=>Array.from(items,x=>x.id);
+  ctx._activeDeepLinkedPost={id:'p449',post:old};
+  let initial=[recent,middle];
+  assert.deepStrictEqual(ids(ctx._insertLinkedPostChronologically(initial)),[500,460,449],
+      'Old linked post follows all newer posts');
+  assert.deepStrictEqual(ids(initial),[500,460],'Never reorder shared feed data');
+  assert.deepStrictEqual(ids(ctx._insertLinkedPostChronologically([recent,old,older])),[500,449,420],
+      'Post already in feed keeps its original position, no duplicate');
+  assert.deepStrictEqual(ids(ctx._insertLinkedPostChronologically([recent,middle,older])),[500,460,449,420],
+      'More old pages preserve timestamp order');
+  ctx._activeDeepLinkedPost={id:'p480',post:{id:480,created_at:'2026-09-19T06:30:00+00:00'}};
+  ctx.location.hash='#post-p480';
+  assert.deepStrictEqual(ids(ctx._insertLinkedPostChronologically([recent,middle,old])),[500,480,460,449],
+      'In-between post goes between newer and older posts');
+  ctx.location.hash='';
+  assert.deepStrictEqual(ids(ctx._insertLinkedPostChronologically([recent,middle])),[500,460],
+      'Normal Home feed unchanged after leaving permalink');
+  console.log('PASS linked post chronology: old, duplicate, pagination, mid-feed, normal feed');
+}
+postChronologyRegression();
+
 (async()=>{
   await run('p449');await run('t456');
-  assert(js.includes("items.unshift(_activeDeepLinkedPost.post)"),'Keep post across feed refresh/filter');
-  assert(js.includes("if(_activeDeepLinkedPost && location.hash === '#post-'+_activeDeepLinkedPost.id)"),'Keep post in feed loads');
-  console.log('PASS deep-linked posts survive feed pagination/filter/refresh');
+  assert(!js.includes('items.unshift(_activeDeepLinkedPost.post)'), 'Never move old posts above new ones');
+  assert(!js.includes('_homeFeedData.unshift(d.post)'), 'Never move fetched post to feed top');
+  assert(js.includes('items = _insertLinkedPostChronologically(items)'), 'Render target chronologically');
+  console.log('PASS deep-linked posts preserve chronological feed order');
   const dm=fs.readFileSync('templates/messages.html','utf8');
   const group=fs.readFileSync('templates/group_detail.html','utf8');
   assert(dm.includes('_dmPostLinkText(m.message)'));
