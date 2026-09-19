@@ -3627,7 +3627,7 @@ if (window.__SESSION_WALLET) {
       <!-- Hidden compat elements -->
       <div id="mobile-deeplink-section" style="display:none"></div>
 
-      <!-- Face ID (shown ONLY when credential saved in localStorage) -->
+      <!-- Device passkey: Face ID / Touch ID on Apple, fingerprint / screen lock on Android -->
       <button class="ob-btn" onclick="_webAuthnLogin()" id="ob-bio-btn"
         style="display:none;background:var(--accent);color:#0a0b0e;flex-direction:column;gap:10px;padding:22px 16px;height:auto;border-radius:14px">
         <svg width="38" height="38" viewBox="0 0 38 38" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -3638,7 +3638,7 @@ if (window.__SESSION_WALLET) {
           <path d="M19 18.5v3.5"/>
           <path d="M15 26c1.2 1.8 6.8 1.8 8 0"/>
         </svg>
-        <span id="ob-bio-label" style="font-size:15px;font-weight:700">Login with Face ID</span>
+        <span id="ob-bio-label" style="font-size:15px;font-weight:700">Unlock with passkey</span>
       </button>
       <div id="ob-bio-err" style="font-size:11px;color:var(--red);text-align:center;min-height:16px;margin-top:-2px"></div>
       <button id="ob-alt-link" onclick="_showWalletOptions()" style="display:none;background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;padding:2px 0 8px;text-decoration:underline;font-family:var(--ui)">or connect a wallet instead</button>
@@ -3718,10 +3718,10 @@ if (window.__SESSION_WALLET) {
 
     <!-- Face ID setup prompt — revealed after private key is saved -->
     <div id="s-faceid-prompt" style="display:none;margin-top:14px;padding:14px 16px;background:rgba(247,185,85,.07);border:1px solid rgba(247,185,85,.22);border-radius:10px">
-      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>Login faster with Face ID?</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.5">Next time, just scan your face — no wallet needed.</div>
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>Sign in faster with a passkey?</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.5">Next time, unlock with Face ID, fingerprint or your device screen lock.</div>
       <div style="display:flex;gap:8px">
-        <button id="s-faceid-prompt-btn" onclick="_setupFaceID()" style="flex:1;padding:10px;background:var(--accent);color:#0a0b0e;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;transition:opacity .15s">Setup Face ID</button>
+        <button id="s-faceid-prompt-btn" onclick="_setupFaceID()" style="flex:1;padding:10px;background:var(--accent);color:#0a0b0e;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;transition:opacity .15s">Set up passkey</button>
         <button onclick="document.getElementById('s-faceid-prompt').style.display='none'" style="padding:10px 16px;background:var(--bg3);border:1px solid var(--border2);border-radius:7px;color:var(--muted);font-size:12px;cursor:pointer">Maybe later</button>
       </div>
       <div id="s-faceid-prompt-msg" style="font-size:11px;margin-top:8px;min-height:14px"></div>
@@ -3888,7 +3888,7 @@ __IMAGE_LIGHTBOX__
     </div>
     <div id="pk-banner-sub" style="font-size:11.5px;color:var(--muted);line-height:1.5;margin-bottom:11px"></div>
     <div style="display:flex;gap:8px">
-      <button id="pk-banner-btn" onclick="_setupPasskeyFromBanner()" style="flex:1;min-height:44px;padding:11px;background:var(--accent);color:#0a0b0e;border:none;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer">Set up Face ID</button>
+      <button id="pk-banner-btn" onclick="_setupPasskeyFromBanner()" style="flex:1;min-height:44px;padding:11px;background:var(--accent);color:#0a0b0e;border:none;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer">Set up passkey</button>
       <button onclick="_dismissPasskeyBanner()" style="min-height:44px;padding:11px 15px;background:var(--bg3);border:1px solid var(--border2);border-radius:9px;color:var(--muted);font-size:12.5px;cursor:pointer">Not now</button>
     </div>
     <div id="pk-banner-msg" style="font-size:11px;margin-top:8px;min-height:14px"></div>
@@ -4688,6 +4688,12 @@ __IMAGE_LIGHTBOX__
 
         <div class="st-wallet-btns">
           <button class="st-manage-btn" onclick="_openManage()">Manage</button>
+        </div>
+        <div id="st-passkey-settings" style="display:none;margin-top:15px;padding:14px;border:1px solid rgba(247,185,85,.26);border-radius:12px;background:rgba(247,185,85,.06)">
+          <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:5px">Secure device unlock</div>
+          <div style="font-size:11.5px;color:var(--muted);line-height:1.5;margin-bottom:11px">Sign in with Face ID, fingerprint or your device screen lock. You can add a passkey for this device without changing your wallet.</div>
+          <button type="button" id="st-passkey-btn" onclick="_setupSettingsPasskey()" style="min-height:44px;width:100%;border:0;border-radius:9px;background:var(--accent);color:#0a0b0e;font-weight:700">Set up passkey</button>
+          <div id="st-passkey-msg" aria-live="polite" style="min-height:16px;font-size:11px;margin-top:8px;color:var(--muted)"></div>
         </div>
       </div>
 
