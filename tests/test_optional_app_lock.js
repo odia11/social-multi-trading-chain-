@@ -95,3 +95,17 @@ async function setup(){
   assert.equal(elements['oa-app-lock'].style.display,'none','Disabled lock does not appear on BFCache');
   console.log('PASS optional app lock: default off, Settings safe, startup/background gate, account-bound WebAuthn, opt out, wallet isolation, no logout');
 })().catch(e=>{console.error(e);process.exit(1)});
+
+// Returning from another app should try the account passkey automatically.
+(async()=>{
+  const {ctx,elements,hiddenCb,assertions}=await setup();
+  await ctx._appLockLoad(false);
+  ctx.document.visibilityState='hidden';hiddenCb();
+  assert.equal(elements['oa-app-lock'].style.display,'flex');
+  ctx.document.visibilityState='visible';hiddenCb();
+  await flush();await flush();
+  assert.equal(assertions(),1,'Returning to the app launches one automatic attempt');
+  assert.equal(elements['oa-app-lock'].style.display,'none','Verified Face ID/passkey clears lock');
+  assert.equal(ctx.phantomKey,'wallet-a','Wallet session must be preserved');
+  console.log('PASS automatic resume: one passkey attempt, same account, no extra OrcAgent button');
+})().catch(e=>{console.error(e);process.exitCode=1});

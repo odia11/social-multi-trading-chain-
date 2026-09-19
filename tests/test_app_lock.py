@@ -92,6 +92,29 @@ class AppLockTest(unittest.TestCase):
         a,status=self.invoke(self.pref,'POST',{'enabled':True})
         self.assertEqual(status,409)
 
+    def test_lock_options_offer_only_current_account_credentials(self):
+        offered=[]
+        wa=self.ns['_webauthn']
+        wa.generate_authentication_options=lambda **kw: (
+            offered.append(kw['allow_credentials']) or SimpleNamespace(challenge=b'challenge'))
+        wa.options_to_json=lambda _: '{"challenge":"Y2hhbGxlbmdl"}'
+        self.ns['_WaPublicKeyCredentialDescriptor']=lambda id: id
+        self.ns['_WaUserVerificationRequirement']=SimpleNamespace(REQUIRED='required')
+        self.ns['_webauthn_store_challenge']=lambda *args: None
+        options=load_function('webauthn_login_options',self.ns)
+        with self.app.test_request_context('/api/auth/webauthn/login/options?app_lock=1'):
+            session.update(user_id=1,wallet='wallet-a')
+            result=options()
+        self.assertEqual(result[1],200)
+        self.assertEqual(offered[-1],[b'own'])
+        with self.app.test_request_context('/api/auth/webauthn/login/options?app_lock=1'):
+            result=options()
+        self.assertEqual(result[1],401)
+        with self.app.test_request_context('/api/auth/webauthn/login/options'):
+            result=options()
+        self.assertEqual(result[1],200)
+        self.assertIsNone(offered[-1])
+
 
 if __name__=='__main__':
     unittest.main()

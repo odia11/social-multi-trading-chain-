@@ -117,7 +117,11 @@ var _pkLoginPromise = null, _pkLoginRefreshTimer = null, _pkLoginBusy = false;
 function _prefetchPasskeyLoginOptions(){
   if(_pkLoginBusy) return Promise.resolve(_pkLoginOpts);
   if(_pkLoginPromise) return _pkLoginPromise;
-  _pkLoginPromise = fetch('/api/auth/webauthn/login/options', {credentials:'include',cache:'no-store'})
+  var optionUrl=(typeof _appLockEnabled!=='undefined' && _appLockEnabled
+                 && typeof phantomKey!=='undefined' && phantomKey)
+    ? '/api/auth/webauthn/login/options?app_lock=1'
+    : '/api/auth/webauthn/login/options';
+  _pkLoginPromise = fetch(optionUrl, {credentials:'include',cache:'no-store'})
     .then(function(r){ return r.ok ? r.json() : null; })
     .then(function(d){
       if(d && d.challenge){ _pkLoginOpts = d; _pkLoginAt = Date.now(); return d; }
@@ -210,7 +214,7 @@ async function _webAuthnLogin(){
    The existing wallet session and device recovery token are NOT revoked. */
 var _appLockEnabled=false, _appLockHasPasskey=false, _appLockBusy=false;
 var _appLockHiddenAt=0, _appLockPrefLoadedFor='', _appLockPromise=null;
-var _appLockLoginTimer=null;
+var _appLockLoginTimer=null, _appLockAutoTried=false;
 function _appLockCacheKey(wallet){
   return 'orca_app_lock_'+wallet;
 }
@@ -229,13 +233,16 @@ function _appLockShow(){
   if(!_appLockEnabled || !phantomKey || _appLockBusy) return;
   var el=_appLockElement();
   if(!el || _appLockVisible()) return;
+  _appLockAutoTried=false;
   el.style.display='flex';
   el.setAttribute('aria-hidden','false');
   var msg=document.getElementById('oa-app-lock-msg');
   if(msg) msg.textContent='';
   var app=document.getElementById('app');
   if(app) app.setAttribute('inert','');
-  // Get the challenge before the tap; otherwise iOS loses user activation.
+  // Use a fresh, account-bound challenge for THIS lock cycle, not any
+  // general-login options that may be cached from the onboarding screen.
+  _pkLoginOpts=null;
   var btn=document.getElementById('oa-app-lock-btn');
   if(btn){btn.disabled=true;btn.textContent='Preparing secure unlock…';}
   _prefetchPasskeyLoginOptions().then(function(opts){
@@ -249,6 +256,21 @@ function _appLockShow(){
     if(!_appLockBusy && _appLockVisible()) _prefetchPasskeyLoginOptions();
   },70000);
 }
+// Best-effort automatic WebAuthn on resume. Safari owns the native passkey
+// confirmation UI; if it requires a user tap, the regular unlock button stays.
+function _appLockTryAutomatic(){
+  if(!_appLockVisible() || !_appLockEnabled || _appLockAutoTried ||
+     _appLockBusy || document.visibilityState!=='visible') return;
+  var ready=_pkLoginOpts && Date.now()-_pkLoginAt<PK_OPTS_FRESH_MS;
+  if(!ready){
+    if(_pkLoginPromise) _pkLoginPromise.then(function(){
+      if(_appLockVisible() && !_appLockAutoTried) _appLockTryAutomatic();
+    });
+    return;
+  }
+  _appLockAutoTried=true;
+  _unlockOrcAgent(true);
+}
 function _appLockHide(){
   var el=_appLockElement();
   if(el){el.style.display='none';el.setAttribute('aria-hidden','true');}
@@ -256,7 +278,7 @@ function _appLockHide(){
   if(app) app.removeAttribute('inert');
   if(_appLockLoginTimer){clearInterval(_appLockLoginTimer);_appLockLoginTimer=null;}
   _appLockHiddenAt=0;
-  if(/^#post-[pt]\\d+$/.test(location.hash)) _handleNotifDeepLink();
+  if(/^#post-[pt]\d+$/.test(location.hash)) _handleNotifDeepLink();
 }
 async function _appLockLoad(onStartup){
   if(!phantomKey || guestMode) return;
@@ -320,7 +342,7 @@ async function _setAppLockPreference(enabled){
     if(saveError && status) status.textContent=saveError;
   }
 }
-async function _unlockOrcAgent(){
+async function _unlockOrcAgent(auto){
   if(_appLockBusy || !_appLockVisible()) return;
   var btn=document.getElementById('oa-app-lock-btn');
   var msg=document.getElementById('oa-app-lock-msg');
@@ -356,7 +378,8 @@ async function _unlockOrcAgent(){
     _appLockHide();
   }catch(e){
     if(msg) msg.textContent=e.name==='NotAllowedError'
-      ? 'Unlock cancelled — tap the button to try again.'
+      ? (auto ? 'Tap Unlock OrcAgent if Face ID did not open automatically.'
+              : 'Unlock cancelled — tap the button to try again.')
       : (e.message||'Could not unlock; please try again.');
   }finally{
     _appLockBusy=false;
@@ -371,11 +394,17 @@ document.addEventListener('visibilitychange',function(){
     // Cover the UI before OS/app-switcher snapshots it.
     if(!_appLockBusy) _appLockShow();
   }else if(document.visibilityState==='visible'){
-    if(_appLockEnabled && _appLockHiddenAt && !_appLockBusy) _appLockShow();
+    if(_appLockEnabled && _appLockHiddenAt && !_appLockBusy){
+      _appLockShow();
+      _appLockTryAutomatic();
+    }
   }
 });
 window.addEventListener('pageshow',function(event){
-  if(event.persisted && _appLockEnabled && phantomKey && !_appLockBusy) _appLockShow();
+  if(event.persisted && _appLockEnabled && phantomKey && !_appLockBusy){
+    _appLockShow();
+    _appLockTryAutomatic();
+  }
 });
 
 async function _loginWithPassword(){
@@ -1527,6 +1556,7 @@ async function launchApp(){
   if(phantomKey) await _appLockLoad(true);
   document.getElementById('onboard').classList.add('hide');
   document.getElementById('app').style.display='block';
+  if(_appLockVisible()) _appLockTryAutomatic();
   if(/^#post-[pt]\d+$/.test(location.hash)) _handleNotifDeepLink();
   if(location.hash==='#settings'){
     history.replaceState(null,'',location.pathname+location.search);

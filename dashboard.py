@@ -17471,7 +17471,22 @@ def webauthn_login_options():
         return jsonify({'success': False, 'msg': 'Face ID unavailable on this server'}), 503
     credential_id = (request.args.get('credential_id') or '').strip()
     allow = None
-    if credential_id:
+    if request.args.get('app_lock') == '1':
+        # Restrict the iOS passkey sheet to this logged-in account. Never
+        # allow a passkey from a different wallet to appear for app unlock.
+        wallet = _authenticated_wallet()
+        user_id = session.get('user_id')
+        if not wallet or not user_id:
+            return jsonify({'ok': False, 'msg': 'Sign in required'}), 401
+        with sqlite3.connect(DB_FILE) as conn:
+            credential_rows = conn.execute(
+                'SELECT credential_id FROM webauthn_credentials WHERE user_id=?',
+                (user_id,)).fetchall()
+        if not credential_rows:
+            return jsonify({'ok': False, 'msg': 'Set up a passkey first'}), 409
+        allow = [_WaPublicKeyCredentialDescriptor(id=_webauthn.base64url_to_bytes(row[0]))
+                 for row in credential_rows]
+    elif credential_id:
         try:
             allow = [_WaPublicKeyCredentialDescriptor(id=_webauthn.base64url_to_bytes(credential_id))]
         except Exception:
