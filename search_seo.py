@@ -45,6 +45,7 @@ _PRIVATE_PREFIXES = (
     "/api/", "/admin", "/messages", "/notifications", "/wallet",
     "/settings", "/phantom", "/solflare", "/callback", "/logout",
 )
+_PUBLIC_PREVIEW_IMAGE_PREFIXES = ("/api/trade-card/", "/api/post-og-image/")
 _TITLE_RE = re.compile(r"<title\b[^>]*>.*?</title>", re.I | re.S)
 _DESCRIPTION_RE = re.compile(
     r"<meta\b(?=[^>]*\bname\s*=\s*[\"']description[\"'])[^>]*>\s*",
@@ -225,11 +226,15 @@ def install(dashboard_module):
     def _orca_robots():
         text = "\n".join([
             "User-agent: *",
-            "Allow: /",
+            # Put specific rules before broad ones for crawlers that match
+            # the first applicable rule rather than the longest prefix.
+            "Allow: /api/trade-card/",
+            "Allow: /api/post-og-image/",
             "Disallow: /api/",
             "Disallow: /admin/",
             "Disallow: /phantom/",
             "Disallow: /solflare/",
+            "Allow: /",
             "Sitemap: " + _BASE_URL + "/sitemap.xml",
             "",
         ])
@@ -263,7 +268,16 @@ def install(dashboard_module):
     def _orca_search_metadata(response):
         path = _path()
         is_private = any(path == prefix or path.startswith(prefix) for prefix in _PRIVATE_PREFIXES)
-        if is_private or (not _public_meta(path) and path not in ("/robots.txt", "/sitemap.xml")):
+        is_public_preview_image = (
+            response.status_code == 200
+            and response.mimetype.startswith("image/")
+            and any(path.startswith(prefix) for prefix in _PUBLIC_PREVIEW_IMAGE_PREFIXES)
+        )
+        if is_public_preview_image:
+            # Public social-card PNGs must be crawlable; never open the rest
+            # of /api/ to search engines or unfurl bots.
+            response.headers.pop("X-Robots-Tag", None)
+        elif is_private or (not _public_meta(path) and path not in ("/robots.txt", "/sitemap.xml")):
             response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
         if (
             response.status_code == 200

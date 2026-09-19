@@ -55,7 +55,7 @@ def _social_block(base, post_id, tc, version='', has_feed_image=False):
     version = _safe_version(version)
     suffix = ('?xv=' + version) if version else ''
     canonical = f'{base}/post/{safe_id}{suffix}'
-    image_version = html.escape(version or '7', quote=True)
+    image_version = html.escape(version or '9', quote=True)
 
     if tc:
         image = f'{base}/api/trade-card/{safe_id}.png?v={image_version}'
