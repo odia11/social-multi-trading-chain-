@@ -34,13 +34,44 @@ html,body{min-height:100vh;background:radial-gradient(circle at 40% -15%,rgba(24
 .s-modal{display:none;position:fixed;inset:0;z-index:200;background:rgba(5,8,12,.9);backdrop-filter:blur(8px);align-items:center;justify-content:center;padding:1rem}.s-modal.open{display:flex}.s-card{background:var(--bg2);border:1px solid rgba(247,185,85,.3);border-radius:14px;padding:26px 24px;width:100%;max-width:480px;position:relative}.s-close{position:absolute;top:14px;right:16px;background:none;border:none;color:var(--muted);font-size:18px}.s-title{font-size:14px;font-weight:800}.s-sub{font-size:9px;color:var(--muted);letter-spacing:.1em;margin-bottom:18px}
 @media(max-width:768px){.page-wrap{padding:16px 16px 116px}.page-title-row{margin-top:18px}.page-title{font-size:26px}.trade-smarter{font-size:9px;letter-spacing:.22em;gap:10px}.trade-smarter::after{width:34px}.status-card{padding:24px 20px 22px;border-radius:24px}.status-head{padding-right:106px;gap:16px;margin-bottom:22px}.bot-orb{width:130px;height:130px;right:-8px;top:10px}.bot-orb::before{inset:30px 23px}.bot-orb::after{left:42px;top:59px;box-shadow:40px 0 0 rgba(247,185,85,.9)}.status-text{font-size:22px}.status-sub{font-size:14px}.bot-toggle-btn{min-height:66px;border-radius:19px;font-size:22px}.stat-grid{gap:12px}.stat-card{min-height:180px;padding:21px 18px;border-radius:22px}.stat-card::after{border-radius:22px}.stat-icon{font-size:27px;margin-bottom:14px}.stat-corner{right:16px;top:19px;font-size:23px}.stat-lbl{font-size:10px;margin-bottom:14px}.stat-val{font-size:29px}.stat-sub{font-size:12px;margin-top:11px}.narrative-card{padding:18px 18px}.page-title-row{align-items:flex-end}}
 @media(max-width:390px){.page-title{font-size:24px}.trade-smarter{display:none}.stat-card{min-height:170px;padding:18px 15px}.stat-val{font-size:26px}.status-head{padding-right:88px}.bot-orb{width:115px;height:115px}.bot-toggle-btn{font-size:20px}}
+
+/* OrcAgent concept-inspired trading dashboard */
+:root{--bg:#080e11;--bg2:#10191d;--bg3:#172126;--gold:#ffca66;--gold2:#ffd77b;--border:#263138}
+html,body{background:#080e11}
+.page-wrap{max-width:800px}
+.page-title-row{margin:12px 0 24px}
+.page-title{font-size:27px;letter-spacing:-.035em}
+.bot-live-indicator{display:flex;align-items:center;gap:9px;color:var(--green);font-size:14px;font-weight:700}
+#bot-live-lamp{width:11px;height:11px;border-radius:50%;background:#77838b}
+#bot-live-lamp.active{background:var(--green);box-shadow:0 0 13px #38d39f66}
+.status-card,.strategy-card{border:1px solid #29353d;border-radius:19px;background:linear-gradient(145deg,#162025,#11191e);box-shadow:inset 0 1px #ffffff08;margin-bottom:15px}
+.status-card{padding:24px}
+.status-card::before,.bot-orb{display:none}
+.status-head{padding-right:0;margin-bottom:18px}
+.status-dot-wrap{border-radius:13px;background:#15382d;width:47px;height:47px}
+.status-text{font-size:22px;color:var(--green)}
+.status-sub{font-size:12px}
+.bot-toggle-btn{min-height:53px;border-radius:12px;font-size:16px;box-shadow:none}
+.bot-toggle-btn.running{background:#192328}
+.strategy-card{padding:12px 22px 18px}
+.strategy-heading{display:flex;justify-content:space-between;align-items:center;padding:10px 0 14px;font-weight:800;font-size:16px;gap:8px}
+.strategy-tag{font-size:9px;color:var(--gold);border:1px solid #69522b;border-radius:5px;padding:4px 6px;letter-spacing:.08em}
+.strategy-row{padding:14px 0;border-top:1px solid #ffffff12;display:flex;flex-direction:column;gap:2px}
+.strategy-row span{color:#9ba5ad;font-size:12px}
+.strategy-row strong{font-size:17px;font-weight:650}
+.strategy-save{min-height:51px;border-radius:11px;background:linear-gradient(180deg,#ffda82,#ffc15a);color:#121415;display:flex;align-items:center;justify-content:center;text-decoration:none;font-weight:800;margin-top:17px}
+.strategy-hint{color:#87929b;font-size:11px;text-align:center;margin:12px 0 0}
+.stat-grid{margin-top:20px}
+.stat-card{min-height:155px;padding:22px}
+.stat-val{font-size:28px}
+@media(max-width:768px){.page-wrap{padding:16px 16px 124px}.page-title{font-size:24px}.status-card{padding:18px}.strategy-card{padding:10px 19px 18px}.stat-card{min-height:150px;padding:19px 15px}.stat-val{font-size:25px}}
 </style>
 </head>
 <body>
 {% include '_low_balance_modal.html' %}
 {{ navbar_html('bot') }}
 <div class="page-wrap">
-  <div class="page-title-row"><div class="page-title">Bot Overview</div><div class="trade-smarter">Trade Smarter</div></div>
+  <div class="page-title-row"><div class="page-title"><span style="color:var(--gold);margin-right:10px">ϟ</span> Auto Trading</div><div class="bot-live-indicator"><span id="bot-live-lamp"></span><span id="bot-live-word">Checking</span></div></div>
 
   <section class="status-card">
     <div class="bot-orb" aria-hidden="true"></div>
@@ -52,6 +83,15 @@ html,body{min-height:100vh;background:radial-gradient(circle at 40% -15%,rgba(24
     <div class="status-error" id="bot-status-error"></div>
   </section>
 
+  <section class="strategy-card" aria-label="Current bot strategy">
+    <div class="strategy-heading">Your Trading Strategy <span class="strategy-tag">LIVE SETTINGS</span></div>
+    <div class="strategy-row"><span>Strategy</span><strong>Momentum + Volume</strong></div>
+    <div class="strategy-row"><span>Take Profit</span><strong id="strategy-tp">—</strong></div>
+    <div class="strategy-row"><span>Stop Loss</span><strong id="strategy-sl">—</strong></div>
+    <div class="strategy-row"><span>Open Positions</span><strong id="strategy-positions">—</strong></div>
+    <a class="strategy-save" href="/settings">⚙ &nbsp; Edit &amp; Save Strategy</a>
+    <p class="strategy-hint">Current saved settings. Update your strategy securely in Settings.</p>
+  </section>
   <div class="stat-grid">
     <div class="stat-card"><div class="stat-icon">🎯</div><div class="stat-corner">▥</div><div class="stat-lbl">Win Rate</div><div class="stat-val" id="stat-winrate">—</div><div class="stat-sub" id="stat-winrate-sub">—</div></div>
     <div class="stat-card"><div class="stat-icon">📊</div><div class="stat-corner">⌁</div><div class="stat-lbl">Total Trades</div><div class="stat-val" id="stat-trades">—</div><div class="stat-sub" id="stat-trades-sub">—</div></div>
@@ -70,7 +110,7 @@ var CSRF={{ csrf_token|tojson }},running=false,hasKey=false;
 function fmtSol(n,s){var v=parseFloat(n||0);return(s&&v>=0?'+':'')+v.toFixed(4)+' SOL'}
 function fmtDate(ts){if(!ts)return'—';return String(ts).slice(0,16).replace('T',' ')}
 async function saveSetting(key,el){var enabled=el.checked;try{var payload={};payload[key]=enabled;var r=await fetch('/api/settings/save',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF},body:JSON.stringify(payload)}).then(r=>r.json()).catch(()=>null);if(!r||!r.ok)el.checked=!enabled}catch(e){el.checked=!enabled}}
-async function loadOverview(){var r=await fetch('/api/bot/overview',{credentials:'include'}).then(r=>r.json()).catch(()=>null);if(!r||!r.ok)return;running=!!r.running;hasKey=!!r.has_trading_key;var dot=document.getElementById('bot-status-dot'),text=document.getElementById('bot-status-text'),sub=document.getElementById('bot-status-sub'),btn=document.getElementById('bot-toggle-btn');dot.classList.toggle('running',running);text.textContent=running?'Bot is running':'Bot is idle';if(!hasKey){sub.innerHTML='No trading key saved — add one in <a href="/settings">Settings</a>.';btn.textContent='▶ Start Trading';btn.disabled=true;btn.classList.remove('running')}else{sub.textContent=r.trading_wallet_short?('Trading wallet '+r.trading_wallet_short):' ';btn.disabled=false;btn.textContent=running?'⏹ Stop Trading':'▶ Start Trading';btn.classList.toggle('running',running)}var wr=document.getElementById('stat-winrate');wr.textContent=r.total_trades?r.win_rate.toFixed(1)+'%':'—';wr.className='stat-val'+(r.total_trades?(r.win_rate>=50?' pos':' neg'):'');document.getElementById('stat-winrate-sub').textContent=r.total_trades?('based on '+r.total_trades+' trades'):'no trades yet';document.getElementById('stat-trades').textContent=r.total_trades||0;document.getElementById('stat-trades-sub').innerHTML=r.total_trades?'<span class="win">'+r.wins+' wins</span> · <span class="loss">'+r.losses+' losses</span>':'—';document.getElementById('stat-sol').textContent=parseFloat(r.trading_wallet_sol||0).toFixed(4)+' SOL';document.getElementById('stat-sol-sub').textContent=r.trading_wallet_short||'—';document.getElementById('stat-tpsl').innerHTML='<span style="color:var(--green)">+'+parseFloat(r.take_profit).toFixed(1)+'%</span> / <span style="color:var(--red)">-'+parseFloat(r.stop_loss).toFixed(1)+'%</span>';var maxPos=r.max_positions||1,openPos=r.open_positions||0;document.getElementById('stat-positions').textContent=openPos+' / '+maxPos;document.getElementById('stat-positions-bar').style.width=Math.min(100,Math.round((openPos/maxPos)*100))+'%';if(r.best_trade){document.getElementById('stat-best').textContent=fmtSol(r.best_trade.pnl,true);document.getElementById('stat-best-sub').textContent='$'+r.best_trade.token+' · '+fmtDate(r.best_trade.timestamp)}else{document.getElementById('stat-best').textContent='—';document.getElementById('stat-best-sub').textContent='no trades yet'}if(r.worst_trade){document.getElementById('stat-worst').textContent=fmtSol(r.worst_trade.pnl,true);document.getElementById('stat-worst-sub').textContent='$'+r.worst_trade.token+' · '+fmtDate(r.worst_trade.timestamp)}else{document.getElementById('stat-worst').textContent='—';document.getElementById('stat-worst-sub').textContent='no trades yet'}}
+async function loadOverview(){var r=await fetch('/api/bot/overview',{credentials:'include'}).then(r=>r.json()).catch(()=>null);if(!r||!r.ok)return;running=!!r.running;hasKey=!!r.has_trading_key;var dot=document.getElementById('bot-status-dot'),text=document.getElementById('bot-status-text'),sub=document.getElementById('bot-status-sub'),btn=document.getElementById('bot-toggle-btn');dot.classList.toggle('running',running);document.getElementById('bot-live-lamp').classList.toggle('active',running);document.getElementById('bot-live-word').textContent=running?'Live':'Idle';document.getElementById('strategy-tp').textContent='+'+parseFloat(r.take_profit||0).toFixed(1)+'%';document.getElementById('strategy-sl').textContent='-'+parseFloat(r.stop_loss||0).toFixed(1)+'%';document.getElementById('strategy-positions').textContent=(r.open_positions||0)+' / '+(r.max_positions||1);text.textContent=running?'Bot is running':'Bot is idle';if(!hasKey){sub.innerHTML='No trading key saved — add one in <a href="/settings">Settings</a>.';btn.textContent='▶ Start Trading';btn.disabled=true;btn.classList.remove('running')}else{sub.textContent=r.trading_wallet_short?('Trading wallet '+r.trading_wallet_short):' ';btn.disabled=false;btn.textContent=running?'⏹ Stop Trading':'▶ Start Trading';btn.classList.toggle('running',running)}var wr=document.getElementById('stat-winrate');wr.textContent=r.total_trades?r.win_rate.toFixed(1)+'%':'—';wr.className='stat-val'+(r.total_trades?(r.win_rate>=50?' pos':' neg'):'');document.getElementById('stat-winrate-sub').textContent=r.total_trades?('based on '+r.total_trades+' trades'):'no trades yet';document.getElementById('stat-trades').textContent=r.total_trades||0;document.getElementById('stat-trades-sub').innerHTML=r.total_trades?'<span class="win">'+r.wins+' wins</span> · <span class="loss">'+r.losses+' losses</span>':'—';document.getElementById('stat-sol').textContent=parseFloat(r.trading_wallet_sol||0).toFixed(4)+' SOL';document.getElementById('stat-sol-sub').textContent=r.trading_wallet_short||'—';document.getElementById('stat-tpsl').innerHTML='<span style="color:var(--green)">+'+parseFloat(r.take_profit).toFixed(1)+'%</span> / <span style="color:var(--red)">-'+parseFloat(r.stop_loss).toFixed(1)+'%</span>';var maxPos=r.max_positions||1,openPos=r.open_positions||0;document.getElementById('stat-positions').textContent=openPos+' / '+maxPos;document.getElementById('stat-positions-bar').style.width=Math.min(100,Math.round((openPos/maxPos)*100))+'%';if(r.best_trade){document.getElementById('stat-best').textContent=fmtSol(r.best_trade.pnl,true);document.getElementById('stat-best-sub').textContent='$'+r.best_trade.token+' · '+fmtDate(r.best_trade.timestamp)}else{document.getElementById('stat-best').textContent='—';document.getElementById('stat-best-sub').textContent='no trades yet'}if(r.worst_trade){document.getElementById('stat-worst').textContent=fmtSol(r.worst_trade.pnl,true);document.getElementById('stat-worst-sub').textContent='$'+r.worst_trade.token+' · '+fmtDate(r.worst_trade.timestamp)}else{document.getElementById('stat-worst').textContent='—';document.getElementById('stat-worst-sub').textContent='no trades yet'}}
 function applyUI(v){running=v;document.getElementById('bot-status-dot').classList.toggle('running',v);document.getElementById('bot-status-text').textContent=v?'Bot is running':'Bot is idle';var b=document.getElementById('bot-toggle-btn');b.textContent=v?'⏹ Stop Trading':'▶ Start Trading';b.classList.toggle('running',v);return b}
 async function toggleBot(){var err=document.getElementById('bot-status-error');err.style.display='none';var prev=running,b=applyUI(!prev);b.disabled=true;try{var r=await fetch(prev?'/api/bot/stop':'/api/bot/start',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF},body:'{}'}),d=await r.json().catch(()=>({}));if(d.low_balance){b=applyUI(prev);b.disabled=false;showLowBalanceModal(d);return}if(!d.ok&&!d.success){b=applyUI(prev);b.disabled=false;err.textContent=d.msg||'Failed to update bot status';err.style.display='block';return}b=applyUI(d.status==='running');b.disabled=false;loadOverview()}catch(e){b=applyUI(prev);b.disabled=false;err.textContent='Network error — please try again';err.style.display='block'}}
 loadOverview();setInterval(loadOverview,20000);

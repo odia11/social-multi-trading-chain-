@@ -592,6 +592,28 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
   .hide-small-btn{min-height:44px}
 }
 /* Left nav is now the shared top navbar component (static/navbar.css). */
+
+/* Concept-inspired premium portfolio; keep real balances and functional wallet actions */
+:root{--bg:#080e11;--bg2:#11191e;--bg3:#172126;--border:#263138;--accent:#ffca66;--amber:#ffca66}
+html,body{background:#080e11}
+.wlt-content{max-width:800px;gap:17px}
+.wlt-hdr{padding-top:25px}
+.wlt-title{font-size:27px;font-weight:800;letter-spacing:-.04em}
+.wlt-sub{color:#98a3ad}
+.wlt-hero{border:1px solid #28353b;background:linear-gradient(145deg,#172126,#0e181c);border-radius:21px;padding:26px 24px 8px}
+.wlt-hero-lbl{color:#c6cbd0;text-transform:none;letter-spacing:0;font-size:15px;font-weight:650}
+.wlt-hero-num{font-size:42px;letter-spacing:-.055em;color:#f5f7f8}
+.wlt-hero-usd{color:#89d7b4}
+.wlt-hero-actions{gap:10px;margin:23px 0}
+.wlt-action{font-size:13px;color:#e0e4e7}
+.wlt-action-ic{width:100%;min-height:53px;border:1px solid #34434b;border-radius:13px;background:#192328;color:#eff2f3;font-size:24px}
+.wlt-action.primary .wlt-action-ic{background:#192328;border-color:#34434b;color:#eff2f3}
+.wlt-hero-inpos{border-color:#2b363d}
+.portfolio-tabs{display:flex;gap:32px;align-items:center;padding:9px 6px 0;border-bottom:1px solid #27333a;scroll-margin-top:100px}
+.portfolio-tabs a{color:#a3abb4;font-weight:700;text-decoration:none;padding:10px 5px 15px;font-size:14px}
+.portfolio-tabs a.selected{color:#ffca66;border-bottom:3px solid #ffca66}
+#portfolio-assets,#portfolio-holdings,#portfolio-activity,#usdc-chain-tiles{scroll-margin-top:100px}
+@media(max-width:768px){.wlt-center{max-height:none;overflow:visible}.wlt-hdr{padding:21px 16px 0}.wlt-title{font-size:25px}.wlt-content{padding:18px 16px 130px}.wlt-hero{padding:22px 18px 7px}.wlt-hero-num{font-size:36px}.wlt-action-ic{min-height:54px}.portfolio-tabs{gap:30px}}
 </style>
 </head>
 <body>
@@ -604,8 +626,8 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
   <!-- header -->
   <div class="wlt-hdr">
     <div>
-      <div class="wlt-title">Wallet</div>
-      <div class="wlt-sub">Your dedicated trading wallet</div>
+      <div class="wlt-title">Portfolio</div>
+      <div class="wlt-sub">Your multi-chain trading wallet</div>
     </div>
     <span class="net-pill"><span class="net-dot"></span>MULTI-CHAIN · MAINNET</span>
   </div>
@@ -620,7 +642,7 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
           <!-- USDC, not SOL. Every trade on every chain is funded with USDC
                now; SOL only pays Solana's network fee. Leading with SOL made
                a wallet holding $4.64 of tradeable balance read as empty. -->
-          <div class="wlt-hero-lbl">Available to trade</div>
+          <div class="wlt-hero-lbl">Available to trade · USDC</div>
           <div class="wlt-hero-num"><span id="avail">—</span></div>
           <div class="wlt-hero-usd" id="avail-sub">USDC across all chains</div>
         </div>
@@ -629,7 +651,7 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
       <div class="wlt-hero-actions">
         <button class="wlt-action primary" onclick="_modalDeposit()"><span class="wlt-action-ic">↓</span>Deposit</button>
         <button class="wlt-action" onclick="_modalSend()"><span class="wlt-action-ic">→</span>Send</button>
-        <button class="wlt-action" onclick="openSwapModal()"><span class="wlt-action-ic">⇄</span>Swap</button>
+        <button class="wlt-action" onclick="_modalDeposit()"><span class="wlt-action-ic">▣</span>Receive</button>
         <!-- No Bridge button. Buying on a chain with no USDC already bridges
              by itself (_maybe_start_auto_bridge_for_buy): it finds a chain
              with enough balance, moves the funds with a buffer, and finishes
@@ -654,7 +676,8 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
       </div>
     </div>
 
-    <div class="sol-usdc-card">
+    <div class="portfolio-tabs" role="navigation" aria-label="Portfolio sections"><a href="#portfolio-assets" class="selected">Assets</a><a href="#usdc-chain-tiles" onclick="var e=document.getElementById('usdc-chain-tiles');if(e&&e.classList.contains('collapsed'))document.getElementById('usdc-tiles-toggle').click()">Chains</a><a href="#portfolio-activity">History</a></div>
+    <div class="sol-usdc-card" id="portfolio-assets">
       <div class="sol-usdc-head">
         <div>
           <div class="sol-usdc-title">Convert assets</div>
@@ -763,7 +786,7 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
     </div>
 
     <!-- holdings -->
-    <div class="holdings">
+    <div class="holdings" id="portfolio-holdings">
       <div class="holdings-hdr">
         <span class="holdings-title">Holdings</span>
         <div style="display:flex;align-items:center;gap:12px">
@@ -775,7 +798,7 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
     </div>
 
     <!-- recent activity -->
-    <div class="act-card">
+    <div class="act-card" id="portfolio-activity">
       <div class="act-hdr">
         <span class="act-title">Recent activity</span>
         <a href="/history" class="act-viewall">View all →</a>
