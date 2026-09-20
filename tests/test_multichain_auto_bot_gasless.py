@@ -38,20 +38,28 @@ def make_dashboard(chain):
         'liquidity_usd': 250_000,
         'volume_24h': 500_000,
         'pair_created_at': 0,
+        'has_profile': True, 'txns24h': 500, 'txns24h_sells': 40,
+        'price_change_24h': 30.0,
     }]
     d.get_ai_active_filters = lambda: {
         'min_liquidity_usd': 10_000,
         'min_pair_age_minutes': 0,
     }
     d._min_marketcap_for_stake = lambda amount: 10_000
+    d._bot_gainers_eligible = lambda t: (bool(t.get('has_profile'))
+        and (t.get('txns24h') or 0) >= 300
+        and (t.get('txns24h_sells') or 0) >= 30)
     d.time = types.SimpleNamespace(time=lambda: 1_800_000_000.0)
-    d.get_token_data = lambda mint, fast=True: {
+    d.get_token_data = lambda mint, fast=True, chain=None: {
         'price': 1.0,
         'change5m': 8.0,
         'change1h': 9.0,
         'volume5m': 20_000,
         'volume1h': 100_000,
+        'has_profile': True, 'txns24h': 500, 'txns24h_sells': 40,
     }
+    d._fast_pump_check = lambda mint, chain=None: False
+    d.NO_HONEYPOT_PROVIDER_LIQ_MULT = 5
     d._check_evm_honeypot = lambda mint, c: {
         'ok': True, 'is_honeypot': False, 'sell_tax': 0,
     }
@@ -82,6 +90,38 @@ def test_usdc_only_wallet_reaches_buy_flow_on_every_evm_chain():
         assert len(buys) == 1, chain
         assert buys[0][2] == chain
         assert buys[0][1]['amount_usdc'] == 10.0
+
+
+def test_gainers_gate_rejects_missing_metadata_on_every_evm_chain():
+    for chain in EVM_CHAINS:
+        for field, value in (('has_profile', False), ('txns24h', 299),
+                             ('txns24h_sells', 29)):
+            d, buys, old = make_dashboard(chain)
+            base = d._get_scanner_cached()[0]
+            d._get_scanner_cached = lambda base=base, field=field, value=value: [
+                {**base, field: value}]
+            patch.install(d)
+            result = d._bot_scan_evm_entry(
+                7, 'wallet', {}, chain, 'encrypted', '0xwallet', 10.0,
+                frozenset(), 5.0, None, True, 'test')
+            assert result is False and not buys, (chain, field)
+
+
+def test_pending_funding_does_not_queue_duplicate_buys():
+    d, buys, _ = make_dashboard('base')
+    class Pending:
+        def get_json(self, silent=True):
+            return {'pending': True, 'ok': False}
+    def buy(*args, **kwargs):
+        buys.append(args)
+        return Pending()
+    d._evm_buy_flow = buy
+    patch.install(d)
+    for _ in range(3):
+        d._bot_scan_evm_entry(7, 'wallet', {}, 'base', 'encrypted',
+                              '0xwallet', 10.0, frozenset(), 5.0, None,
+                              True, 'test')
+    assert len(buys) == 1, 'repeated 2-second cycles must not queue repeated bridge orders'
 
 
 def test_native_funded_wallet_keeps_mature_existing_scanner():

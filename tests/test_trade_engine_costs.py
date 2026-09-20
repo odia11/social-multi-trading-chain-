@@ -41,8 +41,8 @@ q = price_trade('100', FEE, [
 
 check('$100 in, $100 out — the ceiling is met exactly, not approached',
       q.total_user_spend_usd == D('100.00'))
-check('the purchase is the REMAINDER, not the input — this is the whole '
-      'change from how the app works today', q.token_purchase_usd == D('97.27'))
+check('the purchase is the REMAINDER after the 0.75% gross swap fee and costs',
+      q.token_purchase_usd == D('97.26'))
 check('the trade is allowed', q.can_execute and q.reject_reason is None)
 check('OrcAgent pays nothing', q.subsidy_usd == ZERO)
 
@@ -50,11 +50,11 @@ check('every cost is itemised, fee included',
       {c.kind for c in q.costs} == {KIND_BRIDGE_FEE, KIND_SOURCE_GAS, KIND_DEX_FEE,
                                     KIND_SLIPPAGE_RESERVE, KIND_PLATFORM_FEE})
 
-# The fee is a percentage of the PURCHASE, not of the entered amount. Taking
-# it on the entered amount charges for money never spent on the token.
+# Current fee policy: 0.75% of the gross swap amount remaining after
+# bridge/gas/DEX/slippage reserves, rounded up to the cent.
 fee_line = [c for c in q.costs if c.kind == KIND_PLATFORM_FEE][0]
-check('the fee is charged on the purchase, not on the amount typed',
-      fee_line.usd == D('0.73') and fee_line.usd < money('100') * money(FEE))
+check('the fee is 0.75% of the gross swap amount after external costs',
+      fee_line.usd == D('0.74') and fee_line.usd < money('100') * money(FEE))
 check('...and the arithmetic closes: purchase + fee + costs == ceiling',
       q.token_purchase_usd + q.user_costs_usd == D('100.00'))
 

@@ -71,7 +71,43 @@ def test_sitemap_and_robots_point_to_canonical_site():
     assert "\n  <url>\n    <loc>" in sitemap
     assert "Sitemap: https://orcagent.fun/sitemap.xml" in robots
     assert "Disallow: /api/" in robots
+    assert "Allow: /api/trade-card/" in robots
+    assert "Allow: /api/post-og-image/" in robots
+    # Allow is longer/more specific than the generic API disallow.
+    assert robots.index("Allow: /api/trade-card/") < robots.index("Disallow: /api/")
+    assert robots.index("Allow: /api/post-og-image/") < robots.index("Disallow: /api/")
 
+
+
+def test_public_share_artwork_is_crawlable_without_opening_private_api():
+    from flask import Response
+    from urllib.robotparser import RobotFileParser
+
+    app = make_app()
+
+    @app.get("/api/trade-card/p449.png")
+    def _trade_preview():
+        return Response(b"png", mimetype="image/png")
+
+    @app.get("/api/post-og-image/p449")
+    def _post_preview():
+        return Response(b"png", mimetype="image/png")
+
+    @app.get("/api/wallet/private")
+    def _private_api():
+        return {"ok": True}
+
+    client = app.test_client()
+    parser = RobotFileParser()
+    parser.parse(client.get("/robots.txt").get_data(as_text=True).splitlines())
+    for path in ("/api/trade-card/p449.png", "/api/post-og-image/p449"):
+        assert parser.can_fetch("Twitterbot", path)
+        image = client.get(path)
+        assert image.status_code == 200
+        assert "X-Robots-Tag" not in image.headers
+
+    assert not parser.can_fetch("Twitterbot", "/api/wallet/private")
+    assert client.get("/api/wallet/private").headers["X-Robots-Tag"] == "noindex, nofollow, noarchive"
 
 def test_sitemap_has_a_readable_professional_browser_view():
     client = make_app().test_client()

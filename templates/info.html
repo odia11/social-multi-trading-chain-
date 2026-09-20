@@ -115,6 +115,8 @@ html,body{min-height:100vh;min-height:100dvh;background:var(--bg);font-family:va
     <a class="section-nav-link" data-target="docs" href="#docs">Docs</a>
     <a class="section-nav-link" data-target="fees" href="#fees">Fees</a>
     <a class="section-nav-link" data-target="security" href="#security">Security</a>
+    <a class="section-nav-link" data-target="privacy" href="#privacy">Privacy</a>
+    <a class="section-nav-link" data-target="contact" href="#contact">Contact</a>
     <a class="section-nav-link" data-target="terms" href="#terms">Terms</a>
   </div>
 </div>
@@ -300,8 +302,8 @@ html,body{min-height:100vh;min-height:100dvh;background:var(--bg);font-family:va
       <h3>Session security</h3>
       <p>Wallet connections use Sign-In With Solana, with a fresh, server-issued,
       single-use nonce for every login — nothing about your session can be
-      replayed. Optional Face ID / WebAuthn login is available for returning
-      faster without re-signing every time.</p>
+      replayed. A remembered device session lets you return without
+      reconnecting your wallet after every app restart.</p>
 
       <h3>Trade safety checks</h3>
       <p>Before entering a position, the bot validates a token's mint and
@@ -315,6 +317,58 @@ html,body{min-height:100vh;min-height:100dvh;background:var(--bg);font-family:va
       protect you from a token itself losing value, from market volatility,
       or from a signed transaction you approved yourself. Only fund your
       trading wallet with what you're willing to actively trade with.</p>
+    </div>
+  </section>
+
+  <!-- ═══════════ PRIVACY ═══════════ -->
+  <section class="info-section" id="privacy">
+    <div class="section-title"><span class="section-icon">◎</span> Privacy</div>
+    <div class="info-body">
+      <p>OrcAgent is designed around wallet-based access. The platform may
+      process the wallet address you connect, profile information you choose to
+      publish, trading settings, transaction references, social activity and
+      technical session/security data needed to operate the service.</p>
+
+      <h3>What OrcAgent uses data for</h3>
+      <ul>
+        <li>Provide wallet sign-in, profiles, social features and trading tools</li>
+        <li>Keep sessions secure and prevent abuse, fraud and replay attacks</li>
+        <li>Show transaction, portfolio and bot activity back to the account that created it</li>
+        <li>Diagnose reliability and security issues</li>
+      </ul>
+
+      <h3>Wallet information</h3>
+      <p>Public blockchain addresses and transactions are inherently visible on
+      their respective networks. OrcAgent does not require your seed phrase to
+      sign in. Never send a seed phrase or recovery phrase to OrcAgent or to
+      anyone claiming to provide support.</p>
+
+      <h3>Third-party infrastructure</h3>
+      <p>Some features depend on blockchain networks, market-data providers,
+      wallet software and infrastructure providers. Requests necessary to use
+      those features can therefore be processed by those services under their
+      own privacy terms.</p>
+
+      <div class="callout"><strong>Privacy or data question?</strong> Use the
+      contact details below and include only the information needed to identify
+      the issue. Never include a private key or seed phrase.</div>
+    </div>
+  </section>
+
+  <!-- ═══════════ CONTACT ═══════════ -->
+  <section class="info-section" id="contact">
+    <div class="section-title"><span class="section-icon">✦</span> Contact</div>
+    <div class="info-body">
+      <p>For product, account, privacy or security questions, contact OrcAgent
+      through the official channels below.</p>
+      <ul>
+        <li><strong>Email:</strong> <a href="mailto:admin@orcagent.fun">admin@orcagent.fun</a></li>
+        <li><strong>X:</strong> <a href="https://x.com/orcagent" target="_blank" rel="noopener noreferrer">@orcagent</a></li>
+        <li><strong>Website:</strong> <a href="https://orcagent.fun">orcagent.fun</a></li>
+      </ul>
+      <p>For security reports, describe the affected URL or feature and the
+      observed behavior. Do not send private keys, seed phrases, authentication
+      secrets or funds.</p>
     </div>
   </section>
 

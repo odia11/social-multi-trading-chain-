@@ -44,7 +44,7 @@ except ImportError:
     _COMPRESS_OK = False
 from contextlib import contextmanager
 from flask import Flask, jsonify, request, session, render_template, redirect, make_response, send_from_directory, g
-from markupsafe import Markup
+from markupsafe import Markup, escape
 import gzip
 import shutil
 import traceback
@@ -1043,8 +1043,8 @@ print(f'[startup] JUPITER_PROXY_URL = {(JUPITER_PROXY[:40] + "...") if len(JUPIT
 # loading the page (and therefore never seeing this value). Skipped entirely when unset,
 # so local/dev deployments without the env var keep working unchanged.
 API_SHARED_SECRET  = os.environ.get('API_SHARED_SECRET', '')
-FEE_RATE_DEFAULT = 0.05  # 5% performance fee on profitable trades only
-FEE_RATE_TXN     = 0.0075  # 0.75% transaction fee, charged on BOTH the buy and the sell
+FEE_RATE_DEFAULT = 0.0   # legacy performance-fee setting disabled permanently
+FEE_RATE_TXN     = 0.0075  # ONLY platform fee: 0.75% on BOTH buy and sell
 
 # Whether the manual EVM buy runs through the trade engine, where the amount
 # a user enters is the MAXIMUM they spend and the purchase is what remains
@@ -1057,13 +1057,9 @@ TRADE_ENGINE_MANUAL_EVM = os.getenv('TRADE_ENGINE_MANUAL_EVM', '1').strip() not 
                             # charges rather than one combined charge at close.
 
 def _get_fee_rate():
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        row = conn.execute("SELECT value FROM platform_settings WHERE key='fee_rate'").fetchone()
-        conn.close()
-        return float(row[0]) if row else FEE_RATE_DEFAULT
-    except Exception:
-        return FEE_RATE_DEFAULT
+    # Legacy performance-fee hook. Performance fees are disabled; OrcAgent
+    # charges only FEE_RATE_TXN (0.75%) on each buy and sell leg.
+    return 0.0
 FEE_WALLET       = 'HC5ahspSox3XRmDbzXjXVoAASuY89RCmGUKwp87FRJS5'  # fixed fee recipient (independent of admin role)
 # BSC fee recipient -- a *separate* constant from FEE_WALLET on purpose: that's a
 # base58 Solana address and is not a valid EVM recipient in any sense (wrong
@@ -2179,6 +2175,38 @@ def init_db():
         c.execute('ALTER TABLE users ADD COLUMN avatar_url TEXT DEFAULT NULL')
     except sqlite3.OperationalError:
         pass
+    # Every user must have a visible avatar everywhere in OrcAgent.
+    # Existing/null avatars are backfilled to the standard OrcAgent avatar,
+    # and triggers keep new users / removed avatars on the same fallback.
+
+    # Users without a custom photo use a dynamic dark/gold initials avatar.
+    # Username wins (CJ -> CJ); otherwise use the first two wallet characters.
+    c.execute("""UPDATE users
+                 SET avatar_url='/avatar/default/' || wallet_address
+                 WHERE avatar_url IS NULL OR TRIM(avatar_url)=''
+                    OR avatar_url='/static/icon-180.png?v=6'
+                    OR avatar_url='/static/orcagent-default-avatar.svg'
+                    OR avatar_url LIKE '/avatar/default/%'""")
+    c.execute('DROP TRIGGER IF EXISTS trg_users_default_avatar_insert')
+    c.execute('DROP TRIGGER IF EXISTS trg_users_default_avatar_update')
+    c.execute("""CREATE TRIGGER IF NOT EXISTS trg_users_default_avatar_insert
+                 AFTER INSERT ON users
+                 WHEN NEW.avatar_url IS NULL OR TRIM(NEW.avatar_url)=''
+                 BEGIN
+                   UPDATE users SET avatar_url='/avatar/default/' || NEW.wallet_address WHERE id=NEW.id;
+                 END""")
+    c.execute("""CREATE TRIGGER IF NOT EXISTS trg_users_default_avatar_update
+                 AFTER UPDATE OF avatar_url ON users
+                 WHEN NEW.avatar_url IS NULL OR TRIM(NEW.avatar_url)=''
+                 BEGIN
+                   UPDATE users SET avatar_url='/avatar/default/' || NEW.wallet_address WHERE id=NEW.id;
+                 END""")
+    c.execute('''CREATE TRIGGER IF NOT EXISTS trg_users_default_avatar_update
+                 AFTER UPDATE OF avatar_url ON users
+                 WHEN NEW.avatar_url IS NULL OR TRIM(NEW.avatar_url)=''
+                 BEGIN
+                   UPDATE users SET avatar_url='/static/orcagent-default-avatar.svg' WHERE id=NEW.id;
+                 END''')
     try:
         c.execute('ALTER TABLE users ADD COLUMN bio TEXT DEFAULT NULL')
     except sqlite3.OperationalError:
@@ -2538,6 +2566,21 @@ def init_db():
         FOREIGN KEY (user_id) REFERENCES users(id)
     )''')
     c.execute('CREATE INDEX IF NOT EXISTS idx_webauthn_cred ON webauthn_credentials(credential_id)')
+    # Registration challenges must survive concurrent Flask cookie writes
+    # while iOS is showing the Apple Passwords / Face ID sheet.
+    c.execute('''CREATE TABLE IF NOT EXISTS webauthn_registration_challenges (
+        challenge_hash TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        wallet_address TEXT NOT NULL,
+        created_at REAL NOT NULL
+    )''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_web_reg_chal_created ON webauthn_registration_challenges(created_at)')
+    # Per-account opt-in app-screen lock; OFF unless explicitly enabled.
+    c.execute('''CREATE TABLE IF NOT EXISTS app_lock_preferences (
+        wallet_address TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
     # ── remembered wallet connections ──
     # A signed-in wallet should stay signed in. The session cookie alone
     # cannot promise that: iOS clears storage for sites left unused for a
@@ -2793,7 +2836,7 @@ def run_migrations():
         "ALTER TABLE open_positions ADD COLUMN chain TEXT DEFAULT 'solana'",
         "ALTER TABLE fees ADD COLUMN chain TEXT DEFAULT 'solana'",
         # Which wallet this fee was actually paid to -- the normal fee wallet,
-        # or the gas sponsor wallet on the trades where that one still needed
+        # Fee recipient is always the normal revenue wallet.
         # topping up (see _evm_fee_recipient). Blank on every pre-existing row,
         # which predates the sponsor wallet existing at all, so those are all
         # normal fee-wallet income by definition.
@@ -3646,14 +3689,32 @@ profit_cooldown:  dict = {}  # user_id -> expiry_timestamp — 1-hour pause afte
 _learned_bias_cache: dict = {}  # user_id -> (computed_at, {tier: bias}) — see _learned_liquidity_bias()
 _learned_lp_bias_cache: dict = {}  # user_id -> (computed_at, {tier: bias}) — see _learned_lp_bias()
 
+# DexScreener Gainers-style bot universe, enforced before every autonomous BUY.
+# The public pair API exposes transaction totals and info metadata, not the
+# Gainers webpage's complete profile flag or global ranking. has_profile is
+# a conservative available-info proxy; unknown data is NOT a pass.
+BOT_MIN_24H_TXNS = 300
+BOT_MIN_24H_SELLS = 30
+
+
+def _bot_gainers_eligible(token):
+    if not isinstance(token, dict) or not token.get('has_profile'):
+        return False
+    try:
+        return (int(token.get('txns24h') or 0) >= BOT_MIN_24H_TXNS
+                and int(token.get('txns24h_sells') or 0) >= BOT_MIN_24H_SELLS)
+    except (TypeError, ValueError):
+        return False
+
+
 # ── FAST-PUMP DETECTION (6%+ within 15s) ──────────────────────────────────
-# token_loop() only refreshes the full candidate list every 120s, which is far
+# token_loop() refreshes the full candidate list separately, which is too
 # too coarse to catch a sudden move inside a 15-second window. This is a
 # separate, lightweight loop that polls price ONLY (no full metadata) for the
 # current candidate list every FAST_POLL_INTERVAL seconds, batching requests
 # (DexScreener's multi-token endpoint accepts up to 30 comma-joined addresses
 # per call) to keep the extra request volume manageable.
-FAST_POLL_INTERVAL   = 4      # seconds between fast-poll cycles
+FAST_POLL_INTERVAL   = 2      # shared batched price polling; not per-user HTTP requests
 FAST_PUMP_WINDOW     = 15     # seconds — the window checked for the 6% move
 FAST_PUMP_THRESHOLD  = 0.06   # 6%
 _FAST_HIST_MAXAGE    = 20     # seconds — a bit more than the window, so there's
@@ -3661,7 +3722,7 @@ _FAST_HIST_MAXAGE    = 20     # seconds — a bit more than the window, so there
 _fast_hist_lock = threading.Lock()
 _fast_price_history: dict = {}  # mint -> list of (ts, price), oldest first
 
-def _fast_pump_check(mint: str, now: float = None) -> bool:
+def _fast_pump_check(mint: str, now: float = None, chain: str = 'solana') -> bool:
     """True if `mint` has risen >= FAST_PUMP_THRESHOLD at any point in the last
     FAST_PUMP_WINDOW seconds, based on the fast-poll history. Uses the history's
     OWN most recent sample as the current price (not whatever price the caller
@@ -3670,13 +3731,15 @@ def _fast_pump_check(mint: str, now: float = None) -> bool:
     catches a dip-then-pump inside the same window."""
     now = now or time.time()
     with _fast_hist_lock:
-        hist = _fast_price_history.get(mint)
+        hist = _fast_price_history.get(mint if chain == 'solana' else (chain, mint))
         if not hist or len(hist) < 2:
             return False
         # require the freshest sample to actually be fresh -- a mint that dropped
         # out of the candidate list stops getting new samples, and we don't want
         # to judge it off stale history once that happens.
         latest_ts, latest_price = hist[-1]
+        if latest_price < hist[-2][1] * 0.995:
+            return False  # avoid buying after the observed upswing reverses
         if now - latest_ts > FAST_POLL_INTERVAL * 2:
             return False
         window_prices = [p for ts, p in hist if now - ts <= FAST_PUMP_WINDOW and p > 0]
@@ -3688,51 +3751,72 @@ def _fast_pump_check(mint: str, now: float = None) -> bool:
     return (latest_price - floor_price) / floor_price >= FAST_PUMP_THRESHOLD
 
 def _fast_poll_loop():
-    """Global background loop: keeps _fast_price_history warm for whatever mints
-    are currently in state['tokens'] (the shared candidate list token_loop()
-    maintains), so _fast_pump_check() above always has fresh-enough data."""
+    """Shared batched price observations for shortlist tokens on every chain.
+
+    A two-second *target* is not guaranteed delivery: provider latency and
+    rate limits can take longer. Never stamp a stale 429 cache as live data.
+    EVM observations use (chain, address) keys so same-address contracts on
+    different networks can never contaminate each other's pump signals.
+    """
     while True:
         try:
-            mints = [t['mint'] for t in state.get('tokens', []) if t.get('mint')]
-            now = time.time()
-            for i in range(0, len(mints), 30):  # DexScreener multi-token endpoint: up to 30 addresses/call
-                chunk = mints[i:i + 30]
+            if time.time() < _dex_429_until:
+                time.sleep(FAST_POLL_INTERVAL)
+                continue
+            shortlist = [('solana', t['mint']) for t in state.get('tokens', [])[:50]
+                         if t.get('mint') and _bot_gainers_eligible(t)]
+            with _scanner_lock:
+                scanner = list(_scanner_cache.get('data') or [])
+            for chain in EVM_CHAINS:
+                eligible = [t for t in scanner if t.get('chain') == chain
+                            and t.get('mint') and _bot_gainers_eligible(t)]
+                eligible.sort(key=lambda t: t.get('price_change_24h', 0), reverse=True)
+                shortlist.extend((chain, t['mint']) for t in eligible[:5])
+            # Do not duplicate a mint address in the same batch; preserve
+            # chain identity for the subsequent response's best-pair lookup.
+            unique_addresses = list(dict.fromkeys(mint for _, mint in shortlist))
+            wanted = set(shortlist)
+            live_keys = {mint if chain == 'solana' else (chain, mint)
+                         for chain, mint in shortlist}
+            for i in range(0, len(unique_addresses), 30):
+                chunk = unique_addresses[i:i + 30]
                 try:
                     r = _dex_get('https://api.dexscreener.com/latest/dex/tokens/' + ','.join(chunk),
                                  timeout=8, ttl_override=FAST_POLL_INTERVAL)
-                    if not r:
+                    if not r or time.time() < _dex_429_until:
                         continue
-                    pairs = r.json().get('pairs', []) or []
-                    # Same convention as get_token_data(): a token can have multiple
-                    # pairs across DEXs/quote assets — only trust the first (primary/
-                    # highest-relevance) pair per mint, so this history stays a clean
-                    # single series instead of mixing prices from different pairs.
-                    _first_pair_price = {}
-                    for p in pairs:
-                        m = (p.get('baseToken') or {}).get('address', '')
-                        if m and m not in _first_pair_price:
-                            price = float(p.get('priceUsd', 0) or 0)
-                            if price > 0:
-                                _first_pair_price[m] = price
+                    deepest = {}
+                    for pair in (r.json().get('pairs') or []):
+                        chain = pair.get('chainId')
+                        mint = (pair.get('baseToken') or {}).get('address', '')
+                        if (chain, mint) not in wanted:
+                            continue
+                        try:
+                            price = float(pair.get('priceUsd') or 0)
+                            liq = float((pair.get('liquidity') or {}).get('usd') or 0)
+                        except (TypeError, ValueError):
+                            continue
+                        if price <= 0:
+                            continue
+                        key = mint if chain == 'solana' else (chain, mint)
+                        if key not in deepest or liq > deepest[key][0]:
+                            deepest[key] = (liq, price)
+                    observed = time.time()
                     with _fast_hist_lock:
-                        for m, price in _first_pair_price.items():
-                            hist = _fast_price_history.setdefault(m, [])
-                            hist.append((now, price))
-                            # prune samples older than _FAST_HIST_MAXAGE in place
-                            cutoff = now - _FAST_HIST_MAXAGE
+                        for key, (_liq, price) in deepest.items():
+                            hist = _fast_price_history.setdefault(key, [])
+                            hist.append((observed, price))
+                            cutoff = observed - _FAST_HIST_MAXAGE
                             while hist and hist[0][0] < cutoff:
                                 hist.pop(0)
-                except Exception as e:
-                    print(f'[fast-poll] chunk error: {e}', flush=True)
-                time.sleep(0.2)  # stagger chunks within the same cycle
-            # drop history for mints no longer in the candidate list at all,
-            # so this doesn't grow unbounded as the 120s scanner rotates tokens
+                except Exception as exc:
+                    print(f'[fast-poll] chunk error: {type(exc).__name__}', flush=True)
+                time.sleep(0.2)
             with _fast_hist_lock:
-                _live_set = set(mints)
-                for _stale_m in [m for m in _fast_price_history if m not in _live_set]:
-                    _fast_price_history.pop(_stale_m, None)
-        except Exception as e:
-            print(f'[fast-poll] loop error: {e}', flush=True)
+                for key in [k for k in _fast_price_history if k not in live_keys]:
+                    _fast_price_history.pop(key, None)
+        except Exception as exc:
+            print(f'[fast-poll] loop error: {type(exc).__name__}', flush=True)
         time.sleep(FAST_POLL_INTERVAL)
 
 
@@ -4391,7 +4475,7 @@ def _get_user_sol(wallet: str) -> float:
     except: pass
     return 0.0
 
-def get_token_data(mint, fast: bool = False):
+def get_token_data(mint, fast: bool = False, chain: str = None):
     """fast=True bypasses the normal 30s DexScreener cache in favor of the
     HOT_MINT_TTL_FAST/MEDIUM tier for `mint` if it's currently registered in
     _hot_mints (see _hot_mint_fetch_ttl) — every open position stays registered
@@ -4414,7 +4498,10 @@ def get_token_data(mint, fast: bool = False):
         # numbers too. Pick the deepest pool on a chain this app actually
         # trades, exactly as /api/token/info and _get_deepest_pair_info
         # already do, so every surface agrees on one price.
-        _supported = [x for x in pairs if x.get('chainId') in _MARKET_LIVE_CHAINS] or pairs
+        _supported = ([x for x in pairs if x.get('chainId') == chain] if chain else
+                      [x for x in pairs if x.get('chainId') in _MARKET_LIVE_CHAINS])
+        if not _supported:
+            return None
         p    = max(_supported, key=lambda x: float((x.get('liquidity') or {}).get('usd') or 0))
         base = p.get('baseToken', {})
         txns = p.get('txns', {})
@@ -4445,6 +4532,7 @@ def get_token_data(mint, fast: bool = False):
             'txns24h_buys':  h24_buys,
             'txns24h_sells': h24_sells,
             'txns24h':       h24_buys + h24_sells,
+            'has_profile':  bool((p.get('info') or {}).get('imageUrl') or (p.get('info') or {}).get('websites') or (p.get('info') or {}).get('socials')),
             'makers24h':     int(p.get('makers', 0) or 0),
             'pairAddress':   p.get('pairAddress', '') or '',
             'pairCreatedAt': int(p.get('pairCreatedAt', 0) or 0),
@@ -5389,7 +5477,7 @@ def token_loop():
             for i, mint in enumerate(mints):
                 if i > 0:
                     time.sleep(0.3)  # stagger per-token calls
-                data = get_token_data(mint)
+                data = get_token_data(mint, chain='solana')
                 if not data or data['price'] <= 0:
                     continue
                 # Minimum quality filters — score handles the rest
@@ -5420,6 +5508,7 @@ def token_loop():
                     'txns24h':       data['txns24h'],
                     'txns24h_buys':  data['txns24h_buys'],
                     'txns24h_sells': data['txns24h_sells'],
+                    'has_profile':   data['has_profile'],
                     'makers24h':     data['makers24h'],
                     'pairAddress':   data.get('pairAddress', '') or '',
                     'dexId':         data.get('dexId', '') or '',
@@ -5467,7 +5556,7 @@ def token_loop():
             except Exception:
                 pass
         except: pass
-        time.sleep(120)
+        time.sleep(30)  # shared candidate refresh; never per-user 2s discovery
 
 # ── TRADE RECORDING ──
 def check_daily_reset():
@@ -5906,7 +5995,7 @@ def _charge_txn_fee(private_key: str, wallet: str, user_id: int, symbol: str,
         else:
             # Wait for the buy/sell TX to confirm on-chain before we try to spend from that balance
             time.sleep(12)
-            _dest_label = 'gas sponsor wallet' if fee_recipient == _sol_gas_sponsor_address() else 'fee wallet'
+            _dest_label = 'fee wallet'
             print(f'[fee] → attempting {fee:.6f} SOL {kind_} fee transfer from trading wallet to '
                   f'{_dest_label} {fee_recipient[:10]}... for {sw} {sym}', flush=True)
             try:
@@ -6086,22 +6175,21 @@ def _record_user_trade(user_id: int, us: dict, symbol: str, entry: float, exit_p
     # separate transfer left for users to notice leaving their wallet, just record it.
     # EVM: _charge_evm_txn_fee sends a real separate on-chain USDC/USDG transfer --
     # that chain's swap (0x) has no equivalent bundled-platform-fee mechanism.
-    if wallet and private_key and chain == 'solana' and base == 'USDC':
-        # orcagent_solana.py's execute_single_swap() doesn't bundle a platform
-        # fee into a USDC-denominated swap yet (its own docstring: "a disclosed
-        # v1 limitation, not a bug" -- bundling one would need a raw SPL-token-
-        # transfer instruction it doesn't build). bundled=True below would
-        # otherwise fabricate a fee record for money nothing actually
-        # collected, so this mode charges no fee rather than lying about it.
-        print(f'[fee] {short_w} {symbol} sell — USDC-based Solana trade, no platform fee bundled (not yet supported for this mode)', flush=True)
-    elif wallet and private_key:
-        if chain == 'solana':
-            _charge_txn_fee(private_key, wallet, user_id, symbol, swap_sol_amount, 'sell',
-                             trade_ts=now.strftime('%Y-%m-%dT%H:%M:%SZ'), gross_profit=pnl, bundled=True)
+    if wallet and private_key:
+        _fee_ts = now.strftime('%Y-%m-%dT%H:%M:%SZ')
+        if chain == 'solana' and base == 'USDC':
+            gross_proceeds = (swap_sol_amount / (1.0 - FEE_RATE_TXN)) if swap_sol_amount > 0 else 0.0
+            fee_amount = _record_bundled_stable_fee(
+                wallet, user_id, symbol, gross_proceeds, 'sell', 'solana', trade_ts=_fee_ts)
+        elif chain == 'solana':
+            gross_proceeds = (swap_sol_amount / (1.0 - FEE_RATE_TXN)) if swap_sol_amount > 0 else 0.0
+            _charge_txn_fee(private_key, wallet, user_id, symbol, gross_proceeds, 'sell',
+                            trade_ts=_fee_ts, gross_profit=pnl, bundled=True)
+            fee_amount = round(gross_proceeds * FEE_RATE_TXN, 6)
         else:
-            _charge_evm_txn_fee(private_key, wallet, user_id, symbol, swap_sol_amount, 'sell', chain,
-                                 trade_ts=now.strftime('%Y-%m-%dT%H:%M:%SZ'), gross_profit=pnl)
-        fee_amount = round(swap_sol_amount * FEE_RATE_TXN, 6)
+            gross_proceeds = (swap_sol_amount / (1.0 - FEE_RATE_TXN)) if swap_sol_amount > 0 else 0.0
+            fee_amount = _record_bundled_stable_fee(
+                wallet, user_id, symbol, gross_proceeds, 'sell', chain, trade_ts=_fee_ts)
     else:
         print(f'[fee] {short_w} {symbol} no fee — no private key available (sell may have failed)', flush=True)
 
@@ -6647,7 +6735,8 @@ def _bot_scan_evm_entry(user_id: int, wallet: str, positions: dict, chain: str, 
     candidates = [t for t in _get_scanner_cached()
                   if t.get('chain') == chain
                   and t['mint'] not in blacklisted
-                  and positions.get(t['mint'], {}).get('amount', 0) == 0]
+                  and positions.get(t['mint'], {}).get('amount', 0) == 0
+                  and _bot_gainers_eligible(t)]
     if not candidates:
         return False
 
@@ -6667,19 +6756,21 @@ def _bot_scan_evm_entry(user_id: int, wallet: str, positions: dict, chain: str, 
         qualifying.append(t)
     if not qualifying:
         return False
-    # Highest 24h volume first -- no learned-bias/weighted pool for this
-    # first cut, just the strongest-liquidity signal available up front.
-    qualifying.sort(key=lambda t: t.get('volume_24h', 0), reverse=True)
+    # DexScreener Gainers shortlist: 24h price change determines its order;
+    # the separate fresh momentum/volume check decides whether to enter.
+    qualifying.sort(key=lambda t: t.get('price_change_24h', 0), reverse=True)
 
     for t in qualifying[:5]:  # bounded fresh-data lookups, same reasoning as Solana's BUY_POOL_SIZE cap
         mint, symbol = t['mint'], t.get('symbol') or t['mint'][:8]
-        _td = get_token_data(mint, fast=True)
-        if not _td or not _td.get('price'):
+        _td = get_token_data(mint, fast=True, chain=chain)
+        if not _td or not _td.get('price') or not _bot_gainers_eligible(_td):
             continue
         m5, h1 = _td.get('change5m', 0), _td.get('change1h', 0)
         v5m, v1h = _td.get('volume5m', 0), _td.get('volume1h', 0)
         m5_ok = (m5 >= m5_min or h1 >= m5_min) if m5_max is None else (m5_min <= m5 <= m5_max or m5_min <= h1 <= m5_max)
-        if not m5_ok:
+        if not (m5_ok or _fast_pump_check(mint, chain=chain)):
+            continue
+        if h1 >= 50:  # do not chase an exhausted one-hour move
             continue
         if not (v5m > 0 and v1h > 0 and v5m > v1h / 12):
             continue
@@ -6735,7 +6826,7 @@ def _bot_scan_evm_entry(user_id: int, wallet: str, positions: dict, chain: str, 
                 pos['opened_at']       = time.time()
                 pos['entry_liquidity'] = t.get('liquidity_usd', 0)
                 _upsert_open_position(user_id, wallet, mint, pos, source='bot', chain=chain)
-                _charge_evm_txn_fee(pk, wallet, user_id, symbol, min_trade_usdc, 'buy', chain)
+                _record_bundled_stable_fee(wallet, user_id, symbol, min_trade_usdc, 'buy', chain)
         if buy_ok:
             return True
         add_user_log(wallet, f'[bot-{chain}] ✗ BUY failed — {symbol}: {buy_err or "unknown error"} — position NOT recorded')
@@ -7120,7 +7211,7 @@ def _execute_auto_buy_after_bridge(bridge_id: int, user_id: int, wallet: str, de
                 'opened_at': time.time(),
             }
             _upsert_open_position(user_id, wallet, token_address, pos, source='manual', chain=dest_chain)
-            _charge_evm_txn_fee(private_key, wallet, user_id, symbol, amount_usdc, 'buy', dest_chain)
+            _record_bundled_stable_fee(wallet, user_id, symbol, amount_usdc, 'buy', dest_chain)
     except Exception as e:
         _finish('failed', {'error': _redact_keys(str(e))[:300]})
         return
@@ -7667,7 +7758,7 @@ _ERC20_FULL_ABI = _ERC20_MIN_ABI + [
 SWAP_REVERTED_MSG = 'Swap transaction reverted on-chain'
 SWAP_UNCONFIRMED_PREFIX = 'UNCONFIRMED'
 
-def _get_0x_quote(sell_token: str, buy_token: str, sell_amount_raw: int, taker: str, chain: str = 'bsc') -> dict:
+def _get_0x_quote(sell_token: str, buy_token: str, sell_amount_raw: int, taker: str, chain: str = 'bsc', apply_platform_fee: bool = False) -> dict:
     """sell_amount_raw is already in the sell token's smallest unit (respect
     its own decimals -- see the 18-vs-6-decimal USDC note earlier). 0x's
     Swap API v2 (this same allowance-holder endpoint) covers every chain in
@@ -7678,15 +7769,23 @@ def _get_0x_quote(sell_token: str, buy_token: str, sell_amount_raw: int, taker: 
     keeps quoting on BSC exactly as before."""
     if not ZEROX_API_KEY:
         raise RuntimeError('ZEROX_API_KEY not configured')
+    _params = {
+        'chainId': EVM_CHAINS[chain]['zerox_chain_id'],
+        'sellToken': sell_token,
+        'buyToken': buy_token,
+        'sellAmount': str(sell_amount_raw),
+        'taker': taker,
+    }
+    if apply_platform_fee:
+        _fee_token = EVM_CHAINS[chain]['usdc']
+        _params.update({
+            'swapFeeRecipient': EVM_CHAIN_FEE_WALLET,
+            'swapFeeBps': str(int(round(FEE_RATE_TXN * 10000))),
+            'swapFeeToken': _fee_token,
+        })
     r = requests.get(
         'https://api.0x.org/swap/allowance-holder/quote',
-        params={
-            'chainId': EVM_CHAINS[chain]['zerox_chain_id'],
-            'sellToken': sell_token,
-            'buyToken': buy_token,
-            'sellAmount': str(sell_amount_raw),
-            'taker': taker,
-        },
+        params=_params,
         headers={'0x-api-key': ZEROX_API_KEY, '0x-version': 'v2'},
         timeout=15,
     )
@@ -8009,8 +8108,9 @@ def _te_evm_swap_executor(enc_blob: str, wallet: str, evm_address: str):
                         SURGE_ALERT_CHAIN_NAMES.get(plan.chain, plan.chain)))
             # The PURCHASE, not the ceiling. This single argument is the
             # difference between the engine and every legacy endpoint.
+            gross_swap_usd = plan.purchase_usd + plan.fee_usd
             ok, err, tx_hash = _execute_evm_swap(
-                wallet, pk, 'buy', plan.token_address, str(plan.purchase_usd), plan.chain)
+                wallet, pk, 'buy', plan.token_address, str(gross_swap_usd), plan.chain)
 
         if ok:
             return te_execute.SwapOutcome(submitted=True, confirmed=True, tx_hash=tx_hash)
@@ -8026,26 +8126,41 @@ def _te_evm_swap_executor(enc_blob: str, wallet: str, evm_address: str):
 
 
 def _te_evm_fee_charger(enc_blob: str, wallet: str, symbol: str):
-    """Charges the platform fee that was already inside the user's ceiling.
+    """Record the 0.75% fee already collected atomically by 0x.
 
-    Reported as PENDING, never as collected. _charge_evm_txn_fee() hands the
-    transfer to a background thread and returns before it has happened, so
-    there is nothing here that could honestly claim the money arrived --
-    whether it did is written to the fees table by that thread, which is
-    where collections are tracked.
-
-    The amount passed is the PURCHASE. The legacy path passes the full amount
-    the user typed and so charges 0.75% of a number the user never agreed to
-    spend; here the fee is 0.75% of what is actually being bought, which is
-    what the quote already subtracted from the ceiling.
+    The EVM swap quote contains swapFeeRecipient/swapFeeBps/swapFeeToken, so
+    a confirmed swap cannot exist without its platform fee. No second transfer
+    is sent from the user's wallet.
     """
     def charge(plan, outcome):
-        with _use_key(enc_blob, wallet) as pk:
-            _charge_evm_txn_fee(pk, wallet, plan.user_id, symbol,
-                                float(plan.purchase_usd), 'buy', plan.chain)
-        return te_execute.FeeOutcome(charged=False, pending=True, usd=plan.fee_usd)
+        fee = float(plan.fee_usd)
+        recipient = _evm_fee_recipient(plan.chain)
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            conn.execute(
+                'INSERT INTO fees (user_wallet, token, gross_profit, fee_amount, fee_tx, status, kind, chain, recipient) '
+                'VALUES (?,?,?,?,?,?,?,?,?)',
+                (wallet, symbol, 0.0, fee, '0x-bundled:' + str(outcome.tx_hash or ''),
+                 'ok', 'buy', plan.chain, recipient))
+            # Existing referral policy is a share of the already-collected fee,
+            # never an additional user charge.
+            ref_row = conn.execute(
+                'SELECT referred_by FROM users WHERE wallet_address=?', (wallet,)).fetchone()
+            if ref_row and ref_row[0] and fee > 0:
+                earned = round(fee * 0.20, 6)
+                conn.execute(
+                    'INSERT INTO referral_earnings '
+                    '(referrer_wallet, referred_wallet, trade_fee_sol, earned_sol) VALUES (?,?,?,?)',
+                    (ref_row[0], wallet, fee, earned))
+                conn.execute(
+                    'UPDATE users SET referral_balance=referral_balance+? WHERE wallet_address=?',
+                    (earned, ref_row[0]))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f'[fee] EVM bundled fee audit write failed: {e}', flush=True)
+        return te_execute.FeeOutcome(charged=True, pending=False, usd=plan.fee_usd)
     return charge
-
 
 def _te_run_evm_trade(*, quote_id, idem, available, wallet, enc_blob, evm_address,
                       symbol, token_address, chain, user_id):
@@ -8433,7 +8548,7 @@ def _execute_evm_swap(wallet: str, private_key: str, action: str, token_address:
         sell_amount_raw = int(float(amount_str) * (10 ** sell_decimals))
 
         try:
-            quote = _get_0x_quote(sell_token, buy_token, sell_amount_raw, wallet_cs, chain)
+            quote = _get_0x_quote(sell_token, buy_token, sell_amount_raw, wallet_cs, chain, apply_platform_fee=True)
         except RuntimeError as e:
             # _get_0x_quote's own "ZEROX_API_KEY not configured" is already specific
             print(f'[{chain}-swap] {e}', flush=True)
@@ -8461,7 +8576,7 @@ def _execute_evm_swap(wallet: str, private_key: str, action: str, token_address:
                 return False, msg, ''
             # Re-quote after approving -- the first quote's tx.data assumed the
             # allowance issue was still open; a stale quote can revert on-chain.
-            quote = _get_0x_quote(sell_token, buy_token, sell_amount_raw, wallet_cs, chain)
+            quote = _get_0x_quote(sell_token, buy_token, sell_amount_raw, wallet_cs, chain, apply_platform_fee=True)
 
         txn = quote.get('transaction')
         if not txn:
@@ -8919,16 +9034,8 @@ def _sol_gas_sponsor_needs_funding() -> bool:
     return needs
 
 def _sol_fee_recipient() -> str:
-    """Where a Solana trading fee is actually sent -- the Solana gas sponsor
-    wallet while that one is still below its target, otherwise the normal
-    FEE_WALLET. Exactly the same rule as _evm_fee_recipient, and the reason
-    the Solana gas wallet keeps itself funded out of fee income instead of
-    the operator topping it up by hand.
-
-    Solana needs no conversion step on the way: its trading fees are charged
-    in SOL, which IS the gas token, so routing them here is all it takes.
-    (The EVM chains charge in USDC and convert -- see _refill_gas_sponsor.)"""
-    return _sol_gas_sponsor_address() if _sol_gas_sponsor_needs_funding() else FEE_WALLET
+    """All Solana platform fees go directly to the revenue fee wallet."""
+    return FEE_WALLET
 
 def _sponsor_solana_gas(user_id: int, wallet: str, trading_address: str) -> tuple:
     """Sends SOL_GAS_SPONSOR_GRANT from the platform's Solana sponsor wallet
@@ -9506,36 +9613,58 @@ def _gas_sponsor_needs_funding(chain: str) -> bool:
     return needs
 
 def _evm_fee_recipient(chain: str) -> str:
-    """Where an EVM chain's USDC trading fee is actually sent.
+    """All EVM platform fees go directly to the normal revenue fee wallet."""
+    return EVM_CHAIN_FEE_WALLET
 
-    The gas sponsor wallet is a working wallet, not a revenue wallet: it
-    only ever needs enough to keep fronting users their native gas (see
-    _sponsor_evm_gas). So a fee goes there only while it's actually short --
-    below its target gas balance with no fee income already queued to
-    convert -- and every other fee goes to EVM_CHAIN_FEE_WALLET, the normal
-    revenue wallet, exactly as before.
 
-    Routing whole fees this way rather than splitting each one in two keeps
-    it at ONE transfer per trade: a split would mean two ERC20 transfers,
-    doubling the gas the user's own wallet pays on every single trade to
-    move the same total amount.
+def _record_bundled_stable_fee(wallet: str, user_id: int, symbol: str,
+                               gross_amount: float, kind: str, chain: str,
+                               trade_ts: str = None, tx_hash: str = 'bundled-in-swap'):
+    """Record a stablecoin fee that was already collected atomically in the swap."""
+    fee = round(float(gross_amount or 0) * FEE_RATE_TXN, 6)
+    if fee <= 0:
+        return 0.0
+    recipient = FEE_WALLET if chain == 'solana' else EVM_CHAIN_FEE_WALLET
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        conn.execute(
+            'INSERT INTO fees (user_wallet, token, gross_profit, fee_amount, fee_tx, status, kind, chain, recipient) '
+            'VALUES (?,?,?,?,?,?,?,?,?)',
+            (wallet, symbol, 0.0, fee, tx_hash or 'bundled-in-swap', 'ok',
+             kind, chain, recipient))
+        if kind == 'sell' and trade_ts:
+            row = conn.execute(
+                'SELECT id FROM trades WHERE user_id=? AND timestamp=? AND (fee_paid IS NULL OR fee_paid=0) '
+                'ORDER BY rowid LIMIT 1', (user_id, trade_ts)).fetchone()
+            if row:
+                conn.execute('UPDATE trades SET fee_paid=1 WHERE id=?', (row[0],))
+        # Existing referral policy: paid from the already-collected platform fee,
+        # never an additional charge to the trader.
+        ref = conn.execute(
+            'SELECT referred_by FROM users WHERE wallet_address=?', (wallet,)).fetchone()
+        if ref and ref[0]:
+            earned = round(fee * 0.20, 6)
+            conn.execute(
+                'INSERT INTO referral_earnings '
+                '(referrer_wallet, referred_wallet, trade_fee_sol, earned_sol, chain) VALUES (?,?,?,?,?)',
+                (ref[0], wallet, fee, earned, chain))
+            conn.execute(
+                'UPDATE users SET referral_balance=referral_balance+? WHERE wallet_address=?',
+                (earned, ref[0]))
+        conn.commit()
+    finally:
+        conn.close()
+    print(f'[{chain}-fee] ✓ {wallet[:6]}... {symbol} {kind} {fee:.6f} '
+          f'collected atomically → {recipient[:10]}...', flush=True)
+    return fee
 
-    With no sponsor configured, or no fee wallet configured, this is simply
-    whichever one exists."""
-    sponsor = _gas_sponsor_address()
-    if not sponsor:
-        return EVM_CHAIN_FEE_WALLET
-    if not EVM_CHAIN_FEE_WALLET:
-        return sponsor
-    return sponsor if _gas_sponsor_needs_funding(chain) else EVM_CHAIN_FEE_WALLET
 
 def _charge_evm_txn_fee(private_key: str, wallet: str, user_id: int, symbol: str,
                          usdc_amount: float, kind: str, chain: str = 'bsc',
                          trade_ts: str = None, gross_profit: float = 0.0):
     """EVM equivalent of _charge_txn_fee(): same FEE_RATE_TXN (0.75%), charged on
     BOTH the buy and the sell leg regardless of profit -- but the fee itself is
-    USDC, sent to _evm_fee_recipient() (the normal fee wallet, or the gas
-    sponsor wallet while that one is still short on gas) via
+    USDC, sent directly to the normal EVM revenue fee wallet via
     _send_evm_usdc_fee()'s web3 build/sign/send_raw_transaction flow instead of
     a SOL transfer. Shares the fees/referral_earnings tables with the Solana
     path, tagged with `chain` so a USDC amount is never mistaken for a SOL one
@@ -9558,7 +9687,7 @@ def _charge_evm_txn_fee(private_key: str, wallet: str, user_id: int, symbol: str
         sw = (wlt[:6] + '...' + wlt[-4:]) if len(wlt) >= 10 else wlt
         # Wait for the buy/sell TX to confirm on-chain before we try to spend from that balance
         time.sleep(12)
-        _dest_label = 'gas sponsor wallet' if fee_recipient == _gas_sponsor_address() else 'fee wallet'
+        _dest_label = 'fee wallet'
         print(f'[{chn}-fee] → attempting {fee:.6f} USDC {kind_} fee transfer from trading wallet to '
               f'{_dest_label} {fee_recipient[:10]}... for {sw} {sym}', flush=True)
         tx_sig  = None
@@ -10233,7 +10362,7 @@ def user_trader_loop(stop_event, config, wallet: str):
         return
 
     _m5_desc = ('≥' + str(m5_min) + '%' if m5_max is None else str(m5_min) + '-' + str(m5_max) + '%')
-    _scan_interval = config.get('interval', 15)
+    _scan_interval = 2.0  # fixed server-side decision cadence; ignore stale UI interval=300
     add_user_log(wallet, '[' + short + '] Trader started — TP:+' + str(round(take_profit*100)) +
                  '% SL:-' + str(round(stop_loss*100)) +
                  '% | entry: ' + _m5_desc + ' 5m OR 1h + not reversing | max 5 pos | scan ' + str(_scan_interval) +
@@ -10478,7 +10607,7 @@ def user_trader_loop(stop_event, config, wallet: str):
                         _mark_hot_mint(mint, priority=True)
                         if not _was_near_trigger:
                             add_user_log(wallet, '[' + short + '] ⚡ ' + label + ' ' + str(round(chg*100,1)) +
-                                         '% — within 5% of trigger, check interval 15s→2s')
+                                         '% — near exit threshold, maintaining 2s decision cadence')
                             # Dedicated, grep-able stdout line (separate from the per-user UI
                             # log above) so production behavior can be verified directly in the
                             # server logs after deploy — full mint address + explicit UTC
@@ -10486,13 +10615,13 @@ def user_trader_loop(stop_event, config, wallet: str):
                             print(f"[hot-mint] {datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')} "
                                   f"ENTER mint={mint} user={short} chg={round(chg*100,1)}% "
                                   f"sl=-{round(_eff_sl*100,1)}% crash=-{round(crash_exit*100,1)}% "
-                                  f"interval=15s->2s", flush=True)
+                                  f"interval=2s", flush=True)
                     elif _was_near_trigger:
                         add_user_log(wallet, '[' + short + '] ' + label + ' ' + str(round(chg*100,1)) +
                                      '% — back outside trigger range, check interval back to normal')
                         print(f"[hot-mint] {datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')} "
                               f"EXIT  mint={mint} user={short} chg={round(chg*100,1)}% "
-                              f"interval=2s->{config.get('interval', 15)}s", flush=True)
+                              f"interval=2s->{_scan_interval}s", flush=True)
 
                     # ── Rugpull detector — first check, before crash-exit and stop-loss ──
                     _rug_reason = None
@@ -10761,6 +10890,9 @@ def user_trader_loop(stop_event, config, wallet: str):
                     _now_cd    = time.time()
                     for _t in not_held:
                         _tsym = _t.get('symbol', '') or _t['mint'][:8]
+                        if not _bot_gainers_eligible(_t):
+                            _skip_log.append(f'[skip] {_tsym}: DexScreener Gainers activity/profile requirement not met')
+                            continue
                         if _t['mint'] in _blacklisted:
                             _skip_log.append(f'[skip] {_tsym}: blacklisted by user')
                             continue
@@ -10825,7 +10957,7 @@ def user_trader_loop(stop_event, config, wallet: str):
                             _skip_log.append(f'[skip] {_tsym}: cooldown ({int(_cd_exp - _now_cd)}s remaining)')
                             continue
                         qualifying.append(_t)
-                    qualifying.sort(key=lambda t: t.get('change5m', 0), reverse=True)
+                    qualifying.sort(key=lambda t: (t.get('change5m', 0), t.get('change24h', 0)), reverse=True)
                     _bias_note = ''
                     if _learned_bias:
                         _bias_note = ' — learned: ' + ', '.join(
@@ -11034,11 +11166,8 @@ def user_trader_loop(stop_event, config, wallet: str):
                                 if _solana_base == 'SOL':
                                     _charge_txn_fee(_pk, wallet, user_id, label, spend, 'buy', bundled=True)
                                 else:
-                                    # See _record_user_trade()'s matching guard on the sell
-                                    # side: orcagent_solana.py bundles no platform fee into a
-                                    # USDC-denominated swap yet, so charging one here would
-                                    # fabricate a fee record for money nothing collected.
-                                    print(f'[fee] {short} {label} buy — USDC-based Solana trade, no platform fee bundled (not yet supported for this mode)', flush=True)
+                                    _record_bundled_stable_fee(
+                                        wallet, user_id, label, spend, 'buy', 'solana')
                                 open_pos += 1
                                 _trigger_copy_buy(wallet, bmint, best['price'], label, float(best.get('liquidity', 0) or 0))
                             else:
@@ -11080,7 +11209,7 @@ def user_trader_loop(stop_event, config, wallet: str):
             # "near trigger" from "just holding something." Persisted on the position dict
             # rather than a local variable, so this is still correct even if the try block
             # above raised before reaching the position loop this cycle.
-            _wait_s = 2 if any(p.get('_near_trigger') for p in list(positions.values())) else config.get('interval', 15)
+            _wait_s = _scan_interval  # both entry and exit decisions target 2s
             stop_event.wait(_wait_s)
     finally:
         print(f'[bot] {short} loop exited — running set to False', flush=True)
@@ -12392,7 +12521,8 @@ def api_token_holders(mint):
                 if post_row:
                     pid, content, created_at = post_row
                     like_count = c.execute(
-                        "SELECT COUNT(*) FROM post_likes WHERE post_id = ?", ('p' + str(pid),)
+                        "SELECT COUNT(*) FROM post_likes WHERE post_id = ? AND datetime(created_at)>=datetime(?)",
+                        ('p' + str(pid), created_at)
                     ).fetchone()[0]
                     post = {'id': pid, 'content': content, 'created_at': created_at, 'like_count': like_count}
             holders.append({
@@ -12445,7 +12575,8 @@ def api_token_feed(mint):
         posts = []
         for pid, username, avatar_url, is_verified, content, created_at in rows:
             like_count = c.execute(
-                "SELECT COUNT(*) FROM post_likes WHERE post_id = ?", ('p' + str(pid),)
+                "SELECT COUNT(*) FROM post_likes WHERE post_id = ? AND datetime(created_at)>=datetime(?)",
+                        ('p' + str(pid), created_at)
             ).fetchone()[0]
             posts.append({
                 'username':    username or '',
@@ -12890,6 +13021,14 @@ _TOS_CONTENT_HTML = '''
 @app.route('/terms')
 def page_terms():
     return redirect('/info#terms')
+
+@app.route('/privacy')
+def page_privacy():
+    return redirect('/info#privacy')
+
+@app.route('/contact')
+def page_contact():
+    return redirect('/info#contact')
 
 @app.route('/api/tos/status')
 @rate_limit(60, 60)
@@ -14145,7 +14284,7 @@ def _legacy_evm_trade_buy(wallet, enc_blob, user_id, evm_address, chain,
             'symbol':    symbol,
             'opened_at': time.time(),
         }, source='manual', chain=chain)
-        _charge_evm_txn_fee(pk, wallet, user_id, symbol, amount_usdc, 'buy', chain)
+        _record_bundled_stable_fee(wallet, user_id, symbol, amount_usdc, 'buy', chain)
     # Same as the engine path above, including why is_copy has to be there.
     if not is_copy and not get_user_state(wallet)['positions'].get(
             token_address, {}).get('copy_of_wallet'):
@@ -14412,10 +14551,11 @@ def _evm_sell_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM
 
             # 0.75% on the sell leg's USDC amount, not on profit -- same model
             # as _record_user_trade()'s Solana sell-leg fee call.
-            _charge_evm_txn_fee(pk, wallet, user_id, symbol, proceeds_usdc, 'sell', chain,
-                                trade_ts=ts, gross_profit=pnl)
 
-        fee_amount = round(proceeds_usdc * FEE_RATE_TXN, 6)
+        gross_proceeds = (proceeds_usdc / (1.0 - FEE_RATE_TXN)) if proceeds_usdc > 0 else 0.0
+        fee_amount = _record_bundled_stable_fee(
+            wallet, user_id, symbol, gross_proceeds, 'sell', chain, trade_ts=ts,
+            tx_hash='0x-bundled:' + str(sell_tx_hash or ''))
         # Same trades-table insert + badge recalc as _record_user_trade(), so
         # EVM sells count toward PnL history, badges and profile stats.
         try:
@@ -14614,31 +14754,12 @@ def referrals_page():
 
 @app.route('/settings')
 def settings_page():
+    # Use the current dashboard Settings, including account passkeys and
+    # optional app lock. The legacy settings.html is missing that UI.
     wallet = _authenticated_wallet()
     if not wallet:
-        return redirect('/?connect=1')
-    wallet_short = (wallet[:4] + '...' + wallet[-4:]) if len(wallet) >= 8 else wallet
-    x_handle = x_share_trade = x_share_badge = None
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        xrow = conn.execute(
-            'SELECT x_handle, share_on_big_trade, share_on_badge FROM x_connections WHERE wallet_address=?',
-            (wallet,)
-        ).fetchone()
-        if xrow:
-            x_handle, x_share_trade, x_share_badge = xrow[0], bool(xrow[1]), bool(xrow[2])
-    finally:
-        conn.close()
-    return _render_no_cache(
-        'settings.html',
-        wallet=wallet,
-        wallet_short=wallet_short,
-        is_admin=_is_owner(wallet),
-        csrf_token=_get_csrf_token(),
-        x_handle=x_handle,
-        x_share_trade=x_share_trade,
-        x_share_badge=x_share_badge,
-    )
+        return redirect('/?connect=1#settings')
+    return redirect('/#settings')
 
 
 @app.route('/promote')
@@ -15359,6 +15480,7 @@ def api_group_post_delete(group_id, post_id):
         is_mod_or_owner = role in ('owner', 'mod')
         if row[0] != uid and not _is_owner(wallet) and not is_mod_or_owner:
             return jsonify({'ok': False, 'msg': 'Not your post'}), 403
+        _delete_feed_post_interactions(conn, 'g' + str(post_id))
         conn.execute('DELETE FROM group_posts WHERE id=?', (post_id,))
         conn.commit()
         return jsonify({'ok': True})
@@ -15848,6 +15970,9 @@ def api_group_delete(group_id):
             conn.execute(f'DELETE FROM group_poll_options WHERE poll_id IN ({ph})', poll_ids)
             conn.execute(f'DELETE FROM group_polls WHERE id IN ({ph})', poll_ids)
         conn.execute('DELETE FROM group_typing WHERE group_id=?', (group_id,))
+        for (gid,) in conn.execute(
+                'SELECT id FROM group_posts WHERE group_id=?', (group_id,)).fetchall():
+            _delete_feed_post_interactions(conn, 'g' + str(gid))
         conn.execute('DELETE FROM group_posts WHERE group_id=?', (group_id,))
         conn.execute('DELETE FROM group_members WHERE group_id=?', (group_id,))
         conn.execute('DELETE FROM groups WHERE id=?', (group_id,))
@@ -17197,243 +17322,15 @@ def auth_nonce():
     resp.headers['Pragma']        = 'no-cache'
     return resp
 
-@app.route('/api/auth/check-faceid', methods=['GET'])
-def check_faceid():
-    """Public — returns whether any WebAuthn credentials exist on the server."""
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        row = conn.execute('SELECT COUNT(*) FROM webauthn_credentials').fetchone()
-        has_any = bool(row and row[0] > 0)
-    finally:
-        conn.close()
-    return jsonify({'has_users_with_webauthn': has_any})
+# Compatibility for iOS/PWA clients caching the previous app-lock JavaScript.
+# Explicitly disable their lock before retiring the feature. No WebAuthn
+# verification or passkey login is exposed by this endpoint.
+@app.route('/api/auth/app-lock', methods=['GET', 'POST'])
+def api_app_lock_retired():
+    if request.method == 'GET':
+        return jsonify({'ok': True, 'enabled': False, 'has_passkey': False})
+    return jsonify({'ok': False, 'msg': 'App lock has been removed'}), 410
 
-@app.route('/api/auth/webauthn/has-credential', methods=['GET'])
-@rate_limit(30, 60)
-def webauthn_has_credential():
-    """Public — check whether a specific credential_id is registered on this server.
-    The client passes the stored credential_id as a query parameter or X-Credential-Id header."""
-    credential_id = (
-        request.args.get('credential_id') or
-        request.headers.get('X-Credential-Id') or ''
-    ).strip()
-    if not credential_id:
-        return jsonify({'has_credential': False})
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        row = conn.execute(
-            'SELECT 1 FROM webauthn_credentials WHERE credential_id=?', (credential_id,)
-        ).fetchone()
-        has_cred = row is not None
-    finally:
-        conn.close()
-    return jsonify({'has_credential': has_cred})
-
-def _webauthn_expected_origins():
-    """Allowed WebAuthn origins -- production domains, or (only when the request
-    itself is to localhost/127.0.0.1, e.g. local dev/testing) that request's own
-    origin. Mirrors the identical dev carve-out already used in _csrf_check()'s
-    Origin validation -- never widens what a real deployed instance accepts."""
-    host_bare = (request.host or '').split(':')[0]
-    if host_bare in ('localhost', '127.0.0.1'):
-        return [f'{request.scheme}://{request.host}']
-    return list(_CORS_ALLOWLIST)
-
-_WEBAUTHN_CHALLENGE_TTL_S = 120  # generous slack for a biometric prompt to complete
-
-def _webauthn_store_challenge(session_key, challenge_bytes):
-    session[session_key] = {'c': _webauthn.helpers.bytes_to_base64url(challenge_bytes), 't': time.time()}
-
-def _webauthn_pop_challenge(session_key):
-    """Consume (and clear) a stored, single-use WebAuthn challenge. None if
-    missing or expired -- caller must treat that as a hard failure."""
-    data = session.pop(session_key, None)
-    if not data or time.time() - data.get('t', 0) > _WEBAUTHN_CHALLENGE_TTL_S:
-        return None
-    try:
-        return _webauthn.base64url_to_bytes(data['c'])
-    except Exception:
-        return None
-
-@app.route('/api/auth/webauthn/register/options', methods=['GET'])
-@rate_limit(10, 60)
-def webauthn_register_options():
-    if not _WEBAUTHN_OK:
-        return jsonify({'success': False, 'msg': 'Face ID unavailable on this server'}), 503
-    user_id = session.get('user_id')
-    wallet  = _authenticated_wallet()
-    if not user_id or not wallet:
-        return jsonify({'success': False, 'msg': 'Login required before setting up Face ID'}), 401
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        rows = conn.execute('SELECT credential_id FROM webauthn_credentials WHERE user_id=?', (user_id,)).fetchall()
-    finally:
-        conn.close()
-    exclude = []
-    for (cred_id,) in rows:
-        try:
-            exclude.append(_WaPublicKeyCredentialDescriptor(id=_webauthn.base64url_to_bytes(cred_id)))
-        except Exception:
-            pass
-    options = _webauthn.generate_registration_options(
-        rp_id=WEBAUTHN_RP_ID,
-        rp_name=WEBAUTHN_RP_NAME,
-        user_id=str(user_id).encode(),
-        user_name=wallet,
-        user_display_name=wallet,
-        attestation=_WaAttestationConveyancePreference.NONE,
-        authenticator_selection=_WaAuthenticatorSelectionCriteria(
-            # THIS device's own Face ID or Touch ID. Without it iOS is free to
-            # offer a security key or a scan-this-QR-with-another-phone flow
-            # as well, which is a longer road to the same place and not what
-            # the button says it does.
-            authenticator_attachment=_WaAuthenticatorAttachment.PLATFORM,
-            # Discoverable, so signing in later needs nothing remembered on
-            # this device -- an installed app has its own storage, and a
-            # passkey made in Safari leaves no trace in it.
-            resident_key=_WaResidentKeyRequirement.REQUIRED,
-            user_verification=_WaUserVerificationRequirement.REQUIRED,
-        ),
-        exclude_credentials=exclude or None,
-    )
-    _webauthn_store_challenge('webauthn_reg_challenge', options.challenge)
-    return _webauthn.options_to_json(options), 200, {'Content-Type': 'application/json'}
-
-@app.route('/api/auth/webauthn/register', methods=['POST'])
-@rate_limit(10, 60)
-def webauthn_register():
-    if not _WEBAUTHN_OK:
-        return jsonify({'success': False, 'msg': 'Face ID unavailable on this server'}), 503
-    # Registration requires an active session — user must already be logged in
-    user_id = session.get('user_id')
-    wallet  = _authenticated_wallet()
-    if not user_id or not wallet:
-        return jsonify({'success': False, 'msg': 'Login required before setting up Face ID'}), 401
-
-    challenge = _webauthn_pop_challenge('webauthn_reg_challenge')
-    if not challenge:
-        return jsonify({'success': False, 'msg': 'Registration expired — please try again'}), 400
-
-    body = request.json or {}
-    try:
-        verification = _webauthn.verify_registration_response(
-            credential=body,
-            expected_challenge=challenge,
-            expected_rp_id=WEBAUTHN_RP_ID,
-            expected_origin=_webauthn_expected_origins(),
-            require_user_verification=True,
-        )
-    except Exception as e:
-        _log_security_event('webauthn_register_fail', wallet, f'{type(e).__name__}: {e}')
-        return jsonify({'success': False, 'msg': 'Face ID registration could not be verified'}), 400
-
-    credential_id  = _webauthn.helpers.bytes_to_base64url(verification.credential_id)
-    public_key_b64 = _webauthn.helpers.bytes_to_base64url(verification.credential_public_key)
-
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        conn.execute(
-            '''INSERT INTO webauthn_credentials (user_id, credential_id, public_key, sign_count)
-               VALUES (?, ?, ?, ?)
-               ON CONFLICT(credential_id) DO UPDATE SET public_key=excluded.public_key, sign_count=excluded.sign_count''',
-            (user_id, credential_id, public_key_b64, verification.sign_count)
-        )
-        conn.execute('UPDATE users SET webauthn_ready=1 WHERE id=?', (user_id,))
-        conn.commit()
-    finally:
-        conn.close()
-    add_user_log(wallet, 'WebAuthn credential registered')
-    return jsonify({'success': True, 'credential_id': credential_id})
-
-@app.route('/api/auth/webauthn/login/options', methods=['GET'])
-@rate_limit(20, 60)
-def webauthn_login_options():
-    if not _WEBAUTHN_OK:
-        return jsonify({'success': False, 'msg': 'Face ID unavailable on this server'}), 503
-    credential_id = (request.args.get('credential_id') or '').strip()
-    allow = None
-    if credential_id:
-        try:
-            allow = [_WaPublicKeyCredentialDescriptor(id=_webauthn.base64url_to_bytes(credential_id))]
-        except Exception:
-            allow = None
-    options = _webauthn.generate_authentication_options(
-        rp_id=WEBAUTHN_RP_ID,
-        allow_credentials=allow,
-        user_verification=_WaUserVerificationRequirement.REQUIRED,
-    )
-    _webauthn_store_challenge('webauthn_login_challenge', options.challenge)
-    return _webauthn.options_to_json(options), 200, {'Content-Type': 'application/json'}
-
-@app.route('/api/auth/webauthn/login', methods=['POST'])
-@rate_limit(10, 60)
-def webauthn_login():
-    if not _WEBAUTHN_OK:
-        return jsonify({'success': False, 'msg': 'Face ID unavailable on this server'}), 503
-    challenge = _webauthn_pop_challenge('webauthn_login_challenge')
-    if not challenge:
-        return jsonify({'success': False, 'msg': 'Login expired — please try again'}), 400
-
-    body          = request.json or {}
-    credential_id = str(body.get('id', '')).strip()
-    if not credential_id:
-        return jsonify({'success': False, 'msg': 'credential_id required'}), 400
-
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        row = conn.execute(
-            '''SELECT wc.id, wc.user_id, wc.public_key, wc.sign_count, u.wallet_address, COALESCE(u.username, ''),
-                      CASE WHEN u.encrypted_private_key != '' AND u.encrypted_private_key IS NOT NULL
-                           THEN 1 ELSE 0 END
-               FROM webauthn_credentials wc
-               JOIN users u ON u.id = wc.user_id
-               WHERE wc.credential_id = ?''',
-            (credential_id,)
-        ).fetchone()
-    finally:
-        conn.close()
-    if not row:
-        return jsonify({'success': False, 'msg': 'Credential not found — register first'}), 404
-    cred_row_id, user_id, public_key_b64, sign_count, wallet_address, username, has_trading_key = row
-
-    try:
-        verification = _webauthn.verify_authentication_response(
-            credential=body,
-            expected_challenge=challenge,
-            expected_rp_id=WEBAUTHN_RP_ID,
-            expected_origin=_webauthn_expected_origins(),
-            credential_public_key=_webauthn.base64url_to_bytes(public_key_b64),
-            credential_current_sign_count=sign_count,
-            require_user_verification=True,
-        )
-    except Exception as e:
-        _log_security_event('webauthn_login_fail', wallet_address, f'{type(e).__name__}: {e}')
-        return jsonify({'success': False, 'msg': 'Face ID verification failed'}), 401
-
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        conn.execute('UPDATE webauthn_credentials SET sign_count=? WHERE id=?', (verification.new_sign_count, cred_row_id))
-        conn.commit()
-    finally:
-        conn.close()
-
-    # Restore full session — identical to what /api/wallet/set establishes
-    session.permanent           = True
-    session['user_id']          = user_id
-    session['wallet']           = wallet_address
-    session['authenticated']    = True
-    session.pop('readonly', None)  # a stale read-only flag must never survive a real login (see set_wallet())
-    csrf_tok = _get_csrf_token()
-    add_user_log(wallet_address, 'Login via WebAuthn Face ID')
-    return jsonify({
-        'success':         True,
-        'user_id':         user_id,
-        'wallet':          wallet_address,
-        'username':        username or '',
-        'has_trading_key': bool(has_trading_key),
-        'is_admin':        _is_owner(wallet_address),
-        'csrf_token':      csrf_tok,
-    })
 
 # ── remembering a proven wallet connection ────────────────────────────────
 # The rule these three functions exist to keep: connecting a wallet once
@@ -18010,32 +17907,10 @@ def api_session():
     wallet = session.get('wallet', '')
     readonly = bool(session.get('readonly'))
 
-    # Whether this wallet has a passkey, answered by the SERVER.
-    #
-    # The client used to work this out from localStorage, which is per browser
-    # context — and an app added to the home screen gets its own. So someone
-    # with a passkey registered in Safari looked, from inside the installed
-    # app, exactly like someone with none. That matters more there than
-    # anywhere else: the Phantom deeplink cannot complete inside a standalone
-    # app, so a passkey is the only way back in once a session is gone.
-    has_passkey = False
-    if wallet and not readonly:
-        try:
-            conn = sqlite3.connect(DB_FILE)
-            try:
-                has_passkey = conn.execute(
-                    'SELECT 1 FROM webauthn_credentials c JOIN users u ON u.id=c.user_id '
-                    'WHERE u.wallet_address=? LIMIT 1', (wallet,)).fetchone() is not None
-            finally:
-                conn.close()
-        except Exception:
-            has_passkey = False   # unknown is not a reason to nag; the prompt can wait
-
     return jsonify({
         'ok': True,
         'wallet': wallet,
         'readonly': readonly,
-        'has_passkey': has_passkey,
         # Deliberately separate from `wallet`: a read-only session HAS an
         # address but has proved nothing, and _authenticated_wallet() treats
         # it as nobody. The page needs the same distinction.
@@ -18715,6 +18590,37 @@ def save_username():
         conn.close()
     return jsonify({'ok': True, 'username': username})
 
+# ── DEFAULT USER AVATAR ──
+@app.route('/avatar/default/<wallet>', methods=['GET'])
+def default_user_avatar(wallet):
+    wallet = str(wallet or '').strip()
+    username = ''
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        row = conn.execute(
+            'SELECT COALESCE(username, "") FROM users WHERE wallet_address=?',
+            (wallet,)
+        ).fetchone()
+        conn.close()
+        username = str(row[0] or '').strip() if row else ''
+    except Exception:
+        username = ''
+
+    source = username or wallet or 'OA'
+    initials = source[:2].upper()
+    safe = str(escape(initials))
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="User avatar">
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#252a32"/><stop offset="1" stop-color="#11151b"/></linearGradient></defs>
+<circle cx="64" cy="64" r="62" fill="url(#bg)" stroke="#f7b955" stroke-opacity=".72" stroke-width="4"/>
+<circle cx="64" cy="64" r="54" fill="none" stroke="#f7b955" stroke-opacity=".18" stroke-width="2"/>
+<text x="64" y="69" text-anchor="middle" dominant-baseline="middle" fill="#f7b955" font-family="Arial,Helvetica,sans-serif" font-size="40" font-weight="700">{safe}</text>
+</svg>"""
+    resp = make_response(svg)
+    resp.headers['Content-Type'] = 'image/svg+xml; charset=utf-8'
+    resp.headers['Cache-Control'] = 'private, max-age=60'
+    return resp
+
+
 # ── AVATAR ──
 @app.route('/api/avatar', methods=['POST'])
 @rate_limit(10, 60)
@@ -18750,7 +18656,8 @@ def save_avatar():
         conn.commit()
     finally:
         conn.close()
-    return jsonify({'ok': True, 'avatar_url': avatar_data})
+    effective_avatar = avatar_data or f'/avatar/default/{wallet}'
+    return jsonify({'ok': True, 'avatar_url': effective_avatar})
 
 # ── PROFILE BANNER ──
 @app.route('/api/banner', methods=['POST'])
@@ -19845,6 +19752,7 @@ def social_feed():
                        ru.avatar_url, ru.is_verified, fr.post_id as repost_of, NULL as image_url
                 FROM feed_reposts fr
                 LEFT JOIN users ru ON fr.reposter_wallet = ru.wallet_address
+                WHERE ''' + _valid_post_interaction_sql('fr') + '''
             )
         ''' + where_clause + '''
             ORDER BY
@@ -19861,31 +19769,38 @@ def social_feed():
         if post_ids:
             ph = ','.join('?' * len(post_ids))
             like_counts = dict(conn.execute(
-                f'SELECT post_id, COUNT(*) FROM post_likes WHERE post_id IN ({ph}) GROUP BY post_id',
+                f'SELECT pl.post_id, COUNT(*) FROM post_likes pl WHERE pl.post_id IN ({ph}) AND '
+                + _valid_post_interaction_sql('pl') + ' GROUP BY pl.post_id',
                 post_ids))
-            reply_counts = dict(conn.execute(
-                f'SELECT post_id, COUNT(*) FROM feed_replies WHERE post_id IN ({ph}) GROUP BY post_id',
-                post_ids))
-            # Timestamp of each post's newest reply -- lets the frontend flag
-            # "someone replied since you last looked" on your own posts
-            # without a separate per-post fetch (see fc-reply-count.new in
-            # dashboard.js/renderHomeFeed()).
-            last_reply_ats = dict(conn.execute(
-                f'SELECT post_id, MAX(created_at) FROM feed_replies WHERE post_id IN ({ph}) GROUP BY post_id',
-                post_ids))
+            # Never count historic orphan replies attached to a reused post id.
+            # Parse UTC/ISO timestamps via SQLite datetime() on both sides.
+            reply_rows = conn.execute(
+                f'''SELECT r.post_id, COUNT(*), MAX(r.created_at)
+                    FROM feed_replies r
+                    LEFT JOIN feed_posts fp ON r.post_id='p'||fp.id
+                    LEFT JOIN trades t ON r.post_id='t'||t.id
+                    WHERE r.post_id IN ({ph})
+                      AND datetime(r.created_at) >=
+                          datetime(COALESCE(fp.created_at, t.timestamp))
+                    GROUP BY r.post_id''', post_ids).fetchall()
+            reply_counts = {pid: count for pid, count, _ in reply_rows}
+            last_reply_ats = {pid: newest for pid, _, newest in reply_rows}
             repost_counts = dict(conn.execute(
-                f'SELECT post_id, COUNT(*) FROM feed_reposts WHERE post_id IN ({ph}) GROUP BY post_id',
+                f'SELECT fr.post_id, COUNT(*) FROM feed_reposts fr WHERE fr.post_id IN ({ph}) AND '
+                + _valid_post_interaction_sql('fr') + ' GROUP BY fr.post_id',
                 post_ids))
         liked_by_me = set()
         reposted_by_me = set()
         my_uid_for_likes = _get_uid(conn, my_wallet)
         if my_uid_for_likes and post_ids:
             liked_by_me = {r[0] for r in conn.execute(
-                f'SELECT post_id FROM post_likes WHERE user_id=? AND post_id IN ({ph})',
+                f'SELECT pl.post_id FROM post_likes pl WHERE pl.user_id=? AND pl.post_id IN ({ph}) AND '
+                + _valid_post_interaction_sql('pl'),
                 [my_uid_for_likes] + post_ids)}
         if my_wallet and post_ids:
             reposted_by_me = {r[0] for r in conn.execute(
-                f'SELECT post_id FROM feed_reposts WHERE reposter_wallet=? AND post_id IN ({ph})',
+                f'SELECT fr.post_id FROM feed_reposts fr WHERE fr.reposter_wallet=? AND fr.post_id IN ({ph}) AND '
+                + _valid_post_interaction_sql('fr'),
                 [my_wallet] + post_ids)}
         # Resolve the original post/trade each repost row points at, so the feed can
         # render "X reposted" with the original content embedded underneath.
@@ -19897,26 +19812,37 @@ def social_feed():
             if rp_ids:
                 ph_rp = ','.join('?' * len(rp_ids))
                 for r2 in conn.execute(f'''
-                    SELECT fp.id, fp.wallet, fp.content, fp.created_at, u.username, u.avatar_url, u.is_verified, fp.image_url
+                    SELECT fp.id, fp.wallet, fp.content, fp.created_at, u.id, u.username, u.avatar_url, u.is_verified, fp.image_url
                     FROM feed_posts fp LEFT JOIN users u ON fp.wallet = u.wallet_address
                     WHERE fp.id IN ({ph_rp})''', rp_ids):
+                    _ow = r2[1] or ''
+                    _oshort = (_ow[:6] + '...' + _ow[-4:]) if len(_ow) >= 10 else _ow
                     originals['p' + str(r2[0])] = {
-                        'kind': 'p', 'wallet': r2[1] or '', 'content': r2[2] or '', 'created_at': r2[3] or '',
-                        'username': r2[4] or '', 'avatar_url': r2[5] or '', 'verified': bool(r2[6]),
-                        'image_url': r2[7] or '',
+                        'kind': 'p', 'user_id': r2[4] or 0,
+                        'wallet': _oshort, 'wallet_full': _ow,
+                        'content': r2[2] or '', 'created_at': r2[3] or '',
+                        'username': r2[5] or _oshort,
+                        'avatar_url': r2[6] or '', 'verified': bool(r2[7]),
+                        'image_url': r2[8] or '',
                     }
             if rt_ids:
                 ph_rt = ','.join('?' * len(rt_ids))
                 for r2 in conn.execute(f'''
-                    SELECT t.id, u.wallet_address, t.token, t.timestamp, u.username, u.avatar_url, u.is_verified,
+                    SELECT t.id, u.id, u.wallet_address, t.token, t.timestamp, u.username, u.avatar_url, u.is_verified,
                            t.entry_price, t.exit_price
                     FROM trades t LEFT JOIN users u ON t.user_id = u.id
                     WHERE t.id IN ({ph_rt})''', rt_ids):
-                    pnl = round((r2[8] - r2[7]) / r2[7] * 100, 2) if r2[7] and r2[8] else 0
+                    pnl = round((r2[9] - r2[8]) / r2[8] * 100, 2) if r2[8] and r2[9] else 0
+                    _ow = r2[2] or ''
+                    _oshort = (_ow[:6] + '...' + _ow[-4:]) if len(_ow) >= 10 else _ow
                     originals['t' + str(r2[0])] = {
-                        'kind': 't', 'wallet': r2[1] or '', 'content': '', 'created_at': r2[3] or '',
-                        'username': r2[4] or '', 'avatar_url': r2[5] or '', 'verified': bool(r2[6]),
-                        'symbol': r2[2] or '', 'pnl_pct': pnl, 'entry_price': r2[7] or 0, 'exit_price': r2[8] or 0,
+                        'kind': 't', 'user_id': r2[1] or 0,
+                        'wallet': _oshort, 'wallet_full': _ow,
+                        'content': '', 'created_at': r2[4] or '',
+                        'username': r2[5] or _oshort,
+                        'avatar_url': r2[6] or '', 'verified': bool(r2[7]),
+                        'symbol': r2[3] or '', 'pnl_pct': pnl,
+                        'entry_price': r2[8] or 0, 'exit_price': r2[9] or 0,
                     }
         # view_count lives on feed_posts/trades directly (not the shared post_id-keyed
         # tables above), so it needs its own per-kind SELECT rather than one IN query.
@@ -20076,13 +20002,322 @@ def api_swap_quote():
         if out_amount_raw <= 0:
             return jsonify({'ok': False, 'msg': 'No route found'}), 502
         to_decimals = 9 if to_mint == SOL_MINT else _get_token_decimals_rpc(to_mint)
+        min_out_raw = int(q.get('otherAmountThreshold', 0) or 0)
         return jsonify({
-            'ok':               True,
-            'out_amount':       out_amount_raw / (10 ** to_decimals),
-            'price_impact_pct': float(q.get('priceImpactPct', 0) or 0),
+            'ok':                  True,
+            'out_amount':          out_amount_raw / (10 ** to_decimals),
+            'min_out_amount':      (min_out_raw / (10 ** to_decimals)) if min_out_raw > 0 else 0,
+            'price_impact_pct':    float(q.get('priceImpactPct', 0) or 0),
+            'slippage_bps':        300,
+            'network_reserve_sol': SOL_NETWORK_RESERVE if from_mint == SOL_MINT else 0,
         })
     except Exception as e:
         return jsonify({'ok': False, 'msg': str(e)[:150]}), 502
+
+
+
+@app.route('/api/wallet/convert/quote', methods=['GET'])
+@rate_limit(30, 60)
+def api_wallet_convert_quote():
+    """Read-only live quote for same-chain native <-> stable conversions."""
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'msg': 'Not authenticated'}), 401
+
+    chain = str(request.args.get('chain', 'solana')).strip().lower()
+    direction = str(request.args.get('direction', '')).strip().lower()
+    if chain != 'solana' and chain not in EVM_CHAINS:
+        return jsonify({'ok': False, 'msg': f'Unsupported chain {chain!r}'}), 400
+    if direction not in ('native_to_stable', 'stable_to_native'):
+        return jsonify({'ok': False, 'msg': 'Invalid conversion direction'}), 400
+    try:
+        amount = float(request.args.get('amount', 0) or 0)
+    except (TypeError, ValueError):
+        amount = 0.0
+    if not math.isfinite(amount) or amount <= 0:
+        return jsonify({'ok': False, 'msg': 'Enter an amount greater than 0'}), 400
+
+    try:
+        if chain == 'solana':
+            input_mint = SOL_MINT if direction == 'native_to_stable' else USDC_MINT
+            output_mint = USDC_MINT if direction == 'native_to_stable' else SOL_MINT
+            input_decimals = 9 if input_mint == SOL_MINT else 6
+            output_decimals = 9 if output_mint == SOL_MINT else 6
+            amount_raw = int(amount * (10 ** input_decimals))
+            jup_url = (JUPITER_PROXY + '/quote') if JUPITER_PROXY else 'https://api.jup.ag/swap/v1/quote'
+            headers = {'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 OrcAgent/1.0'}
+            if PROXY_SECRET:
+                headers['X-Proxy-Secret'] = PROXY_SECRET
+            r = requests.get(jup_url, params={
+                'inputMint': input_mint,
+                'outputMint': output_mint,
+                'amount': amount_raw,
+                'slippageBps': 300,
+            }, headers=headers, timeout=10)
+            if r.status_code != 200:
+                return jsonify({'ok': False, 'msg': f'Quote unavailable (HTTP {r.status_code})'}), 502
+            q = r.json()
+            out_raw = int(q.get('outAmount', 0) or 0)
+            min_raw = int(q.get('otherAmountThreshold', 0) or 0)
+            if out_raw <= 0:
+                return jsonify({'ok': False, 'msg': 'No route found'}), 502
+            return jsonify({
+                'ok': True,
+                'chain': chain,
+                'direction': direction,
+                'from_symbol': 'SOL' if direction == 'native_to_stable' else 'USDC',
+                'to_symbol': 'USDC' if direction == 'native_to_stable' else 'SOL',
+                'out_amount': out_raw / (10 ** output_decimals),
+                'min_out_amount': (min_raw / (10 ** output_decimals)) if min_raw > 0 else 0,
+                'price_impact_pct': float(q.get('priceImpactPct', 0) or 0),
+                'slippage_bps': 300,
+                'network_reserve_native': SOL_NETWORK_RESERVE,
+            })
+
+        cfg = EVM_CHAINS[chain]
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            row = conn.execute(
+                'SELECT bsc_wallet_address FROM users WHERE wallet_address=?',
+                (wallet,)
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row or not row[0]:
+            return jsonify({'ok': False, 'msg': 'No EVM trading wallet configured'}), 400
+        evm_address = row[0]
+
+        w3 = _get_web3(chain)
+        stable_contract = w3.eth.contract(
+            address=w3.to_checksum_address(cfg['usdc']), abi=_ERC20_MIN_ABI)
+        stable_decimals = int(stable_contract.functions.decimals().call())
+        if direction == 'native_to_stable':
+            sell_token, buy_token = BNB_NATIVE_ADDR, cfg['usdc']
+            sell_raw = int(amount * (10 ** 18))
+            out_decimals = stable_decimals
+        else:
+            sell_token, buy_token = cfg['usdc'], BNB_NATIVE_ADDR
+            sell_raw = int(amount * (10 ** stable_decimals))
+            out_decimals = 18
+
+        quote = _get_0x_quote(
+            sell_token, buy_token, sell_raw,
+            w3.to_checksum_address(evm_address), chain)
+        out_raw = int(quote.get('buyAmount', 0) or 0)
+        min_raw = int(quote.get('minBuyAmount', 0) or 0)
+        if out_raw <= 0:
+            return jsonify({'ok': False, 'msg': 'No route found'}), 502
+        gas_reserve = float(w3.from_wei(
+            w3.eth.gas_price * GAS_CONVERT_RESERVE_UNITS, 'ether'))
+        return jsonify({
+            'ok': True,
+            'chain': chain,
+            'direction': direction,
+            'from_symbol': cfg['native_symbol'] if direction == 'native_to_stable' else user_currency_label(chain),
+            'to_symbol': user_currency_label(chain) if direction == 'native_to_stable' else cfg['native_symbol'],
+            'out_amount': out_raw / (10 ** out_decimals),
+            'min_out_amount': (min_raw / (10 ** out_decimals)) if min_raw > 0 else 0,
+            'price_impact_pct': float(quote.get('priceImpactPct', 0) or 0),
+            'network_reserve_native': gas_reserve,
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'msg': _redact_keys(str(e))[:180]}), 502
+
+
+@app.route('/api/wallet/convert', methods=['POST'])
+@rate_limit(5, 60)
+def api_wallet_convert():
+    """User-confirmed same-chain native <-> stable conversion."""
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'msg': 'Not authenticated'}), 401
+    data = request.get_json(silent=True) or {}
+    chain = str(data.get('chain', 'solana')).strip().lower()
+    direction = str(data.get('direction', '')).strip().lower()
+    if chain != 'solana' and chain not in EVM_CHAINS:
+        return jsonify({'ok': False, 'msg': f'Unsupported chain {chain!r}'}), 400
+    if direction not in ('native_to_stable', 'stable_to_native'):
+        return jsonify({'ok': False, 'msg': 'Invalid conversion direction'}), 400
+    try:
+        amount = float(data.get('amount', 0) or 0)
+    except (TypeError, ValueError):
+        amount = 0.0
+    if not math.isfinite(amount) or amount <= 0:
+        return jsonify({'ok': False, 'msg': 'Enter an amount greater than 0'}), 400
+
+    if chain == 'solana':
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            row = conn.execute(
+                'SELECT encrypted_private_key FROM users WHERE wallet_address=?',
+                (wallet,)
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row or not row[0]:
+            return jsonify({'ok': False, 'msg': 'No Solana trading wallet configured'}), 400
+        enc_blob = row[0]
+        fetch_user_balances(wallet)
+        current_sol = float(get_user_state(wallet).get('sol', 0) or 0)
+        trading_wallet = _get_trading_wallet_address(wallet) or wallet
+
+        if direction == 'native_to_stable':
+            max_convert = max(0.0, current_sol - SOL_NETWORK_RESERVE)
+            if amount > max_convert + 1e-9:
+                return jsonify({'ok': False, 'msg':
+                    f'Keep at least {SOL_NETWORK_RESERVE:.3f} SOL for network fees. '
+                    f'Maximum now: {max_convert:.6f} SOL'}), 400
+            with _use_key(enc_blob, wallet) as pk:
+                ok, sig, err, received, spent = _execute_user_swap_ex(
+                    wallet, pk, 'buy', USDC_MINT, str(amount), base='SOL')
+            from_sym, to_sym = 'SOL', 'USDC'
+            amount_out = received
+        else:
+            usdc_bal = _get_solana_usdc_balance(trading_wallet)
+            if amount > usdc_bal + 1e-9:
+                return jsonify({'ok': False, 'msg':
+                    f'Not enough USDC — available {usdc_bal:.2f}'}), 400
+            if current_sol < SOL_NETWORK_RESERVE:
+                return jsonify({'ok': False, 'msg':
+                    f'At least {SOL_NETWORK_RESERVE:.3f} SOL is needed for network fees before converting USDC to SOL'}), 400
+            with _use_key(enc_blob, wallet) as pk:
+                ok, sig, err, sold_amount, received_sol = _execute_user_swap_ex(
+                    wallet, pk, 'sell', USDC_MINT, str(amount), base='SOL')
+            from_sym, to_sym = 'USDC', 'SOL'
+            amount_out = received_sol
+        if not ok or not sig:
+            return jsonify({'ok': False, 'msg': (err or 'Conversion failed')[-200:]}), 502
+        _log_security_event('wallet_convert', wallet,
+                            f'{chain}:{direction} amount={amount} tx={sig[:16]}...')
+        add_user_log(wallet, f'Converted {amount:.6f} {from_sym} to {to_sym}')
+        return jsonify({'ok': True, 'chain': chain, 'direction': direction,
+                        'from_symbol': from_sym, 'to_symbol': to_sym,
+                        'amount_in': amount, 'amount_out': amount_out,
+                        'tx_hash': sig})
+
+    cfg = EVM_CHAINS[chain]
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        row = conn.execute(
+            'SELECT encrypted_private_key_bsc, bsc_wallet_address FROM users WHERE wallet_address=?',
+            (wallet,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row or not row[0] or not row[1]:
+        return jsonify({'ok': False, 'msg': 'No EVM trading wallet configured'}), 400
+    enc_blob, evm_address = row
+    try:
+        w3 = _get_web3(chain)
+        native_bal = get_evm_native_balance(evm_address, chain)
+        stable_bal = get_evm_usdc_balance(evm_address, chain)
+        reserve_native = float(w3.from_wei(
+            w3.eth.gas_price * GAS_CONVERT_RESERVE_UNITS, 'ether'))
+    except Exception as e:
+        return jsonify({'ok': False, 'msg': f'Balance check failed: {_redact_keys(str(e))[:140]}'}), 502
+
+    native_symbol = cfg['native_symbol']
+    stable_label = user_currency_label(chain)
+    with _use_key(enc_blob, wallet) as pk:
+        if direction == 'native_to_stable':
+            max_convert = max(0.0, native_bal - reserve_native)
+            if amount > max_convert + 1e-12:
+                return jsonify({'ok': False, 'msg':
+                    f'Keep enough {native_symbol} for network fees. Maximum now: {max_convert:.8f} {native_symbol}'}), 400
+            ok, err, tx_hash = _execute_evm_native_to_usdc(
+                wallet, pk, chain, amount)
+            from_sym, to_sym = native_symbol, stable_label
+        else:
+            if amount > stable_bal + 1e-9:
+                return jsonify({'ok': False, 'msg':
+                    f'Not enough {stable_label} — available {stable_bal:.2f}'}), 400
+            if native_bal <= 0:
+                return jsonify({'ok': False, 'msg':
+                    f'A small amount of {native_symbol} is needed to pay the network fee for this conversion'}), 400
+            ok, err, tx_hash = _execute_evm_gas_topup(
+                wallet, pk, chain, amount)
+            from_sym, to_sym = stable_label, native_symbol
+    if not ok or not tx_hash:
+        return jsonify({'ok': False, 'msg': err or 'Conversion failed'}), 502
+    _log_security_event('wallet_convert', wallet,
+                        f'{chain}:{direction} amount={amount} tx={tx_hash[:16]}...')
+    add_user_log(wallet, f'Converted {amount:.6f} {from_sym} to {to_sym} on {chain}')
+    return jsonify({'ok': True, 'chain': chain, 'direction': direction,
+                    'from_symbol': from_sym, 'to_symbol': to_sym,
+                    'amount_in': amount, 'tx_hash': tx_hash})
+
+
+
+@app.route('/api/wallet/convert-sol-usdc', methods=['POST'])
+@rate_limit(5, 60)
+def api_wallet_convert_sol_usdc():
+    """User-confirmed SOL -> USDC conversion in the user's trading wallet."""
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'error': 'Not logged in'}), 401
+
+    data = request.get_json(silent=True) or {}
+    try:
+        amount_sol = float(data.get('amount_sol', 0) or 0)
+    except (TypeError, ValueError):
+        amount_sol = 0.0
+    if not math.isfinite(amount_sol) or amount_sol <= 0:
+        return jsonify({'ok': False, 'error': 'Enter a valid SOL amount'}), 400
+    if amount_sol > 500:
+        return jsonify({'ok': False, 'error': 'Amount is too large'}), 400
+
+    fetch_user_balances(wallet)
+    current_sol = float(get_user_state(wallet).get('sol', 0) or 0)
+    max_convert = max(0.0, current_sol - SOL_NETWORK_RESERVE)
+    if amount_sol > max_convert + 1e-9:
+        return jsonify({
+            'ok': False,
+            'error': (f'Keep at least {SOL_NETWORK_RESERVE:.3f} SOL for network fees. '
+                      f'You can convert up to {max_convert:.6f} SOL right now.'),
+            'sol_balance': current_sol,
+            'max_convert_sol': max_convert,
+            'network_reserve_sol': SOL_NETWORK_RESERVE,
+        }), 400
+
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        row = conn.execute(
+            'SELECT id, encrypted_private_key FROM users WHERE wallet_address=?',
+            (wallet,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row or not row[1]:
+        return jsonify({'ok': False, 'error': 'No trading wallet is configured'}), 400
+    uid, enc_blob = row
+
+    lock = _get_solana_buy_lock(wallet, USDC_MINT)
+    with lock:
+        last = _recent_solana_buys.get((wallet, USDC_MINT), 0)
+        if time.time() - last < SOLANA_BUY_REPEAT_WINDOW:
+            return jsonify({'ok': False, 'error': 'A SOL -> USDC conversion was just submitted. Wait a moment.'}), 429
+        _recent_solana_buys[(wallet, USDC_MINT)] = time.time()
+        capture = {}
+        with _use_key(enc_blob, wallet) as pk:
+            ok, sig, err_msg, usdc_received, sol_spent = _execute_user_swap_ex(
+                wallet, pk, 'buy', USDC_MINT, str(amount_sol),
+                base='SOL', capture=capture
+            )
+        if not ok or not sig:
+            _recent_solana_buys.pop((wallet, USDC_MINT), None)
+            return jsonify({'ok': False, 'error': (err_msg or 'SOL -> USDC swap failed')[-200:]}), 500
+
+    _log_security_event('sol_to_usdc', wallet,
+                        f'amount_sol={amount_sol:.8f} tx={sig[:16]}...')
+    add_user_log(wallet, f'Converted {amount_sol:.6f} SOL to {usdc_received:.2f} USDC')
+    return jsonify({
+        'ok': True,
+        'signature': sig,
+        'sol_spent': sol_spent if sol_spent else amount_sol,
+        'usdc_received': usdc_received,
+        'network_reserve_sol': SOL_NETWORK_RESERVE,
+    })
+
 
 @app.route('/api/instant-trade', methods=['POST', 'OPTIONS'])
 @rate_limit(10, 60)
@@ -20356,10 +20591,17 @@ def api_instant_trade():
             # assert bundled=True regardless -- writing a fees row and paying a
             # 20% referral cut on money nobody collected.
             if swap_info.get('fee_bundled'):
-                with _use_key(enc_blob, wallet) as pk:
-                    _charge_txn_fee(pk, wallet, uid, symbol,
-                                    amount_sol if side == 'buy' else sol_recorded,
-                                    side, bundled=True)
+                if SOLANA_BASE_CURRENCY == 'USDC':
+                    _gross = (amount_sol if side == 'buy'
+                              else ((sol_recorded / (1.0 - FEE_RATE_TXN)) if sol_recorded > 0 else 0.0))
+                    _record_bundled_stable_fee(
+                        wallet, uid, symbol, _gross, side, 'solana',
+                        tx_hash='bundled-in-swap')
+                else:
+                    with _use_key(enc_blob, wallet) as pk:
+                        _gross = (amount_sol if side == 'buy'
+                                  else ((sol_recorded / (1.0 - FEE_RATE_TXN)) if sol_recorded > 0 else 0.0))
+                        _charge_txn_fee(pk, wallet, uid, symbol, _gross, side, bundled=True)
             else:
                 print(f'[fee] {wallet[:6]}... {symbol} {side}: the platform fee was NOT '
                       f'collected inside the swap, so nothing is recorded for it',
@@ -20593,6 +20835,7 @@ def feed_post_delete(post_id):
             return jsonify({'ok': False, 'msg': 'Post not found'}), 404
         if row[0] != wallet:
             return jsonify({'ok': False, 'msg': 'Forbidden'}), 403
+        _delete_feed_post_interactions(conn, 'p' + str(post_id))
         conn.execute('DELETE FROM feed_posts WHERE id=?', (post_id,))
         conn.commit()
         return jsonify({'ok': True})
@@ -20648,6 +20891,7 @@ def feed_post_delete_v2(post_id):
             return jsonify({'ok': False, 'msg': 'Post not found'}), 404
         if row[0] != wallet and not is_admin:
             return jsonify({'ok': False, 'msg': 'Forbidden'}), 403
+        _delete_feed_post_interactions(conn, 'p' + str(post_id))
         conn.execute('DELETE FROM feed_posts WHERE id=?', (post_id,))
         conn.commit()
         return jsonify({'ok': True})
@@ -20671,6 +20915,7 @@ def trade_delete(trade_id):
             return jsonify({'ok': False, 'msg': 'Trade not found'}), 404
         if row[0] != uid:
             return jsonify({'ok': False, 'msg': 'Forbidden'}), 403
+        _delete_feed_post_interactions(conn, 't' + str(trade_id))
         conn.execute('DELETE FROM trades WHERE id=?', (trade_id,))
         conn.commit()
         return jsonify({'ok': True})
@@ -20712,6 +20957,15 @@ def toggle_feed_like(post_id):
             return jsonify({'ok': False, 'msg': 'User not found'}), 404
         if not _group_post_access_ok(conn, post_id, me):
             return jsonify({'ok': False, 'msg': 'Members only'}), 403
+        post_created_at = _require_interaction_post(conn, post_id)
+        if not post_created_at:
+            return jsonify({'ok': False, 'msg': 'Post not found'}), 404
+        # A stale like is not a toggle on a newly reused post identity.
+        conn.execute(
+            'DELETE FROM post_likes WHERE user_id=? AND post_id=? '
+            'AND (datetime(created_at)<datetime(?) OR datetime(created_at) IS NULL)',
+            (me, post_id, post_created_at)
+        )
         existing = conn.execute(
             'SELECT id FROM post_likes WHERE user_id=? AND post_id=?', (me, post_id)
         ).fetchone()
@@ -20734,7 +20988,10 @@ def toggle_feed_like(post_id):
                     'INSERT INTO notifications (user_id, type, content, link, actor_wallet) VALUES (?,?,?,?,?)',
                     (owner_uid, 'like', liker_name+' liked your post', link, wallet))
                 _send_push_notification(owner_uid, 'New like', liker_name+' liked your post', link)
-        count = conn.execute('SELECT COUNT(*) FROM post_likes WHERE post_id=?', (post_id,)).fetchone()[0]
+        count = conn.execute(
+            'SELECT COUNT(*) FROM post_likes WHERE post_id=? AND '
+            'datetime(created_at)>=datetime(?)',
+            (post_id, post_created_at)).fetchone()[0]
         conn.commit()
     finally:
         conn.close()
@@ -20753,6 +21010,14 @@ def toggle_feed_repost(post_id):
         me = _get_uid(conn, wallet)
         if not me:
             return jsonify({'ok': False, 'msg': 'User not found'}), 404
+        post_created_at = _require_interaction_post(conn, post_id)
+        if not post_created_at:
+            return jsonify({'ok': False, 'msg': 'Post not found'}), 404
+        conn.execute(
+            'DELETE FROM feed_reposts WHERE reposter_wallet=? AND post_id=? '
+            'AND (datetime(created_at)<datetime(?) OR datetime(created_at) IS NULL)',
+            (wallet, post_id, post_created_at)
+        )
         existing = conn.execute(
             'SELECT id FROM feed_reposts WHERE reposter_wallet=? AND post_id=?', (wallet, post_id)
         ).fetchone()
@@ -20770,7 +21035,10 @@ def toggle_feed_repost(post_id):
                     'INSERT INTO notifications (user_id, type, content, link, actor_wallet) VALUES (?,?,?,?,?)',
                     (owner_uid, 'repost', reposter_name+' reposted your post', '/#post-'+post_id, wallet))
                 _send_push_notification(owner_uid, 'New repost', reposter_name+' reposted your post', '/#post-'+post_id)
-        count = conn.execute('SELECT COUNT(*) FROM feed_reposts WHERE post_id=?', (post_id,)).fetchone()[0]
+        count = conn.execute(
+            'SELECT COUNT(*) FROM feed_reposts WHERE post_id=? '
+            'AND datetime(created_at)>=datetime(?)',
+            (post_id, post_created_at)).fetchone()[0]
         conn.commit()
     finally:
         conn.close()
@@ -20781,14 +21049,22 @@ def toggle_feed_repost(post_id):
 def get_feed_likes(post_id):
     conn = sqlite3.connect(DB_FILE)
     try:
-        count = conn.execute('SELECT COUNT(*) FROM post_likes WHERE post_id=?', (post_id,)).fetchone()[0]
+        post_created_at = _require_interaction_post(conn, post_id)
+        if not post_created_at:
+            return jsonify({'ok': False, 'msg': 'Post not found'}), 404
+        count = conn.execute(
+            'SELECT COUNT(*) FROM post_likes WHERE post_id=? '
+            'AND datetime(created_at)>=datetime(?)',
+            (post_id, post_created_at)).fetchone()[0]
         wallet = _current_wallet()
         liked = False
         if wallet:
             me = _get_uid(conn, wallet)
             if me:
                 liked = bool(conn.execute(
-                    'SELECT 1 FROM post_likes WHERE user_id=? AND post_id=?', (me, post_id)
+                    'SELECT 1 FROM post_likes WHERE user_id=? AND post_id=? '
+                    'AND datetime(created_at)>=datetime(?)',
+                    (me, post_id, post_created_at)
                 ).fetchone())
     finally:
         conn.close()
@@ -20800,13 +21076,16 @@ def get_feed_like_users(post_id):
     """Who liked this post — for the 'liked by' list. Most recent like first."""
     conn = sqlite3.connect(DB_FILE)
     try:
+        post_created_at = _require_interaction_post(conn, post_id)
+        if not post_created_at:
+            return jsonify({'ok': False, 'msg': 'Post not found'}), 404
         rows = conn.execute(
             '''SELECT u.id, u.wallet_address, u.username, u.avatar_url, u.is_verified
                FROM post_likes pl JOIN users u ON u.id = pl.user_id
-               WHERE pl.post_id=?
+               WHERE pl.post_id=? AND datetime(pl.created_at)>=datetime(?)
                ORDER BY pl.created_at DESC
                LIMIT 200''',
-            (post_id,)
+            (post_id, post_created_at)
         ).fetchall()
     finally:
         conn.close()
@@ -20831,8 +21110,11 @@ def get_feed_post(post_id):
         if post_id.startswith('p') and post_id[1:].isdigit():
             row = conn.execute('''
                 SELECT fp.id, fp.wallet, fp.content, fp.created_at,
-                       (SELECT COUNT(*) FROM post_likes   WHERE post_id = 'p'||fp.id) as like_count,
-                       (SELECT COUNT(*) FROM feed_replies WHERE post_id = 'p'||fp.id) as reply_count,
+                       (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id='p'||fp.id
+                          AND datetime(pl.created_at)>=datetime(fp.created_at)) as like_count,
+                       (SELECT COUNT(*) FROM feed_replies r
+                        WHERE r.post_id = 'p'||fp.id
+                          AND datetime(r.created_at)>=datetime(fp.created_at)) as reply_count,
                        fp.view_count,
                        u.username, NULL as symbol, NULL as mint_address, NULL as pnl_pct,
                        (fp.wallet = ?) as is_own, NULL as entry_price, NULL as exit_price,
@@ -20846,8 +21128,11 @@ def get_feed_post(post_id):
             row = conn.execute('''
                 SELECT t.id, u.wallet_address as wallet, NULL as content,
                        t.timestamp as created_at,
-                       (SELECT COUNT(*) FROM post_likes   WHERE post_id = 't'||t.id) as like_count,
-                       (SELECT COUNT(*) FROM feed_replies WHERE post_id = 't'||t.id) as reply_count,
+                       (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id='t'||t.id
+                          AND datetime(pl.created_at)>=datetime(t.timestamp)) as like_count,
+                       (SELECT COUNT(*) FROM feed_replies r
+                        WHERE r.post_id = 't'||t.id
+                          AND datetime(r.created_at)>=datetime(t.timestamp)) as reply_count,
                        t.view_count,
                        u.username,
                        t.token as symbol,
@@ -20913,6 +21198,14 @@ def toggle_feed_reaction(post_id):
             return jsonify({'ok': False, 'msg': 'User not found'}), 404
         if not _group_post_access_ok(conn, post_id, me):
             return jsonify({'ok': False, 'msg': 'Members only'}), 403
+        post_created_at = _require_interaction_post(conn, post_id)
+        if not post_created_at:
+            return jsonify({'ok': False, 'msg': 'Post not found'}), 404
+        conn.execute(
+            'DELETE FROM post_reactions WHERE user_id=? AND post_id=? AND emoji=? '
+            'AND (datetime(created_at)<datetime(?) OR datetime(created_at) IS NULL)',
+            (me, post_id, emoji, post_created_at)
+        )
         existing = conn.execute(
             'SELECT id FROM post_reactions WHERE user_id=? AND post_id=? AND emoji=?',
             (me, post_id, emoji)
@@ -20944,12 +21237,14 @@ def toggle_feed_reaction(post_id):
                 _send_push_notification(owner_uid, 'New reaction', reactor_name+' reacted '+emoji+' to your post', link)
         conn.commit()
         counts = {row[0]: row[1] for row in conn.execute(
-            'SELECT emoji, COUNT(*) FROM post_reactions WHERE post_id=? GROUP BY emoji',
-            (post_id,)
+            'SELECT emoji, COUNT(*) FROM post_reactions WHERE post_id=? '
+            'AND datetime(created_at)>=datetime(?) GROUP BY emoji',
+            (post_id, post_created_at)
         ).fetchall()}
         mine = [row[0] for row in conn.execute(
-            'SELECT emoji FROM post_reactions WHERE user_id=? AND post_id=?',
-            (me, post_id)
+            'SELECT emoji FROM post_reactions WHERE user_id=? AND post_id=? '
+            'AND datetime(created_at)>=datetime(?)',
+            (me, post_id, post_created_at)
         ).fetchall()]
     finally:
         conn.close()
@@ -20968,7 +21263,9 @@ def feed_reactions_batch():
     try:
         ph = ','.join('?' * len(post_ids))
         count_rows = conn.execute(
-            f'SELECT post_id, emoji, COUNT(*) FROM post_reactions WHERE post_id IN ({ph}) GROUP BY post_id, emoji',
+            f'SELECT pr.post_id, pr.emoji, COUNT(*) FROM post_reactions pr '
+            f'WHERE pr.post_id IN ({ph}) AND ' + _valid_post_interaction_sql('pr')
+            + ' GROUP BY pr.post_id, pr.emoji',
             post_ids
         ).fetchall()
         reactions = {}
@@ -20979,7 +21276,9 @@ def feed_reactions_batch():
             me = _get_uid(conn, wallet)
             if me:
                 mine_rows = conn.execute(
-                    f'SELECT post_id, emoji FROM post_reactions WHERE user_id=? AND post_id IN ({ph})',
+                    f'SELECT pr.post_id, pr.emoji FROM post_reactions pr '
+                    f'WHERE pr.user_id=? AND pr.post_id IN ({ph}) AND '
+                    + _valid_post_interaction_sql('pr'),
                     [me] + post_ids
                 ).fetchall()
                 for pid, emoji in mine_rows:
@@ -21006,6 +21305,47 @@ def _post_owner_uid(conn, post_id):
     else:
         row = None
     return row[0] if row else None
+
+
+def _feed_post_created_at(conn, post_id):
+    """Creation timestamp for the exact post identity (p, t, or g)."""
+    if not isinstance(post_id, str) or len(post_id) < 2 or not post_id[1:].isdigit():
+        return None
+    source = {'p': ('feed_posts', 'created_at'),
+              't': ('trades', 'timestamp'),
+              'g': ('group_posts', 'created_at')}.get(post_id[0])
+    if not source:
+        return None
+    table, column = source  # fixed internal identifiers, never user SQL
+    row = conn.execute(
+        f'SELECT {column} FROM {table} WHERE id=?', (int(post_id[1:]),)
+    ).fetchone()
+    return row[0] if row else None
+
+
+def _valid_post_interaction_sql(alias):
+    """SQL predicate: interaction must belong to this incarnation of its post."""
+    return (
+        f"datetime({alias}.created_at) >= datetime(COALESCE("
+        f"(SELECT created_at FROM feed_posts WHERE 'p'||id={alias}.post_id),"
+        f"(SELECT timestamp FROM trades WHERE 't'||id={alias}.post_id),"
+        f"(SELECT created_at FROM group_posts WHERE 'g'||id={alias}.post_id)))"
+    )
+
+
+def _require_interaction_post(conn, post_id):
+    created = _feed_post_created_at(conn, post_id)
+    return created
+
+
+def _delete_feed_post_interactions(conn, post_id):
+    """Remove dependent feed interactions in the caller's post-delete transaction."""
+    conn.execute('DELETE FROM feed_reply_likes WHERE reply_id IN '
+                 '(SELECT id FROM feed_replies WHERE post_id=?)', (post_id,))
+    conn.execute('DELETE FROM feed_replies WHERE post_id=?', (post_id,))
+    conn.execute('DELETE FROM post_likes WHERE post_id=?', (post_id,))
+    conn.execute('DELETE FROM post_reactions WHERE post_id=?', (post_id,))
+    conn.execute('DELETE FROM feed_reposts WHERE post_id=?', (post_id,))
 
 
 @app.route('/api/feed/reply', methods=['POST'])
@@ -21036,9 +21376,14 @@ def post_feed_reply():
             return jsonify({'ok': False, 'msg': 'User not found'}), 404
         if not _group_post_access_ok(conn, post_id, me):
             return jsonify({'ok': False, 'msg': 'Members only'}), 403
+        post_created_at = _feed_post_created_at(conn, post_id)
+        if not post_created_at:
+            return jsonify({'ok': False, 'msg': 'Post not found'}), 404
         if parent_reply_id is not None:
             parent_row = conn.execute(
-                'SELECT post_id FROM feed_replies WHERE id=?', (parent_reply_id,)
+                'SELECT post_id FROM feed_replies WHERE id=? '
+                'AND datetime(created_at)>=datetime(?)',
+                (parent_reply_id, post_created_at)
             ).fetchone()
             if not parent_row or parent_row[0] != post_id:
                 return jsonify({'ok': False, 'msg': 'Invalid parent_reply_id'}), 400
@@ -21067,6 +21412,7 @@ def post_feed_reply():
     return jsonify({
         'ok': True, 'id': reply_id, 'user_id': me,
         'username': row[0] if row else '',
+        'wallet': wallet,
         'avatar_url': row[1] if row else '',
         'message': message,
         'created_at': now,
@@ -21082,6 +21428,9 @@ def get_feed_replies(post_id):
         me = _get_uid(conn, wallet) if wallet else None
         if not _group_post_access_ok(conn, post_id, me):
             return jsonify({'ok': False, 'msg': 'Members only'}), 403
+        post_created_at = _feed_post_created_at(conn, post_id)
+        if not post_created_at:
+            return jsonify({'ok': False, 'msg': 'Post not found'}), 404
         rows = conn.execute(
             '''SELECT r.id,
                       COALESCE(u.username, ''),
@@ -21096,8 +21445,9 @@ def get_feed_replies(post_id):
                FROM feed_replies r
                LEFT JOIN users u ON u.id = r.user_id
                WHERE r.post_id = ?
+                 AND datetime(r.created_at) >= datetime(?)
                ORDER BY r.created_at ASC''',
-            (post_id,)
+            (post_id, post_created_at)
         ).fetchall()
         liked = set()
         if me and rows:
@@ -21141,9 +21491,17 @@ def toggle_feed_reply_like(reply_id):
         me = _get_uid(conn, wallet)
         if not me:
             return jsonify({'ok': False, 'error': 'not logged in'}), 401
-        reply_post = conn.execute('SELECT post_id FROM feed_replies WHERE id=?', (reply_id,)).fetchone()
+        reply_post = conn.execute(
+            'SELECT post_id, created_at FROM feed_replies WHERE id=?', (reply_id,)
+        ).fetchone()
         if not reply_post or not _group_post_access_ok(conn, reply_post[0], me):
-            return jsonify({'ok': False, 'msg': 'Members only'}), 403
+            return jsonify({'ok': False, 'msg': 'Reply unavailable'}), 404
+        created_at = _feed_post_created_at(conn, reply_post[0])
+        if not created_at or not conn.execute(
+            'SELECT datetime(?) >= datetime(?)',
+            (reply_post[1], created_at)
+        ).fetchone()[0]:
+            return jsonify({'ok': False, 'msg': 'Reply unavailable'}), 404
         existing = conn.execute(
             'SELECT id FROM feed_reply_likes WHERE user_id=? AND reply_id=?',
             (me, reply_id)
@@ -25425,7 +25783,11 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
             # one that did not would book revenue nobody received and pay a
             # referral cut on it.
             if swap_info.get('fee_bundled'):
-                _charge_txn_fee(_pk, wallet, user_id, pos['symbol'], spend, 'buy', bundled=True)
+                if SOLANA_BASE_CURRENCY == 'USDC':
+                    _record_bundled_stable_fee(
+                        wallet, user_id, pos['symbol'], spend, 'buy', 'solana')
+                else:
+                    _charge_txn_fee(_pk, wallet, user_id, pos['symbol'], spend, 'buy', bundled=True)
             else:
                 print(f'[fee] {wallet[:6]}... {pos["symbol"]} buy: the platform fee was '
                       f'NOT collected inside the swap, so nothing is recorded for it',
@@ -27121,6 +27483,7 @@ def api_market_live():
 # scanner UI's filters need, plus an on-demand safety enrichment step.
 _scanner_cache: dict = {'ts': 0.0, 'data': []}
 _scanner_lock = threading.Lock()
+_scanner_refresh_lock = threading.Lock()  # one upstream refresh shared by all bots
 _scanner_safety_cache: dict = {}  # (chain,mint,include_lp) -> (ts, normalized safety result)
 _scanner_safety_lock = threading.Lock()
 _SCANNER_SAFETY_TTL = 600  # 10 min -- mint/freeze authority + LP-lock state rarely change
@@ -27227,6 +27590,9 @@ def _get_scanner_candidates() -> list:
             'price_change_24h': _f(pc.get('h24')),
             'pair_created_at':  int(p.get('pairCreatedAt')) if p.get('pairCreatedAt') else None,
             'verified_socials': bool(socials or websites),
+            'has_profile':      bool(info.get('imageUrl') or socials or websites),
+            'txns24h':          int(_f(h24t.get('buys'))) + int(_f(h24t.get('sells'))),
+            'txns24h_sells':    int(_f(h24t.get('sells'))),
             'twitter_url':      twitter_url,
             'telegram_url':     telegram_url,
             'website_url':      website_url,
@@ -27278,10 +27644,11 @@ def _get_scanner_candidates() -> list:
                     if not a:
                         continue
                     cur_liq  = _f((p.get('liquidity') or {}).get('usd'))
-                    existing = best_pair.get(a)
+                    pair_key = (p.get('chainId'), a.lower())
+                    existing = best_pair.get(pair_key)
                     old_liq  = _f((existing.get('liquidity') or {}).get('usd')) if existing else -1
                     if cur_liq > old_liq:
-                        best_pair[a] = p
+                        best_pair[pair_key] = p
             except Exception:
                 pass
 
@@ -27292,8 +27659,9 @@ def _get_scanner_candidates() -> list:
             for p in (d.get('pairs') if isinstance(d, dict) else (d if isinstance(d, list) else [])):
                 if p.get('chainId') == 'solana':
                     a = (p.get('baseToken') or {}).get('address', '')
-                    if a and a not in best_pair:
-                        best_pair[a] = p
+                    key = ('solana', a.lower()) if a else None
+                    if key and key not in best_pair:
+                        best_pair[key] = p
         except Exception:
             pass
 
@@ -27312,8 +27680,9 @@ def _get_scanner_candidates() -> list:
                 for p in (d.get('pairs') if isinstance(d, dict) else (d if isinstance(d, list) else [])):
                     if p.get('chainId') == _chain:
                         a = (p.get('baseToken') or {}).get('address', '')
-                        if a and a not in best_pair:
-                            best_pair[a] = p
+                        key = (_chain, a.lower()) if a else None
+                        if key and key not in best_pair:
+                            best_pair[key] = p
             except Exception:
                 pass
 
@@ -27333,6 +27702,16 @@ def _get_scanner_candidates() -> list:
 
 
 def _get_scanner_cached() -> list:
+    # The 2s decision loops must not each launch a full network refresh when
+    # the shared 15s cache expires. Double-check under the refresh lock.
+    with _scanner_lock:
+        if time.time() - _scanner_cache['ts'] < 15 and _scanner_cache['data']:
+            return _scanner_cache['data']
+    with _scanner_refresh_lock:
+        return _refresh_scanner_cached()
+
+
+def _refresh_scanner_cached() -> list:
     now = time.time()
     with _scanner_lock:
         if now - _scanner_cache['ts'] < 15 and _scanner_cache['data']:
@@ -28557,9 +28936,9 @@ def admin_fee_stats():
         collected = round(float((c.fetchone() or (0,))[0]), 4)
         c.execute(f'SELECT COALESCE(SUM(fee_amount),0) FROM fees WHERE {ok_f} AND timestamp LIKE ?', (today + '%',))
         today_sol = round(float((c.fetchone() or (0,))[0]), 4)
-        # Pending = 5% of profitable trades not yet paid
-        c.execute('''SELECT COALESCE(SUM(t.pnl * 0.05), 0) FROM trades t
-                     WHERE t.pnl > 0 AND (t.fee_paid IS NULL OR t.fee_paid = 0)''')
+        # Pending = actual unpaid 0.75% transaction fees already recorded on trades.
+        c.execute('''SELECT COALESCE(SUM(t.fee_amount), 0) FROM trades t
+                     WHERE (t.fee_paid IS NULL OR t.fee_paid = 0)''')
         pending = round(float((c.fetchone() or (0,))[0]), 4)
         conn.close()
         return jsonify({'ok': True, 'collected': collected, 'pending': pending, 'today': today_sol})
@@ -29157,7 +29536,7 @@ def _recover_uncollected_fees(triggered_by: str = 'manual') -> dict:
             conn2.execute(
                 '''INSERT INTO fees (user_wallet, token, gross_profit, fee_amount, fee_tx, status)
                    VALUES (?,?,?,?,?,?)''',
-                (user_wallet, '[recovery]', total_fee / _get_fee_rate(), total_fee, tx_sig, 'ok'))
+                (user_wallet, '[recovery]', 0.0, total_fee, tx_sig, 'ok'))
             # Referral payout (20% of the fee just actually collected) -- the normal
             # per-trade path (_charge_txn_fee/_do_fee) credits this on every successful
             # send, but a trade recovered here (its original attempt failed or never ran)
@@ -29458,6 +29837,9 @@ def admin_ban_user():
         return jsonify({'ok': False, 'msg': 'Missing wallet'}), 400
     conn = sqlite3.connect(DB_FILE)
     try:
+        for (pid,) in conn.execute(
+                'SELECT id FROM feed_posts WHERE wallet=?', (target,)).fetchall():
+            _delete_feed_post_interactions(conn, 'p' + str(pid))
         conn.execute('DELETE FROM users WHERE wallet_address=?', (target,))
         conn.execute('DELETE FROM feed_posts WHERE wallet=?', (target,))
         conn.commit()
@@ -29494,6 +29876,9 @@ def admin_ban_v2():
         return jsonify({'ok': False, 'msg': 'Missing wallet'}), 400
     conn = sqlite3.connect(DB_FILE)
     try:
+        for (pid,) in conn.execute(
+                'SELECT id FROM feed_posts WHERE wallet=?', (target,)).fetchall():
+            _delete_feed_post_interactions(conn, 'p' + str(pid))
         conn.execute('DELETE FROM users WHERE wallet_address=?', (target,))
         conn.execute('DELETE FROM feed_posts WHERE wallet=?', (target,))
         conn.commit()
@@ -29515,6 +29900,7 @@ def admin_delete_post():
         row = conn.execute('SELECT id FROM feed_posts WHERE id=?', (post_id,)).fetchone()
         if not row:
             return jsonify({'ok': False, 'msg': 'Post not found'}), 404
+        _delete_feed_post_interactions(conn, 'p' + str(post_id))
         conn.execute('DELETE FROM feed_posts WHERE id=?', (post_id,))
         conn.commit()
         return jsonify({'ok': True})
@@ -29607,8 +29993,8 @@ def admin_revenue():
         today_sol = round(float(c.fetchone()[0] or 0), 4)
         c.execute('SELECT COALESCE(SUM(fee_amount),0) FROM fees WHERE status="failed" OR fee_tx LIKE "FAILED:%"')
         failed = round(float(c.fetchone()[0] or 0), 4)
-        c.execute('''SELECT COALESCE(SUM(t.pnl * 0.05), 0) FROM trades t
-                     WHERE t.pnl > 0 AND (t.fee_paid IS NULL OR t.fee_paid = 0)''')
+        c.execute('''SELECT COALESCE(SUM(t.fee_amount), 0) FROM trades t
+                     WHERE (t.fee_paid IS NULL OR t.fee_paid = 0)''')
         pending = round(float(c.fetchone()[0] or 0), 4)
         c.execute('''SELECT user_wallet, token, gross_profit, fee_amount, fee_tx, timestamp, status
                      FROM fees ORDER BY timestamp DESC LIMIT 200''')
@@ -29644,7 +30030,7 @@ def admin_settings_get():
         conn.close()
     return jsonify({
         'ok': True,
-        'fee':           round(float(rows.get('fee_rate', FEE_RATE_DEFAULT)) * 100, 4),
+        'fee':           round(FEE_RATE_TXN * 100, 4),
         'max_positions': float(rows.get('max_positions_per_user', 5)),
         'min_deposit':   float(rows.get('min_deposit', 0.1)),
         'rate_limit':    int(float(rows.get('rate_limit', 20))),
