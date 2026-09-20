@@ -230,12 +230,41 @@ BAL = {"ok":True,"solana_usdc":0.0,"total_usdc":12.4,
        "evm_chains":{"bsc":12.4,"base":0,"arbitrum":0,"polygon":0,"robinhood":0}}
 HOLD = {"ok":True,"chain":"bsc","amount":8000.0,"price_usd":0.0013,
         "value_usd":10.4,"symbol":"UPONLY","source":"position"}
+def _chromium_candidates():
+    """Every place a usable Chromium might be, best first.
+
+    The sandbox this was written in keeps browsers under PLAYWRIGHT_BROWSERS_PATH
+    and pins a build Playwright's own resolver does not find, which is why an
+    explicit path was hard-coded here. That path exists on exactly one machine:
+    on a CI runner it does not, and the launch failed with "executable doesn't
+    exist" -- a missing browser reported as a failing buy sheet."""
+    import glob, os
+    seen, out = set(), []
+    for cand in ([os.environ.get('ORCA_CHROMIUM')]
+                 + sorted(glob.glob(os.path.join(
+                     os.environ.get('PLAYWRIGHT_BROWSERS_PATH', '/opt/pw-browsers'),
+                     'chromium-*', 'chrome-linux', 'chrome')), reverse=True)):
+        if cand and cand not in seen and os.path.exists(cand):
+            seen.add(cand)
+            out.append(cand)
+    return out
+
+
+async def _launch(p):
+    """Explicit path when one is really there, otherwise Playwright's own."""
+    for exe in _chromium_candidates():
+        try:
+            return await p.chromium.launch(executable_path=exe,
+                                           args=['--no-sandbox'])
+        except Exception:
+            continue
+    return await p.chromium.launch(args=['--no-sandbox'])
+
+
 async def main():
     out = {}
     async with async_playwright() as p:
-        b = await p.chromium.launch(
-            executable_path='/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
-            args=['--no-sandbox'])
+        b = await _launch(p)
         ctx = await b.new_context(viewport={'width':390,'height':844},
                                   is_mobile=True, has_touch=True)
         page = await ctx.new_page()
@@ -440,7 +469,18 @@ async def main():
         out['errors'] = errs[:3]
         await b.close()
     print('@@' + json.dumps(out))
-asyncio.run(main())
+try:
+    asyncio.run(main())
+except Exception as exc:
+    # A browser that cannot be started at all is not a verdict on the buy
+    # sheet. Say which it is, so the caller can tell "this machine has no
+    # Chromium" from "the sheet is broken".
+    msg = str(exc)
+    if ('executable doesn' in msg or 'Failed to launch' in msg
+            or 'Executable doesn' in msg or 'BrowserType.launch' in msg):
+        print('@@NOBROWSER ' + msg.splitlines()[0][:300])
+        sys.exit(0)
+    raise
 ''' % PORT
 
 for _ in range(40):
@@ -454,11 +494,28 @@ for _ in range(40):
 try:
     r = subprocess.run([sys.executable, '-c', DRIVER], capture_output=True,
                        text=True, timeout=240)
-    line = [l for l in r.stdout.splitlines() if l.startswith('@@')]
+    marks = [l for l in r.stdout.splitlines() if l.startswith('@@')]
+    nobrowser = next((l for l in marks if l.startswith('@@NOBROWSER')), None)
+    line = [l for l in marks if not l.startswith('@@NOBROWSER')]
     B = json.loads(line[-1][2:]) if line else {}
-    assert B, (r.stdout[-1500:] + r.stderr[-1500:])
+    if not B:
+        assert nobrowser, (r.stdout[-1500:] + r.stderr[-1500:])
 finally:
     server.terminate()
+
+# No Chromium on this machine. The checks above this point read the source
+# and the stylesheet and have already run; the ones below drive a real
+# browser and cannot. Reporting them as failures would say the buy sheet is
+# broken, which is not what was found -- so they are skipped, out loud.
+if not B:
+    passed = sum(1 for _, ok in checks if ok)
+    print()
+    print('SKIP: no Chromium available, so the browser checks did not run.')
+    print('      ' + nobrowser[len('@@NOBROWSER '):])
+    print('      Install one (playwright install chromium) or point')
+    print('      ORCA_CHROMIUM at an existing binary to run them.')
+    print(f'\n{passed}/{len(checks)} source checks passed, browser checks skipped')
+    sys.exit(0 if passed == len(checks) else 1)
 
 check('BROWSER: pressing Buy on a card opens the sheet', B.get('opened'))
 check('BROWSER: the balance is already on screen when it opens, rather than '
