@@ -3,7 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
-<title>Wallet — OrcAgent</title>
+<title>Portfolio — OrcAgent</title>
+<!-- Load the canonical Portfolio presentation BEFORE the shared navbar loader.\n     Its version changes with every deploy; cached navbar scripts detect these tags and do not inject legacy UI. -->
+<link rel="stylesheet" href="/static/portfolio-redesign.css?v={{ app_version }}">
+<script src="/static/portfolio-redesign.js?v={{ app_version }}" defer></script>
 <link rel="manifest" href="/app.webmanifest" crossorigin="use-credentials">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
