@@ -4,13 +4,29 @@
 var prefetched=new Set();
 function sameOriginUrl(href){try{var u=new URL(href,location.href);if(u.origin!==location.origin)return null;if(u.protocol!=='http:'&&u.protocol!=='https:')return null;return u}catch(e){return null}}
 function navCandidate(a){if(!a||!a.href||a.hasAttribute('download')||(a.target&&a.target!=='_self'))return null;var u=sameOriginUrl(a.href);if(!u)return null;if(u.pathname.indexOf('/api/')===0)return null;if(/^javascript:/i.test(a.getAttribute('href')||''))return null;if(u.pathname===location.pathname&&u.search===location.search)return null;return u}
-function prefetch(a){var u=navCandidate(a);if(!u)return;var key=u.pathname+u.search;if(prefetched.has(key))return;prefetched.add(key);var l=document.createElement('link');l.rel='prefetch';l.href=u.pathname+u.search;l.as='document';document.head.appendChild(l)}
 function closestLink(e){var n=e.target;return n&&n.closest?n.closest('a[href]'):null}
 
-/* Warm only the page the user is actually showing intent to open. The old
-   idle routine fetched seven authenticated HTML pages after every navigation,
-   which competed with the page's own API calls on the single app worker and
-   made "prefetching" feel like lag. */
+/* HTML responses carry no-store because wallet/session pages are private.
+   Prefetching those documents re-runs server work without a reusable cache
+   entry. Warm ONLY versioned public route assets (never API or wallet data).
+   Cross-document View Transitions keep the old page painted during navigation. */
+var ROUTE_ASSETS={
+  '/':['home-mobile.css?v=7','home-mobile-polish.css?v=5','home-composer-mobile.css?v=1','home-desktop.css?v=1','home-mobile.js?v=5','home-desktop.js?v=1'],
+  '/wallet':['portfolio-redesign.css?v=6','portfolio-redesign.js?v=9','portfolio-assets.js?v=1'],
+  '/live-market':['live-market-redesign.css?v=7','live-market-final.css?v=4','live-market-redesign.js?v=5','live-market-hotfix.js?v=8'],
+  '/groups':['groups-redesign.css?v=1','groups-redesign.js?v=1']
+};
+function prefetch(a){
+  var u=navCandidate(a);if(!u)return;
+  var assets=ROUTE_ASSETS[u.pathname];if(!assets)return;
+  if(navigator.connection&&navigator.connection.saveData)return;
+  assets.forEach(function(asset){
+    var key='/static/'+asset;if(prefetched.has(key))return;
+    prefetched.add(key);
+    var l=document.createElement('link');l.rel='prefetch';l.href=key;
+    l.as=asset.indexOf('.css?')!==-1?'style':'script';document.head.appendChild(l);
+  });
+}
 ['pointerover','touchstart','focusin'].forEach(function(type){document.addEventListener(type,function(e){prefetch(closestLink(e))},{passive:true,capture:true})});
 
 /* Images below the first viewport should not delay initial rendering. */

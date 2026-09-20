@@ -68,3 +68,30 @@ html.oa-page-hidden *,html.oa-page-hidden *::before,html.oa-page-hidden *::after
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 }
+
+/* Keep the outgoing document visible until the next route can paint.
+   This is a progressive enhancement: unsupported browsers use normal links.
+   Do NOT swap server-rendered trading/wallet HTML into an SPA: each route
+   owns its API subscriptions, authentication checks and teardown lifecycle. */
+@view-transition {
+  navigation: auto;
+}
+::view-transition-old(root) {
+  animation: 115ms ease-in both oa-route-out;
+}
+::view-transition-new(root) {
+  animation: 115ms ease-out both oa-route-in;
+}
+@keyframes oa-route-out {
+  from { opacity: 1 }
+  to { opacity: 1 }
+}
+@keyframes oa-route-in {
+  from { opacity: .90 }
+  to { opacity: 1 }
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),::view-transition-new(root) {
+    animation-duration: .01ms !important;
+  }
+}

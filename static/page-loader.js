@@ -1,8 +1,8 @@
 (function(){
 'use strict';
 /* app-ux.js owns intent prefetching. This file only shows navigation progress. */
-if(!document.getElementById('oa-app-ux-css')){var c=document.createElement('link');c.id='oa-app-ux-css';c.rel='stylesheet';c.href='/static/app-ux.css?v=3';document.head.appendChild(c)}
-if(!document.getElementById('oa-app-ux-js')){var j=document.createElement('script');j.id='oa-app-ux-js';j.src='/static/app-ux.js?v=3';j.defer=true;document.head.appendChild(j)}
+if(!document.getElementById('oa-app-ux-css')){var c=document.createElement('link');c.id='oa-app-ux-css';c.rel='stylesheet';c.href='/static/app-ux.css?v=4';document.head.appendChild(c)}
+if(!document.getElementById('oa-app-ux-js')){var j=document.createElement('script');j.id='oa-app-ux-js';j.src='/static/app-ux.js?v=4';j.defer=true;document.head.appendChild(j)}
 var b=document.getElementById('pgl-bar');
 if(!b){b=document.createElement('div');b.id='pgl-bar';b.style.cssText='position:fixed;top:0;left:0;height:2px;width:0;background:#f7b955;z-index:99999;transition:width .18s ease,opacity .22s ease;box-shadow:0 0 8px rgba(247,185,85,.35);pointer-events:none';document.documentElement.appendChild(b)}
 var p=0,t=null,running=false;

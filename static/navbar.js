@@ -21,7 +21,10 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
   if(!styled){
     document.documentElement.classList.add('oa-pf-boot');
     var boot=document.createElement('style');boot.id='oa-pf-boot-style';
-    boot.textContent='html.oa-pf-boot,html.oa-pf-boot body{background:#080d12!important}html.oa-pf-boot body{visibility:hidden!important}';
+    // Never hide the complete page during a route change: that produces the
+    // dark blank frame users report. The shared document transition retains
+    // the outgoing page while the preloaded portfolio stylesheet arrives.
+    boot.textContent='html.oa-pf-boot,html.oa-pf-boot body{background:#080d12!important}';
     document.head.appendChild(boot);
   }
   ensureStyle('/static/portfolio-redesign.css?v=6','portfolio-redesign.css');
