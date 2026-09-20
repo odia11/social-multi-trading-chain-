@@ -9790,6 +9790,12 @@ function _replyRelTime(created_at){
 function _renderReplyRow(r, postId, depth){
   depth = depth || 0;
   var name    = esc(r.username || (r.wallet ? r.wallet.slice(0,6)+'…' : '?'));
+  // A wallet URL keeps pointing to the same trader after username changes.
+  // A real anchor also supports long-press/open-in-new-tab on mobile.
+  var profileHref = r.wallet ? '/profile/'+encodeURIComponent(r.wallet) : '';
+  var nameHtml = profileHref
+    ? '<a class="fc-ri-name fc-ri-profile-link" href="'+esc(profileHref)+'" onclick="event.stopPropagation()">'+name+'</a>'
+    : '<span class="fc-ri-name">'+name+'</span>';
   var initKey = r.username || r.wallet || '?';
   var bg      = typeof _lbAvatarColor === 'function' ? _lbAvatarColor(initKey) : '#1b4332';
   var ini     = initKey[0].toUpperCase();
@@ -9816,7 +9822,7 @@ function _renderReplyRow(r, postId, depth){
     +'<div class="fc-ri-row">'
     +'<div class="fc-ri-avatar" style="background:'+bg+';position:relative;overflow:hidden;cursor:pointer" onclick="'+avatarClick+'">'+ini+avatarImg+'</div>'
     +'<div class="fc-ri-body">'
-    +'<div class="fc-ri-line"><span class="fc-ri-name">'+name+'</span>'+verifiedBadge+_teamBadgeHtml(r.team_role)+youChip+' <span class="fc-ri-text-inline">'+msgHtml+'</span></div>'
+    +'<div class="fc-ri-line">'+nameHtml+verifiedBadge+_teamBadgeHtml(r.team_role)+youChip+' <span class="fc-ri-text-inline">'+msgHtml+'</span></div>'
     +'<div class="fc-ri-meta">'
     +'<span class="fc-ri-time">'+_replyRelTime(r.created_at)+'</span>'
     +'<button class="fc-ri-reply-btn" onclick="_feedToggleNestedReply('+r.id+',\''+postId.replace(/'/g,"\\'")+'\',this)">Reply</button>'
@@ -9881,7 +9887,7 @@ function _feedSubmitNestedReply(inp, postId, parentReplyId){
         var parentDepth = parentRow.dataset.parentId ? 2 : 1; // one level deeper than the parent, capped visually
         var fakeReply = {
           id: d.id, user_id: d.user_id,
-          username: d.username, wallet: '',
+          username: d.username, wallet: d.wallet || '',
           message: d.message, created_at: d.created_at,
           like_count: 0, liked_by_me: false, is_mine: true,
           parent_reply_id: parentReplyId,
@@ -9984,7 +9990,7 @@ function _feedSubmitReply(inp, postId){
         if(emptyMsg && emptyMsg.textContent.indexOf('No replies yet')!==-1) list.innerHTML='';
         var fakeReply = {
           id: d.id, user_id: d.user_id,
-          username: d.username, wallet: '',
+          username: d.username, wallet: d.wallet || '',
           message: d.message, created_at: d.created_at,
           like_count: 0, liked_by_me: false, is_mine: true,
           verified: !!(_myProfileData && _myProfileData.verified),

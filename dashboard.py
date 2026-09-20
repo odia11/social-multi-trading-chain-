@@ -21288,6 +21288,7 @@ def post_feed_reply():
     return jsonify({
         'ok': True, 'id': reply_id, 'user_id': me,
         'username': row[0] if row else '',
+        'wallet': wallet,
         'avatar_url': row[1] if row else '',
         'message': message,
         'created_at': now,
