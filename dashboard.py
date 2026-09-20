@@ -6756,9 +6756,9 @@ def _bot_scan_evm_entry(user_id: int, wallet: str, positions: dict, chain: str, 
         qualifying.append(t)
     if not qualifying:
         return False
-    # Highest 24h volume first -- no learned-bias/weighted pool for this
-    # first cut, just the strongest-liquidity signal available up front.
-    qualifying.sort(key=lambda t: t.get('volume_24h', 0), reverse=True)
+    # DexScreener Gainers shortlist: 24h price change determines its order;
+    # the separate fresh momentum/volume check decides whether to enter.
+    qualifying.sort(key=lambda t: t.get('price_change_24h', 0), reverse=True)
 
     for t in qualifying[:5]:  # bounded fresh-data lookups, same reasoning as Solana's BUY_POOL_SIZE cap
         mint, symbol = t['mint'], t.get('symbol') or t['mint'][:8]
@@ -27483,6 +27483,7 @@ def api_market_live():
 # scanner UI's filters need, plus an on-demand safety enrichment step.
 _scanner_cache: dict = {'ts': 0.0, 'data': []}
 _scanner_lock = threading.Lock()
+_scanner_refresh_lock = threading.Lock()  # one upstream refresh shared by all bots
 _scanner_safety_cache: dict = {}  # (chain,mint,include_lp) -> (ts, normalized safety result)
 _scanner_safety_lock = threading.Lock()
 _SCANNER_SAFETY_TTL = 600  # 10 min -- mint/freeze authority + LP-lock state rarely change
@@ -27643,10 +27644,11 @@ def _get_scanner_candidates() -> list:
                     if not a:
                         continue
                     cur_liq  = _f((p.get('liquidity') or {}).get('usd'))
-                    existing = best_pair.get(a)
+                    pair_key = (p.get('chainId'), a.lower())
+                    existing = best_pair.get(pair_key)
                     old_liq  = _f((existing.get('liquidity') or {}).get('usd')) if existing else -1
                     if cur_liq > old_liq:
-                        best_pair[a] = p
+                        best_pair[pair_key] = p
             except Exception:
                 pass
 
@@ -27657,8 +27659,9 @@ def _get_scanner_candidates() -> list:
             for p in (d.get('pairs') if isinstance(d, dict) else (d if isinstance(d, list) else [])):
                 if p.get('chainId') == 'solana':
                     a = (p.get('baseToken') or {}).get('address', '')
-                    if a and a not in best_pair:
-                        best_pair[a] = p
+                    key = ('solana', a.lower()) if a else None
+                    if key and key not in best_pair:
+                        best_pair[key] = p
         except Exception:
             pass
 
@@ -27677,8 +27680,9 @@ def _get_scanner_candidates() -> list:
                 for p in (d.get('pairs') if isinstance(d, dict) else (d if isinstance(d, list) else [])):
                     if p.get('chainId') == _chain:
                         a = (p.get('baseToken') or {}).get('address', '')
-                        if a and a not in best_pair:
-                            best_pair[a] = p
+                        key = (_chain, a.lower()) if a else None
+                        if key and key not in best_pair:
+                            best_pair[key] = p
             except Exception:
                 pass
 
@@ -27698,6 +27702,16 @@ def _get_scanner_candidates() -> list:
 
 
 def _get_scanner_cached() -> list:
+    # The 2s decision loops must not each launch a full network refresh when
+    # the shared 15s cache expires. Double-check under the refresh lock.
+    with _scanner_lock:
+        if time.time() - _scanner_cache['ts'] < 15 and _scanner_cache['data']:
+            return _scanner_cache['data']
+    with _scanner_refresh_lock:
+        return _refresh_scanner_cached()
+
+
+def _refresh_scanner_cached() -> list:
     now = time.time()
     with _scanner_lock:
         if now - _scanner_cache['ts'] < 15 and _scanner_cache['data']:

@@ -14,6 +14,8 @@ so autonomous BUYs share the exact same USDC ceiling, gasless/bridge handling,
 fees, position tracking and copy-trade hooks as a Live Market BUY.
 """
 
+import threading
+
 
 def install(d):
     if getattr(d, '_multichain_auto_bot_installed', False):
@@ -42,7 +44,8 @@ def install(d):
         except Exception:
             return {}
 
-    pending_auto_buys = {}  # wallet + chain + mint -> monotonic expiry
+    pending_auto_buys = {}  # wallet + chain + mint -> wall-clock expiry
+    pending_lock = threading.Lock()  # atomically reserve before network I/O
 
     def _gasless_entry(user_id, wallet, positions, chain, enc_blob_evm,
                        evm_address, min_trade_usdc, blacklisted,
@@ -50,12 +53,14 @@ def install(d):
         # One unresolved bridge per wallet/chain: otherwise a 2s loop could
         # queue multiple expensive buys before the first balance arrives.
         now = d.time.time()
-        for key, expiry in list(pending_auto_buys.items()):
-            if expiry <= now:
-                pending_auto_buys.pop(key, None)
-        if any(w == wallet and c == chain and expiry > now + 60
-               for (w, c, _mint), expiry in pending_auto_buys.items()):
-            return False
+        with pending_lock:
+            for key, expiry in list(pending_auto_buys.items()):
+                if expiry <= now:
+                    pending_auto_buys.pop(key, None)
+            if any(w == wallet and c == chain and expiry > now
+                   for (w, c, _mint), expiry in pending_auto_buys.items()):
+                return False
+            reserved = set(pending_auto_buys)
         # Candidate universe is already multi-chain. Keep one pass per chain so
         # max_positions remains a per-chain ceiling in user_trader_loop().
         try:
@@ -66,7 +71,7 @@ def install(d):
                 and t.get('mint') not in blacklisted
                 and positions.get(t.get('mint'), {}).get('amount', 0) == 0
                 and d._bot_gainers_eligible(t)
-                and pending_auto_buys.get((wallet, chain, t.get('mint')), 0) <= d.time.time()
+                and (wallet, chain, t.get('mint')) not in reserved
             ]
         except Exception as exc:
             print(f'[bot-{chain}] {short} scanner failed: {exc}', flush=True)
@@ -137,6 +142,15 @@ def install(d):
                     d.add_user_log(wallet, f'[bot-{chain}] SKIPPING {symbol} — sell tax too high')
                     continue
 
+            # Reserve before any bridge/swap network call. Two bot threads can
+            # scan the same wallet concurrently after a restart or duplicate start.
+            order_key = (wallet, chain, mint)
+            with pending_lock:
+                now = d.time.time()
+                if any(w == wallet and c == chain and expiry > now
+                       for (w, c, _), expiry in pending_auto_buys.items()):
+                    return False
+                pending_auto_buys[order_key] = now + 1800
             d.add_user_log(wallet, f'[bot-{chain}] Best: {symbol} — BUYING with USDC')
             try:
                 resp = d._evm_buy_flow(
@@ -147,19 +161,25 @@ def install(d):
                 )
                 body = _response_json(resp)
             except Exception as exc:
+                with pending_lock:
+                    pending_auto_buys.pop(order_key, None)
                 d.add_user_log(wallet, f'[bot-{chain}] BUY failed — {symbol}: {type(exc).__name__}')
                 continue
 
             if body.get('ok'):
-                pending_auto_buys[(wallet, chain, mint)] = d.time.time() + 60
+                with pending_lock:
+                    pending_auto_buys[order_key] = d.time.time() + 60
                 return True
             # A bridge/gasless preparation may intentionally return pending.
             # That is not a failed strategy signal; the existing completion
             # worker will execute the requested BUY once funding settles.
             if body.get('pending'):
-                pending_auto_buys[(wallet, chain, mint)] = d.time.time() + 1800
+                with pending_lock:
+                    pending_auto_buys[order_key] = d.time.time() + 1800
                 d.add_user_log(wallet, f'[bot-{chain}] {symbol} — funding/bridge pending; suppress duplicate BUY attempts')
                 return True
+            with pending_lock:
+                pending_auto_buys.pop(order_key, None)
             d.add_user_log(wallet, f'[bot-{chain}] BUY failed — {symbol}: {body.get("msg") or body.get("error") or "execution refused"}')
         return False
 

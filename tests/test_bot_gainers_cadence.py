@@ -60,7 +60,7 @@ def test_cadence_and_routes():
     evm = (Path(__file__).resolve().parents[1] / 'multichain_auto_bot.py').read_text()
     assert 'd._bot_gainers_eligible(t)' in evm
     assert 'd._bot_gainers_eligible(td)' in evm
-    assert 'pending_auto_buys[(wallet, chain, mint)]' in evm
+    assert 'pending_auto_buys[order_key] = now + 1800' in evm
     assert 'd._fast_pump_check(mint, chain=chain)' in evm
     print('PASS 2-second target, shared 30-second discovery, all-chain policy and duplicate protection')
 
