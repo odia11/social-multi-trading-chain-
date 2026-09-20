@@ -3689,14 +3689,32 @@ profit_cooldown:  dict = {}  # user_id -> expiry_timestamp — 1-hour pause afte
 _learned_bias_cache: dict = {}  # user_id -> (computed_at, {tier: bias}) — see _learned_liquidity_bias()
 _learned_lp_bias_cache: dict = {}  # user_id -> (computed_at, {tier: bias}) — see _learned_lp_bias()
 
+# DexScreener Gainers-style bot universe, enforced before every autonomous BUY.
+# The public pair API exposes transaction totals and info metadata, not the
+# Gainers webpage's complete profile flag or global ranking. has_profile is
+# a conservative available-info proxy; unknown data is NOT a pass.
+BOT_MIN_24H_TXNS = 300
+BOT_MIN_24H_SELLS = 30
+
+
+def _bot_gainers_eligible(token):
+    if not isinstance(token, dict) or not token.get('has_profile'):
+        return False
+    try:
+        return (int(token.get('txns24h') or 0) >= BOT_MIN_24H_TXNS
+                and int(token.get('txns24h_sells') or 0) >= BOT_MIN_24H_SELLS)
+    except (TypeError, ValueError):
+        return False
+
+
 # ── FAST-PUMP DETECTION (6%+ within 15s) ──────────────────────────────────
-# token_loop() only refreshes the full candidate list every 120s, which is far
+# token_loop() refreshes the full candidate list separately, which is too
 # too coarse to catch a sudden move inside a 15-second window. This is a
 # separate, lightweight loop that polls price ONLY (no full metadata) for the
 # current candidate list every FAST_POLL_INTERVAL seconds, batching requests
 # (DexScreener's multi-token endpoint accepts up to 30 comma-joined addresses
 # per call) to keep the extra request volume manageable.
-FAST_POLL_INTERVAL   = 4      # seconds between fast-poll cycles
+FAST_POLL_INTERVAL   = 2      # shared batched price polling; not per-user HTTP requests
 FAST_PUMP_WINDOW     = 15     # seconds — the window checked for the 6% move
 FAST_PUMP_THRESHOLD  = 0.06   # 6%
 _FAST_HIST_MAXAGE    = 20     # seconds — a bit more than the window, so there's
@@ -3704,7 +3722,7 @@ _FAST_HIST_MAXAGE    = 20     # seconds — a bit more than the window, so there
 _fast_hist_lock = threading.Lock()
 _fast_price_history: dict = {}  # mint -> list of (ts, price), oldest first
 
-def _fast_pump_check(mint: str, now: float = None) -> bool:
+def _fast_pump_check(mint: str, now: float = None, chain: str = 'solana') -> bool:
     """True if `mint` has risen >= FAST_PUMP_THRESHOLD at any point in the last
     FAST_PUMP_WINDOW seconds, based on the fast-poll history. Uses the history's
     OWN most recent sample as the current price (not whatever price the caller
@@ -3713,13 +3731,15 @@ def _fast_pump_check(mint: str, now: float = None) -> bool:
     catches a dip-then-pump inside the same window."""
     now = now or time.time()
     with _fast_hist_lock:
-        hist = _fast_price_history.get(mint)
+        hist = _fast_price_history.get(mint if chain == 'solana' else (chain, mint))
         if not hist or len(hist) < 2:
             return False
         # require the freshest sample to actually be fresh -- a mint that dropped
         # out of the candidate list stops getting new samples, and we don't want
         # to judge it off stale history once that happens.
         latest_ts, latest_price = hist[-1]
+        if latest_price < hist[-2][1] * 0.995:
+            return False  # avoid buying after the observed upswing reverses
         if now - latest_ts > FAST_POLL_INTERVAL * 2:
             return False
         window_prices = [p for ts, p in hist if now - ts <= FAST_PUMP_WINDOW and p > 0]
@@ -3731,51 +3751,72 @@ def _fast_pump_check(mint: str, now: float = None) -> bool:
     return (latest_price - floor_price) / floor_price >= FAST_PUMP_THRESHOLD
 
 def _fast_poll_loop():
-    """Global background loop: keeps _fast_price_history warm for whatever mints
-    are currently in state['tokens'] (the shared candidate list token_loop()
-    maintains), so _fast_pump_check() above always has fresh-enough data."""
+    """Shared batched price observations for shortlist tokens on every chain.
+
+    A two-second *target* is not guaranteed delivery: provider latency and
+    rate limits can take longer. Never stamp a stale 429 cache as live data.
+    EVM observations use (chain, address) keys so same-address contracts on
+    different networks can never contaminate each other's pump signals.
+    """
     while True:
         try:
-            mints = [t['mint'] for t in state.get('tokens', []) if t.get('mint')]
-            now = time.time()
-            for i in range(0, len(mints), 30):  # DexScreener multi-token endpoint: up to 30 addresses/call
-                chunk = mints[i:i + 30]
+            if time.time() < _dex_429_until:
+                time.sleep(FAST_POLL_INTERVAL)
+                continue
+            shortlist = [('solana', t['mint']) for t in state.get('tokens', [])[:50]
+                         if t.get('mint') and _bot_gainers_eligible(t)]
+            with _scanner_lock:
+                scanner = list(_scanner_cache.get('data') or [])
+            for chain in EVM_CHAINS:
+                eligible = [t for t in scanner if t.get('chain') == chain
+                            and t.get('mint') and _bot_gainers_eligible(t)]
+                eligible.sort(key=lambda t: t.get('price_change_24h', 0), reverse=True)
+                shortlist.extend((chain, t['mint']) for t in eligible[:5])
+            # Do not duplicate a mint address in the same batch; preserve
+            # chain identity for the subsequent response's best-pair lookup.
+            unique_addresses = list(dict.fromkeys(mint for _, mint in shortlist))
+            wanted = set(shortlist)
+            live_keys = {mint if chain == 'solana' else (chain, mint)
+                         for chain, mint in shortlist}
+            for i in range(0, len(unique_addresses), 30):
+                chunk = unique_addresses[i:i + 30]
                 try:
                     r = _dex_get('https://api.dexscreener.com/latest/dex/tokens/' + ','.join(chunk),
                                  timeout=8, ttl_override=FAST_POLL_INTERVAL)
-                    if not r:
+                    if not r or time.time() < _dex_429_until:
                         continue
-                    pairs = r.json().get('pairs', []) or []
-                    # Same convention as get_token_data(): a token can have multiple
-                    # pairs across DEXs/quote assets — only trust the first (primary/
-                    # highest-relevance) pair per mint, so this history stays a clean
-                    # single series instead of mixing prices from different pairs.
-                    _first_pair_price = {}
-                    for p in pairs:
-                        m = (p.get('baseToken') or {}).get('address', '')
-                        if m and m not in _first_pair_price:
-                            price = float(p.get('priceUsd', 0) or 0)
-                            if price > 0:
-                                _first_pair_price[m] = price
+                    deepest = {}
+                    for pair in (r.json().get('pairs') or []):
+                        chain = pair.get('chainId')
+                        mint = (pair.get('baseToken') or {}).get('address', '')
+                        if (chain, mint) not in wanted:
+                            continue
+                        try:
+                            price = float(pair.get('priceUsd') or 0)
+                            liq = float((pair.get('liquidity') or {}).get('usd') or 0)
+                        except (TypeError, ValueError):
+                            continue
+                        if price <= 0:
+                            continue
+                        key = mint if chain == 'solana' else (chain, mint)
+                        if key not in deepest or liq > deepest[key][0]:
+                            deepest[key] = (liq, price)
+                    observed = time.time()
                     with _fast_hist_lock:
-                        for m, price in _first_pair_price.items():
-                            hist = _fast_price_history.setdefault(m, [])
-                            hist.append((now, price))
-                            # prune samples older than _FAST_HIST_MAXAGE in place
-                            cutoff = now - _FAST_HIST_MAXAGE
+                        for key, (_liq, price) in deepest.items():
+                            hist = _fast_price_history.setdefault(key, [])
+                            hist.append((observed, price))
+                            cutoff = observed - _FAST_HIST_MAXAGE
                             while hist and hist[0][0] < cutoff:
                                 hist.pop(0)
-                except Exception as e:
-                    print(f'[fast-poll] chunk error: {e}', flush=True)
-                time.sleep(0.2)  # stagger chunks within the same cycle
-            # drop history for mints no longer in the candidate list at all,
-            # so this doesn't grow unbounded as the 120s scanner rotates tokens
+                except Exception as exc:
+                    print(f'[fast-poll] chunk error: {type(exc).__name__}', flush=True)
+                time.sleep(0.2)
             with _fast_hist_lock:
-                _live_set = set(mints)
-                for _stale_m in [m for m in _fast_price_history if m not in _live_set]:
-                    _fast_price_history.pop(_stale_m, None)
-        except Exception as e:
-            print(f'[fast-poll] loop error: {e}', flush=True)
+                for key in [k for k in _fast_price_history if k not in live_keys]:
+                    _fast_price_history.pop(key, None)
+        except Exception as exc:
+            print(f'[fast-poll] loop error: {type(exc).__name__}', flush=True)
         time.sleep(FAST_POLL_INTERVAL)
 
 
@@ -4434,7 +4475,7 @@ def _get_user_sol(wallet: str) -> float:
     except: pass
     return 0.0
 
-def get_token_data(mint, fast: bool = False):
+def get_token_data(mint, fast: bool = False, chain: str = None):
     """fast=True bypasses the normal 30s DexScreener cache in favor of the
     HOT_MINT_TTL_FAST/MEDIUM tier for `mint` if it's currently registered in
     _hot_mints (see _hot_mint_fetch_ttl) — every open position stays registered
@@ -4457,7 +4498,10 @@ def get_token_data(mint, fast: bool = False):
         # numbers too. Pick the deepest pool on a chain this app actually
         # trades, exactly as /api/token/info and _get_deepest_pair_info
         # already do, so every surface agrees on one price.
-        _supported = [x for x in pairs if x.get('chainId') in _MARKET_LIVE_CHAINS] or pairs
+        _supported = ([x for x in pairs if x.get('chainId') == chain] if chain else
+                      [x for x in pairs if x.get('chainId') in _MARKET_LIVE_CHAINS])
+        if not _supported:
+            return None
         p    = max(_supported, key=lambda x: float((x.get('liquidity') or {}).get('usd') or 0))
         base = p.get('baseToken', {})
         txns = p.get('txns', {})
@@ -4488,6 +4532,7 @@ def get_token_data(mint, fast: bool = False):
             'txns24h_buys':  h24_buys,
             'txns24h_sells': h24_sells,
             'txns24h':       h24_buys + h24_sells,
+            'has_profile':  bool((p.get('info') or {}).get('imageUrl') or (p.get('info') or {}).get('websites') or (p.get('info') or {}).get('socials')),
             'makers24h':     int(p.get('makers', 0) or 0),
             'pairAddress':   p.get('pairAddress', '') or '',
             'pairCreatedAt': int(p.get('pairCreatedAt', 0) or 0),
@@ -5432,7 +5477,7 @@ def token_loop():
             for i, mint in enumerate(mints):
                 if i > 0:
                     time.sleep(0.3)  # stagger per-token calls
-                data = get_token_data(mint)
+                data = get_token_data(mint, chain='solana')
                 if not data or data['price'] <= 0:
                     continue
                 # Minimum quality filters — score handles the rest
@@ -5463,6 +5508,7 @@ def token_loop():
                     'txns24h':       data['txns24h'],
                     'txns24h_buys':  data['txns24h_buys'],
                     'txns24h_sells': data['txns24h_sells'],
+                    'has_profile':   data['has_profile'],
                     'makers24h':     data['makers24h'],
                     'pairAddress':   data.get('pairAddress', '') or '',
                     'dexId':         data.get('dexId', '') or '',
@@ -5510,7 +5556,7 @@ def token_loop():
             except Exception:
                 pass
         except: pass
-        time.sleep(120)
+        time.sleep(30)  # shared candidate refresh; never per-user 2s discovery
 
 # ── TRADE RECORDING ──
 def check_daily_reset():
@@ -6689,7 +6735,8 @@ def _bot_scan_evm_entry(user_id: int, wallet: str, positions: dict, chain: str, 
     candidates = [t for t in _get_scanner_cached()
                   if t.get('chain') == chain
                   and t['mint'] not in blacklisted
-                  and positions.get(t['mint'], {}).get('amount', 0) == 0]
+                  and positions.get(t['mint'], {}).get('amount', 0) == 0
+                  and _bot_gainers_eligible(t)]
     if not candidates:
         return False
 
@@ -6715,13 +6762,15 @@ def _bot_scan_evm_entry(user_id: int, wallet: str, positions: dict, chain: str, 
 
     for t in qualifying[:5]:  # bounded fresh-data lookups, same reasoning as Solana's BUY_POOL_SIZE cap
         mint, symbol = t['mint'], t.get('symbol') or t['mint'][:8]
-        _td = get_token_data(mint, fast=True)
-        if not _td or not _td.get('price'):
+        _td = get_token_data(mint, fast=True, chain=chain)
+        if not _td or not _td.get('price') or not _bot_gainers_eligible(_td):
             continue
         m5, h1 = _td.get('change5m', 0), _td.get('change1h', 0)
         v5m, v1h = _td.get('volume5m', 0), _td.get('volume1h', 0)
         m5_ok = (m5 >= m5_min or h1 >= m5_min) if m5_max is None else (m5_min <= m5 <= m5_max or m5_min <= h1 <= m5_max)
-        if not m5_ok:
+        if not (m5_ok or _fast_pump_check(mint, chain=chain)):
+            continue
+        if h1 >= 50:  # do not chase an exhausted one-hour move
             continue
         if not (v5m > 0 and v1h > 0 and v5m > v1h / 12):
             continue
@@ -10313,7 +10362,7 @@ def user_trader_loop(stop_event, config, wallet: str):
         return
 
     _m5_desc = ('≥' + str(m5_min) + '%' if m5_max is None else str(m5_min) + '-' + str(m5_max) + '%')
-    _scan_interval = config.get('interval', 15)
+    _scan_interval = 2.0  # fixed server-side decision cadence; ignore stale UI interval=300
     add_user_log(wallet, '[' + short + '] Trader started — TP:+' + str(round(take_profit*100)) +
                  '% SL:-' + str(round(stop_loss*100)) +
                  '% | entry: ' + _m5_desc + ' 5m OR 1h + not reversing | max 5 pos | scan ' + str(_scan_interval) +
@@ -10558,7 +10607,7 @@ def user_trader_loop(stop_event, config, wallet: str):
                         _mark_hot_mint(mint, priority=True)
                         if not _was_near_trigger:
                             add_user_log(wallet, '[' + short + '] ⚡ ' + label + ' ' + str(round(chg*100,1)) +
-                                         '% — within 5% of trigger, check interval 15s→2s')
+                                         '% — near exit threshold, maintaining 2s decision cadence')
                             # Dedicated, grep-able stdout line (separate from the per-user UI
                             # log above) so production behavior can be verified directly in the
                             # server logs after deploy — full mint address + explicit UTC
@@ -10566,13 +10615,13 @@ def user_trader_loop(stop_event, config, wallet: str):
                             print(f"[hot-mint] {datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')} "
                                   f"ENTER mint={mint} user={short} chg={round(chg*100,1)}% "
                                   f"sl=-{round(_eff_sl*100,1)}% crash=-{round(crash_exit*100,1)}% "
-                                  f"interval=15s->2s", flush=True)
+                                  f"interval=2s", flush=True)
                     elif _was_near_trigger:
                         add_user_log(wallet, '[' + short + '] ' + label + ' ' + str(round(chg*100,1)) +
                                      '% — back outside trigger range, check interval back to normal')
                         print(f"[hot-mint] {datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')} "
                               f"EXIT  mint={mint} user={short} chg={round(chg*100,1)}% "
-                              f"interval=2s->{config.get('interval', 15)}s", flush=True)
+                              f"interval=2s->{_scan_interval}s", flush=True)
 
                     # ── Rugpull detector — first check, before crash-exit and stop-loss ──
                     _rug_reason = None
@@ -10841,6 +10890,9 @@ def user_trader_loop(stop_event, config, wallet: str):
                     _now_cd    = time.time()
                     for _t in not_held:
                         _tsym = _t.get('symbol', '') or _t['mint'][:8]
+                        if not _bot_gainers_eligible(_t):
+                            _skip_log.append(f'[skip] {_tsym}: DexScreener Gainers activity/profile requirement not met')
+                            continue
                         if _t['mint'] in _blacklisted:
                             _skip_log.append(f'[skip] {_tsym}: blacklisted by user')
                             continue
@@ -10905,7 +10957,7 @@ def user_trader_loop(stop_event, config, wallet: str):
                             _skip_log.append(f'[skip] {_tsym}: cooldown ({int(_cd_exp - _now_cd)}s remaining)')
                             continue
                         qualifying.append(_t)
-                    qualifying.sort(key=lambda t: t.get('change5m', 0), reverse=True)
+                    qualifying.sort(key=lambda t: (t.get('change5m', 0), t.get('change24h', 0)), reverse=True)
                     _bias_note = ''
                     if _learned_bias:
                         _bias_note = ' — learned: ' + ', '.join(
@@ -11157,7 +11209,7 @@ def user_trader_loop(stop_event, config, wallet: str):
             # "near trigger" from "just holding something." Persisted on the position dict
             # rather than a local variable, so this is still correct even if the try block
             # above raised before reaching the position loop this cycle.
-            _wait_s = 2 if any(p.get('_near_trigger') for p in list(positions.values())) else config.get('interval', 15)
+            _wait_s = _scan_interval  # both entry and exit decisions target 2s
             stop_event.wait(_wait_s)
     finally:
         print(f'[bot] {short} loop exited — running set to False', flush=True)
@@ -27537,6 +27589,9 @@ def _get_scanner_candidates() -> list:
             'price_change_24h': _f(pc.get('h24')),
             'pair_created_at':  int(p.get('pairCreatedAt')) if p.get('pairCreatedAt') else None,
             'verified_socials': bool(socials or websites),
+            'has_profile':      bool(info.get('imageUrl') or socials or websites),
+            'txns24h':          int(_f(h24t.get('buys'))) + int(_f(h24t.get('sells'))),
+            'txns24h_sells':    int(_f(h24t.get('sells'))),
             'twitter_url':      twitter_url,
             'telegram_url':     telegram_url,
             'website_url':      website_url,

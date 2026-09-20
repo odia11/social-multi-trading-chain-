@@ -3039,7 +3039,7 @@ async function toggleTrader(){
   // Watchdog: re-enable after 5 s regardless, so a hung request never leaves the button stuck
   const watchdog=setTimeout(()=>{ _refreshTradeBtnState(); },5000);
   try{
-    const res=await fetch(starting?'/api/trader/start':'/api/trader/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({interval:300,trade_pct:0.20,max_usdc:1.0})});
+    const res=await fetch(starting?'/api/trader/start':'/api/trader/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({interval:2,trade_pct:0.20,max_usdc:1.0})});
     const rj=await res.json().catch(()=>null);
     if(rj&&rj.ok){
       traderOn=starting;   // optimistic update — don't wait for fetchState()

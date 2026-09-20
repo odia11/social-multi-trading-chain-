@@ -42,9 +42,20 @@ def install(d):
         except Exception:
             return {}
 
+    pending_auto_buys = {}  # wallet + chain + mint -> monotonic expiry
+
     def _gasless_entry(user_id, wallet, positions, chain, enc_blob_evm,
                        evm_address, min_trade_usdc, blacklisted,
                        m5_min, m5_max, pref_scam_filter, short):
+        # One unresolved bridge per wallet/chain: otherwise a 2s loop could
+        # queue multiple expensive buys before the first balance arrives.
+        now = d.time.time()
+        for key, expiry in list(pending_auto_buys.items()):
+            if expiry <= now:
+                pending_auto_buys.pop(key, None)
+        if any(w == wallet and c == chain and expiry > now + 60
+               for (w, c, _mint), expiry in pending_auto_buys.items()):
+            return False
         # Candidate universe is already multi-chain. Keep one pass per chain so
         # max_positions remains a per-chain ceiling in user_trader_loop().
         try:
@@ -54,6 +65,8 @@ def install(d):
                 and t.get('mint')
                 and t.get('mint') not in blacklisted
                 and positions.get(t.get('mint'), {}).get('amount', 0) == 0
+                and d._bot_gainers_eligible(t)
+                and pending_auto_buys.get((wallet, chain, t.get('mint')), 0) <= d.time.time()
             ]
         except Exception as exc:
             print(f'[bot-{chain}] {short} scanner failed: {exc}', flush=True)
@@ -85,15 +98,15 @@ def install(d):
         if not qualifying:
             return False
 
-        qualifying.sort(key=lambda t: float(t.get('volume_24h') or 0), reverse=True)
+        qualifying.sort(key=lambda t: float(t.get('price_change_24h') or 0), reverse=True)
         for token in qualifying[:5]:
             mint = token['mint']
             symbol = token.get('symbol') or mint[:8]
             try:
-                td = d.get_token_data(mint, fast=True)
+                td = d.get_token_data(mint, fast=True, chain=chain)
             except Exception:
                 td = None
-            if not td or not td.get('price'):
+            if not td or not td.get('price') or not d._bot_gainers_eligible(td):
                 continue
 
             m5 = float(td.get('change5m') or 0)
@@ -102,7 +115,9 @@ def install(d):
             v1h = float(td.get('volume1h') or 0)
             momentum_ok = ((m5 >= m5_min or h1 >= m5_min) if m5_max is None
                            else (m5_min <= m5 <= m5_max or m5_min <= h1 <= m5_max))
-            if not momentum_ok or not (v5m > 0 and v1h > 0 and v5m > v1h / 12.0):
+            fast_pump = d._fast_pump_check(mint, chain=chain)
+            if (not (momentum_ok or fast_pump) or h1 >= 50
+                    or not (v5m > 0 and v1h > 0 and v5m > v1h / 12.0)):
                 continue
 
             if pref_scam_filter:
@@ -110,7 +125,12 @@ def install(d):
                     hp = d._check_evm_honeypot(mint, chain)
                 except Exception:
                     hp = {'ok': False, 'is_honeypot': True, 'sell_tax': 100}
-                if not hp.get('ok') or hp.get('is_honeypot'):
+                if hp.get('no_provider'):
+                    if float(token.get('liquidity_usd') or 0) < (
+                            float(ai_filters.get('min_liquidity_usd') or 0)
+                            * d.NO_HONEYPOT_PROVIDER_LIQ_MULT):
+                        continue
+                elif not hp.get('ok') or hp.get('is_honeypot'):
                     d.add_user_log(wallet, f'[bot-{chain}] SKIPPING {symbol} — honeypot check failed')
                     continue
                 if float(hp.get('sell_tax') or 0) >= 15:
@@ -131,11 +151,14 @@ def install(d):
                 continue
 
             if body.get('ok'):
+                pending_auto_buys[(wallet, chain, mint)] = d.time.time() + 60
                 return True
             # A bridge/gasless preparation may intentionally return pending.
             # That is not a failed strategy signal; the existing completion
             # worker will execute the requested BUY once funding settles.
             if body.get('pending'):
+                pending_auto_buys[(wallet, chain, mint)] = d.time.time() + 1800
+                d.add_user_log(wallet, f'[bot-{chain}] {symbol} — funding/bridge pending; suppress duplicate BUY attempts')
                 return True
             d.add_user_log(wallet, f'[bot-{chain}] BUY failed — {symbol}: {body.get("msg") or body.get("error") or "execution refused"}')
         return False
