@@ -72,113 +72,6 @@ async function connectReadonlyAddress(){
   finally{ if(btn){ btn.disabled=false; btn.textContent='CONNECT (read-only) →'; } }
 }
 
-/* ── WebAuthn base64url <-> ArrayBuffer helpers ──
-   Server (py_webauthn) speaks base64url JSON for challenge/id/response fields
-   (see webauthn_register_options()/webauthn_login_options() in dashboard.py);
-   navigator.credentials.create()/.get() need real ArrayBuffers instead. These
-   two directions are the only thing standing between the two, so getting them
-   right is what makes verification actually work end-to-end. ── */
-function _waB64uEncode(buf){
-  var bytes=new Uint8Array(buf), bin='';
-  for(var i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
-  return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-}
-function _waB64uDecode(str){
-  str=str.replace(/-/g,'+').replace(/_/g,'/');
-  while(str.length%4) str+='=';
-  var bin=atob(str), bytes=new Uint8Array(bin.length);
-  for(var i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
-  return bytes.buffer;
-}
-function _waOptionsFromJSON(opt){
-  var out=Object.assign({},opt);
-  out.challenge=_waB64uDecode(opt.challenge);
-  if(opt.user) out.user=Object.assign({},opt.user,{id:_waB64uDecode(opt.user.id)});
-  ['excludeCredentials','allowCredentials'].forEach(function(k){
-    if(Array.isArray(opt[k])) out[k]=opt[k].map(function(c){ return Object.assign({},c,{id:_waB64uDecode(c.id)}); });
-  });
-  return out;
-}
-function _waCredentialToJSON(cred){
-  var r=cred.response;
-  var out={id:cred.id, rawId:_waB64uEncode(cred.rawId), type:cred.type, response:{clientDataJSON:_waB64uEncode(r.clientDataJSON)}};
-  if(r.attestationObject) out.response.attestationObject=_waB64uEncode(r.attestationObject);
-  if(r.authenticatorData)  out.response.authenticatorData=_waB64uEncode(r.authenticatorData);
-  if(r.signature)          out.response.signature=_waB64uEncode(r.signature);
-  if(r.userHandle)         out.response.userHandle=_waB64uEncode(r.userHandle);
-  return out;
-}
-
-/* Signing in has the same problem the setup did: asking the server for a
-   challenge after the tap spends the tap's user activation, and iOS then
-   refuses to show the sheet. Fetched when the button appears instead. */
-var _pkLoginOpts = null, _pkLoginAt = 0;
-function _prefetchPasskeyLoginOptions(){
-  var storedId = null;
-  try{ storedId = localStorage.getItem('orca_credential_id'); }catch(e){}
-  var url = '/api/auth/webauthn/login/options'
-          + (storedId ? ('?credential_id=' + encodeURIComponent(storedId)) : '');
-  return fetch(url, {credentials:'include'})
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if(d && d.challenge){ _pkLoginOpts = d; _pkLoginAt = Date.now(); }
-      return (d && d.challenge) ? d : null;
-    })
-    .catch(function(){ return null; });
-}
-
-async function _webAuthnLogin(){
-  var errEl=document.getElementById('ob-bio-err');
-  var btn=document.getElementById('ob-bio-btn');
-  var label=document.getElementById('ob-bio-label');
-  if(errEl) errEl.textContent='';
-  if(!window.PublicKeyCredential){
-    if(errEl) errEl.textContent='WebAuthn not supported on this device.';
-    _showWalletOptions(); return;
-  }
-  if(btn) btn.disabled=true;
-  if(label) label.textContent='Authenticating…';
-  var failed=false, _retryable=false, startedAt=0;
-  try{
-    var fresh = _pkLoginOpts && (Date.now() - _pkLoginAt) < PK_OPTS_FRESH_MS;
-    var opt = fresh ? _pkLoginOpts : await _prefetchPasskeyLoginOptions();
-    _pkLoginOpts = null;                 // one challenge, one attempt
-    if(!opt||!opt.challenge){ if(errEl) errEl.textContent='Face ID unavailable — try connecting wallet instead.'; failed=true; return; }
-    var startedAt = Date.now();
-    var cred=await navigator.credentials.get({publicKey:_waOptionsFromJSON(opt)});
-    if(!cred){ if(errEl) errEl.textContent='Face ID failed.'; failed=true; return; }
-    var r=await fetch('/api/auth/webauthn/login',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(_waCredentialToJSON(cred))
-    }).then(res=>res.json()).catch(()=>null);
-    if(r&&r.success){
-      localStorage.setItem('orca_credential_id',cred.id); // .id is already base64url, same encoding the server just verified
-      location.reload();
-    } else {
-      if(errEl) errEl.textContent=(r&&r.msg)||'Face ID failed — try connecting wallet instead.';
-      failed=true;
-    }
-  }catch(e){
-    // Same two meanings as on the setup side: dismissed, or never shown.
-    var quick = (Date.now() - (typeof startedAt === 'number' ? startedAt : 0)) < 700;
-    var em = e.name==='NotAllowedError'
-             ? (quick ? 'The Face ID prompt did not open. Tap Login with Face ID once more.'
-                      : 'Face ID cancelled — tap again, or connect your wallet instead.')
-           : e.name==='SecurityError' ? 'This address cannot use your passkey. Open OrcAgent at orcagent.fun.'
-           : 'Auth failed: '+(e.message||e.name);
-    if(errEl) errEl.textContent=em;
-    if(e.name==='NotAllowedError'){ _prefetchPasskeyLoginOptions(); _retryable=true; }
-    failed=true;
-  }finally{
-    if(btn) btn.disabled=false;
-    if(label) label.textContent='Login with Face ID';
-    // A prompt that was dismissed or never opened is not a reason to take
-    // the Face ID button away -- the whole fix is that tapping again works.
-    // Only a real dead end falls back to the wallet buttons.
-    if(failed && !_retryable) _showWalletOptions();
-  }
-}
-
 async function _loginWithPassword(){
   var userEl=document.getElementById('ob-pwd-user');
   var passEl=document.getElementById('ob-pwd-pass');
@@ -379,244 +272,16 @@ async function _resumeFromDeviceToken(){
   return '';
 }
 
-/* ── the way back into an installed app ──
-   A home-screen app cannot complete the Phantom deeplink: it opens Safari,
-   and the session lands there instead. Once such an app loses its session
-   there is no route back — the connect screen can only tell you to go and
-   open the site in a browser. A passkey is the one credential that works
-   inside it, and the code for it has been here all along behind a prompt
-   that was never shown: #s-faceid-prompt sits inside Settings at
-   display:none, and nothing anywhere sets it visible.
-
-   Shown from the SERVER's answer, not localStorage. An installed app has its
-   own storage, so a passkey registered in Safari leaves no trace there — the
-   client cannot tell "no passkey" from "not this context". */
-/* ── having the challenge in hand BEFORE the tap ──
-   navigator.credentials.create() has to run while the tap that asked for it
-   is still the browser's current user activation. Fetching the challenge
-   first spends that activation on a network round trip, and iOS then
-   refuses the call outright -- with NotAllowedError, the same error it
-   raises when somebody dismisses the sheet. So the screen said "Setup
-   cancelled." for a sheet that had never appeared, and no amount of tapping
-   ever produced a different answer.
-
-   The challenge is fetched ahead of the tap instead, and kept fresh while
-   the prompt is on screen. The server holds one for 120 seconds; this
-   replaces it well inside that, and never while a prompt is actually open,
-   since fetching another would invalidate the one being answered. */
-var _pkOpts = null, _pkOptsAt = 0, _pkOptsTimer = null, _pkBusy = false;
-var PK_OPTS_FRESH_MS = 80000;      // the server's own window is 120s
-
-function _pkOptsFresh(){
-  return !!_pkOpts && (Date.now() - _pkOptsAt) < PK_OPTS_FRESH_MS;
-}
-function _prefetchPasskeyOptions(){
-  if(_pkBusy) return Promise.resolve(_pkOpts);
-  return fetch('/api/auth/webauthn/register/options', {credentials:'include'})
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if(d && d.challenge){ _pkOpts = d; _pkOptsAt = Date.now(); }
-      return (d && d.challenge) ? d : null;
-    })
-    .catch(function(){ return null; });
-}
-function _keepPasskeyOptionsFresh(on){
-  if(_pkOptsTimer){ clearInterval(_pkOptsTimer); _pkOptsTimer = null; }
-  if(!on) return;
-  _prefetchPasskeyOptions();
-  _pkOptsTimer = setInterval(_prefetchPasskeyOptions, PK_OPTS_FRESH_MS);
-}
-
-/* Whether this device can make a Face ID / Touch ID passkey at all.
-   window.PublicKeyCredential alone does not answer that: it is present in
-   browsers with no platform authenticator, in private windows, and inside
-   in-app browsers where passkeys do not work -- so the banner offered a
-   button that could only ever fail. */
-function _faceIdPossible(){
-  if(!window.PublicKeyCredential
-     || !PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable){
-    return Promise.resolve(false);
-  }
-  try{
-    return PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
-      .then(function(ok){ return !!ok; })
-      .catch(function(){ return false; });
-  }catch(e){ return Promise.resolve(false); }
-}
-
-function _passkeyBannerDismissed(){
-  try{ return localStorage.getItem('orca_pk_prompt_off') === '1'; }catch(e){ return false; }
-}
-function _dismissPasskeyBanner(){
-  var b = document.getElementById('pk-banner');
-  if(b) b.style.display = 'none';
-  _keepPasskeyOptionsFresh(false);     // nothing on screen to keep ready for
-  try{ localStorage.setItem('orca_pk_prompt_off', '1'); }catch(e){}
-}
-function _maybePromptPasskey(session){
-  var b = document.getElementById('pk-banner');
-  if(!b || !session || !session.authenticated) return;
-  if(session.has_passkey) return;            // already has the way back
-  // Asked of the device rather than assumed. A browser with no platform
-  // authenticator, a private window, or an in-app browser all have
-  // window.PublicKeyCredential and none of them can make a Face ID passkey
-  // -- offering the button there is offering something that can only fail.
-  _faceIdPossible().then(function(can){
-    if(can) _showPasskeyBanner(b, session);
-  });
-}
-function _showPasskeyBanner(b, session){
-  // Inside an installed app the reminder is not a convenience, so it is not
-  // dismissible-forever there: losing the session locks the person out.
-  // Read through a guard: this function is defined above the const that holds
-  // it, so a caller that ran earlier than expected would hit the temporal
-  // dead zone and throw instead of simply not prompting.
-  var standalone = false;
-  try{ standalone = isStandalonePWA; }catch(e){ standalone = false; }
-  if(_passkeyBannerDismissed() && !standalone) return;
-  // The challenge has to be in hand before the tap -- see the note above
-  // _pkOpts. Started here, when the banner appears, and kept fresh for as
-  // long as it is on screen.
-  _keepPasskeyOptionsFresh(true);
-  var t = document.getElementById('pk-banner-title');
-  var sub = document.getElementById('pk-banner-sub');
-  if(standalone){
-    if(t) t.textContent = 'Set up Face ID to stay signed in';
-    if(sub) sub.textContent = 'Connecting a wallet does not work from an app on '
-      + 'your home screen — it opens the browser instead. Face ID is how you get '
-      + 'back in here if you are ever signed out.';
-  } else {
-    if(sub) sub.textContent = 'Sign in with Face ID instead of reconnecting your '
-      + 'wallet each time — and it keeps working if you add OrcAgent to your home screen.';
-  }
-  b.style.display = '';
-}
-function _setupPasskeyFromBanner(){
-  var btn = document.getElementById('pk-banner-btn');
-  var msg = document.getElementById('pk-banner-msg');
-  _setupFaceID({btn: btn, msg: msg, onDone: function(){
-    var b = document.getElementById('pk-banner');
-    if(b) setTimeout(function(){ b.style.display = 'none'; }, 2000);
-  }});
-}
-
-async function _setupFaceID(opts){
-  // The banner and the Settings prompt both drive this; each passes its own
-  // button and message element rather than the function guessing which
-  // surface it is reporting into.
-  opts = opts || {};
-  var wallet=phantomKey;
-  var btn=opts.btn||document.getElementById('s-faceid-prompt-btn');
-  var msg=opts.msg||document.getElementById('s-faceid-prompt-msg');
-  function _show(text,ok){
-    if(!msg) return;
-    msg.style.color=ok?'var(--green)':'var(--red)';
-    msg.textContent=text;
-  }
-  if(!wallet){ _show('Connect a wallet first.',false); return; }
-  if(!window.PublicKeyCredential){
-    _show('This browser cannot use Face ID. Open OrcAgent in Safari and try '
-          + 'again.',false); return; }
-  if(!(await _faceIdPossible())){
-    // Said once, plainly, instead of a button that fails every time.
-    _show('This device has no Face ID or Touch ID available to websites. It '
-          + 'needs a screen lock turned on, and a normal browser window — '
-          + 'private windows and in-app browsers cannot do it.',false);
-    return;
-  }
-  if(btn){ btn.disabled=true; btn.textContent='Setting up…'; }
-  if(msg){ msg.style.color='var(--muted)'; msg.textContent=''; }
-  _pkBusy = true;
-  var started = Date.now();
-  try{
-    // Prefetched where possible: asking the server for a challenge HERE
-    // spends the tap's user activation on a network round trip, and iOS then
-    // refuses the call without ever showing the sheet.
-    var opt = _pkOptsFresh() ? _pkOpts : await _prefetchPasskeyOptions();
-    _pkOpts = null;                     // one challenge, one attempt
-    if(!opt||!opt.challenge){ _show((opt&&opt.msg)||'Could not start Face ID setup.',false); return; }
-    started = Date.now();
-    var cred=await navigator.credentials.create({publicKey:_waOptionsFromJSON(opt)});
-    if(!cred){ _show('Registration failed — please try again.',false); return; }
-    var r=await fetch('/api/auth/webauthn/register',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(_waCredentialToJSON(cred))
-    }).then(res=>res.json()).catch(()=>null);
-    if(r&&r.success){
-      localStorage.setItem('orca_credential_id',cred.id);
-      _keepPasskeyOptionsFresh(false);
-      _show('✓ Face ID saved — you can sign in with it from now on.',true);
-      _updateFaceIdStatus();
-      if(opts.onDone) opts.onDone();
-      setTimeout(function(){ var p=document.getElementById('s-faceid-prompt'); if(p) p.style.display='none'; },2500);
-    } else {
-      _show('Registration failed: '+((r&&r.msg)||'unknown error'),false);
-    }
-  }catch(e){
-    // NotAllowedError means two completely different things: somebody
-    // dismissed the sheet, or the sheet never appeared at all. The time
-    // tells them apart -- nobody reads and dismisses a Face ID prompt in
-    // half a second -- and being told you cancelled something you never saw
-    // is what made this look broken rather than merely refused.
-    if(e.name === 'NotAllowedError'){
-      if(Date.now() - started < 700){
-        _show('The Face ID prompt did not open. Tap Set up Face ID once more '
-              + '— it usually works on the second try.', false);
-        _prefetchPasskeyOptions();      // ready for that second tap
-      } else {
-        _show('Cancelled. Tap Set up Face ID whenever you are ready.', false);
-        _prefetchPasskeyOptions();
-      }
-    } else if(e.name === 'InvalidStateError'){
-      // Not a failure: this device already has one. Saying so and recording
-      // it locally beats telling somebody to try something they have done.
-      try{ localStorage.setItem('orca_credential_id','1'); }catch(_e){}
-      _show('Face ID is already set up on this device — you can sign in with '
-            + 'it.', true);
-      _updateFaceIdStatus();
-      if(opts.onDone) opts.onDone();
-    } else if(e.name === 'SecurityError'){
-      _show('Face ID cannot be set up from this address. Open OrcAgent at '
-            + 'orcagent.fun and try again.', false);
-    } else if(e.name === 'ConstraintError' || e.name === 'NotSupportedError'){
-      // The passkey has to be one the device can find on its own later --
-      // an installed app has its own storage and cannot be told which one
-      // to use. A device that will not store one says so here rather than
-      // leaving somebody with a login that works in Safari and nowhere else.
-      _show('This device will not save a passkey for OrcAgent. Check that a '
-            + 'screen lock and iCloud Keychain are turned on, then try again.',
-            false);
-    } else {
-      _show('Setup failed: '+(e.message||e.name), false);
-    }
-  }finally{
-    _pkBusy = false;
-    if(btn){ btn.disabled=false; btn.textContent=opts.btnLabel||'Setup Face ID'; }
-  }
-}
-
-async function _removeFaceId(){
-  if(!(await openConfirmModal({text:'Remove saved Face ID login from this device?',danger:true}))) return;
-  localStorage.removeItem('orca_credential_id');
-  var msg=document.getElementById('s-faceid-msg');
-  if(msg){ msg.style.color='var(--muted)'; msg.textContent='Face ID removed.'; }
-  _updateFaceIdStatus();
-}
-
-function _updateFaceIdStatus(){
-  var has=!!localStorage.getItem('orca_credential_id');
-  var status=document.getElementById('s-faceid-status');
-  var btn=document.getElementById('s-faceid-btn');
-  var removeBtn=document.getElementById('s-faceid-remove-btn');
-  var bioBtn=document.getElementById('ob-bio-btn');
-  if(status) status.textContent=has?'Face ID is set up on this device.':'Not set up.';
-  if(btn) btn.textContent=has?'Update Face ID':'Setup Face ID login';
-  if(removeBtn) removeBtn.style.display=has?'':'none';
-  if(bioBtn) bioBtn.style.display=has?'':'none';
-}
-
 /* Mobile deep-link constants — used by wallet detection below */
 const isMobile=/iPhone|iPad|Android/i.test(navigator.userAgent);
+function _phantomBrowseConnectUrl(){
+  var returnRoute = _currentWalletReturnRoute();
+  var target = new URL(returnRoute || '/', 'https://orcagent.fun');
+  target.searchParams.set('phantom_connect', '1');
+  target.searchParams.set('return_to', returnRoute || '/');
+  return 'https://phantom.app/ul/browse/' + encodeURIComponent(target.toString())
+    + '?ref=' + encodeURIComponent(window.location.origin);
+}
 const phantomDeepLink='https://phantom.app/ul/browse/'+encodeURIComponent('https://orcagent.fun');
 const solflareDeepLink='https://solflare.com/ul/v1/browse/'+encodeURIComponent('https://orcagent.fun');
 /* Installed PWA (standalone display-mode): Phantom's connect deep link
@@ -818,38 +483,20 @@ function _applySolflareDetection(solflareBtn, solflareNote){
   }, 400);
 }
 
-/* On load: switch connect screen between Face ID / password / Phantom modes */
+/* Wallet connect always remains the normal sign-in option. */
 document.addEventListener('DOMContentLoaded',function(){
-  var hasFaceId=false;
-  try{ hasFaceId=!!localStorage.getItem('orca_credential_id'); }catch(e){}
-  var bioBtn    =document.getElementById('ob-bio-btn');
-  var altLink   =document.getElementById('ob-alt-link');
-  var pwdForm   =document.getElementById('ob-pwd-form');
-  var wbtns     =document.getElementById('ob-wallet-btns');
+  var wbtns=document.getElementById('ob-wallet-btns');
   var phantomBtn=document.getElementById('phantom-ob-btn');
-  var phantomNote=document.getElementById('ob-phantom-note');
   var solflareBtn=document.getElementById('solflare-ob-btn');
-  var skipBtn   =document.getElementById('ob-skip-btn');
-  var nullEl    ={style:{},innerHTML:'',textContent:''};
-
-  if(hasFaceId){
-    /* Face ID mode: show Face ID button + "or connect differently" link; hide wallet buttons */
-    if(bioBtn)   bioBtn.style.display='flex';
-    _prefetchPasskeyLoginOptions();   // ready before the tap, not after it
-    if(altLink)  altLink.style.display='';
-    if(pwdForm)  pwdForm.style.display='none';
-    if(wbtns)    wbtns.style.display='none';
-  } else {
-    /* No Face ID: show both wallet connect buttons */
-    if(pwdForm)     pwdForm.style.display='none';
-    if(bioBtn)      bioBtn.style.display='none';
-    if(altLink)     altLink.style.display='none';
-    if(wbtns)       wbtns.style.display='block';
-    if(phantomBtn)  phantomBtn.style.display='flex';
-    if(solflareBtn) solflareBtn.style.display='flex';
-    _applyPhantomDetection(phantomBtn, phantomNote||nullEl);
-    _applySolflareDetection(solflareBtn, nullEl);
-  }
+  var note=document.getElementById('ob-phantom-note');
+  var pwdForm=document.getElementById('ob-pwd-form');
+  var nullEl={style:{},innerHTML:'',textContent:''};
+  if(pwdForm) pwdForm.style.display='none';
+  if(wbtns) wbtns.style.display='block';
+  if(phantomBtn) phantomBtn.style.display='flex';
+  if(solflareBtn) solflareBtn.style.display='flex';
+  _applyPhantomDetection(phantomBtn,note||nullEl);
+  _applySolflareDetection(solflareBtn,nullEl);
 });
 
 // ── CSRF TOKEN ──
@@ -929,7 +576,7 @@ var _csrfReady = _initCsrf();
 //
 // What replaces it as protection is per-action, not per-session: the trading
 // key never leaves the server, sensitive actions can be put behind Face ID or
-// a passkey, and Disconnect revokes every remembered login on every device at
+// an authenticator prompt, and Disconnect revokes remembered login on every device at
 // once. A timer that signs out someone reading the feed protects nothing that
 // those do not protect better, and it cost every single user their session
 // several times a day.
@@ -973,7 +620,7 @@ async function connectWalletOnboard(type){
 
   if(!check){
     /* On mobile without the extension, use deep link */
-    if(isMobile){ if(isPhantom){ _phantomMobileV1Connect(); return; } window.location.href=solflareDeepLink; return; }
+    if(isMobile){ if(isPhantom){ window.location.href=_phantomBrowseConnectUrl(); return; } window.location.href=solflareDeepLink; return; }
     const other=isPhantom?'Solflare':'Phantom';
     const otherUrl=isPhantom?'https://solflare.com':'https://phantom.app';
     msgEl.innerHTML=name+' wallet not detected. <a href="'+installUrl+'" target="_blank" style="color:var(--blue);text-decoration:underline">Install '+name+'</a> or try <a href="'+otherUrl+'" target="_blank" style="color:var(--blue);text-decoration:underline">'+other+'</a>.';
@@ -1018,6 +665,36 @@ async function connectWalletOnboard(type){
     console.error(e);
   }
 }
+
+// If a mobile user arrived through Phantom's in-app browser, complete the
+// connection there using Phantom's injected provider. This avoids the fragile
+// two-hop connect -> signMessage deeplink callback flow used by ordinary
+// mobile browsers.
+(function _autoConnectInsidePhantomBrowser(){
+  try{
+    var u = new URL(window.location.href);
+    if(u.searchParams.get('phantom_connect') !== '1') return;
+    var returnTo = u.searchParams.get('return_to') || '/';
+    u.searchParams.delete('phantom_connect');
+    u.searchParams.delete('return_to');
+    var clean = u.pathname + (u.searchParams.toString() ? '?'+u.searchParams.toString() : '') + u.hash;
+    history.replaceState(null, '', clean);
+    var attempts = 0;
+    var timer = setInterval(function(){
+      attempts += 1;
+      if(window.solana && window.solana.isPhantom){
+        clearInterval(timer);
+        connectWalletOnboard('phantom').then(function(){
+          if(phantomKey && returnTo && returnTo !== '/') window.location.replace(returnTo);
+        }).catch(function(e){ console.error('[phantom-browser-connect]', e); });
+      }else if(attempts >= 20){
+        clearInterval(timer);
+        var msgEl=document.getElementById('wallet-install-msg');
+        if(msgEl){msgEl.textContent='Open this page inside Phantom and tap Connect again.';msgEl.style.display='block';}
+      }
+    }, 250);
+  }catch(e){ console.error('[phantom-browser-connect:init]', e); }
+})();
 
 function resetWallet(){
   phantomKey=null; walletType=null;
@@ -1081,7 +758,6 @@ function disconnectWallet(){
   var _doLogout=function(){
     fetch('/api/logout',{method:'POST',credentials:'include'}).finally(function(){
       phantomKey=null; walletType=null; guestMode=false;
-      localStorage.removeItem('orca_credential_id');
       // Disconnect has to mean disconnected. Leaving the token behind would
       // let the very next page load sign this browser straight back in.
       _clearDeviceToken();
@@ -1257,6 +933,11 @@ async function launchApp(){
   if(phantomKey) guestMode = false;
   document.getElementById('onboard').classList.add('hide');
   document.getElementById('app').style.display='block';
+  if(/^#post-[pt]\d+$/.test(location.hash)) _handleNotifDeepLink();
+  if(location.hash==='#settings'){
+    history.replaceState(null,'',location.pathname+location.search);
+    _sbNav('settings');
+  }
   const _spos=document.getElementById('s-pos'); if(_spos) _spos.textContent='0/5';
   if(phantomKey){
     const _dsb=document.getElementById('deposit-sol-btn'); if(_dsb) _dsb.style.display='';
@@ -1756,7 +1437,13 @@ function _fcLinkHtml(url){
   // enough path to recognise it, exactly as the platforms people came from do.
   var label = url.replace(/^https?:\/\//i,'').replace(/\/$/,'');
   if(label.length > 42) label = label.slice(0, 41) + '…';
-  return '<a href="'+esc(href)+'" target="_blank" rel="noopener noreferrer nofollow" '
+  var isOrcaPost=false;
+  try{
+    var parsed=new URL(href,location.origin);
+    isOrcaPost=(parsed.hostname==='orcagent.fun'||parsed.hostname==='www.orcagent.fun'
+                ||parsed.origin===location.origin) && /^\/post\/[pt]\d+$/.test(parsed.pathname);
+  }catch(e){}
+  return '<a href="'+esc(href)+'"'+(isOrcaPost?'':' target="_blank" rel="noopener noreferrer nofollow"')+' '
        + 'onclick="event.stopPropagation()" '
        + 'style="color:#f7b955;text-decoration:none;word-break:break-word">'+esc(label)+'</a>'
        + esc(trail);
@@ -3352,7 +3039,7 @@ async function toggleTrader(){
   // Watchdog: re-enable after 5 s regardless, so a hung request never leaves the button stuck
   const watchdog=setTimeout(()=>{ _refreshTradeBtnState(); },5000);
   try{
-    const res=await fetch(starting?'/api/trader/start':'/api/trader/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({interval:300,trade_pct:0.20,max_usdc:1.0})});
+    const res=await fetch(starting?'/api/trader/start':'/api/trader/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({interval:2,trade_pct:0.20,max_usdc:1.0})});
     const rj=await res.json().catch(()=>null);
     if(rj&&rj.ok){
       traderOn=starting;   // optimistic update — don't wait for fetchState()
@@ -3431,21 +3118,6 @@ var _sessionBootstrapComplete = false;
             .then(function(r){ return r.json(); }).catch(function(){ return _me; });
         }
       }
-      if(_me) _maybePromptPasskey(_me);
-    }catch(e){}
-  } else {
-    // The prompt used to live ONLY inside the branch above, which runs when
-    // the page has no wallet in hand yet. So the moment a wallet was
-    // remembered -- which is the normal state for anyone already using the
-    // app -- the offer of a passkey was skipped entirely, and the people
-    // most likely to be locked out later were exactly the ones never asked.
-    // Whether to prompt is the server's answer about the session, not a
-    // question of whether this page happens to know a wallet address.
-    try{
-      fetch('/api/session', {credentials:'include'})
-        .then(function(r){ return r.json(); })
-        .then(function(me){ if(me) _maybePromptPasskey(me); })
-        .catch(function(){});
     }catch(e){}
   }
   // Checked AFTER that, so the server stays the authority: a real disconnect
@@ -4387,7 +4059,6 @@ async function openSettings(){
     settingsHasKey=false;
     _updateKeyStatus();
   }
-  _updateFaceIdStatus();
 }
 
 function closeSettings(){
@@ -4565,6 +4236,8 @@ function _fadeIn(el){
 
 function _clearStalePostHash(){
   if(/^#post-/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
+  _activeDeepLinkedPost = null;
+  _lastDeepLinkHash = null;
 }
 
 // ── DAILY LEADERBOARD ──
@@ -7894,26 +7567,24 @@ function _renderTradeTerminalCard(t){
       + ' style="display:none;font-size:11px;margin-top:6px;padding-top:6px;'
       + 'border-top:1px solid #1a1f2e;line-height:1.5"></div>';
   }
-  return '<div data-mint="'+esc(t.token_address||'')+'" style="position:relative;overflow:hidden;background:#0d1117;border:1px solid #1a1f2e;border-radius:10px;padding:14px 16px;margin:8px 0 10px;font-family:\'JetBrains Mono\',monospace;cursor:pointer" onclick="event.stopPropagation();showTokenCard('+symJs+','+mintJs+')">'
-    +'<div data-cc="banner" class="tc-banner" style="position:absolute;inset:0;background-size:cover;background-position:center"></div>'
-    +'<div style="position:absolute;inset:0;background:linear-gradient(to bottom,rgba(13,17,23,0.55),rgba(13,17,23,0.92))"></div>'
-    +'<div style="position:relative;z-index:1">'
-    +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
-    +'<div style="flex:1;min-width:0">'
-    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">'
-    +'<span style="color:'+sideCol+';font-weight:700;font-size:11px;border:1px solid '+sideCol+'33;border-radius:4px;padding:1px 5px">'+(isBuy?'BUY':'SELL')+'</span>'
-    +'<span style="color:#eef1f5;font-weight:700;font-size:15px">$'+sym+'</span>'
-    +dur
+  // One complete card shared by the composer and the published feed.
+  // Keep every value in normal layout flow; the percentage cannot cover prices.
+  return '<div class="oa-home-trade-card" data-mint="'+esc(t.token_address||'')+'" role="link" tabindex="0" onclick="event.stopPropagation();showTokenCard('+symJs+','+mintJs+')" >'
+    +'<div data-cc="banner" class="tc-banner oa-home-trade-banner"></div>'
+    +'<div class="oa-home-trade-shade"></div>'
+    +'<div class="oa-home-trade-content">'
+      +'<div class="oa-home-trade-title">'
+        +'<span class="oa-home-trade-side" style="color:'+sideCol+';border-color:'+sideCol+'">'+(isBuy?'BUY':'SELL')+'</span>'
+        +'<strong>$'+sym+'</strong>'
+      +'</div>'
+      +'<div class="oa-home-trade-main">'
+        +'<div class="oa-home-trade-prices"><div><b>Entry</b> <span>'+entry+'</span></div><div><b>Now</b> <span>'+exit_p+'</span></div></div>'
+        +'<div class="oa-home-trade-pct" style="color:'+pctCol+'">'+pctStr+'</div>'
+      +'</div>'
+      +'<div class="oa-home-trade-profit">'+solStr+'</div>'
+      +'<div class="oa-home-trade-footer">View token <span aria-hidden="true">→</span></div>'
     +'</div>'
-    +'<div style="color:#8a919c;font-size:11px;margin-bottom:5px">$'+esc(String(t.entry_price||entryN||'—'))+' → $'+esc(String(t.exit_price||exitN||'—'))+'</div>'
-    +'<div style="color:#f7b955;font-size:12px;font-weight:600">'+solStr+'</div>'
-    +amtStr
-    +fumbleSlot
-    +'</div>'
-    +'<div style="font-size:26px;font-weight:700;color:'+pctCol+';line-height:1;text-align:right;padding-left:14px;align-self:center">'+pctStr+'</div>'
-    +'</div>'
-    +'</div>'
-    +'</div>';
+  +'</div>';
 }
 
 // mint -> header image URL (or null once confirmed there isn't one), so
@@ -8028,6 +7699,8 @@ function _renderComposerTradePreview(){
   if(!prev || !card || !_composerTrade) return;
   prev.style.display = 'block';
   card.innerHTML = _renderTradeTerminalCard(_composerTrade);
+  var bannerCard = card.querySelector('.oa-home-trade-card');
+  if(bannerCard) _hydrateTradeBanner(bannerCard);
 }
 
 function _clearComposerTrade(){
@@ -8569,9 +8242,22 @@ async function loadHomeFeed(){
     const data = await r.json();
     if(data && Array.isArray(data.items)){
       _homeFeedData = data.items;
+      // The shared post is merged at its chronological position only when
+      // rendering. Never move an old post ahead of newer feed updates.
       _homeFeedNextCursor = data.next_cursor || null;
       try{
+        // If the target was already opened while this feed request was
+        // loading, keep it in view after the chronological re-render.
+        var linkedId=_activeDeepLinkedPost && location.hash==='#post-'+_activeDeepLinkedPost.id
+          ? _activeDeepLinkedPost.id : '';
+        var oldLinked=linkedId && document.getElementById('fc-card-'+linkedId);
+        var keepLinkedInView=oldLinked && oldLinked.getBoundingClientRect().bottom>0
+          && oldLinked.getBoundingClientRect().top<window.innerHeight;
         renderHomeFeed();
+        if(keepLinkedInView){
+          var freshLinked=document.getElementById('fc-card-'+linkedId);
+          if(freshLinked) freshLinked.scrollIntoView({behavior:'auto',block:'center'});
+        }
         _handleNotifDeepLink();
       }catch(e){
         console.error('[feed] render error:', e);
@@ -8605,7 +8291,20 @@ async function loadMoreHomeFeed(){
     if(data && Array.isArray(data.items)){
       _homeFeedData = _homeFeedData.concat(data.items);
       _homeFeedNextCursor = data.next_cursor || null;
-      renderHomeFeed(data.items); // append only the new page, not a full rebuild
+      if(_activeDeepLinkedPost && location.hash==='#post-'+_activeDeepLinkedPost.id){
+        // Older pages may contain posts between the latest page and the
+        // linked post. Reposition that post by timestamp as they arrive.
+        var oldCard=document.getElementById('fc-card-'+_activeDeepLinkedPost.id);
+        var inView=oldCard && oldCard.getBoundingClientRect().bottom>0
+                   && oldCard.getBoundingClientRect().top<window.innerHeight;
+        renderHomeFeed();
+        if(inView){
+          var linkedCard=document.getElementById('fc-card-'+_activeDeepLinkedPost.id);
+          if(linkedCard) linkedCard.scrollIntoView({behavior:'auto',block:'center'});
+        }
+      } else {
+        renderHomeFeed(data.items); // normal feed retains fast append-only paging
+      }
     }
   }catch(e){
     console.error('[feed] load-more error:', e);
@@ -9047,7 +8746,7 @@ setInterval(function(){
 function renderHomeFeed(appendItems){
   const el = document.getElementById('center-feed');
   if(!el) return;
-  if(!_homeFeedData||!_homeFeedData.length){
+  if((!_homeFeedData||!_homeFeedData.length) && !_activeDeepLinkedPost){
     el.innerHTML='<p style="color:#565d68;padding:20px">No posts yet</p>';
     return;
   }
@@ -9058,8 +8757,14 @@ function renderHomeFeed(appendItems){
     // Trades no longer auto-appear as if personally posted in the regular
     // feed — they only show in the explicit Live Trades ticker above, or as
     // a real post if the user chose to share one via the notifications page.
-    items = items.filter(function(i){ return i.type!=='trade'; });
+    items = items.filter(function(i){
+      return i.type!=='trade' || !!(_activeDeepLinkedPost && location.hash === '#post-'+_activeDeepLinkedPost.id
+        && (i.trade_id ? 't'+i.trade_id : (i.id ? 'p'+i.id : '')) === _activeDeepLinkedPost.id);
+    });
   }
+  // A permalink opens the target at its ORIGINAL chronological position.
+  // Keep the normal latest-first order; never pin an older share to the top.
+  if(!appendItems) items = _insertLinkedPostChronologically(items);
   if(!items.length){
     if(!appendItems) el.innerHTML = '<div class="fc-empty">No activity yet — start trading to appear in the feed.</div>';
     return;
@@ -9345,9 +9050,18 @@ function _renderFeedCard(e){
     e = Object.assign({}, e, orig, {
       id: (e.repost_of||'').replace(/^[a-z]/,''), // numeric part of the original's id, for legacy fields that expect it
       type: orig.kind === 't' ? 'trade' : 'text',
+      // A repost has two identities: the reposter belongs ONLY in the green
+      // banner above; the card itself always belongs to the original author.
+      user_id: orig.user_id || 0,
+      username: orig.username || orig.wallet || 'Trader',
+      wallet: orig.wallet || '',
+      wallet_full: orig.wallet_full || orig.wallet || '',
+      avatar_url: orig.avatar_url || '',
+      verified: !!orig.verified,
+      team_role: orig.team_role || 'user',
       like_count: e.like_count, reply_count: e.reply_count, view_count: e.view_count,
       repost_count: e.repost_count, reposted_by_me: e.reposted_by_me, liked_by_me: e.liked_by_me,
-      is_own: (orig.wallet && orig.wallet === (typeof phantomKey!=='undefined'?phantomKey:null)),
+      is_own: !!(orig.wallet_full && orig.wallet_full === (typeof phantomKey!=='undefined'?phantomKey:null)),
     });
     e.__safePostIdOverride = (e.repost_of || '');
   }
@@ -9565,7 +9279,7 @@ function _renderFeedCard(e){
       +'<span class="fc-like-count" onclick="event.stopPropagation();_fcOpenLikedBy(\''+esc(safePostId)+'\')" title="See who liked this">'+esc(String(e.like_count||0))+'</span>'
     +'</button>'
     +'<div class="fc-react-wrap">'
-    +'<button class="fc-action fc-emoji-react-btn" onclick="_feedReactOpen(event,\''+esc(safePostId)+'\')" title="Choose emoji" aria-label="Choose emoji" style="width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:0;background:transparent;font-size:22px;line-height:1">😊</button>'
+    +'<button class="fc-action fc-emoji-react-btn" id="rbtn-'+esc(safePostId)+'" onclick="_feedReactOpen(event,\''+esc(safePostId)+'\')" title="Choose emoji" aria-label="Choose emoji" style="display:inline-flex;align-items:center;gap:5px;padding:4px 6px;margin:-4px -6px;border:0;background:transparent;font-size:22px;line-height:1">😊<span class="fc-react-count" id="rcount-'+esc(safePostId)+'" style="font-size:13px;color:#8a919c;font-family:JetBrains Mono,monospace">0</span></button>'
     +'<div class="fc-react-palette" id="rpal-'+esc(safePostId)+'"></div>'
     +'</div>'
     +'<div class="fc-share-wrap">'
@@ -9578,7 +9292,6 @@ function _renderFeedCard(e){
     +'</div>'
     +'<span class="fc-view-count" title="Views">'+esc(_fmtViewCount(e.view_count))+'</span>'
     +'</div>'
-    +'<div class="fc-reactions" id="rpills-'+esc(safePostId)+'"></div>'
     +'<div class="fc-reply-box" id="rbox-'+esc(safePostId)+'" onclick="event.stopPropagation()">'
     +'<div class="fc-reply-inner">'
     +'<div class="fc-reply-card" id="rcard-'+esc(safePostId)+'">'
@@ -9608,7 +9321,7 @@ function _homeCopyTrade(uid, username){
 }
 
 function _xShareIntent(postId){
-  var canonical=window.location.origin+'/post/'+encodeURIComponent(postId)+'?xv=8';
+  var canonical=window.location.origin+'/post/'+encodeURIComponent(postId)+'?xv=9';
   var text='View this post on OrcAgent @orcagent';
   return 'https://twitter.com/intent/tweet?text='+encodeURIComponent(text)
     +'&url='+encodeURIComponent(canonical);
@@ -9806,18 +9519,12 @@ async function _feedReactSend(postId, emoji){
 }
 
 function _feedRenderPills(postId, counts, mine){
-  var el = document.getElementById('rpills-'+postId);
-  if(!el) return;
-  var mineSet = new Set(mine || []);
-  var html = '';
-  _FEED_EMOJIS.forEach(function(emoji){
-    var n = (counts && counts[emoji]) || 0;
-    if(!n) return;
-    var cls = mineSet.has(emoji) ? ' mine' : '';
-    html += '<button class="fc-reaction-pill'+cls+'" onclick="event.stopPropagation();_feedReactSend(\''+postId+'\',\''+emoji+'\')">'
-      + emoji+'<span class="rp-count">'+n+'</span></button>';
-  });
-  el.innerHTML = html;
+  var countEl = document.getElementById('rcount-'+postId);
+  var btn = document.getElementById('rbtn-'+postId);
+  var total = 0;
+  Object.keys(counts || {}).forEach(function(emoji){ total += Number(counts[emoji]) || 0; });
+  if(countEl) countEl.textContent = String(total);
+  if(btn) btn.classList.toggle('reacted', Array.isArray(mine) && mine.length > 0);
 }
 
 
@@ -9889,47 +9596,92 @@ function _feedToggleReply(btn, postId){
   }
 }
 
-/* ── Notification deep-linking: #post-<id> jumps straight to that post ── */
+/* ── Canonical post deep-links: preserve the post through auth/feed loading ── */
 var _lastDeepLinkHash = null;
+var _pendingDeepLinkHash = null;
+var _activeDeepLinkedPost = null; // {id, post}; survives feed refreshes
+
+function _insertLinkedPostChronologically(items){
+  if(!_activeDeepLinkedPost || location.hash !== '#post-'+_activeDeepLinkedPost.id)
+    return items;
+  var linked=_activeDeepLinkedPost.post;
+  if(!linked) return items;
+  var postId=_activeDeepLinkedPost.id;
+  // If the post is in the feed already, respect the server's original order.
+  if(items.some(function(i){
+    return (i.id ? 'p'+i.id : (i.trade_id ? 't'+i.trade_id : ''))===postId;
+  })) return items;
+  var result=items.slice();
+  var raw=linked.created_at||linked.timestamp||linked.opened_at||'';
+  var linkedStamp=String(raw).replace(' ','T');
+  if(linkedStamp && !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(linkedStamp)) linkedStamp+='Z';
+  var linkedTime=Date.parse(linkedStamp);
+  var index=result.length;
+  if(Number.isFinite(linkedTime)){
+    for(var n=0;n<result.length;n++){
+      var candidate=result[n];
+      var candidateRaw=candidate.created_at||candidate.timestamp||candidate.opened_at||'';
+      var candidateStamp=String(candidateRaw).replace(' ','T');
+      if(candidateStamp && !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(candidateStamp)) candidateStamp+='Z';
+      var candidateTime=Date.parse(candidateStamp);
+      if(Number.isFinite(candidateTime) && candidateTime < linkedTime){
+        index=n;
+        break;
+      }
+    }
+  }
+  // A post older than the current first page appears BELOW every newer post,
+  // not at the top, while scrollIntoView() still opens it immediately.
+  result.splice(index,0,linked);
+  return result;
+}
+
 window.addEventListener('hashchange', function(){
-  if(!/^#post-/.test(location.hash)) return;
-  // If we're not currently on the Home view, switching there also runs
-  // loadHomeFeed() -> renderHomeFeed() -> _handleNotifDeepLink(), which
-  // does the actual jump once the feed is loaded.
-  if(_dmOpen || _gcOpen || document.getElementById('dash-wallet')?.style.display==='block'){
-    _sbNav('dashboard');
-  } else {
+  if(/^#post-[pt]\d+$/.test(location.hash)){
     _handleNotifDeepLink();
+  }else{
+    _lastDeepLinkHash = null;
+    _activeDeepLinkedPost = null;
   }
 });
 function _handleNotifDeepLink(){
-  var m = /^#post-(.+)$/.exec(location.hash);
-  if(!m) return;
-  if(location.hash === _lastDeepLinkHash) return;
-  _lastDeepLinkHash = location.hash;
-  // Set by _markOneRead() in notifications.html right before its <a href>
-  // navigates here -- the only way a notification's type survives the full
-  // page load from /notifications to / (they're separate pages, not SPA
-  // routes). Not set for a plain in-feed card click, or for a push
-  // notification opened in a new tab (no sessionStorage carry-over there).
-  var notifType = sessionStorage.getItem('_notifJumpType') || null;
-  sessionStorage.removeItem('_notifJumpType');
-  _jumpToPost(decodeURIComponent(m[1]), notifType);
+  var match = /^#post-([pt]\d+)$/.exec(location.hash);
+  if(!match) return;
+  var hash = location.hash;
+  var app = document.getElementById('app');
+  // No "handled" flag until the application AND target card are visible.
+  // This also covers links opened before wallet/session recovery or ToS.
+  if(!app || app.style.display==='none') return;
+  if(_pendingDeepLinkHash===hash) return;
+  if(_lastDeepLinkHash===hash && document.getElementById('fc-card-'+match[1])) return;
+  var notifType = null;
+  try{
+    notifType=sessionStorage.getItem('_notifJumpType')||null;
+    sessionStorage.removeItem('_notifJumpType');
+  }catch(e){}
+  _pendingDeepLinkHash=hash;
+  _jumpToPost(match[1],notifType).then(function(opened){
+    if(opened && location.hash===hash) _lastDeepLinkHash=hash;
+  }).catch(function(err){
+    console.error('[post-deeplink] failed to open',match[1],err);
+  }).finally(function(){
+    if(_pendingDeepLinkHash===hash) _pendingDeepLinkHash=null;
+  });
 }
 
 function _fcCardClick(ev, postId){
   var ae = document.activeElement;
-  if (ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT')) {
-    return; // gebruiker is actief aan het typen, negeer card-klik
-  }
+  if (ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT')) return;
   if(ev.target.closest('a, button, input, textarea, select')) return;
   var rbox = document.getElementById('rbox-'+postId);
   if(rbox && rbox.classList.contains('open')){
     var openedAt = Number(rbox.dataset.openedAt || 0);
-    if (Date.now() - openedAt < 400) return; // net geopend, negeer sluit-tik
+    if (Date.now() - openedAt < 400) return;
     rbox.classList.remove('open');
     if(location.hash === '#post-'+postId){
       history.pushState(null, '', location.pathname + location.search);
+      _activeDeepLinkedPost = null;
+      _lastDeepLinkHash = null;
     }
     return;
   }
@@ -9938,42 +9690,61 @@ function _fcCardClick(ev, postId){
 }
 
 async function _jumpToPost(postId, notifType){
-  var card = document.getElementById('fc-card-'+postId);
-  if(!card){
-    try{
-      var r = await fetch('/api/feed/post/'+encodeURIComponent(postId));
-      var d = await r.json();
-      if(d && d.ok && d.post){
-        _homeFeedData = (_homeFeedData||[]).filter(function(i){
-          var pid = i.id ? 'p'+i.id : (i.trade_id ? 't'+i.trade_id : null);
-          return pid !== postId;
-        });
-        _homeFeedData.unshift(d.post);
-        renderHomeFeed();
-        card = document.getElementById('fc-card-'+postId);
-      }
-    }catch(err){ console.error('[notif-deeplink] failed to fetch post', postId, err); }
+  if(!/^[pt]\d+$/.test(String(postId||''))) return false;
+  var app=document.getElementById('app');
+  if(!app || app.style.display==='none') return false;
+
+  // A permalink may be opened from a chat, wallet or group screen. Switch to
+  // Home first; those screens hide the entire feed, so scrolling alone fails.
+  if(_dmOpen || _gcOpen || document.getElementById('dash-wallet')?.style.display==='block'){
+    _sbNav('dashboard');
+    // closeMessagesView/openCommunityView clear stale hashes during normal nav.
+    history.replaceState(null,'','#post-'+postId);
   }
-  if(!card) return;
-  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  card.scrollIntoView({behavior: reduceMotion ? 'auto' : 'smooth', block: 'center'});
+
+  var card=document.getElementById('fc-card-'+postId);
+  if(!card || card.dataset.virtualized==='1'){
+    try{
+      var r=await fetch('/api/feed/post/'+encodeURIComponent(postId), {credentials:'include'});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      var d=await r.json();
+      if(d && d.ok && d.post){
+        _activeDeepLinkedPost={id:postId,post:d.post};
+        // Do not mutate the normal feed. renderHomeFeed() inserts this
+        // permalink at its timestamp position, after all newer posts.
+        renderHomeFeed();
+        card=document.getElementById('fc-card-'+postId);
+      }
+    }catch(err){ console.error('[post-deeplink] failed to fetch post',postId,err); }
+  }else if(_feedPostById[postId]){
+    _activeDeepLinkedPost={id:postId,post:_feedPostById[postId]};
+  }
+  if(!card) return false;
+  if(card.dataset.virtualized==='1') _revirtualizeCard(card);
+  // One frame allows the inserted card and mobile scroller to lay out before
+  // scrolling; auto instead of smooth gets the user to their post immediately.
+  await new Promise(function(resolve){requestAnimationFrame(resolve)});
+  if(!document.contains(card)) return false;
+  card.scrollIntoView({behavior:'auto',block:'center'});
   card.classList.add('fc-card-highlight');
-  setTimeout(function(){ card.classList.remove('fc-card-highlight'); }, 2200);
-  var rbox = document.getElementById('rbox-'+postId);
-  if(rbox && notifType === 'reply'){ rbox.classList.add('open'); rbox.dataset.openedAt = Date.now(); }
-  if(!rbox || !rbox.dataset.repliesLoaded){
-    if(rbox) rbox.dataset.repliesLoaded = '1';
+  setTimeout(function(){card.classList.remove('fc-card-highlight')},2200);
+  var rbox=document.getElementById('rbox-'+postId);
+  if(rbox && notifType==='reply'){
+    rbox.classList.add('open');
+    rbox.dataset.openedAt=Date.now();
+  }
+  if(rbox && !rbox.dataset.repliesLoaded){
+    rbox.dataset.repliesLoaded='1';
     _feedLoadReplies(postId);
   }
-  // Landing here from a "someone replied" notification is also "having seen
-  // it" -- same has-new clearing _feedToggleReply() does on a manual open.
-  var replyBtn = card.querySelector('.fc-reply-btn');
+  var replyBtn=card.querySelector('.fc-reply-btn');
   if(replyBtn && replyBtn.classList.contains('has-new')){
     replyBtn.classList.remove('has-new');
-    var dot = replyBtn.querySelector('.fc-reply-new-dot');
+    var dot=replyBtn.querySelector('.fc-reply-new-dot');
     if(dot) dot.remove();
-    _fcMarkRepliesSeen(postId, replyBtn.getAttribute('data-last-reply'));
+    _fcMarkRepliesSeen(postId,replyBtn.getAttribute('data-last-reply'));
   }
+  return true;
 }
 
 // ── "new reply on your post" tracking (localStorage, per post) ──
@@ -10019,6 +9790,12 @@ function _replyRelTime(created_at){
 function _renderReplyRow(r, postId, depth){
   depth = depth || 0;
   var name    = esc(r.username || (r.wallet ? r.wallet.slice(0,6)+'…' : '?'));
+  // A wallet URL keeps pointing to the same trader after username changes.
+  // A real anchor also supports long-press/open-in-new-tab on mobile.
+  var profileHref = r.wallet ? '/profile/'+encodeURIComponent(r.wallet) : '';
+  var nameHtml = profileHref
+    ? '<a class="fc-ri-name fc-ri-profile-link" href="'+esc(profileHref)+'" onclick="event.stopPropagation()">'+name+'</a>'
+    : '<span class="fc-ri-name">'+name+'</span>';
   var initKey = r.username || r.wallet || '?';
   var bg      = typeof _lbAvatarColor === 'function' ? _lbAvatarColor(initKey) : '#1b4332';
   var ini     = initKey[0].toUpperCase();
@@ -10045,7 +9822,7 @@ function _renderReplyRow(r, postId, depth){
     +'<div class="fc-ri-row">'
     +'<div class="fc-ri-avatar" style="background:'+bg+';position:relative;overflow:hidden;cursor:pointer" onclick="'+avatarClick+'">'+ini+avatarImg+'</div>'
     +'<div class="fc-ri-body">'
-    +'<div class="fc-ri-line"><span class="fc-ri-name">'+name+'</span>'+verifiedBadge+_teamBadgeHtml(r.team_role)+youChip+' <span class="fc-ri-text-inline">'+msgHtml+'</span></div>'
+    +'<div class="fc-ri-line">'+nameHtml+verifiedBadge+_teamBadgeHtml(r.team_role)+youChip+' <span class="fc-ri-text-inline">'+msgHtml+'</span></div>'
     +'<div class="fc-ri-meta">'
     +'<span class="fc-ri-time">'+_replyRelTime(r.created_at)+'</span>'
     +'<button class="fc-ri-reply-btn" onclick="_feedToggleNestedReply('+r.id+',\''+postId.replace(/'/g,"\\'")+'\',this)">Reply</button>'
@@ -10110,7 +9887,7 @@ function _feedSubmitNestedReply(inp, postId, parentReplyId){
         var parentDepth = parentRow.dataset.parentId ? 2 : 1; // one level deeper than the parent, capped visually
         var fakeReply = {
           id: d.id, user_id: d.user_id,
-          username: d.username, wallet: '',
+          username: d.username, wallet: d.wallet || '',
           message: d.message, created_at: d.created_at,
           like_count: 0, liked_by_me: false, is_mine: true,
           parent_reply_id: parentReplyId,
@@ -10213,7 +9990,7 @@ function _feedSubmitReply(inp, postId){
         if(emptyMsg && emptyMsg.textContent.indexOf('No replies yet')!==-1) list.innerHTML='';
         var fakeReply = {
           id: d.id, user_id: d.user_id,
-          username: d.username, wallet: '',
+          username: d.username, wallet: d.wallet || '',
           message: d.message, created_at: d.created_at,
           like_count: 0, liked_by_me: false, is_mine: true,
           verified: !!(_myProfileData && _myProfileData.verified),

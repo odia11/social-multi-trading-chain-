@@ -41,7 +41,7 @@ def test_portfolio_scroll_does_not_require_has_support():
 
 def test_route_bootstrap_sets_scroll_classes_before_dynamic_assets():
     home_class = NAVBAR_JS.index("classList.add('oa-home-mobile-root')")
-    home_css = NAVBAR_JS.index("ensureStyle('/static/home-mobile.css?v=6'")
+    home_css = NAVBAR_JS.index("ensureStyle('/static/home-mobile.css?v=7'")
     portfolio_class = NAVBAR_JS.index("classList.add('oa-portfolio-root')")
     portfolio_css = NAVBAR_JS.index("ensureStyle('/static/portfolio-redesign.css?v=6'")
     assert home_class < home_css
