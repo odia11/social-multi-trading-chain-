@@ -37,3 +37,32 @@ body.oa-portfolio #activity-list .act-time{font-size:10.5px;color:#697280;margin
 body.oa-portfolio.pf-view-overview .dep-card{display:none}body.oa-portfolio.pf-view-overview .act-card[data-pf-extra="1"]{display:none}body.oa-portfolio.pf-view-deposit .pf-balance-card,body.oa-portfolio.pf-view-deposit .pf-allocation,body.oa-portfolio.pf-view-deposit .holdings,body.oa-portfolio.pf-view-deposit .act-card{display:none}body.oa-portfolio.pf-view-deposit .dep-card{display:block}
 @media(max-width:600px){body.oa-portfolio{overflow-y:auto!important;position:static!important;touch-action:pan-y!important}body.oa-portfolio #app{display:block!important;overflow:visible!important;height:auto!important;min-height:100dvh!important}body.oa-portfolio .wlt-center{max-height:none!important;height:auto!important;overflow:visible!important}body.oa-portfolio .wlt-hdr{padding:14px 16px 4px}body.oa-portfolio .wlt-title{font-size:27px}body.oa-portfolio .wlt-sub{font-size:11.5px;line-height:1.35}body.oa-portfolio .wlt-content{padding:6px 14px 92px;gap:12px;overflow:visible!important}.pf-tabs{margin:2px 14px 10px;padding:5px;gap:5px;border-radius:15px}.pf-tab{min-height:40px;font-size:12.5px}.pf-balance-card{border-radius:20px;padding:19px 17px 16px}.pf-kicker{font-size:10px}.pf-balance{font-size:35px;margin-top:8px}.pf-change{font-size:11.5px;margin-top:6px}.pf-actions{margin-top:16px;gap:8px}.pf-action{min-height:48px;font-size:13.5px;border-radius:14px}.pf-allocation{grid-template-columns:128px 1fr;gap:12px;padding:15px 14px;border-radius:20px}.pf-donut{width:116px;height:116px}.pf-donut:after{inset:22px}.pf-donut-center{font-size:11.5px;padding:30px}.pf-leg-row{grid-template-columns:10px 1fr auto;gap:7px;font-size:12px}.pf-leg-val{font-size:11px}body.oa-portfolio .holdings,body.oa-portfolio .act-card,body.oa-portfolio .dep-card{border-radius:18px}body.oa-portfolio .holdings-hdr,body.oa-portfolio .act-hdr{padding:15px 16px}body.oa-portfolio .tok-list{padding:0 16px}body.oa-portfolio .tok-row{padding:13px 0}body.oa-portfolio .tok-logo,body.oa-portfolio .tok-init{width:40px;height:40px}body.oa-portfolio #activity-list{padding:0 15px}body.oa-portfolio #activity-list .act-row{padding:13px 0;gap:10px}body.oa-portfolio #activity-list .act-tile{width:38px;height:38px;border-radius:12px}body.oa-portfolio #activity-list .act-sub{max-width:42vw}body.oa-portfolio #activity-list .act-right{min-width:82px}body.oa-portfolio #activity-list .act-amt{font-size:11.5px}}
 @media(max-width:380px){.pf-allocation{grid-template-columns:1fr}.pf-donut{width:132px;height:132px}.pf-legend{padding:0 6px}}
+
+/* Approved OrcAgent mobile portfolio: source of truth is the REAL wallet hero. */
+body.oa-portfolio{--pf-line:#29353d;--pf-yellow:#ffca66;background:#080e11}
+body.oa-portfolio .wlt-center{max-width:800px}
+body.oa-portfolio .wlt-hdr{padding:22px 22px 6px}
+body.oa-portfolio .wlt-title{font-size:27px;font-weight:800}
+body.oa-portfolio .wlt-sub{font-size:12px;color:#99a3ad}
+body.oa-portfolio .wlt-hero{display:block!important;background:linear-gradient(145deg,#172126,#10191d);border:1px solid #29353d;border-radius:20px;padding:26px 23px 8px;box-shadow:inset 0 1px #ffffff09}
+body.oa-portfolio .wlt-hero-lbl{font-size:15px;color:#d0d6da;font-weight:650;text-transform:none;letter-spacing:0}
+body.oa-portfolio #pf-total{font:750 clamp(32px,8vw,43px)/1.15 var(--mono,monospace);letter-spacing:-.04em;margin-top:12px}
+body.oa-portfolio .wlt-hero-usd{color:#9ce0bf;font-size:12px;line-height:1.5}
+body.oa-portfolio .wlt-hero-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:23px 0 20px}
+body.oa-portfolio .wlt-action{font-size:13px;font-weight:650;color:#e9eef1;min-width:0}
+body.oa-portfolio .wlt-action-ic,body.oa-portfolio .wlt-action.primary .wlt-action-ic{width:100%;height:54px;border-radius:13px;background:#182329;border:1px solid #354149;color:#ffca66;font-size:21px}
+body.oa-portfolio .portfolio-tabs{display:flex!important;margin:8px 0 3px;padding:0 2px;gap:0;justify-content:space-between;border-bottom:1px solid #303a42}
+body.oa-portfolio .portfolio-tabs button{flex:1;border:0;border-bottom:3px solid transparent;border-radius:0;background:transparent;color:#a6afb7;padding:17px 6px;font:700 14px var(--ui,system-ui);cursor:pointer}
+body.oa-portfolio .portfolio-tabs button.selected{color:#ffca66;border-bottom-color:#ffca66}
+body.oa-portfolio .pf-tabs,body.oa-portfolio .pf-balance-card,body.oa-portfolio .pf-allocation{display:none!important}
+body.oa-portfolio .wlt-content{gap:15px}
+body.oa-portfolio .holdings{display:block;background:transparent;border:0;box-shadow:none}
+body.oa-portfolio .holdings-hdr{padding:14px 0 12px}
+body.oa-portfolio .sol-usdc-card,body.oa-portfolio .dep-card,body.oa-portfolio .act-card{display:none}
+body.oa-portfolio.pf-view-assets .holdings{display:block}
+body.oa-portfolio.pf-view-chains .holdings,body.oa-portfolio.pf-view-history .holdings{display:none}
+
+body.oa-portfolio.pf-view-chains .sol-usdc-card,body.oa-portfolio.pf-view-chains .dep-card{display:block}
+body.oa-portfolio.pf-view-history .act-card{display:block}
+body.oa-portfolio .portfolio-tabs button:focus-visible,body.oa-portfolio .wlt-action:focus-visible{outline:2px solid #ffca66;outline-offset:3px}
+@media(max-width:600px){body.oa-portfolio .wlt-hdr{padding:15px 16px 4px}body.oa-portfolio .wlt-content{padding:8px 15px 115px}body.oa-portfolio .wlt-hero{padding:21px 18px 7px;border-radius:18px}body.oa-portfolio #pf-total{font-size:36px}body.oa-portfolio .portfolio-tabs button{min-height:52px;font-size:14px}body.oa-portfolio .wlt-action-ic{height:51px}}

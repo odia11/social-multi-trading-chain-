@@ -27,8 +27,8 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
     boot.textContent='html.oa-pf-boot,html.oa-pf-boot body{background:#080d12!important}';
     document.head.appendChild(boot);
   }
-  ensureStyle('/static/portfolio-redesign.css?v=6','portfolio-redesign.css');
-  ensureScript('/static/portfolio-redesign.js?v=9','portfolio-redesign.js');
+  ensureStyle('/static/portfolio-redesign.css?v=7','portfolio-redesign.css');
+  ensureScript('/static/portfolio-redesign.js?v=10','portfolio-redesign.js');
   ensureScript('/static/portfolio-assets.js?v=1','portfolio-assets.js');
 })();
 

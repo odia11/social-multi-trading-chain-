@@ -12,7 +12,7 @@ function closestLink(e){var n=e.target;return n&&n.closest?n.closest('a[href]'):
    Cross-document View Transitions keep the old page painted during navigation. */
 var ROUTE_ASSETS={
   '/':['home-mobile.css?v=7','home-mobile-polish.css?v=5','home-composer-mobile.css?v=1','home-desktop.css?v=1','home-mobile.js?v=5','home-desktop.js?v=1'],
-  '/wallet':['portfolio-redesign.css?v=6','portfolio-redesign.js?v=9','portfolio-assets.js?v=1'],
+  '/wallet':['portfolio-redesign.css?v=7','portfolio-redesign.js?v=10','portfolio-assets.js?v=1'],
   '/live-market':['live-market-redesign.css?v=7','live-market-final.css?v=4','live-market-redesign.js?v=5','live-market-hotfix.js?v=8'],
   '/groups':['groups-redesign.css?v=1','groups-redesign.js?v=1']
 };
