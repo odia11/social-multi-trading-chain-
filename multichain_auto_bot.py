@@ -195,9 +195,29 @@ def install(d):
         except Exception:
             native = 0
         if native and native > 0:
-            return original(user_id, wallet, positions, chain, enc_blob_evm,
-                            evm_address, min_trade_usdc, blacklisted,
-                            m5_min, m5_max, pref_scam_filter, short)
+            # The native-funded route executes its own swap internally. Guard
+            # that entire path too, not just USDC-only/gasless submissions.
+            order_key = (wallet, chain, '__native_scan__')
+            with pending_lock:
+                now = d.time.time()
+                if any(w == wallet and c == chain and expiry > now
+                       for (w, c, _), expiry in pending_auto_buys.items()):
+                    return False
+                pending_auto_buys[order_key] = now + 1800
+            try:
+                bought = original(user_id, wallet, positions, chain, enc_blob_evm,
+                                  evm_address, min_trade_usdc, blacklisted,
+                                  m5_min, m5_max, pref_scam_filter, short)
+            except Exception:
+                with pending_lock:
+                    pending_auto_buys.pop(order_key, None)
+                raise
+            with pending_lock:
+                if bought:
+                    pending_auto_buys[order_key] = d.time.time() + 60
+                else:
+                    pending_auto_buys.pop(order_key, None)
+            return bought
         return _gasless_entry(user_id, wallet, positions, chain, enc_blob_evm,
                               evm_address, min_trade_usdc, blacklisted,
                               m5_min, m5_max, pref_scam_filter, short)

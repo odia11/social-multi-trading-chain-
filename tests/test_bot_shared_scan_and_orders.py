@@ -61,8 +61,35 @@ def test_two_concurrent_auto_buys_only_one_order():
     assert len(buys) == 1, 'two overlapping loops double-purchased'
 
 
+
+def test_native_funded_concurrent_scan_only_once():
+    d, buys, old = make_dashboard('base')
+    d.get_evm_native_balance = lambda addr, chain: .01
+    entered, release = threading.Event(), threading.Event()
+    def legacy(*args, **kwargs):
+        old.append(args)
+        entered.set()
+        assert release.wait(3)
+        return True
+    d._bot_scan_evm_entry = legacy
+    multichain_auto_bot.install(d)
+    def scan():
+        return d._bot_scan_evm_entry(7, 'wallet', {}, 'base', 'encrypted',
+                                     '0xwallet', 10., frozenset(), 5., None,
+                                     True, 'test')
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(scan)
+        assert entered.wait(3)
+        second = executor.submit(scan)
+        assert second.result(timeout=3) is False
+        release.set()
+        assert first.result(timeout=3) is True
+    assert len(old) == 1, 'native-funded overlapping loops double-purchased'
+
+
 if __name__ == '__main__':
     test_personal_tp_sl()
     test_singleflight_scanner()
     test_two_concurrent_auto_buys_only_one_order()
-    print('PASS shared scanner, per-position TP/SL and atomic order reservation')
+    test_native_funded_concurrent_scan_only_once()
+    print('PASS shared scanner, personal TP/SL and both atomic order paths')
