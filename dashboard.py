@@ -15426,6 +15426,7 @@ def api_group_post_delete(group_id, post_id):
         is_mod_or_owner = role in ('owner', 'mod')
         if row[0] != uid and not _is_owner(wallet) and not is_mod_or_owner:
             return jsonify({'ok': False, 'msg': 'Not your post'}), 403
+        _delete_feed_post_interactions(conn, 'g' + str(post_id))
         conn.execute('DELETE FROM group_posts WHERE id=?', (post_id,))
         conn.commit()
         return jsonify({'ok': True})
@@ -15915,6 +15916,9 @@ def api_group_delete(group_id):
             conn.execute(f'DELETE FROM group_poll_options WHERE poll_id IN ({ph})', poll_ids)
             conn.execute(f'DELETE FROM group_polls WHERE id IN ({ph})', poll_ids)
         conn.execute('DELETE FROM group_typing WHERE group_id=?', (group_id,))
+        for (gid,) in conn.execute(
+                'SELECT id FROM group_posts WHERE group_id=?', (group_id,)).fetchall():
+            _delete_feed_post_interactions(conn, 'g' + str(gid))
         conn.execute('DELETE FROM group_posts WHERE group_id=?', (group_id,))
         conn.execute('DELETE FROM group_members WHERE group_id=?', (group_id,))
         conn.execute('DELETE FROM groups WHERE id=?', (group_id,))
@@ -19712,16 +19716,19 @@ def social_feed():
             like_counts = dict(conn.execute(
                 f'SELECT post_id, COUNT(*) FROM post_likes WHERE post_id IN ({ph}) GROUP BY post_id',
                 post_ids))
-            reply_counts = dict(conn.execute(
-                f'SELECT post_id, COUNT(*) FROM feed_replies WHERE post_id IN ({ph}) GROUP BY post_id',
-                post_ids))
-            # Timestamp of each post's newest reply -- lets the frontend flag
-            # "someone replied since you last looked" on your own posts
-            # without a separate per-post fetch (see fc-reply-count.new in
-            # dashboard.js/renderHomeFeed()).
-            last_reply_ats = dict(conn.execute(
-                f'SELECT post_id, MAX(created_at) FROM feed_replies WHERE post_id IN ({ph}) GROUP BY post_id',
-                post_ids))
+            # Never count historic orphan replies attached to a reused post id.
+            # Parse UTC/ISO timestamps via SQLite datetime() on both sides.
+            reply_rows = conn.execute(
+                f'''SELECT r.post_id, COUNT(*), MAX(r.created_at)
+                    FROM feed_replies r
+                    LEFT JOIN feed_posts fp ON r.post_id='p'||fp.id
+                    LEFT JOIN trades t ON r.post_id='t'||t.id
+                    WHERE r.post_id IN ({ph})
+                      AND datetime(r.created_at) >=
+                          datetime(COALESCE(fp.created_at, t.timestamp))
+                    GROUP BY r.post_id''', post_ids).fetchall()
+            reply_counts = {pid: count for pid, count, _ in reply_rows}
+            last_reply_ats = {pid: newest for pid, _, newest in reply_rows}
             repost_counts = dict(conn.execute(
                 f'SELECT post_id, COUNT(*) FROM feed_reposts WHERE post_id IN ({ph}) GROUP BY post_id',
                 post_ids))
@@ -20769,6 +20776,7 @@ def feed_post_delete(post_id):
             return jsonify({'ok': False, 'msg': 'Post not found'}), 404
         if row[0] != wallet:
             return jsonify({'ok': False, 'msg': 'Forbidden'}), 403
+        _delete_feed_post_interactions(conn, 'p' + str(post_id))
         conn.execute('DELETE FROM feed_posts WHERE id=?', (post_id,))
         conn.commit()
         return jsonify({'ok': True})
@@ -20824,6 +20832,7 @@ def feed_post_delete_v2(post_id):
             return jsonify({'ok': False, 'msg': 'Post not found'}), 404
         if row[0] != wallet and not is_admin:
             return jsonify({'ok': False, 'msg': 'Forbidden'}), 403
+        _delete_feed_post_interactions(conn, 'p' + str(post_id))
         conn.execute('DELETE FROM feed_posts WHERE id=?', (post_id,))
         conn.commit()
         return jsonify({'ok': True})
@@ -20847,6 +20856,7 @@ def trade_delete(trade_id):
             return jsonify({'ok': False, 'msg': 'Trade not found'}), 404
         if row[0] != uid:
             return jsonify({'ok': False, 'msg': 'Forbidden'}), 403
+        _delete_feed_post_interactions(conn, 't' + str(trade_id))
         conn.execute('DELETE FROM trades WHERE id=?', (trade_id,))
         conn.commit()
         return jsonify({'ok': True})
@@ -21008,7 +21018,9 @@ def get_feed_post(post_id):
             row = conn.execute('''
                 SELECT fp.id, fp.wallet, fp.content, fp.created_at,
                        (SELECT COUNT(*) FROM post_likes   WHERE post_id = 'p'||fp.id) as like_count,
-                       (SELECT COUNT(*) FROM feed_replies WHERE post_id = 'p'||fp.id) as reply_count,
+                       (SELECT COUNT(*) FROM feed_replies r
+                        WHERE r.post_id = 'p'||fp.id
+                          AND datetime(r.created_at)>=datetime(fp.created_at)) as reply_count,
                        fp.view_count,
                        u.username, NULL as symbol, NULL as mint_address, NULL as pnl_pct,
                        (fp.wallet = ?) as is_own, NULL as entry_price, NULL as exit_price,
@@ -21023,7 +21035,9 @@ def get_feed_post(post_id):
                 SELECT t.id, u.wallet_address as wallet, NULL as content,
                        t.timestamp as created_at,
                        (SELECT COUNT(*) FROM post_likes   WHERE post_id = 't'||t.id) as like_count,
-                       (SELECT COUNT(*) FROM feed_replies WHERE post_id = 't'||t.id) as reply_count,
+                       (SELECT COUNT(*) FROM feed_replies r
+                        WHERE r.post_id = 't'||t.id
+                          AND datetime(r.created_at)>=datetime(t.timestamp)) as reply_count,
                        t.view_count,
                        u.username,
                        t.token as symbol,
@@ -21184,6 +21198,32 @@ def _post_owner_uid(conn, post_id):
     return row[0] if row else None
 
 
+def _feed_post_created_at(conn, post_id):
+    """Creation timestamp for the exact post identity (p, t, or g)."""
+    if not isinstance(post_id, str) or len(post_id) < 2 or not post_id[1:].isdigit():
+        return None
+    source = {'p': ('feed_posts', 'created_at'),
+              't': ('trades', 'timestamp'),
+              'g': ('group_posts', 'created_at')}.get(post_id[0])
+    if not source:
+        return None
+    table, column = source  # fixed internal identifiers, never user SQL
+    row = conn.execute(
+        f'SELECT {column} FROM {table} WHERE id=?', (int(post_id[1:]),)
+    ).fetchone()
+    return row[0] if row else None
+
+
+def _delete_feed_post_interactions(conn, post_id):
+    """Remove dependent feed interactions in the caller's post-delete transaction."""
+    conn.execute('DELETE FROM feed_reply_likes WHERE reply_id IN '
+                 '(SELECT id FROM feed_replies WHERE post_id=?)', (post_id,))
+    conn.execute('DELETE FROM feed_replies WHERE post_id=?', (post_id,))
+    conn.execute('DELETE FROM post_likes WHERE post_id=?', (post_id,))
+    conn.execute('DELETE FROM post_reactions WHERE post_id=?', (post_id,))
+    conn.execute('DELETE FROM feed_reposts WHERE post_id=?', (post_id,))
+
+
 @app.route('/api/feed/reply', methods=['POST'])
 @rate_limit(15, 60)
 def post_feed_reply():
@@ -21212,9 +21252,14 @@ def post_feed_reply():
             return jsonify({'ok': False, 'msg': 'User not found'}), 404
         if not _group_post_access_ok(conn, post_id, me):
             return jsonify({'ok': False, 'msg': 'Members only'}), 403
+        post_created_at = _feed_post_created_at(conn, post_id)
+        if not post_created_at:
+            return jsonify({'ok': False, 'msg': 'Post not found'}), 404
         if parent_reply_id is not None:
             parent_row = conn.execute(
-                'SELECT post_id FROM feed_replies WHERE id=?', (parent_reply_id,)
+                'SELECT post_id FROM feed_replies WHERE id=? '
+                'AND datetime(created_at)>=datetime(?)',
+                (parent_reply_id, post_created_at)
             ).fetchone()
             if not parent_row or parent_row[0] != post_id:
                 return jsonify({'ok': False, 'msg': 'Invalid parent_reply_id'}), 400
@@ -21258,6 +21303,9 @@ def get_feed_replies(post_id):
         me = _get_uid(conn, wallet) if wallet else None
         if not _group_post_access_ok(conn, post_id, me):
             return jsonify({'ok': False, 'msg': 'Members only'}), 403
+        post_created_at = _feed_post_created_at(conn, post_id)
+        if not post_created_at:
+            return jsonify({'ok': False, 'msg': 'Post not found'}), 404
         rows = conn.execute(
             '''SELECT r.id,
                       COALESCE(u.username, ''),
@@ -21272,8 +21320,9 @@ def get_feed_replies(post_id):
                FROM feed_replies r
                LEFT JOIN users u ON u.id = r.user_id
                WHERE r.post_id = ?
+                 AND datetime(r.created_at) >= datetime(?)
                ORDER BY r.created_at ASC''',
-            (post_id,)
+            (post_id, post_created_at)
         ).fetchall()
         liked = set()
         if me and rows:
@@ -21317,9 +21366,17 @@ def toggle_feed_reply_like(reply_id):
         me = _get_uid(conn, wallet)
         if not me:
             return jsonify({'ok': False, 'error': 'not logged in'}), 401
-        reply_post = conn.execute('SELECT post_id FROM feed_replies WHERE id=?', (reply_id,)).fetchone()
+        reply_post = conn.execute(
+            'SELECT post_id, created_at FROM feed_replies WHERE id=?', (reply_id,)
+        ).fetchone()
         if not reply_post or not _group_post_access_ok(conn, reply_post[0], me):
-            return jsonify({'ok': False, 'msg': 'Members only'}), 403
+            return jsonify({'ok': False, 'msg': 'Reply unavailable'}), 404
+        created_at = _feed_post_created_at(conn, reply_post[0])
+        if not created_at or not conn.execute(
+            'SELECT datetime(?) >= datetime(?)',
+            (reply_post[1], created_at)
+        ).fetchone()[0]:
+            return jsonify({'ok': False, 'msg': 'Reply unavailable'}), 404
         existing = conn.execute(
             'SELECT id FROM feed_reply_likes WHERE user_id=? AND reply_id=?',
             (me, reply_id)
@@ -29638,6 +29695,9 @@ def admin_ban_user():
         return jsonify({'ok': False, 'msg': 'Missing wallet'}), 400
     conn = sqlite3.connect(DB_FILE)
     try:
+        for (pid,) in conn.execute(
+                'SELECT id FROM feed_posts WHERE wallet=?', (target,)).fetchall():
+            _delete_feed_post_interactions(conn, 'p' + str(pid))
         conn.execute('DELETE FROM users WHERE wallet_address=?', (target,))
         conn.execute('DELETE FROM feed_posts WHERE wallet=?', (target,))
         conn.commit()
@@ -29674,6 +29734,9 @@ def admin_ban_v2():
         return jsonify({'ok': False, 'msg': 'Missing wallet'}), 400
     conn = sqlite3.connect(DB_FILE)
     try:
+        for (pid,) in conn.execute(
+                'SELECT id FROM feed_posts WHERE wallet=?', (target,)).fetchall():
+            _delete_feed_post_interactions(conn, 'p' + str(pid))
         conn.execute('DELETE FROM users WHERE wallet_address=?', (target,))
         conn.execute('DELETE FROM feed_posts WHERE wallet=?', (target,))
         conn.commit()
@@ -29695,6 +29758,7 @@ def admin_delete_post():
         row = conn.execute('SELECT id FROM feed_posts WHERE id=?', (post_id,)).fetchone()
         if not row:
             return jsonify({'ok': False, 'msg': 'Post not found'}), 404
+        _delete_feed_post_interactions(conn, 'p' + str(post_id))
         conn.execute('DELETE FROM feed_posts WHERE id=?', (post_id,))
         conn.commit()
         return jsonify({'ok': True})

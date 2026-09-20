@@ -1,0 +1,141 @@
+"""Post/reply identity regression: old replies must not attach to reused post IDs.
+
+Uses an isolated SQLite database, never the production database.
+"""
+import ast
+import datetime
+import sqlite3
+import tempfile
+import unittest
+from pathlib import Path
+from flask import Flask, jsonify, request, session
+
+BASE = Path(__file__).resolve().parents[1]
+SOURCE = (BASE / 'dashboard.py').read_text()
+FUNCTIONS = {n.name: n for n in ast.parse(SOURCE).body
+             if isinstance(n, ast.FunctionDef)}
+
+
+def extract(ns, *names):
+    nodes = []
+    for name in names:
+        n = FUNCTIONS[name]
+        n.decorator_list = []
+        nodes.append(n)
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), 'dashboard.py', 'exec'), ns)
+
+
+class ReplyIdentityTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db = str(Path(self.tmp.name) / 'replies.db')
+        self.app = Flask(__name__)
+        self.app.secret_key = 'fixture-only'
+        with sqlite3.connect(self.db) as c:
+            c.executescript("""
+            CREATE TABLE users (id INTEGER PRIMARY KEY, wallet_address TEXT,
+                username TEXT, avatar_url TEXT, is_verified INTEGER);
+            CREATE TABLE feed_posts (id INTEGER PRIMARY KEY, wallet TEXT,
+                content TEXT, created_at TEXT, image_url TEXT, view_count INTEGER DEFAULT 0);
+            CREATE TABLE trades (id INTEGER PRIMARY KEY, user_id INTEGER,
+                timestamp TEXT, token TEXT, mint_address TEXT,
+                entry_price REAL, exit_price REAL, view_count INTEGER DEFAULT 0);
+            CREATE TABLE group_posts (id INTEGER PRIMARY KEY, created_at TEXT);
+            CREATE TABLE feed_replies (id INTEGER PRIMARY KEY, post_id TEXT,
+                user_id INTEGER, message TEXT, created_at TEXT,
+                parent_reply_id INTEGER);
+            CREATE TABLE feed_reply_likes (id INTEGER PRIMARY KEY, user_id INTEGER, reply_id INTEGER);
+            CREATE TABLE post_likes (post_id TEXT, user_id INTEGER);
+            CREATE TABLE post_reactions (post_id TEXT, user_id INTEGER);
+            CREATE TABLE feed_reposts (id INTEGER PRIMARY KEY,
+                post_id TEXT, reposter_wallet TEXT, created_at TEXT);
+            INSERT INTO users VALUES (1, 'wallet-one', 'Tester', '', 0);
+            INSERT INTO feed_posts VALUES
+                (450, 'wallet-one', 'New September post', '2026-09-19 18:48:36', NULL, 2),
+                (451, 'wallet-one', 'Another post', '2026-09-20 01:00:00', NULL, 0);
+            INSERT INTO trades VALUES
+                (832, 1, '2026-09-18T17:01:46Z', 'GUMBUS', 'mint', 1, 2, 0);
+            INSERT INTO group_posts VALUES (9, '2026-09-19 18:48:36');
+            INSERT INTO feed_replies VALUES
+                (3, 'p450', 1, 'Historic June reply', '2026-06-29 16:49:26', NULL),
+                (4, 'p450', 1, 'Valid September reply', '2026-09-19 20:00:00', NULL),
+                (5, 't832', 1, 'Valid ISO trade reply', '2026-09-18 17:02:00', NULL),
+                (6, 'g9', 1, 'Old group reply', '2026-06-29 16:49:26', NULL);
+            INSERT INTO feed_reply_likes VALUES (1, 1, 3);
+            INSERT INTO post_likes VALUES ('p450', 1);
+            INSERT INTO post_reactions VALUES ('p450', 1);
+            INSERT INTO feed_reposts VALUES (2, 'p450', 'wallet-one', '2026-09-19 21:00:00');
+            """)
+        self.ns = {
+            'sqlite3': sqlite3, 'DB_FILE': self.db,
+            'jsonify': jsonify, 'request': request, 'session': session,
+            'datetime': datetime,
+            '_authenticated_wallet': lambda: 'wallet-one',
+            '_current_wallet': lambda: 'wallet-one',
+            '_get_uid': lambda c, w: 1,
+            '_group_post_access_ok': lambda c, pid, uid: True,
+            '_team_roles_for_wallets': lambda wallets: {},
+            '_sanitize': lambda value: value,
+            '_post_owner_uid': lambda c, pid: None,
+        }
+        extract(self.ns, '_feed_post_created_at', '_delete_feed_post_interactions',
+                'get_feed_replies', 'post_feed_reply', 'social_feed', 'get_feed_post')
+
+    def test_reply_list_hides_old_reply_but_keeps_real_replies(self):
+        with self.app.test_request_context('/api/feed/replies/p450'):
+            result = self.ns['get_feed_replies']('p450')
+            self.assertEqual(result.json['ok'], True)
+            self.assertEqual([r['id'] for r in result.json['replies']], [4])
+        with self.app.test_request_context('/api/feed/replies/t832'):
+            result = self.ns['get_feed_replies']('t832')
+            self.assertEqual([r['id'] for r in result.json['replies']], [5])
+        with self.app.test_request_context('/api/feed/replies/g9'):
+            result = self.ns['get_feed_replies']('g9')
+            self.assertEqual(result.json['replies'], [])
+        with self.app.test_request_context('/api/feed/replies/p9999'):
+            self.assertEqual(self.ns['get_feed_replies']('p9999')[1], 404)
+
+    def test_feed_and_deep_link_counts_use_only_valid_replies(self):
+        with self.app.test_request_context('/api/social/feed?filter=all'):
+            result = self.ns['social_feed']()
+            feed = result.json['items']
+            post = next(p for p in feed if p['id'] == 450 and p['type'] == 'text')
+            trade = next(p for p in feed if p['id'] == 832)
+            self.assertEqual(post['reply_count'], 1)
+            self.assertEqual(post['last_reply_at'], '2026-09-19 20:00:00')
+            self.assertEqual(trade['reply_count'], 1)
+        with self.app.test_request_context('/api/feed/post/p450'):
+            self.assertEqual(self.ns['get_feed_post']('p450').json['post']['reply_count'], 1)
+        with self.app.test_request_context('/api/feed/post/t832'):
+            self.assertEqual(self.ns['get_feed_post']('t832').json['post']['reply_count'], 1)
+
+    def test_new_reply_rejects_stale_parent_and_missing_post(self):
+        with self.app.test_request_context('/api/feed/reply', method='POST',
+                 json={'post_id':'p450', 'message':'Nested', 'parent_reply_id':3}):
+            self.assertEqual(self.ns['post_feed_reply']()[1], 400)
+        with self.app.test_request_context('/api/feed/reply', method='POST',
+                 json={'post_id':'p9999', 'message':'Orphan'}):
+            self.assertEqual(self.ns['post_feed_reply']()[1], 404)
+        with self.app.test_request_context('/api/feed/reply', method='POST',
+                 json={'post_id':'p450', 'message':'Nested', 'parent_reply_id':4}):
+            self.assertEqual(self.ns['post_feed_reply']().json['ok'], True)
+
+    def test_deleting_post_cleans_replies_likes_and_reposts_together(self):
+        with sqlite3.connect(self.db) as conn:
+            self.ns['_delete_feed_post_interactions'](conn,'p450')
+            conn.execute('DELETE FROM feed_posts WHERE id=450')
+            conn.commit()
+            for table in ('feed_replies','post_likes','post_reactions','feed_reposts'):
+                self.assertEqual(conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE post_id='p450'"
+                ).fetchone()[0],0,table)
+            self.assertEqual(conn.execute(
+                'SELECT COUNT(*) FROM feed_reply_likes'
+            ).fetchone()[0],0)
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM feed_replies WHERE post_id='t832'"
+            ).fetchone()[0],1)
+
+if __name__ == '__main__':
+    unittest.main()
