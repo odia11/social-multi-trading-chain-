@@ -12469,7 +12469,8 @@ def api_token_holders(mint):
                 if post_row:
                     pid, content, created_at = post_row
                     like_count = c.execute(
-                        "SELECT COUNT(*) FROM post_likes WHERE post_id = ?", ('p' + str(pid),)
+                        "SELECT COUNT(*) FROM post_likes WHERE post_id = ? AND datetime(created_at)>=datetime(?)",
+                        ('p' + str(pid), created_at)
                     ).fetchone()[0]
                     post = {'id': pid, 'content': content, 'created_at': created_at, 'like_count': like_count}
             holders.append({
@@ -12522,7 +12523,8 @@ def api_token_feed(mint):
         posts = []
         for pid, username, avatar_url, is_verified, content, created_at in rows:
             like_count = c.execute(
-                "SELECT COUNT(*) FROM post_likes WHERE post_id = ?", ('p' + str(pid),)
+                "SELECT COUNT(*) FROM post_likes WHERE post_id = ? AND datetime(created_at)>=datetime(?)",
+                        ('p' + str(pid), created_at)
             ).fetchone()[0]
             posts.append({
                 'username':    username or '',
@@ -19698,6 +19700,7 @@ def social_feed():
                        ru.avatar_url, ru.is_verified, fr.post_id as repost_of, NULL as image_url
                 FROM feed_reposts fr
                 LEFT JOIN users ru ON fr.reposter_wallet = ru.wallet_address
+                WHERE ''' + _valid_post_interaction_sql('fr') + '''
             )
         ''' + where_clause + '''
             ORDER BY
@@ -19714,7 +19717,8 @@ def social_feed():
         if post_ids:
             ph = ','.join('?' * len(post_ids))
             like_counts = dict(conn.execute(
-                f'SELECT post_id, COUNT(*) FROM post_likes WHERE post_id IN ({ph}) GROUP BY post_id',
+                f'SELECT pl.post_id, COUNT(*) FROM post_likes pl WHERE pl.post_id IN ({ph}) AND '
+                + _valid_post_interaction_sql('pl') + ' GROUP BY pl.post_id',
                 post_ids))
             # Never count historic orphan replies attached to a reused post id.
             # Parse UTC/ISO timestamps via SQLite datetime() on both sides.
@@ -19730,18 +19734,21 @@ def social_feed():
             reply_counts = {pid: count for pid, count, _ in reply_rows}
             last_reply_ats = {pid: newest for pid, _, newest in reply_rows}
             repost_counts = dict(conn.execute(
-                f'SELECT post_id, COUNT(*) FROM feed_reposts WHERE post_id IN ({ph}) GROUP BY post_id',
+                f'SELECT fr.post_id, COUNT(*) FROM feed_reposts fr WHERE fr.post_id IN ({ph}) AND '
+                + _valid_post_interaction_sql('fr') + ' GROUP BY fr.post_id',
                 post_ids))
         liked_by_me = set()
         reposted_by_me = set()
         my_uid_for_likes = _get_uid(conn, my_wallet)
         if my_uid_for_likes and post_ids:
             liked_by_me = {r[0] for r in conn.execute(
-                f'SELECT post_id FROM post_likes WHERE user_id=? AND post_id IN ({ph})',
+                f'SELECT pl.post_id FROM post_likes pl WHERE pl.user_id=? AND pl.post_id IN ({ph}) AND '
+                + _valid_post_interaction_sql('pl'),
                 [my_uid_for_likes] + post_ids)}
         if my_wallet and post_ids:
             reposted_by_me = {r[0] for r in conn.execute(
-                f'SELECT post_id FROM feed_reposts WHERE reposter_wallet=? AND post_id IN ({ph})',
+                f'SELECT fr.post_id FROM feed_reposts fr WHERE fr.reposter_wallet=? AND fr.post_id IN ({ph}) AND '
+                + _valid_post_interaction_sql('fr'),
                 [my_wallet] + post_ids)}
         # Resolve the original post/trade each repost row points at, so the feed can
         # render "X reposted" with the original content embedded underneath.
@@ -20898,6 +20905,15 @@ def toggle_feed_like(post_id):
             return jsonify({'ok': False, 'msg': 'User not found'}), 404
         if not _group_post_access_ok(conn, post_id, me):
             return jsonify({'ok': False, 'msg': 'Members only'}), 403
+        post_created_at = _require_interaction_post(conn, post_id)
+        if not post_created_at:
+            return jsonify({'ok': False, 'msg': 'Post not found'}), 404
+        # A stale like is not a toggle on a newly reused post identity.
+        conn.execute(
+            'DELETE FROM post_likes WHERE user_id=? AND post_id=? '
+            'AND (datetime(created_at)<datetime(?) OR datetime(created_at) IS NULL)',
+            (me, post_id, post_created_at)
+        )
         existing = conn.execute(
             'SELECT id FROM post_likes WHERE user_id=? AND post_id=?', (me, post_id)
         ).fetchone()
@@ -20920,7 +20936,10 @@ def toggle_feed_like(post_id):
                     'INSERT INTO notifications (user_id, type, content, link, actor_wallet) VALUES (?,?,?,?,?)',
                     (owner_uid, 'like', liker_name+' liked your post', link, wallet))
                 _send_push_notification(owner_uid, 'New like', liker_name+' liked your post', link)
-        count = conn.execute('SELECT COUNT(*) FROM post_likes WHERE post_id=?', (post_id,)).fetchone()[0]
+        count = conn.execute(
+            'SELECT COUNT(*) FROM post_likes WHERE post_id=? AND '
+            'datetime(created_at)>=datetime(?)',
+            (post_id, post_created_at)).fetchone()[0]
         conn.commit()
     finally:
         conn.close()
@@ -20939,6 +20958,14 @@ def toggle_feed_repost(post_id):
         me = _get_uid(conn, wallet)
         if not me:
             return jsonify({'ok': False, 'msg': 'User not found'}), 404
+        post_created_at = _require_interaction_post(conn, post_id)
+        if not post_created_at:
+            return jsonify({'ok': False, 'msg': 'Post not found'}), 404
+        conn.execute(
+            'DELETE FROM feed_reposts WHERE reposter_wallet=? AND post_id=? '
+            'AND (datetime(created_at)<datetime(?) OR datetime(created_at) IS NULL)',
+            (wallet, post_id, post_created_at)
+        )
         existing = conn.execute(
             'SELECT id FROM feed_reposts WHERE reposter_wallet=? AND post_id=?', (wallet, post_id)
         ).fetchone()
@@ -20956,7 +20983,10 @@ def toggle_feed_repost(post_id):
                     'INSERT INTO notifications (user_id, type, content, link, actor_wallet) VALUES (?,?,?,?,?)',
                     (owner_uid, 'repost', reposter_name+' reposted your post', '/#post-'+post_id, wallet))
                 _send_push_notification(owner_uid, 'New repost', reposter_name+' reposted your post', '/#post-'+post_id)
-        count = conn.execute('SELECT COUNT(*) FROM feed_reposts WHERE post_id=?', (post_id,)).fetchone()[0]
+        count = conn.execute(
+            'SELECT COUNT(*) FROM feed_reposts WHERE post_id=? '
+            'AND datetime(created_at)>=datetime(?)',
+            (post_id, post_created_at)).fetchone()[0]
         conn.commit()
     finally:
         conn.close()
@@ -20967,14 +20997,22 @@ def toggle_feed_repost(post_id):
 def get_feed_likes(post_id):
     conn = sqlite3.connect(DB_FILE)
     try:
-        count = conn.execute('SELECT COUNT(*) FROM post_likes WHERE post_id=?', (post_id,)).fetchone()[0]
+        post_created_at = _require_interaction_post(conn, post_id)
+        if not post_created_at:
+            return jsonify({'ok': False, 'msg': 'Post not found'}), 404
+        count = conn.execute(
+            'SELECT COUNT(*) FROM post_likes WHERE post_id=? '
+            'AND datetime(created_at)>=datetime(?)',
+            (post_id, post_created_at)).fetchone()[0]
         wallet = _current_wallet()
         liked = False
         if wallet:
             me = _get_uid(conn, wallet)
             if me:
                 liked = bool(conn.execute(
-                    'SELECT 1 FROM post_likes WHERE user_id=? AND post_id=?', (me, post_id)
+                    'SELECT 1 FROM post_likes WHERE user_id=? AND post_id=? '
+                    'AND datetime(created_at)>=datetime(?)',
+                    (me, post_id, post_created_at)
                 ).fetchone())
     finally:
         conn.close()
@@ -20986,13 +21024,16 @@ def get_feed_like_users(post_id):
     """Who liked this post — for the 'liked by' list. Most recent like first."""
     conn = sqlite3.connect(DB_FILE)
     try:
+        post_created_at = _require_interaction_post(conn, post_id)
+        if not post_created_at:
+            return jsonify({'ok': False, 'msg': 'Post not found'}), 404
         rows = conn.execute(
             '''SELECT u.id, u.wallet_address, u.username, u.avatar_url, u.is_verified
                FROM post_likes pl JOIN users u ON u.id = pl.user_id
-               WHERE pl.post_id=?
+               WHERE pl.post_id=? AND datetime(pl.created_at)>=datetime(?)
                ORDER BY pl.created_at DESC
                LIMIT 200''',
-            (post_id,)
+            (post_id, post_created_at)
         ).fetchall()
     finally:
         conn.close()
@@ -21017,7 +21058,8 @@ def get_feed_post(post_id):
         if post_id.startswith('p') and post_id[1:].isdigit():
             row = conn.execute('''
                 SELECT fp.id, fp.wallet, fp.content, fp.created_at,
-                       (SELECT COUNT(*) FROM post_likes   WHERE post_id = 'p'||fp.id) as like_count,
+                       (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id='p'||fp.id
+                          AND datetime(pl.created_at)>=datetime(fp.created_at)) as like_count,
                        (SELECT COUNT(*) FROM feed_replies r
                         WHERE r.post_id = 'p'||fp.id
                           AND datetime(r.created_at)>=datetime(fp.created_at)) as reply_count,
@@ -21034,7 +21076,8 @@ def get_feed_post(post_id):
             row = conn.execute('''
                 SELECT t.id, u.wallet_address as wallet, NULL as content,
                        t.timestamp as created_at,
-                       (SELECT COUNT(*) FROM post_likes   WHERE post_id = 't'||t.id) as like_count,
+                       (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id='t'||t.id
+                          AND datetime(pl.created_at)>=datetime(t.timestamp)) as like_count,
                        (SELECT COUNT(*) FROM feed_replies r
                         WHERE r.post_id = 't'||t.id
                           AND datetime(r.created_at)>=datetime(t.timestamp)) as reply_count,
@@ -21103,6 +21146,14 @@ def toggle_feed_reaction(post_id):
             return jsonify({'ok': False, 'msg': 'User not found'}), 404
         if not _group_post_access_ok(conn, post_id, me):
             return jsonify({'ok': False, 'msg': 'Members only'}), 403
+        post_created_at = _require_interaction_post(conn, post_id)
+        if not post_created_at:
+            return jsonify({'ok': False, 'msg': 'Post not found'}), 404
+        conn.execute(
+            'DELETE FROM post_reactions WHERE user_id=? AND post_id=? AND emoji=? '
+            'AND (datetime(created_at)<datetime(?) OR datetime(created_at) IS NULL)',
+            (me, post_id, emoji, post_created_at)
+        )
         existing = conn.execute(
             'SELECT id FROM post_reactions WHERE user_id=? AND post_id=? AND emoji=?',
             (me, post_id, emoji)
@@ -21134,12 +21185,14 @@ def toggle_feed_reaction(post_id):
                 _send_push_notification(owner_uid, 'New reaction', reactor_name+' reacted '+emoji+' to your post', link)
         conn.commit()
         counts = {row[0]: row[1] for row in conn.execute(
-            'SELECT emoji, COUNT(*) FROM post_reactions WHERE post_id=? GROUP BY emoji',
-            (post_id,)
+            'SELECT emoji, COUNT(*) FROM post_reactions WHERE post_id=? '
+            'AND datetime(created_at)>=datetime(?) GROUP BY emoji',
+            (post_id, post_created_at)
         ).fetchall()}
         mine = [row[0] for row in conn.execute(
-            'SELECT emoji FROM post_reactions WHERE user_id=? AND post_id=?',
-            (me, post_id)
+            'SELECT emoji FROM post_reactions WHERE user_id=? AND post_id=? '
+            'AND datetime(created_at)>=datetime(?)',
+            (me, post_id, post_created_at)
         ).fetchall()]
     finally:
         conn.close()
@@ -21158,7 +21211,9 @@ def feed_reactions_batch():
     try:
         ph = ','.join('?' * len(post_ids))
         count_rows = conn.execute(
-            f'SELECT post_id, emoji, COUNT(*) FROM post_reactions WHERE post_id IN ({ph}) GROUP BY post_id, emoji',
+            f'SELECT pr.post_id, pr.emoji, COUNT(*) FROM post_reactions pr '
+            f'WHERE pr.post_id IN ({ph}) AND ' + _valid_post_interaction_sql('pr')
+            + ' GROUP BY pr.post_id, pr.emoji',
             post_ids
         ).fetchall()
         reactions = {}
@@ -21169,7 +21224,9 @@ def feed_reactions_batch():
             me = _get_uid(conn, wallet)
             if me:
                 mine_rows = conn.execute(
-                    f'SELECT post_id, emoji FROM post_reactions WHERE user_id=? AND post_id IN ({ph})',
+                    f'SELECT pr.post_id, pr.emoji FROM post_reactions pr '
+                    f'WHERE pr.user_id=? AND pr.post_id IN ({ph}) AND '
+                    + _valid_post_interaction_sql('pr'),
                     [me] + post_ids
                 ).fetchall()
                 for pid, emoji in mine_rows:
@@ -21212,6 +21269,21 @@ def _feed_post_created_at(conn, post_id):
         f'SELECT {column} FROM {table} WHERE id=?', (int(post_id[1:]),)
     ).fetchone()
     return row[0] if row else None
+
+
+def _valid_post_interaction_sql(alias):
+    """SQL predicate: interaction must belong to this incarnation of its post."""
+    return (
+        f"datetime({alias}.created_at) >= datetime(COALESCE("
+        f"(SELECT created_at FROM feed_posts WHERE 'p'||id={alias}.post_id),"
+        f"(SELECT timestamp FROM trades WHERE 't'||id={alias}.post_id),"
+        f"(SELECT created_at FROM group_posts WHERE 'g'||id={alias}.post_id)))"
+    )
+
+
+def _require_interaction_post(conn, post_id):
+    created = _feed_post_created_at(conn, post_id)
+    return created
 
 
 def _delete_feed_post_interactions(conn, post_id):
