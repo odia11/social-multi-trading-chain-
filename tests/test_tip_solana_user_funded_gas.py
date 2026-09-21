@@ -73,7 +73,8 @@ def test_direct_solana_failure_can_retry_after_user_funded_topup():
 def test_topup_targets_absolute_required_sol_plus_margin():
     b=block(TIP,"@app.post('/api/tip')","@app.post('/api/wallet/send-token')")
     assert "Decimal(max(required, 0)) / Decimal(1_000_000_000)" in b
-    assert "+ Decimal('0.0005')" in b
+    assert "Decimal('0.001') if solana_gas_shortfall" in b
+    assert "Decimal('0.0005')" in b
 
 
 if __name__=='__main__':

@@ -33,6 +33,45 @@ def test_real_sol_shortfall_is_specific():
     assert exc.gas_shortfall and exc.reason_code == 'insufficient_sol'
 
 
+
+def test_live_rent_failure_account_zero_triggers_user_funded_gas():
+    # Verbatim structural error from the user's 21:49 UTC rejected tip.
+    rpc_error = {
+        'code': -32002, 'message': 'Transaction simulation failed',
+        'data': {'err': {'InsufficientFundsForRent': {'account_index': 0}},
+                 'logs': []},
+    }
+    exc = m._preflight_error_from_rpc(rpc_error)
+    assert exc.gas_shortfall is True
+    assert exc.reason_code == 'insufficient_sol'
+    assert 'SOL' in str(exc)
+
+
+def test_insufficient_spl_token_funds_does_not_trigger_sol_topup():
+    rpc_error = {
+        'code': -32002, 'message': 'Transaction simulation failed',
+        'data': {'err': {'InstructionError': [1, {'Custom': 1}]},
+                 'logs': ['Program log: Error: insufficient funds']},
+    }
+    exc = m._preflight_error_from_rpc(rpc_error)
+    assert not exc.gas_shortfall
+    assert exc.reason_code == 'program_rejected'
+
+
+def test_tip_rent_rejection_increases_reserve_and_preserves_amount():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] /
+           'portfolio_token_withdraw.py').read_text()
+    start = src.index("if not tx_hash and sol:")
+    end = src.index("if not tx_hash:", start+20)
+    block = src[start:end]
+    assert "spare = sol['balance'] - amount" in block
+    assert "Decimal('0.0035') if solana_gas_shortfall" in block
+    assert "Decimal('0.001') if solana_gas_shortfall" in block
+    assert "topup(sender_wallet, spare, target_sol=float(target_sol))" in block
+
+
+
 def test_stale_blockhash_is_not_relabelled_as_gas():
     exc=m._preflight_error_from_rpc({
         'message': 'Transaction simulation failed',

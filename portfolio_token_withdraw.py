@@ -99,8 +99,9 @@ def _preflight_error_from_rpc(error):
     joined = ' '.join((error_text, detail)).lower()
     gas_shortfall = any(term in joined for term in (
         'insufficient lamports', 'insufficient funds for fee',
-        'insufficient funds for rent', 'insufficientfundsforfee',
-        'accountnotrentexempt', 'insufficient funds for transaction fee'))
+        'insufficient funds for rent', 'insufficientfundsforrent',
+        'insufficientfundsforfee', 'accountnotrentexempt',
+        'insufficient funds for transaction fee'))
     blockhash = 'blockhashnotfound' in joined or 'blockhash not found' in joined
     if gas_shortfall:
         label = 'Insufficient SOL for the network fee or token-account rent'
@@ -714,12 +715,18 @@ def install(d):
                     try:
                         required = int(sol.get('required_lamports') or 0)
                         current = int(sol.get('lamports') or 0)
-                        # Top up to at least the readiness estimate with a
-                        # safety cushion for preflight/priority-fee variance.
+                        # The 165-byte ATA rent estimate alone does not
+                        # guarantee that account 0 (sender/fee payer) remains
+                        # rent-exempt after an account creation. A confirmed
+                        # InsufficientFundsForRent from simulation overrides
+                        # the optimistic readiness estimate. Keep the tip
+                        # amount reserved and bootstrap only from spare USDC.
                         target_sol = max(
-                            Decimal('0.0025'),
+                            Decimal('0.0035') if solana_gas_shortfall
+                            else Decimal('0.0025'),
                             (Decimal(max(required, 0)) / Decimal(1_000_000_000))
-                            + Decimal('0.0005')
+                            + (Decimal('0.001') if solana_gas_shortfall
+                               else Decimal('0.0005'))
                         )
                         topup(sender_wallet, spare, target_sol=float(target_sol))
                         recipient_address = recipient['solana']
