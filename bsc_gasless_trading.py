@@ -447,6 +447,12 @@ def install(d):
         return original_fee(private_key, wallet, user_id, symbol, usdc_amount, kind,
                             chain, trade_ts, gross_profit)
 
+    # Expose the user-funded gas conversion to the cross-chain bridge path.
+    d._gasless_evm_native_topup = (
+        lambda private_key, chain_name:
+            _gasless_native_topup(d, private_key, chain_name)
+    )
+
     d._ensure_evm_gas = ensure_gas
     d._execute_evm_swap = execute
     d._charge_evm_txn_fee = charge_fee
