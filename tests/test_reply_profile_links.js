@@ -1,0 +1,20 @@
+const assert=require('node:assert/strict');
+const fs=require('fs');
+const vm=require('vm');
+const js=fs.readFileSync('static/dashboard.js','utf8');
+const html=fs.readFileSync('dashboard.html','utf8');
+const start=js.indexOf('function _renderReplyRow(');
+const end=js.indexOf('\nfunction _feedToggleNestedReply(',start);
+assert(start>0&&end>start,'Reply renderer exists');
+const context={esc:s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'),_fcRichText:s=>s,_teamBadgeHtml:()=>'',_replyRelTime:()=> 'now',encodeURIComponent};
+vm.createContext(context);
+vm.runInContext(js.slice(start,end),context);
+function row(r){return context._renderReplyRow({id:123,username:'Alice',wallet:'Cdn8WftaYcdudV9yeeQPY1A1Tgo1bMa9eV4Tv9SeAM9',message:'hello',avatar_url:'',...r},'p450',0)}
+assert.match(row({}),/<a class="fc-ri-name fc-ri-profile-link" href="\/profile\/Cdn8WftaYcdudV9yeeQPY1A1Tgo1bMa9eV4Tv9SeAM9" onclick="event.stopPropagation\(\)">Alice<\/a>/);
+assert.match(row({username:'Renamed'}),/href="\/profile\/Cdn8WftaYcdudV9yeeQPY1A1Tgo1bMa9eV4Tv9SeAM9"[^>]*>Renamed<\/a>/);
+assert.match(row({username:'<img onerror=bad>'}),/&lt;img onerror=bad&gt;<\/a>/);
+assert.doesNotMatch(row({username:'<img onerror=bad>'}),/<img onerror=bad>/);
+assert.match(row({wallet:''}),/<span class="fc-ri-name">Alice<\/span>/);
+assert.equal((js.match(/username: d\.username, wallet: d\.wallet \|\| ''/g)||[]).length,2,'normal and nested replies both receive wallet');
+assert.match(html,/\.fc-ri-profile-link\{[^}]*cursor:pointer/);
+console.log('PASS reply profile links: wallet routing, rename stability, escaping, both newly posted reply types, mobile styling');

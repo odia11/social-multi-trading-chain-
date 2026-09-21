@@ -41,8 +41,10 @@ document.head.appendChild(style);
 
 function json(url){var sep=url.indexOf('?')>=0?'&':'?';return fetch(url+sep+'t='+Date.now(),{credentials:'include',cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('read failed');return r.json()})}
 function calculate(summary,tokBody,bal){
+  summary=summary||{};tokBody=tokBody||{};bal=bal||{};
   var stable=num(summary.total_usdc!=null?summary.total_usdc:summary.total);
   var tokens=Array.isArray(tokBody.tokens)?tokBody.tokens:[];
+  var solToken=tokens.find(function(x){return String(x.symbol||'').toUpperCase()==='SOL'});
   var other=tokens.reduce(function(sum,x){
     var sym=String(x.symbol||x.ticker||'').toUpperCase();
     if(sym==='USDC'||sym==='USDT'||sym==='USDG'||sym==='SOL')return sum;
@@ -50,8 +52,12 @@ function calculate(summary,tokBody,bal){
     if(v==null)v=num(x.balance!=null?x.balance:x.amount)*num(x.price_usd!=null?x.price_usd:x.price);
     return sum+num(v);
   },0);
-  var solPrice=num(bal.sol_price||summary.sol_price||window._wSolPrice||0);
-  var solValue=num(bal.sol)*solPrice;
+  var solPrice=num(bal.sol_price||summary.sol_price||(solToken&&(solToken.price_usd||solToken.price))||window._wSolPrice||0);
+  var solAmount=(bal.sol!=null)?num(bal.sol):num(solToken&&(solToken.balance!=null?solToken.balance:solToken.amount));
+  var solValue=solAmount*solPrice;
+  if(!(solValue>0)&&solToken){
+    solValue=num(solToken.usd_value!=null?solToken.usd_value:solToken.value_usd);
+  }
   return {stable:stable,sol:solValue,other:other,total:stable+solValue+other};
 }
 function paint(snap){
@@ -63,42 +69,46 @@ function paint(snap){
   var donut=document.getElementById('pf-donut');if(donut)donut.style.background='conic-gradient(var(--pf-yellow) 0 '+p1.toFixed(1)+'%,#7ed797 '+p1.toFixed(1)+'% '+(p1+p2).toFixed(1)+'%,#7b8ca6 '+(p1+p2).toFixed(1)+'% 100%)';
   [['pf-a',stable],['pf-b',solValue],['pf-c',other]].forEach(function(x){var e=document.getElementById(x[0]+'-val');if(e)e.textContent=(x[1]/sum*100).toFixed(1)+'%'});
   _lastPaint=Date.now();window.__orcaPortfolioValue=total;
-  document.dispatchEvent(new CustomEvent('orca:portfolio-value',{detail:{total:total}}));
+  document.dispatchEvent(new CustomEvent('orca:portfolio-value',{detail:{total:total,stable:stable,sol:solValue,other:other}}));
 }
 
 /* A Portfolio paint is all-or-nothing. Previously Promise.allSettled painted
    whatever subset happened to finish, so a transient RPC/rate-limit failure
    could briefly turn a $1.46 portfolio into $0.13 and back. */
-function refreshValue(){
+function refreshValue(forceFresh){
   if(_busy||document.hidden)return Promise.resolve(false);
   _busy=true;
-  return Promise.all([
-    json('/api/wallet/usdc-summary'),
-    json('/api/wallet/tokens?bust=1'),
-    json('/api/wallet/balance')
-  ]).then(function(r){paint(calculate(r[0]||{},r[1]||{},r[2]||{}));decorate();return true})
-    .catch(function(){return false})
-    .finally(function(){_busy=false});
+  var getter=window.OrcAgentGetPortfolioSnapshot;
+  var req=(typeof getter==='function')?getter(!!forceFresh):json('/api/portfolio/snapshot'+(forceFresh?'?bust=1':''));
+  return req.then(function(s){
+    if(!s||!s.ok)return false;
+    paint({stable:num(s.stable&&s.stable.total_usdc),
+           sol:num(s.sol&&s.sol.value_usd),
+           other:num(s.other_assets_value_usd),
+           total:num(s.total_usd)});
+    decorate();return true;
+  }).catch(function(){return false}).finally(function(){_busy=false});
 }
 function refreshHoldings(){
   try{if(typeof window.loadTokens==='function')window.loadTokens(true)}catch(e){}
-  return refreshValue();
+  return refreshValue(true);
 }
 function queue(fn,delay){if(_queued)clearTimeout(_queued);_queued=setTimeout(function(){_queued=null;fn()},delay||0)}
 function boot(){
   decorate();
   var h=document.querySelector('.holdings');
   if(h&&window.MutationObserver){var mt=null;new MutationObserver(function(){clearTimeout(mt);mt=setTimeout(decorate,80)}).observe(h,{childList:true,subtree:true})}
-  /* One initial holdings load, then 5-second complete snapshots. No focus/
-     visibility storm: iOS can fire those events repeatedly while switching
-     app/browser. */
-  queue(refreshHoldings,60);
+  /* The wallet template already starts loadTokens() itself. Do NOT immediately
+     start a second forced all-chain token scan here: that made Total Balance
+     wait behind duplicate RPC work. First paint from the normal cached token
+     snapshot, then keep revalidating quietly in the background. */
+  queue(function(){refreshValue(false)},0);
   if(_timer)clearInterval(_timer);
-  _timer=setInterval(refreshValue,AUTO_REFRESH_MS);
+  _timer=setInterval(function(){refreshValue(false)},AUTO_REFRESH_MS);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 document.addEventListener('orca:trade-complete',function(){queue(refreshHoldings,150)});
-document.addEventListener('orca:bfcache-restored',function(){queue(refreshValue,100)});
+document.addEventListener('orca:bfcache-restored',function(){queue(function(){refreshValue(false)},100)});
 window.OrcAgentRefreshPortfolio=refreshHoldings;
 window.OrcAgentRefreshPortfolioValue=refreshValue;
 })();

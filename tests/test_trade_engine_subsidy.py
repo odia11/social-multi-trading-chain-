@@ -140,7 +140,7 @@ check('attaching to a grant that does not exist raises instead of doing nothing'
 
 
 # ── the admin endpoint reports it ──
-src = open('/home/user/Orc-agent-Solana-chain-/dashboard.py').read()
+src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'dashboard.py')).read()
 check('the admin gas-sponsor endpoint returns the subsidy figure',
       "'subsidy': subsidy," in src)
 check('...and returns the same shape when sponsorship is switched off, so the '

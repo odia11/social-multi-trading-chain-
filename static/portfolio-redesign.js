@@ -35,63 +35,45 @@ function polishWithdrawModal(){
   var title=modal.querySelector('.w-modal-title');if(title&&/^\s*Send\s*$/i.test(title.textContent||''))title.textContent='Withdraw';
   var btn=document.getElementById('send-btn');if(btn){var text=(btn.textContent||'').trim();if(/^Send\b/i.test(text))btn.textContent=text.replace(/^Send\b/i,'Withdraw')}
 }
-function removeLegacyHistoryCards(){
-  /* The old Wallet template contains Recent activity, Bridge History and
-     Trade History cards. Bot trades belong on /history and bridge diagnostics
-     do not belong in Portfolio. Portfolio now has one dedicated Live Market
-     transaction card injected separately, so remove every legacy act-card. */
-  document.querySelectorAll('.act-card').forEach(function(card){card.remove()});
-}
+function removeLegacyHistoryCards(){ /* Preserve actual wallet and bridge history for the History tab. */ }
 function boot(){
   if(location.pathname.replace(/\/+$/,'')!=='/wallet'){revealPortfolio();return}
-  if(document.body.classList.contains('oa-portfolio')){removeLegacyHistoryCards();revealWhenStyled();return}
-  document.body.classList.add('oa-portfolio','pf-view-overview');
+  if(document.body.classList.contains('oa-portfolio')){revealWhenStyled();return}
+  document.body.classList.add('oa-portfolio','pf-view-assets');
   document.title='Portfolio — OrcAgent';
 
   var title=document.querySelector('.wlt-title'),sub=document.querySelector('.wlt-sub');
   if(title)title.textContent='Portfolio';
-  if(sub)sub.textContent='Your complete multi-chain trading portfolio';
+  if(sub)sub.textContent='Your multi-chain trading wallet';
   document.querySelectorAll('a[href="/wallet"],a[href^="/wallet?"]').forEach(function(a){var text=(a.textContent||'').trim();if(/wallet/i.test(text))a.textContent=text.replace(/wallet/ig,'Portfolio');a.setAttribute('aria-label','Portfolio')});
 
   var center=document.querySelector('.wlt-center'),hdr=document.querySelector('.wlt-hdr'),content=document.querySelector('.wlt-content');
   if(!center||!hdr||!content){revealPortfolio();return}
 
-  var tabs=document.createElement('div');
-  tabs.className='pf-tabs';
-  tabs.innerHTML='<button class="pf-tab active" data-pf-view="overview">Overview</button><button class="pf-tab" data-pf-view="deposit">Deposit</button><button class="pf-tab" data-pf-view="withdraw">Withdraw</button>';
-  hdr.insertAdjacentElement('afterend',tabs);
+  var tabs=document.querySelector('.portfolio-tabs');
 
-  var hero=document.createElement('section');
-  hero.className='pf-balance-card';
-  hero.innerHTML='<div class="pf-kicker">Total portfolio value</div><div class="pf-balance" id="pf-total">$0.00</div><div class="pf-change" id="pf-change"><span>Multi-chain</span><span class="muted">live balances</span></div><div class="pf-actions"><button class="pf-action deposit" id="pf-deposit">↓ <span>Deposit</span></button><button class="pf-action withdraw" id="pf-withdraw">⇧ <span>Withdraw</span></button></div>';
-  content.insertBefore(hero,content.firstChild);
+  var hero=document.querySelector('.wlt-hero');
 
-  var allocation=document.createElement('section');
-  allocation.className='pf-allocation';
-  allocation.innerHTML='<div class="pf-donut" id="pf-donut"><div class="pf-donut-center" id="pf-donut-total">$0.00</div></div><div class="pf-legend"><div class="pf-leg-row"><span class="pf-dot a"></span><span class="pf-leg-name" id="pf-a-name">USDC</span><span class="pf-leg-val" id="pf-a-val">—</span></div><div class="pf-leg-row"><span class="pf-dot b"></span><span class="pf-leg-name" id="pf-b-name">SOL</span><span class="pf-leg-val" id="pf-b-val">—</span></div><div class="pf-leg-row"><span class="pf-dot c"></span><span class="pf-leg-name" id="pf-c-name">Other</span><span class="pf-leg-val" id="pf-c-val">—</span></div></div>';
-  hero.insertAdjacentElement('afterend',allocation);
+  /* No synthetic balance or allocation: the real wallet hero owns the live total. */
 
   var holdings=document.querySelector('.holdings');
   if(holdings){var ht=holdings.querySelector('.holdings-title');if(ht)ht.textContent='Assets'}
   removeLegacyHistoryCards();
 
   function showView(view){
-    document.body.classList.remove('pf-view-overview','pf-view-deposit','pf-view-withdraw');
-    if(view==='withdraw'){
-      document.body.classList.add('pf-view-overview');
-      tabs.querySelectorAll('.pf-tab').forEach(function(b){b.classList.toggle('active',b.dataset.pfView==='withdraw')});
-      call('_modalSend');setTimeout(polishWithdrawModal,0);return;
-    }
+    if(['assets','history'].indexOf(view)===-1)view='assets';
+    document.body.classList.remove('pf-view-overview','pf-view-deposit','pf-view-withdraw','pf-view-assets','pf-view-chains','pf-view-history');
     document.body.classList.add('pf-view-'+view);
-    tabs.querySelectorAll('.pf-tab').forEach(function(b){b.classList.toggle('active',b.dataset.pfView===view)});
-    if(view==='deposit'){
-      setTimeout(function(){var d=document.querySelector('.dep-card');if(!d)return;try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){try{d.scrollIntoView()}catch(_e){}}},30);
-    }else{try{center.scrollTop=0}catch(e){}try{window.scrollTo(0,0)}catch(e){}}
+    if(tabs)tabs.querySelectorAll('[data-portfolio-tab]').forEach(function(b){
+      var active=b.dataset.portfolioTab===view;
+      b.classList.toggle('selected',active);b.setAttribute('aria-selected',String(active));
+    });
   }
-  tabs.addEventListener('click',function(e){var b=e.target.closest('[data-pf-view]');if(b)showView(b.dataset.pfView)});
-  document.getElementById('pf-deposit').addEventListener('click',function(){showView('deposit')});
-  document.getElementById('pf-withdraw').addEventListener('click',function(){showView('withdraw')});
-  document.addEventListener('change',function(e){if(e.target&&e.target.id==='send-chain')setTimeout(polishWithdrawModal,0)});
+  if(tabs)tabs.addEventListener('click',function(e){
+    var b=e.target.closest('[data-portfolio-tab]');
+    if(b)showView(b.dataset.portfolioTab);
+  });
+  showView('assets');
 
   if(holdings&&window.MutationObserver){
     var pctTimer=null;

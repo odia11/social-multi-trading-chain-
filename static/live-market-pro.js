@@ -469,62 +469,89 @@ function chartTick(idx){
    screen (the server batches up to 30 pools into a single upstream call), so
    this is cheaper than the chart polling it lets us slow down, not dearer. */
 var _priceTimer = null;
+var _priceInFlight = false;
+var _priceFailures = 0;
+var _priceNextAt = 0;
+var _pricePollBaseMs = 2000;
+
+function _applyLivePrice(st, idx, px){
+  if(!st || st.destroyed || !st.candles || !st.candles.length) return;
+  px=Number(px);
+  if(!(px>0) || px===st.price) return;
+  st.price=px;
+  var last=st.candles[st.candles.length-1];
+  var seconds=chartBucketSeconds(st.tf), now=Math.floor(Date.now()/1000);
+  var bucket=Math.floor(now/seconds)*seconds;
+  if(bucket>last.t){
+    last=startObservedCandle(st,px);
+    st.candles.push(last);
+    if(st.candles.length>60)st.candles.shift();
+    renderChartSvg(idx,st.candles,px);
+    return;
+  }
+  last.c=px;
+  if(px>last.h)last.h=px;
+  if(px<last.l)last.l=px;
+  updateLiveChartPrice(idx,px);
+}
 
 function tickLivePrices(){
-  var byChain = {};
+  if(document.visibilityState!=='visible' || _priceInFlight || Date.now()<_priceNextAt)return;
+  var groups={}, refs={};
   Object.keys(_chartTimers).forEach(function(idx){
-    var st = _chartTimers[idx];
-    if(!st || st.destroyed || !st.pair || !st.candles) return;
-    var c = st.chain || 'solana';
-    (byChain[c] = byChain[c] || []).push(idx);
+    var st=_chartTimers[idx];
+    if(!st||st.destroyed||!st.pair||!st.candles)return;
+    var c=st.chain||'solana', key=(st.pair||'').toLowerCase();
+    (groups[c]=groups[c]||[]).push(st.pair);
+    (refs[c]=refs[c]||{})[key]=(refs[c][key]||[]).concat([idx]);
   });
-  Object.keys(byChain).forEach(function(chain){
-    var idxs  = byChain[chain];
-    var pairs = idxs.map(function(i){ return _chartTimers[i].pair; });
-    fetch('/api/market/prices?chain='+encodeURIComponent(chain)
-          +'&pairs='+encodeURIComponent(pairs.join(',')))
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        if(!d || !d.prices) return;
-        idxs.forEach(function(i){
-          var st = _chartTimers[i];
-          if(!st || st.destroyed || !st.candles || !st.candles.length) return;
-          var px = d.prices[(st.pair||'').toLowerCase()];
-          if(!(px > 0) || px === st.price) return;
-          st.price = px;
-          // The newest candle is the one still forming, so its close IS the
-          // current price -- move it, and stretch its high/low to match, or
-          // the wick would end up outside its own candle.
-          var last = st.candles[st.candles.length - 1];
-          var seconds=chartBucketSeconds(st.tf), now=Math.floor(Date.now()/1000);
-          var bucket=Math.floor(now/seconds)*seconds;
-          if(bucket>last.t){
-            last=startObservedCandle(st,px);
-            st.candles.push(last);
-            if(st.candles.length>60) st.candles.shift();
-            renderChartSvg(i,st.candles,px);
-            return;
-          }
-          last.c = px;
-          if(px > last.h) last.h = px;
-          if(px < last.l) last.l = px;
-          updateLiveChartPrice(i, px);
+  if(!Object.keys(groups).length)return;
+
+  // Deduplicate pair addresses per chain before serializing the request.
+  Object.keys(groups).forEach(function(c){
+    var seen={};groups[c]=groups[c].filter(function(p){var k=String(p).toLowerCase();if(seen[k])return false;seen[k]=1;return true;});
+  });
+  _priceInFlight=true;
+  var qs=new URLSearchParams();
+  qs.set('groups',JSON.stringify(groups));
+  fetch('/api/market/prices-batch?'+qs.toString(),{credentials:'include',cache:'no-store'})
+    .then(function(r){
+      if(r.status===429||r.status===503){var e=new Error('backoff');e.retryable=true;throw e;}
+      if(!r.ok)throw new Error('price batch failed');
+      return r.json();
+    })
+    .then(function(d){
+      if(!d||!d.chains)return;
+      Object.keys(d.chains).forEach(function(chain){
+        var prices=d.chains[chain]||{};
+        Object.keys(prices).forEach(function(pair){
+          var ids=(refs[chain]&&refs[chain][pair.toLowerCase()])||[];
+          ids.forEach(function(i){_applyLivePrice(_chartTimers[i],i,prices[pair]);});
         });
-      })
-      .catch(function(){});   // decoration: a miss leaves the last drawing up
-  });
+      });
+      _priceFailures=0;
+      _priceNextAt=Date.now()+_pricePollBaseMs;
+    })
+    .catch(function(){
+      _priceFailures=Math.min(_priceFailures+1,3);
+      _priceNextAt=Date.now()+Math.min(8000,_pricePollBaseMs*Math.pow(2,_priceFailures));
+    })
+    .finally(function(){_priceInFlight=false;});
 }
 
 function startLivePrices(){
-  if(_priceTimer) return;
+  if(_priceTimer)return;
   tickLivePrices();
-  _priceTimer = setInterval(function(){
-    // Nothing to ask about when the tab is in the background, and asking
-    // anyway is how a page ends up rate-limited for charts nobody is looking
-    // at. It resumes on the next tick when the tab comes back.
-    if(document.visibilityState === 'visible') tickLivePrices();
-  }, 2000);   // must not be shorter than the server's price window, or the
-              // extra ticks just re-ask for an answer that cannot have changed
+  // Small scheduler tick, actual network cadence is controlled by
+  // _priceNextAt. This avoids overlapping requests and gives 429/503 an
+  // exponential backoff instead of immediately hammering the same endpoint.
+  _priceTimer=setInterval(tickLivePrices,500);
+  document.addEventListener('visibilitychange',function(){
+    if(document.visibilityState==='visible'){
+      _priceNextAt=0;
+      tickLivePrices();
+    }
+  });
 }
 
 // `chain` defaults to 'solana' -- the API's own default -- so a caller that
@@ -2583,13 +2610,14 @@ document.addEventListener('DOMContentLoaded', function(){
     _pendingDeepLinkMint = _qMint;
   }
 
-  setInterval(function(){ loadFeed(true); }, 15000);
-  // Polled faster than the feed: the whole point of a surge is that it is
-  // happening right now, and the radar itself re-samples every 30s.
-  setInterval(loadSurges, 12000);
-  setInterval(loadTape, 8000);
-  setInterval(loadTraders, 30000);
-  setInterval(loadPulse, 20000);
+  // Background tabs do zero market polling. Mobile browsers otherwise keep
+  // old pages alive long enough to burn through rate limits for data nobody
+  // can see, then return to the foreground already throttled.
+  setInterval(function(){ if(!document.hidden) loadFeed(true); }, 15000);
+  setInterval(function(){ if(!document.hidden) loadSurges(); }, 12000);
+  setInterval(function(){ if(!document.hidden) loadTape(); }, 8000);
+  setInterval(function(){ if(!document.hidden) loadTraders(); }, 30000);
+  setInterval(function(){ if(!document.hidden) loadPulse(); }, 20000);
   // The one that makes the charts move. Started once for the whole page, not
   // per card -- it batches every visible chart into a single request.
   startLivePrices();

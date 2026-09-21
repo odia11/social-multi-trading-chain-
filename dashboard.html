@@ -3,7 +3,7 @@
 <head>
 <script>if(typeof globalThis.Buffer==='undefined'){globalThis.Buffer={from:function(a){return new Uint8Array(a)},alloc:function(n){return new Uint8Array(n)}};}</script>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0a0b0e">
 <title>OrcAgent — Multi-Chain Social Trading Platform</title>
 <link rel="manifest" href="/app.webmanifest" crossorigin="use-credentials">
@@ -504,6 +504,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
 .fc-view-count{font-size:11.5px;color:#565d68;font-family:'JetBrains Mono',monospace;margin-left:auto;user-select:none}
 .fc-action{display:flex;align-items:center;gap:5px;color:#565d68;font-size:13px;background:transparent;border:none;cursor:pointer;padding:0;font-family:'Geist',system-ui,sans-serif;transition:color .15s}
 .fc-action:hover{color:#eef1f5}
+.fc-emoji-react-btn.reacted,.fc-emoji-react-btn.reacted .fc-react-count{color:#f7b955!important}
 .fc-repost-btn{padding:4px 6px;margin:-4px -6px;border-radius:6px;transition:color .15s,background-color .15s}
 .fc-repost-btn:hover{color:#3ad29b;background:rgba(58,210,155,.12)}
 .fc-repost-btn.reposted{color:#3ad29b!important}
@@ -581,6 +582,9 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
 .fc-ri-body{flex:1;min-width:0}
 .fc-ri-line{font-size:13.5px;line-height:1.45;color:#c7ccd4;word-wrap:break-word}
 .fc-ri-name{font-weight:700;color:var(--text)}
+.fc-ri-profile-link{color:var(--text);text-decoration:none;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.fc-ri-profile-link:hover,.fc-ri-profile-link:focus-visible{color:var(--gold,#f7b955);text-decoration:underline;text-underline-offset:2px}
+.fc-ri-profile-link:focus-visible{outline:2px solid #f7b955;outline-offset:3px;border-radius:2px}
 .fc-ri-you{font-size:10px;font-weight:600;color:var(--muted);margin-left:1px}
 .fc-ri-text-inline{color:#c7ccd4}
 .fc-ri-meta{display:flex;align-items:center;gap:14px;margin-top:3px}
@@ -664,6 +668,41 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
 }
 .tc-banner{animation:trade-card-pan 14s ease-in-out infinite alternate}
 @media (prefers-reduced-motion: reduce){.tc-banner{animation:none}}
+
+/* One complete trade-card layout for Home composer and published feed. */
+.oa-home-trade-card{box-sizing:border-box;position:relative;isolation:isolate;overflow:hidden;width:100%;max-width:100%;min-width:0;margin:8px 0 10px;border:1px solid rgba(247,185,85,.55);border-radius:16px;background:#0d1117;cursor:pointer;font-family:'JetBrains Mono',monospace;container-type:inline-size}
+.oa-home-trade-banner{position:absolute;inset:0;background-size:cover;background-position:center;opacity:.76}
+.oa-home-trade-shade{position:absolute;inset:0;background:linear-gradient(90deg,rgba(10,12,17,.94),rgba(10,12,17,.75) 54%,rgba(10,12,17,.36)),linear-gradient(180deg,rgba(10,12,17,.20),rgba(10,12,17,.75))}
+.oa-home-trade-content{position:relative;z-index:1;min-width:0;padding:16px 18px 12px}
+.oa-home-trade-title{display:flex;align-items:center;gap:9px;min-width:0;margin-bottom:12px;color:#eef1f5}
+.oa-home-trade-title strong{min-width:0;overflow-wrap:anywhere;font-size:19px;line-height:1.25}
+.oa-home-trade-side{flex:none;padding:3px 7px;border:1px solid;border-radius:7px;font-size:12px;font-weight:800;line-height:1.2}
+.oa-home-trade-main{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;min-width:0}
+.oa-home-trade-prices{display:grid;gap:8px;min-width:0;color:#eef1f5;font-size:13px;line-height:1.4}
+.oa-home-trade-prices>div{min-width:0;overflow-wrap:anywhere}
+.oa-home-trade-prices b{color:#b7bec9;font-weight:600;margin-right:5px}
+.oa-home-trade-pct{max-width:100%;font-size:clamp(22px,5vw,35px);font-weight:800;line-height:1.2;overflow-wrap:anywhere;text-align:right}
+.oa-home-trade-profit{margin-top:14px;color:#f7b955;font-size:16px;font-weight:750;overflow-wrap:anywhere}
+.oa-home-trade-footer{display:flex;justify-content:flex-end;gap:10px;align-items:center;margin-top:17px;padding-top:11px;border-top:1px solid rgba(255,255,255,.14);font-family:system-ui,sans-serif;font-size:13px;font-weight:650;color:#eef1f5}
+.oa-home-trade-card:focus-visible{outline:2px solid #f7b955;outline-offset:2px}
+#composer-trade-preview,#composer-trade-card{box-sizing:border-box;min-width:0;max-width:100%;width:100%}
+#composer-trade-preview>button{z-index:4!important;background:rgba(10,12,17,.84)!important;border-radius:50%;width:25px;height:25px;top:13px!important;right:10px!important;color:#eef1f5!important}
+@container (max-width:420px){
+ .oa-home-trade-content{padding:13px 14px 10px}
+ .oa-home-trade-title{gap:7px;margin-bottom:10px;padding-right:22px}
+ .oa-home-trade-title strong{font-size:16px}
+ .oa-home-trade-main{grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
+ .oa-home-trade-prices{font-size:11px;gap:5px}
+ .oa-home-trade-prices b{margin-right:2px}
+ .oa-home-trade-pct{font-size:clamp(20px,7.4cqw,30px);text-align:right;white-space:nowrap}
+ .oa-home-trade-profit{margin-top:9px;font-size:14px}
+ .oa-home-trade-footer{margin-top:11px;padding-top:9px}
+}
+@container (max-width:285px){
+ .oa-home-trade-main{grid-template-columns:minmax(0,1fr)}
+ .oa-home-trade-pct{text-align:left}
+}
+@media(max-width:420px){.oa-home-trade-content{padding:14px 13px 11px}}
 
 /* ── TOKEN CARDS ── */
 .market-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));gap:10px}
@@ -3591,23 +3630,7 @@ if (window.__SESSION_WALLET) {
       <!-- Hidden compat elements -->
       <div id="mobile-deeplink-section" style="display:none"></div>
 
-      <!-- Face ID (shown ONLY when credential saved in localStorage) -->
-      <button class="ob-btn" onclick="_webAuthnLogin()" id="ob-bio-btn"
-        style="display:none;background:var(--accent);color:#0a0b0e;flex-direction:column;gap:10px;padding:22px 16px;height:auto;border-radius:14px">
-        <svg width="38" height="38" viewBox="0 0 38 38" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 12V6h6"/><path d="M34 12V6h-6"/>
-          <path d="M4 26v6h6"/><path d="M34 26v6h-6"/>
-          <line x1="14" y1="16" x2="14" y2="18.5"/>
-          <line x1="24" y1="16" x2="24" y2="18.5"/>
-          <path d="M19 18.5v3.5"/>
-          <path d="M15 26c1.2 1.8 6.8 1.8 8 0"/>
-        </svg>
-        <span id="ob-bio-label" style="font-size:15px;font-weight:700">Login with Face ID</span>
-      </button>
-      <div id="ob-bio-err" style="font-size:11px;color:var(--red);text-align:center;min-height:16px;margin-top:-2px"></div>
-      <button id="ob-alt-link" onclick="_showWalletOptions()" style="display:none;background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;padding:2px 0 8px;text-decoration:underline;font-family:var(--ui)">or connect a wallet instead</button>
-
-      <!-- Wallet connect buttons (shown when no Face ID, or via "connect a wallet instead") -->
+      <!-- Standard wallet connect buttons -->
       <div id="ob-wallet-btns">
         <button class="ob-btn ob-wallet-btn" id="phantom-ob-btn" onclick="connectWalletOnboard('phantom')">
           <svg width="18" height="18" viewBox="0 0 128 128" fill="none"><path d="M64 0C28.7 0 0 28.7 0 64s28.7 64 64 64 64-28.7 64-64S99.3 0 64 0z" fill="#AB9FF2"/><path d="M108.2 64.8c0 20.5-16.6 37.1-37.1 37.1-9.7 0-18.5-3.7-25.1-9.8l-11.7 9c-1.4 1.1-3.4.1-3.4-1.7V64.8c0-20.5 16.6-37.1 37.1-37.1S108.2 44.3 108.2 64.8z" fill="white"/></svg>
@@ -3679,17 +3702,6 @@ if (window.__SESSION_WALLET) {
     <div style="height:14px"></div>
     <div class="s-msg" id="s-msg"></div>
     <button class="s-save" id="s-save-btn" onclick="saveSettings()" disabled>SAVE SETTINGS</button>
-
-    <!-- Face ID setup prompt — revealed after private key is saved -->
-    <div id="s-faceid-prompt" style="display:none;margin-top:14px;padding:14px 16px;background:rgba(247,185,85,.07);border:1px solid rgba(247,185,85,.22);border-radius:10px">
-      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>Login faster with Face ID?</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.5">Next time, just scan your face — no wallet needed.</div>
-      <div style="display:flex;gap:8px">
-        <button id="s-faceid-prompt-btn" onclick="_setupFaceID()" style="flex:1;padding:10px;background:var(--accent);color:#0a0b0e;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;transition:opacity .15s">Setup Face ID</button>
-        <button onclick="document.getElementById('s-faceid-prompt').style.display='none'" style="padding:10px 16px;background:var(--bg3);border:1px solid var(--border2);border-radius:7px;color:var(--muted);font-size:12px;cursor:pointer">Maybe later</button>
-      </div>
-      <div id="s-faceid-prompt-msg" style="font-size:11px;margin-top:8px;min-height:14px"></div>
-    </div>
 
   </div>
 </div>
@@ -3836,27 +3848,6 @@ __IMAGE_LIGHTBOX__
        in dashboard.py's _get_index_base_html() (dashboard.html isn't Jinja-rendered),
        see the __NAVBAR__ replace() there. -->
   __NAVBAR__
-
-  <!-- PASSKEY PROMPT — the way back in.
-       An app added to the home screen cannot complete the Phantom deeplink:
-       it opens Safari, and the session lands there instead. So once a
-       standalone app loses its session there is no route back at all, and
-       the connect screen can only tell you to go and open the site in a
-       browser. A passkey is the one credential that works inside it.
-       Hidden until _maybePromptPasskey() has confirmed the server says this
-       wallet has none and the device can create one. -->
-  <div id="pk-banner" style="display:none;margin:10px 12px 0;padding:12px 14px;background:rgba(247,185,85,.07);border:1px solid rgba(247,185,85,.22);border-radius:12px">
-    <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--text);margin-bottom:5px">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:0 0 15px;color:var(--accent)"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-      <span id="pk-banner-title">Stay signed in</span>
-    </div>
-    <div id="pk-banner-sub" style="font-size:11.5px;color:var(--muted);line-height:1.5;margin-bottom:11px"></div>
-    <div style="display:flex;gap:8px">
-      <button id="pk-banner-btn" onclick="_setupPasskeyFromBanner()" style="flex:1;min-height:44px;padding:11px;background:var(--accent);color:#0a0b0e;border:none;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer">Set up Face ID</button>
-      <button onclick="_dismissPasskeyBanner()" style="min-height:44px;padding:11px 15px;background:var(--bg3);border:1px solid var(--border2);border-radius:9px;color:var(--muted);font-size:12.5px;cursor:pointer">Not now</button>
-    </div>
-    <div id="pk-banner-msg" style="font-size:11px;margin-top:8px;min-height:14px"></div>
-  </div>
 
   <!-- DASHBOARD UTILITY ROW — owner-only admin/health toggles for the in-page
        panels below. Hidden by default and only ever shown to an owner
@@ -4358,7 +4349,11 @@ __IMAGE_LIGHTBOX__
     <!-- 5. Footer -->
     <div class="rs-footer">
       <div class="rs-footer-links">
-        <a href="/info">About</a>
+        <a href="/about">About</a>
+        <a href="/security">Security</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/contact">Contact</a>
+        <a href="/terms">Terms</a>
       </div>
       <div class="rs-footer-note">OrcAgent is invite-only beta. Trade with a dedicated wallet. Crypto trading carries significant risk of loss.</div>
     </div>
@@ -4522,70 +4517,28 @@ __IMAGE_LIGHTBOX__
     <div class="st-content">
       <div class="st-title">Settings</div>
 
-      <!-- ── CARD 1: Trading Strategy ── -->
-      <div class="st-card">
-        <div class="st-card-hdr" style="display:flex;align-items:center;gap:7px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Trading Strategy</div>
-
+      <!-- ── CARD 1: Advanced Strategy — live dashboard settings route ── -->
+      <div class="st-card" id="advanced-strategy">
+        <div class="st-card-hdr" style="display:flex;align-items:center;gap:7px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Advanced Strategy</div>
+        <div class="st-row-sub" style="margin-bottom:14px">Configure signal entry and position limits here. Trade size, take profit, stop loss and daily loss limit are managed in Auto Trading.</div>
         <div class="st-row">
-          <div class="st-row-left">
-            <div class="st-row-label">Breakout trigger</div>
-            <div class="st-row-sub">% move to enter a position</div>
-          </div>
+          <div class="st-row-left"><div class="st-row-label">Breakout trigger</div><div class="st-row-sub">% move required before an entry is considered</div></div>
           <input id="s-breakout" class="st-amber-inp" type="number" value="3" min="0.1" max="100" step="0.1">
         </div>
-
         <div class="st-row">
-          <div class="st-row-left">
-            <div class="st-row-label">Min Trade Size (USDC)</div>
-            <div class="st-row-sub">Stake per trade (scales with signal strength, up to 3x higher)</div>
-          </div>
-          <input id="ds-minusdc" class="st-amber-inp" type="number" value="1" min="1" max="10000" step="1">
-        </div>
-
-        <div class="st-row">
-          <div class="st-row-left">
-            <div class="st-row-label">Take profit</div>
-            <div class="st-row-sub">% gain to close in profit</div>
-          </div>
-          <input id="s-tp" class="st-amber-inp" type="number" value="15" min="0.1" max="1000" step="0.1">
-        </div>
-
-        <div class="st-row">
-          <div class="st-row-left">
-            <div class="st-row-label">Stop loss</div>
-            <div class="st-row-sub">% drop before cutting the trade</div>
-          </div>
-          <input id="s-sl" class="st-amber-inp" type="number" value="8" min="0.1" max="100" step="0.1">
-        </div>
-
-        <div class="st-row">
-          <div class="st-row-left">
-            <div class="st-row-label">Max concurrent positions</div>
-            <div class="st-row-sub">Open trades held at once</div>
-          </div>
+          <div class="st-row-left"><div class="st-row-label">Max concurrent positions</div><div class="st-row-sub">Maximum open bot positions per chain</div></div>
           <input id="s-maxpos" class="st-amber-inp" type="number" value="3" min="1" max="20" step="1">
         </div>
-
         <div class="st-save-row">
-          <button class="st-save-btn" id="strat-save-btn" onclick="_saveStrategy()">Save</button>
+          <button class="st-save-btn" id="strat-save-btn" onclick="_saveStrategy()">Save Advanced</button>
           <span class="st-save-msg" id="strat-msg"></span>
         </div>
+        <a class="st-save-btn" href="/auto-trading-bot" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none;margin-top:12px">Open Auto Trading →</a>
       </div>
 
       <!-- ── CARD 2: Preferences ── -->
       <div class="st-card">
         <div class="st-card-hdr" style="display:flex;align-items:center;gap:7px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>Preferences</div>
-
-        <div class="st-tog-row">
-          <div>
-            <div class="st-tog-label">Auto Trading</div>
-            <div class="st-tog-sub">Bot executes trades automatically</div>
-          </div>
-          <label class="st-toggle">
-            <input type="checkbox" id="pref-autobot" onchange="_onBotToggle(this)">
-            <span class="st-track"></span>
-          </label>
-        </div>
 
         <div class="st-tog-row">
           <div>
@@ -4701,7 +4654,11 @@ __IMAGE_LIGHTBOX__
 
     <!-- Footer -->
     <div class="rr-footer">
-      <a href="/info">About</a>
+      <a href="/about">About</a>
+      <a href="/security">Security</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/contact">Contact</a>
+      <a href="/terms">Terms</a>
     </div>
     <div class="rr-note">Trade with a dedicated wallet. Crypto trading carries risk.</div>
   </aside>

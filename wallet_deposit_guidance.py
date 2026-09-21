@@ -35,8 +35,10 @@ def install(appmod) -> None:
       .wlt-usdc-guide-copy{font-size:11.5px;line-height:1.55;color:#8a919c}
       .wlt-usdc-guide-copy strong{color:#eef1f5;font-weight:650}
       @media(max-width:720px){
-        .wlt-usdc-guide{padding:14px;gap:10px;border-radius:14px}
-        .wlt-usdc-guide-copy{font-size:11px}
+        /* The compact Portfolio UI already explains Deposit/Send/Receive in
+           the hero. Keep this longer educational note off the mobile asset
+           screen so it cannot flash in before the dedicated Portfolio CSS. */
+        .wlt-usdc-guide{display:none!important}
       }
     </style>
     <div class="wlt-usdc-guide" role="note" aria-label="How USDC deposits work">

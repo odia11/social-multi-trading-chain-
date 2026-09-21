@@ -5,7 +5,11 @@ navigation-style "Start Trading" CTA to use it. The actual bot start/stop
 button on the bot page is deliberately excluded.
 """
 import sqlite3
-from flask import redirect
+import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
+import requests
+from flask import redirect, jsonify
 
 
 def install(dashboard):
@@ -13,6 +17,60 @@ def install(dashboard):
     if getattr(app, '_orca_auto_trading_route_installed', False):
         return
     app._orca_auto_trading_route_installed = True
+
+    # Public BTC/ETH/SOL USD quotes. One backend call for all three Home cards;
+    # short shared cache avoids three upstream calls per user every refresh.
+    _home_quote_cache = {'at': 0.0, 'quotes': {}, 'attempt': 0.0}
+    _home_quote_lock = threading.Lock()
+
+    @app.route('/api/home/major-prices')
+    def home_major_prices():
+        now = time.monotonic()
+        with _home_quote_lock:
+            quotes = _home_quote_cache['quotes']
+            if quotes and now - _home_quote_cache['at'] < 12:
+                return jsonify({'ok': True, 'prices': quotes, 'stale': False})
+            # Do not pound the provider during a temporary upstream outage.
+            if now - _home_quote_cache['attempt'] < 8:
+                return jsonify({'ok': bool(quotes), 'prices': quotes,
+                                'stale': True})
+            _home_quote_cache['attempt'] = now
+
+        def read_quote(symbol):
+            response = requests.get(
+                'https://api.exchange.coinbase.com/products/' + symbol + '-USD/stats',
+                headers={'Accept': 'application/json', 'User-Agent': 'OrcAgent/1.0'},
+                timeout=4,
+            )
+            response.raise_for_status()
+            data = response.json()
+            last = float(data['last'])
+            opened = float(data['open'])
+            if not (0 < last < 1e9 and 0 < opened < 1e9):
+                raise ValueError('Invalid exchange quote')
+            return symbol, {'price': last,
+                            'change24h': round((last / opened - 1) * 100, 2)}
+
+        fresh = {}
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [executor.submit(read_quote, name) for name in ('BTC', 'ETH', 'SOL')]
+            for future in futures:
+                try:
+                    symbol, quote = future.result()
+                    fresh[symbol] = quote
+                except (requests.RequestException, ValueError, KeyError,
+                        TypeError, OverflowError):
+                    pass
+        with _home_quote_lock:
+            if fresh:
+                _home_quote_cache['quotes'] = {
+                    **_home_quote_cache['quotes'], **fresh}
+                _home_quote_cache['at'] = time.monotonic()
+            quotes = dict(_home_quote_cache['quotes'])
+        response = jsonify({'ok': bool(quotes), 'prices': quotes,
+                            'stale': not bool(fresh)})
+        response.headers['Cache-Control'] = 'no-store'
+        return response
 
     @app.route('/auto-trading-bot')
     def auto_trading_bot_page():

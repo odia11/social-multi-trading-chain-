@@ -390,6 +390,22 @@ function _esc(s) {
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+
+// Text DMs can contain an OrcAgent post permalink. Show a clickable,
+// same-tab link to the exact post while keeping every other character escaped.
+function _dmPostLinkText(raw){
+  var text=String(raw==null?'':raw), out='', last=0, match;
+  var pattern=/https?:\/\/(?:www\.)?orcagent\.fun\/post\/([pt]\d+)(?:\?[^\s<>"']*)?/gi;
+  while((match=pattern.exec(text))!==null){
+    out+=_esc(text.slice(last,match.index));
+    var id=match[1];
+    out+='<a href="/post/'+id+'" style="color:#f7b955;text-decoration:underline;overflow-wrap:anywhere"'
+      +' onclick="event.stopPropagation()">View post on OrcAgent →</a>';
+    last=match.index+match[0].length;
+  }
+  return out+_esc(text.slice(last));
+}
+
 function _scrollToBottom() {
   requestAnimationFrame(function(){
     requestAnimationFrame(function(){
@@ -978,7 +994,7 @@ function _renderMessages(msgs, forceScroll) {
       var tr = {}; try { tr = JSON.parse(m.message); } catch(e) {}
       bubble = '<div class="msg-bubble msg-trade">'+_renderDmTokenCard(tr)+'</div>';
     } else {
-      bubble = '<div class="msg-bubble">'+_esc(m.message)+'</div>';
+      bubble = '<div class="msg-bubble">'+_dmPostLinkText(m.message)+'</div>';
     }
     var menu = '';
     if (mine) {

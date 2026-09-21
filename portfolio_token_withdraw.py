@@ -17,17 +17,10 @@ from decimal import Decimal, InvalidOperation, ROUND_DOWN
 import requests
 from flask import jsonify, request
 
-import solana_source_bridge_gasless as _bridge_gas
-
 _LOCKS = {}
 _LOCKS_GUARD = threading.Lock()
 _RECENT = {}
 _RECENT_GUARD = threading.Lock()
-
-_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
-# Matches dashboard.SOL_GAS_MIN_BALANCE -- the level below which a wallet
-# can't reliably cover a transfer plus a new recipient token account's rent.
-_GAS_RESERVE_SOL = Decimal('0.003')
 
 
 def _lock_for(wallet: str, chain: str):
@@ -65,27 +58,118 @@ def _csrf_ok(d):
     return bool(callable(fn) and fn(token))
 
 
+def _rpc_urls(d):
+    urls = []
+    for url in (list(getattr(d, 'CLAIM_SOL_RPCS', []) or [])
+                + [getattr(d, 'SOLANA_RPC', None), getattr(d, 'SOLANA_RPC_URL', None)]
+                + list(getattr(d, '_PROXY_RPCS', []) or [])):
+        url = str(url or '').strip()
+        if url and url not in urls:
+            urls.append(url)
+    return urls
+
+
 def _rpc(d):
-    return str(getattr(d, 'SOLANA_RPC', None) or getattr(d, 'SOLANA_RPC_URL', None) or '').strip()
+    urls = _rpc_urls(d)
+    return urls[0] if urls else ''
 
 
 def _rpc_call(url, method, params):
     r = requests.post(url, json={'jsonrpc':'2.0','id':1,'method':method,'params':params}, timeout=15)
+    if r.status_code != 200:
+        raise RuntimeError('Solana RPC HTTP %s' % r.status_code)
     body = r.json()
     if body.get('error'):
         raise RuntimeError(str(body['error'].get('message') or body['error']))
+    if 'result' not in body:
+        raise RuntimeError('Solana RPC response missing result')
     return body.get('result')
 
 
-def _solana_transfer(d, wallet, token_address, to_address, amount):
+def _rpc_call_any(d, method, params, require_nonempty=False):
+    """Read from the first healthy Solana RPC, returning (result, url).
+
+    An empty token-account list is not considered authoritative while other
+    configured providers remain, because OrcAgent has observed public RPCs
+    return [] while a configured provider immediately returns the real SPL
+    accounts.
+    """
+    last = None
+    empty = None
+    for url in _rpc_urls(d):
+        try:
+            result = _rpc_call(url, method, params)
+            if require_nonempty:
+                value = (result or {}).get('value') if isinstance(result, dict) else None
+                if not value:
+                    empty = (result, url)
+                    continue
+            return result, url
+        except Exception as exc:
+            last = exc
+            continue
+    if empty is not None:
+        return empty
+    if last:
+        raise last
+    raise RuntimeError('No Solana RPC is configured')
+
+
+def _solana_source_accounts(d, owner_text, token_address):
+    """Find funded source accounts using the same fallback as balance reads.
+
+    Filter every response locally. Never combine snapshots across providers,
+    and never select an unrelated mint/account from a program-wide scan.
+    """
+    programs = ('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+                'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
+
+    def matching(result):
+        found = []
+        for entry in (result or {}).get('value') or []:
+            try:
+                account = entry['account']
+                info = account['data']['parsed']['info']
+                if (account['owner'] in programs
+                        and info['mint'] == token_address
+                        and info['owner'] == owner_text
+                        and info.get('state') != 'frozen'
+                        and int(info['tokenAmount']['amount']) > 0):
+                    found.append(entry)
+            except (KeyError, TypeError, ValueError):
+                continue
+        return found
+
+    last_error = None
+    saw_response = False
+    for query in [{'mint': token_address}] + [{'programId': p} for p in programs]:
+        for url in _rpc_urls(d):
+            try:
+                result = _rpc_call(url, 'getTokenAccountsByOwner', [
+                    owner_text, query, {'encoding': 'jsonParsed', 'commitment': 'confirmed'}])
+                if not isinstance(result, dict) or not isinstance(result.get('value'), list):
+                    raise RuntimeError('Invalid Solana token-account response')
+                saw_response = True
+                accounts = matching(result)
+                if accounts:
+                    return accounts
+            except Exception as exc:
+                last_error = exc
+    if not saw_response and last_error:
+        raise RuntimeError('Solana source token accounts are unavailable') from last_error
+    return []
+
+
+def _solana_transfer(d, wallet, token_address, to_address, amount,
+                     allow_user_funded_gas=False):
     from solders.hash import Hash
     from solders.instruction import AccountMeta, Instruction
     from solders.keypair import Keypair
     from solders.pubkey import Pubkey
     from solders.transaction import Transaction
 
-    url = _rpc(d)
-    if not url:
+    urls = _rpc_urls(d)
+    if not urls:
         raise RuntimeError('Solana network is unavailable')
     try:
         mint = Pubkey.from_string(token_address)
@@ -101,10 +185,7 @@ def _solana_transfer(d, wallet, token_address, to_address, amount):
     owner = Pubkey.from_string(owner_text)
 
     # The exact source token account and its decimals are server-read.
-    result = _rpc_call(url, 'getTokenAccountsByOwner', [
-        owner_text, {'mint': token_address}, {'encoding':'jsonParsed'}
-    ]) or {}
-    accounts = result.get('value') or []
+    accounts = _solana_source_accounts(d, owner_text, token_address)
     source = None
     balance_raw = 0
     decimals = 0
@@ -141,7 +222,7 @@ def _solana_transfer(d, wallet, token_address, to_address, amount):
     )
 
     instructions = []
-    dest_info = _rpc_call(url, 'getAccountInfo', [str(dest_ata), {'encoding':'base64'}])
+    dest_info, _ = _rpc_call_any(d, 'getAccountInfo', [str(dest_ata), {'encoding':'base64'}])
     if not dest_info or not dest_info.get('value'):
         # CreateAssociatedTokenAccountIdempotent (instruction=1).
         instructions.append(Instruction(
@@ -165,42 +246,53 @@ def _solana_transfer(d, wallet, token_address, to_address, amount):
     if not enc:
         raise RuntimeError('Solana trading key is not configured')
 
-    # Require user-funded SOL for network/rent -- OrcAgent never subsidises
-    # it -- but most trading wallets hold USDC only, since buys are already
-    # gasless. Bootstrap a sliver of that same USDC into SOL first, the same
-    # way a cross-chain buy does, rather than blocking a wallet that in fact
-    # has enough USDC to cover its own gas.
-    lamports = int(_rpc_call(url, 'getBalance', [owner_text, {'commitment':'confirmed'}]).get('value') or 0)
-    if Decimal(lamports) / _bridge_gas._LAMPORTS_PER_SOL < _GAS_RESERVE_SOL:
-        shortfall = _GAS_RESERVE_SOL - (Decimal(lamports) / _bridge_gas._LAMPORTS_PER_SOL)
-        reserved_for_send = amount if token_address == _USDC_MINT else Decimal(0)
-        usdc_balance = Decimal(str(d._get_solana_usdc_balance(owner_text) or 0))
-        usdc_available = usdc_balance - reserved_for_send
-        if usdc_available < _bridge_gas._MIN_BOOTSTRAP_USDC:
-            raise ValueError(
-                'Not enough SOL in your trading wallet to pay the network fee, and not '
-                'enough spare USDC to create it automatically. Add a little SOL or USDC.')
+    # Require the sender's own SOL for both tx fee and, when needed, the
+    # recipient ATA rent. A tiny non-zero SOL balance is NOT enough to create
+    # a missing token account.
+    native, _ = _rpc_call_any(
+        d, 'getBalance', [owner_text, {'commitment':'confirmed'}])
+    lamports = int((native or {}).get('value') or 0)
+    required_lamports = 20_000
+    if not dest_info or not dest_info.get('value'):
         try:
-            with d._use_key(enc, wallet) as private_key:
-                _used_usdc, gas_order, _quoted_sol = _bridge_gas._pick_gasless_order(
-                    private_key, usdc_available, shortfall)
-                _bridge_gas._execute_order(private_key, gas_order)
-        except Exception as exc:
-            raise ValueError('Could not fund the network fee from your USDC: %s' % str(exc)[:200])
-
-        for _ in range(8):
-            lamports = int(_rpc_call(url, 'getBalance', [owner_text, {'commitment':'confirmed'}]).get('value') or 0)
-            if Decimal(lamports) / _bridge_gas._LAMPORTS_PER_SOL >= _GAS_RESERVE_SOL:
-                break
-            time.sleep(0.5)
-        else:
-            raise ValueError('Gasless SOL bootstrap completed, but the balance has not updated yet. Try again shortly.')
-        try:
-            d.add_user_log(wallet, '[tip] Converted USDC to SOL gas automatically before sending')
+            rent, _ = _rpc_call_any(
+                d, 'getMinimumBalanceForRentExemption', [165])
+            required_lamports += int(rent or 2_100_000)
         except Exception:
-            pass
+            required_lamports += 2_100_000
+    if lamports < required_lamports:
+        # User-authorised Portfolio withdrawals may use the same existing
+        # Jupiter gasless bootstrap as tips. Reserve the entire outgoing USDC
+        # amount first, so network gas never reduces the requested transfer.
+        # Tips have their own bootstrap under the tip lock and leave this
+        # optional transfer behavior off to avoid spending gas twice.
+        if not allow_user_funded_gas:
+            raise ValueError(
+                'Not enough SOL in your trading wallet to pay the network fee and token-account rent')
+        topup = getattr(d, '_gasless_solana_native_topup', None)
+        if not callable(topup):
+            raise ValueError('Solana user-funded network gas is unavailable')
+        usdc_balance = Decimal(str(d._get_solana_usdc_balance(owner_text)))
+        reserved = amount if token_address == d.USDC_MINT else Decimal('0')
+        spare = usdc_balance - reserved
+        if spare < Decimal('0.20'):
+            raise ValueError(
+                'Not enough spare USDC to create Solana network gas while keeping the full send amount')
+        target_sol = max(
+            Decimal('0.0035'),
+            Decimal(required_lamports + 500_000) / Decimal(1_000_000_000))
+        try:
+            topup(wallet, spare, target_sol=float(target_sol))
+        except Exception as exc:
+            raise ValueError('Unable to create Solana network gas from spare USDC') from exc
+        refreshed, _ = _rpc_call_any(
+            d, 'getBalance', [owner_text, {'commitment':'confirmed'}])
+        lamports = int((refreshed or {}).get('value') or 0)
+        if lamports < required_lamports:
+            raise ValueError('SOL top-up was submitted but sufficient gas is not yet confirmed; check your balance before retrying')
 
-    blockhash = (_rpc_call(url, 'getLatestBlockhash', [{'commitment':'confirmed'}]) or {}).get('value', {}).get('blockhash')
+    bh_result, _ = _rpc_call_any(d, 'getLatestBlockhash', [{'commitment':'confirmed'}])
+    blockhash = (bh_result or {}).get('value', {}).get('blockhash')
     if not blockhash:
         raise RuntimeError('Could not get a recent Solana blockhash')
 
@@ -211,7 +303,7 @@ def _solana_transfer(d, wallet, token_address, to_address, amount):
         tx = Transaction.new_signed_with_payer(instructions, owner, [kp], Hash.from_string(blockhash))
         encoded = base64.b64encode(bytes(tx)).decode('ascii')
 
-    sig = _rpc_call(url, 'sendTransaction', [encoded, {
+    sig, _ = _rpc_call_any(d, 'sendTransaction', [encoded, {
         'encoding':'base64', 'skipPreflight':False, 'preflightCommitment':'confirmed',
         'maxRetries':3
     }])
@@ -281,9 +373,162 @@ def _explorer(chain, tx_hash):
         'solana':'https://solscan.io/tx/', 'bsc':'https://bscscan.com/tx/',
         'base':'https://basescan.org/tx/', 'arbitrum':'https://arbiscan.io/tx/',
         'polygon':'https://polygonscan.com/tx/',
+        'robinhood':'https://explorer.testnet.chain.robinhood.com/tx/',
     }
     base = bases.get(chain)
     return base + tx_hash if base and tx_hash else ''
+
+
+def _user_tip_wallets(d, user_id):
+    conn = sqlite3.connect(d.DB_FILE, timeout=8.0)
+    try:
+        row = conn.execute(
+            'SELECT wallet_address, COALESCE(bsc_wallet_address, "") FROM users WHERE id=?',
+            (int(user_id),)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    session_wallet, evm_wallet = str(row[0] or ''), str(row[1] or '')
+    try:
+        solana_wallet = str(d._get_trading_wallet_address(session_wallet) or session_wallet)
+    except Exception:
+        solana_wallet = session_wallet
+    return {'session': session_wallet, 'solana': solana_wallet, 'evm': evm_wallet}
+
+
+def _tip_required_lamports(d, owner_text, recipient_text):
+    """SOL required for a canonical-USDC tip, including ATA rent if needed."""
+    from solders.pubkey import Pubkey
+
+    try:
+        owner = Pubkey.from_string(owner_text)
+        recipient = Pubkey.from_string(recipient_text)
+        mint = Pubkey.from_string(d.USDC_MINT)
+        token_program = Pubkey.from_string(
+            str(getattr(d, 'TOKEN_PROGRAM_ID',
+                        'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')))
+        ata_program = Pubkey.from_string(
+            'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+        dest_ata, _ = Pubkey.find_program_address(
+            [bytes(recipient), bytes(token_program), bytes(mint)], ata_program)
+        dest_info, _ = _rpc_call_any(
+            d, 'getAccountInfo', [str(dest_ata), {'encoding':'base64'}])
+        required = 20_000  # normal signature/transaction headroom
+        if not dest_info or not dest_info.get('value'):
+            try:
+                rent, _ = _rpc_call_any(
+                    d, 'getMinimumBalanceForRentExemption', [165])
+                required += int(rent or 2_100_000)
+            except Exception:
+                required += 2_100_000
+        return required
+    except Exception:
+        # Conservative fallback: enough for a new classic SPL token account
+        # plus the transaction itself.
+        return 2_120_000
+
+
+def _tip_solana_ready(d, sender_wallet, amount, recipient_wallet):
+    try:
+        owner = str(d._get_trading_wallet_address(sender_wallet) or '')
+        if not owner:
+            return None
+    except Exception:
+        return None
+
+    # A failed chain read is UNKNOWN, never an empty wallet. Use the same
+    # validated source accounts as the transfer instead of cached UI totals.
+    try:
+        accounts = _solana_source_accounts(d, owner, str(d.USDC_MINT))
+        balance = sum((
+            Decimal(entry['account']['data']['parsed']['info']['tokenAmount']['amount'])
+            / (Decimal(10) ** int(entry['account']['data']['parsed']['info']['tokenAmount']['decimals']))
+            for entry in accounts), Decimal('0'))
+    except Exception as exc:
+        raise RuntimeError(
+            'Cannot verify Solana USDC: the blockchain provider is unavailable or rate-limited. '
+            'Your balance is unknown, not zero. Please try again later.') from exc
+    if balance < amount:
+        return None
+    try:
+        native, _ = _rpc_call_any(
+            d, 'getBalance', [owner, {'commitment':'confirmed'}])
+        if not isinstance(native, dict) or not isinstance(native.get('value'), int):
+            raise ValueError('Invalid SOL balance response')
+        lamports = native['value']
+    except Exception as exc:
+        raise RuntimeError('Cannot verify the SOL network-fee balance. Please try again later.') from exc
+
+    required_lamports = _tip_required_lamports(
+        d, owner, str(recipient_wallet or ''))
+    return {
+        'chain':'solana', 'balance':balance,
+        'native_ready': lamports >= required_lamports,
+        'lamports': lamports,
+        'required_lamports': required_lamports,
+    }
+
+
+def _tip_evm_candidates(d, sender_wallet, amount, recipient_evm):
+    if not recipient_evm:
+        return [], []
+    row = _wallet_keys(d, sender_wallet)
+    source = str(row[2] or '').strip() if row else ''
+    if not source:
+        return [], []
+    ready, needs_gas = [], []
+    for chain, cfg in getattr(d, 'EVM_CHAINS', {}).items():
+        # A USDC tip must arrive as USDC. Robinhood currently uses USDG as
+        # its trading stablecoin, so it is deliberately not a tip rail until
+        # native USDC is configured there.
+        if str(cfg.get('usdc_symbol') or 'USDC').upper() != 'USDC':
+            continue
+        try:
+            balance = Decimal(str(d.get_evm_usdc_balance(source, chain)))
+            if balance < amount:
+                continue
+            native = Decimal(str(d.get_evm_native_balance(source, chain)))
+            item = {'chain':chain, 'balance':balance,
+                    'token':str(cfg.get('usdc') or ''), 'source':source}
+            (ready if native > 0 else needs_gas).append(item)
+        except Exception:
+            continue
+    ready.sort(key=lambda x: x['balance'], reverse=True)
+    needs_gas.sort(key=lambda x: x['balance'], reverse=True)
+    return ready, needs_gas
+
+
+def _record_tip(d, sender_wallet, sender_user_id, recipient_user_id,
+                recipient_wallet, amount, chain, tx_hash):
+    conn = sqlite3.connect(d.DB_FILE, timeout=8.0)
+    try:
+        conn.execute('CREATE TABLE IF NOT EXISTS tip_transactions ('
+                     'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+                     'sender_user_id INTEGER NOT NULL,'
+                     'recipient_user_id INTEGER NOT NULL,'
+                     'sender_wallet TEXT NOT NULL,'
+                     'recipient_wallet TEXT NOT NULL,'
+                     'amount REAL NOT NULL,'
+                     'chain TEXT NOT NULL,'
+                     'tx_hash TEXT NOT NULL,'
+                     "status TEXT NOT NULL DEFAULT 'confirmed',"
+                     'created_at TEXT DEFAULT CURRENT_TIMESTAMP)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_tips_sender ON tip_transactions(sender_user_id, created_at)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_tips_recipient ON tip_transactions(recipient_user_id, created_at)')
+        conn.execute(
+            'INSERT INTO tip_transactions '
+            '(sender_user_id,recipient_user_id,sender_wallet,recipient_wallet,amount,chain,tx_hash,status) '
+            'VALUES (?,?,?,?,?,?,?,?)',
+            (sender_user_id, recipient_user_id, sender_wallet, recipient_wallet,
+             float(amount), chain, tx_hash, 'confirmed'))
+        conn.execute(
+            'INSERT INTO notifications (user_id,type,content,link,actor_wallet) VALUES (?,?,?,?,?)',
+            (recipient_user_id, 'tip', 'You received %.2f USDC tip.' % float(amount),
+             '/wallet', sender_wallet))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def install(d):
@@ -291,6 +536,216 @@ def install(d):
     if getattr(app, '_orca_portfolio_token_withdraw_installed', False):
         return
     app._orca_portfolio_token_withdraw_installed = True
+
+    @app.post('/api/tip')
+    def _send_user_tip():
+        sender_wallet = d._authenticated_wallet()
+        if not sender_wallet:
+            return jsonify({'ok':False,'error':'Authentication required'}), 401
+        if not _csrf_ok(d):
+            return jsonify({'ok':False,'error':'CSRF validation failed'}), 403
+        if callable(getattr(d, '_rate_ok', None)) and not d._rate_ok('tip_wallet:' + sender_wallet, 12, 3600):
+            return jsonify({'ok':False,'error':'Tip limit reached. Try again later.'}), 429
+
+        body = request.get_json(silent=True) or {}
+        try:
+            recipient_user_id = int(body.get('recipient_user_id'))
+        except (TypeError, ValueError):
+            return jsonify({'ok':False,'error':'Invalid recipient'}), 400
+        amount = _amount(body.get('amount'))
+        if amount is None:
+            return jsonify({'ok':False,'error':'Enter a positive USDC amount'}), 400
+        if amount > Decimal('10000'):
+            return jsonify({'ok':False,'error':'Tip amount is above the per-transfer limit'}), 400
+
+        conn = sqlite3.connect(d.DB_FILE, timeout=8.0)
+        try:
+            sender_row = conn.execute(
+                'SELECT id FROM users WHERE wallet_address=? LIMIT 1',
+                (sender_wallet,)).fetchone()
+        finally:
+            conn.close()
+        if not sender_row:
+            return jsonify({'ok':False,'error':'Sender account not found'}), 404
+        sender_user_id = int(sender_row[0])
+        if sender_user_id == recipient_user_id:
+            return jsonify({'ok':False,'error':'You cannot tip yourself'}), 400
+
+        recipient = _user_tip_wallets(d, recipient_user_id)
+        if not recipient:
+            return jsonify({'ok':False,'error':'Recipient account not found'}), 404
+
+        key = ('tip', sender_wallet, recipient_user_id, str(amount.normalize()))
+        now = time.time()
+        with _RECENT_GUARD:
+            if now - _RECENT.get(key, 0) < 45:
+                return jsonify({'ok':False,'error':'This tip was already submitted recently'}), 409
+
+        lock = _lock_for(sender_wallet, 'tip')
+        if not lock.acquire(blocking=False):
+            return jsonify({'ok':False,'error':'Another tip is already in progress'}), 409
+        try:
+            ready_evm, gasless_evm = _tip_evm_candidates(
+                d, sender_wallet, amount, recipient.get('evm'))
+            solana_error = ''
+            try:
+                sol = _tip_solana_ready(
+                    d, sender_wallet, amount, recipient.get('solana'))
+            except RuntimeError as exc:
+                sol = None
+                solana_error = str(exc)
+                app.logger.warning('Solana tip readiness unavailable: %s', solana_error)
+
+            candidates = list(ready_evm)
+            if sol and sol.get('native_ready'):
+                candidates.append(sol)
+            candidates.sort(key=lambda x: x['balance'], reverse=True)
+
+            tx_hash = ''
+            sent = 0.0
+            chain = ''
+            recipient_address = ''
+            solana_gas_shortfall = False
+
+            for candidate in candidates:
+                chain = candidate['chain']
+                try:
+                    if chain == 'solana':
+                        recipient_address = recipient['solana']
+                        tx_hash, sent = _solana_transfer(
+                            d, sender_wallet, d.USDC_MINT,
+                            recipient_address, amount)
+                    else:
+                        recipient_address = recipient['evm']
+                        tx_hash, sent = _evm_transfer(
+                            d, sender_wallet, chain, candidate['token'],
+                            recipient_address, amount)
+                    if tx_hash:
+                        break
+                except Exception as exc:
+                    safe = str(exc)
+                    try:
+                        safe = d._redact_keys(safe)
+                    except Exception:
+                        pass
+                    if chain == 'solana':
+                        solana_gas_shortfall = (isinstance(exc, ValueError) and str(exc).startswith(
+                            'Not enough SOL in your trading wallet'))
+                        solana_error = safe[:220]
+                        app.logger.warning(
+                            'solana tip direct transfer failed wallet=%s error=%s reason=%s',
+                            sender_wallet[:8] + '…', type(exc).__name__, solana_error)
+                    tx_hash = ''
+
+            # A marginal SOL balance can pass a pre-read and still fail
+            # preflight once the exact recipient ATA/rent/fee is known. If a
+            # Solana pre-send SOL check failed OR readiness said gas was short,
+            # make one user-funded gas bootstrap attempt from SPARE USDC, then
+            # retry the exact requested tip once. Never reduce the tip amount.
+            if not tx_hash and sol:
+                spare = sol['balance'] - amount
+                topup = getattr(d, '_gasless_solana_native_topup', None)
+                should_topup = (
+                    not sol.get('native_ready')
+                    or solana_gas_shortfall
+                )
+                if should_topup and callable(topup) and spare >= Decimal('0.20'):
+                    try:
+                        required = int(sol.get('required_lamports') or 0)
+                        current = int(sol.get('lamports') or 0)
+                        # Top up to at least the readiness estimate with a
+                        # safety cushion for preflight/priority-fee variance.
+                        target_sol = max(
+                            Decimal('0.0025'),
+                            (Decimal(max(required, 0)) / Decimal(1_000_000_000))
+                            + Decimal('0.0005')
+                        )
+                        topup(sender_wallet, spare, target_sol=float(target_sol))
+                        recipient_address = recipient['solana']
+                        chain = 'solana'
+                        tx_hash, sent = _solana_transfer(
+                            d, sender_wallet, d.USDC_MINT,
+                            recipient_address, amount)
+                        solana_error = ''
+                    except Exception as exc:
+                        safe = str(exc)
+                        try:
+                            safe = d._redact_keys(safe)
+                        except Exception:
+                            pass
+                        solana_error = safe[:220]
+                        app.logger.warning(
+                            'solana tip gas bootstrap unavailable wallet=%s error=%s reason=%s',
+                            sender_wallet[:8] + '…', type(exc).__name__, solana_error)
+                        tx_hash = ''
+
+            if not tx_hash:
+                topup_amount = Decimal(str(getattr(d, 'GAS_TOPUP_USDC_AMOUNT', 2.0)))
+                for candidate in gasless_evm:
+                    if candidate['balance'] < amount + topup_amount:
+                        continue
+                    chain = candidate['chain']
+                    try:
+                        row = _wallet_keys(d, sender_wallet)
+                        enc = str(row[1] or '').strip() if row else ''
+                        topup = getattr(d, '_gasless_evm_native_topup', None)
+                        if not enc or not callable(topup):
+                            continue
+                        with d._use_key(enc, sender_wallet) as private_key:
+                            topup(private_key, chain)
+                        recipient_address = recipient['evm']
+                        tx_hash, sent = _evm_transfer(
+                            d, sender_wallet, chain, candidate['token'],
+                            recipient_address, amount)
+                        break
+                    except Exception:
+                        tx_hash = ''
+
+            if not tx_hash:
+                if solana_error:
+                    # This is intentionally the server-side transfer/provider
+                    # reason, already redacted above. It is materially more
+                    # useful than blaming gas for every possible failure.
+                    return jsonify({
+                        'ok':False,
+                        'error':'Solana tip failed: ' + solana_error
+                    }), 400
+                if sol and (sol['balance'] - amount) < Decimal('0.20'):
+                    return jsonify({
+                        'ok':False,
+                        'error':'Not enough spare USDC to create Solana network gas while keeping the full tip amount.'
+                    }), 400
+                return jsonify({
+                    'ok':False,
+                    'error':'No funded USDC route is currently available for this tip.'
+                }), 400
+
+            with _RECENT_GUARD:
+                _RECENT[key] = time.time()
+            _record_tip(d, sender_wallet, sender_user_id, recipient_user_id,
+                        recipient_address, amount, chain, tx_hash)
+            try:
+                d._wallet_tokens_cache.pop(sender_wallet, None)
+                d._wallet_tokens_cache.pop(recipient['session'], None)
+            except Exception:
+                pass
+            try:
+                d.add_user_log(sender_wallet,
+                    'TIP: %.2f USDC sent to user %s · tx %s' %
+                    (float(amount), recipient_user_id, tx_hash[:12]))
+            except Exception:
+                pass
+            return jsonify({
+                'ok':True, 'amount_sent':sent, 'currency':'USDC',
+                'chain':chain, 'tx_hash':tx_hash,
+                'explorer':_explorer(chain, tx_hash)
+            })
+        except Exception as exc:
+            app.logger.warning('user tip failed wallet=%s error=%s',
+                               sender_wallet[:8] + '…', type(exc).__name__)
+            return jsonify({'ok':False,'error':'Tip transfer failed. Please try again after checking your balance.'}), 502
+        finally:
+            lock.release()
 
     @app.post('/api/wallet/send-token')
     def _send_portfolio_token():
@@ -324,7 +779,9 @@ def install(d):
             return jsonify({'ok':False,'error':'Another withdrawal is already in progress'}), 409
         try:
             if chain == 'solana':
-                tx_hash, sent = _solana_transfer(d, wallet, token_address, to_address, amount)
+                tx_hash, sent = _solana_transfer(
+                    d, wallet, token_address, to_address, amount,
+                    allow_user_funded_gas=True)
             else:
                 tx_hash, sent = _evm_transfer(d, wallet, chain, token_address, to_address, amount)
             with _RECENT_GUARD:

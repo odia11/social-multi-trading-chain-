@@ -3,7 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
-<title>Wallet — OrcAgent</title>
+<title>Portfolio — OrcAgent</title>
+<!-- Load the canonical Portfolio presentation BEFORE the shared navbar loader.\n     Its version changes with every deploy; cached navbar scripts detect these tags and do not inject legacy UI. -->
+<link rel="stylesheet" href="/static/portfolio-redesign.css?v={{ app_version }}">
+<script src="/static/portfolio-redesign.js?v={{ app_version }}" defer></script>
+<script src="/static/approved-portfolio.js?v={{ app_version }}" defer></script>
 <link rel="manifest" href="/app.webmanifest" crossorigin="use-credentials">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -103,6 +107,22 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
 
 /* ── deposit card ── */
 .dep-card{background:#101216;border:1px solid rgba(255,255,255,.06);border-radius:18px;padding:18px;box-shadow:0 1px 0 rgba(255,255,255,.03) inset}
+/* SOL -> USDC funding card */
+.sol-usdc-card{background:linear-gradient(135deg,rgba(247,185,85,.09),#101216 55%);border:1px solid rgba(247,185,85,.22);border-radius:18px;padding:18px;box-shadow:0 1px 0 rgba(255,255,255,.03) inset}
+.sol-usdc-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+.sol-usdc-title{font-size:14px;font-weight:750;color:var(--text);margin-bottom:4px}
+.sol-usdc-copy{font-size:12px;color:var(--muted);line-height:1.5;max-width:430px}
+.sol-usdc-balances{display:flex;gap:10px;margin:14px 0}
+.sol-usdc-stat{flex:1;background:#0a0b0e;border:1px solid #1a1d23;border-radius:11px;padding:10px 12px}
+.sol-usdc-stat span{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+.sol-usdc-stat b{font-family:var(--mono);font-size:14px;color:var(--text)}
+.sol-usdc-btn{width:100%;border:1px solid rgba(247,185,85,.45);background:linear-gradient(180deg,#f7c568,#f7b955);color:#101216;border-radius:12px;padding:12px 14px;font:700 13px var(--ui);cursor:pointer}
+.sol-usdc-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.sol-usdc-btn.secondary{background:#15181e;color:var(--text);border-color:#2a2f38}
+.sol-usdc-note{font-size:10.5px;color:var(--muted);margin-top:9px;line-height:1.45}
+.sw-review-summary{display:none;margin:10px 0 12px;padding:12px;border:1px solid rgba(247,185,85,.2);background:rgba(247,185,85,.06);border-radius:12px}
+.sw-review-summary.show{display:block}
+.sw-review-line{display:flex;justify-content:space-between;gap:14px;font-size:11.5px;padding:5px 0;color:var(--muted)}
+.sw-review-line b{color:var(--text);font-family:var(--mono);font-weight:600;text-align:right}
 /* flex-wrap + a min-width floor on each tile: with 6 chains (Solana + 5
    EVM) this row no longer fits unwrapped on a phone-width screen, and a
    bare flex:1 item won't shrink below its own content's width by default
@@ -576,6 +596,29 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
   .hide-small-btn{min-height:44px}
 }
 /* Left nav is now the shared top navbar component (static/navbar.css). */
+
+/* Concept-inspired premium portfolio; keep real balances and functional wallet actions */
+:root{--bg:#080e11;--bg2:#11191e;--bg3:#172126;--border:#263138;--accent:#ffca66;--amber:#ffca66}
+html,body{background:#080e11}
+.wlt-content{max-width:800px;gap:17px}
+.wlt-hdr{padding-top:25px}
+.wlt-title{font-size:27px;font-weight:800;letter-spacing:-.04em}
+.wlt-sub{color:#98a3ad}
+.wlt-hero{border:1px solid #28353b;background:linear-gradient(145deg,#172126,#0e181c);border-radius:21px;padding:26px 24px 8px}
+.wlt-hero-lbl{color:#c6cbd0;text-transform:none;letter-spacing:0;font-size:15px;font-weight:650}
+.wlt-hero-num{font-size:42px;letter-spacing:-.055em;color:#f5f7f8}
+.wlt-hero-usd{color:#89d7b4}
+.wlt-hero-actions{gap:10px;margin:23px 0}
+.wlt-action{font-size:13px;color:#e0e4e7}
+.wlt-action-ic{width:100%;min-height:53px;border:1px solid #34434b;border-radius:13px;background:#192328;color:#eff2f3;font-size:24px}
+.wlt-action.primary .wlt-action-ic{background:#192328;border-color:#34434b;color:#eff2f3}
+.wlt-hero-inpos{border-color:#2b363d}
+.portfolio-tabs{display:flex;gap:32px;align-items:center;padding:9px 6px 0;border-bottom:1px solid #27333a;scroll-margin-top:100px}
+.portfolio-tabs a{color:#a3abb4;font-weight:700;text-decoration:none;padding:10px 5px 15px;font-size:14px}
+.portfolio-tabs a.selected{color:#ffca66;border-bottom:3px solid #ffca66}
+#portfolio-assets,#portfolio-holdings,#portfolio-activity,#usdc-chain-tiles{scroll-margin-top:100px}
+@media(max-width:768px){.wlt-center{max-height:none;overflow:visible}.wlt-hdr{padding:21px 16px 0}.wlt-title{font-size:25px}.wlt-content{padding:18px 16px 130px}.wlt-hero{padding:22px 18px 7px}.wlt-hero-num{font-size:36px}.wlt-action-ic{min-height:54px}.portfolio-tabs{gap:30px}}
+.wallet-scope-note{font-size:12px;color:var(--muted,#8b96a5);margin-top:6px;line-height:1.35}
 </style>
 </head>
 <body>
@@ -588,10 +631,10 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
   <!-- header -->
   <div class="wlt-hdr">
     <div>
-      <div class="wlt-title">Wallet</div>
-      <div class="wlt-sub">Your dedicated trading wallet</div>
+      <div class="wlt-title">Portfolio</div>
+      <div class="wlt-sub">Your multi-chain trading wallet</div>
     </div>
-    <span class="net-pill"><span class="net-dot"></span>MULTI-CHAIN · MAINNET</span>
+    <a class="pf-search-link" href="/live-market" aria-label="Search tokens"><svg width="18" height="18" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="m16 16 5 5"></path></svg></a><span class="net-pill"><span class="net-dot"></span>MULTI-CHAIN · MAINNET</span>
   </div>
 
   <!-- scrollable content -->
@@ -604,16 +647,17 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
           <!-- USDC, not SOL. Every trade on every chain is funded with USDC
                now; SOL only pays Solana's network fee. Leading with SOL made
                a wallet holding $4.64 of tradeable balance read as empty. -->
-          <div class="wlt-hero-lbl">Available to trade</div>
-          <div class="wlt-hero-num"><span id="avail">—</span></div>
-          <div class="wlt-hero-usd" id="avail-sub">USDC across all chains</div>
+          <div class="wlt-hero-lbl">OrcAgent Trading Wallet</div>
+          <div class="wlt-hero-num" id="pf-total">—</div>
+          <div class="wlt-hero-usd" id="pf-performance">Live multi-chain balance</div>
+          <div class="wlt-hero-usd pf-tradeable">Available to trade in OrcAgent: <span id="avail">—</span> <span id="avail-sub">USDC across all chains</span></div>
         </div>
-        <button class="wlt-hero-refresh" onclick="loadBalance()" title="Refresh">↻</button>
+        <svg class="pf-spark" viewBox="0 0 122 73" role="img" aria-label="Portfolio trend during this session"><path id="pf-spark-fill" fill="url(#pf-spark-gradient)" d=""></path><path id="pf-spark-line" d="" stroke="#37dc9d" stroke-width="2.5" fill="none" stroke-linejoin="round" stroke-linecap="round"></path><defs><linearGradient id="pf-spark-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#32d99a" stop-opacity=".27"></stop><stop offset="100%" stop-color="#32d99a" stop-opacity="0"></stop></linearGradient></defs></svg><button class="wlt-hero-refresh" onclick="loadBalance()" aria-label="Refresh balance" title="Refresh">↻</button>
       </div>
       <div class="wlt-hero-actions">
         <button class="wlt-action primary" onclick="_modalDeposit()"><span class="wlt-action-ic">↓</span>Deposit</button>
         <button class="wlt-action" onclick="_modalSend()"><span class="wlt-action-ic">→</span>Send</button>
-        <button class="wlt-action" onclick="openSwapModal()"><span class="wlt-action-ic">⇄</span>Swap</button>
+        <button class="wlt-action" onclick="_modalDeposit()"><span class="wlt-action-ic">▣</span>Receive</button>
         <!-- No Bridge button. Buying on a chain with no USDC already bridges
              by itself (_maybe_start_auto_bridge_for_buy): it finds a chain
              with enough balance, moves the funds with a buffer, and finishes
@@ -636,6 +680,25 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
         <span class="wlt-hero-inpos-lbl">SOL for network fees</span>
         <span class="wlt-hero-inpos-val" id="fee-sol">—</span>
       </div>
+    </div>
+
+    <div class="portfolio-tabs" role="tablist" aria-label="Portfolio sections"><button class="selected" type="button" role="tab" aria-selected="true" data-portfolio-tab="assets">Assets</button><button type="button" role="tab" aria-selected="false" data-portfolio-tab="history">History</button></div>
+    <div class="sol-usdc-card" id="portfolio-assets">
+      <div class="sol-usdc-head">
+        <div>
+          <div class="sol-usdc-title">Convert assets</div>
+          <div class="sol-usdc-copy">Swap between the native gas token and the trading stablecoin on Solana, BSC, Base, Arbitrum, Polygon or Robinhood Chain.</div>
+        </div>
+      </div>
+      <div class="sol-usdc-balances">
+        <div class="sol-usdc-stat"><span>SOL available</span><b id="convert-sol-bal">—</b></div>
+        <div class="sol-usdc-stat"><span>Solana USDC</span><b id="convert-usdc-bal">—</b></div>
+      </div>
+      <div class="sol-usdc-actions">
+        <button class="sol-usdc-btn" onclick="_modalConvert()">Convert assets</button>
+        <button class="sol-usdc-btn secondary" onclick="_modalBridge()">Bridge USDC</button>
+      </div>
+      <div class="sol-usdc-note">Same-chain conversions use Jupiter on Solana and 0x on EVM chains. Cross-chain USDC uses the Bridge flow. You always review the live quote before confirming.</div>
     </div>
 
     <!-- combined USDC balance across every chain this app trades on -- the
@@ -663,8 +726,6 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
         </div>
         <span id="usdc-evm-tiles" style="display:contents"></span>
       </div>
-      <button onclick="openSwapModalToUsdc()" title="Convert SOL to USDC"
-              style="background:none;border:none;color:#f7b955;font-size:12px;font-weight:700;cursor:pointer;padding:0;margin-top:12px;text-decoration:underline dotted">Convert SOL to USDC →</button>
     </div>
 
     <!-- unified deposit card — tabs per chain, so adding more chains later
@@ -731,7 +792,7 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
     </div>
 
     <!-- holdings -->
-    <div class="holdings">
+    <div class="holdings" id="portfolio-holdings">
       <div class="holdings-hdr">
         <span class="holdings-title">Holdings</span>
         <div style="display:flex;align-items:center;gap:12px">
@@ -739,11 +800,11 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
           <button onclick="loadTokens(true)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:0" title="Refresh">↻</button>
         </div>
       </div>
-      <div class="tok-list" id="tokens"><div class="state-msg">Loading…</div></div>
+      <div class="pf-asset-static"><div class="pf-asset-coin usdc">$</div><div class="pf-asset-description"><b>USDC</b><small>Across all chains</small></div><div class="pf-asset-amount"><b id="pf-usdc-asset">—</b><small>Stablecoin</small></div></div><div class="pf-asset-static"><div class="pf-asset-coin sol"><span>≋</span></div><div class="pf-asset-description"><b>SOL</b><small>Solana</small></div><div class="pf-asset-amount"><b id="pf-sol-asset">—</b><small id="pf-sol-price">—</small></div></div><div class="tok-list" id="tokens"><div class="state-msg">Loading…</div></div>
     </div>
 
     <!-- recent activity -->
-    <div class="act-card">
+    <div class="act-card" id="portfolio-activity">
       <div class="act-hdr">
         <span class="act-title">Recent activity</span>
         <a href="/history" class="act-viewall">View all →</a>
@@ -888,11 +949,17 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
     <!-- rate + slippage -->
     <div class="sw-info-row">
       <span id="sw-rate-lbl">—</span>
-      <span>Slippage 0.5%</span>
+      <span>Slippage 3.0%</span>
     </div>
 
-    <!-- confirm -->
-    <button class="sw-review-btn" id="sw-confirm-btn" onclick="_execSwap()">Review swap</button>
+    <div class="sw-review-summary" id="sw-review-summary">
+      <div class="sw-review-line"><span>You pay</span><b id="sw-review-pay">—</b></div>
+      <div class="sw-review-line"><span>Expected</span><b id="sw-review-receive">—</b></div>
+      <div class="sw-review-line"><span>Minimum received</span><b id="sw-review-min">—</b></div>
+      <div class="sw-review-line"><span>SOL kept for network fees</span><b>0.005 SOL</b></div>
+    </div>
+
+    <button class="sw-review-btn" id="sw-confirm-btn" onclick="_swReviewOrConfirm()">Review swap</button>
 
     <!-- token picker overlay -->
     <div class="sw-picker" id="sw-picker">
@@ -1243,6 +1310,161 @@ function _execSend(){
   })
 }
 
+// ── same-chain native ↔ stable convert modal ───────────────────────────────
+var _CONVERT_CHAINS=[
+  {v:'solana',label:'Solana',native:'SOL',stable:'USDC'},
+  {v:'bsc',label:'BSC',native:'BNB',stable:'USDC'},
+  {v:'base',label:'Base',native:'ETH',stable:'USDC'},
+  {v:'arbitrum',label:'Arbitrum',native:'ETH',stable:'USDC'},
+  {v:'polygon',label:'Polygon',native:'POL',stable:'USDC'},
+  {v:'robinhood',label:'Robinhood Chain',native:'ETH',stable:'USDC'}
+]
+var _convertQuote=null
+var _convertBalance=null
+
+function _convertCfg(){
+  var el=document.getElementById('cv-chain')
+  var v=el?el.value:'solana'
+  return _CONVERT_CHAINS.find(function(c){return c.v===v})||_CONVERT_CHAINS[0]
+}
+function _convertDirection(){
+  var el=document.getElementById('cv-direction')
+  return el?el.value:'native_to_stable'
+}
+function _convertOptions(selected){
+  return _CONVERT_CHAINS.map(function(c){
+    return '<option value="'+c.v+'"'+(c.v===selected?' selected':'')+'>'+c.label+'</option>'
+  }).join('')
+}
+function _modalConvert(){
+  _convertQuote=null
+  _convertBalance=null
+  _showModal(
+    '<div class="w-modal-title">Convert assets</div>'
+    +'<div class="w-modal-note" style="margin-top:0">Swap on the same chain. To move USDC between chains, use Bridge instead.</div>'
+    +'<div class="br-form-card">'
+      +'<div class="br-form-box" style="flex:1">'
+        +'<div class="br-form-box-lbl">Network</div>'
+        +'<select class="br-form-select" id="cv-chain" onchange="_convertChanged()">'+_convertOptions('solana')+'</select>'
+      +'</div>'
+      +'<div class="br-form-box" style="flex:1">'
+        +'<div class="br-form-box-lbl">Direction</div>'
+        +'<select class="br-form-select" id="cv-direction" onchange="_convertChanged()">'
+          +'<option value="native_to_stable">Native → USDC</option>'
+          +'<option value="stable_to_native">USDC → Native</option>'
+        +'</select>'
+      +'</div>'
+    +'</div>'
+    +'<div class="br-form-amount-wrap">'
+      +'<input class="br-form-amount-inp" id="cv-amount" type="number" placeholder="0.00" min="0.000001" step="any" oninput="_convertQuote=null;document.getElementById(\'cv-quote\').innerHTML=\'\'">'
+      +'<span class="br-form-amount-sym" id="cv-from-sym">SOL</span>'
+    +'</div>'
+    +'<div class="br-bal-row"><span id="cv-balance">Balance: —</span></div>'
+    +'<div class="w-modal-btns" style="margin-top:14px">'
+      +'<button class="w-modal-btn w-modal-secondary" onclick="_closeModal()">Cancel</button>'
+      +'<button class="w-modal-btn w-modal-primary" id="cv-quote-btn" onclick="_convertGetQuote()">Get Quote</button>'
+    +'</div>'
+    +'<div id="cv-quote"></div>'
+  )
+  _convertChanged()
+}
+function _convertChanged(){
+  _convertQuote=null
+  var q=document.getElementById('cv-quote'); if(q) q.innerHTML=''
+  var cfg=_convertCfg(), dir=_convertDirection()
+  var from=dir==='native_to_stable'?cfg.native:cfg.stable
+  var to=dir==='native_to_stable'?cfg.stable:cfg.native
+  var sym=document.getElementById('cv-from-sym'); if(sym) sym.textContent=from
+  var dirEl=document.getElementById('cv-direction')
+  if(dirEl){
+    dirEl.options[0].text=cfg.native+' → '+cfg.stable
+    dirEl.options[1].text=cfg.stable+' → '+cfg.native
+  }
+  _convertLoadBalance()
+}
+function _convertLoadBalance(){
+  var cfg=_convertCfg(), dir=_convertDirection()
+  var txt=document.getElementById('cv-balance')
+  if(!txt) return
+  txt.textContent='Balance: …'
+  if(cfg.v==='solana'){
+    var native=parseFloat((document.getElementById('sol')||{}).textContent||0)
+    var stable=_usdcSummaryCache?parseFloat(_usdcSummaryCache.solana_usdc||0):0
+    _convertBalance=dir==='native_to_stable'?native:stable
+    txt.textContent='Balance: '+_convertBalance.toFixed(4)+' '+(dir==='native_to_stable'?'SOL':'USDC')
+    return
+  }
+  fetch('/api/evm/'+cfg.v+'/balance',{credentials:'include'})
+    .then(function(r){return r.json()})
+    .then(function(d){
+      if(!d.ok) throw new Error(d.msg||'balance unavailable')
+      var native=parseFloat(d.native_balance||0), stable=parseFloat(d.usdc||0)
+      _convertBalance=dir==='native_to_stable'?native:stable
+      txt.textContent='Balance: '+_convertBalance.toFixed(6)+' '+(dir==='native_to_stable'?cfg.native:cfg.stable)
+    })
+    .catch(function(){txt.textContent='Balance: unavailable'})
+}
+function _convertGetQuote(){
+  var cfg=_convertCfg(), dir=_convertDirection()
+  var amount=parseFloat((document.getElementById('cv-amount')||{}).value)||0
+  var out=document.getElementById('cv-quote')
+  if(!(amount>0)){out.innerHTML='<div class="w-modal-note" style="color:var(--red)">Enter an amount greater than 0.</div>';return}
+  if(_convertBalance!=null&&amount>_convertBalance+1e-12){
+    out.innerHTML='<div class="w-modal-note" style="color:var(--red)">Amount exceeds your available balance.</div>';return
+  }
+  var btn=document.getElementById('cv-quote-btn')
+  btn.disabled=true;btn.textContent='Getting quote…'
+  out.innerHTML='<div class="w-modal-note">Fetching live quote…</div>'
+  var qs=new URLSearchParams({chain:cfg.v,direction:dir,amount:amount})
+  fetch('/api/wallet/convert/quote?'+qs.toString(),{credentials:'include'})
+    .then(function(r){return r.json()})
+    .then(function(d){
+      if(!d.ok){out.innerHTML='<div class="w-modal-note" style="color:var(--red)">'+esc(d.msg||'Quote unavailable')+'</div>';return}
+      _convertQuote={chain:cfg.v,direction:dir,amount:amount,from_symbol:d.from_symbol,to_symbol:d.to_symbol}
+      var min=d.min_out_amount>0?parseFloat(d.min_out_amount).toFixed(6):'—'
+      var receive=parseFloat(d.out_amount||0).toFixed(6)
+      var impact=(parseFloat(d.price_impact_pct||0)*100).toFixed(3)+'%'
+      var reserve=d.network_reserve_native>0
+        ?parseFloat(d.network_reserve_native).toFixed(6)+' '+cfg.native
+        :'—'
+      out.innerHTML=
+        '<div class="w-modal-label" style="margin-top:16px">REVIEW</div>'
+        +'<div class="br-quote-card">'
+          +'<div class="br-quote-row"><span class="br-quote-row-lbl">You send</span><span class="br-quote-row-val">'+amount+' '+esc(d.from_symbol)+'</span></div>'
+          +'<div class="br-quote-row"><span class="br-quote-row-lbl">Expected</span><span class="br-quote-row-val accent">≈ '+receive+' '+esc(d.to_symbol)+'</span></div>'
+          +'<div class="br-quote-row"><span class="br-quote-row-lbl">Minimum received</span><span class="br-quote-row-val">'+min+' '+esc(d.to_symbol)+'</span></div>'
+          +'<div class="br-quote-row"><span class="br-quote-row-lbl">Price impact</span><span class="br-quote-row-val">'+impact+'</span></div>'
+          +'<div class="br-quote-row"><span class="br-quote-row-lbl">Network reserve</span><span class="br-quote-row-val">'+reserve+'</span></div>'
+        +'</div>'
+        +'<div class="w-modal-note">Network fees are paid from your own wallet. OrcAgent does not advance funds for this conversion.</div>'
+        +'<div class="w-modal-btns"><button class="w-modal-btn w-modal-primary" onclick="_convertConfirm()">Confirm '+esc(d.from_symbol)+' → '+esc(d.to_symbol)+'</button></div>'
+    })
+    .catch(function(){out.innerHTML='<div class="w-modal-note" style="color:var(--red)">Network error — try again</div>'})
+    .finally(function(){btn.disabled=false;btn.textContent='Get Quote'})
+}
+function _convertConfirm(){
+  if(!_convertQuote) return
+  var out=document.getElementById('cv-quote')
+  out.innerHTML='<div class="w-modal-note">Signing and submitting…</div>'
+  fetch('/api/wallet/convert',{
+    method:'POST',credentials:'include',
+    headers:{'Content-Type':'application/json','X-CSRF-Token':_csrf},
+    body:JSON.stringify(_convertQuote)
+  }).then(function(r){return r.json()}).then(function(d){
+    if(!d.ok){
+      out.innerHTML='<div class="w-modal-note" style="color:var(--red)">'+esc(d.msg||'Conversion failed')+'</div>'
+      return
+    }
+    _wToast('✓ Conversion confirmed',true)
+    _closeModal()
+    setTimeout(function(){
+      loadBalance();loadUsdcSummary();loadTokens(true);_loadActivity()
+    },1500)
+  }).catch(function(){
+    out.innerHTML='<div class="w-modal-note" style="color:var(--red)">Network error — check your activity before retrying.</div>'
+  })
+}
+
 // ── bridge modal (cross-chain, via 0x Cross-Chain API -- /api/bridge/*) ──
 var _BRIDGE_CHAINS=[
   {v:'solana',   label:'Solana'},
@@ -1537,6 +1759,10 @@ function openSwapModal(toMintOverride){
   if(outEl) outEl.textContent='0'
   var rateEl=document.getElementById('sw-rate-lbl')
   if(rateEl) rateEl.textContent='—'
+  _swLastQuote=null
+  _swReviewReady=false
+  var rev=document.getElementById('sw-review-summary'); if(rev) rev.classList.remove('show')
+  var cbtn=document.getElementById('sw-confirm-btn'); if(cbtn){cbtn.disabled=false;cbtn.textContent='Review swap'}
   var fuEl=document.getElementById('sw-from-usd')
   if(fuEl) fuEl.textContent='≈ $—'
   var tuEl=document.getElementById('sw-to-usd')
@@ -1681,7 +1907,7 @@ function _swSetMax(){
   var amt=0
   if(_swFromMint==='__SOL__'){
     var solEl=document.getElementById('sol')
-    amt=parseFloat((solEl?solEl.textContent:'0')||0)
+    amt=Math.max(0,parseFloat((solEl?solEl.textContent:'0')||0)-SOL_FEE_RESERVE)
   } else {
     var spl=window._wTokens||_allSpl||[]
     var tok=spl.find(function(t){return t.mint===_swFromMint})
@@ -1716,12 +1942,17 @@ function _swFmtOut(v){
 }
 var _swQuoteDebounce=null
 var _swQuoteSeq=0
+var _swLastQuote=null
+var _swReviewReady=false
 async function _swUpdateEst(){
   var spl=window._wTokens||_allSpl||[]
   var amtEl=document.getElementById('sw-amt-inp')
   var outEl=document.getElementById('sw-out-amt')
   var rateEl=document.getElementById('sw-rate-lbl')
   var amt=parseFloat((amtEl||{}).value)||0
+  _swReviewReady=false
+  var _reviewEl=document.getElementById('sw-review-summary'); if(_reviewEl) _reviewEl.classList.remove('show')
+  var _reviewBtn=document.getElementById('sw-confirm-btn'); if(_reviewBtn&&!_reviewBtn.disabled) _reviewBtn.textContent='Review swap'
   var fromIsSOL=_swFromMint==='__SOL__'
   var toIsSOL=_swToMint==='__SOL__'
   var solPx=window._wSolPrice||0
@@ -1768,6 +1999,7 @@ async function _swUpdateEst(){
       var qd=await qr.json()
       if(seq!==_swQuoteSeq) return // stale -- user kept typing or changed tokens since this fired
       if(qd.ok&&qd.out_amount>0){
+        _swLastQuote=qd
         if(outEl) outEl.textContent=_swFmtOut(qd.out_amount)
         if(toUsdEl&&toPx>0) toUsdEl.textContent='≈ $'+(qd.out_amount*toPx).toFixed(2)
         var impact=qd.price_impact_pct?' · impact '+(qd.price_impact_pct*100).toFixed(2)+'%':''
@@ -1777,6 +2009,35 @@ async function _swUpdateEst(){
       // never block "Review swap" over a quote-preview hiccup.
     }catch(e){}
   },400)
+}
+
+function _swReviewOrConfirm(){
+  var amt=parseFloat((document.getElementById('sw-amt-inp')||{}).value)||0
+  if(amt<=0){_wToast('Enter an amount',false);return}
+  var usdcMint='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+  if(_swFromMint!=='__SOL__'||_swToMint!==usdcMint){
+    _execSwap()
+    return
+  }
+  var max=Math.max(0,parseFloat((document.getElementById('sol')||{}).textContent||0)-SOL_FEE_RESERVE)
+  if(amt>max+1e-9){_wToast('Keep 0.005 SOL for network fees. Max: '+max.toFixed(6)+' SOL',false);return}
+  if(!_swLastQuote||!_swLastQuote.ok||!_swLastQuote.out_amount){
+    _wToast('Waiting for a live Jupiter quote…',false)
+    _swUpdateEst()
+    return
+  }
+  if(!_swReviewReady){
+    document.getElementById('sw-review-pay').textContent=amt.toFixed(6)+' SOL'
+    document.getElementById('sw-review-receive').textContent=_swFmtOut(_swLastQuote.out_amount)+' USDC'
+    document.getElementById('sw-review-min').textContent=
+      (_swLastQuote.min_out_amount>0?_swFmtOut(_swLastQuote.min_out_amount):'—')+' USDC'
+    document.getElementById('sw-review-summary').classList.add('show')
+    var btn=document.getElementById('sw-confirm-btn')
+    if(btn) btn.textContent='Confirm SOL → USDC'
+    _swReviewReady=true
+    return
+  }
+  _execSwap()
 }
 
 async function _execSwap(){
@@ -1791,6 +2052,7 @@ async function _execSwap(){
   if(fromIsSOL&&!_swToMint){_wToast('Select a token to receive',false);return}
   if(btn){btn.disabled=true;btn.textContent='Swapping…'}
   var payload
+  var isSolToUsdc=fromIsSOL&&_swToMint==='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
   if(fromIsSOL){
     payload={side:'buy',token_address:_swToMint,symbol:(toTok||{}).symbol||'',amount_sol:amt}
   } else {
@@ -1804,24 +2066,26 @@ async function _execSwap(){
     payload={side:'sell',token_address:_swFromMint,symbol:(fromTok||{}).symbol||'',amount_token:amountToken}
   }
   try{
-    var r=await fetch('/api/instant-trade',{
+    var r=await fetch(isSolToUsdc?'/api/wallet/convert-sol-usdc':'/api/instant-trade',{
       method:'POST',credentials:'include',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(payload)
+      headers:{'Content-Type':'application/json','X-CSRF-Token':_csrf},
+      body:JSON.stringify(isSolToUsdc?{amount_sol:amt}:payload)
     })
     var d=await r.json()
     if(d.success||d.ok){
       _closeSwapModal()
       var sym=fromIsSOL?(toTok||{}).symbol||'token':(fromTok||{}).symbol||'token'
-      _wToast('⚡ '+(fromIsSOL?'Bought':'Sold')+' '+sym,true)
-      setTimeout(function(){loadTokens(true);loadBalance();_loadActivity()},1500)
+      _wToast(isSolToUsdc
+        ?('✓ Converted '+amt.toFixed(4)+' SOL to '+parseFloat(d.usdc_received||0).toFixed(2)+' USDC')
+        :('⚡ '+(fromIsSOL?'Bought':'Sold')+' '+sym),true)
+      setTimeout(function(){loadTokens(true);loadBalance();loadUsdcSummary();_loadActivity()},1500)
     } else {
       _wToast('Swap failed: '+(d.error||d.msg||'Unknown error'),false)
-      if(btn){btn.disabled=false;btn.textContent='Review swap'}
+      if(btn){btn.disabled=false;btn.textContent=_swReviewReady?'Confirm SOL → USDC':'Review swap'}
     }
   }catch(e){
     _wToast('Network error',false)
-    if(btn){btn.disabled=false;btn.textContent='Review swap'}
+    if(btn){btn.disabled=false;btn.textContent=_swReviewReady?'Confirm SOL → USDC':'Review swap'}
   }
 }
 
@@ -2016,10 +2280,9 @@ function _sbSearch(q){
 function _renderHoldings(spl){
   var wrap=document.getElementById('tokens')
   if(!wrap) return
-  if(!spl.length){
-    wrap.innerHTML='<div class="state-msg">No tokens'+((_hideSmall&&_allSpl.length)?' — try showing small balances':'')+'</div>'
-    return
-  }
+  // Aggregated multi-chain USDC has its own pinned row above the token list.
+  spl=spl.filter(function(x){return String(x.symbol||'').toUpperCase()!=='USDC'})
+  if(!spl.length){wrap.innerHTML='';return}
   wrap.innerHTML=spl.map(function(x,i){
     var realI=_allSpl.indexOf(x)
     var sym=x.symbol||'?'
@@ -2080,6 +2343,24 @@ function _toggleTokTrade(i){
 }
 
 // ── balance ───────────────────────────────────────────────
+var _portfolioSnapshotData=null
+var _portfolioSnapshotAt=0
+var _portfolioSnapshotPromise=null
+function _getPortfolioSnapshot(forceFresh){
+  var now=Date.now()
+  if(!forceFresh && _portfolioSnapshotData && now-_portfolioSnapshotAt<3500){
+    return Promise.resolve(_portfolioSnapshotData)
+  }
+  if(_portfolioSnapshotPromise) return _portfolioSnapshotPromise
+  var url='/api/portfolio/snapshot'+(forceFresh?'?bust=1':'')
+  _portfolioSnapshotPromise=fetch(url,{credentials:'include',cache:'no-store'})
+    .then(function(r){if(!r.ok)throw new Error('snapshot unavailable');return r.json()})
+    .then(function(d){if(!d||!d.ok)throw new Error((d&&d.msg)||'snapshot failed');_portfolioSnapshotData=d;_portfolioSnapshotAt=Date.now();return d})
+    .finally(function(){_portfolioSnapshotPromise=null})
+  return _portfolioSnapshotPromise
+}
+window.OrcAgentGetPortfolioSnapshot=_getPortfolioSnapshot
+
 var _balanceLoadedOnce=false
 // Mirrors SOL_NETWORK_RESERVE in dashboard.py -- what a Solana wallet has to
 // keep back to send a trade and later close it.
@@ -2087,7 +2368,9 @@ var SOL_FEE_RESERVE = 0.005
 var _solBalanceCache = null
 
 function loadBalance(){
-  fetch('/api/wallet/balance').then(function(r){return r.json()}).then(function(d){
+  _getPortfolioSnapshot(false).then(function(snap){
+    var d={sol:snap.sol&&snap.sol.amount,usd:snap.sol&&snap.sol.value_usd,
+           in_positions_sol:snap.sol&&snap.sol.in_positions_sol}
     if(d.sol!=null) document.getElementById('sol').textContent=parseFloat(d.sol).toFixed(4)
     if(d.usd!=null) document.getElementById('usd').textContent=parseFloat(d.usd).toFixed(2)
     // The hero shows USDC (see loadUsdcSummary). SOL is reported here as
@@ -2108,6 +2391,8 @@ function loadBalance(){
     // Kept so the Send modal's MAX has a figure to work from; it opens
     // without fetching anything of its own.
     if(d.sol!=null) _solBalanceCache=parseFloat(d.sol)
+    var _cSol=document.getElementById('convert-sol-bal')
+    if(_cSol&&d.sol!=null) _cSol.textContent=Math.max(0,parseFloat(d.sol)-SOL_FEE_RESERVE).toFixed(4)+' SOL'
     if(d.in_positions_sol!=null) document.getElementById('inpos').textContent=parseFloat(d.in_positions_sol).toFixed(4)+' SOL'
     _balanceLoadedOnce=true
   }).catch(function(){
@@ -2142,8 +2427,10 @@ var _usdcLoadedOnce=false
 var _EVM_CHAIN_LABELS={bsc:'BSC',base:'Base',arbitrum:'Arbitrum',polygon:'Polygon',robinhood:'Robinhood'}
 var _usdcSummaryCache=null   // last-fetched {solana_usdc, evm_chains} -- the Bridge modal's balance/MAX reads this instead of its own fetch
 function loadUsdcSummary(){
-  fetch('/api/wallet/usdc-summary').then(function(r){return r.json()}).then(function(d){
-    if(!d.ok) throw new Error(d.msg||'failed')
+  _getPortfolioSnapshot(false).then(function(snap){
+    var d={ok:true,total_usdc:snap.stable.total_usdc,solana_usdc:snap.stable.solana_usdc,
+           evm_chains:snap.stable.evm_chains,evm_address:snap.wallets&&snap.wallets.evm,
+           solana_address:snap.wallets&&snap.wallets.solana}
     var _tot='$'+parseFloat(d.total_usdc).toFixed(2)
     document.getElementById('usdc-total').textContent=_tot
     // This is the balance a trade is actually funded from, so it is the one
@@ -2151,6 +2438,8 @@ function loadUsdcSummary(){
     var _availEl=document.getElementById('avail')
     if(_availEl) _availEl.textContent=_tot
     document.getElementById('usdc-sol-val').textContent='$'+parseFloat(d.solana_usdc).toFixed(2)
+    var _cUsdc=document.getElementById('convert-usdc-bal')
+    if(_cUsdc) _cUsdc.textContent='$'+parseFloat(d.solana_usdc).toFixed(2)
     // evm_chains is {chain: usdc_balance} for every chain in EVM_CHAINS
     // (dashboard.py) -- rendered generically so a future chain added there
     // shows up here without a template change.
@@ -2190,10 +2479,9 @@ function _toggleHideSmall(){
 // ── holdings ──────────────────────────────────────────────
 function loadTokens(bust){
   var wrap=document.getElementById('tokens')
-  wrap.innerHTML='<div class="state-msg">Loading…</div>'
-  fetch('/api/wallet/tokens'+(bust?'?bust=1':'')).then(function(r){return r.json()}).then(function(d){
-    if(!d.ok && !d.tokens){wrap.innerHTML='<div class="state-msg">Failed to load</div>';return}
-    var tokens=d.tokens||[]
+  if(!_allSpl.length) wrap.innerHTML='<div class="state-msg">Loading…</div>'
+  _getPortfolioSnapshot(!!bust).then(function(snap){
+    var tokens=snap.assets||[]
 
     // SOL entry for USD total
     var solToken=tokens.find(function(x){return x.symbol==='SOL'})

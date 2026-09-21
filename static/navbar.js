@@ -21,11 +21,14 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
   if(!styled){
     document.documentElement.classList.add('oa-pf-boot');
     var boot=document.createElement('style');boot.id='oa-pf-boot-style';
-    boot.textContent='html.oa-pf-boot,html.oa-pf-boot body{background:#080d12!important}html.oa-pf-boot body{visibility:hidden!important}';
+    // Never hide the complete page during a route change: that produces the
+    // dark blank frame users report. The shared document transition retains
+    // the outgoing page while the preloaded portfolio stylesheet arrives.
+    boot.textContent='html.oa-pf-boot,html.oa-pf-boot body{background:#080d12!important}';
     document.head.appendChild(boot);
   }
-  ensureStyle('/static/portfolio-redesign.css?v=6','portfolio-redesign.css');
-  ensureScript('/static/portfolio-redesign.js?v=9','portfolio-redesign.js');
+  ensureStyle('/static/portfolio-redesign.css?v=7','portfolio-redesign.css');
+  ensureScript('/static/portfolio-redesign.js?v=10','portfolio-redesign.js');
   ensureScript('/static/portfolio-assets.js?v=1','portfolio-assets.js');
 })();
 
@@ -40,8 +43,8 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/'||!window.matchMedia('(max-width:767px)').matches)return;
   document.documentElement.classList.add('oa-home-mobile-root');
-  ensureStyle('/static/home-mobile.css?v=6','home-mobile.css');
-  ensureScript('/static/home-mobile.js?v=4','home-mobile.js');
+  ensureStyle('/static/home-mobile.css?v=7','home-mobile.css');
+  ensureScript('/static/home-mobile.js?v=6','home-mobile.js');
 })();
 
 (function(){
@@ -61,14 +64,14 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
 /* Shared premium mobile bottom nav across OrcAgent. */
 (function(){
   if(!window.matchMedia('(max-width:767px)').matches)return;
-  ensureStyle('/static/mobile-bottom-nav.css?v=3','mobile-bottom-nav.css');
-  ensureScript('/static/mobile-bottom-nav.js?v=4','mobile-bottom-nav.js');
+  ensureStyle('/static/mobile-bottom-nav.css?v=4','mobile-bottom-nav.css');
+  ensureScript('/static/mobile-bottom-nav.js?v=5','mobile-bottom-nav.js');
 })();
 
 /* Consistent reply/repost/like/bookmark SVGs wherever feed actions exist. */
 (function(){
   ensureStyle('/static/feed-action-icons.css?v=2','feed-action-icons.css');
-  ensureScript('/static/feed-action-icons.js?v=1','feed-action-icons.js');
+  ensureScript('/static/feed-action-icons.js?v=3','feed-action-icons.js');
 })();
 
 var _NB_LIVE_CHAINS=['solana','bsc','base','arbitrum','polygon','robinhood'];

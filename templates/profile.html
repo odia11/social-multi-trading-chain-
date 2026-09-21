@@ -1081,10 +1081,10 @@ async function _removeBanner(){
       {% endfor %}
     </div>
 
-    <label class="tip-label">Network</label>
+    <label class="tip-label">Routing</label>
     <div class="tip-network">
-      <span class="tip-sol">SOL</span>
-      <div>Solana (USDC)<small>Sent on Solana. The network fee comes out of your own SOL.</small></div>
+      <span class="tip-sol">$</span>
+      <div>Automatic USDC routing<small>OrcAgent selects an available network automatically. Network costs are paid from your own wallet.</small></div>
     </div>
 
     <label class="tip-label" for="tip-message">Add a message (optional)</label>
@@ -1122,11 +1122,9 @@ async function _removeBanner(){
 </div>
 
 <script>
-// The wallet this profile belongs to, written by the server. A tip goes here
-// and nowhere else -- there is no recipient field on the page to change.
-var _tipRecipient = {{ wallet|tojson }};
-var _tipPeerId    = {{ user_id|tojson }};
-var _tipMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';   // canonical Solana USDC
+// Recipient identity is server-owned. The browser only sends the profile's
+// user id; /api/tip resolves the user's actual OrcAgent wallets itself.
+var _tipPeerId = {{ user_id|tojson }};
 var _tipSending = false;
 
 function _tipEl(id){ return document.getElementById(id); }
@@ -1188,15 +1186,10 @@ function _sendTip(){
   _tipSending = true;
   _tipEl('tip-submit').disabled = true;
   _tipSay('Sending\u2026', true);
-  fetch('/api/wallet/send-token', {
+  fetch('/api/tip', {
     method: 'POST',
     headers: {'Content-Type':'application/json','X-CSRF-Token':_csrf},
-    body: JSON.stringify({
-      chain:'solana',
-      token_address:_tipMint,
-      to_address:_tipRecipient,
-      amount:amount
-    })
+    body: JSON.stringify({recipient_user_id:_tipPeerId, amount:amount})
   }).then(function(r){ return r.json().catch(function(){ return {}; }); })
     .then(function(d){
       if(d && d.ok){

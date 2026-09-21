@@ -143,6 +143,83 @@ def install(d):
             'msg': 'Could not fund Solana bridge gas automatically from your USDC: ' + safe,
         }
 
+    def user_funded_solana_topup(wallet: str, max_spend_usdc,
+                                  target_sol=0.0035):
+        """Convert this user's own Solana USDC into enough SOL for network use.
+
+        This never touches a sponsor/platform wallet. It is suitable for any
+        user-authorised action (tip/send/bridge) that already has USDC but
+        lacks native SOL. Returns a small result dict for the caller.
+        """
+        max_spend = _q6(max_spend_usdc)
+        if max_spend < _MIN_BOOTSTRAP_USDC:
+            raise RuntimeError(
+                f'At least ${float(_MIN_BOOTSTRAP_USDC):.2f} spare USDC is needed '
+                'to create Solana network gas automatically')
+
+        row = _solana_key_row(wallet)
+        if not row or not row[1]:
+            raise RuntimeError('Solana trading key is not configured')
+        enc_blob = row[1]
+        trading_address = d._get_trading_wallet_address(wallet)
+        if not trading_address:
+            raise RuntimeError('Solana trading wallet is not configured')
+
+        current_sol = Decimal(str(d._get_user_sol(trading_address) or 0))
+        target = Decimal(str(target_sol or 0.0035))
+        if target <= 0:
+            target = Decimal('0.0035')
+        if current_sol >= target:
+            return {
+                'ok': True, 'spent_usdc': Decimal('0'),
+                'before_sol': current_sol, 'after_sol': current_sol,
+            }
+
+        shortfall = target - current_sol
+        try:
+            sol_usdc = _q6(d._get_solana_usdc_balance(trading_address) or 0)
+        except Exception:
+            # Caller already capped max_spend to spare on-chain USDC. If the
+            # mint-only RPC is temporarily unavailable, do not repeat the same
+            # failing balance read and block an otherwise valid gasless order.
+            sol_usdc = max_spend
+        budget = min(max_spend, sol_usdc)
+        if budget < _MIN_BOOTSTRAP_USDC:
+            raise RuntimeError('Not enough spare USDC is available to create Solana network gas')
+
+        with d._use_key(enc_blob, wallet) as private_key:
+            used_usdc, order, quoted_sol = _pick_gasless_order(
+                private_key, budget, shortfall)
+            _execute_order(private_key, order)
+
+        actual_sol = current_sol
+        for _ in range(10):
+            try:
+                actual_sol = Decimal(str(d._get_user_sol(trading_address) or 0))
+            except Exception:
+                actual_sol = current_sol
+            if actual_sol > current_sol:
+                break
+            time.sleep(0.5)
+        if actual_sol <= current_sol:
+            raise RuntimeError(
+                'Gasless SOL top-up confirmed but the SOL balance has not updated yet')
+
+        try:
+            d.add_user_log(
+                wallet,
+                f'[gas] Converted ${float(used_usdc):.2f} USDC to '
+                f'{float(quoted_sol):.6f} SOL from the user wallet')
+        except Exception:
+            pass
+        return {
+            'ok': True, 'spent_usdc': used_usdc,
+            'before_sol': current_sol, 'after_sol': actual_sol,
+            'quoted_sol': quoted_sol,
+        }
+
+    d._gasless_solana_native_topup = user_funded_solana_topup
+
     def auto_bridge(user_id, wallet, evm_address, dest_chain,
                     token_address, amount_usdc):
         first = original(user_id, wallet, evm_address, dest_chain,

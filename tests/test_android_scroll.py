@@ -41,15 +41,16 @@ def test_portfolio_scroll_does_not_require_has_support():
 
 def test_route_bootstrap_sets_scroll_classes_before_dynamic_assets():
     home_class = NAVBAR_JS.index("classList.add('oa-home-mobile-root')")
-    home_css = NAVBAR_JS.index("ensureStyle('/static/home-mobile.css?v=6'")
+    home_css = NAVBAR_JS.index("ensureStyle('/static/home-mobile.css?v=7'")
     portfolio_class = NAVBAR_JS.index("classList.add('oa-portfolio-root')")
-    portfolio_css = NAVBAR_JS.index("ensureStyle('/static/portfolio-redesign.css?v=6'")
+    portfolio_css = NAVBAR_JS.index("ensureStyle('/static/portfolio-redesign.css?v=7'")
     assert home_class < home_css
     assert portfolio_class < portfolio_css
 
 
 def test_android_uses_document_element_as_single_native_scroll_owner():
-    assert "if path in ('/', '/wallet')" in APP_PERF
+    assert "_root_scroll_excluded = ('/messages', '/live-market')" in APP_PERF
+    assert "if path not in _root_scroll_excluded" in APP_PERF
     assert 'oa-native-mobile-scroll' in APP_PERF
     assert 'html.oa-native-mobile-scroll{height:auto!important' in APP_PERF
     assert 'overflow-y:auto!important' in APP_PERF
@@ -59,3 +60,7 @@ def test_android_uses_document_element_as_single_native_scroll_owner():
     assert 'html.oa-native-mobile-scroll.oa-modal-open' in APP_PERF
     assert 'html.oa-native-mobile-scroll.oa-wallet-actions-open' in APP_PERF
     assert 'html.oa-native-mobile-scroll.oa-app-menu-open' in APP_PERF
+    assert 'oa-android-scroll' in APP_PERF
+    assert 'body.oa-home-mobile #main-content.wrap' in APP_PERF
+    assert 'overflow-y:auto!important' in APP_PERF
+    assert 'touch-action:pan-y!important' in APP_PERF

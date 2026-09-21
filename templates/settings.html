@@ -194,60 +194,37 @@ html,body{min-height:100%;background:var(--bg);font-family:var(--ui);color:var(-
     <div class="st-content">
       <div class="st-title">Settings</div>
 
-      <!-- ── CARD 1: Trading Strategy ── -->
-      <div class="st-card">
-        <div class="st-card-hdr">⚡ Trading Strategy</div>
+      <!-- ── CARD 1: Advanced Strategy ── -->
+      <div class="st-card" id="advanced-strategy">
+        <div class="st-card-hdr">⚡ Advanced Strategy</div>
+        <div class="st-row-sub" style="margin:-4px 0 14px">Fine-tune signal entry and position limits. Daily controls such as trade size, take profit, stop loss and daily loss limit live on the Auto Trading page.</div>
 
         <div class="st-row">
           <div class="st-row-left">
             <div class="st-row-label">Breakout trigger</div>
-            <div class="st-row-sub">% move to enter a position</div>
+            <div class="st-row-sub">% move required before the bot considers an entry</div>
           </div>
           <input id="s-breakout" class="st-amber-inp" type="number" value="3" min="0.1" max="100" step="0.1">
         </div>
 
         <div class="st-row">
           <div class="st-row-left">
-            <div class="st-row-label">Min Trade Size (USDC)</div>
-            <div class="st-row-sub">Stake per trade (up to 2x higher on a strong signal)</div>
-          </div>
-          <input id="s-minusdc" class="st-amber-inp" type="number" value="1" min="1" max="10000" step="1">
-        </div>
-
-        <div class="st-row">
-          <div class="st-row-left">
-            <div class="st-row-label">Solana trade currency</div>
-            <div class="st-row-sub">Every Solana trade is funded with USDC, the same as on the other chains. A small amount of SOL is still needed for network fees — that is separate from your trading balance.</div>
-          </div>
-          <div class="st-row-value">USDC</div>
-        </div>
-
-        <div class="st-row">
-          <div class="st-row-left">
-            <div class="st-row-label">Take profit</div>
-            <div class="st-row-sub">% gain to close in profit</div>
-          </div>
-          <input id="s-tp" class="st-amber-inp" type="number" value="15" min="0.1" max="1000" step="0.1">
-        </div>
-
-        <div class="st-row">
-          <div class="st-row-left">
-            <div class="st-row-label">Stop loss</div>
-            <div class="st-row-sub">% drop before cutting the trade</div>
-          </div>
-          <input id="s-sl" class="st-amber-inp" type="number" value="8" min="0.1" max="100" step="0.1">
-        </div>
-
-        <div class="st-row">
-          <div class="st-row-left">
             <div class="st-row-label">Max concurrent positions</div>
-            <div class="st-row-sub">Open trades held at once</div>
+            <div class="st-row-sub">Maximum open bot positions per chain</div>
           </div>
           <input id="s-maxpos" class="st-amber-inp" type="number" value="3" min="1" max="20" step="1">
         </div>
 
+        <div class="st-row">
+          <div class="st-row-left">
+            <div class="st-row-label">Trading currency</div>
+            <div class="st-row-sub">Bot trade sizing is configured in USDC across supported chains.</div>
+          </div>
+          <div class="st-row-value">USDC</div>
+        </div>
+
         <div class="st-save-row">
-          <button class="st-save-btn" id="strat-save-btn" onclick="_saveStrategy()">Save</button>
+          <button class="st-save-btn" id="strat-save-btn" onclick="_saveStrategy()">Save Advanced</button>
           <span class="st-save-msg" id="strat-msg"></span>
         </div>
       </div>
@@ -255,17 +232,6 @@ html,body{min-height:100%;background:var(--bg);font-family:var(--ui);color:var(-
       <!-- ── CARD 2: Preferences ── -->
       <div class="st-card">
         <div class="st-card-hdr">🔔 Preferences</div>
-
-        <div class="st-tog-row">
-          <div>
-            <div class="st-tog-label">Auto Trading</div>
-            <div class="st-tog-sub">Bot executes trades automatically</div>
-          </div>
-          <label class="st-toggle">
-            <input type="checkbox" id="pref-autobot" onchange="_onBotToggle(this)">
-            <span class="st-track"></span>
-          </label>
-        </div>
 
         <div class="st-tog-row">
           <div>
@@ -479,9 +445,6 @@ async function _initPage(){
     if(!d.ok) return;
     /* strategy inputs */
     if(d.breakout_trigger!=null) document.getElementById('s-breakout').value=d.breakout_trigger;
-    if(d.min_trade_size!=null)   document.getElementById('s-minusdc').value=d.min_trade_size;
-    if(d.take_profit!=null)      document.getElementById('s-tp').value=d.take_profit;
-    if(d.stop_loss!=null)        document.getElementById('s-sl').value=d.stop_loss;
     if(d.max_positions!=null)    document.getElementById('s-maxpos').value=d.max_positions;
 
     /* key status */
@@ -527,9 +490,6 @@ async function _saveStrategy(){
   try{
     var submitted = {
       breakout_trigger: parseFloat(document.getElementById('s-breakout').value)||3,
-      min_trade_size:   parseFloat(document.getElementById('s-minusdc').value)||1,
-      take_profit:      parseFloat(document.getElementById('s-tp').value)||15,
-      stop_loss:        parseFloat(document.getElementById('s-sl').value)||8,
       max_positions:    parseInt(document.getElementById('s-maxpos').value)||3
     };
     var d=await _post('/api/settings/save', submitted);
@@ -544,7 +504,7 @@ async function _saveStrategy(){
     var msgEl=document.getElementById('strat-msg');
     if(msgEl){msgEl.className='st-save-msg err';msgEl.textContent='✗ Network error';}
   }finally{
-    btn.textContent='Save'; btn.disabled=false;
+    btn.textContent='Save Advanced'; btn.disabled=false;
   }
 }
 

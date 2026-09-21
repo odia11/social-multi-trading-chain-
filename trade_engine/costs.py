@@ -257,29 +257,22 @@ def price_trade(max_spend_usd, fee_rate, other_costs=(), same_chain: bool = True
 
     user_other = sum((c.usd for c in lines if c.payer == PAYER_USER), ZERO)
 
-    # token * (1 + rate) + user_other = ceiling  ->  solve for token.
-    # Rounded DOWN so the reconstructed total can only come in under the
-    # ceiling, never over it.
+    # The platform fee is 0.75% OF the gross swap amount and is included in
+    # the user's ceiling. Example: $100 gross -> $0.75 fee -> $99.25 purchase.
     remaining = ceiling - user_other
     if remaining <= ZERO:
         token = ZERO
         fee = ZERO
     else:
-        token = _down(remaining / (Decimal('1') + rate))
-        # The fee is then taken from the purchase we actually settled on, so
-        # the two always agree. Rounded UP, so it is never understated.
-        fee = _up(token * rate)
-        # Rounding both ways can leave a cent of headroom or overshoot by
-        # one; give any spare cent back to the purchase, and take one back
-        # from the purchase if the pair went over.
+        fee = _up(remaining * rate)
+        token = _down(remaining - fee)
         while token + fee + user_other > ceiling and token > ZERO:
             token -= CENT
-            fee = _up(token * rate)
 
     if fee > ZERO:
         lines.append(CostLine(
             kind=KIND_PLATFORM_FEE, usd=fee, payer=PAYER_USER, source='orcagent',
-            detail=f'{(rate * 100).normalize()}% of the token purchase',
+            detail=f'{(rate * 100).normalize()}% of the gross swap amount',
         ))
 
     return Quote(

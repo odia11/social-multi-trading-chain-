@@ -195,20 +195,11 @@ def _sweep_user_chain(user_id: int, wallet: str, evm_address: str, enc_blob: str
 
 
 def _refill_sponsor_wallet():
-    """Keeps the platform's own gas sponsor wallet solvent: trading fees land
-    there as USDC, grants go out as native gas, so it periodically converts
-    some of that fee income back into gas (see dashboard._refill_gas_sponsor).
-    A no-op when sponsorship isn't configured or the sponsor is still flush."""
-    for chain in _app.EVM_CHAINS:
-        try:
-            refilled, msg = _app._refill_gas_sponsor(chain)
-        except Exception as e:
-            logger.error('[gas-manager] sponsor refill on %s raised: %s', chain, e)
-            continue
-        if refilled:
-            logger.info('[gas-manager] sponsor wallet refilled with gas on %s from fee income', chain)
-        elif msg:
-            logger.error('[gas-manager] sponsor wallet could not be refilled on %s: %s', chain, msg)
+    """Disabled by policy: gas sponsor wallets are funded manually.
+
+    Trading fee revenue must never be diverted or converted to refill them.
+    """
+    return
 
 
 def sweep_once():
@@ -216,6 +207,13 @@ def sweep_once():
     EVM_CHAINS. Safe to call directly (e.g. right after a trade) as well as
     from the periodic loop below -- _ensure_evm_gas()'s own per-(wallet,
     chain) lock keeps overlapping calls from ever double-topping-up."""
+    # Production explicitly does not front user gas. BUY/SELL/bridge paths now
+    # self-fund gas just-in-time from the user's own stablecoin, so sweeping
+    # every user/chain here only creates RPC load and can trigger public-RPC
+    # rate limits without providing any benefit.
+    if not getattr(_app, 'ORCAGENT_FRONTS_GAS', True):
+        return
+
     # Before handing gas out to users, make sure the wallet it comes from
     # still has some -- otherwise every grant below fails for the same reason.
     _refill_sponsor_wallet()

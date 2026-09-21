@@ -23,7 +23,7 @@ def test_failed_api_always_uses_official_x_composer():
 
 def test_fallback_keeps_canonical_post_and_card_preview():
     assert "window.location.origin+'/post/'+encodeURIComponent(postId)" in share
-    assert "?xv=8" in share
+    assert "?xv=9" in share
     assert "@orcagent" in share
 
 def test_server_supplied_redirect_is_restricted_to_x_intent():

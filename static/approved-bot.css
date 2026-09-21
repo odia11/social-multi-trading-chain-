@@ -1,0 +1,108 @@
+/* Approved OrcAgent mobile bot: real backend, screenshot-matched structure. */
+:root{--gold:#ffcb66;--gold2:#ffda80;--green:#40dda2;--border:#29373b}
+html,body{background:#080e11;color:#f6f7f9;overflow-x:clip}
+.page-wrap{max-width:750px;padding:19px 18px 130px}
+.page-title-row{margin:8px 0 19px;align-items:center}
+.page-title{font-size:23px;font-weight:780;letter-spacing:-.03em}
+.bot-lightning{color:var(--gold);font-size:30px;margin-right:10px}
+.bot-live-indicator{color:var(--green);font-size:14px}
+#bot-live-lamp.active{background:#3bdda3;box-shadow:0 0 12px #3bdda35e}
+.status-card,.strategy-card{background:linear-gradient(135deg,#141f22,#10191d);border:1px solid #2c3b42;box-shadow:inset 0 1px #ffffff0c}
+.status-card{padding:22px 20px 0;border-radius:20px 20px 0 0;margin:0}
+.status-card:before,.bot-orb{display:none}
+.status-head{display:flex;gap:12px;align-items:center;margin:0;padding:0 0 19px;border-bottom:1px solid #334047}
+.status-dot-wrap{position:relative;width:49px;height:49px;flex:0 0 49px;background:#11372b;border-radius:13px;box-shadow:none}
+.bot-zap{font-size:37px;color:var(--green);font-weight:800;line-height:1}
+.status-dot{display:none}
+.status-meta{flex:1;min-width:0}
+.status-label{color:#aeb8be;font-size:13px}
+.status-text{font-size:20px;color:var(--green);font-weight:750;line-height:1.25}
+.status-sub{font-size:10px;color:#78878e;max-width:155px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bot-toggle-btn{width:59px;min-height:32px;height:32px;flex:0 0 59px;border-radius:999px;background:#27343a;border:1px solid #3a484e;padding:3px;box-shadow:none;display:flex;align-items:center;justify-content:flex-start;cursor:pointer}
+.bot-toggle-btn.running{background:var(--gold);border-color:#ffd785;justify-content:flex-end}
+.bot-switch-knob{height:24px;width:24px;display:block;background:#070c0d;border-radius:50%;box-shadow:0 1px 3px #0008}
+.bot-toggle-btn:not(.running) .bot-switch-knob{background:#b7c0c4}
+.bot-toggle-btn:disabled{opacity:.6}
+.status-error{margin:11px 0 0}
+.strategy-card{padding:0 20px 21px;border-radius:0 0 20px 20px;border-top:0;margin:0 0 12px}
+.strategy-row{display:flex;flex-direction:column;gap:5px;padding:13px 0;border-top:1px solid #303e43}
+.strategy-row:first-child{border-top:0}
+.strategy-row span,.strategy-row label{font:500 13px var(--ui);color:#a8b3bd}
+.strategy-row strong{font-size:17px;color:#f7f9fa;font-weight:680}
+.strategy-row small{color:#75838c;font-size:10px;font-weight:500}
+.bot-field{display:flex;align-items:center;gap:6px;min-height:29px}
+.bot-field input{border:0;outline:0;min-width:0;width:120px;max-width:54%;background:transparent;color:#f5f8fa;font:680 18px var(--ui);padding:0;appearance:textfield;border-bottom:1px solid transparent;border-radius:0}
+.bot-field input:focus{border-bottom-color:var(--gold)}
+.bot-field input::-webkit-inner-spin-button,.bot-field input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.bot-field span{font-size:16px;font-weight:700;color:#f4f6f8}
+.bot-field-shadow{display:none}
+.strategy-save{width:100%;min-height:52px;background:linear-gradient(180deg,#ffda7d,#ffc35a);color:#121411;border:1px solid #ffe19c;border-radius:12px;font:800 17px var(--ui);margin:14px 0 0;cursor:pointer;box-shadow:0 3px 13px #eaae3020}
+.strategy-save:disabled{opacity:.65}
+.bot-save-message{font-size:12px;color:var(--green);min-height:0}
+.bot-save-message:not(:empty){margin-top:10px}
+.bot-save-message[data-error="1"]{color:var(--red)}
+.stat-grid{display:none}
+.narrative-card{margin:0 0 12px;border:1px solid #2d3b42;border-radius:17px;padding:18px 17px;background:#10191c}
+.narrative-card .narrative-title{font-size:16px}
+.narrative-card .narrative-desc{color:#a3b0b9;font-size:12px}
+.narrative-card .narrative-beta-tag{font-size:10px}
+@media(max-width:768px){.page-wrap{padding:15px 16px 130px}.page-title{font-size:23px}.status-card{padding:19px 17px 0}.strategy-card{padding:0 17px 18px}.status-head{padding-right:0;gap:13px;margin:0}.status-text{font-size:20px}.bot-toggle-btn{min-height:32px}.strategy-row{padding:13px 0}.narrative-card{margin-top:12px}}
+@media(min-width:769px){.stat-grid{display:grid;margin-top:25px}}
+
+.ai-analysis-card{display:flex;align-items:center;gap:13px;padding:16px 17px}.ai-wave{color:#42e8a3;background:#103529;border-radius:13px;flex:0 0 45px;height:45px;font:700 40px var(--ui);display:grid;place-items:center;line-height:1}.ai-analysis-copy{flex:1;min-width:0}.ai-analysis-card .narrative-hdr{margin-bottom:3px}.ai-analysis-card .narrative-desc{line-height:1.35}.ai-analysis-card .na-toggle{width:38px;height:22px}.ai-analysis-card .na-track:before{width:16px;height:16px}.ai-analysis-card .na-toggle input:checked+.na-track:before{transform:translateX(16px)}@media(max-width:768px){.narrative-card:not(.ai-analysis-card){display:none}}
+
+/* iPhone visual QA, 2026-09-21: keep bot page in the approved compact viewport.
+   Scoped to this route: other pages retain the global mobile search. */
+body.oa-bot-page .pt-nb-topbar .pt-nb-search-wrap{display:none!important}
+body.oa-bot-page .page-wrap{padding-top:4px}
+body.oa-bot-page .page-title-row{margin-top:0;margin-bottom:16px}
+body.oa-bot-page .bot-field{display:inline-flex;justify-content:flex-start;align-items:baseline;gap:4px;width:fit-content;max-width:100%;min-height:28px;white-space:nowrap}
+body.oa-bot-page .bot-field input{flex:0 0 auto;min-width:0!important;max-width:none!important;margin:0!important;display:inline-block;vertical-align:baseline;text-align:left}
+body.oa-bot-page #bot-tp,body.oa-bot-page #bot-sl{width:4.5ch!important}
+body.oa-bot-page #bot-max-trade,body.oa-bot-page #bot-loss-limit{width:7ch!important}
+body.oa-bot-page .bot-field span{flex:0 0 auto;margin:0!important}
+body.oa-bot-page .strategy-row{gap:3px}
+@media(max-width:768px){
+ body.oa-bot-page .pt-nb-topbar{padding-bottom:6px}
+ body.oa-bot-page .page-wrap{padding:3px 16px 130px!important}
+ body.oa-bot-page .page-title-row{margin:7px 0 16px!important}
+ body.oa-bot-page .strategy-row{padding:11px 0}
+ body.oa-bot-page .status-head{padding-bottom:15px}
+}
+
+/* Final mobile density pass from live iPhone QA. */
+body.oa-bot-page .bot-field input{width:auto!important;max-width:100%!important}
+@media(max-width:768px){
+ body.oa-bot-page .status-sub{display:none}
+ body.oa-bot-page .strategy-row{padding:8px 0!important;gap:2px!important}
+ body.oa-bot-page .strategy-row span,body.oa-bot-page .strategy-row label{font-size:12px}
+ body.oa-bot-page .strategy-row strong{font-size:16px}
+ body.oa-bot-page .bot-field{min-height:25px;gap:3px}
+ body.oa-bot-page .bot-field input{font-size:17px!important;line-height:1.15}
+ body.oa-bot-page .bot-field span{font-size:15px!important;line-height:1.15}
+ body.oa-bot-page .strategy-save{min-height:48px;margin-top:10px}
+ body.oa-bot-page .status-head{padding-bottom:13px}
+}
+
+
+/* Match the standard OrcAgent Home/Portfolio charcoal surfaces, not teal. */
+body.oa-bot-page{background:#0e1013!important}
+body.oa-bot-page .status-card,
+body.oa-bot-page .strategy-card,
+body.oa-bot-page .narrative-card,
+body.oa-bot-page .stat-card{
+ background:#15171b!important;background-image:none!important;
+ border-color:#292d34!important;box-shadow:none!important;
+}
+body.oa-bot-page .strategy-row,
+body.oa-bot-page .status-head{border-color:#2a2d33!important}
+body.oa-bot-page .strategy-row span,
+body.oa-bot-page .strategy-row label,
+body.oa-bot-page .status-label{color:#a1a5ae}
+body.oa-bot-page .status-dot-wrap{background:#153428}
+body.oa-bot-page .bot-toggle-btn:not(.running){background:#30343a;border-color:#424850}
+body.oa-bot-page .strategy-heading .strategy-tag{
+ color:#ffcb66;border-color:#805f31;background:#201b14;text-decoration:none;
+ border-radius:9px;padding:8px 10px;letter-spacing:0;font-size:12px;
+}
+body.oa-bot-page #bot-min-trade{width:7ch!important}

@@ -38,18 +38,18 @@ check('ordinary mobile bottom space is tightened from the old 132px reserve',
       and 'calc(132px + env' not in CSS)
 check('portfolio gets a compact but safe fixed-nav reserve',
       'body.oa-shared-ux.oa-portfolio .wlt-center' in CSS)
-check('every HTML response gets the shared v3 performance assets early',
-      'app-ux.css?v=3' in PERF and 'app-ux.js?v=3' in PERF)
+check('every HTML response gets the shared v4 performance assets early',
+      'app-ux.css?v=4' in PERF and 'app-ux.js?v=4' in PERF)
 check('route-critical redesign assets are applied before first paint',
       'portfolio-redesign.css?v=6' in PERF
       and 'live-market-redesign.css?v=7' in PERF
-      and 'home-mobile.css?v=6' in PERF
+      and 'home-mobile.css?v=7' in PERF
       and 'home-mobile-polish.css?v=5' in PERF)
 check('production WSGI installs the performance adapter',
       'from app_performance import install as _install_app_performance' in ENTRY
       and '_install_app_performance(_dashboard)' in ENTRY)
 check('fallback loader no longer duplicates document prefetching',
-      'app-ux.css?v=3' in LOADER and 'app-ux.js?v=3' in LOADER
+      'app-ux.css?v=4' in LOADER and 'app-ux.js?v=4' in LOADER
       and 'fetchDocument' not in LOADER and 'primeCore' not in LOADER)
 check('nginx compresses text assets while retaining live proxy streaming',
       'gzip on;' in NGINX and 'application/javascript' in NGINX
@@ -57,4 +57,17 @@ check('nginx compresses text assets while retaining live proxy streaming',
 check('static assets keep bounded caching with background revalidation',
       'max-age=604800' in NGINX and 'stale-while-revalidate=86400' in NGINX)
 
-print('\n13/13 checks passed')
+
+check('same-origin documents opt in to browser-managed route transitions',
+      '@view-transition' in CSS and 'navigation: auto' in CSS
+      and '::view-transition-old(root)' in CSS
+      and '::view-transition-new(root)' in CSS)
+check('private no-store HTML is never prefetched',
+      "l.as='document'" not in UX and "l.href=u.pathname+u.search" not in UX)
+check('route asset prefetch is restricted to public versioned CSS/JS',
+      "var ROUTE_ASSETS" in UX and "var key='/static/'+asset" in UX
+      and 'navigator.connection.saveData' in UX)
+check('portfolio boot does not hide its entire document',
+      'visibility:hidden!important' not in (ROOT / 'static' / 'navbar.js').read_text(encoding='utf-8'))
+
+print('\n17/17 checks passed')

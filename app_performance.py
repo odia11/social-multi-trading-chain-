@@ -42,12 +42,12 @@ def install(appmod) -> None:
                     '</script>'
                 )
 
-            style('app-ux.css', '/static/app-ux.css?v=3', ' id="oa-app-ux-css"')
-            script('app-ux.js', '/static/app-ux.js?v=3', ' id="oa-app-ux-js"')
+            style('app-ux.css', '/static/app-ux.css?v=4', ' id="oa-app-ux-css"')
+            script('app-ux.js', '/static/app-ux.js?v=4', ' id="oa-app-ux-js"')
             style('shared-trade-card-v2.css', '/static/shared-trade-card-v2.css?v=1', ' id="oa-shared-trade-card-css"')
             script('shared-trade-card-v2.js', '/static/shared-trade-card-v2.js?v=1', ' id="oa-shared-trade-card-js"')
             style('feed-action-icons.css', '/static/feed-action-icons.css?v=2')
-            script('feed-action-icons.js', '/static/feed-action-icons.js?v=1')
+            script('feed-action-icons.js', '/static/feed-action-icons.js?v=3')
 
             if 'fonts.googleapis.com' in html and 'rel="preconnect" href="https://fonts.googleapis.com"' not in html:
                 tags.append('<link rel="preconnect" href="https://fonts.googleapis.com">')
@@ -69,7 +69,7 @@ def install(appmod) -> None:
                 style('groups-redesign.css', '/static/groups-redesign.css?v=1')
                 script('groups-redesign.js', '/static/groups-redesign.js?v=1')
             elif path == '/':
-                style('home-mobile.css', '/static/home-mobile.css?v=6', ' media="(max-width:767px)"')
+                style('home-mobile.css', '/static/home-mobile.css?v=7', ' media="(max-width:767px)"')
                 style('home-mobile-polish.css', '/static/home-mobile-polish.css?v=5', ' media="(max-width:767px)"')
                 style('home-composer-mobile.css', '/static/home-composer-mobile.css?v=1', ' media="(max-width:767px)"')
                 style('home-desktop.css', '/static/home-desktop.css?v=1', ' media="(min-width:1025px)"')
@@ -82,11 +82,21 @@ def install(appmod) -> None:
             # owner, but make it the real standards-mode root: html. Body and the
             # app shells are allowed to grow naturally and never become nested
             # vertical scrollers.
-            if path in ('/', '/wallet') and 'data-oa-native-mobile-scroll="1"' not in html:
+            # Use the standards-mode root scroller on every ordinary mobile
+            # document page. Previously this was limited to Home + Portfolio,
+            # so Android Chrome/WebView still ended up with body/inner-container
+            # scrolling on Bot, Profile, Notifications, Groups, Settings, etc.
+            # iOS is permissive about that split ownership; Chromium is not.
+            # Messages and Live Market intentionally own fullscreen/internal
+            # scrollers and therefore remain excluded.
+            _root_scroll_excluded = ('/messages', '/live-market')
+            if path not in _root_scroll_excluded and 'data-oa-native-mobile-scroll="1"' not in html:
                 tags.append(
                     '<script data-oa-native-mobile-scroll="1">'
-                    '(function(){if(window.matchMedia&&window.matchMedia("(max-width:767px)").matches)'
-                    'document.documentElement.classList.add("oa-native-mobile-scroll");})();'
+                    '(function(){if(window.matchMedia&&window.matchMedia("(max-width:767px)").matches){'
+                    'document.documentElement.classList.add("oa-native-mobile-scroll");'
+                    'if(/Android/i.test(navigator.userAgent||""))document.documentElement.classList.add("oa-android-scroll");'
+                    '}})();'
                     '</script>'
                 )
                 tags.append(
@@ -106,6 +116,10 @@ def install(appmod) -> None:
                     'html.oa-native-mobile-scroll.oa-modal-open,'
                     'html.oa-native-mobile-scroll.oa-wallet-actions-open,'
                     'html.oa-native-mobile-scroll.oa-app-menu-open{overflow:hidden!important}'
+                    'html.oa-native-mobile-scroll.oa-android-scroll body.oa-home-mobile{height:100dvh!important;min-height:100dvh!important;overflow:hidden!important}'
+                    'html.oa-native-mobile-scroll.oa-android-scroll body.oa-home-mobile #app{height:100dvh!important;min-height:100dvh!important;max-height:100dvh!important;overflow:hidden!important;display:flex!important;flex-direction:column!important}'
+                    'html.oa-native-mobile-scroll.oa-android-scroll body.oa-home-mobile .app-body{flex:1 1 auto!important;min-height:0!important;height:auto!important;max-height:none!important;overflow:hidden!important}'
+                    'html.oa-native-mobile-scroll.oa-android-scroll body.oa-home-mobile #main-content.wrap{flex:1 1 auto!important;height:100%!important;min-height:0!important;max-height:none!important;overflow-x:hidden!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important;overscroll-behavior-y:contain!important;touch-action:pan-y!important}'
                     '}'
                     '</style>'
                 )
