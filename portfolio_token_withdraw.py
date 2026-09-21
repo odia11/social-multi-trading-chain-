@@ -115,6 +115,51 @@ def _rpc_call_any(d, method, params, require_nonempty=False):
     raise RuntimeError('No Solana RPC is configured')
 
 
+def _solana_source_accounts(d, owner_text, token_address):
+    """Find funded source accounts using the same fallback as balance reads.
+
+    Filter every response locally. Never combine snapshots across providers,
+    and never select an unrelated mint/account from a program-wide scan.
+    """
+    programs = ('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+                'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
+
+    def matching(result):
+        found = []
+        for entry in (result or {}).get('value') or []:
+            try:
+                account = entry['account']
+                info = account['data']['parsed']['info']
+                if (account['owner'] in programs
+                        and info['mint'] == token_address
+                        and info['owner'] == owner_text
+                        and info.get('state') != 'frozen'
+                        and int(info['tokenAmount']['amount']) > 0):
+                    found.append(entry)
+            except (KeyError, TypeError, ValueError):
+                continue
+        return found
+
+    last_error = None
+    saw_response = False
+    for query in [{'mint': token_address}] + [{'programId': p} for p in programs]:
+        for url in _rpc_urls(d):
+            try:
+                result = _rpc_call(url, 'getTokenAccountsByOwner', [
+                    owner_text, query, {'encoding': 'jsonParsed', 'commitment': 'confirmed'}])
+                if not isinstance(result, dict) or not isinstance(result.get('value'), list):
+                    raise RuntimeError('Invalid Solana token-account response')
+                saw_response = True
+                accounts = matching(result)
+                if accounts:
+                    return accounts
+            except Exception as exc:
+                last_error = exc
+    if not saw_response and last_error:
+        raise RuntimeError('Solana source token accounts are unavailable') from last_error
+    return []
+
+
 def _solana_transfer(d, wallet, token_address, to_address, amount):
     from solders.hash import Hash
     from solders.instruction import AccountMeta, Instruction
@@ -139,11 +184,7 @@ def _solana_transfer(d, wallet, token_address, to_address, amount):
     owner = Pubkey.from_string(owner_text)
 
     # The exact source token account and its decimals are server-read.
-    result, url = _rpc_call_any(d, 'getTokenAccountsByOwner', [
-        owner_text, {'mint': token_address}, {'encoding':'jsonParsed'}
-    ], require_nonempty=True)
-    result = result or {}
-    accounts = result.get('value') or []
+    accounts = _solana_source_accounts(d, owner_text, token_address)
     source = None
     balance_raw = 0
     decimals = 0

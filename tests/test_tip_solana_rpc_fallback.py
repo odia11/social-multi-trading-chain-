@@ -33,8 +33,7 @@ def test_tip_readiness_does_not_use_single_rpc():
 
 def test_solana_tip_transfer_fails_over_for_token_account_and_reads():
     b=block('def _solana_transfer', '\ndef _evm_transfer')
-    assert "_rpc_call_any(d, 'getTokenAccountsByOwner'" in b
-    assert "require_nonempty=True" in b
+    assert "_solana_source_accounts(d, owner_text, token_address)" in b
     assert "_rpc_call_any(d, 'getAccountInfo'" in b
     assert "_rpc_call_any(" in b and "'getBalance'" in b
     assert "_rpc_call_any(d, 'getLatestBlockhash'" in b
