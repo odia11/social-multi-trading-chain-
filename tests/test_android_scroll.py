@@ -49,7 +49,8 @@ def test_route_bootstrap_sets_scroll_classes_before_dynamic_assets():
 
 
 def test_android_uses_document_element_as_single_native_scroll_owner():
-    assert "if path in ('/', '/wallet')" in APP_PERF
+    assert "_root_scroll_excluded = ('/messages', '/live-market')" in APP_PERF
+    assert "if path not in _root_scroll_excluded" in APP_PERF
     assert 'oa-native-mobile-scroll' in APP_PERF
     assert 'html.oa-native-mobile-scroll{height:auto!important' in APP_PERF
     assert 'overflow-y:auto!important' in APP_PERF

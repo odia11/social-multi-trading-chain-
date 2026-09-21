@@ -82,7 +82,15 @@ def install(appmod) -> None:
             # owner, but make it the real standards-mode root: html. Body and the
             # app shells are allowed to grow naturally and never become nested
             # vertical scrollers.
-            if path in ('/', '/wallet') and 'data-oa-native-mobile-scroll="1"' not in html:
+            # Use the standards-mode root scroller on every ordinary mobile
+            # document page. Previously this was limited to Home + Portfolio,
+            # so Android Chrome/WebView still ended up with body/inner-container
+            # scrolling on Bot, Profile, Notifications, Groups, Settings, etc.
+            # iOS is permissive about that split ownership; Chromium is not.
+            # Messages and Live Market intentionally own fullscreen/internal
+            # scrollers and therefore remain excluded.
+            _root_scroll_excluded = ('/messages', '/live-market')
+            if path not in _root_scroll_excluded and 'data-oa-native-mobile-scroll="1"' not in html:
                 tags.append(
                     '<script data-oa-native-mobile-scroll="1">'
                     '(function(){if(window.matchMedia&&window.matchMedia("(max-width:767px)").matches)'
