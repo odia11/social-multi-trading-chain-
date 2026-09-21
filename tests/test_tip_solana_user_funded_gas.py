@@ -22,7 +22,7 @@ def test_generic_solana_topup_is_exposed():
 def test_tip_preserves_requested_amount_and_only_spends_spare_usdc_for_gas():
     b=block(TIP,"@app.post('/api/tip')","@app.post('/api/wallet/send-token')")
     assert "spare = sol['balance'] - amount" in b
-    assert "topup(sender_wallet, spare, target_sol=0.0025)" in b
+    assert "topup(sender_wallet, spare, target_sol=float(target_sol))" in b
     assert "_solana_transfer(\n                            d, sender_wallet, d.USDC_MINT,\n                            recipient_address, amount)" in b
 
 
@@ -69,6 +69,19 @@ def test_tip_reconciles_too_low_usdc_result():
     assert "d._wallet_tokens_cache.pop(sender_wallet, None)" in b
     assert 'd._fetch_wallet_tokens(sender_wallet, owner)' in b
     assert 'if scanned > balance:' in b
+
+
+def test_direct_solana_failure_can_retry_after_user_funded_topup():
+    b=block(TIP,"@app.post('/api/tip')","@app.post('/api/wallet/send-token')")
+    assert 'solana_direct_attempted = True' in b
+    assert 'or solana_direct_attempted' in b
+    assert "solana_error = safe[:220]" in b
+    assert b.count('_solana_transfer(') >= 2
+
+def test_topup_targets_absolute_required_sol_plus_margin():
+    b=block(TIP,"@app.post('/api/tip')","@app.post('/api/wallet/send-token')")
+    assert "Decimal(max(required, 0)) / Decimal(1_000_000_000)" in b
+    assert "+ Decimal('0.0005')" in b
 
 
 if __name__=='__main__':

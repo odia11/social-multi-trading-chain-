@@ -543,11 +543,14 @@ def install(d):
             sent = 0.0
             chain = ''
             recipient_address = ''
+            solana_error = ''
+            solana_direct_attempted = False
 
             for candidate in candidates:
                 chain = candidate['chain']
                 try:
                     if chain == 'solana':
+                        solana_direct_attempted = True
                         recipient_address = recipient['solana']
                         tx_hash, sent = _solana_transfer(
                             d, sender_wallet, d.USDC_MINT,
@@ -557,30 +560,61 @@ def install(d):
                         tx_hash, sent = _evm_transfer(
                             d, sender_wallet, chain, candidate['token'],
                             recipient_address, amount)
-                    break
-                except Exception:
+                    if tx_hash:
+                        break
+                except Exception as exc:
+                    safe = str(exc)
+                    try:
+                        safe = d._redact_keys(safe)
+                    except Exception:
+                        pass
+                    if chain == 'solana':
+                        solana_error = safe[:220]
+                        app.logger.info(
+                            'solana tip direct transfer failed wallet=%s error=%s reason=%s',
+                            sender_wallet[:8] + '…', type(exc).__name__, solana_error)
                     tx_hash = ''
 
-            if not tx_hash and sol and not sol.get('native_ready'):
+            # A marginal SOL balance can pass a pre-read and still fail
+            # preflight once the exact recipient ATA/rent/fee is known. If a
+            # Solana transfer failed OR readiness already said gas was short,
+            # make one user-funded gas bootstrap attempt from SPARE USDC, then
+            # retry the exact requested tip once. Never reduce the tip amount.
+            if not tx_hash and sol:
                 spare = sol['balance'] - amount
                 topup = getattr(d, '_gasless_solana_native_topup', None)
-                if callable(topup) and spare >= Decimal('0.20'):
+                should_topup = (
+                    not sol.get('native_ready')
+                    or solana_direct_attempted
+                )
+                if should_topup and callable(topup) and spare >= Decimal('0.20'):
                     try:
-                        topup(sender_wallet, spare, target_sol=0.0025)
+                        required = int(sol.get('required_lamports') or 0)
+                        current = int(sol.get('lamports') or 0)
+                        # Top up to at least the readiness estimate with a
+                        # safety cushion for preflight/priority-fee variance.
+                        target_sol = max(
+                            Decimal('0.0025'),
+                            (Decimal(max(required, 0)) / Decimal(1_000_000_000))
+                            + Decimal('0.0005')
+                        )
+                        topup(sender_wallet, spare, target_sol=float(target_sol))
                         recipient_address = recipient['solana']
                         chain = 'solana'
                         tx_hash, sent = _solana_transfer(
                             d, sender_wallet, d.USDC_MINT,
                             recipient_address, amount)
+                        solana_error = ''
                     except Exception as exc:
                         safe = str(exc)
                         try:
                             safe = d._redact_keys(safe)
                         except Exception:
                             pass
+                        solana_error = safe[:220]
                         app.logger.info(
                             'solana tip gas bootstrap unavailable wallet=%s error=%s reason=%s',
-                            sender_wallet[:8] + '…', type(exc).__name__, safe[:180])
+                            sender_wallet[:8] + '…', type(exc).__name__, solana_error)
                         tx_hash = ''
 
             if not tx_hash:
@@ -606,9 +640,22 @@ def install(d):
                         tx_hash = ''
 
             if not tx_hash:
+                if solana_error:
+                    # This is intentionally the server-side transfer/provider
+                    # reason, already redacted above. It is materially more
+                    # useful than blaming gas for every possible failure.
+                    return jsonify({
+                        'ok':False,
+                        'error':'Solana tip failed: ' + solana_error
+                    }), 400
+                if sol and (sol['balance'] - amount) < Decimal('0.20'):
+                    return jsonify({
+                        'ok':False,
+                        'error':'Not enough spare USDC to create Solana network gas while keeping the full tip amount.'
+                    }), 400
                 return jsonify({
                     'ok':False,
-                    'error':'This tip cannot be sent yet. There is enough USDC only if the wallet can also create or pay its network gas.'
+                    'error':'No funded USDC route is currently available for this tip.'
                 }), 400
 
             with _RECENT_GUARD:
