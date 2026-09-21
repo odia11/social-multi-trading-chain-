@@ -1896,6 +1896,9 @@ def _run_audit() -> dict:
     if not ANTHROPIC_API_KEY:
         checks.append({'name': 'Anthropic API', 'status': 'warn',
                         'msg': 'ANTHROPIC_API_KEY not configured — AI signals/narrative agent disabled'})
+    elif not _anthropic_operationally_available():
+        checks.append({'name': 'Anthropic API', 'status': 'fail',
+                       'msg': 'Invalid API key — AI features disabled until key update/restart'})
     else:
         try:
             ar = requests.post(
@@ -1911,6 +1914,7 @@ def _run_audit() -> dict:
                 checks.append({'name': 'Anthropic API', 'status': 'fail',
                                 'msg': 'Credit balance too low — AI signals/narrative agent failing closed'})
             elif ar.status_code == 401:
+                _mark_anthropic_auth_failed('audit')
                 checks.append({'name': 'Anthropic API', 'status': 'fail', 'msg': 'Invalid API key (401)'})
             elif ar.status_code == 429:
                 checks.append({'name': 'Anthropic API', 'status': 'warn', 'msg': 'Rate-limited (429)'})
@@ -4671,7 +4675,41 @@ def get_token_data(mint, fast: bool = False, chain: str = None):
 
 _ai_cache: dict = {}
 _AI_CACHE_TTL      = 300   # seconds — cache per-token AI signal for 5 min
-_ai_disabled_until = 0.0   # epoch — set to now+3600 on 401, resets automatically
+_ai_disabled_until = 0.0
+
+# Process-wide Anthropic authentication circuit breaker. Environment variables
+# are loaded at process start, so retrying the same rejected key every few
+# seconds can never heal by itself. A new key arrives through a deploy/restart;
+# the explicit admin connectivity test can also clear this after a successful
+# live check.
+_anthropic_auth_state = {'failed': False, 'failed_at': 0.0}
+_anthropic_auth_lock = threading.Lock()
+
+def _anthropic_operationally_available() -> bool:
+    return bool(ANTHROPIC_API_KEY) and not bool(_anthropic_auth_state.get('failed'))
+
+def _mark_anthropic_auth_failed(source: str = 'ai') -> None:
+    first = False
+    with _anthropic_auth_lock:
+        if not _anthropic_auth_state.get('failed'):
+            first = True
+        _anthropic_auth_state['failed'] = True
+        _anthropic_auth_state['failed_at'] = time.time()
+    # Keep the older dashboard/status field compatible, but make the auth
+    # failure process-lifetime instead of one hour of repeated rediscovery.
+    globals()['_ai_disabled_until'] = float('inf')
+    if first:
+        print(f'[anthropic-auth] disabled after HTTP 401 from {source}; waiting for key update/restart', flush=True)
+        try:
+            add_log('AI features disabled - invalid ANTHROPIC_API_KEY')
+        except Exception:
+            pass
+
+def _clear_anthropic_auth_failure() -> None:
+    with _anthropic_auth_lock:
+        _anthropic_auth_state['failed'] = False
+        _anthropic_auth_state['failed_at'] = 0.0
+    globals()['_ai_disabled_until'] = 0.0
 
 _ANTHROPIC_URL     = 'https://api.anthropic.com/v1/messages'
 _ANTHROPIC_HEADERS = {'anthropic-version': '2023-06-01', 'content-type': 'application/json'}
@@ -4680,11 +4718,9 @@ def get_ai_signal(token_data: dict, mint: str) -> tuple:
     """Returns (bonus_pts 0–2.0, text). Direct REST call — no SDK dependency.
     Caches per mint for _AI_CACHE_TTL seconds to avoid hammering the API."""
     global _ai_disabled_until
-    if not ANTHROPIC_API_KEY:
+    if not _anthropic_operationally_available():
         return 0.0, ''
     now = time.time()
-    if now < _ai_disabled_until:
-        return 0.0, ''
     cached = _ai_cache.get(mint)
     if cached and now - cached['ts'] < _AI_CACHE_TTL:
         return cached['score'], cached['reasoning']
@@ -4706,8 +4742,7 @@ def get_ai_signal(token_data: dict, mint: str) -> tuple:
             timeout=10,
         )
         if resp.status_code == 401:
-            _ai_disabled_until = now + 3600  # 1-hour backoff, not permanent
-            add_log('AI signals disabled - check ANTHROPIC_API_KEY')
+            _mark_anthropic_auth_failed('ai-signal')
             _ai_cache[mint] = {'score': 0.0, 'reasoning': '', 'ts': now}
             return 0.0, ''
         if resp.status_code == 429:
@@ -4746,9 +4781,9 @@ def get_ai_trade_decision(token_data: dict, mint: str, symbol: str, spend_sol: f
     global _ai_disabled_until
     if not ANTHROPIC_API_KEY:
         return {'action': 'BUY', 'reasoning': 'AI check skipped — ANTHROPIC_API_KEY not configured'}
+    if not _anthropic_operationally_available():
+        return {'action': 'BUY', 'reasoning': 'AI check skipped — Anthropic authentication disabled'}
     now = time.time()
-    if now < _ai_disabled_until:
-        return {'action': 'BUY', 'reasoning': 'AI check skipped — backing off after a prior auth failure'}
     cached = _AI_TRADE_GATE_CACHE.get(mint)
     if cached and now - cached['ts'] < _AI_TRADE_GATE_CACHE_TTL:
         return cached['decision']
@@ -4789,8 +4824,7 @@ def get_ai_trade_decision(token_data: dict, mint: str, symbol: str, spend_sol: f
             timeout=8,
         )
         if resp.status_code == 401:
-            _ai_disabled_until = now + 3600
-            add_log('AI signals disabled - check ANTHROPIC_API_KEY')
+            _mark_anthropic_auth_failed('ai-trade-gate')
             return decision
         if resp.status_code != 200:
             print(f'[ai-trade-gate] HTTP {resp.status_code} for {mint[:8]}: {resp.text[:300]}', flush=True)
@@ -4933,6 +4967,8 @@ def run_ai_self_analysis() -> dict:
     (the admin 'Run now' button) or from the daily scheduler."""
     if not ANTHROPIC_API_KEY:
         return {'ok': False, 'msg': 'ANTHROPIC_API_KEY not configured'}
+    if not _anthropic_operationally_available():
+        return {'ok': False, 'msg': 'Anthropic authentication disabled until key update/restart'}
     try:
         conn = sqlite3.connect(DB_FILE)
         rows = conn.execute('''
@@ -5045,6 +5081,9 @@ def run_ai_self_analysis() -> dict:
                   'messages': [{'role': 'user', 'content': user_prompt}]},
             timeout=30,
         )
+        if resp.status_code == 401:
+            _mark_anthropic_auth_failed('ai-self-analysis')
+            return {'ok': False, 'msg': 'Anthropic authentication failed (401)'}
         if resp.status_code != 200:
             return {'ok': False, 'msg': f'HTTP {resp.status_code}: {resp.text[:300]}'}
         text = ((resp.json().get('content') or [{}])[0].get('text') or '').strip()
@@ -5100,8 +5139,8 @@ def get_narrative_signal(token_data: dict, mint: str, symbol: str) -> dict:
     str, 'decision': 'buy'|'pass', 'confidence': 0-10}. Any request or parse
     failure returns {'decision': 'pass', 'thesis': ['parse error']} -- fails
     closed, same convention as _check_lp_locked()/_check_bsc_honeypot()."""
-    if not ANTHROPIC_API_KEY:
-        return {'decision': 'pass', 'thesis': ['parse error']}
+    if not _anthropic_operationally_available():
+        return {'decision': 'pass', 'thesis': ['AI unavailable']}
     try:
         prompt = (
             f'Research recent mentions of ${symbol} (mint/address: {mint}) on X and the web. '
@@ -5124,8 +5163,11 @@ def get_narrative_signal(token_data: dict, mint: str, symbol: str) -> dict:
             },
             timeout=30,
         )
+        if resp.status_code == 401:
+            _mark_anthropic_auth_failed('narrative-signal')
+            return {'decision': 'pass', 'thesis': ['AI unavailable']}
         if resp.status_code != 200:
-            print(f'[narrative-signal] HTTP {resp.status_code} for {mint[:8]}: {resp.text[:500]}', flush=True)
+            print(f'[narrative-signal] HTTP {resp.status_code} for {mint[:8]}', flush=True)
             return {'decision': 'pass', 'thesis': ['parse error']}
         content = resp.json().get('content') or []
         # Web search runs server-side and adds web_search_tool_result blocks
@@ -5160,79 +5202,60 @@ def get_narrative_signal(token_data: dict, mint: str, symbol: str) -> dict:
         print(f'[narrative-signal] error for {mint[:8]}: {e}{body}', flush=True)
         return {'decision': 'pass', 'thesis': ['parse error']}
 
+_x_buzz_call_lock = threading.Lock()
+
 def _discover_x_buzz() -> list[str]:
-    """Lightweight X/Twitter buzz discovery via Claude + web search -- finds
-    candidate cashtags for the narrative agent's normal pipeline elsewhere
-    to evaluate; this function makes no buy/pass call itself. Logged to
-    the service journal via print() only, not agent_journal -- this is
-    discovery, not a decision, so there's nothing here worth an audit-trail
-    entry for.
+    """Discover up to ten X cashtags via Anthropic web search.
 
-    Uses web_search_20260209 (current dynamic-filtering tool type) rather
-    than the web_search_20250305 the original spec named -- same
-    correction as get_narrative_signal(), which claude-sonnet-5 also
-    requires the newer variant for.
-
-    Returns a list of up to 10 cashtag strings (e.g. ["$FOO", "$BAR"]).
-    Any request or parse failure returns [] -- fails closed, same
-    convention as get_narrative_signal()."""
-    if not ANTHROPIC_API_KEY:
+    Optional feature: known-bad authentication fails closed immediately and
+    concurrent callers collapse into one paid request.
+    """
+    if not _anthropic_operationally_available():
         return []
-    try:
-        # Asks across every chain the platform trades, not just Solana: the
-        # cashtags come back chain-agnostic anyway, and each consumer decides
-        # for itself which chains it will accept when resolving them (see
-        # _resolve_buzz_pairs). Asking Solana-only meant a token blowing up on
-        # Base or Robinhood Chain could never be discovered here at all.
-        prompt = (
-            'Find memecoins being talked about unusually heavily right now on '
-            'X/Twitter, including ones still small by volume. Look at Solana, BNB Chain '
-            '(BSC), Base, Arbitrum, Polygon and Robinhood Chain. Return ONLY a JSON array '
-            'of cashtags, max 10, e.g. ["$FOO", "$BAR"].'
-        )
-        resp = requests.post(
-            _ANTHROPIC_URL,
-            headers={**_ANTHROPIC_HEADERS, 'x-api-key': ANTHROPIC_API_KEY},
-            json={
-                'model': 'claude-sonnet-5',
-                'max_tokens': 2000,
-                'tools': [{'type': 'web_search_20260209', 'name': 'web_search'}],
-                'messages': [{'role': 'user', 'content': prompt}],
-            },
-            timeout=30,
-        )
-        if resp.status_code != 200:
-            print(f'[x-buzz] HTTP {resp.status_code}: {resp.text[:500]}', flush=True)
+    with _x_buzz_call_lock:
+        if not _anthropic_operationally_available():
             return []
-        content = resp.json().get('content') or []
-        # Same convention as get_narrative_signal(): web search adds
-        # web_search_tool_result blocks alongside the model's own text --
-        # only the last text block is the actual answer.
-        text_blocks = [b.get('text', '') for b in content if b.get('type') == 'text']
-        if not text_blocks:
-            print('[x-buzz] no text blocks in response', flush=True)
+        try:
+            prompt = (
+                'Find memecoins being talked about unusually heavily right now on '
+                'X/Twitter, including ones still small by volume. Look at Solana, BNB Chain '
+                '(BSC), Base, Arbitrum, Polygon and Robinhood Chain. Return ONLY a JSON array '
+                'of cashtags, max 10, e.g. ["$FOO", "$BAR"].'
+            )
+            resp = requests.post(
+                _ANTHROPIC_URL,
+                headers={**_ANTHROPIC_HEADERS, 'x-api-key': ANTHROPIC_API_KEY},
+                json={
+                    'model': 'claude-sonnet-5',
+                    'max_tokens': 2000,
+                    'tools': [{'type': 'web_search_20260209', 'name': 'web_search'}],
+                    'messages': [{'role': 'user', 'content': prompt}],
+                },
+                timeout=30,
+            )
+            if resp.status_code == 401:
+                _mark_anthropic_auth_failed('x-buzz')
+                return []
+            if resp.status_code != 200:
+                print(f'[x-buzz] HTTP {resp.status_code}; discovery skipped', flush=True)
+                return []
+            content = resp.json().get('content') or []
+            text_blocks = [b.get('text', '') for b in content if b.get('type') == 'text']
+            if not text_blocks:
+                return []
+            raw = text_blocks[-1].strip()
+            if raw.startswith('```'):
+                raw = raw.strip('`')
+                if raw.startswith('json'):
+                    raw = raw[4:]
+                raw = raw.strip()
+            parsed = json.loads(raw)
+            if not isinstance(parsed, list):
+                return []
+            return [str(x) for x in parsed if isinstance(x, str)][:10]
+        except Exception as e:
+            print(f'[x-buzz] request failed: {type(e).__name__}', flush=True)
             return []
-        raw = text_blocks[-1].strip()
-        print(f'[x-buzz] raw output: {raw[:500]}', flush=True)
-        if raw.startswith('```'):
-            raw = raw.strip('`')
-            if raw.startswith('json'):
-                raw = raw[4:]
-            raw = raw.strip()
-        parsed = json.loads(raw)
-        if not isinstance(parsed, list):
-            return []
-        return [str(x) for x in parsed if isinstance(x, str)][:10]
-    except Exception as e:
-        body = ''
-        resp_obj = getattr(e, 'response', None)
-        if resp_obj is not None:
-            try:
-                body = f' | body: {resp_obj.text[:500]}'
-            except Exception:
-                pass
-        print(f'[x-buzz] error: {e}{body}', flush=True)
-        return []
 
 def _resolve_buzz_pairs(tickers: list[str], allowed_chains) -> list[dict]:
     """Shared resolver behind both buzz consumers: turns cashtags into real
@@ -5288,41 +5311,42 @@ def _resolve_buzz_pairs(tickers: list[str], allowed_chains) -> list[dict]:
 _BUZZ_TTL = int(os.environ.get('X_BUZZ_TTL_SECONDS', '900'))  # 15 min -- buzz moves in minutes, and each refresh costs an Anthropic web-search call
 _buzz_cache = {'ts': 0.0, 'data': []}
 _buzz_lock = threading.Lock()
+_buzz_refresh_lock = threading.Lock()
 
 def get_multichain_x_buzz() -> list:
-    """Tokens being talked about on X right now, across every chain the
-    platform trades -- display only, never a trading input.
+    """Cached display-only X buzz across supported chains.
 
-    Cached hard on purpose. The surge radar consults this every 30s, but
-    each refresh is a paid Claude web-search call, so a miss would otherwise
-    burn credits continuously. On any failure (no API key, no credit, a bad
-    response) this returns the last good list rather than nothing, so a
-    billing lapse degrades the badge quietly instead of making it flicker."""
+    Empty is a valid cached result. Refresh is single-flight so surge radar,
+    Live Market and narrative discovery cannot independently pay for the same
+    request or independently rediscover a broken credential.
+    """
     now = time.time()
     with _buzz_lock:
-        if now - _buzz_cache['ts'] < _BUZZ_TTL and _buzz_cache['data']:
-            return _buzz_cache['data']
-        stale = _buzz_cache['data']
-    try:
-        found = _resolve_buzz_pairs(_discover_x_buzz(), set(_MARKET_LIVE_CHAINS))
-    except Exception as e:
-        print(f'[x-buzz] multichain resolve failed: {e}', flush=True)
-        return stale
-    if not found:
-        # Keep whatever we had rather than blanking the badge on one bad
-        # cycle; the timestamp still advances so this backs off properly.
+        if _buzz_cache['ts'] and now - _buzz_cache['ts'] < _BUZZ_TTL:
+            return list(_buzz_cache['data'])
+    with _buzz_refresh_lock:
+        now = time.time()
+        with _buzz_lock:
+            if _buzz_cache['ts'] and now - _buzz_cache['ts'] < _BUZZ_TTL:
+                return list(_buzz_cache['data'])
+            stale = list(_buzz_cache['data'])
+        try:
+            found = _resolve_buzz_pairs(_discover_x_buzz(), set(_MARKET_LIVE_CHAINS))
+        except Exception as e:
+            print(f'[x-buzz] multichain resolve failed: {type(e).__name__}', flush=True)
+            found = []
         with _buzz_lock:
             _buzz_cache['ts'] = now
-        return stale
-    with _buzz_lock:
-        _buzz_cache['ts'] = now
-        _buzz_cache['data'] = found
-    by_chain = {}
-    for c in found:
-        by_chain[c['chain']] = by_chain.get(c['chain'], 0) + 1
-    print(f'[x-buzz] {len(found)} token(s) buzzing on X: ' +
-          ', '.join(f'{n} on {ch}' for ch, n in sorted(by_chain.items())), flush=True)
-    return found
+            if found:
+                _buzz_cache['data'] = found
+            data = list(_buzz_cache['data'] if _buzz_cache['data'] else stale)
+        if found:
+            by_chain = {}
+            for c in found:
+                by_chain[c['chain']] = by_chain.get(c['chain'], 0) + 1
+            print(f'[x-buzz] {len(found)} token(s) buzzing on X: ' +
+                  ', '.join(f'{n} on {ch}' for ch, n in sorted(by_chain.items())), flush=True)
+        return data
 
 def _match_buzz_to_mints(tickers: list[str]) -> list[dict]:
     """Solana-only view of the buzz, for the narrative trading agent.
@@ -7820,24 +7844,26 @@ def _narrative_agent_process_candidate(user_id: int, wallet: str, mint: str, cha
                         filter_result=_log_prefix + ('' if ok else (err or 'swap failed')))
 
 def _narrative_agent_gather_candidates() -> list:
-    """Merges _get_narrative_candidates() (boosted/trending) with
-    _discover_x_buzz() -> _match_buzz_to_mints() (X/Twitter buzz) into one
-    candidate list, each shaped {'address', 'chain', 'symbol', 'source'?}.
+    """Merges _get_narrative_candidates() (boosted/trending) with the
+    already-cached multichain X-buzz snapshot into one candidate list, each
+    shaped {'address', 'chain', 'symbol', 'source'?}.
     Shared by _narrative_agent_cycle() (the normal 15-iteration/900s path,
     every wallet except NARRATIVE_UNCAPPED_WALLETS) and
     _narrative_agent_collect_new_candidates() (the NARRATIVE_UNCAPPED_
     WALLETS 10s fast-loop path, Part A below) so the two candidate sources
     can't drift out of sync with each other."""
     candidates = list(_get_narrative_candidates())
-    for buzz_cand in _match_buzz_to_mints(_discover_x_buzz()):
+    for buzz_cand in get_multichain_x_buzz():
+        if str(buzz_cand.get('chain') or '').lower() != 'solana':
+            continue
         mint = buzz_cand.get('mint', '')
         if not mint:
             continue
         candidates.append({
             'address': mint,
-            'chain':   'solana',  # _match_buzz_to_mints() only searches DexScreener's Solana pairs
-            'symbol':  buzz_cand.get('symbol', '') or mint[:8],
-            'source':  'x_buzz',
+            'chain': 'solana',
+            'symbol': buzz_cand.get('symbol', '') or mint[:8],
+            'source': 'x_buzz',
         })
     return candidates
 
@@ -25043,8 +25069,8 @@ def admin_support_suggest_reply(thread_id):
     if err: return err
     if not ANTHROPIC_API_KEY:
         return jsonify({'ok': False, 'msg': 'AI suggestions are not configured (ANTHROPIC_API_KEY not set)'}), 400
-    if time.time() < _ai_disabled_until:
-        return jsonify({'ok': False, 'msg': 'AI temporarily unavailable — check API key'}), 503
+    if not _anthropic_operationally_available():
+        return jsonify({'ok': False, 'msg': 'AI unavailable — check ANTHROPIC_API_KEY'}), 503
     conn = sqlite3.connect(DB_FILE)
     try:
         trow = conn.execute('SELECT id FROM support_threads WHERE id=?', (thread_id,)).fetchone()
@@ -25075,7 +25101,7 @@ def admin_support_suggest_reply(thread_id):
             timeout=15,
         )
         if resp.status_code == 401:
-            _ai_disabled_until = time.time() + 3600  # 1-hour backoff, not permanent
+            _mark_anthropic_auth_failed('support-ai')
             return jsonify({'ok': False, 'msg': 'AI disabled — invalid API key'}), 503
         if resp.status_code == 429:
             return jsonify({'ok': False, 'msg': 'AI is rate-limited — try again shortly'}), 503
@@ -30067,7 +30093,9 @@ def admin_health():
         # on-demand (System tab load), not polled, so this is safe to run
         # every time. Same check as _run_audit()'s "Anthropic API" entry.
         anthropic_status = 'missing'
-        if ANTHROPIC_API_KEY:
+        if ANTHROPIC_API_KEY and not _anthropic_operationally_available():
+            anthropic_status = 'invalid_key'
+        elif ANTHROPIC_API_KEY:
             try:
                 ar = requests.post(
                     _ANTHROPIC_URL,
@@ -30081,6 +30109,7 @@ def admin_health():
                 elif ar.status_code == 400 and 'credit balance' in ar.text.lower():
                     anthropic_status = 'no_credit'
                 elif ar.status_code == 401:
+                    _mark_anthropic_auth_failed('system-status')
                     anthropic_status = 'invalid_key'
                 elif ar.status_code == 429:
                     anthropic_status = 'rate_limited'
@@ -30719,9 +30748,9 @@ def admin_test():
             )
             if resp.status_code == 200:
                 results['ai'] = {'ok': True,  'msg': 'Claude API key is valid ✓'}
-                global _ai_disabled_until
-                _ai_disabled_until = 0.0  # clear any backoff
+                _clear_anthropic_auth_failure()
             elif resp.status_code == 401:
+                _mark_anthropic_auth_failed('admin-test')
                 results['ai'] = {'ok': False, 'msg': 'Invalid API key (401)'}
             elif resp.status_code == 429:
                 results['ai'] = {'ok': False, 'msg': 'Rate limited — key is valid but quota hit (429)'}
