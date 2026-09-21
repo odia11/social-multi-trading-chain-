@@ -23961,6 +23961,7 @@ def _fetch_wallet_tokens(wallet: str, onchain_wallet: str = None) -> dict:
     mints_needed: list = []
     raw_accounts: list = []
     _seen_mints: set = set()
+    _raw_by_mint: dict = {}
     _rpcs_to_try = [SOLANA_RPC] + [ep for ep in _PROXY_RPCS if ep != SOLANA_RPC]
     for _prog_id in (TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID):
         _prog_accounts: list = []
@@ -23984,10 +23985,16 @@ def _fetch_wallet_tokens(wallet: str, onchain_wallet: str = None) -> dict:
             ta       = info.get('tokenAmount') or {}
             ui_amount = float(ta.get('uiAmount') or 0)
             decimals  = int(ta.get('decimals', 0))
-            if ui_amount < 0.000001 or not mint or mint == SOL_MINT or mint in _seen_mints:
+            if ui_amount < 0.000001 or not mint or mint == SOL_MINT:
                 continue
+            existing = _raw_by_mint.get(mint)
+            if existing is not None:
+                existing['amount'] += ui_amount
+                continue
+            row = {'mint': mint, 'amount': ui_amount, 'decimals': decimals}
+            _raw_by_mint[mint] = row
             _seen_mints.add(mint)
-            raw_accounts.append({'mint': mint, 'amount': ui_amount, 'decimals': decimals})
+            raw_accounts.append(row)
             mints_needed.append(mint)
     print(f'[wallet-tokens] total SPL accounts after merge: {len(raw_accounts)}', flush=True)
 
@@ -24200,21 +24207,54 @@ def api_wallet_balance():
 
 
 def _get_solana_usdc_balance(address: str) -> float:
-    """Direct on-chain USDC-on-Solana balance for `address` -- one
-    getTokenAccountsByOwner call filtered to just the USDC mint, rather than
-    _fetch_wallet_tokens()'s full every-token-plus-DexScreener-pricing fetch,
-    since /api/wallet/usdc-summary below only ever needs this one figure."""
-    try:
-        r = requests.post(SOLANA_RPC, json={
-            'jsonrpc': '2.0', 'id': 1, 'method': 'getTokenAccountsByOwner',
-            'params': [address, {'mint': USDC_MINT}, {'encoding': 'jsonParsed'}],
-        }, timeout=8)
-        accounts = r.json().get('result', {}).get('value', [])
-        if accounts:
-            info = accounts[0]['account']['data']['parsed']['info']['tokenAmount']
-            return float(info.get('uiAmount') or 0)
-    except Exception as e:
-        print(f'[wallet] _get_solana_usdc_balance failed for {address[:8]}...: {e}', flush=True)
+    """Authoritative on-chain Solana USDC balance for the trading wallet.
+
+    Uses the same ordered RPC fallback pool as the wallet token scanner.
+    Public Solana RPCs can return an empty/error response while a configured
+    provider has the real token accounts. Sum every canonical-USDC token
+    account instead of assuming the first account is the whole balance.
+    """
+    rpcs = []
+    for rpc in list(CLAIM_SOL_RPCS) + [SOLANA_RPC] + list(_PROXY_RPCS):
+        if rpc and rpc not in rpcs:
+            rpcs.append(rpc)
+
+    last_error = None
+    for rpc in rpcs:
+        try:
+            r = requests.post(rpc, json={
+                'jsonrpc': '2.0', 'id': 1, 'method': 'getTokenAccountsByOwner',
+                'params': [address, {'mint': USDC_MINT}, {'encoding': 'jsonParsed'}],
+            }, timeout=8)
+            if r.status_code != 200:
+                last_error = f'HTTP {r.status_code}'
+                continue
+            body = r.json()
+            if body.get('error'):
+                last_error = str((body.get('error') or {}).get('message') or 'RPC error')
+                continue
+            result = body.get('result')
+            if not isinstance(result, dict) or 'value' not in result:
+                last_error = 'missing RPC result'
+                continue
+
+            accounts = result.get('value') or []
+            total = 0.0
+            for account in accounts:
+                try:
+                    info = account['account']['data']['parsed']['info']['tokenAmount']
+                    raw = info.get('uiAmountString')
+                    total += float(raw if raw not in (None, '') else (info.get('uiAmount') or 0))
+                except (KeyError, TypeError, ValueError):
+                    continue
+            if accounts:
+                return total
+        except Exception as e:
+            last_error = type(e).__name__
+            continue
+
+    if last_error:
+        print(f'[wallet] Solana USDC unavailable for {address[:8]}... after RPC fallbacks: {last_error}', flush=True)
     return 0.0
 
 
