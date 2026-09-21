@@ -54,13 +54,21 @@ def test_tip_readiness_falls_back_to_wallet_token_snapshot():
     b=block(TIP,'def _tip_solana_ready','def _tip_evm_candidates')
     assert '_fetch_wallet_tokens(sender_wallet, owner)' in b
     assert "str(token.get('mint') or '') == str(d.USDC_MINT)" in b
-    assert "total += Decimal(str(token.get('amount') or 0))" in b
+    assert "scanned += Decimal(str(token.get('amount') or 0))" in b
 
 
 def test_bootstrap_trusts_caller_spare_usdc_when_balance_rpc_is_down():
     b=block(BOOT,'def user_funded_solana_topup','def auto_bridge')
     assert 'except Exception:' in b
     assert 'sol_usdc = max_spend' in b
+
+
+def test_tip_reconciles_too_low_usdc_result():
+    b=block(TIP,'def _tip_solana_ready','def _tip_evm_candidates')
+    assert 'if balance < amount:' in b
+    assert "d._wallet_tokens_cache.pop(sender_wallet, None)" in b
+    assert 'd._fetch_wallet_tokens(sender_wallet, owner)' in b
+    assert 'if scanned > balance:' in b
 
 
 if __name__=='__main__':

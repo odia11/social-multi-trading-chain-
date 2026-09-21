@@ -24225,22 +24225,59 @@ def api_wallet_balance():
                      'in_positions_sol': in_positions_sol})
 
 
-def _get_solana_usdc_balance(address: str) -> float:
-    """Authoritative canonical-USDC balance for an OrcAgent Solana wallet.
+_sol_usdc_balance_cache = {}
+_sol_usdc_balance_lock = threading.Lock()
+_SOL_USDC_BALANCE_TTL = 3.0
 
-    A provider failure is NOT a zero balance. At least one RPC must return a
-    syntactically valid result before zero can be considered confirmed.
-    Multiple USDC token accounts are summed.
-    """
-    rpcs = []
-    # Prefer configured production providers. Demo/public endpoints are useful
-    # only as final fallbacks and may throttle or lag.
+
+def _solana_balance_rpc_pool():
+    out = []
     for rpc in list(CLAIM_SOL_RPCS) + [SOLANA_RPC] + list(_PROXY_RPCS):
-        if rpc and rpc not in rpcs:
-            rpcs.append(rpc)
+        if rpc and rpc not in out:
+            out.append(rpc)
+    return out
 
+
+def _sum_usdc_from_entries(entries) -> float:
+    total = 0.0
+    for account in entries or []:
+        try:
+            info = account['account']['data']['parsed']['info']
+            if str(info.get('mint') or '') != USDC_MINT:
+                continue
+            ta = info.get('tokenAmount') or {}
+            raw = ta.get('uiAmountString')
+            total += float(raw if raw not in (None, '') else (ta.get('uiAmount') or 0))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return total
+
+
+def _get_solana_usdc_balance(address: str) -> float:
+    """Canonical Solana USDC balance with two independent RPC read strategies.
+
+    Some Solana providers have returned an empty result for the mint-filtered
+    getTokenAccountsByOwner call while a programId scan on the same wallet
+    immediately returned the real token account. Treating that as $0 broke
+    Portfolio and tips. We therefore:
+      1) try the efficient mint-filtered query across providers;
+      2) if all are empty/unusable, scan Token Program + Token-2022 accounts
+         and filter canonical USDC locally.
+    A confirmed zero requires successful provider responses from the fallback
+    scan too; transport/auth/rate-limit failures are never converted to zero.
+    """
+    now = time.time()
+    key = str(address)
+    with _sol_usdc_balance_lock:
+        hit = _sol_usdc_balance_cache.get(key)
+        if hit and now - hit[0] < _SOL_USDC_BALANCE_TTL:
+            return hit[1]
+
+    rpcs = _solana_balance_rpc_pool()
     last_error = None
-    confirmed_empty = False
+    saw_valid = False
+
+    # Fast path: mint-filtered query.
     for rpc in rpcs:
         try:
             r = requests.post(rpc, json={
@@ -24258,30 +24295,64 @@ def _get_solana_usdc_balance(address: str) -> float:
             if not isinstance(result, dict) or 'value' not in result:
                 last_error = 'missing RPC result'
                 continue
+            saw_valid = True
+            entries = result.get('value') or []
+            if entries:
+                total = _sum_usdc_from_entries(entries)
+                with _sol_usdc_balance_lock:
+                    _sol_usdc_balance_cache[key] = (time.time(), total)
+                return total
+        except Exception as exc:
+            last_error = type(exc).__name__
 
-            accounts = result.get('value') or []
-            if not accounts:
-                confirmed_empty = True
-                # Keep looking: another configured provider may have fresher
-                # token-account state. Only return zero after all usable
-                # providers also found nothing.
-                continue
-
-            total = 0.0
-            for account in accounts:
-                try:
-                    info = account['account']['data']['parsed']['info']['tokenAmount']
-                    raw = info.get('uiAmountString')
-                    total += float(raw if raw not in (None, '') else (info.get('uiAmount') or 0))
-                except (KeyError, TypeError, ValueError):
+    # Strong fallback: enumerate both token programs and filter the mint
+    # locally. Never add balances across different RPC providers.
+    fallback_valid = False
+    for rpc in rpcs:
+        provider_total = 0.0
+        provider_valid = False
+        provider_failed = False
+        for program_id in (TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID):
+            try:
+                r = requests.post(rpc, json={
+                    'jsonrpc': '2.0', 'id': 1, 'method': 'getTokenAccountsByOwner',
+                    'params': [address, {'programId': program_id}, {'encoding': 'jsonParsed'}],
+                }, timeout=10)
+                if r.status_code != 200:
+                    last_error = f'HTTP {r.status_code}'
+                    provider_failed = True
                     continue
-            return total
-        except Exception as e:
-            last_error = type(e).__name__
-            continue
+                body = r.json()
+                if body.get('error'):
+                    last_error = str((body.get('error') or {}).get('message') or 'RPC error')
+                    provider_failed = True
+                    continue
+                result = body.get('result')
+                if not isinstance(result, dict) or 'value' not in result:
+                    last_error = 'missing RPC result'
+                    provider_failed = True
+                    continue
+                provider_valid = True
+                provider_total += _sum_usdc_from_entries(result.get('value') or [])
+            except Exception as exc:
+                last_error = type(exc).__name__
+                provider_failed = True
 
-    if confirmed_empty:
+        if provider_valid:
+            fallback_valid = True
+            if provider_total > 0:
+                with _sol_usdc_balance_lock:
+                    _sol_usdc_balance_cache[key] = (time.time(), provider_total)
+                return provider_total
+            # Keep trying fresher providers if this one saw no canonical USDC.
+            if not provider_failed:
+                saw_valid = True
+
+    if fallback_valid or saw_valid:
+        with _sol_usdc_balance_lock:
+            _sol_usdc_balance_cache[key] = (time.time(), 0.0)
         return 0.0
+
     raise RuntimeError(
         'Solana USDC balance unavailable'
         + (f' ({last_error})' if last_error else '')

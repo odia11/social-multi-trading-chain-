@@ -10,25 +10,23 @@ def section(a,b):
 
 
 def test_usdc_balance_uses_rpc_fallback_pool():
-    b=section('def _get_solana_usdc_balance', "@app.route('/api/wallet/usdc-summary'")
+    b=section('def _solana_balance_rpc_pool', "@app.route('/api/wallet/usdc-summary'")
     assert 'CLAIM_SOL_RPCS' in b
     assert '_PROXY_RPCS' in b
     assert '[SOLANA_RPC]' in b
 
 
-def test_empty_rpc_answer_does_not_end_fallback_search():
+def test_empty_mint_query_falls_back_to_program_account_scan():
     b=section('def _get_solana_usdc_balance', "@app.route('/api/wallet/usdc-summary'")
-    assert 'if not accounts:' in b
-    assert 'confirmed_empty = True' in b
-    assert 'continue' in b[b.index('if not accounts:'):b.index('total = 0.0')]
-    assert 'return total' in b
+    assert "{'programId': program_id}" in b
+    assert 'TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID' in b
+    assert '_sum_usdc_from_entries' in b
 
 
 def test_all_usdc_token_accounts_are_summed():
-    b=section('def _get_solana_usdc_balance', "@app.route('/api/wallet/usdc-summary'")
-    assert 'for account in accounts:' in b
+    b=section('def _sum_usdc_from_entries', 'def _get_solana_usdc_balance')
+    assert 'for account in entries or []:' in b
     assert 'total +=' in b
-    assert 'accounts[0]' not in b
     assert "uiAmountString" in b
 
 
@@ -41,11 +39,9 @@ def test_wallet_token_scanner_aggregates_duplicate_mints():
 
 def test_total_rpc_failure_raises_instead_of_false_zero():
     b=section('def _get_solana_usdc_balance', "@app.route('/api/wallet/usdc-summary'")
+    assert 'if fallback_valid or saw_valid:' in b
     assert "raise RuntimeError(" in b
-    assert "if confirmed_empty:" in b
-    tail=b[b.index('if confirmed_empty:'):]
-    assert 'return 0.0' in tail
-    assert 'raise RuntimeError' in tail
+    assert 'Solana USDC balance unavailable' in b
 
 
 def test_wallet_ui_labels_trading_wallet_scope():
