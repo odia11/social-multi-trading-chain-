@@ -4431,9 +4431,6 @@ async function loadSettingsPage(){
     var d=await fetch('/api/settings/get').then(function(r){return r.json();});
     if(d.ok){
       var b =document.getElementById('s-breakout'); if(b  && d.breakout_trigger!=null) b.value =d.breakout_trigger;
-      var mu=document.getElementById('ds-minusdc');  if(mu && d.min_trade_size!=null)   mu.value=d.min_trade_size;
-      var tp=document.getElementById('s-tp');        if(tp && d.take_profit!=null)      tp.value=d.take_profit;
-      var sl=document.getElementById('s-sl');        if(sl && d.stop_loss!=null)        sl.value=d.stop_loss;
       var mp=document.getElementById('s-maxpos');    if(mp && d.max_positions!=null)    mp.value=d.max_positions;
       _setKeyStatus(!!d.has_trading_key);
       var notifs=document.getElementById('pref-notifs'); if(notifs) notifs.checked=!!d.pref_notifications;
@@ -4547,9 +4544,6 @@ async function _saveStrategy(){
   try{
     var submitted={
       breakout_trigger: parseFloat((document.getElementById('s-breakout')||{}).value)||3,
-      min_trade_size:   parseFloat((document.getElementById('ds-minusdc')||{}).value)||1,
-      take_profit:      parseFloat((document.getElementById('s-tp')||{}).value)||15,
-      stop_loss:        parseFloat((document.getElementById('s-sl')||{}).value)||8,
       max_positions:    parseInt((document.getElementById('s-maxpos')||{}).value,10)||3
     };
     var d=await fetch('/api/settings/save',{
