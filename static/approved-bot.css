@@ -69,3 +69,17 @@ body.oa-bot-page .strategy-row{gap:3px}
  body.oa-bot-page .strategy-row{padding:11px 0}
  body.oa-bot-page .status-head{padding-bottom:15px}
 }
+
+/* Final mobile density pass from live iPhone QA. */
+body.oa-bot-page .bot-field input{width:auto!important;max-width:100%!important}
+@media(max-width:768px){
+ body.oa-bot-page .status-sub{display:none}
+ body.oa-bot-page .strategy-row{padding:8px 0!important;gap:2px!important}
+ body.oa-bot-page .strategy-row span,body.oa-bot-page .strategy-row label{font-size:12px}
+ body.oa-bot-page .strategy-row strong{font-size:16px}
+ body.oa-bot-page .bot-field{min-height:25px;gap:3px}
+ body.oa-bot-page .bot-field input{font-size:17px!important;line-height:1.15}
+ body.oa-bot-page .bot-field span{font-size:15px!important;line-height:1.15}
+ body.oa-bot-page .strategy-save{min-height:48px;margin-top:10px}
+ body.oa-bot-page .status-head{padding-bottom:13px}
+}

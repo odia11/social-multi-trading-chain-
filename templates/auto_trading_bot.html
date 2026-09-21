@@ -116,7 +116,9 @@ async function saveBotStrategy(){
   }catch(e){msg.textContent=e.message||'Could not save settings';msg.dataset.error='1'}
   finally{b.disabled=false}
 }
-['bot-max-trade','bot-tp','bot-sl','bot-loss-limit'].forEach(function(id){document.getElementById(id).addEventListener('input',function(){botFormDirty=true})});
+function fitBotInput(el){if(!el)return;var raw=String(el.value||'');var chars=Math.max(1,raw.length);el.style.width=(chars+.55)+'ch'}
+['bot-max-trade','bot-tp','bot-sl','bot-loss-limit'].forEach(function(id){var el=document.getElementById(id);fitBotInput(el);el.addEventListener('input',function(){botFormDirty=true;fitBotInput(this)})});
+var _loadOverview=loadOverview;loadOverview=async function(){await _loadOverview();['bot-max-trade','bot-tp','bot-sl','bot-loss-limit'].forEach(function(id){fitBotInput(document.getElementById(id))})};
 loadOverview();setInterval(loadOverview,20000);
 window.addEventListener('pageshow',function(e){if(e.persisted)loadOverview()});
 </script>
