@@ -812,6 +812,13 @@ html,body{background:#080e11}
       <div id="activity-list"><div class="state-msg">Loading…</div></div>
     </div>
 
+    <section class="act-card oa-tip-history-card" id="oa-tip-history-card" aria-label="USDC tips" style="margin-top:16px">
+      <div class="act-hdr"><span class="act-title">USDC Tips</span>
+        <button id="oa-tip-history-refresh" type="button" class="oa-tip-refresh" aria-label="Refresh tips">↻</button>
+      </div>
+      <div id="oa-tip-history" class="oa-tip-history"><div class="state-msg">Loading tips…</div></div>
+    </section>
+
     <!-- bridge history -- every cross-chain bridge this wallet has run, so
          refreshing the page never loses a still-in-progress bridge's status
          (see /api/bridge/transactions) -->
@@ -2647,5 +2654,7 @@ initPullToRefresh({ onRefresh: function(){
 }});
 </script>
 
+<link rel="stylesheet" href="/static/tip-experience.css?v={{ app_version }}">
+<script src="/static/tip-experience.js?v={{ app_version }}" defer></script>
 </body>
 </html>

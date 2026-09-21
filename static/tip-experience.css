@@ -1,0 +1,38 @@
+/* Shared OrcAgent dark / gold Tip receipt, profile stats and history. */
+.oa-tip-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:14px 16px 6px}
+.oa-tip-stat{background:#131c21;border:1px solid #2b3941;border-radius:14px;padding:13px 15px;min-width:0;display:flex;flex-direction:column;gap:6px}
+.oa-tip-stat span{font-size:11px;font-weight:650;color:#a1aeb8}
+.oa-tip-stat strong{font-size:17px;font-weight:800;color:#ffcf70;font-variant-numeric:tabular-nums}
+.oa-tip-receipt[hidden],#oa-tip-receipt-explorer[hidden]{display:none!important}
+.oa-tip-receipt{text-align:center;display:flex;flex-direction:column;align-items:center;gap:13px;padding:14px 2px 10px;color:#f3f6f6}
+.tip-sheet.oa-tip-result>:not(.tip-head):not(.tip-handle):not(.oa-tip-receipt){display:none!important}
+.oa-tip-receipt-icon{width:54px;height:54px;border:1px solid #3d7c65;background:#173629;border-radius:50%;display:grid;place-items:center;font-size:27px;color:#46daa3}
+.oa-tip-receipt h2{font-size:21px;font-weight:800}
+.oa-tip-receipt-amount{font-size:32px;font-weight:800;color:#ffcd6d;font-variant-numeric:tabular-nums}
+.oa-tip-receipt-peer{font-size:13px;color:#a8b5bf}
+.oa-tip-receipt-meta{width:100%;padding:14px;background:#151d22;border:1px solid #303d45;border-radius:13px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px}
+.oa-tip-pill{font-size:11px;font-weight:800;display:inline-block;border:1px solid #626b73;border-radius:20px;padding:5px 9px;color:#c5cdd4;white-space:nowrap}
+.oa-tip-pill.confirmed{color:#3fdea4;background:#103128;border-color:#26664d}
+.oa-tip-pill.submitted{color:#f7c46b;background:#302515;border-color:#655030}
+.oa-tip-pill.failed{color:#ff8192;background:#311923;border-color:#793c49}
+.oa-tip-receipt-link{display:block;padding:12px;color:#f7c46b;text-decoration:none;font-weight:700}
+.oa-tip-receipt-done{width:100%;padding:14px;background:#f7b955;color:#101418;border:0;border-radius:12px;font-size:15px;font-weight:800;cursor:pointer}
+.oa-tip-receipt-info{font-size:12px;color:#91a1ac;line-height:1.5}
+.oa-tip-history{padding:5px 12px 14px}
+.oa-tip-empty{text-align:center;padding:27px 8px;color:#99a7b0;font-size:13px}
+.oa-tip-row{border-bottom:1px solid #2a3840;display:grid;grid-template-columns:37px minmax(0,1fr) auto;column-gap:10px;row-gap:9px;padding:14px 3px}
+.oa-tip-row:last-child{border-bottom:0}
+.oa-tip-row.oa-tip-highlight{background:#2b2416;outline:1px solid #e7b661;border-radius:12px;padding:14px 8px}
+.oa-tip-row-icon{height:34px;width:34px;border-radius:11px;display:grid;place-items:center;background:#322817;color:#f7c46b;font-size:22px}
+.oa-tip-row-icon.received{background:#163329;color:#4adea8}
+.oa-tip-row-main{display:flex;flex-direction:column;gap:4px;min-width:0}
+.oa-tip-row-main strong{color:#eaf0f4;font-size:14px}
+.oa-tip-peer{font-size:12px;color:#f7c46b;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.oa-tip-row-main small{font-size:11px;color:#91a1aa}
+.oa-tip-row-right{display:flex;flex-direction:column;align-items:flex-end;gap:5px}
+.oa-tip-row-right strong{font-size:13px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.oa-tip-positive{color:#4adea8}.oa-tip-negative{color:#f3ece0}
+.oa-tip-row-detail{grid-column:2/-1;display:flex;align-items:center;justify-content:space-between;gap:8px;color:#8c9ba6;font-size:11px}
+.oa-tip-row-detail a{color:#f7c46b;text-decoration:none;white-space:nowrap}
+.oa-tip-refresh{border:0;background:transparent;color:#f7c46b;cursor:pointer;font-size:23px;min-width:42px;min-height:40px}
+@media(max-width:420px){.oa-tip-row{grid-template-columns:33px minmax(0,1fr) auto;column-gap:7px}.oa-tip-row-right strong{font-size:12px}.oa-tip-stats{gap:7px}.oa-tip-stat{padding:12px 10px}.oa-tip-stat strong{font-size:15px}}

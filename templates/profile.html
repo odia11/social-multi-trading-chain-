@@ -437,6 +437,12 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
       <div class="pf-follow-item"><span class="pf-follow-count">{{ copiers|default(0) }}</span><span class="pf-follow-label">Copiers</span></div>
     </section>
 
+    <section class="oa-tip-stats" id="oa-tip-stats" data-user-id="{{ user_id }}" aria-label="USDC tip support" aria-live="polite">
+      <div class="oa-tip-stat"><span>Tips received</span><strong id="oa-tip-received">—</strong></div>
+      <div class="oa-tip-stat"><span>Supporters</span><strong id="oa-tip-supporters">—</strong></div>
+      {% if is_own_profile %}<div class="oa-tip-stat"><span>Tips sent</span><strong id="oa-tip-sent">—</strong></div>{% endif %}
+    </section>
+
     <main class="pf-content">
       {% if can_view_sensitive %}
       <div class="pf-wallet-row">
@@ -1049,6 +1055,19 @@ async function _removeBanner(){
       <button class="tip-close" type="button" onclick="_closeTip()" aria-label="Close">&times;</button>
     </div>
 
+    <section id="oa-tip-receipt" class="oa-tip-receipt" hidden aria-live="polite" aria-atomic="true">
+      <div class="oa-tip-receipt-icon">✓</div>
+      <h2 id="oa-tip-receipt-title">Tip submitted</h2>
+      <div class="oa-tip-receipt-amount" id="oa-tip-receipt-amount">— USDC</div>
+      <div class="oa-tip-receipt-peer" id="oa-tip-receipt-peer">Waiting for blockchain confirmation</div>
+      <div class="oa-tip-receipt-meta">
+        <span id="oa-tip-receipt-network">Network —</span>
+        <span id="oa-tip-receipt-status" class="oa-tip-pill">Submitted</span>
+      </div>
+      <a id="oa-tip-receipt-explorer" class="oa-tip-receipt-link" href="#" target="_blank" rel="noopener noreferrer">View transaction ↗</a>
+      <button class="oa-tip-receipt-done" type="button" onclick="_tipFinish()">Done</button>
+      <p class="oa-tip-receipt-info" id="oa-tip-receipt-info">Your tip will appear in both Portfolio histories when submitted; received totals update after confirmation.</p>
+    </section>
     <div class="tip-user">
       {% if avatar_url %}<img src="{{ avatar_url }}" alt="">{% else %}<img src="{{ _default_avatar }}" alt="">{% endif %}
       <div class="tip-user-main">
@@ -1189,13 +1208,17 @@ function _sendTip(){
   fetch('/api/tip', {
     method: 'POST',
     headers: {'Content-Type':'application/json','X-CSRF-Token':_csrf},
-    body: JSON.stringify({recipient_user_id:_tipPeerId, amount:amount})
+    body: JSON.stringify({recipient_user_id:_tipPeerId, amount:amount,
+                          message:(_tipEl('tip-message').value||'').trim().slice(0,100)})
   }).then(function(r){ return r.json().catch(function(){ return {}; }); })
     .then(function(d){
       if(d && d.ok){
-        _tipSay('Sent ' + amount.toFixed(2) + ' USDC', true);
-        _tipSendNote(amount);
-        setTimeout(function(){ _tipSending = false; _closeTip(); }, 1500);
+        _tipSending = false;
+        if(typeof window.OrcAgentTipReceipt === 'function'){
+          window.OrcAgentTipReceipt(d, amount, function(){ _tipSendNote(amount); });
+        } else {
+          _tipSay('Tip submitted — awaiting blockchain confirmation', true);
+        }
         return;
       }
       _tipSending = false;
@@ -1214,5 +1237,7 @@ function _sendTip(){
 }
 </script>
 
+<link rel="stylesheet" href="/static/tip-experience.css?v={{ app_version }}">
+<script src="/static/tip-experience.js?v={{ app_version }}" defer></script>
 </body>
 </html>

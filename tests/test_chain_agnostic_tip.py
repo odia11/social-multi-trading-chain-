@@ -71,9 +71,14 @@ def test_zero_gas_fallback_uses_sender_own_stablecoin():
 
 
 def test_success_is_audited_and_notifies_recipient():
-    assert 'CREATE TABLE IF NOT EXISTS tip_transactions' in BACKEND
-    assert "'You received %.2f USDC tip.'" in BACKEND
-    assert "'confirmed'" in BACKEND
+    ledger = (ROOT / 'tip_experience.py').read_text()
+    assert 'CREATE TABLE IF NOT EXISTS tip_transactions' in ledger
+    assert "VALUES (?,?,?,?,?,?,?,'submitted',?)" in ledger
+    assert "_record_tip(d, sender_wallet" in BACKEND
+    assert "status='submitted'" in ledger
+    assert "state == 'confirmed'" in ledger
+    assert "'tip', content" in ledger
+    assert "sender_user_id" in ledger and "recipient_user_id" in ledger
 
 
 if __name__ == '__main__':

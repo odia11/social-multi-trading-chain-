@@ -73,7 +73,8 @@ function boot(){
     var b=e.target.closest('[data-portfolio-tab]');
     if(b)showView(b.dataset.portfolioTab);
   });
-  showView('assets');
+  var requestedView=new URLSearchParams(location.search).get('tab');
+  showView(requestedView==='history' ? 'history' : 'assets');
 
   if(holdings&&window.MutationObserver){
     var pctTimer=null;

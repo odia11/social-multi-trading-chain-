@@ -45,7 +45,7 @@
 .ntf-icon{width:40px;height:40px;border-radius:11px;flex-shrink:0;display:flex;align-items:center;justify-content:center;margin-top:2px}
 .ntf-icon.trade-up{background:rgba(58,210,155,.14);color:var(--green)}
 .ntf-icon.trade-down{background:rgba(255,77,106,.14);color:var(--red)}
-.ntf-icon.copy{background:rgba(247,185,85,.14);color:var(--accent)}
+.ntf-icon.copy,.ntf-icon.tip{background:rgba(247,185,85,.14);color:var(--accent)}
 .ntf-icon.social{background:rgba(255,77,106,.14);color:var(--red)}
 .ntf-icon.message{background:rgba(99,102,241,.14);color:var(--indigo)}
 .ntf-icon.system{background:var(--bg3);color:var(--sub)}
@@ -114,6 +114,7 @@
       <div class="ntf-tabs">
         <button class="ntf-tab active" id="tab-trades" onclick="_switchTab('trades')">Trades</button>
         <button class="ntf-tab" id="tab-social" onclick="_switchTab('social')">Social</button>
+        <button class="ntf-tab" id="tab-tips" onclick="_switchTab('tips')">Tips</button>
       </div>
     </div>
     <div class="ntf-body">
@@ -174,6 +175,7 @@ var _ICON_SVG = {
   'trade-up':   '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>',
   'trade-down': '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/></svg>',
   'copy':       '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+  'tip': '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="13" rx="2"/><path d="M12 8v13M3 12h18M12 8C8 8 5 6 7 4c2-3 5 0 5 4Zm0 0c4 0 7-2 5-4-2-3-5 0-5 4Z"/></svg>',
   'social':     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
   'message':    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   'system':     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>'
@@ -268,6 +270,9 @@ function _rowHtml(n){
     // (hidden in select mode along with the other per-row actions).
     var shareBtn = _selectMode ? '' : '<button class="ntf-share-btn" data-content="' + _esc(n.content) + '" data-link="' + _esc(n.link || '') + '" onclick="_shareTrade(this,event)">Share</button>';
     return _buildPersonalRow(n, isUnread, iconCls, bodyHtml, n.link || '#', shareBtn);
+  } else if(type === 'tip'){
+    iconCls = 'tip';
+    bodyHtml = '<div class="ntf-text">' + _ntfContentHtml(n) + '</div>';
   } else if(type === 'message'){
     iconCls = 'message';
     bodyHtml = '<div class="ntf-text">' + _ntfContentHtml(n) + '</div>';
@@ -347,7 +352,9 @@ function _render(){
   var NOTIF_TRADE_TYPES = {trade:1, bridge:1};
   _personal.forEach(function(n){
     var isTradeType = !!NOTIF_TRADE_TYPES[n.type];
-    if((_activeTab === 'social' && !isTradeType) || (_activeTab === 'trades' && isTradeType)){
+    if((_activeTab === 'social' && !isTradeType && n.type!=='tip')
+       || (_activeTab === 'trades' && isTradeType)
+       || (_activeTab === 'tips' && n.type==='tip')){
       rows.push({n:n, ts:n.created_at});
     }
   });
@@ -457,7 +464,7 @@ function _attachNtfSwipeToDelete(wrapEl, contentEl, deleteBtnEl, opts){
 }
 function _switchTab(tab){
   _activeTab = tab;
-  ['trades','social'].forEach(function(t){
+  ['trades','social','tips'].forEach(function(t){
     document.getElementById('tab-'+t).classList.toggle('active', t===tab);
   });
   _render();

@@ -560,35 +560,13 @@ def _tip_evm_candidates(d, sender_wallet, amount, recipient_evm):
 
 
 def _record_tip(d, sender_wallet, sender_user_id, recipient_user_id,
-                recipient_wallet, amount, chain, tx_hash):
-    conn = sqlite3.connect(d.DB_FILE, timeout=8.0)
-    try:
-        conn.execute('CREATE TABLE IF NOT EXISTS tip_transactions ('
-                     'id INTEGER PRIMARY KEY AUTOINCREMENT,'
-                     'sender_user_id INTEGER NOT NULL,'
-                     'recipient_user_id INTEGER NOT NULL,'
-                     'sender_wallet TEXT NOT NULL,'
-                     'recipient_wallet TEXT NOT NULL,'
-                     'amount REAL NOT NULL,'
-                     'chain TEXT NOT NULL,'
-                     'tx_hash TEXT NOT NULL,'
-                     "status TEXT NOT NULL DEFAULT 'confirmed',"
-                     'created_at TEXT DEFAULT CURRENT_TIMESTAMP)')
-        conn.execute('CREATE INDEX IF NOT EXISTS idx_tips_sender ON tip_transactions(sender_user_id, created_at)')
-        conn.execute('CREATE INDEX IF NOT EXISTS idx_tips_recipient ON tip_transactions(recipient_user_id, created_at)')
-        conn.execute(
-            'INSERT INTO tip_transactions '
-            '(sender_user_id,recipient_user_id,sender_wallet,recipient_wallet,amount,chain,tx_hash,status) '
-            'VALUES (?,?,?,?,?,?,?,?)',
-            (sender_user_id, recipient_user_id, sender_wallet, recipient_wallet,
-             float(amount), chain, tx_hash, 'confirmed'))
-        conn.execute(
-            'INSERT INTO notifications (user_id,type,content,link,actor_wallet) VALUES (?,?,?,?,?)',
-            (recipient_user_id, 'tip', 'You received %.2f USDC tip.' % float(amount),
-             '/wallet', sender_wallet))
-        conn.commit()
-    finally:
-        conn.close()
+                recipient_wallet, amount, chain, tx_hash, note=''):
+    # RPC submission gives only a signature, not a confirmed payment.
+    # The confirmation watcher reconciles the real chain result separately.
+    from tip_experience import record_submitted
+    return record_submitted(d, sender_wallet, sender_user_id,
+                            recipient_user_id, recipient_wallet, amount,
+                            chain, tx_hash, note=note)
 
 
 def install(d):
@@ -790,8 +768,10 @@ def install(d):
 
             with _RECENT_GUARD:
                 _RECENT[key] = time.time()
-            _record_tip(d, sender_wallet, sender_user_id, recipient_user_id,
-                        recipient_address, amount, chain, tx_hash)
+            tip_id = _record_tip(
+                d, sender_wallet, sender_user_id, recipient_user_id,
+                recipient_address, amount, chain, tx_hash,
+                note=str(body.get('message') or '')[:100])
             try:
                 d._wallet_tokens_cache.pop(sender_wallet, None)
                 d._wallet_tokens_cache.pop(recipient['session'], None)
@@ -805,7 +785,8 @@ def install(d):
                 pass
             return jsonify({
                 'ok':True, 'amount_sent':sent, 'currency':'USDC',
-                'chain':chain, 'tx_hash':tx_hash,
+                'chain':chain, 'tx_hash':tx_hash, 'tip_id':tip_id,
+                'status':'submitted',
                 'explorer':_explorer(chain, tx_hash)
             })
         except Exception as exc:
