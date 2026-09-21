@@ -63,3 +63,8 @@ body.oa-portfolio .rt-sidebar{display:none}
 body.oa-portfolio .pf-tabs,body.oa-portfolio .pf-balance-card,body.oa-portfolio .pf-allocation{display:none!important}
 @media(max-width:767px){body.oa-portfolio .pt-nb-search-wrap{display:none!important}}
 body.oa-portfolio .pf-search-link{margin-left:auto;width:37px;height:37px;display:flex;align-items:center;justify-content:center;border:1px solid #303d44;border-radius:11px;color:#dae2e4;text-decoration:none;background:#141d22}body.oa-portfolio .pf-search-link:hover{color:#ffcb66;border-color:#ffcb66}
+
+/* Live Portfolio QA: keep Assets visually identical to approved reference. */
+body.oa-portfolio .wlt-usdc-guide{display:none!important}
+body.oa-portfolio.pf-view-assets .holdings-hdr{display:none!important}
+body.oa-portfolio #pf-spark-line,body.oa-portfolio #pf-spark-fill{transition:d .28s ease,opacity .2s ease}
