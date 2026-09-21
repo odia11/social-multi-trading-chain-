@@ -207,6 +207,13 @@ def sweep_once():
     EVM_CHAINS. Safe to call directly (e.g. right after a trade) as well as
     from the periodic loop below -- _ensure_evm_gas()'s own per-(wallet,
     chain) lock keeps overlapping calls from ever double-topping-up."""
+    # Production explicitly does not front user gas. BUY/SELL/bridge paths now
+    # self-fund gas just-in-time from the user's own stablecoin, so sweeping
+    # every user/chain here only creates RPC load and can trigger public-RPC
+    # rate limits without providing any benefit.
+    if not getattr(_app, 'ORCAGENT_FRONTS_GAS', True):
+        return
+
     # Before handing gas out to users, make sure the wallet it comes from
     # still has some -- otherwise every grant below fails for the same reason.
     _refill_sponsor_wallet()

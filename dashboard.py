@@ -1339,17 +1339,92 @@ def ensure_bsc_wallet(conn, user_id: int, wallet_address: str) -> str:
     return bsc_address
 
 _w3_by_chain: dict = {}
+_w3_by_rpc: dict = {}
+_evm_read_cache: dict = {}
+_evm_read_locks: dict = {}
+_evm_read_guard = threading.Lock()
+_evm_rpc_cooldown: dict = {}
+_EVM_BALANCE_CACHE_TTL = 3.0
+_EVM_RPC_COOLDOWN_SECONDS = 12.0
+
+
+def _rpc_candidates(chain: str) -> list:
+    """Ordered read endpoints. Transaction code keeps using the configured
+    primary via _get_web3(); only idempotent balance reads may fail over."""
+    primary = EVM_CHAINS[chain]['rpc_url']
+    urls = [primary]
+    if chain == 'base':
+        # BASE_RPC_FALLBACK_URLS lets production override/extend this list.
+        # Public fallbacks are reads only; signing/broadcast paths still use
+        # the explicitly configured primary endpoint.
+        extra = os.environ.get('BASE_RPC_FALLBACK_URLS', '')
+        urls.extend([u.strip() for u in extra.split(',') if u.strip()])
+        urls.extend([
+            'https://public.1rpc.io/base',
+            'https://base.publicnode.com',
+        ])
+    out=[]; seen=set()
+    for u in urls:
+        if u and u not in seen:
+            seen.add(u); out.append(u)
+    return out
+
+
+def _web3_for_rpc(url: str):
+    from web3 import Web3
+    with _evm_read_guard:
+        w3 = _w3_by_rpc.get(url)
+        if w3 is None:
+            w3 = Web3(Web3.HTTPProvider(url, request_kwargs={'timeout': 6}))
+            _w3_by_rpc[url] = w3
+        return w3
+
+
 def _get_web3(chain: str = 'bsc'):
-    """Lazily-constructed, per-chain Web3 instance (cached by chain so this
-    never reconnects on every call). `chain` is a key into EVM_CHAINS --
-    defaults to 'bsc' so every pre-existing call site (which never passed
-    this argument) keeps talking to the exact same RPC it always did."""
+    """Primary per-chain Web3 used by transaction/signing paths."""
     global _w3_by_chain
     if chain not in _w3_by_chain:
-        from web3 import Web3
-        cfg = EVM_CHAINS[chain]
-        _w3_by_chain[chain] = Web3(Web3.HTTPProvider(cfg['rpc_url'], request_kwargs={'timeout': 8}))
+        _w3_by_chain[chain] = _web3_for_rpc(EVM_CHAINS[chain]['rpc_url'])
     return _w3_by_chain[chain]
+
+
+def _evm_read_with_fallback(chain: str, cache_key: tuple, reader):
+    """Single-flight, briefly cached read with endpoint cooldown/failover."""
+    now = time.time()
+    hit = _evm_read_cache.get(cache_key)
+    if hit and now - hit[0] < _EVM_BALANCE_CACHE_TTL:
+        return hit[1]
+    with _evm_read_guard:
+        lock = _evm_read_locks.get(cache_key)
+        if lock is None:
+            lock = threading.Lock(); _evm_read_locks[cache_key] = lock
+    with lock:
+        now = time.time()
+        hit = _evm_read_cache.get(cache_key)
+        if hit and now - hit[0] < _EVM_BALANCE_CACHE_TTL:
+            return hit[1]
+        last = None
+        urls = _rpc_candidates(chain)
+        # Do not touch a recently-throttled endpoint until its cooldown ends,
+        # unless every endpoint is cooling down (then try the oldest one).
+        live = [u for u in urls if _evm_rpc_cooldown.get((chain,u), 0) <= now]
+        if not live:
+            live = sorted(urls, key=lambda u: _evm_rpc_cooldown.get((chain,u), 0))[:1]
+        for url in live:
+            try:
+                value = reader(_web3_for_rpc(url))
+                _evm_read_cache[cache_key] = (time.time(), value)
+                _evm_rpc_cooldown.pop((chain,url), None)
+                return value
+            except Exception as exc:
+                last = exc
+                text = str(exc).lower()
+                if '429' in text or 'too many requests' in text or 'rate limit' in text:
+                    _evm_rpc_cooldown[(chain,url)] = time.time() + _EVM_RPC_COOLDOWN_SECONDS
+                continue
+        if last:
+            raise last
+        raise RuntimeError(f'No RPC available for {chain}')
 
 # Minimal ERC20/BEP20 ABI -- just the two read-only calls we actually need,
 # not the full standard. Keeps this dependency-free of any ABI-fetching step.
@@ -1362,22 +1437,29 @@ _ERC20_MIN_ABI = [
 ]
 
 def get_evm_native_balance(address: str, chain: str = 'bsc') -> float:
-    """Native gas-token balance (BNB/ETH/POL depending on `chain`), in whole
-    units not wei."""
-    w3 = _get_web3(chain)
-    wei = w3.eth.get_balance(w3.to_checksum_address(address))
-    return float(w3.from_wei(wei, 'ether'))
+    """Native gas-token balance with short cache + read failover."""
+    addr = str(address).lower()
+    def read(w3):
+        wei = w3.eth.get_balance(w3.to_checksum_address(address))
+        return float(w3.from_wei(wei, 'ether'))
+    return _evm_read_with_fallback(chain, ('native', chain, addr), read)
+
 
 def get_evm_usdc_balance(address: str, chain: str = 'bsc') -> float:
-    """USDC balance on `chain`. Reads decimals() from the contract itself
-    rather than assuming 6 -- BSC's Binance-Peg USDC is 18 decimals, not 6
-    like the native Circle USDC on every other chain in EVM_CHAINS, and this
-    one read avoids hardcoding that (or any other chain's) decimals wrong."""
-    w3 = _get_web3(chain)
-    contract = w3.eth.contract(address=w3.to_checksum_address(EVM_CHAINS[chain]['usdc']), abi=_ERC20_MIN_ABI)
-    raw = contract.functions.balanceOf(w3.to_checksum_address(address)).call()
-    decimals = contract.functions.decimals().call()
-    return raw / (10 ** decimals)
+    """Stablecoin balance with short cache + read failover.
+
+    Reads decimals from-chain so BSC's 18-decimal Binance-Peg USDC and the
+    6-decimal Circle variants remain correct."""
+    addr = str(address).lower()
+    token = EVM_CHAINS[chain]['usdc']
+    def read(w3):
+        contract = w3.eth.contract(
+            address=w3.to_checksum_address(token), abi=_ERC20_MIN_ABI)
+        owner = w3.to_checksum_address(address)
+        raw = contract.functions.balanceOf(owner).call()
+        decimals = contract.functions.decimals().call()
+        return raw / (10 ** decimals)
+    return _evm_read_with_fallback(chain, ('stable', chain, addr, token.lower()), read)
 
 def get_evm_token_balance(address: str, token_address: str, chain: str = 'bsc') -> float:
     """Read one ERC20 balance in human units from the chain itself.
