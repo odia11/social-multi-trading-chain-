@@ -74,19 +74,67 @@ def _rpc(d):
     return urls[0] if urls else ''
 
 
+
+class _SolanaPreflightError(RuntimeError):
+    """A rejected Solana transaction, including a bounded, safe RPC diagnosis."""
+
+    def __init__(self, message, *, gas_shortfall=False, reason_code='simulation'):
+        super().__init__(message)
+        self.gas_shortfall = gas_shortfall
+        self.reason_code = reason_code
+
+
+def _preflight_error_from_rpc(error):
+    """Keep the actual simulation failure; never expose arbitrary RPC data."""
+    data = error.get('data') if isinstance(error.get('data'), dict) else {}
+    failure = data.get('err')
+    logs = data.get('logs') if isinstance(data.get('logs'), list) else []
+    error_text = str(failure or '')[:140]
+    # Take only short program ERROR lines, never full RPC response / URLs.
+    lines = [str(line).strip() for line in logs
+             if isinstance(line, str) and
+             ('failed:' in line.lower() or 'error:' in line.lower()
+              or 'insufficient lamports' in line.lower())]
+    detail = lines[-1][:140] if lines else ''
+    joined = ' '.join((error_text, detail)).lower()
+    gas_shortfall = any(term in joined for term in (
+        'insufficient lamports', 'insufficient funds for fee',
+        'insufficient funds for rent', 'insufficientfundsforfee',
+        'accountnotrentexempt', 'insufficient funds for transaction fee'))
+    blockhash = 'blockhashnotfound' in joined or 'blockhash not found' in joined
+    if gas_shortfall:
+        label = 'Insufficient SOL for the network fee or token-account rent'
+        code = 'insufficient_sol'
+    elif blockhash:
+        label = 'Recent Solana blockhash expired before submission'
+        code = 'expired_blockhash'
+    elif failure is not None or detail:
+        label = 'Solana rejected the transaction: ' + (detail or error_text)
+        code = 'program_rejected'
+    else:
+        label = 'Solana simulation failed; the RPC did not provide an instruction reason'
+        code = 'missing_preflight_details'
+    return _SolanaPreflightError(
+        label[:235], gas_shortfall=gas_shortfall, reason_code=code)
+
+
 def _rpc_call(url, method, params):
     r = requests.post(url, json={'jsonrpc':'2.0','id':1,'method':method,'params':params}, timeout=15)
     if r.status_code != 200:
         raise RuntimeError('Solana RPC HTTP %s' % r.status_code)
     body = r.json()
     if body.get('error'):
-        raise RuntimeError(str(body['error'].get('message') or body['error']))
+        error = body['error']
+        message = str(error.get('message') or '') if isinstance(error, dict) else str(error)
+        if method == 'sendTransaction' and 'simulation failed' in message.lower():
+            raise _preflight_error_from_rpc(error)
+        raise RuntimeError(message[:220] or 'Solana RPC rejected request')
     if 'result' not in body:
         raise RuntimeError('Solana RPC response missing result')
     return body.get('result')
 
 
-def _rpc_call_any(d, method, params, require_nonempty=False):
+def _rpc_call_any(d, method, params, require_nonempty=False, preferred_url=None):
     """Read from the first healthy Solana RPC, returning (result, url).
 
     An empty token-account list is not considered authoritative while other
@@ -96,7 +144,13 @@ def _rpc_call_any(d, method, params, require_nonempty=False):
     """
     last = None
     empty = None
-    for url in _rpc_urls(d):
+    urls = _rpc_urls(d)
+    if preferred_url and preferred_url in urls:
+        # A signed transfer's blockhash and preflight should use the same
+        # provider first; other providers remain as transport fallbacks.
+        urls.remove(preferred_url)
+        urls.insert(0, preferred_url)
+    for url in urls:
         try:
             result = _rpc_call(url, method, params)
             if require_nonempty:
@@ -105,6 +159,11 @@ def _rpc_call_any(d, method, params, require_nonempty=False):
                     empty = (result, url)
                     continue
             return result, url
+        except _SolanaPreflightError:
+            # This signed transfer failed preflight. Do not hide its detailed
+            # instruction error behind a later provider's 401/429/timeout or
+            # resubmit the same rejected transaction to a different RPC.
+            raise
         except Exception as exc:
             last = exc
             continue
@@ -291,7 +350,7 @@ def _solana_transfer(d, wallet, token_address, to_address, amount,
         if lamports < required_lamports:
             raise ValueError('SOL top-up was submitted but sufficient gas is not yet confirmed; check your balance before retrying')
 
-    bh_result, _ = _rpc_call_any(d, 'getLatestBlockhash', [{'commitment':'confirmed'}])
+    bh_result, blockhash_rpc = _rpc_call_any(d, 'getLatestBlockhash', [{'commitment':'confirmed'}])
     blockhash = (bh_result or {}).get('value', {}).get('blockhash')
     if not blockhash:
         raise RuntimeError('Could not get a recent Solana blockhash')
@@ -306,7 +365,7 @@ def _solana_transfer(d, wallet, token_address, to_address, amount,
     sig, _ = _rpc_call_any(d, 'sendTransaction', [encoded, {
         'encoding':'base64', 'skipPreflight':False, 'preflightCommitment':'confirmed',
         'maxRetries':3
-    }])
+    }], preferred_url=blockhash_rpc)
     return str(sig), float(Decimal(send_raw) / scale)
 
 
@@ -629,7 +688,9 @@ def install(d):
                     except Exception:
                         pass
                     if chain == 'solana':
-                        solana_gas_shortfall = (isinstance(exc, ValueError) and str(exc).startswith(
+                        solana_gas_shortfall = (
+                            isinstance(exc, _SolanaPreflightError) and exc.gas_shortfall
+                        ) or (isinstance(exc, ValueError) and str(exc).startswith(
                             'Not enough SOL in your trading wallet'))
                         solana_error = safe[:220]
                         app.logger.warning(
