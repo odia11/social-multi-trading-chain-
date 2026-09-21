@@ -4,8 +4,9 @@
 if((location.pathname.replace(/\/+$/,'')||'/')!=='/wallet')return;
 var samples=[];
 var STORAGE_KEY='orcaPortfolioLastConfirmedTotal';
-function remember(total){try{sessionStorage.setItem(STORAGE_KEY,String(total))}catch(e){}}
-function recalled(){try{var n=Number(sessionStorage.getItem(STORAGE_KEY));return Number.isFinite(n)&&n>=0?n:null}catch(e){return null}}
+var STORAGE_AT_KEY='orcaPortfolioLastConfirmedTotalAt';
+function remember(total){try{localStorage.setItem(STORAGE_KEY,String(total));localStorage.setItem(STORAGE_AT_KEY,String(Date.now()))}catch(e){}}
+function recalled(){try{var n=Number(localStorage.getItem(STORAGE_KEY)),at=Number(localStorage.getItem(STORAGE_AT_KEY));if(!Number.isFinite(n)||n<0)return null;if(Number.isFinite(at)&&Date.now()-at>86400000)return null;return n}catch(e){return null}}
 function money(n){
   n=Number(n);
   return Number.isFinite(n)?'$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
@@ -62,9 +63,11 @@ function boot(){
   var avail=document.getElementById('avail');
   function provisionalFromAvail(){
     var totalEl=document.getElementById('pf-total');
-    if(!avail||!totalEl||totalEl.textContent.trim()!=='—')return;
+    if(!avail||!totalEl||window.__orcaPortfolioValue!=null)return;
+    var current=(totalEl.textContent||'').trim();
+    if(current!=='—'&&current!=='$0.00')return;
     var n=Number((avail.textContent||'').replace(/[^0-9.\-]/g,''));
-    if(Number.isFinite(n)&&n>=0){
+    if(Number.isFinite(n)&&n>0){
       put('pf-total',money(n));samples=[n];spark();
       put('pf-performance','Syncing complete multi-chain balance…');
     }

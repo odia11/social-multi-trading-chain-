@@ -69,12 +69,12 @@ function paint(snap){
 /* A Portfolio paint is all-or-nothing. Previously Promise.allSettled painted
    whatever subset happened to finish, so a transient RPC/rate-limit failure
    could briefly turn a $1.46 portfolio into $0.13 and back. */
-function refreshValue(){
+function refreshValue(forceFresh){
   if(_busy||document.hidden)return Promise.resolve(false);
   _busy=true;
   return Promise.all([
     json('/api/wallet/usdc-summary'),
-    json('/api/wallet/tokens?bust=1'),
+    json('/api/wallet/tokens'+(forceFresh?'?bust=1':'')),
     json('/api/wallet/balance')
   ]).then(function(r){paint(calculate(r[0]||{},r[1]||{},r[2]||{}));decorate();return true})
     .catch(function(){return false})
@@ -82,23 +82,24 @@ function refreshValue(){
 }
 function refreshHoldings(){
   try{if(typeof window.loadTokens==='function')window.loadTokens(true)}catch(e){}
-  return refreshValue();
+  return refreshValue(true);
 }
 function queue(fn,delay){if(_queued)clearTimeout(_queued);_queued=setTimeout(function(){_queued=null;fn()},delay||0)}
 function boot(){
   decorate();
   var h=document.querySelector('.holdings');
   if(h&&window.MutationObserver){var mt=null;new MutationObserver(function(){clearTimeout(mt);mt=setTimeout(decorate,80)}).observe(h,{childList:true,subtree:true})}
-  /* One initial holdings load, then 5-second complete snapshots. No focus/
-     visibility storm: iOS can fire those events repeatedly while switching
-     app/browser. */
-  queue(refreshHoldings,60);
+  /* The wallet template already starts loadTokens() itself. Do NOT immediately
+     start a second forced all-chain token scan here: that made Total Balance
+     wait behind duplicate RPC work. First paint from the normal cached token
+     snapshot, then keep revalidating quietly in the background. */
+  queue(function(){refreshValue(false)},0);
   if(_timer)clearInterval(_timer);
-  _timer=setInterval(refreshValue,AUTO_REFRESH_MS);
+  _timer=setInterval(function(){refreshValue(false)},AUTO_REFRESH_MS);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 document.addEventListener('orca:trade-complete',function(){queue(refreshHoldings,150)});
-document.addEventListener('orca:bfcache-restored',function(){queue(refreshValue,100)});
+document.addEventListener('orca:bfcache-restored',function(){queue(function(){refreshValue(false)},100)});
 window.OrcAgentRefreshPortfolio=refreshHoldings;
 window.OrcAgentRefreshPortfolioValue=refreshValue;
 })();
