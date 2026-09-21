@@ -153,12 +153,28 @@ def install(d):
                 pending_auto_buys[order_key] = now + 1800
             d.add_user_log(wallet, f'[bot-{chain}] Best: {symbol} — BUYING with USDC')
             try:
-                resp = d._evm_buy_flow(
-                    wallet,
-                    {'token_address': mint, 'amount_usdc': float(min_trade_usdc)},
-                    chain,
-                    wallet_label='EVM',
-                )
+                # user_trader_loop runs in a plain background Thread. The
+                # shared buy flow returns Flask JSON responses, so it needs an
+                # application context even though there is no HTTP request.
+                # Without this, the first real qualifying EVM candidate dies
+                # at jsonify() with "Working outside of application context".
+                app = getattr(d, 'app', None)
+                if app is not None and hasattr(app, 'app_context'):
+                    with app.app_context():
+                        resp = d._evm_buy_flow(
+                            wallet,
+                            {'token_address': mint, 'amount_usdc': float(min_trade_usdc)},
+                            chain,
+                            wallet_label='EVM',
+                        )
+                else:
+                    # Keeps the adapter unit-testable with a light namespace.
+                    resp = d._evm_buy_flow(
+                        wallet,
+                        {'token_address': mint, 'amount_usdc': float(min_trade_usdc)},
+                        chain,
+                        wallet_label='EVM',
+                    )
                 body = _response_json(resp)
             except Exception as exc:
                 with pending_lock:

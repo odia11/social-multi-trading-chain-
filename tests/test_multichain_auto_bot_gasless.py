@@ -12,6 +12,7 @@ import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 
 import types
+from flask import Flask, jsonify
 
 import multichain_auto_bot as patch
 
@@ -150,3 +151,25 @@ def test_production_entry_installs_patch_after_evm_gasless_layer():
     gasless = src.index('_install_evm_gasless_trading(_dashboard)')
     bot = src.index('_install_multichain_auto_bot(_dashboard)')
     assert gasless < bot
+
+
+def test_background_bot_buy_has_flask_application_context():
+    d, buys, _ = make_dashboard('base')
+    d.app = Flask('bot-context-regression')
+
+    class JsonBuy:
+        pass
+
+    def flask_buy(wallet, data, chain, wallet_label='EVM'):
+        # This intentionally uses jsonify: it is exactly what production
+        # dashboard._evm_buy_flow does on every success/refusal path.
+        buys.append((wallet, data, chain, wallet_label))
+        return jsonify({'ok': True, 'chain': chain})
+
+    d._evm_buy_flow = flask_buy
+    patch.install(d)
+    ok = d._bot_scan_evm_entry(
+        7, 'wallet', {}, 'base', 'encrypted', 10.0,
+        frozenset(), 5.0, None, True, 'test')
+    assert ok is True
+    assert len(buys) == 1
