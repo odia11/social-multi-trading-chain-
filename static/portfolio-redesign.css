@@ -21,7 +21,7 @@ body.oa-portfolio .wlt-action{display:flex;flex-direction:column;align-items:cen
 body.oa-portfolio .wlt-action:hover{border-color:#edc168;color:#ffcf74}
 body.oa-portfolio .wlt-action-ic,body.oa-portfolio .wlt-action.primary .wlt-action-ic{width:auto;height:auto;min-height:0;background:none;border:0;color:#f3f6f6;font-size:23px}
 body.oa-portfolio .wlt-hero-inpos{display:none}
-body.oa-portfolio .portfolio-tabs{display:grid!important;grid-template-columns:repeat(3,1fr);gap:0;margin:0;padding:0 0 0;border:0;border-bottom:1px solid #2b3840;border-radius:0;background:transparent}
+body.oa-portfolio .portfolio-tabs{display:grid!important;grid-template-columns:repeat(2,1fr);gap:0;margin:0;padding:0 0 0;border:0;border-bottom:1px solid #2b3840;border-radius:0;background:transparent}
 body.oa-portfolio .portfolio-tabs button{min-width:0;min-height:52px;padding:11px 4px;background:transparent!important;border:0;border-bottom:3px solid transparent;border-radius:0!important;color:#9eabb5;font:700 14px var(--ui,system-ui);cursor:pointer}
 body.oa-portfolio .portfolio-tabs button.selected{color:#ffcb66;border-color:#ffcb66}
 body.oa-portfolio .portfolio-tabs button:focus-visible,body.oa-portfolio .wlt-action:focus-visible{outline:2px solid #ffcb66;outline-offset:2px}
@@ -51,8 +51,7 @@ body.oa-portfolio .pf-asset-amount b{font:700 14px var(--mono)}
 body.oa-portfolio .pf-asset-amount small{font:500 11px var(--ui);color:#45d7a2}
 body.oa-portfolio .sol-usdc-card,body.oa-portfolio .dep-card,body.oa-portfolio .act-card,body.oa-portfolio #oa-portfolio-transactions{display:none}
 body.oa-portfolio.pf-view-assets .holdings{display:block}
-body.oa-portfolio.pf-view-chains .holdings,body.oa-portfolio.pf-view-history .holdings{display:none}
-body.oa-portfolio.pf-view-chains .sol-usdc-card,body.oa-portfolio.pf-view-chains .dep-card{display:block;margin-top:15px}
+body.oa-portfolio.pf-view-history .holdings{display:none}
 body.oa-portfolio.pf-view-history .act-card,body.oa-portfolio.pf-view-history #oa-portfolio-transactions{display:block;margin-top:15px}
 body.oa-portfolio .act-card,body.oa-portfolio .dep-card{background:#121b20;border:1px solid #2c3b41;border-radius:17px}
 body.oa-portfolio .rt-sidebar{display:none}

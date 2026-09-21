@@ -61,18 +61,13 @@ function boot(){
   removeLegacyHistoryCards();
 
   function showView(view){
-    if(['assets','chains','history'].indexOf(view)===-1)view='assets';
+    if(['assets','history'].indexOf(view)===-1)view='assets';
     document.body.classList.remove('pf-view-overview','pf-view-deposit','pf-view-withdraw','pf-view-assets','pf-view-chains','pf-view-history');
     document.body.classList.add('pf-view-'+view);
     if(tabs)tabs.querySelectorAll('[data-portfolio-tab]').forEach(function(b){
       var active=b.dataset.portfolioTab===view;
       b.classList.toggle('selected',active);b.setAttribute('aria-selected',String(active));
     });
-    if(view==='chains'){
-      var e=document.getElementById('usdc-chain-tiles');
-      var toggle=document.getElementById('usdc-tiles-toggle');
-      if(e&&e.classList.contains('collapsed')&&toggle)toggle.click();
-    }
   }
   if(tabs)tabs.addEventListener('click',function(e){
     var b=e.target.closest('[data-portfolio-tab]');
