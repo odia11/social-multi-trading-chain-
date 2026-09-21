@@ -244,9 +244,108 @@ def _explorer(chain, tx_hash):
         'solana':'https://solscan.io/tx/', 'bsc':'https://bscscan.com/tx/',
         'base':'https://basescan.org/tx/', 'arbitrum':'https://arbiscan.io/tx/',
         'polygon':'https://polygonscan.com/tx/',
+        'robinhood':'https://explorer.testnet.chain.robinhood.com/tx/',
     }
     base = bases.get(chain)
     return base + tx_hash if base and tx_hash else ''
+
+
+def _user_tip_wallets(d, user_id):
+    conn = sqlite3.connect(d.DB_FILE, timeout=8.0)
+    try:
+        row = conn.execute(
+            'SELECT wallet_address, COALESCE(bsc_wallet_address, "") FROM users WHERE id=?',
+            (int(user_id),)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    session_wallet, evm_wallet = str(row[0] or ''), str(row[1] or '')
+    try:
+        solana_wallet = str(d._get_trading_wallet_address(session_wallet) or session_wallet)
+    except Exception:
+        solana_wallet = session_wallet
+    return {'session': session_wallet, 'solana': solana_wallet, 'evm': evm_wallet}
+
+
+def _tip_solana_ready(d, sender_wallet, amount):
+    try:
+        owner = str(d._get_trading_wallet_address(sender_wallet) or '')
+        if not owner:
+            return None
+        balance = Decimal(str(d._get_solana_usdc_balance(owner)))
+        if balance < amount:
+            return None
+        url = _rpc(d)
+        if not url:
+            return None
+        lamports = int((_rpc_call(url, 'getBalance', [owner, {'commitment':'confirmed'}]) or {}).get('value') or 0)
+        if lamports < 10000:
+            return None
+        return {'chain':'solana', 'balance':balance, 'native_ready':True}
+    except Exception:
+        return None
+
+
+def _tip_evm_candidates(d, sender_wallet, amount, recipient_evm):
+    if not recipient_evm:
+        return [], []
+    row = _wallet_keys(d, sender_wallet)
+    source = str(row[2] or '').strip() if row else ''
+    if not source:
+        return [], []
+    ready, needs_gas = [], []
+    for chain, cfg in getattr(d, 'EVM_CHAINS', {}).items():
+        # A USDC tip must arrive as USDC. Robinhood currently uses USDG as
+        # its trading stablecoin, so it is deliberately not a tip rail until
+        # native USDC is configured there.
+        if str(cfg.get('usdc_symbol') or 'USDC').upper() != 'USDC':
+            continue
+        try:
+            balance = Decimal(str(d.get_evm_usdc_balance(source, chain)))
+            if balance < amount:
+                continue
+            native = Decimal(str(d.get_evm_native_balance(source, chain)))
+            item = {'chain':chain, 'balance':balance,
+                    'token':str(cfg.get('usdc') or ''), 'source':source}
+            (ready if native > 0 else needs_gas).append(item)
+        except Exception:
+            continue
+    ready.sort(key=lambda x: x['balance'], reverse=True)
+    needs_gas.sort(key=lambda x: x['balance'], reverse=True)
+    return ready, needs_gas
+
+
+def _record_tip(d, sender_wallet, sender_user_id, recipient_user_id,
+                recipient_wallet, amount, chain, tx_hash):
+    conn = sqlite3.connect(d.DB_FILE, timeout=8.0)
+    try:
+        conn.execute('CREATE TABLE IF NOT EXISTS tip_transactions ('
+                     'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+                     'sender_user_id INTEGER NOT NULL,'
+                     'recipient_user_id INTEGER NOT NULL,'
+                     'sender_wallet TEXT NOT NULL,'
+                     'recipient_wallet TEXT NOT NULL,'
+                     'amount REAL NOT NULL,'
+                     'chain TEXT NOT NULL,'
+                     'tx_hash TEXT NOT NULL,'
+                     "status TEXT NOT NULL DEFAULT 'confirmed',"
+                     'created_at TEXT DEFAULT CURRENT_TIMESTAMP)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_tips_sender ON tip_transactions(sender_user_id, created_at)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_tips_recipient ON tip_transactions(recipient_user_id, created_at)')
+        conn.execute(
+            'INSERT INTO tip_transactions '
+            '(sender_user_id,recipient_user_id,sender_wallet,recipient_wallet,amount,chain,tx_hash,status) '
+            'VALUES (?,?,?,?,?,?,?,?)',
+            (sender_user_id, recipient_user_id, sender_wallet, recipient_wallet,
+             float(amount), chain, tx_hash, 'confirmed'))
+        conn.execute(
+            'INSERT INTO notifications (user_id,type,content,link,actor_wallet) VALUES (?,?,?,?,?)',
+            (recipient_user_id, 'tip', 'You received %.2f USDC tip.' % float(amount),
+             '/wallet', sender_wallet))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def install(d):
@@ -254,6 +353,140 @@ def install(d):
     if getattr(app, '_orca_portfolio_token_withdraw_installed', False):
         return
     app._orca_portfolio_token_withdraw_installed = True
+
+    @app.post('/api/tip')
+    def _send_user_tip():
+        sender_wallet = d._authenticated_wallet()
+        if not sender_wallet:
+            return jsonify({'ok':False,'error':'Authentication required'}), 401
+        if not _csrf_ok(d):
+            return jsonify({'ok':False,'error':'CSRF validation failed'}), 403
+        if callable(getattr(d, '_rate_ok', None)) and not d._rate_ok('tip_wallet:' + sender_wallet, 12, 3600):
+            return jsonify({'ok':False,'error':'Tip limit reached. Try again later.'}), 429
+
+        body = request.get_json(silent=True) or {}
+        try:
+            recipient_user_id = int(body.get('recipient_user_id'))
+        except (TypeError, ValueError):
+            return jsonify({'ok':False,'error':'Invalid recipient'}), 400
+        amount = _amount(body.get('amount'))
+        if amount is None:
+            return jsonify({'ok':False,'error':'Enter a positive USDC amount'}), 400
+        if amount > Decimal('10000'):
+            return jsonify({'ok':False,'error':'Tip amount is above the per-transfer limit'}), 400
+
+        conn = sqlite3.connect(d.DB_FILE, timeout=8.0)
+        try:
+            sender_row = conn.execute(
+                'SELECT id FROM users WHERE wallet_address=? LIMIT 1',
+                (sender_wallet,)).fetchone()
+        finally:
+            conn.close()
+        if not sender_row:
+            return jsonify({'ok':False,'error':'Sender account not found'}), 404
+        sender_user_id = int(sender_row[0])
+        if sender_user_id == recipient_user_id:
+            return jsonify({'ok':False,'error':'You cannot tip yourself'}), 400
+
+        recipient = _user_tip_wallets(d, recipient_user_id)
+        if not recipient:
+            return jsonify({'ok':False,'error':'Recipient account not found'}), 404
+
+        key = ('tip', sender_wallet, recipient_user_id, str(amount.normalize()))
+        now = time.time()
+        with _RECENT_GUARD:
+            if now - _RECENT.get(key, 0) < 45:
+                return jsonify({'ok':False,'error':'This tip was already submitted recently'}), 409
+
+        lock = _lock_for(sender_wallet, 'tip')
+        if not lock.acquire(blocking=False):
+            return jsonify({'ok':False,'error':'Another tip is already in progress'}), 409
+        try:
+            ready_evm, gasless_evm = _tip_evm_candidates(
+                d, sender_wallet, amount, recipient.get('evm'))
+            sol = _tip_solana_ready(d, sender_wallet, amount)
+
+            candidates = list(ready_evm)
+            if sol:
+                candidates.append(sol)
+            candidates.sort(key=lambda x: x['balance'], reverse=True)
+
+            tx_hash = ''
+            sent = 0.0
+            chain = ''
+            recipient_address = ''
+
+            for candidate in candidates:
+                chain = candidate['chain']
+                try:
+                    if chain == 'solana':
+                        recipient_address = recipient['solana']
+                        tx_hash, sent = _solana_transfer(
+                            d, sender_wallet, d.USDC_MINT,
+                            recipient_address, amount)
+                    else:
+                        recipient_address = recipient['evm']
+                        tx_hash, sent = _evm_transfer(
+                            d, sender_wallet, chain, candidate['token'],
+                            recipient_address, amount)
+                    break
+                except Exception:
+                    tx_hash = ''
+
+            if not tx_hash:
+                topup_amount = Decimal(str(getattr(d, 'GAS_TOPUP_USDC_AMOUNT', 2.0)))
+                for candidate in gasless_evm:
+                    if candidate['balance'] < amount + topup_amount:
+                        continue
+                    chain = candidate['chain']
+                    try:
+                        row = _wallet_keys(d, sender_wallet)
+                        enc = str(row[1] or '').strip() if row else ''
+                        topup = getattr(d, '_gasless_evm_native_topup', None)
+                        if not enc or not callable(topup):
+                            continue
+                        with d._use_key(enc, sender_wallet) as private_key:
+                            topup(private_key, chain)
+                        recipient_address = recipient['evm']
+                        tx_hash, sent = _evm_transfer(
+                            d, sender_wallet, chain, candidate['token'],
+                            recipient_address, amount)
+                        break
+                    except Exception:
+                        tx_hash = ''
+
+            if not tx_hash:
+                return jsonify({
+                    'ok':False,
+                    'error':'Not enough spendable USDC and network gas is available to send this tip.'
+                }), 400
+
+            with _RECENT_GUARD:
+                _RECENT[key] = time.time()
+            _record_tip(d, sender_wallet, sender_user_id, recipient_user_id,
+                        recipient_address, amount, chain, tx_hash)
+            try:
+                d._wallet_tokens_cache.pop(sender_wallet, None)
+                d._wallet_tokens_cache.pop(recipient['session'], None)
+            except Exception:
+                pass
+            try:
+                d.add_user_log(sender_wallet,
+                    'TIP: %.2f USDC sent to user %s · tx %s' %
+                    (float(amount), recipient_user_id, tx_hash[:12]))
+            except Exception:
+                pass
+            return jsonify({
+                'ok':True, 'amount_sent':sent, 'currency':'USDC',
+                'chain':chain, 'tx_hash':tx_hash,
+                'explorer':_explorer(chain, tx_hash)
+            })
+        except Exception as exc:
+            app.logger.warning('user tip failed wallet=%s error=%s',
+                               sender_wallet[:8] + '…', type(exc).__name__)
+            return jsonify({'ok':False,'error':'Tip transfer failed. Please try again after checking your balance.'}), 502
+        finally:
+            lock.release()
 
     @app.post('/api/wallet/send-token')
     def _send_portfolio_token():

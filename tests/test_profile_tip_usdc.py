@@ -6,9 +6,9 @@ WITHDRAW = (ROOT / 'portfolio_token_withdraw.py').read_text()
 
 checks = {
     'tip button is visible on another user profile': 'Tip USDC' in PROFILE and 'pf-btn-tip' in PROFILE,
-    'tip uses existing authenticated token-send endpoint': "fetch('/api/wallet/send-token'" in PROFILE,
-    'tip is fixed to canonical Solana USDC mint': "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" in PROFILE,
-    'tip recipient is the profile wallet, not typed input': 'var _tipRecipient = {{ wallet|tojson }};' in PROFILE and "to_address:_tipRecipient" in PROFILE,
+    'tip uses dedicated chain-agnostic endpoint': "fetch('/api/tip'" in PROFILE,
+    'tip no longer exposes a client-side token mint': '_tipMint' not in PROFILE,
+    'tip recipient is server-resolved by immutable user id': 'recipient_user_id:_tipPeerId' in PROFILE and '_tipRecipient' not in PROFILE,
     'default OrcAgent banner is shown when user banner is absent': "{% set _default_banner = '/static/orcagent-mobile-hero.svg' %}" in PROFILE and "banner_url or _default_banner" in PROFILE,
     'default OrcAgent avatar is shown when avatar is absent': '/static/icon-180.png?v=6' in PROFILE,
     'backend remains authenticated and csrf protected': "wallet = d._authenticated_wallet()" in WITHDRAW and "if not _csrf_ok(d):" in WITHDRAW,
@@ -53,8 +53,8 @@ _design = {
         PROFILE.count('_tipPreset(') >= 2 and '.tip-preset.active' in PROFILE,
     'the button says what it will do, with the amount in it':
         'tip-submit-label' in PROFILE and "'Tip ' + (+a) + ' USDC'" in PROFILE,
-    'the network is named, along with whose SOL pays the fee':
-        'Solana (USDC)' in PROFILE and 'comes out of your own SOL' in PROFILE,
+    'network routing is automatic and costs remain user-funded':
+        'Automatic USDC routing' in PROFILE and 'Network costs are paid from your own wallet' in PROFILE,
     'the optional note counts its characters against the limit it enforces':
         'maxlength="100"' in PROFILE and 'tip-count' in PROFILE,
     # A memo does not ride along on this transfer, so a message field that
