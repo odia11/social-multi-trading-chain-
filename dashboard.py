@@ -24207,19 +24207,21 @@ def api_wallet_balance():
 
 
 def _get_solana_usdc_balance(address: str) -> float:
-    """Authoritative on-chain Solana USDC balance for the trading wallet.
+    """Authoritative canonical-USDC balance for an OrcAgent Solana wallet.
 
-    Uses the same ordered RPC fallback pool as the wallet token scanner.
-    Public Solana RPCs can return an empty/error response while a configured
-    provider has the real token accounts. Sum every canonical-USDC token
-    account instead of assuming the first account is the whole balance.
+    A provider failure is NOT a zero balance. At least one RPC must return a
+    syntactically valid result before zero can be considered confirmed.
+    Multiple USDC token accounts are summed.
     """
     rpcs = []
+    # Prefer configured production providers. Demo/public endpoints are useful
+    # only as final fallbacks and may throttle or lag.
     for rpc in list(CLAIM_SOL_RPCS) + [SOLANA_RPC] + list(_PROXY_RPCS):
         if rpc and rpc not in rpcs:
             rpcs.append(rpc)
 
     last_error = None
+    confirmed_empty = False
     for rpc in rpcs:
         try:
             r = requests.post(rpc, json={
@@ -24239,6 +24241,13 @@ def _get_solana_usdc_balance(address: str) -> float:
                 continue
 
             accounts = result.get('value') or []
+            if not accounts:
+                confirmed_empty = True
+                # Keep looking: another configured provider may have fresher
+                # token-account state. Only return zero after all usable
+                # providers also found nothing.
+                continue
+
             total = 0.0
             for account in accounts:
                 try:
@@ -24247,15 +24256,17 @@ def _get_solana_usdc_balance(address: str) -> float:
                     total += float(raw if raw not in (None, '') else (info.get('uiAmount') or 0))
                 except (KeyError, TypeError, ValueError):
                     continue
-            if accounts:
-                return total
+            return total
         except Exception as e:
             last_error = type(e).__name__
             continue
 
-    if last_error:
-        print(f'[wallet] Solana USDC unavailable for {address[:8]}... after RPC fallbacks: {last_error}', flush=True)
-    return 0.0
+    if confirmed_empty:
+        return 0.0
+    raise RuntimeError(
+        'Solana USDC balance unavailable'
+        + (f' ({last_error})' if last_error else '')
+    )
 
 
 @app.route('/api/wallet/usdc-summary', methods=['GET'])

@@ -618,6 +618,7 @@ html,body{background:#080e11}
 .portfolio-tabs a.selected{color:#ffca66;border-bottom:3px solid #ffca66}
 #portfolio-assets,#portfolio-holdings,#portfolio-activity,#usdc-chain-tiles{scroll-margin-top:100px}
 @media(max-width:768px){.wlt-center{max-height:none;overflow:visible}.wlt-hdr{padding:21px 16px 0}.wlt-title{font-size:25px}.wlt-content{padding:18px 16px 130px}.wlt-hero{padding:22px 18px 7px}.wlt-hero-num{font-size:36px}.wlt-action-ic{min-height:54px}.portfolio-tabs{gap:30px}}
+.wallet-scope-note{font-size:12px;color:var(--muted,#8b96a5);margin-top:6px;line-height:1.35}
 </style>
 </head>
 <body>
@@ -646,10 +647,10 @@ html,body{background:#080e11}
           <!-- USDC, not SOL. Every trade on every chain is funded with USDC
                now; SOL only pays Solana's network fee. Leading with SOL made
                a wallet holding $4.64 of tradeable balance read as empty. -->
-          <div class="wlt-hero-lbl">Total Balance</div>
+          <div class="wlt-hero-lbl">OrcAgent Trading Wallet</div>
           <div class="wlt-hero-num" id="pf-total">—</div>
           <div class="wlt-hero-usd" id="pf-performance">Live multi-chain balance</div>
-          <div class="wlt-hero-usd pf-tradeable">Available to trade: <span id="avail">—</span> <span id="avail-sub">USDC across all chains</span></div>
+          <div class="wlt-hero-usd pf-tradeable">Available to trade in OrcAgent: <span id="avail">—</span> <span id="avail-sub">USDC across all chains</span></div><div class="wallet-scope-note">Connected Phantom wallet is separate from this trading wallet.</div>
         </div>
         <svg class="pf-spark" viewBox="0 0 122 73" role="img" aria-label="Portfolio trend during this session"><path id="pf-spark-fill" fill="url(#pf-spark-gradient)" d=""></path><path id="pf-spark-line" d="" stroke="#37dc9d" stroke-width="2.5" fill="none" stroke-linejoin="round" stroke-linecap="round"></path><defs><linearGradient id="pf-spark-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#32d99a" stop-opacity=".27"></stop><stop offset="100%" stop-color="#32d99a" stop-opacity="0"></stop></linearGradient></defs></svg><button class="wlt-hero-refresh" onclick="loadBalance()" aria-label="Refresh balance" title="Refresh">↻</button>
       </div>
