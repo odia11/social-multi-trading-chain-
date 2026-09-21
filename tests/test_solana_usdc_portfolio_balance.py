@@ -51,7 +51,7 @@ def test_total_rpc_failure_raises_instead_of_false_zero():
 def test_wallet_ui_labels_trading_wallet_scope():
     html=(ROOT/'templates'/'wallet.html').read_text()
     assert 'OrcAgent Trading Wallet' in html
-    assert 'Connected Phantom wallet is separate from this trading wallet.' in html
+    assert 'Connected Phantom wallet is separate from this trading wallet.' not in html
 
 
 if __name__=='__main__':

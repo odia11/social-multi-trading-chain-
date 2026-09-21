@@ -58,16 +58,61 @@ def _csrf_ok(d):
     return bool(callable(fn) and fn(token))
 
 
+def _rpc_urls(d):
+    urls = []
+    for url in (list(getattr(d, 'CLAIM_SOL_RPCS', []) or [])
+                + [getattr(d, 'SOLANA_RPC', None), getattr(d, 'SOLANA_RPC_URL', None)]
+                + list(getattr(d, '_PROXY_RPCS', []) or [])):
+        url = str(url or '').strip()
+        if url and url not in urls:
+            urls.append(url)
+    return urls
+
+
 def _rpc(d):
-    return str(getattr(d, 'SOLANA_RPC', None) or getattr(d, 'SOLANA_RPC_URL', None) or '').strip()
+    urls = _rpc_urls(d)
+    return urls[0] if urls else ''
 
 
 def _rpc_call(url, method, params):
     r = requests.post(url, json={'jsonrpc':'2.0','id':1,'method':method,'params':params}, timeout=15)
+    if r.status_code != 200:
+        raise RuntimeError('Solana RPC HTTP %s' % r.status_code)
     body = r.json()
     if body.get('error'):
         raise RuntimeError(str(body['error'].get('message') or body['error']))
+    if 'result' not in body:
+        raise RuntimeError('Solana RPC response missing result')
     return body.get('result')
+
+
+def _rpc_call_any(d, method, params, require_nonempty=False):
+    """Read from the first healthy Solana RPC, returning (result, url).
+
+    An empty token-account list is not considered authoritative while other
+    configured providers remain, because OrcAgent has observed public RPCs
+    return [] while a configured provider immediately returns the real SPL
+    accounts.
+    """
+    last = None
+    empty = None
+    for url in _rpc_urls(d):
+        try:
+            result = _rpc_call(url, method, params)
+            if require_nonempty:
+                value = (result or {}).get('value') if isinstance(result, dict) else None
+                if not value:
+                    empty = (result, url)
+                    continue
+            return result, url
+        except Exception as exc:
+            last = exc
+            continue
+    if empty is not None:
+        return empty
+    if last:
+        raise last
+    raise RuntimeError('No Solana RPC is configured')
 
 
 def _solana_transfer(d, wallet, token_address, to_address, amount):
@@ -77,8 +122,8 @@ def _solana_transfer(d, wallet, token_address, to_address, amount):
     from solders.pubkey import Pubkey
     from solders.transaction import Transaction
 
-    url = _rpc(d)
-    if not url:
+    urls = _rpc_urls(d)
+    if not urls:
         raise RuntimeError('Solana network is unavailable')
     try:
         mint = Pubkey.from_string(token_address)
@@ -94,9 +139,10 @@ def _solana_transfer(d, wallet, token_address, to_address, amount):
     owner = Pubkey.from_string(owner_text)
 
     # The exact source token account and its decimals are server-read.
-    result = _rpc_call(url, 'getTokenAccountsByOwner', [
+    result, url = _rpc_call_any(d, 'getTokenAccountsByOwner', [
         owner_text, {'mint': token_address}, {'encoding':'jsonParsed'}
-    ]) or {}
+    ], require_nonempty=True)
+    result = result or {}
     accounts = result.get('value') or []
     source = None
     balance_raw = 0
@@ -134,7 +180,7 @@ def _solana_transfer(d, wallet, token_address, to_address, amount):
     )
 
     instructions = []
-    dest_info = _rpc_call(url, 'getAccountInfo', [str(dest_ata), {'encoding':'base64'}])
+    dest_info, _ = _rpc_call_any(d, 'getAccountInfo', [str(dest_ata), {'encoding':'base64'}])
     if not dest_info or not dest_info.get('value'):
         # CreateAssociatedTokenAccountIdempotent (instruction=1).
         instructions.append(Instruction(
@@ -159,11 +205,13 @@ def _solana_transfer(d, wallet, token_address, to_address, amount):
         raise RuntimeError('Solana trading key is not configured')
 
     # Require user-funded SOL for network/rent. OrcAgent never subsidises it.
-    lamports = int(_rpc_call(url, 'getBalance', [owner_text, {'commitment':'confirmed'}]).get('value') or 0)
+    native, _ = _rpc_call_any(d, 'getBalance', [owner_text, {'commitment':'confirmed'}])
+    lamports = int((native or {}).get('value') or 0)
     if lamports < 10000:
         raise ValueError('Not enough SOL in your trading wallet to pay the network fee')
 
-    blockhash = (_rpc_call(url, 'getLatestBlockhash', [{'commitment':'confirmed'}]) or {}).get('value', {}).get('blockhash')
+    bh_result, _ = _rpc_call_any(d, 'getLatestBlockhash', [{'commitment':'confirmed'}])
+    blockhash = (bh_result or {}).get('value', {}).get('blockhash')
     if not blockhash:
         raise RuntimeError('Could not get a recent Solana blockhash')
 
@@ -174,7 +222,7 @@ def _solana_transfer(d, wallet, token_address, to_address, amount):
         tx = Transaction.new_signed_with_payer(instructions, owner, [kp], Hash.from_string(blockhash))
         encoded = base64.b64encode(bytes(tx)).decode('ascii')
 
-    sig = _rpc_call(url, 'sendTransaction', [encoded, {
+    sig, _ = _rpc_call_any(d, 'sendTransaction', [encoded, {
         'encoding':'base64', 'skipPreflight':False, 'preflightCommitment':'confirmed',
         'maxRetries':3
     }])
@@ -276,10 +324,8 @@ def _tip_solana_ready(d, sender_wallet, amount):
         balance = Decimal(str(d._get_solana_usdc_balance(owner)))
         if balance < amount:
             return None
-        url = _rpc(d)
-        if not url:
-            return None
-        lamports = int((_rpc_call(url, 'getBalance', [owner, {'commitment':'confirmed'}]) or {}).get('value') or 0)
+        native, _ = _rpc_call_any(d, 'getBalance', [owner, {'commitment':'confirmed'}])
+        lamports = int((native or {}).get('value') or 0)
         if lamports < 10000:
             return None
         return {'chain':'solana', 'balance':balance, 'native_ready':True}
