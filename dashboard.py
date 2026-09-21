@@ -23877,15 +23877,33 @@ def api_wallet_balance():
     # funds. Falls back to the session wallet only if no trading key is
     # saved yet, matching the previous behavior for that case.
     balance_wallet = _get_trading_wallet_address(wallet) or wallet
-    try:
-        r = requests.post(SOLANA_RPC, json={
-            'jsonrpc': '2.0', 'id': 1, 'method': 'getBalance', 'params': [balance_wallet]
-        }, timeout=8)
-        lamports = r.json()['result']['value']
-        sol = round(lamports / 1e9, 6)
-        usd = round(sol * _sol_price_usd, 4) if _sol_price_usd else None
-    except Exception as e:
-        return jsonify({'ok': False, 'msg': str(e)}), 500
+    # Public Solana RPCs can rate-limit getBalance while token reads through
+    # another provider still work. Try the ordered fallback pool instead of
+    # making one provider hiccup a hard Portfolio failure.
+    sol = None
+    last_balance_error = None
+    seen_rpcs = set()
+    for rpc in CLAIM_SOL_RPCS:
+        if not rpc or rpc in seen_rpcs:
+            continue
+        seen_rpcs.add(rpc)
+        try:
+            r = requests.post(rpc, json={
+                'jsonrpc': '2.0', 'id': 1, 'method': 'getBalance',
+                'params': [balance_wallet]
+            }, timeout=4)
+            body = r.json()
+            value = (body.get('result') or {}).get('value')
+            if value is None:
+                raise ValueError((body.get('error') or {}).get('message') or 'RPC returned no balance')
+            sol = round(float(value) / 1e9, 6)
+            break
+        except Exception as e:
+            last_balance_error = str(e)
+    if sol is None:
+        return jsonify({'ok': False, 'msg': 'SOL balance temporarily unavailable',
+                        'detail': last_balance_error}), 503
+    usd = round(sol * _sol_price_usd, 4) if _sol_price_usd else None
 
     # SOL currently committed to open positions -- the Wallet page's "In Open
     # Positions" stat used to just be a static "0 SOL" placeholder with

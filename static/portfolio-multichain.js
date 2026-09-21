@@ -41,8 +41,10 @@ document.head.appendChild(style);
 
 function json(url){var sep=url.indexOf('?')>=0?'&':'?';return fetch(url+sep+'t='+Date.now(),{credentials:'include',cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('read failed');return r.json()})}
 function calculate(summary,tokBody,bal){
+  summary=summary||{};tokBody=tokBody||{};bal=bal||{};
   var stable=num(summary.total_usdc!=null?summary.total_usdc:summary.total);
   var tokens=Array.isArray(tokBody.tokens)?tokBody.tokens:[];
+  var solToken=tokens.find(function(x){return String(x.symbol||'').toUpperCase()==='SOL'});
   var other=tokens.reduce(function(sum,x){
     var sym=String(x.symbol||x.ticker||'').toUpperCase();
     if(sym==='USDC'||sym==='USDT'||sym==='USDG'||sym==='SOL')return sum;
@@ -50,8 +52,12 @@ function calculate(summary,tokBody,bal){
     if(v==null)v=num(x.balance!=null?x.balance:x.amount)*num(x.price_usd!=null?x.price_usd:x.price);
     return sum+num(v);
   },0);
-  var solPrice=num(bal.sol_price||summary.sol_price||window._wSolPrice||0);
-  var solValue=num(bal.sol)*solPrice;
+  var solPrice=num(bal.sol_price||summary.sol_price||(solToken&&(solToken.price_usd||solToken.price))||window._wSolPrice||0);
+  var solAmount=(bal.sol!=null)?num(bal.sol):num(solToken&&(solToken.balance!=null?solToken.balance:solToken.amount));
+  var solValue=solAmount*solPrice;
+  if(!(solValue>0)&&solToken){
+    solValue=num(solToken.usd_value!=null?solToken.usd_value:solToken.value_usd);
+  }
   return {stable:stable,sol:solValue,other:other,total:stable+solValue+other};
 }
 function paint(snap){
@@ -72,13 +78,19 @@ function paint(snap){
 function refreshValue(forceFresh){
   if(_busy||document.hidden)return Promise.resolve(false);
   _busy=true;
-  return Promise.all([
+  return Promise.allSettled([
     json('/api/wallet/usdc-summary'),
     json('/api/wallet/tokens'+(forceFresh?'?bust=1':'')),
     json('/api/wallet/balance')
-  ]).then(function(r){paint(calculate(r[0]||{},r[1]||{},r[2]||{}));decorate();return true})
-    .catch(function(){return false})
-    .finally(function(){_busy=false});
+  ]).then(function(r){
+    var summary=r[0].status==='fulfilled'?r[0].value:null;
+    var tokens=r[1].status==='fulfilled'?r[1].value:null;
+    var balance=r[2].status==='fulfilled'?r[2].value:{};
+    // A total needs stable balances + token holdings. SOL balance is optional
+    // because the token snapshot also contains SOL and its USD value.
+    if(!summary||!tokens)return false;
+    paint(calculate(summary,tokens,balance));decorate();return true;
+  }).catch(function(){return false}).finally(function(){_busy=false});
 }
 function refreshHoldings(){
   try{if(typeof window.loadTokens==='function')window.loadTokens(true)}catch(e){}
