@@ -26199,7 +26199,7 @@ def bot_overview():
         'ok': True, 'has_trading_key': False, 'running': False,
         'open_positions': 0, 'max_positions': 3,
         'take_profit': 15.0, 'stop_loss': 8.0,
-        'max_trade_size': 10.0, 'daily_loss_limit': 50.0,
+        'min_trade_size': 1.0, 'max_trade_size': 10.0, 'daily_loss_limit': 50.0,
         'trading_wallet_short': None, 'trading_wallet_sol': 0.0,
         'total_trades': 0, 'wins': 0, 'losses': 0, 'win_rate': 0.0,
         'best_trade': None, 'worst_trade': None,
@@ -26207,12 +26207,12 @@ def bot_overview():
     conn = sqlite3.connect(DB_FILE)
     try:
         row = conn.execute(
-            '''SELECT id, encrypted_private_key, take_profit, stop_loss, max_positions, max_trade_size, daily_loss_limit
+            '''SELECT id, encrypted_private_key, take_profit, stop_loss, max_positions, min_trade_size, max_trade_size, daily_loss_limit
                FROM users WHERE wallet_address=?''', (wallet,)
         ).fetchone()
         if not row:
             return jsonify(empty)
-        uid, enc_key, take_profit, stop_loss, max_positions, max_trade_size, daily_loss_limit = row
+        uid, enc_key, take_profit, stop_loss, max_positions, min_trade_size, max_trade_size, daily_loss_limit = row
 
         trading_wallet_short = None
         trading_wallet_sol = 0.0
@@ -26259,6 +26259,7 @@ def bot_overview():
         'running': running,
         'open_positions': open_positions,
         'max_positions': max_positions if max_positions is not None else 3,
+        'min_trade_size': min_trade_size if min_trade_size is not None else 1.0,
         'take_profit': take_profit if take_profit is not None else 15.0,
         'stop_loss': stop_loss if stop_loss is not None else 8.0,
         'max_trade_size': max_trade_size if max_trade_size is not None else 10.0,
