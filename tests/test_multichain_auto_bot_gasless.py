@@ -29,6 +29,15 @@ def make_dashboard(chain):
 
     d = types.SimpleNamespace()
     d._bot_scan_evm_entry = old_scanner
+    class _KeyCtx:
+        def __enter__(self): return '0x' + '1' * 64
+        def __exit__(self, *a): return False
+    d._use_key = lambda enc, wallet: _KeyCtx()
+    class _Acct:
+        @staticmethod
+        def from_key(key):
+            return types.SimpleNamespace(address='0x' + 'b' * 40)
+    d._EvmAccount = _Acct
     d.get_evm_native_balance = lambda addr, c: 0.0
     d._get_scanner_cached = lambda: [{
         'chain': chain,
@@ -82,7 +91,7 @@ def test_usdc_only_wallet_reaches_buy_flow_on_every_evm_chain():
         d, buys, old = make_dashboard(chain)
         patch.install(d)
         ok = d._bot_scan_evm_entry(
-            7, 'wallet', {}, chain, 'encrypted', '0xwallet', 10.0,
+            7, 'wallet', {}, chain, 'encrypted', 10.0,
             frozenset(), 5.0, None, True, 'walle...test',
         )
         assert ok is True, chain
@@ -102,7 +111,7 @@ def test_gainers_gate_rejects_missing_metadata_on_every_evm_chain():
                 {**base, field: value}]
             patch.install(d)
             result = d._bot_scan_evm_entry(
-                7, 'wallet', {}, chain, 'encrypted', '0xwallet', 10.0,
+                7, 'wallet', {}, chain, 'encrypted', 10.0,
                 frozenset(), 5.0, None, True, 'test')
             assert result is False and not buys, (chain, field)
 
@@ -119,7 +128,7 @@ def test_pending_funding_does_not_queue_duplicate_buys():
     patch.install(d)
     for _ in range(3):
         d._bot_scan_evm_entry(7, 'wallet', {}, 'base', 'encrypted',
-                              '0xwallet', 10.0, frozenset(), 5.0, None,
+                              10.0, frozenset(), 5.0, None,
                               True, 'test')
     assert len(buys) == 1, 'repeated 2-second cycles must not queue repeated bridge orders'
 
@@ -129,7 +138,7 @@ def test_native_funded_wallet_keeps_mature_existing_scanner():
     d.get_evm_native_balance = lambda addr, chain: 0.01
     patch.install(d)
     d._bot_scan_evm_entry(
-        7, 'wallet', {}, 'base', 'encrypted', '0xwallet', 10.0,
+        7, 'wallet', {}, 'base', 'encrypted', 10.0,
         frozenset(), 5.0, None, True, 'walle...test',
     )
     assert len(old) == 1

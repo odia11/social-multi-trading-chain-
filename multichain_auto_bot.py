@@ -183,16 +183,26 @@ def install(d):
             d.add_user_log(wallet, f'[bot-{chain}] BUY failed — {symbol}: {body.get("msg") or body.get("error") or "execution refused"}')
         return False
 
-    def scan(user_id, wallet, positions, chain, enc_blob_evm, evm_address,
+    def scan(user_id, wallet, positions, chain, enc_blob_evm,
              min_trade_usdc, blacklisted, m5_min, m5_max,
              pref_scam_filter, short):
         # Native gas must never be a prerequisite for reaching OrcAgent's
         # gasless execution layer. If it exists, keep using the mature legacy
         # scanner. If it does not, run the equivalent scan and hand the BUY to
         # the shared USDC execution flow.
+        # Match dashboard._bot_scan_evm_entry's public signature exactly.
+        # The EVM address is implementation detail, so derive it from the
+        # encrypted trading key only for this balance check and never persist
+        # the decrypted key across scans.
+        evm_address = ''
         try:
+            with d._use_key(enc_blob_evm, wallet) as private_key:
+                evm_address = d._EvmAccount.from_key(private_key).address
             native = d.get_evm_native_balance(evm_address, chain)
         except Exception:
+            # If address derivation or the native-balance RPC is unavailable,
+            # fall through to the USDC/gasless execution path. That path
+            # performs its own authenticated key handling and balance checks.
             native = 0
         if native and native > 0:
             # The native-funded route executes its own swap internally. Guard
@@ -206,7 +216,7 @@ def install(d):
                 pending_auto_buys[order_key] = now + 1800
             try:
                 bought = original(user_id, wallet, positions, chain, enc_blob_evm,
-                                  evm_address, min_trade_usdc, blacklisted,
+                                  min_trade_usdc, blacklisted,
                                   m5_min, m5_max, pref_scam_filter, short)
             except Exception:
                 with pending_lock:

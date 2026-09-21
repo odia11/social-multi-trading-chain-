@@ -49,7 +49,7 @@ def test_two_concurrent_auto_buys_only_one_order():
     multichain_auto_bot.install(d)
     def scan():
         return d._bot_scan_evm_entry(7, 'wallet', {}, 'base', 'encrypted',
-                                     '0xwallet', 10., frozenset(), 5., None,
+                                     10., frozenset(), 5., None,
                                      True, 'test')
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         first = executor.submit(scan)
@@ -75,7 +75,7 @@ def test_native_funded_concurrent_scan_only_once():
     multichain_auto_bot.install(d)
     def scan():
         return d._bot_scan_evm_entry(7, 'wallet', {}, 'base', 'encrypted',
-                                     '0xwallet', 10., frozenset(), 5., None,
+                                     10., frozenset(), 5., None,
                                      True, 'test')
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         first = executor.submit(scan)
