@@ -83,3 +83,26 @@ body.oa-bot-page .bot-field input{width:auto!important;max-width:100%!important}
  body.oa-bot-page .strategy-save{min-height:48px;margin-top:10px}
  body.oa-bot-page .status-head{padding-bottom:13px}
 }
+
+
+/* Match the standard OrcAgent Home/Portfolio charcoal surfaces, not teal. */
+body.oa-bot-page{background:#0e1013!important}
+body.oa-bot-page .status-card,
+body.oa-bot-page .strategy-card,
+body.oa-bot-page .narrative-card,
+body.oa-bot-page .stat-card{
+ background:#15171b!important;background-image:none!important;
+ border-color:#292d34!important;box-shadow:none!important;
+}
+body.oa-bot-page .strategy-row,
+body.oa-bot-page .status-head{border-color:#2a2d33!important}
+body.oa-bot-page .strategy-row span,
+body.oa-bot-page .strategy-row label,
+body.oa-bot-page .status-label{color:#a1a5ae}
+body.oa-bot-page .status-dot-wrap{background:#153428}
+body.oa-bot-page .bot-toggle-btn:not(.running){background:#30343a;border-color:#424850}
+body.oa-bot-page .strategy-heading .strategy-tag{
+ color:#ffcb66;border-color:#805f31;background:#201b14;text-decoration:none;
+ border-radius:9px;padding:8px 10px;letter-spacing:0;font-size:12px;
+}
+body.oa-bot-page #bot-min-trade{width:7ch!important}

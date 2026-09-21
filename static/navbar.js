@@ -44,7 +44,7 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
   if(here!=='/'||!window.matchMedia('(max-width:767px)').matches)return;
   document.documentElement.classList.add('oa-home-mobile-root');
   ensureStyle('/static/home-mobile.css?v=7','home-mobile.css');
-  ensureScript('/static/home-mobile.js?v=5','home-mobile.js');
+  ensureScript('/static/home-mobile.js?v=6','home-mobile.js');
 })();
 
 (function(){
