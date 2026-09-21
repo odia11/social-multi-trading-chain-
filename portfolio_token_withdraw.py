@@ -317,23 +317,50 @@ def _user_tip_wallets(d, user_id):
 
 
 def _tip_solana_ready(d, sender_wallet, amount):
+    owner = ''
     try:
         owner = str(d._get_trading_wallet_address(sender_wallet) or '')
         if not owner:
             return None
+    except Exception:
+        return None
+
+    balance = None
+    try:
         balance = Decimal(str(d._get_solana_usdc_balance(owner)))
-        if balance < amount:
-            return None
+    except Exception:
+        # The portfolio token scanner has a broader SPL-RPC fallback path than
+        # the mint-only balance read. Reuse it rather than falsely declaring
+        # the user unfunded when one provider is throttled.
+        try:
+            data = d._fetch_wallet_tokens(sender_wallet, owner) or {}
+            total = Decimal('0')
+            for token in data.get('tokens') or []:
+                if (str(token.get('mint') or '') == str(d.USDC_MINT)
+                        and str(token.get('chain') or 'solana').lower() == 'solana'):
+                    total += Decimal(str(token.get('amount') or 0))
+            balance = total
+        except Exception:
+            balance = None
+
+    if balance is None or balance < amount:
+        return None
+
+    lamports = 0
+    try:
         native, _ = _rpc_call_any(
             d, 'getBalance', [owner, {'commitment':'confirmed'}])
         lamports = int((native or {}).get('value') or 0)
-        return {
-            'chain':'solana', 'balance':balance,
-            'native_ready': lamports >= 10000,
-            'lamports': lamports,
-        }
     except Exception:
-        return None
+        # Unknown gas state should still allow the user-funded gas bootstrap
+        # branch to try. It will do its own failover-safe native read.
+        lamports = 0
+
+    return {
+        'chain':'solana', 'balance':balance,
+        'native_ready': lamports >= 10000,
+        'lamports': lamports,
+    }
 
 
 def _tip_evm_candidates(d, sender_wallet, amount, recipient_evm):

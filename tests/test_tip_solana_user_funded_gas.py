@@ -29,8 +29,8 @@ def test_tip_preserves_requested_amount_and_only_spends_spare_usdc_for_gas():
 def test_low_sol_solana_is_still_a_tip_candidate_for_bootstrap():
     b=block(TIP,'def _tip_solana_ready','def _tip_evm_candidates')
     assert "'native_ready': lamports >= 10000" in b
-    tail=b[b.index('lamports ='):b.index('except Exception:')]
-    assert "'native_ready': lamports >= 10000" in tail
+    assert "lamports = 0" in b
+    assert "return {" in b
 
 
 def test_no_platform_sponsor_in_tip_bootstrap_path():
@@ -48,6 +48,19 @@ def test_native_sol_helper_uses_rpc_fallbacks():
     assert 'CLAIM_SOL_RPCS' in body
     assert '_PROXY_RPCS' in body
     assert "raise RuntimeError('SOL balance unavailable'" in body
+
+
+def test_tip_readiness_falls_back_to_wallet_token_snapshot():
+    b=block(TIP,'def _tip_solana_ready','def _tip_evm_candidates')
+    assert '_fetch_wallet_tokens(sender_wallet, owner)' in b
+    assert "str(token.get('mint') or '') == str(d.USDC_MINT)" in b
+    assert "total += Decimal(str(token.get('amount') or 0))" in b
+
+
+def test_bootstrap_trusts_caller_spare_usdc_when_balance_rpc_is_down():
+    b=block(BOOT,'def user_funded_solana_topup','def auto_bridge')
+    assert 'except Exception:' in b
+    assert 'sol_usdc = max_spend' in b
 
 
 if __name__=='__main__':

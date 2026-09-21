@@ -176,7 +176,13 @@ def install(d):
             }
 
         shortfall = target - current_sol
-        sol_usdc = _q6(d._get_solana_usdc_balance(trading_address) or 0)
+        try:
+            sol_usdc = _q6(d._get_solana_usdc_balance(trading_address) or 0)
+        except Exception:
+            # Caller already capped max_spend to spare on-chain USDC. If the
+            # mint-only RPC is temporarily unavailable, do not repeat the same
+            # failing balance read and block an otherwise valid gasless order.
+            sol_usdc = max_spend
         budget = min(max_spend, sol_usdc)
         if budget < _MIN_BOOTSTRAP_USDC:
             raise RuntimeError('Not enough spare USDC is available to create Solana network gas')
