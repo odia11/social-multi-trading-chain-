@@ -33,11 +33,12 @@ check('OrcAgent fee is embedded in the same stablecoin-funded order',
       "'swapFeeRecipient': _fee_recipient(d, chain_name)" in src
       and "'swapFeeBps': str(fee_bps)" in src
       and "'swapFeeToken': stable.address" in src)
-check('all supported EVM BUYs bypass native-gas precheck while non-buy actions keep it',
-      "if _supported(chain) and _is_buy_context():" in src
+check('all supported EVM BUYs and SELLs reach gasless execution before native-gas gating',
+      "if _supported(chain) and (_is_buy_context() or _is_sell_context()):" in src
       and 'return original_ensure(' in src)
-check('all supported EVM BUYs use gasless executor; sells keep original executor',
-      "if not _supported(chain) or str(action).lower() != 'buy':" in src
+check('supported EVM BUYs and SELLs both use the gasless adapter',
+      "action not in {'buy', 'sell'}" in src
+      and '_gasless_sell_quote(' in src
       and 'return original_execute(' in src)
 check('gasless approval is signed when 0x provides it',
       "issues.get('allowance') is not None" in src

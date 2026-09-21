@@ -50,6 +50,25 @@ def _is_buy_context() -> bool:
     return False
 
 
+def _is_sell_context() -> bool:
+    """True while an OrcAgent manual/bot EVM exit is being executed."""
+    frame = inspect.currentframe()
+    try:
+        for _ in range(18):
+            if frame is None:
+                break
+            name = frame.f_code.co_name
+            if name in {
+                '_evm_sell_flow', '_bot_execute_exit', '_sell_and_get_realized_evm',
+                '_execute_copy_sell', '_copy_execute_sell',
+            } or ('sell' in name.lower() and 'buy' not in name.lower()):
+                return True
+            frame = frame.f_back
+    finally:
+        del frame
+    return False
+
+
 def _api_headers(d):
     key = (getattr(d, 'ZEROX_API_KEY', '') or os.getenv('ZEROX_API_KEY', '')).strip()
     if not key:
@@ -168,6 +187,95 @@ def _gasless_quote(d, private_key: str, buy_token: str, amount_usdc: str, chain_
     return q, chain
 
 
+def _erc20_amount_raw(d, chain_name: str, token_address: str, amount) -> int:
+    """Convert a human ERC20 amount to raw units without float rounding."""
+    w3 = d._get_web3(chain_name)
+    abi = [{
+        'constant': True, 'inputs': [], 'name': 'decimals',
+        'outputs': [{'name': '', 'type': 'uint8'}], 'type': 'function'
+    }]
+    contract = w3.eth.contract(
+        address=w3.to_checksum_address(token_address), abi=abi)
+    decimals = int(contract.functions.decimals().call())
+    if decimals < 0 or decimals > 36:
+        raise RuntimeError(f'implausible token decimals on {chain_name}: {decimals}')
+    raw = Decimal(str(amount)) * (Decimal(10) ** decimals)
+    # Tracked bot quantities may contain more precision than the token can
+    # represent. Floor to what the chain can actually transfer, never round up
+    # and accidentally ask 0x to sell more than the wallet owns.
+    return int(raw)
+
+
+def _gasless_sell_quote(d, private_key: str, sell_token: str,
+                        amount_token, chain_name: str):
+    """Gasless ERC20 -> chain stablecoin quote for an exit."""
+    chain = _evm_chain(d, chain_name)
+    sell_raw = _erc20_amount_raw(
+        d, chain_name, sell_token, amount_token)
+    if sell_raw <= 0:
+        raise RuntimeError('Token sell amount must be greater than zero')
+    taker = Account.from_key(private_key).address
+    fee_bps = int((Decimal(str(d.FEE_RATE_TXN)) *
+                   Decimal('10000')).to_integral_value())
+    params = {
+        'chainId': str(chain.chain_id),
+        'sellToken': sell_token,
+        'buyToken': chain.stable.address,
+        'sellAmount': str(sell_raw),
+        'taker': taker,
+        # Fee comes from the stablecoin proceeds, not as a second transfer.
+        'swapFeeRecipient': _fee_recipient(d, chain_name),
+        'swapFeeBps': str(fee_bps),
+        'swapFeeToken': chain.stable.address,
+    }
+    r = requests.get(_API + '/gasless/quote', params=params,
+                     headers=_api_headers(d), timeout=15)
+    q = _json_response(r, f'0x gasless sell quote ({chain.display_name})')
+    if q.get('liquidityAvailable') is False:
+        raise RuntimeError(
+            f'No gasless {chain.display_name} sell route is available for this token')
+    if not q.get('trade'):
+        raise RuntimeError(
+            f'0x gasless sell quote for {chain.display_name} contained no executable trade')
+    return q, chain
+
+
+def _gasless_native_topup(d, private_key: str, chain_name: str) -> str:
+    """Use the user's own stablecoin to obtain native gas without pre-funding.
+
+    This is only a fallback for ERC20s whose approval cannot itself be signed
+    gaslessly. OrcAgent fronts nothing: 0x relays a stablecoin-funded swap and
+    the resulting native coin lands in the same user trading wallet.
+    """
+    chain = _evm_chain(d, chain_name)
+    taker = Account.from_key(private_key).address
+    available = Decimal(str(d.get_evm_usdc_balance(taker, chain_name)))
+    configured = Decimal(str(getattr(d, 'GAS_TOPUP_USDC_AMOUNT', 2.0)))
+    amount = min(available, configured)
+    # 0x documents roughly a $1 practical Gasless minimum on non-mainnet
+    # chains. Below this, pretending a top-up can be created just delays the
+    # exit; fail cleanly and keep the position open instead.
+    if amount < Decimal('1'):
+        raise RuntimeError(
+            f'Not enough {chain.stable.symbol} remains to create gas for this sell')
+    sell_raw = _to_stable_raw(d, chain_name, amount, chain.stable)
+    params = {
+        'chainId': str(chain.chain_id),
+        'sellToken': chain.stable.address,
+        'buyToken': '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE',
+        'sellAmount': str(sell_raw),
+        'taker': taker,
+    }
+    r = requests.get(_API + '/gasless/quote', params=params,
+                     headers=_api_headers(d), timeout=15)
+    q = _json_response(r, f'0x gasless gas top-up ({chain.display_name})')
+    if q.get('liquidityAvailable') is False or not q.get('trade'):
+        raise RuntimeError(
+            f'No gasless {chain.stable.symbol}-to-{chain.native.symbol} route is available')
+    # Deliberately no OrcAgent platform fee on this internal gas conversion.
+    return _submit_and_wait(d, private_key, q, chain)
+
+
 def _submit_and_wait(d, private_key: str, quote: dict, chain) -> str:
     issues = quote.get('issues') or {}
     allowance_needed = issues.get('allowance') is not None
@@ -269,23 +377,61 @@ def install(d):
 
     def ensure_gas(user_id, wallet, private_key, evm_address, chain,
                    auto_buy_token_address=None, auto_buy_requested_usdc=None):
-        # Every supported EVM BUY is relayed. Native BNB/ETH/POL is neither
-        # required from the user nor funded by OrcAgent.
-        if _supported(chain) and _is_buy_context():
+        # Every supported EVM BUY is relayed. EVM SELLs now try Gasless first
+        # as well. Therefore native BNB/ETH/POL must not block the caller before
+        # execute() gets a chance to use the relay. If a token cannot be
+        # approved gaslessly, execute() creates native gas from this user's own
+        # stablecoin and then falls back to the mature signed sell path.
+        if _supported(chain) and (_is_buy_context() or _is_sell_context()):
             return True, '', None
         return original_ensure(user_id, wallet, private_key, evm_address, chain,
                                auto_buy_token_address, auto_buy_requested_usdc)
 
     def execute(wallet, private_key, action, token_address, amount_str, chain='bsc'):
-        if not _supported(chain) or str(action).lower() != 'buy':
-            return original_execute(wallet, private_key, action, token_address, amount_str, chain)
+        action = str(action).lower()
+        if not _supported(chain) or action not in {'buy', 'sell'}:
+            return original_execute(
+                wallet, private_key, action, token_address, amount_str, chain)
+        if action == 'buy':
+            try:
+                quote, meta = _gasless_quote(
+                    d, private_key, token_address, amount_str, chain)
+                tx_hash = _submit_and_wait(d, private_key, quote, meta)
+                state.last_evm_buy = {
+                    'chain': chain, 'tx_hash': tx_hash, 'at': time.time()}
+                return True, '', tx_hash
+            except Exception as exc:
+                return False, d._redact_keys(str(exc))[:500], ''
+
+        # SELL: Gasless API can relay sales of non-native ERC20 tokens. This is
+        # the preferred path because TP/SL must still be able to close a
+        # position when the user holds zero BNB/ETH/POL.
+        gasless_error = None
         try:
-            quote, meta = _gasless_quote(d, private_key, token_address, amount_str, chain)
+            quote, meta = _gasless_sell_quote(
+                d, private_key, token_address, amount_str, chain)
             tx_hash = _submit_and_wait(d, private_key, quote, meta)
-            state.last_evm_buy = {'chain': chain, 'tx_hash': tx_hash, 'at': time.time()}
             return True, '', tx_hash
         except Exception as exc:
-            return False, d._redact_keys(str(exc))[:500], ''
+            gasless_error = d._redact_keys(str(exc))[:350]
+
+        # Some meme tokens do not implement EIP-2612. 0x can relay their swap
+        # only after an ordinary allowance exists. Instead of asking the user
+        # to manually deposit gas, buy a small amount of native gas using the
+        # user's own remaining USDC/USDG through a separate gasless swap, then
+        # use the existing approval+sell implementation. OrcAgent contributes
+        # no funds and takes no platform fee on this gas conversion.
+        try:
+            _gasless_native_topup(d, private_key, chain)
+            return original_execute(
+                wallet, private_key, 'sell', token_address, amount_str, chain)
+        except Exception as fallback_exc:
+            fallback_error = d._redact_keys(str(fallback_exc))[:350]
+            return False, (
+                'Gasless sell could not be completed'
+                + (f': {gasless_error}' if gasless_error else '')
+                + f'; automatic gas setup also failed: {fallback_error}'
+            )[:700], ''
 
     def charge_fee(private_key, wallet, user_id, symbol, usdc_amount, kind,
                    chain='bsc', trade_ts=None, gross_profit=0.0):
