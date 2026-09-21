@@ -35,7 +35,7 @@ function polishWithdrawModal(){
   var title=modal.querySelector('.w-modal-title');if(title&&/^\s*Send\s*$/i.test(title.textContent||''))title.textContent='Withdraw';
   var btn=document.getElementById('send-btn');if(btn){var text=(btn.textContent||'').trim();if(/^Send\b/i.test(text))btn.textContent=text.replace(/^Send\b/i,'Withdraw')}
 }
-function removeLegacyHistoryCards(){ /* Preserve actual wallet and bridge history for the History tab. */ }
+function removeLegacyHistoryCards(){ /* Original cards remain in Assets; the unified History owns its own view. */ }
 function boot(){
   if(location.pathname.replace(/\/+$/,'')!=='/wallet'){revealPortfolio();return}
   if(document.body.classList.contains('oa-portfolio')){revealWhenStyled();return}
@@ -64,6 +64,7 @@ function boot(){
     if(['assets','history'].indexOf(view)===-1)view='assets';
     document.body.classList.remove('pf-view-overview','pf-view-deposit','pf-view-withdraw','pf-view-assets','pf-view-chains','pf-view-history');
     document.body.classList.add('pf-view-'+view);
+    document.dispatchEvent(new CustomEvent('orcagent:portfolio-view',{detail:{view:view}}));
     if(tabs)tabs.querySelectorAll('[data-portfolio-tab]').forEach(function(b){
       var active=b.dataset.portfolioTab===view;
       b.classList.toggle('selected',active);b.setAttribute('aria-selected',String(active));

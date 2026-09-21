@@ -11,6 +11,7 @@ os.environ['ORCAGENT_FRONTS_GAS'] = '0'
 
 import dashboard as _dashboard
 from tip_experience import install as _install_tip_experience
+from portfolio_wallet_activity import install as _install_portfolio_wallet_activity
 from search_seo import install as _install_search_seo
 from evm_to_solana_bridge import install as _install_evm_to_solana_bridge
 from wallet_deposit_guidance import install as _install_wallet_deposit_guidance
@@ -144,6 +145,7 @@ _install_portfolio_trade_history(_dashboard)
 # all network fees remain the user's responsibility.
 _install_portfolio_token_withdraw(_dashboard)
 _install_tip_experience(_dashboard)
+_install_portfolio_wallet_activity(_dashboard)
 
 # Keep mobile Live Market execution-sheet sections in normal document flow so
 # stats, percentage shortcuts, keypad, fees and slider never overlap.

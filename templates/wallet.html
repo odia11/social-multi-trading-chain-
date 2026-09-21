@@ -6,7 +6,9 @@
 <title>Portfolio — OrcAgent</title>
 <!-- Load the canonical Portfolio presentation BEFORE the shared navbar loader.\n     Its version changes with every deploy; cached navbar scripts detect these tags and do not inject legacy UI. -->
 <link rel="stylesheet" href="/static/portfolio-redesign.css?v={{ app_version }}">
+<link rel="stylesheet" href="/static/portfolio-history-redesign.css?v={{ app_version }}">
 <script src="/static/portfolio-redesign.js?v={{ app_version }}" defer></script>
+<script src="/static/portfolio-history-redesign.js?v={{ app_version }}" defer></script>
 <script src="/static/approved-portfolio.js?v={{ app_version }}" defer></script>
 <link rel="manifest" href="/app.webmanifest" crossorigin="use-credentials">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -683,6 +685,55 @@ html,body{background:#080e11}
     </div>
 
     <div class="portfolio-tabs" role="tablist" aria-label="Portfolio sections"><button class="selected" type="button" role="tab" aria-selected="true" data-portfolio-tab="assets">Assets</button><button type="button" role="tab" aria-selected="false" data-portfolio-tab="history">History</button></div>
+    <!-- The approved OrcAgent History mockup, rendered from actual tip,
+         Live Market and read-only wallet events. Never synthetic demo rows. -->
+    <section id="oa-history-page" class="oa-h-page" aria-label="Portfolio transaction history">
+      <header class="oa-h-header">
+        <div class="oa-h-headcopy">
+          <a class="oa-h-back" href="/wallet?tab=assets" aria-label="Back to Portfolio assets">‹ Portfolio</a>
+          <h1>History</h1>
+          <p>Your activity across OrcAgent</p>
+        </div>
+        <label class="oa-h-network" for="oa-h-chain">
+          <span class="oa-h-network-globe" aria-hidden="true">◎</span>
+          <select id="oa-h-chain" aria-label="Filter history by chain">
+            <option value="all">All Chains</option>
+            <option value="solana">Solana</option>
+            <option value="base">Base</option>
+            <option value="bsc">BNB Chain</option>
+            <option value="arbitrum">Arbitrum</option>
+            <option value="polygon">Polygon</option>
+            <option value="robinhood">Robinhood</option>
+          </select>
+          <span class="oa-h-select-chevron" aria-hidden="true">⌄</span>
+        </label>
+      </header>
+
+      <section class="oa-h-recent" id="oa-h-recent" aria-label="Recent activity">
+        <div class="oa-h-recent-head">
+          <span class="oa-h-head-icon oa-h-head-icon-gold" aria-hidden="true"></span>
+          <div class="oa-h-recent-label"><strong>Recent Activity</strong><small>Your latest actions</small></div>
+          <button type="button" id="oa-h-viewall" class="oa-h-viewall">View All</button>
+          <button type="button" id="oa-h-recent-toggle" class="oa-h-chevron" aria-expanded="true" aria-label="Collapse recent activity">⌃</button>
+        </div>
+        <div id="oa-h-recent-list" class="oa-h-recent-list" aria-live="polite">
+          <div class="oa-h-empty">Loading recent activity…</div>
+        </div>
+      </section>
+
+      <div class="oa-h-filters" id="oa-h-filters" role="group" aria-label="History categories">
+        <button type="button" data-oa-h-filter="all" class="active" aria-pressed="true"><span class="oa-h-filter-symbol" aria-hidden="true"></span>All</button>
+        <button type="button" data-oa-h-filter="tips" aria-pressed="false"><span class="oa-h-filter-symbol" aria-hidden="true"></span>Tips</button>
+        <button type="button" data-oa-h-filter="swaps" aria-pressed="false"><span class="oa-h-filter-symbol" aria-hidden="true"></span>Swaps</button>
+        <button type="button" data-oa-h-filter="wallet" aria-pressed="false"><span class="oa-h-filter-symbol" aria-hidden="true"></span>Wallet</button>
+      </div>
+
+      <div id="oa-h-days" class="oa-h-days" aria-live="polite">
+        <div class="oa-h-empty">Loading transaction history…</div>
+      </div>
+      <p class="oa-h-disclaimer" id="oa-h-scope"></p>
+    </section>
+
     <div class="sol-usdc-card" id="portfolio-assets">
       <div class="sol-usdc-head">
         <div>
@@ -819,16 +870,8 @@ html,body{background:#080e11}
       <div id="oa-tip-history" class="oa-tip-history"><div class="state-msg">Loading tips…</div></div>
     </section>
 
-    <!-- bridge history -- every cross-chain bridge this wallet has run, so
-         refreshing the page never loses a still-in-progress bridge's status
-         (see /api/bridge/transactions) -->
-    <div class="act-card" style="margin-top:16px">
-      <div class="act-hdr">
-        <span class="act-title">Bridge History</span>
-        <button onclick="_loadBridgeHistory()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:0" title="Refresh">↻</button>
-      </div>
-      <div id="bridge-history-list"><div class="state-msg">Loading…</div></div>
-    </div>
+    <!-- Bridge transactions still run normally and retain their backend
+         records, but there is no separate bridge ledger card in Portfolio. -->
 
     <!-- manual trade history — Live Market instant-trades only (source='manual');
          bot-executed trades live on /bot and /history instead -->
@@ -1642,7 +1685,7 @@ function _bridgeConfirm(){
     _bridgeRenderStatus(d.bridge_id, 'origin_tx_pending', d.tx_hash, null)
     _bridgeStatusTimer=setInterval(function(){_bridgePollStatus(d.bridge_id)}, 8000)
   }).catch(function(){
-    quoteEl.innerHTML='<div class="w-modal-note" style="color:var(--red)">Network error — the transaction may or may not have been submitted; check Bridge History below before retrying.</div>'
+    quoteEl.innerHTML='<div class="w-modal-note" style="color:var(--red)">Network error — the transaction may or may not have been submitted; check your wallet or transaction explorer before retrying.</div>'
   })
 }
 
@@ -1660,7 +1703,7 @@ function _bridgeRenderStatus(bridgeId, status, sourceTxHash, destTxHash){
         +'<div class="br-fail-title">'+(status==='origin_tx_reverted'?'TRANSACTION REVERTED':status==='bridge_failed'?'BRIDGE FAILED':'STATUS UNKNOWN (TIMED OUT)')+'</div>'
         +'<div class="br-fail-row"><span class="br-fail-row-lbl">Bridge ID</span><span class="br-fail-row-val">'+bridgeId+'</span></div>'
         +(sourceTxHash?('<div class="br-fail-row"><span class="br-fail-row-lbl">Origin TX</span><span class="br-fail-row-val"><span class="br-tx-chip" onclick="_brCopyTx(\''+sourceTxHash+'\',this)" title="'+sourceTxHash+'">'+_brShortHash(sourceTxHash)+' ⧉</span></span></div>'):'')
-        +'<div class="br-note-foot" style="margin-top:10px">If funds already left your origin wallet, check Bridge History below for recovery details before retrying — never resubmit blindly.</div>'
+        +'<div class="br-note-foot" style="margin-top:10px">If funds already left your origin wallet, check the bridge transaction status before retrying — never resubmit blindly.</div>'
       +'</div>'
     )
     if(_bridgeStatusTimer){clearInterval(_bridgeStatusTimer);_bridgeStatusTimer=null}

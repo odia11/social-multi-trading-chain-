@@ -1,0 +1,124 @@
+/* OrcAgent Portfolio -> History. Faithful to the approved mobile reference:
+   3 compact recent rows, gold/teal/violet icon tiles, pills and day accordions.
+   The existing Assets presentation is unchanged. */
+body.oa-portfolio .oa-h-page{display:none}
+body.oa-portfolio.pf-view-history .oa-h-page{display:flex;flex-direction:column;gap:16px;min-width:0;width:100%}
+body.oa-portfolio.pf-view-history .wlt-hdr,
+body.oa-portfolio.pf-view-history .wlt-hero,
+body.oa-portfolio.pf-view-history .portfolio-tabs,
+body.oa-portfolio.pf-view-history .act-card,
+body.oa-portfolio.pf-view-history .dep-card,
+body.oa-portfolio.pf-view-history .sol-usdc-card,
+body.oa-portfolio.pf-view-history .oa-tip-history-card,
+body.oa-portfolio.pf-view-history #oa-portfolio-transactions,
+body.oa-portfolio.pf-view-history .holdings{display:none!important}
+body.oa-portfolio.pf-view-history .wlt-content{padding-top:18px;max-width:880px;gap:0}
+body.oa-portfolio.pf-view-history{--oa-h-bg:#111a20;--oa-h-border:#2a3942;--oa-h-gold:#f7b955;--oa-h-white:#f2f5f7;--oa-h-muted:#9caab4;--oa-h-green:#49d9b2}
+.oa-h-page *{box-sizing:border-box}
+.oa-h-page button,.oa-h-page select{font-family:var(--ui,Geist,system-ui)}
+.oa-h-header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:5px 2px 1px}
+.oa-h-headcopy{min-width:0}
+.oa-h-back{font-size:11px;font-weight:700;color:#f7b955;text-decoration:none;display:inline-block;margin-bottom:6px;min-height:20px}
+.oa-h-headcopy h1{margin:0;font-size:32px;letter-spacing:-.9px;line-height:1.13;color:var(--oa-h-white);font-weight:800}
+.oa-h-headcopy p{font-size:12.5px;color:var(--oa-h-muted);margin:7px 0 0}
+.oa-h-network{display:flex;align-items:center;gap:7px;padding:0 11px;height:42px;flex-shrink:0;border:1px solid #36454c;border-radius:13px;background:#141e24;position:relative;max-width:45%}
+.oa-h-network-globe{display:grid;place-items:center;color:#dce5e8}.oa-h-network-globe svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linejoin:round}
+.oa-h-network select{color:#edf1f4;font-size:12.5px;font-weight:650;min-width:0;max-width:102px;width:102px;background:transparent;border:0;outline:0;appearance:none;cursor:pointer;padding:0 4px 0 0}
+.oa-h-network option{background:#141e24;color:#edf1f4}
+.oa-h-select-chevron{font-size:20px;color:#e4e9ea;pointer-events:none;margin-top:-7px}
+.oa-h-recent{background:linear-gradient(155deg,#141f26,#0f181e);border:1px solid #35454c;border-radius:18px;padding:13px 11px 12px;box-shadow:0 1px 0 #43535c55 inset}
+.oa-h-recent-head{display:flex;align-items:center;gap:11px;min-height:44px;padding:0 1px 8px}
+.oa-h-head-icon{width:38px;height:38px;border-radius:13px;display:grid;place-items:center;flex-shrink:0}
+.oa-h-head-icon-gold{color:#f7b955;background:linear-gradient(145deg,#40321c,#261f16);border:1px solid #756039;box-shadow:0 3px 17px #f7b95512}
+.oa-h-head-icon svg{width:19px;height:19px}
+.oa-h-recent-label{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
+.oa-h-recent-label strong{font-size:16px;font-weight:800;color:#eff3f5}
+.oa-h-recent-label small{font-size:11px;color:#9caab4}
+.oa-h-viewall{border:0;background:transparent;color:#ffce76;cursor:pointer;font-weight:750;font-size:12px;white-space:nowrap;min-height:38px;padding:0 4px}
+.oa-h-chevron{border:0;background:none;color:#ffcb70;font-size:25px;line-height:1;width:30px;min-height:38px;cursor:pointer;flex-shrink:0}
+.oa-h-recent-list{display:flex;flex-direction:column;gap:2px;overflow:hidden}
+.oa-h-recent.is-collapsed .oa-h-recent-list{display:none}
+.oa-h-recent-row{display:flex;align-items:center;gap:10px;padding:8px 10px;background:#111a20;border:1px solid #293941;min-height:65px;border-radius:13px;min-width:0}
+.oa-h-icon{width:41px;height:41px;flex:0 0 41px;display:grid;place-items:center;border-radius:12px;background:#172127;border:1px solid #34444c}
+.oa-h-icon svg{width:21px;height:21px;stroke-width:2.1;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round}
+.oa-h-icon.send{color:#ffc876;border-color:#bd954d;background:linear-gradient(145deg,#382b17,#241e14);box-shadow:0 2px 13px #dba34419}
+.oa-h-icon.deposit{color:#79baff;border-color:#3a87f5;background:linear-gradient(145deg,#183557,#10243a);box-shadow:0 2px 13px #307be629}
+.oa-h-icon.receive{color:#46dfbf;border-color:#2fc0a4;background:linear-gradient(145deg,#153a36,#102725);box-shadow:0 2px 13px #30b99b1c}
+.oa-h-icon.tip{color:#ffcc70;border-color:#d2a34a;background:linear-gradient(145deg,#392c1b,#282115);box-shadow:0 2px 13px #ecb54b1c}
+.oa-h-icon.tip svg{fill:currentColor;stroke-width:1}
+.oa-h-icon.swap{color:#c695fd;border-color:#905cc0;background:linear-gradient(145deg,#2c1d3d,#1d182a);box-shadow:0 2px 13px #9b61c927}
+.oa-h-icon.failed{color:#fa8396;border-color:#915467;background:#342029}
+.oa-h-main{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px}
+.oa-h-main strong{font-size:13.5px;font-weight:760;color:#f0f2f3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.oa-h-main small{font-size:11px;color:#9caab4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.oa-h-right{margin-left:auto;display:flex;flex-direction:column;gap:4px;align-items:flex-end;min-width:72px;max-width:40%}
+.oa-h-right strong{font-size:12.5px;font-weight:750;color:#eef1f3;font-variant-numeric:tabular-nums;white-space:nowrap}
+.oa-h-right strong.incoming{color:#5be0bd}
+.oa-h-right time{font-size:11px;color:#98a9b4;white-space:nowrap}
+.oa-h-empty{text-align:center;padding:23px 10px;font-size:12px;color:#93a3ae;line-height:1.55}
+.oa-h-filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}
+.oa-h-filters button{display:flex;align-items:center;justify-content:center;gap:7px;min-width:0;min-height:43px;border:1px solid #33434c;background:linear-gradient(165deg,#182229,#111920);border-radius:999px;color:#aebbc4;cursor:pointer;font-weight:700;font-size:12px;padding:0 5px;touch-action:manipulation}
+.oa-h-filters button.active{color:#ffce75;border-color:#f2bf61;background:linear-gradient(145deg,#382b19,#191c1b);box-shadow:0 1px 12px #f7b9551c}
+.oa-h-filter-symbol{display:grid;place-items:center;color:inherit}
+.oa-h-filter-symbol svg{height:16px;width:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.oa-h-filters button[data-oa-h-filter="tips"]:not(.active) .oa-h-filter-symbol{color:#ff8f9d}
+.oa-h-filters button[data-oa-h-filter="swaps"]:not(.active) .oa-h-filter-symbol{color:#c599ff}
+.oa-h-filters button[data-oa-h-filter="wallet"]:not(.active) .oa-h-filter-symbol{color:#57dfbd}
+.oa-h-days{display:flex;flex-direction:column;gap:11px}
+.oa-h-day{background:linear-gradient(155deg,#151f26,#111a20);border:1px solid #30434b;border-radius:16px;overflow:hidden}
+.oa-h-day-header{display:flex;align-items:center;gap:9px;width:100%;min-height:58px;padding:10px 13px;background:transparent;border:0;cursor:pointer;color:#eef1f4;text-align:left}
+.oa-h-day-header svg{width:20px;height:20px;fill:none;stroke:#acc1d0;stroke-width:1.9;flex-shrink:0}
+.oa-h-day-header strong{font-size:15px;font-weight:800;white-space:nowrap}
+.oa-h-day-header .oa-h-date{font-size:11px;color:#a4b1bd;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;flex:1;min-width:0}
+.oa-h-day-header .oa-h-count{font-size:10.5px;white-space:nowrap;color:#9caab5}
+.oa-h-day-header .oa-h-day-chevron{font-size:22px;color:#ffce76;margin:-5px 0 0 5px;min-width:17px}
+.oa-h-day.is-closed .oa-h-day-chevron{color:#a4bbc7}
+.oa-h-day.is-closed .oa-h-day-list{display:none}
+.oa-h-day-list{padding:0 9px 10px;display:flex;flex-direction:column;gap:2px}
+.oa-h-day-row{background:#111920;border:1px solid #283a43;border-radius:11px;overflow:hidden}
+.oa-h-day-row.oa-h-highlight{border-color:#f7bf61;box-shadow:0 0 0 1px #f7bf612c}
+.oa-h-day-row-head{display:flex;align-items:center;gap:9px;width:100%;min-height:59px;padding:8px 9px;text-align:left;border:0;background:transparent;color:#eff3f5;cursor:pointer;min-width:0}
+.oa-h-day-row-head .oa-h-icon{width:34px;height:34px;flex-basis:34px;border-radius:10px}
+.oa-h-day-row-head .oa-h-icon svg{width:19px;height:19px}
+.oa-h-day-row-head .oa-h-main strong{font-size:12.5px}
+.oa-h-day-row-head .oa-h-main small{font-size:10.5px}
+.oa-h-day-row-head .oa-h-right{min-width:75px}
+.oa-h-day-row-head .oa-h-right strong{font-size:11.5px}
+.oa-h-day-row-chevron{margin-left:0;font-size:20px;color:#a6bac6;min-width:12px;text-align:center}
+.oa-h-day-row.is-open .oa-h-day-row-chevron{color:#f7ca6d}
+.oa-h-detail{display:none;padding:9px 13px 12px 53px;border-top:1px solid #293940;font-size:11px;color:#a1afba;line-height:1.55}
+.oa-h-day-row.is-open .oa-h-detail{display:block}
+.oa-h-detail-grid{display:grid;grid-template-columns:70px minmax(0,1fr);gap:4px 8px}
+.oa-h-detail-grid strong{color:#eaf0f2;font-weight:600;word-break:break-word}
+.oa-h-detail a{display:inline-flex;align-items:center;min-height:33px;color:#ffce76;font-weight:750;text-decoration:none}
+.oa-h-disclaimer{color:#82949d;text-align:center;font-size:10px;line-height:1.4;margin:1px 3px 0}
+@media(max-width:630px){
+  body.oa-portfolio.pf-view-history .wlt-content{padding:14px 12px calc(120px + env(safe-area-inset-bottom,0px));max-width:100%}
+  .oa-h-page{gap:14px}
+  .oa-h-header{padding:2px 1px 1px;gap:6px}
+  .oa-h-headcopy h1{font-size:30px}
+  .oa-h-network{max-width:44%;height:40px;padding:0 7px;gap:4px}
+  .oa-h-network select{width:78px;max-width:78px;font-size:11px}
+  .oa-h-headcopy p{font-size:11.5px}
+  .oa-h-recent{padding:11px 9px}
+  .oa-h-recent-label strong{font-size:15px}
+  .oa-h-recent-row{min-height:61px;padding:7px}
+  .oa-h-filters{gap:6px}
+  .oa-h-filters button{gap:5px;font-size:11px;min-height:42px}
+  .oa-h-day-header{padding:9px 10px;gap:7px}
+  .oa-h-day-header .oa-h-date{font-size:10px}
+  .oa-h-day-header .oa-h-count{font-size:10px}
+  .oa-h-day-row-head{padding:7px}
+  .oa-h-day-row-head .oa-h-icon{width:32px;height:32px;flex-basis:32px}
+  .oa-h-day-row-head .oa-h-main strong{font-size:12px}
+  .oa-h-day-row-head .oa-h-main small{font-size:10px}
+  .oa-h-detail{padding-left:11px}
+}
+@media(max-width:375px){
+  .oa-h-network-globe{display:none}
+  .oa-h-headcopy h1{font-size:27px}
+  .oa-h-headcopy p{font-size:10.5px}
+  .oa-h-filters button{font-size:10.5px;gap:4px}
+  .oa-h-filters svg{max-width:14px}
+  .oa-h-day-header strong{font-size:14px}
+}
