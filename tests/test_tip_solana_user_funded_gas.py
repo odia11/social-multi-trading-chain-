@@ -28,9 +28,9 @@ def test_tip_preserves_requested_amount_and_only_spends_spare_usdc_for_gas():
 
 def test_low_sol_solana_is_still_a_tip_candidate_for_bootstrap():
     b=block(TIP,'def _tip_solana_ready','def _tip_evm_candidates')
-    assert "'native_ready': lamports >= 10000" in b
+    assert "_tip_required_lamports" in b
+    assert "'native_ready': lamports >= required_lamports" in b
     assert "lamports = 0" in b
-    assert "return {" in b
 
 
 def test_no_platform_sponsor_in_tip_bootstrap_path():

@@ -192,6 +192,9 @@ def _execute(order: dict, signed_tx: str):
 
 
 def install(d):
+    # Routes may safely skip their legacy SOL-reserve precheck only when this
+    # adapter is actually configured to intercept USDC-funded buys.
+    d._solana_ultra_gasless_configured = bool(_api_key())
     original = d._execute_user_swap_ex
 
     def execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str,

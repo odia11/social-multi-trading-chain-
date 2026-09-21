@@ -10623,10 +10623,9 @@ def user_trader_loop(stop_event, config, wallet: str):
     # and every EVM-entry gas/candidate check below can tell "never set up"
     # apart from "empty string."
     _enc_blob_evm = row[13] if (len(row) > 13 and row[13]) else None
-    # Which currency the Solana bot itself trades with -- 'SOL' (default) or
-    # 'USDC'. A small SOL balance is still required for Solana's own network
-    # fees regardless (see _GAS_MIN below); this only changes what funds the
-    # TRADE. Re-read fresh every loop start, never cached beyond that, so a
+    # Which currency the Solana bot itself trades with -- 'SOL' or 'USDC'.
+    # A configured Jupiter Ultra USDC BUY may be gasless; legacy swaps still
+    # need native SOL. Re-read fresh every loop start, never cached beyond that, so a
     # Settings change takes effect the next time the bot is (re)started.
     # One currency for every Solana trade -- see SOLANA_BASE_CURRENCY. The
     # per-user column is left in the database rather than dropped, so nothing
@@ -10799,7 +10798,10 @@ def user_trader_loop(stop_event, config, wallet: str):
                 # still cannot buy anything -- which is the same judgement
                 # gas_manager already makes ("not topped up this cycle: no
                 # USDC on Solana to trade with yet").
-                if us_sol < _GAS_MIN and us_solana_avail >= 1:
+                _gasless_usdc_buy = (
+                    _solana_base == 'USDC' and _solana_usdc_buy_gasless_enabled())
+                if (not _gasless_usdc_buy
+                        and us_sol < _GAS_MIN and us_solana_avail >= 1):
                     try:
                         with _use_key(_enc_blob, wallet) as _bot_gas_pk:
                             _ensure_solana_gas(wallet, _bot_gas_pk)
@@ -10808,7 +10810,7 @@ def user_trader_loop(stop_event, config, wallet: str):
                         print(f'[bot] {short} gas top-up failed: '
                               f'{type(_e).__name__}: {_e}', flush=True)
 
-                if us_sol < _GAS_MIN:
+                if us_sol < _GAS_MIN and not _gasless_usdc_buy:
                     _gas_msg = (f'[{short}] ⚠ LOW SOL — trading wallet has {round(us_sol, 6)} SOL '
                                 f'(need ≥{_GAS_MIN} for gas). Buys skipped. '
                                 f'Fund: {_trading_wallet}')
@@ -14646,9 +14648,14 @@ SOL_NETWORK_RESERVE = 0.005
 # already defaulted to and what every EVM chain uses, so it is the one that
 # stays.
 #
-# SOL is still needed on Solana for network fees -- that is unavoidable and
-# separate from what a trade is funded with.
+# Legacy Solana transactions still need native SOL. Configured Jupiter Ultra
+# USDC buys are the exception: Ultra can return a genuinely gasless order, so
+# those entrypoints must not reject a wallet simply because its SOL is low.
 SOLANA_BASE_CURRENCY = 'USDC'
+
+def _solana_usdc_buy_gasless_enabled() -> bool:
+    return (SOLANA_BASE_CURRENCY == 'USDC'
+            and bool(globals().get('_solana_ultra_gasless_configured', False)))
 
 # Whether OrcAgent's own wallet ever fronts a user's gas.
 #
@@ -20752,16 +20759,17 @@ def api_instant_trade():
                                              f'{SOLANA_BUY_REPEAT_WINDOW}s to buy more.',
                                     'duplicate': True}), 429
 
-                # Two balances, two jobs: the trade is funded with USDC, the
-                # network fee is paid in SOL. Checking only one of them is how
-                # a user gets a failure that names the wrong currency.
-                fetch_user_balances(wallet)
-                current_sol = get_user_state(wallet).get('sol', 0)
-                if current_sol < SOL_NETWORK_RESERVE:
-                    return jsonify({'error':
-                        f'Not enough SOL for network fees — you have {current_sol:.4f} '
-                        f'and about {SOL_NETWORK_RESERVE} is needed. Trades themselves '
-                        f'are funded with {SOLANA_BASE_CURRENCY}.'}), 400
+                # Jupiter Ultra can pay the network side of a USDC-funded BUY
+                # from inside the swap. Do not reject that gasless path merely
+                # because the wallet has little/no native SOL. Legacy/non-USDC
+                # swaps still keep their native-gas precheck.
+                if not _solana_usdc_buy_gasless_enabled():
+                    fetch_user_balances(wallet)
+                    current_sol = get_user_state(wallet).get('sol', 0)
+                    if current_sol < SOL_NETWORK_RESERVE:
+                        return jsonify({'error':
+                            f'Not enough SOL for network fees — you have {current_sol:.4f} '
+                            f'and about {SOL_NETWORK_RESERVE} is needed.'}), 400
                 # The trading wallet, not the session wallet: they are two
                 # different keypairs and the funds live on the first.
                 trading_wallet = _get_trading_wallet_address(wallet) or wallet
@@ -26139,42 +26147,46 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
                             'msg': f'You just bought this token. Wait '
                                    f'{SOLANA_BUY_REPEAT_WINDOW}s to buy more of it.'}), 429
 
-        # Two different balances, for two different jobs. The trade is funded
-        # with USDC; the network fee is paid in SOL and always will be. A
-        # wallet needs both, and saying which one is short is the difference
-        # between a fixable message and a confusing one.
-        us_sol = _get_user_sol(trading_wallet)
-        if us_sol < SOL_NETWORK_RESERVE:
-            # ASK THE SPONSOR FIRST, then refuse.
-            #
-            # This path refused outright, which is the whole promise of
-            # "fund everything in USDC, fees are handled" broken at the one
-            # moment it matters: a wallet holding only USDC could not make a
-            # single Solana trade, and was told to go and buy SOL.
-            #
-            # The EVM side has called _ensure_evm_gas before every buy from
-            # the start. Solana had the identical helper -- it tops the
-            # trading wallet up from the platform sponsor -- and simply never
-            # called it here. It is a no-op when sponsorship is switched off,
-            # so behaviour without a sponsor key is exactly what it was.
-            try:
-                with _use_key(enc_blob, wallet) as _gas_pk:
-                    _gas_ok, _gas_msg = _ensure_solana_gas(wallet, _gas_pk)
-            except Exception as e:
-                print(f'[solana-buy] gas top-up failed for {wallet[:6]}...: '
-                      f'{type(e).__name__}: {e}', flush=True)
-                _gas_ok, _gas_msg = False, ''
-            # Re-read rather than trust the return: a grant that landed is
-            # only real once the balance says so, and this is money.
+        # Configured Jupiter Ultra USDC buys are genuinely gasless; the
+        # adapter intercepts them before the legacy subprocess path. Only the
+        # legacy path needs the old SOL reserve/sponsor gate below.
+        if not _solana_usdc_buy_gasless_enabled():
+            # Two different balances, for two different jobs. The trade is funded
+            # with USDC; the network fee is paid in SOL and always will be. A
+            # wallet needs both, and saying which one is short is the difference
+            # between a fixable message and a confusing one.
             us_sol = _get_user_sol(trading_wallet)
+            if us_sol < SOL_NETWORK_RESERVE:
+                # ASK THE SPONSOR FIRST, then refuse.
+                #
+                # This path refused outright, which is the whole promise of
+                # "fund everything in USDC, fees are handled" broken at the one
+                # moment it matters: a wallet holding only USDC could not make a
+                # single Solana trade, and was told to go and buy SOL.
+                #
+                # The EVM side has called _ensure_evm_gas before every buy from
+                # the start. Solana had the identical helper -- it tops the
+                # trading wallet up from the platform sponsor -- and simply never
+                # called it here. It is a no-op when sponsorship is switched off,
+                # so behaviour without a sponsor key is exactly what it was.
+                try:
+                    with _use_key(enc_blob, wallet) as _gas_pk:
+                        _gas_ok, _gas_msg = _ensure_solana_gas(wallet, _gas_pk)
+                except Exception as e:
+                    print(f'[solana-buy] gas top-up failed for {wallet[:6]}...: '
+                          f'{type(e).__name__}: {e}', flush=True)
+                    _gas_ok, _gas_msg = False, ''
+                # Re-read rather than trust the return: a grant that landed is
+                # only real once the balance says so, and this is money.
+                us_sol = _get_user_sol(trading_wallet)
 
-        if us_sol < SOL_NETWORK_RESERVE:
-            return jsonify({
-                'ok': False, 'low_balance': True, 'trading_wallet': trading_wallet,
-                'msg': f'⚠️ Not enough SOL for network fees — you have {us_sol:.4f} '
-                       f'and about {SOL_NETWORK_RESERVE} is needed to send a trade '
-                       f'and later close it. Trades themselves are funded with '
-                       f'{SOLANA_BASE_CURRENCY}; this is only the fee.'}), 400
+            if us_sol < SOL_NETWORK_RESERVE:
+                return jsonify({
+                    'ok': False, 'low_balance': True, 'trading_wallet': trading_wallet,
+                    'msg': f'⚠️ Not enough SOL for network fees — you have {us_sol:.4f} '
+                           f'and about {SOL_NETWORK_RESERVE} is needed to send a trade '
+                           f'and later close it. Trades themselves are funded with '
+                           f'{SOLANA_BASE_CURRENCY}; this is only the fee.'}), 400
 
         us_usdc = _get_solana_usdc_balance(trading_wallet)
         # The configured trade size is already USD-denominated, and USDC is a

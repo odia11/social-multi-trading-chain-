@@ -204,11 +204,23 @@ def _solana_transfer(d, wallet, token_address, to_address, amount):
     if not enc:
         raise RuntimeError('Solana trading key is not configured')
 
-    # Require user-funded SOL for network/rent. OrcAgent never subsidises it.
-    native, _ = _rpc_call_any(d, 'getBalance', [owner_text, {'commitment':'confirmed'}])
+    # Require the sender's own SOL for both tx fee and, when needed, the
+    # recipient ATA rent. A tiny non-zero SOL balance is NOT enough to create
+    # a missing token account.
+    native, _ = _rpc_call_any(
+        d, 'getBalance', [owner_text, {'commitment':'confirmed'}])
     lamports = int((native or {}).get('value') or 0)
-    if lamports < 10000:
-        raise ValueError('Not enough SOL in your trading wallet to pay the network fee')
+    required_lamports = 20_000
+    if not dest_info or not dest_info.get('value'):
+        try:
+            rent, _ = _rpc_call_any(
+                d, 'getMinimumBalanceForRentExemption', [165])
+            required_lamports += int(rent or 2_100_000)
+        except Exception:
+            required_lamports += 2_100_000
+    if lamports < required_lamports:
+        raise ValueError(
+            'Not enough SOL in your trading wallet to pay the network fee and token-account rent')
 
     bh_result, _ = _rpc_call_any(d, 'getLatestBlockhash', [{'commitment':'confirmed'}])
     blockhash = (bh_result or {}).get('value', {}).get('blockhash')
@@ -316,7 +328,39 @@ def _user_tip_wallets(d, user_id):
     return {'session': session_wallet, 'solana': solana_wallet, 'evm': evm_wallet}
 
 
-def _tip_solana_ready(d, sender_wallet, amount):
+def _tip_required_lamports(d, owner_text, recipient_text):
+    """SOL required for a canonical-USDC tip, including ATA rent if needed."""
+    from solders.pubkey import Pubkey
+
+    try:
+        owner = Pubkey.from_string(owner_text)
+        recipient = Pubkey.from_string(recipient_text)
+        mint = Pubkey.from_string(d.USDC_MINT)
+        token_program = Pubkey.from_string(
+            str(getattr(d, 'TOKEN_PROGRAM_ID',
+                        'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')))
+        ata_program = Pubkey.from_string(
+            'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+        dest_ata, _ = Pubkey.find_program_address(
+            [bytes(recipient), bytes(token_program), bytes(mint)], ata_program)
+        dest_info, _ = _rpc_call_any(
+            d, 'getAccountInfo', [str(dest_ata), {'encoding':'base64'}])
+        required = 20_000  # normal signature/transaction headroom
+        if not dest_info or not dest_info.get('value'):
+            try:
+                rent, _ = _rpc_call_any(
+                    d, 'getMinimumBalanceForRentExemption', [165])
+                required += int(rent or 2_100_000)
+            except Exception:
+                required += 2_100_000
+        return required
+    except Exception:
+        # Conservative fallback: enough for a new classic SPL token account
+        # plus the transaction itself.
+        return 2_120_000
+
+
+def _tip_solana_ready(d, sender_wallet, amount, recipient_wallet):
     try:
         owner = str(d._get_trading_wallet_address(sender_wallet) or '')
         if not owner:
@@ -360,10 +404,13 @@ def _tip_solana_ready(d, sender_wallet, amount):
     except Exception:
         lamports = 0
 
+    required_lamports = _tip_required_lamports(
+        d, owner, str(recipient_wallet or ''))
     return {
         'chain':'solana', 'balance':balance,
-        'native_ready': lamports >= 10000,
+        'native_ready': lamports >= required_lamports,
         'lamports': lamports,
+        'required_lamports': required_lamports,
     }
 
 
@@ -484,7 +531,8 @@ def install(d):
         try:
             ready_evm, gasless_evm = _tip_evm_candidates(
                 d, sender_wallet, amount, recipient.get('evm'))
-            sol = _tip_solana_ready(d, sender_wallet, amount)
+            sol = _tip_solana_ready(
+                d, sender_wallet, amount, recipient.get('solana'))
 
             candidates = list(ready_evm)
             if sol and sol.get('native_ready'):
@@ -525,9 +573,14 @@ def install(d):
                             d, sender_wallet, d.USDC_MINT,
                             recipient_address, amount)
                     except Exception as exc:
+                        safe = str(exc)
+                        try:
+                            safe = d._redact_keys(safe)
+                        except Exception:
+                            pass
                         app.logger.info(
-                            'solana tip gas bootstrap unavailable wallet=%s error=%s',
-                            sender_wallet[:8] + '…', type(exc).__name__)
+                            'solana tip gas bootstrap unavailable wallet=%s error=%s reason=%s',
+                            sender_wallet[:8] + '…', type(exc).__name__, safe[:180])
                         tx_hash = ''
 
             if not tx_hash:

@@ -36,7 +36,7 @@ def test_solana_tip_transfer_fails_over_for_token_account_and_reads():
     assert "_rpc_call_any(d, 'getTokenAccountsByOwner'" in b
     assert "require_nonempty=True" in b
     assert "_rpc_call_any(d, 'getAccountInfo'" in b
-    assert "_rpc_call_any(d, 'getBalance'" in b
+    assert "_rpc_call_any(" in b and "'getBalance'" in b
     assert "_rpc_call_any(d, 'getLatestBlockhash'" in b
     assert "_rpc_call_any(d, 'sendTransaction'" in b
 
