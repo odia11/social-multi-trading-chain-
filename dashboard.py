@@ -1379,6 +1379,24 @@ def get_evm_usdc_balance(address: str, chain: str = 'bsc') -> float:
     decimals = contract.functions.decimals().call()
     return raw / (10 ** decimals)
 
+def get_evm_token_balance(address: str, token_address: str, chain: str = 'bsc') -> float:
+    """Read one ERC20 balance in human units from the chain itself.
+
+    Used around confirmed buys so open_positions stores what actually landed,
+    not max_spend / a market-price estimate.  That matters for later TP/SL:
+    an estimated amount that is even slightly too high can make the exit try
+    to sell more tokens than the wallet owns.
+    """
+    w3 = _get_web3(chain)
+    contract = w3.eth.contract(
+        address=w3.to_checksum_address(token_address), abi=_ERC20_MIN_ABI)
+    owner = w3.to_checksum_address(address)
+    raw = int(contract.functions.balanceOf(owner).call())
+    decimals = int(contract.functions.decimals().call())
+    if decimals < 0 or decimals > 36:
+        raise ValueError(f'implausible token decimals on {chain}: {decimals}')
+    return raw / (10 ** decimals)
+
 def get_bnb_balance(address: str) -> float:
     """Backward-compatible alias -- every pre-existing call site expects this
     exact name/signature for BSC specifically."""
@@ -7238,17 +7256,14 @@ def _maybe_start_auto_bridge_for_buy(user_id: int, wallet: str, evm_address: str
 
 def _execute_auto_buy_after_bridge(bridge_id: int, user_id: int, wallet: str, dest_chain: str,
                                     token_address: str, requested_usdc: float) -> None:
-    """Runs the token purchase a bridge was created to feed, once that
-    bridge's status reaches bridge_filled -- called from
-    _bridge_status_loop(), never from a request handler (the user is never
-    blocked waiting on this). Re-checks the destination chain's real
-    on-chain USDC/USDG balance rather than trusting the bridge's quoted
-    output amount (0x's settled amount can differ slightly from the quote),
-    the same on-chain-balance-is-truth principle every other buy in this app
-    already follows, and spends at most `requested_usdc` even if more
-    arrived. Never calls _upsert_open_position()/_charge_evm_txn_fee() on any
-    failure path -- a transaction merely being submitted is never enough to
-    record a trade, matching every other buy path in this app."""
+    """Execute exactly one budgeted buy after bridge settlement.
+
+    The attached `requested_usdc` is already the post-bridge buy ceiling from
+    the cross-chain budget guard. We now run the same Trade Engine used by
+    normal EVM buys, so fee/gas/slippage reserves come OUT of that ceiling
+    rather than being added to it. The engine also persists the actual token
+    balance delta through _te_run_evm_trade().
+    """
     def _finish(status: str, result: dict):
         conn_r = sqlite3.connect(DB_FILE)
         try:
@@ -7263,63 +7278,92 @@ def _execute_auto_buy_after_bridge(bridge_id: int, user_id: int, wallet: str, de
     conn = sqlite3.connect(DB_FILE)
     try:
         row = conn.execute(
-            'SELECT encrypted_private_key_bsc FROM users WHERE id=?', (user_id,)
-        ).fetchone()
+            'SELECT encrypted_private_key_bsc, bsc_wallet_address FROM users WHERE id=?',
+            (user_id,)).fetchone()
     finally:
         conn.close()
     if not row or not row[0]:
         _finish('failed', {'error': 'No EVM trading wallet configured'})
         return
 
+    enc_blob, stored_evm_address = row
     try:
-        with _use_key(row[0], wallet) as private_key:
+        with _use_key(enc_blob, wallet) as private_key:
             acct = _EvmAccount.from_key(private_key)
             w3 = _get_web3(dest_chain)
             evm_address = w3.to_checksum_address(acct.address)
-            available = get_evm_usdc_balance(evm_address, dest_chain)
-            amount_usdc = min(requested_usdc, available)
-            if amount_usdc <= 0:
-                _finish('failed', {'error': f'No {user_currency_label(dest_chain)} arrived on {dest_chain} yet'})
-                return
-            # This buy fires right after USDC just landed via a bridge --
-            # exactly the case where the destination wallet may never have
-            # held any native gas at all yet. Same auto-gas mechanism as
-            # every other manual/bot trade path (see _ensure_evm_gas's own
-            # module comment): tops up from this wallet's own USDC, or
-            # bridges a small bootstrap from the user's own SOL if it's at
-            # literal zero.
-            _gas_ok, _gas_msg, _gas_bridge_id = _ensure_evm_gas(user_id, wallet, private_key, evm_address, dest_chain)
-            if not _gas_ok:
-                _finish('failed', {'error': _gas_refusal_message(
-                    _gas_msg, 'buy', SURGE_ALERT_CHAIN_NAMES.get(dest_chain, dest_chain))})
-                return
-            buy_ok, buy_err, buy_tx_hash = _execute_evm_swap(
-                wallet, private_key, 'buy', token_address, str(amount_usdc), dest_chain)
-            if not buy_ok:
-                _finish('failed', {'error': buy_err or 'Swap failed'})
-                return
 
-            td          = get_token_data(token_address)
-            entry_price = float(td['price']) if td and td.get('price') else 0.0
-            symbol      = (td.get('symbol') or token_address[:8]) if td else token_address[:8]
-            pos = {
-                'amount':    (amount_usdc / entry_price) if entry_price > 0 else 0.0,
-                'buy_price': entry_price,
-                'spend':     amount_usdc,
-                'symbol':    symbol,
-                'opened_at': time.time(),
-            }
-            _upsert_open_position(user_id, wallet, token_address, pos, source='manual', chain=dest_chain)
-            _record_bundled_stable_fee(wallet, user_id, symbol, amount_usdc, 'buy', dest_chain)
+        available = float(get_evm_usdc_balance(evm_address, dest_chain))
+        ceiling = min(float(requested_usdc or 0), available)
+        if ceiling <= 0:
+            _finish('failed', {
+                'error': f'No {user_currency_label(dest_chain)} arrived on {dest_chain} yet'})
+            return
+
+        td = get_token_data(token_address)
+        symbol = (td.get('symbol') or token_address[:8]) if td else token_address[:8]
+        quote = _te_build_and_store_quote(
+            uid=user_id, wallet=wallet,
+            source_chain=dest_chain, dest_chain=dest_chain,
+            token_address=token_address,
+            max_spend=Decimal(str(ceiling)), taker=evm_address,
+            mode='auto_bridge')
+        qbody = quote.to_dict()
+        if not qbody.get('can_execute'):
+            _finish('failed', {
+                'error': qbody.get('reject_reason') or
+                         'Trade does not fit inside the post-bridge USDC budget',
+                'max_spend_usdc': ceiling})
+            return
+
+        result = _te_run_evm_trade(
+            quote_id=quote.quote_id,
+            # Stable across every status-loop retry/restart. The ledger claim
+            # makes the settlement continuation exactly-once as well as the
+            # bridge row's pending->processing claim.
+            idem=f'bridge:{bridge_id}:auto-buy',
+            available=Decimal(str(available)), wallet=wallet,
+            enc_blob=enc_blob, evm_address=evm_address,
+            symbol=symbol, token_address=token_address,
+            chain=dest_chain, user_id=user_id,
+            position_source='bot')
+
+        if result.state != te_ledger.COMPLETED:
+            _finish('failed', {
+                'error': result.failure_reason or 'Post-bridge swap did not complete',
+                'tx_hash': result.tx_hash or '',
+                'trade_id': result.trade_id,
+                'needs_investigation': bool(result.needs_investigation)})
+            return
+
+        purchase = float(qbody.get('token_purchase_usd') or 0)
+        max_spend = float(qbody.get('max_spend_usd') or ceiling)
+        if max_spend > ceiling + 1e-9:
+            # Defensive invariant: this should be impossible if the engine is
+            # correct, but never report/continue a trade whose stored quote
+            # exceeds the bridge-attached ceiling.
+            _finish('failed', {'error': 'Internal budget invariant failed'})
+            return
+
+    except (TeQuoteError, TeCostError, TeProviderError, te_registry.RegistryError) as e:
+        _finish('failed', {'error': f'Could not price post-bridge trade: {e}'})
+        return
     except Exception as e:
         _finish('failed', {'error': _redact_keys(str(e))[:300]})
         return
 
-    # Final outcome, not a bridge-mechanics detail -- worded like every other
-    # buy confirmation in this app, with no mention of the bridge that funded it.
-    add_user_log(wallet, f'✓ Bought {symbol} on {dest_chain} for ${amount_usdc}')
-    _finish('done', {'symbol': symbol, 'amount_usdc': amount_usdc, 'entry_price': entry_price,
-                      'token_address': token_address, 'chain': dest_chain, 'tx_hash': buy_tx_hash})
+    add_user_log(wallet, f'✓ Bought {symbol} on {dest_chain} for ${purchase:.2f}')
+    _finish('done', {
+        'symbol': symbol,
+        'amount_usdc': purchase,
+        'max_spend_usdc': max_spend,
+        'requested_ceiling_usdc': ceiling,
+        'costs': qbody.get('costs_by_kind') or {},
+        'token_address': token_address,
+        'chain': dest_chain,
+        'tx_hash': result.tx_hash or '',
+        'trade_id': result.trade_id,
+    })
 
 def _bridge_sign_send_evm(txn: dict, raw_quote: dict, private_key: str, chain: str,
                            origin_address: str, origin_token: str) -> str:
@@ -8262,18 +8306,21 @@ def _te_evm_fee_charger(enc_blob: str, wallet: str, symbol: str):
     return charge
 
 def _te_run_evm_trade(*, quote_id, idem, available, wallet, enc_blob, evm_address,
-                      symbol, token_address, chain, user_id):
-    """Run one stored quote on an EVM chain, and record the position it opened.
+                      symbol, token_address, chain, user_id, position_source='manual'):
+    """Execute one EVM quote and persist only the confirmed token receipt.
 
-    One function so /api/trade/execute and any legacy route forwarded onto the
-    engine behave identically -- including the bookkeeping, which is the part
-    that would quietly diverge if each caller did it itself.
-
-    The position is opened at the PURCHASE, not at the amount the user typed.
-    The legacy path records the typed amount as the spend while having also
-    paid a fee on top of it, so every position it opens overstates what was
-    bought and understates what it cost.
+    `token_purchase_usd` remains the cost basis for PnL, but position quantity
+    comes from the wallet's actual ERC20 balance delta whenever RPC reads are
+    available. This prevents slippage/fees from creating a synthetic position
+    larger than the wallet can later sell.
     """
+    balance_before = None
+    try:
+        balance_before = get_evm_token_balance(
+            evm_address, token_address, chain)
+    except Exception as e:
+        print(f'[trade-engine] pre-buy token balance unreadable on {chain}: {e}', flush=True)
+
     conn = sqlite3.connect(DB_FILE)
     try:
         result = te_execute.execute_trade(
@@ -8285,21 +8332,36 @@ def _te_run_evm_trade(*, quote_id, idem, available, wallet, enc_blob, evm_addres
     finally:
         conn.close()
 
-    # Only a COMPLETED trade opens a position. A trade that was sent but never
-    # confirmed deliberately does not: recording a position for a swap nobody
-    # has seen land would put a holding on screen that may not exist, and the
-    # user would then try to sell it.
     if result.state == te_ledger.COMPLETED and result.created:
         purchase = float(quote_row['token_purchase_usd']) if quote_row else 0.0
         td = get_token_data(token_address)
-        entry_price = float(td['price']) if td and td.get('price') else 0.0
+        quoted_entry = float(td['price']) if td and td.get('price') else 0.0
+
+        received = 0.0
+        measured = False
+        if balance_before is not None:
+            try:
+                balance_after = get_evm_token_balance(
+                    evm_address, token_address, chain)
+                received = max(0.0, float(balance_after) - float(balance_before))
+                measured = received > 0
+            except Exception as e:
+                print(f'[trade-engine] post-buy token balance unreadable on {chain}: {e}', flush=True)
+
+        # RPC failure is not allowed to erase a confirmed swap. Fall back to
+        # the old market-price estimate, but only when the exact delta could
+        # not be measured. Exact delta is always preferred for sell safety.
+        if not measured:
+            received = (purchase / quoted_entry) if quoted_entry > 0 else 0.0
+        entry_price = (purchase / received) if received > 0 else quoted_entry
+
         _upsert_open_position(user_id, wallet, token_address, {
-            'amount':    (purchase / entry_price) if entry_price > 0 else 0.0,
+            'amount':    received,
             'buy_price': entry_price,
             'spend':     purchase,
             'symbol':    symbol,
             'opened_at': time.time(),
-        }, source='manual', chain=chain)
+        }, source=position_source, chain=chain)
     return result
 
 
