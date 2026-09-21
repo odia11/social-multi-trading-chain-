@@ -7,9 +7,10 @@ inside an href, which would rewrite the middle of a URL into a link of its
 own.
 
 The real functions are lifted out of static/dashboard.js and run in node."""
+import os
 import json, re, subprocess, sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JS   = open(REPO + '/static/dashboard.js').read()
 
 checks = []

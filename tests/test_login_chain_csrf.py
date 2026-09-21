@@ -22,14 +22,16 @@ present a token that only exists once there is one. That is the same reason
 simply missed.
 
 Nothing in the chain acts on who the session says you are. Each step works
+import os
 from a server-generated token held for ten minutes, and the Origin check
 applies to all of them, exempt or not.
 """
+import os
 import ast
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py', encoding='utf-8').read()
 CB = open(REPO + '/templates/phantom_callback.html', encoding='utf-8').read()
 TREE = ast.parse(SRC)

@@ -7,9 +7,10 @@ something the user did, and a market scanner produces a lot of
 uninstalled, so the caps matter more than the happy path.
 
 Extracted from the live source; push delivery and the database mocked."""
+import os
 import re, sqlite3, sys, tempfile, threading, time
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC  = open(REPO + '/dashboard.py').read()
 RADAR = open(REPO + '/surge_radar.py').read()
 
@@ -166,7 +167,7 @@ check('a token with no logo still alerts, with no icon set, so the service '
 check('the logo is validated in notify_surge before it is sent, not on the way out',
       "image_url" in extract_func('notify_surge'))
 
-SW = open('/home/user/Orc-agent-Solana-chain-/static/sw.js', encoding='utf-8').read()
+SW = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static/sw.js'), encoding='utf-8').read()
 check('the service worker uses the sent icon when there is one',
       "data.icon || '/favicon.svg" in SW)
 check("...and keeps OUR mark as the badge — the glyph saying which app buzzed "

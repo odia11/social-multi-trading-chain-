@@ -27,15 +27,17 @@ This screen spends money and had none. Every control now says what it is
 and shows where the focus is; the amount and the balance are readable
 rather than grey-on-black; someone who has asked for less motion gets a
 steady bar instead of a moving one; and the confirm gesture is reachable
+import os
 from a keyboard -- by walking the knob across with the arrow keys, which
 takes as many deliberate actions as a slide does. It used to confirm on a
 single press of Enter, which is exactly the one accidental action the whole
 control exists to prevent, just moved off the touchscreen.
 """
+import os
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = open(REPO + '/templates/live_market_pro.html', encoding='utf-8').read()
 JS = open(REPO + '/static/live-market-pro.js', encoding='utf-8').read()
 CSS = re.sub(r'/\*.*?\*/', '', HTML, flags=re.DOTALL)

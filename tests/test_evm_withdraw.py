@@ -20,10 +20,11 @@ finished is a different problem with the same cost, so an identical
 withdrawal inside a short window is refused as the double-tap it almost
 always is.
 """
+import os
 import ast
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py').read()
 TREE = ast.parse(SRC)
 

@@ -23,11 +23,12 @@ display-mode media query has not been reliable. Missing it reads as an
 ordinary browser tab, and the app then offers a connection that cannot
 complete.
 """
+import os
 import ast
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py').read()
 JS = open(REPO + '/static/dashboard.js').read()
 PAGE = open(REPO + '/dashboard.html').read()

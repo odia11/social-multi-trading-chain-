@@ -31,7 +31,7 @@ import subprocess
 import sys
 import tempfile
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UPDATE = open(REPO + '/deploy/update.sh').read()
 
 checks = []
@@ -104,7 +104,11 @@ else:
     W = os.path.join(home if os.path.isdir(home) else '/home', 'orcagent-deploy-test')
     shutil.rmtree(W, ignore_errors=True)
     os.makedirs(W)
-    shutil.chown(W, OWNER, OWNER)
+    # The account's own primary group, not a group named after it. On
+    # Debian and Ubuntu `nobody` belongs to `nogroup`, and there is no
+    # group called `nobody` at all -- shutil.chown then raises
+    # LookupError and the reproduction never runs.
+    shutil.chown(W, OWNER, pwd.getpwnam(OWNER).pw_gid)
     os.chmod(W, 0o755)
     origin, clone = os.path.join(W, 'origin.git'), os.path.join(W, 'clone')
 

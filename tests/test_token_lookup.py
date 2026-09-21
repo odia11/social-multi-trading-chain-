@@ -7,9 +7,10 @@ the right ones.
 
 The real functions are lifted out of the two front-end files and run in node,
 so these test the shipped code rather than a copy of it."""
+import os
 import json, re, subprocess, sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 D    = open(REPO + '/static/dashboard.js').read()
 T    = open(REPO + '/static/token-card.js').read()
 

@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 checks = []
 def check(name, cond):

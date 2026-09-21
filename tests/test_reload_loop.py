@@ -32,10 +32,11 @@ impossible by construction rather than by guard, which is the stronger
 result, and this file checks for that instead -- plus the rule itself, which
 still applies to every other reload in the app.
 """
+import os
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JS = open(REPO + '/static/dashboard.js').read()
 
 checks = []

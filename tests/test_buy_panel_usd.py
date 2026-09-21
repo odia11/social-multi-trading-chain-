@@ -25,7 +25,7 @@ import re
 import subprocess
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JS = open(REPO + '/static/live-market-pro.js').read()
 HTML = open(REPO + '/templates/live_market_pro.html').read()
 

@@ -19,7 +19,7 @@ import tempfile
 import time
 from decimal import Decimal
 
-sys.path.insert(0, '/home/user/Orc-agent-Solana-chain-')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trade_engine import execute as X                             # noqa: E402
 from trade_engine import ledger as L                              # noqa: E402
@@ -388,7 +388,7 @@ check('a claim on a trade that was MID-SWAP when the process died is left alone 
 
 # ── the engine stays an engine ──
 import ast                                                        # noqa: E402
-src = open('/home/user/Orc-agent-Solana-chain-/trade_engine/execute.py').read()
+src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'trade_engine/execute.py')).read()
 tree = ast.parse(src)
 imported = set()
 for n in ast.walk(tree):

@@ -18,11 +18,12 @@ switched accounts, nothing was stolen. That is a different endpoint, and
 which one revokes is decided on the server by the URL rather than by a flag
 the page sends.
 """
+import os
 import ast
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py').read()
 JS = open(REPO + '/static/dashboard.js').read()
 NAVJS = open(REPO + '/static/navbar.js').read()
