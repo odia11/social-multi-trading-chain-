@@ -93,8 +93,10 @@ def install(appmod) -> None:
             if path not in _root_scroll_excluded and 'data-oa-native-mobile-scroll="1"' not in html:
                 tags.append(
                     '<script data-oa-native-mobile-scroll="1">'
-                    '(function(){if(window.matchMedia&&window.matchMedia("(max-width:767px)").matches)'
-                    'document.documentElement.classList.add("oa-native-mobile-scroll");})();'
+                    '(function(){if(window.matchMedia&&window.matchMedia("(max-width:767px)").matches){'
+                    'document.documentElement.classList.add("oa-native-mobile-scroll");'
+                    'if(/Android/i.test(navigator.userAgent||""))document.documentElement.classList.add("oa-android-scroll");'
+                    '}})();'
                     '</script>'
                 )
                 tags.append(
@@ -114,6 +116,10 @@ def install(appmod) -> None:
                     'html.oa-native-mobile-scroll.oa-modal-open,'
                     'html.oa-native-mobile-scroll.oa-wallet-actions-open,'
                     'html.oa-native-mobile-scroll.oa-app-menu-open{overflow:hidden!important}'
+                    'html.oa-native-mobile-scroll.oa-android-scroll body.oa-home-mobile{height:100dvh!important;min-height:100dvh!important;overflow:hidden!important}'
+                    'html.oa-native-mobile-scroll.oa-android-scroll body.oa-home-mobile #app{height:100dvh!important;min-height:100dvh!important;max-height:100dvh!important;overflow:hidden!important;display:flex!important;flex-direction:column!important}'
+                    'html.oa-native-mobile-scroll.oa-android-scroll body.oa-home-mobile .app-body{flex:1 1 auto!important;min-height:0!important;height:auto!important;max-height:none!important;overflow:hidden!important}'
+                    'html.oa-native-mobile-scroll.oa-android-scroll body.oa-home-mobile #main-content.wrap{flex:1 1 auto!important;height:100%!important;min-height:0!important;max-height:none!important;overflow-x:hidden!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important;overscroll-behavior-y:contain!important;touch-action:pan-y!important}'
                     '}'
                     '</style>'
                 )

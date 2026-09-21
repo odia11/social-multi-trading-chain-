@@ -60,3 +60,7 @@ def test_android_uses_document_element_as_single_native_scroll_owner():
     assert 'html.oa-native-mobile-scroll.oa-modal-open' in APP_PERF
     assert 'html.oa-native-mobile-scroll.oa-wallet-actions-open' in APP_PERF
     assert 'html.oa-native-mobile-scroll.oa-app-menu-open' in APP_PERF
+    assert 'oa-android-scroll' in APP_PERF
+    assert 'body.oa-home-mobile #main-content.wrap' in APP_PERF
+    assert 'overflow-y:auto!important' in APP_PERF
+    assert 'touch-action:pan-y!important' in APP_PERF
