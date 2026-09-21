@@ -78,18 +78,15 @@ function paint(snap){
 function refreshValue(forceFresh){
   if(_busy||document.hidden)return Promise.resolve(false);
   _busy=true;
-  return Promise.allSettled([
-    json('/api/wallet/usdc-summary'),
-    json('/api/wallet/tokens'+(forceFresh?'?bust=1':'')),
-    json('/api/wallet/balance')
-  ]).then(function(r){
-    var summary=r[0].status==='fulfilled'?r[0].value:null;
-    var tokens=r[1].status==='fulfilled'?r[1].value:null;
-    var balance=r[2].status==='fulfilled'?r[2].value:{};
-    // A total needs stable balances + token holdings. SOL balance is optional
-    // because the token snapshot also contains SOL and its USD value.
-    if(!summary||!tokens)return false;
-    paint(calculate(summary,tokens,balance));decorate();return true;
+  var getter=window.OrcAgentGetPortfolioSnapshot;
+  var req=(typeof getter==='function')?getter(!!forceFresh):json('/api/portfolio/snapshot'+(forceFresh?'?bust=1':''));
+  return req.then(function(s){
+    if(!s||!s.ok)return false;
+    paint({stable:num(s.stable&&s.stable.total_usdc),
+           sol:num(s.sol&&s.sol.value_usd),
+           other:num(s.other_assets_value_usd),
+           total:num(s.total_usd)});
+    decorate();return true;
   }).catch(function(){return false}).finally(function(){_busy=false});
 }
 function refreshHoldings(){

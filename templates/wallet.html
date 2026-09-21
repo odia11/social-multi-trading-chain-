@@ -2342,6 +2342,24 @@ function _toggleTokTrade(i){
 }
 
 // ── balance ───────────────────────────────────────────────
+var _portfolioSnapshotData=null
+var _portfolioSnapshotAt=0
+var _portfolioSnapshotPromise=null
+function _getPortfolioSnapshot(forceFresh){
+  var now=Date.now()
+  if(!forceFresh && _portfolioSnapshotData && now-_portfolioSnapshotAt<3500){
+    return Promise.resolve(_portfolioSnapshotData)
+  }
+  if(_portfolioSnapshotPromise) return _portfolioSnapshotPromise
+  var url='/api/portfolio/snapshot'+(forceFresh?'?bust=1':'')
+  _portfolioSnapshotPromise=fetch(url,{credentials:'include',cache:'no-store'})
+    .then(function(r){if(!r.ok)throw new Error('snapshot unavailable');return r.json()})
+    .then(function(d){if(!d||!d.ok)throw new Error((d&&d.msg)||'snapshot failed');_portfolioSnapshotData=d;_portfolioSnapshotAt=Date.now();return d})
+    .finally(function(){_portfolioSnapshotPromise=null})
+  return _portfolioSnapshotPromise
+}
+window.OrcAgentGetPortfolioSnapshot=_getPortfolioSnapshot
+
 var _balanceLoadedOnce=false
 // Mirrors SOL_NETWORK_RESERVE in dashboard.py -- what a Solana wallet has to
 // keep back to send a trade and later close it.
@@ -2349,7 +2367,9 @@ var SOL_FEE_RESERVE = 0.005
 var _solBalanceCache = null
 
 function loadBalance(){
-  fetch('/api/wallet/balance').then(function(r){return r.json()}).then(function(d){
+  _getPortfolioSnapshot(false).then(function(snap){
+    var d={sol:snap.sol&&snap.sol.amount,usd:snap.sol&&snap.sol.value_usd,
+           in_positions_sol:snap.sol&&snap.sol.in_positions_sol}
     if(d.sol!=null) document.getElementById('sol').textContent=parseFloat(d.sol).toFixed(4)
     if(d.usd!=null) document.getElementById('usd').textContent=parseFloat(d.usd).toFixed(2)
     // The hero shows USDC (see loadUsdcSummary). SOL is reported here as
@@ -2406,8 +2426,10 @@ var _usdcLoadedOnce=false
 var _EVM_CHAIN_LABELS={bsc:'BSC',base:'Base',arbitrum:'Arbitrum',polygon:'Polygon',robinhood:'Robinhood'}
 var _usdcSummaryCache=null   // last-fetched {solana_usdc, evm_chains} -- the Bridge modal's balance/MAX reads this instead of its own fetch
 function loadUsdcSummary(){
-  fetch('/api/wallet/usdc-summary').then(function(r){return r.json()}).then(function(d){
-    if(!d.ok) throw new Error(d.msg||'failed')
+  _getPortfolioSnapshot(false).then(function(snap){
+    var d={ok:true,total_usdc:snap.stable.total_usdc,solana_usdc:snap.stable.solana_usdc,
+           evm_chains:snap.stable.evm_chains,evm_address:snap.wallets&&snap.wallets.evm,
+           solana_address:snap.wallets&&snap.wallets.solana}
     var _tot='$'+parseFloat(d.total_usdc).toFixed(2)
     document.getElementById('usdc-total').textContent=_tot
     // This is the balance a trade is actually funded from, so it is the one
@@ -2456,10 +2478,9 @@ function _toggleHideSmall(){
 // ── holdings ──────────────────────────────────────────────
 function loadTokens(bust){
   var wrap=document.getElementById('tokens')
-  wrap.innerHTML='<div class="state-msg">Loading…</div>'
-  fetch('/api/wallet/tokens'+(bust?'?bust=1':'')).then(function(r){return r.json()}).then(function(d){
-    if(!d.ok && !d.tokens){wrap.innerHTML='<div class="state-msg">Failed to load</div>';return}
-    var tokens=d.tokens||[]
+  if(!_allSpl.length) wrap.innerHTML='<div class="state-msg">Loading…</div>'
+  _getPortfolioSnapshot(!!bust).then(function(snap){
+    var tokens=snap.assets||[]
 
     // SOL entry for USD total
     var solToken=tokens.find(function(x){return x.symbol==='SOL'})
