@@ -324,11 +324,14 @@ def _tip_solana_ready(d, sender_wallet, amount):
         balance = Decimal(str(d._get_solana_usdc_balance(owner)))
         if balance < amount:
             return None
-        native, _ = _rpc_call_any(d, 'getBalance', [owner, {'commitment':'confirmed'}])
+        native, _ = _rpc_call_any(
+            d, 'getBalance', [owner, {'commitment':'confirmed'}])
         lamports = int((native or {}).get('value') or 0)
-        if lamports < 10000:
-            return None
-        return {'chain':'solana', 'balance':balance, 'native_ready':True}
+        return {
+            'chain':'solana', 'balance':balance,
+            'native_ready': lamports >= 10000,
+            'lamports': lamports,
+        }
     except Exception:
         return None
 
@@ -453,7 +456,7 @@ def install(d):
             sol = _tip_solana_ready(d, sender_wallet, amount)
 
             candidates = list(ready_evm)
-            if sol:
+            if sol and sol.get('native_ready'):
                 candidates.append(sol)
             candidates.sort(key=lambda x: x['balance'], reverse=True)
 
@@ -478,6 +481,23 @@ def install(d):
                     break
                 except Exception:
                     tx_hash = ''
+
+            if not tx_hash and sol and not sol.get('native_ready'):
+                spare = sol['balance'] - amount
+                topup = getattr(d, '_gasless_solana_native_topup', None)
+                if callable(topup) and spare >= Decimal('0.20'):
+                    try:
+                        topup(sender_wallet, spare, target_sol=0.0025)
+                        recipient_address = recipient['solana']
+                        chain = 'solana'
+                        tx_hash, sent = _solana_transfer(
+                            d, sender_wallet, d.USDC_MINT,
+                            recipient_address, amount)
+                    except Exception as exc:
+                        app.logger.info(
+                            'solana tip gas bootstrap unavailable wallet=%s error=%s',
+                            sender_wallet[:8] + '…', type(exc).__name__)
+                        tx_hash = ''
 
             if not tx_hash:
                 topup_amount = Decimal(str(getattr(d, 'GAS_TOPUP_USDC_AMOUNT', 2.0)))
@@ -504,7 +524,7 @@ def install(d):
             if not tx_hash:
                 return jsonify({
                     'ok':False,
-                    'error':'Not enough spendable USDC and network gas is available to send this tip.'
+                    'error':'This tip cannot be sent yet. There is enough USDC only if the wallet can also create or pay its network gas.'
                 }), 400
 
             with _RECENT_GUARD:

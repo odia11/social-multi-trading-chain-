@@ -4602,11 +4602,30 @@ def add_user_log(wallet: str, msg: str):
         us['log_lines'].pop()
 
 def _get_user_sol(wallet: str) -> float:
-    try:
-        r = requests.post(SOLANA_RPC, json={'jsonrpc':'2.0','id':1,'method':'getBalance','params':[wallet]}, timeout=8)
-        return round(r.json()['result']['value'] / 1e9, 6)
-    except: pass
-    return 0.0
+    """Read native SOL with provider failover; never confuse RPC failure with zero."""
+    last_error = None
+    seen = set()
+    for rpc in list(CLAIM_SOL_RPCS) + [SOLANA_RPC] + list(_PROXY_RPCS):
+        if not rpc or rpc in seen:
+            continue
+        seen.add(rpc)
+        try:
+            r = requests.post(rpc, json={
+                'jsonrpc':'2.0','id':1,'method':'getBalance',
+                'params':[wallet, {'commitment':'confirmed'}],
+            }, timeout=8)
+            if r.status_code != 200:
+                last_error = f'HTTP {r.status_code}'
+                continue
+            body = r.json()
+            if body.get('error') or not isinstance(body.get('result'), dict):
+                last_error = str((body.get('error') or {}).get('message') or 'invalid RPC response')
+                continue
+            return round(float(body['result'].get('value') or 0) / 1e9, 9)
+        except Exception as exc:
+            last_error = type(exc).__name__
+            continue
+    raise RuntimeError('SOL balance unavailable' + (f' ({last_error})' if last_error else ''))
 
 def get_token_data(mint, fast: bool = False, chain: str = None):
     """fast=True bypasses the normal 30s DexScreener cache in favor of the
