@@ -28460,61 +28460,23 @@ def api_market_token_prices():
     return jsonify({'ok': True, 'tokens': out})
 
 
-@app.route('/api/market/prices')
-@rate_limit(240, 60)
-def api_market_prices():
-    """Current price for many pools at once.
-
-    Why this exists: the chart is drawn from 5-minute candles, so between
-    candles there is nothing new to draw and it sits perfectly still. The
-    missing piece is the price right now.
-
-    Fetching that per card would be one upstream request per card per tick.
-    DexScreener will take up to 30 pair addresses in a single call, so a page
-    showing thirty tokens costs ONE request -- fewer than the chart polling it
-    replaces, not more.
-
-    Addresses are validated for the chain they claim to be on and the list is
-    capped, rather than being pasted into a URL as sent. A caller cannot use
-    this to make the server fetch something else.
-    """
-    chain = request.args.get('chain', 'solana').strip().lower()
+def _market_prices_for_pairs(chain: str, wanted: list) -> dict:
+    """Shared price batch used by both single-chain and page-wide endpoints."""
     if chain not in EVM_CHAINS and chain != 'solana':
-        return jsonify({'ok': False, 'prices': {}})
+        return {}
     dex_chain_id = EVM_CHAINS[chain]['dex_chain'] if chain in EVM_CHAINS else 'solana'
-
-    def _addr_ok(a):
-        return is_valid_evm_address(a) if chain in EVM_CHAINS else bool(_SOLANA_ADDR_RE.match(a))
-
-    wanted, seen = [], set()
-    for raw in (request.args.get('pairs', '') or '').split(','):
-        a = raw.strip()
-        if a and _addr_ok(a) and a.lower() not in seen:
-            seen.add(a.lower())
-            wanted.append(a)
-        if len(wanted) >= 30:      # DexScreener's own limit for one call
-            break
-    if not wanted:
-        return jsonify({'ok': True, 'prices': {}})
-
     now = time.time()
     prices, stale = {}, []
     with _live_price_lock:
-        for a in wanted:
+        for a in wanted[:30]:
             hit = _live_price_cache.get((chain, a.lower()))
             if hit and now - hit[0] < _LIVE_PRICE_TTL:
                 prices[a.lower()] = hit[1]
             else:
                 stale.append(a)
     if not stale:
-        # Everything on this screen was already fetched for somebody else
-        # inside this window. No upstream request at all.
-        return jsonify({'ok': True, 'prices': prices})
-
+        return prices
     try:
-        # ttl_override=0 because the per-pool cache above is now the cache;
-        # leaving _dex_get's URL-keyed one in the way would only re-introduce
-        # the whole-list keying this replaced.
         r = _dex_get('https://api.dexscreener.com/latest/dex/pairs/'
                      + dex_chain_id + '/' + ','.join(stale),
                      timeout=8, ttl_override=0)
@@ -28539,13 +28501,78 @@ def api_market_prices():
                 for k in [k for k, v in _live_price_cache.items() if v[0] < cutoff]:
                     del _live_price_cache[k]
     except Exception as e:
-        # A price tick is decoration on top of the candles. If it fails the
-        # chart keeps drawing exactly what it drew before, so this is a quiet
-        # answer -- and whatever WAS cached still goes back, rather than
-        # throwing away good prices because one fetch failed.
-        print(f'[prices] batch fetch failed: {e}', flush=True)
+        print(f'[prices] batch fetch failed for {chain}: {type(e).__name__}', flush=True)
+    return prices
 
-    return jsonify({'ok': True, 'prices': prices})
+
+def _validated_market_pairs(chain: str, raw_pairs) -> list:
+    if chain not in EVM_CHAINS and chain != 'solana':
+        return []
+    def ok(a):
+        return is_valid_evm_address(a) if chain in EVM_CHAINS else bool(_SOLANA_ADDR_RE.match(a))
+    wanted, seen = [], set()
+    for raw in raw_pairs:
+        a = str(raw or '').strip()
+        if a and ok(a) and a.lower() not in seen:
+            seen.add(a.lower()); wanted.append(a)
+        if len(wanted) >= 30:
+            break
+    return wanted
+
+
+@app.route('/api/market/prices')
+@rate_limit(240, 60)
+def api_market_prices():
+    chain = request.args.get('chain', 'solana').strip().lower()
+    wanted = _validated_market_pairs(chain, (request.args.get('pairs', '') or '').split(','))
+    return jsonify({'ok': True, 'prices': _market_prices_for_pairs(chain, wanted) if wanted else {}})
+
+
+@app.route('/api/market/prices-batch')
+@rate_limit(90, 60)
+def api_market_prices_batch():
+    """One browser request for every visible Live Market chain.
+
+    The server still batches each chain for DexScreener, but those independent
+    upstream reads run concurrently. A page with cards on six chains therefore
+    uses one client request per tick rather than six, with the same 2s cache.
+    """
+    try:
+        groups = json.loads(request.args.get('groups', '{}') or '{}')
+    except Exception:
+        groups = {}
+    if not isinstance(groups, dict):
+        groups = {}
+    clean = {}
+    total = 0
+    for raw_chain, raw_pairs in groups.items():
+        chain = str(raw_chain or '').strip().lower()
+        if not isinstance(raw_pairs, list):
+            continue
+        pairs = _validated_market_pairs(chain, raw_pairs)
+        if not pairs:
+            continue
+        # Global cap prevents a crafted request from turning this convenience
+        # endpoint into an unbounded upstream fan-out.
+        room = max(0, 60 - total)
+        if room <= 0:
+            break
+        clean[chain] = pairs[:room]
+        total += len(clean[chain])
+
+    if not clean:
+        return jsonify({'ok': True, 'chains': {}})
+
+    out = {}
+    with ThreadPoolExecutor(max_workers=min(6, len(clean))) as ex:
+        futures = {ex.submit(_market_prices_for_pairs, chain, pairs): chain
+                   for chain, pairs in clean.items()}
+        for fut, chain in futures.items():
+            try:
+                out[chain] = fut.result(timeout=9)
+            except Exception:
+                out[chain] = {}
+    return jsonify({'ok': True, 'chains': out, 'server_ts': time.time()})
 
 
 @app.route('/api/chart/<mint>')
