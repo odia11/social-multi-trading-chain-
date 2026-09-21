@@ -409,41 +409,28 @@ def _tip_solana_ready(d, sender_wallet, amount, recipient_wallet):
     except Exception:
         return None
 
-    balance = Decimal('0')
+    # A failed chain read is UNKNOWN, never an empty wallet. Use the same
+    # validated source accounts as the transfer instead of cached UI totals.
     try:
-        balance = Decimal(str(d._get_solana_usdc_balance(owner)))
-    except Exception:
-        pass
-
-    # A too-low result is reconciled against the broader SPL scanner as well,
-    # not only on exceptions. This protects against stale/empty mint-filtered
-    # RPC responses without trusting client-supplied balances.
-    if balance < amount:
-        try:
-            try:
-                d._wallet_tokens_cache.pop(sender_wallet, None)
-            except Exception:
-                pass
-            data = d._fetch_wallet_tokens(sender_wallet, owner) or {}
-            scanned = Decimal('0')
-            for token in data.get('tokens') or []:
-                if str(token.get('mint') or '') == str(d.USDC_MINT):
-                    scanned += Decimal(str(token.get('amount') or 0))
-            if scanned > balance:
-                balance = scanned
-        except Exception:
-            pass
-
+        accounts = _solana_source_accounts(d, owner, str(d.USDC_MINT))
+        balance = sum((
+            Decimal(entry['account']['data']['parsed']['info']['tokenAmount']['amount'])
+            / (Decimal(10) ** int(entry['account']['data']['parsed']['info']['tokenAmount']['decimals']))
+            for entry in accounts), Decimal('0'))
+    except Exception as exc:
+        raise RuntimeError(
+            'Cannot verify Solana USDC: the blockchain provider is unavailable or rate-limited. '
+            'Your balance is unknown, not zero. Please try again later.') from exc
     if balance < amount:
         return None
-
-    lamports = 0
     try:
         native, _ = _rpc_call_any(
             d, 'getBalance', [owner, {'commitment':'confirmed'}])
-        lamports = int((native or {}).get('value') or 0)
-    except Exception:
-        lamports = 0
+        if not isinstance(native, dict) or not isinstance(native.get('value'), int):
+            raise ValueError('Invalid SOL balance response')
+        lamports = native['value']
+    except Exception as exc:
+        raise RuntimeError('Cannot verify the SOL network-fee balance. Please try again later.') from exc
 
     required_lamports = _tip_required_lamports(
         d, owner, str(recipient_wallet or ''))
@@ -572,8 +559,14 @@ def install(d):
         try:
             ready_evm, gasless_evm = _tip_evm_candidates(
                 d, sender_wallet, amount, recipient.get('evm'))
-            sol = _tip_solana_ready(
-                d, sender_wallet, amount, recipient.get('solana'))
+            solana_error = ''
+            try:
+                sol = _tip_solana_ready(
+                    d, sender_wallet, amount, recipient.get('solana'))
+            except RuntimeError as exc:
+                sol = None
+                solana_error = str(exc)
+                app.logger.warning('Solana tip readiness unavailable: %s', solana_error)
 
             candidates = list(ready_evm)
             if sol and sol.get('native_ready'):
@@ -584,14 +577,12 @@ def install(d):
             sent = 0.0
             chain = ''
             recipient_address = ''
-            solana_error = ''
-            solana_direct_attempted = False
+            solana_gas_shortfall = False
 
             for candidate in candidates:
                 chain = candidate['chain']
                 try:
                     if chain == 'solana':
-                        solana_direct_attempted = True
                         recipient_address = recipient['solana']
                         tx_hash, sent = _solana_transfer(
                             d, sender_wallet, d.USDC_MINT,
@@ -610,15 +601,17 @@ def install(d):
                     except Exception:
                         pass
                     if chain == 'solana':
+                        solana_gas_shortfall = (isinstance(exc, ValueError) and str(exc).startswith(
+                            'Not enough SOL in your trading wallet'))
                         solana_error = safe[:220]
-                        app.logger.info(
+                        app.logger.warning(
                             'solana tip direct transfer failed wallet=%s error=%s reason=%s',
                             sender_wallet[:8] + '…', type(exc).__name__, solana_error)
                     tx_hash = ''
 
             # A marginal SOL balance can pass a pre-read and still fail
             # preflight once the exact recipient ATA/rent/fee is known. If a
-            # Solana transfer failed OR readiness already said gas was short,
+            # Solana pre-send SOL check failed OR readiness said gas was short,
             # make one user-funded gas bootstrap attempt from SPARE USDC, then
             # retry the exact requested tip once. Never reduce the tip amount.
             if not tx_hash and sol:
@@ -626,7 +619,7 @@ def install(d):
                 topup = getattr(d, '_gasless_solana_native_topup', None)
                 should_topup = (
                     not sol.get('native_ready')
-                    or solana_direct_attempted
+                    or solana_gas_shortfall
                 )
                 if should_topup and callable(topup) and spare >= Decimal('0.20'):
                     try:
@@ -653,7 +646,7 @@ def install(d):
                         except Exception:
                             pass
                         solana_error = safe[:220]
-                        app.logger.info(
+                        app.logger.warning(
                             'solana tip gas bootstrap unavailable wallet=%s error=%s reason=%s',
                             sender_wallet[:8] + '…', type(exc).__name__, solana_error)
                         tx_hash = ''

@@ -137,7 +137,7 @@ def main():
     print('USDC_BALANCE:', balance if accounts is not None else 'UNKNOWN (RPC failure; not zero)')
     print('SOL_LAMPORTS:', native)
     print('REQUIRED_LAMPORTS_WITH_RECIPIENT_ACCOUNT:', required)
-    print('SPARE_USDC_AFTER_TIP:', balance - amount)
+    print('SPARE_USDC_AFTER_TIP:', balance - amount if accounts is not None else 'UNKNOWN')
     print('JUPITER_API_KEY_CONFIGURED:', bool(env.get('JUPITER_API_KEY')))
     if accounts is None:
         print('BLOCKER: source token accounts could not be read; see RPC status codes above.')

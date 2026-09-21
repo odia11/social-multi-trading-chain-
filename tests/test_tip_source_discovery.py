@@ -97,5 +97,34 @@ class SourceDiscoveryTests(unittest.TestCase):
                 tip._solana_transfer(self.d, 'session', MINT, self.recipient, Decimal('0.03'))
             self.assertFalse(any(c.args[1] == 'sendTransaction' for c in rpc.call_args_list))
 
+class ReadinessFailureTests(SourceDiscoveryTests):
+    def test_unknown_usdc_raises_instead_of_reporting_zero(self):
+        self.d.USDC_MINT = MINT
+        with patch.object(tip, '_solana_source_accounts', side_effect=RuntimeError('HTTP 429')):
+            with self.assertRaisesRegex(RuntimeError, 'unknown, not zero'):
+                tip._tip_solana_ready(self.d, 'session', Decimal('0.05'), self.recipient)
+
+    def test_zero_is_distinct_from_unavailable(self):
+        self.d.USDC_MINT = MINT
+        with patch.object(tip, '_solana_source_accounts', return_value=[]):
+            self.assertIsNone(tip._tip_solana_ready(self.d, 'session', Decimal('0.05'), self.recipient))
+
+    def test_known_balance_and_recipient_rent_report_actual_shortfall(self):
+        self.d.USDC_MINT = MINT
+        with patch.object(tip, '_solana_source_accounts', return_value=[self.account]), patch.object(
+                tip, '_rpc_call_any', return_value=({'value': 890946}, 'rpc-a')), patch.object(
+                tip, '_tip_required_lamports', return_value=1508440):
+            ready = tip._tip_solana_ready(self.d, 'session', Decimal('0.05'), self.recipient)
+        self.assertFalse(ready['native_ready'])
+        self.assertEqual(ready['balance'], Decimal('0.8645'))
+        self.assertEqual(ready['required_lamports'] - ready['lamports'], 617494)
+
+    def test_unknown_sol_does_not_trigger_a_gas_topup(self):
+        self.d.USDC_MINT = MINT
+        with patch.object(tip, '_solana_source_accounts', return_value=[self.account]), patch.object(
+                tip, '_rpc_call_any', side_effect=RuntimeError('HTTP 429')):
+            with self.assertRaisesRegex(RuntimeError, 'Cannot verify the SOL'):
+                tip._tip_solana_ready(self.d, 'session', Decimal('0.05'), self.recipient)
+
 if __name__ == '__main__':
     unittest.main()

@@ -30,7 +30,7 @@ def test_low_sol_solana_is_still_a_tip_candidate_for_bootstrap():
     b=block(TIP,'def _tip_solana_ready','def _tip_evm_candidates')
     assert "_tip_required_lamports" in b
     assert "'native_ready': lamports >= required_lamports" in b
-    assert "lamports = 0" in b
+    assert "Cannot verify the SOL network-fee balance" in b
 
 
 def test_no_platform_sponsor_in_tip_bootstrap_path():
@@ -50,11 +50,10 @@ def test_native_sol_helper_uses_rpc_fallbacks():
     assert "raise RuntimeError('SOL balance unavailable'" in body
 
 
-def test_tip_readiness_falls_back_to_wallet_token_snapshot():
+def test_tip_readiness_uses_validated_transfer_sources():
     b=block(TIP,'def _tip_solana_ready','def _tip_evm_candidates')
-    assert '_fetch_wallet_tokens(sender_wallet, owner)' in b
-    assert "str(token.get('mint') or '') == str(d.USDC_MINT)" in b
-    assert "scanned += Decimal(str(token.get('amount') or 0))" in b
+    assert '_solana_source_accounts(d, owner, str(d.USDC_MINT))' in b
+    assert 'Your balance is unknown, not zero' in b
 
 
 def test_bootstrap_trusts_caller_spare_usdc_when_balance_rpc_is_down():
@@ -63,18 +62,11 @@ def test_bootstrap_trusts_caller_spare_usdc_when_balance_rpc_is_down():
     assert 'sol_usdc = max_spend' in b
 
 
-def test_tip_reconciles_too_low_usdc_result():
-    b=block(TIP,'def _tip_solana_ready','def _tip_evm_candidates')
-    assert 'if balance < amount:' in b
-    assert "d._wallet_tokens_cache.pop(sender_wallet, None)" in b
-    assert 'd._fetch_wallet_tokens(sender_wallet, owner)' in b
-    assert 'if scanned > balance:' in b
-
 
 def test_direct_solana_failure_can_retry_after_user_funded_topup():
     b=block(TIP,"@app.post('/api/tip')","@app.post('/api/wallet/send-token')")
-    assert 'solana_direct_attempted = True' in b
-    assert 'or solana_direct_attempted' in b
+    assert 'isinstance(exc, ValueError)' in b
+    assert 'or solana_gas_shortfall' in b
     assert "solana_error = safe[:220]" in b
     assert b.count('_solana_transfer(') >= 2
 

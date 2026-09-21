@@ -19825,7 +19825,7 @@ def wallet_send():
 # Two-entry RPC list for the frontend proxy endpoints:
 # SOLANA_RPC_URL (env var) first; public mainnet-beta as fallback.
 _PROXY_RPCS = [u for u in [SOLANA_RPC_URL, SOLANA_RPC] if u]
-print(f'[rpc] PROXY_RPCS: {_PROXY_RPCS}', flush=True)
+print('[rpc] PROXY_RPCS: ' + ', '.join(_rpc_label(u) for u in _PROXY_RPCS), flush=True)
 
 # ── SOLANA BLOCKHASH PROXY ──
 @app.route('/api/solana/blockhash', methods=['GET'])
