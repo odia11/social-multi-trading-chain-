@@ -63,7 +63,7 @@ function paint(snap){
   var donut=document.getElementById('pf-donut');if(donut)donut.style.background='conic-gradient(var(--pf-yellow) 0 '+p1.toFixed(1)+'%,#7ed797 '+p1.toFixed(1)+'% '+(p1+p2).toFixed(1)+'%,#7b8ca6 '+(p1+p2).toFixed(1)+'% 100%)';
   [['pf-a',stable],['pf-b',solValue],['pf-c',other]].forEach(function(x){var e=document.getElementById(x[0]+'-val');if(e)e.textContent=(x[1]/sum*100).toFixed(1)+'%'});
   _lastPaint=Date.now();window.__orcaPortfolioValue=total;
-  document.dispatchEvent(new CustomEvent('orca:portfolio-value',{detail:{total:total}}));
+  document.dispatchEvent(new CustomEvent('orca:portfolio-value',{detail:{total:total,stable:stable,sol:solValue,other:other}}));
 }
 
 /* A Portfolio paint is all-or-nothing. Previously Promise.allSettled painted

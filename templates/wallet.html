@@ -7,6 +7,7 @@
 <!-- Load the canonical Portfolio presentation BEFORE the shared navbar loader.\n     Its version changes with every deploy; cached navbar scripts detect these tags and do not inject legacy UI. -->
 <link rel="stylesheet" href="/static/portfolio-redesign.css?v={{ app_version }}">
 <script src="/static/portfolio-redesign.js?v={{ app_version }}" defer></script>
+<script src="/static/approved-portfolio.js?v={{ app_version }}" defer></script>
 <link rel="manifest" href="/app.webmanifest" crossorigin="use-credentials">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -632,7 +633,7 @@ html,body{background:#080e11}
       <div class="wlt-title">Portfolio</div>
       <div class="wlt-sub">Your multi-chain trading wallet</div>
     </div>
-    <span class="net-pill"><span class="net-dot"></span>MULTI-CHAIN · MAINNET</span>
+    <a class="pf-search-link" href="/live-market" aria-label="Search tokens"><svg width="18" height="18" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="m16 16 5 5"></path></svg></a><span class="net-pill"><span class="net-dot"></span>MULTI-CHAIN · MAINNET</span>
   </div>
 
   <!-- scrollable content -->
@@ -647,9 +648,10 @@ html,body{background:#080e11}
                a wallet holding $4.64 of tradeable balance read as empty. -->
           <div class="wlt-hero-lbl">Total Balance</div>
           <div class="wlt-hero-num" id="pf-total">—</div>
-          <div class="wlt-hero-usd">Available to trade: <span id="avail">—</span> <span id="avail-sub">USDC across all chains</span></div>
+          <div class="wlt-hero-usd" id="pf-performance">Live multi-chain balance</div>
+          <div class="wlt-hero-usd pf-tradeable">Available to trade: <span id="avail">—</span> <span id="avail-sub">USDC across all chains</span></div>
         </div>
-        <button class="wlt-hero-refresh" onclick="loadBalance()" title="Refresh">↻</button>
+        <svg class="pf-spark" viewBox="0 0 122 73" role="img" aria-label="Portfolio trend during this session"><path id="pf-spark-fill" fill="url(#pf-spark-gradient)" d=""></path><path id="pf-spark-line" d="" stroke="#37dc9d" stroke-width="2.5" fill="none" stroke-linejoin="round" stroke-linecap="round"></path><defs><linearGradient id="pf-spark-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#32d99a" stop-opacity=".27"></stop><stop offset="100%" stop-color="#32d99a" stop-opacity="0"></stop></linearGradient></defs></svg><button class="wlt-hero-refresh" onclick="loadBalance()" aria-label="Refresh balance" title="Refresh">↻</button>
       </div>
       <div class="wlt-hero-actions">
         <button class="wlt-action primary" onclick="_modalDeposit()"><span class="wlt-action-ic">↓</span>Deposit</button>
@@ -797,7 +799,7 @@ html,body{background:#080e11}
           <button onclick="loadTokens(true)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:0" title="Refresh">↻</button>
         </div>
       </div>
-      <div class="tok-list" id="tokens"><div class="state-msg">Loading…</div></div>
+      <div class="pf-asset-static"><div class="pf-asset-coin usdc">$</div><div class="pf-asset-description"><b>USDC</b><small>Across all chains</small></div><div class="pf-asset-amount"><b id="pf-usdc-asset">—</b><small>Stablecoin</small></div></div><div class="pf-asset-static"><div class="pf-asset-coin sol"><span>≋</span></div><div class="pf-asset-description"><b>SOL</b><small>Solana</small></div><div class="pf-asset-amount"><b id="pf-sol-asset">—</b><small id="pf-sol-price">—</small></div></div><div class="tok-list" id="tokens"><div class="state-msg">Loading…</div></div>
     </div>
 
     <!-- recent activity -->
@@ -2277,10 +2279,9 @@ function _sbSearch(q){
 function _renderHoldings(spl){
   var wrap=document.getElementById('tokens')
   if(!wrap) return
-  if(!spl.length){
-    wrap.innerHTML='<div class="state-msg">No tokens'+((_hideSmall&&_allSpl.length)?' — try showing small balances':'')+'</div>'
-    return
-  }
+  // Aggregated multi-chain USDC has its own pinned row above the token list.
+  spl=spl.filter(function(x){return String(x.symbol||'').toUpperCase()!=='USDC'})
+  if(!spl.length){wrap.innerHTML='';return}
   wrap.innerHTML=spl.map(function(x,i){
     var realI=_allSpl.indexOf(x)
     var sym=x.symbol||'?'

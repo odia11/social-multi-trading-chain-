@@ -18284,6 +18284,22 @@ def settings_save():
         # Any direct SL/TP edit is by definition a custom configuration now,
         # not whatever named preset it may have started from.
         updates.append('sl_tp_preset=?'); params.append('custom')
+    # The mobile bot strategy form saves risk limits through the same atomic
+    # per-user settings endpoint as take-profit and stop-loss.
+    for field, upper in (('max_trade_size', 100000.0), ('daily_loss_limit', 500000.0)):
+        if field in data:
+            try:
+                value = float(data[field])
+                if not math.isfinite(value) or value < 1.0 or value > upper:
+                    return jsonify({'ok': False, 'msg': field + ' must be between 1 and ' + str(int(upper))}), 400
+                if field == 'max_trade_size':
+                    with sqlite3.connect(DB_FILE) as _limits_db:
+                        _min_row = _limits_db.execute('SELECT min_trade_size FROM users WHERE wallet_address=?', (wallet,)).fetchone()
+                    if _min_row and _min_row[0] is not None and value < float(_min_row[0]):
+                        return jsonify({'ok': False, 'msg': 'Max trade size must be at least your saved minimum trade size'}), 400
+                updates.append(field + '=?'); params.append(value)
+            except (ValueError, TypeError):
+                return jsonify({'ok': False, 'msg': field + ' must be a number'}), 400
     if 'max_positions' in data:
         try:
             v = int(data['max_positions'])
@@ -26183,6 +26199,7 @@ def bot_overview():
         'ok': True, 'has_trading_key': False, 'running': False,
         'open_positions': 0, 'max_positions': 3,
         'take_profit': 15.0, 'stop_loss': 8.0,
+        'max_trade_size': 10.0, 'daily_loss_limit': 50.0,
         'trading_wallet_short': None, 'trading_wallet_sol': 0.0,
         'total_trades': 0, 'wins': 0, 'losses': 0, 'win_rate': 0.0,
         'best_trade': None, 'worst_trade': None,
@@ -26190,12 +26207,12 @@ def bot_overview():
     conn = sqlite3.connect(DB_FILE)
     try:
         row = conn.execute(
-            '''SELECT id, encrypted_private_key, take_profit, stop_loss, max_positions
+            '''SELECT id, encrypted_private_key, take_profit, stop_loss, max_positions, max_trade_size, daily_loss_limit
                FROM users WHERE wallet_address=?''', (wallet,)
         ).fetchone()
         if not row:
             return jsonify(empty)
-        uid, enc_key, take_profit, stop_loss, max_positions = row
+        uid, enc_key, take_profit, stop_loss, max_positions, max_trade_size, daily_loss_limit = row
 
         trading_wallet_short = None
         trading_wallet_sol = 0.0
@@ -26244,6 +26261,8 @@ def bot_overview():
         'max_positions': max_positions if max_positions is not None else 3,
         'take_profit': take_profit if take_profit is not None else 15.0,
         'stop_loss': stop_loss if stop_loss is not None else 8.0,
+        'max_trade_size': max_trade_size if max_trade_size is not None else 10.0,
+        'daily_loss_limit': daily_loss_limit if daily_loss_limit is not None else 50.0,
         'trading_wallet_short': trading_wallet_short,
         'trading_wallet_sol': trading_wallet_sol,
         'total_trades': total_trades,
