@@ -16,6 +16,7 @@ import shlex
 import sqlite3
 import sys
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 APP = Path('/opt/orcagent')
 sys.path.insert(0, str(APP))
@@ -95,25 +96,54 @@ def main():
                         _get_trading_wallet_address=lambda _: owner)
     allowed = {'getTokenAccountsByOwner', 'getAccountInfo', 'getBalance',
                'getMinimumBalanceForRentExemption', 'getLatestBlockhash'}
-    real_rpc = tip._rpc_call
     def readonly_rpc(url, method, params):
         if method not in allowed:
             raise RuntimeError('Blocked non-read RPC method')
-        return real_rpc(url, method, params)
+        host = urlsplit(url).hostname or 'configured-provider'
+        try:
+            response = requests.post(url, json={
+                'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params}, timeout=15)
+        except requests.RequestException as exc:
+            print('RPC', host, method, 'NETWORK_ERROR', type(exc).__name__, flush=True)
+            raise RuntimeError('RPC network failure') from None
+        print('RPC', host, method, 'HTTP', response.status_code, flush=True)
+        if response.status_code != 200:
+            raise RuntimeError('RPC HTTP ' + str(response.status_code))
+        try:
+            body = response.json()
+        except ValueError:
+            raise RuntimeError('RPC invalid JSON') from None
+        if body.get('error'):
+            code = (body.get('error') or {}).get('code')
+            print('RPC_ERROR_CODE', code if isinstance(code, int) else 'unspecified', flush=True)
+            raise RuntimeError('RPC rejected read')
+        if 'result' not in body:
+            raise RuntimeError('RPC missing result')
+        return body['result']
     tip._rpc_call = readonly_rpc
     def rpc(method, params):
         return tip._rpc_call_any(d, method, params)[0]
     print('Checking live source accounts...', flush=True)
-    accounts = tip._solana_source_accounts(d, owner, d.USDC_MINT)
+    accounts = None
+    try:
+        accounts = tip._solana_source_accounts(d, owner, d.USDC_MINT)
+    except Exception as exc:
+        print('SOURCE_ACCOUNT_LOOKUP_FAILED:', type(exc).__name__, flush=True)
     balance = sum((Decimal(a['account']['data']['parsed']['info']['tokenAmount']['amount']) /
                    Decimal(10) ** int(a['account']['data']['parsed']['info']['tokenAmount']['decimals'])
-                   for a in accounts), Decimal(0))
+                   for a in (accounts or [])), Decimal(0))
     native = int(rpc('getBalance', [owner, {'commitment':'confirmed'}])['value'])
     required = tip._tip_required_lamports(d, owner, destination)
-    print('USDC_BALANCE:', balance)
+    print('USDC_BALANCE:', balance if accounts is not None else 'UNKNOWN (RPC failure; not zero)')
     print('SOL_LAMPORTS:', native)
     print('REQUIRED_LAMPORTS_WITH_RECIPIENT_ACCOUNT:', required)
     print('SPARE_USDC_AFTER_TIP:', balance - amount)
+    print('JUPITER_API_KEY_CONFIGURED:', bool(env.get('JUPITER_API_KEY')))
+    if accounts is None:
+        print('BLOCKER: source token accounts could not be read; see RPC status codes above.')
+        print('DONE: nothing signed or sent.')
+        connection.close()
+        return 1
     class PreflightReady(Exception):
         pass
     @contextmanager
