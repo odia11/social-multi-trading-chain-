@@ -39,10 +39,11 @@ Verified in a real browser on both viewports: tap opens the token and routes
 it into the Live Market feed, a real drag pans the rail and opens nothing,
 and the tap straight after a drag works again.
 """
+import os
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = open(REPO + '/templates/live_market_pro.html', encoding='utf-8').read()
 JS = open(REPO + '/static/live-market-pro.js', encoding='utf-8').read()
 

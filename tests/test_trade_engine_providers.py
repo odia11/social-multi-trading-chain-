@@ -8,10 +8,11 @@ does a fee the provider already priced in get added a second time?
 Every provider response below is the shape the real APIs return. No network:
 the fetch function is injected, which is the reason it is injected.
 """
+import os
 import sys
 from decimal import Decimal
 
-sys.path.insert(0, '/home/user/Orc-agent-Solana-chain-')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trade_engine import registry as R                       # noqa: E402
 from trade_engine.costs import KIND_DEX_FEE, KIND_SLIPPAGE_RESERVE  # noqa: E402

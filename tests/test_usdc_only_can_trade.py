@@ -20,11 +20,12 @@ identical helper -- it tops the trading wallet up from the platform sponsor
 So: the page asks, the server decides, and the server asks the sponsor before
 it refuses anyone.
 """
+import os
 import ast
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py', encoding='utf-8').read()
 JS = open(REPO + '/static/dashboard.js', encoding='utf-8').read()
 TREE = ast.parse(SRC)

@@ -8,9 +8,10 @@ second alert. Nothing else is ever pushed: a falling token is refused by the
 radar itself, so it never reaches the alert path at all.
 
 dashboard is replaced by a stub module before surge_radar imports it."""
+import os
 import sys, time, types
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
 checks = []

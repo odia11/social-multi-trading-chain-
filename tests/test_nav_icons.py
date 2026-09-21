@@ -15,12 +15,13 @@ These checks RENDER the menu and parse what comes out, rather than matching
 strings. A malformed icon is invisible in source and obvious in a browser,
 which is the wrong way round.
 """
+import os
 import ast
 import re
 import sys
 import xml.etree.ElementTree as ET
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py').read()
 CSS = open(REPO + '/static/navbar.css').read()
 TREE = ast.parse(SRC)

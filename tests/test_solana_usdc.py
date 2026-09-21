@@ -15,11 +15,12 @@ The one thing that must NOT change: a position opened in SOL is still sold
 back into SOL. Its base is recorded on the position, and forcing those sells
 into USDC would misstate the profit on every trade opened before today.
 """
+import os
 import ast
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py').read()
 TREE = ast.parse(SRC)
 

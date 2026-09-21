@@ -21,11 +21,12 @@ And which code is running. The deployed copy has no .git, so _app_version()
 always fell through to the time the process started: a fine cache-buster and
 a useless answer to the first question of every support round.
 """
+import os
 import ast
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py', encoding='utf-8').read()
 INSTALL = open(REPO + '/deploy/install.sh', encoding='utf-8').read()
 TREE = ast.parse(SRC)

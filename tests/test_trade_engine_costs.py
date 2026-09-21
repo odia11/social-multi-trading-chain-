@@ -8,10 +8,11 @@ replaces is a trade that goes through and costs more than the user agreed
 to, or costs OrcAgent money nobody charged for. Both look like success from
 the outside, which is why they need a test that says no.
 """
+import os
 import sys
 from decimal import Decimal
 
-sys.path.insert(0, '/home/user/Orc-agent-Solana-chain-')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trade_engine.costs import (          # noqa: E402
     CostLine, CostError, Quote, price_trade, reconcile, sponsored_gas, money,

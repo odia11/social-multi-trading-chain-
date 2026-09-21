@@ -10,7 +10,7 @@ So: import the real module, in a subprocess, with the environment it needs.
 Nothing else catches this class of error."""
 import os, subprocess, sys, tempfile
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 checks = []
 def check(name, cond):
     checks.append((name, bool(cond)))

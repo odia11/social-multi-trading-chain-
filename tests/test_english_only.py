@@ -26,7 +26,7 @@ import os
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIP_DIRS = ('.git/', 'node_modules/', 'tests/', 'venv/', 'deploy/', 'static/vendor/')
 EXTS = ('.html', '.js', '.py')
 

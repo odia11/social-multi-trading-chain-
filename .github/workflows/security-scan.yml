@@ -1,10 +1,19 @@
 name: Security Scan
 
 on:
+  # Gate the pull request, not only the push that follows it. Without this
+  # the first time main hears about a change is after it has landed there.
+  pull_request:
+    branches: [main, dev]
   push:
     branches: [main, dev]
+  workflow_dispatch:
   schedule:
     - cron: '0 6 * * *'   # daily at 06:00 UTC
+
+concurrency:
+  group: security-scan-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   security:

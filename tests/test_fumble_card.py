@@ -23,11 +23,12 @@ The card already knows the token, the amount and the exit price -- they are
 on it. The only thing fetched is today's price, which is a public fact about
 a token and says nothing about whose trade it was.
 """
+import os
 import ast
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py', encoding='utf-8').read()
 JS = open(REPO + '/static/dashboard.js', encoding='utf-8').read()
 TREE = ast.parse(SRC)

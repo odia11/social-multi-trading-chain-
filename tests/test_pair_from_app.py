@@ -24,11 +24,12 @@ signature, never from anything a caller sends. Claiming is single-use.
 "Not finished yet", "expired" and "never existed" are one answer, because
 the app polls and must not be able to tell them apart.
 """
+import os
 import ast
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py').read()
 JS = open(REPO + '/static/dashboard.js').read()
 CB = open(REPO + '/templates/phantom_callback.html').read()
