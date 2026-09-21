@@ -17,10 +17,17 @@ from decimal import Decimal, InvalidOperation, ROUND_DOWN
 import requests
 from flask import jsonify, request
 
+import solana_source_bridge_gasless as _bridge_gas
+
 _LOCKS = {}
 _LOCKS_GUARD = threading.Lock()
 _RECENT = {}
 _RECENT_GUARD = threading.Lock()
+
+_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+# Matches dashboard.SOL_GAS_MIN_BALANCE -- the level below which a wallet
+# can't reliably cover a transfer plus a new recipient token account's rent.
+_GAS_RESERVE_SOL = Decimal('0.003')
 
 
 def _lock_for(wallet: str, chain: str):
@@ -158,10 +165,40 @@ def _solana_transfer(d, wallet, token_address, to_address, amount):
     if not enc:
         raise RuntimeError('Solana trading key is not configured')
 
-    # Require user-funded SOL for network/rent. OrcAgent never subsidises it.
+    # Require user-funded SOL for network/rent -- OrcAgent never subsidises
+    # it -- but most trading wallets hold USDC only, since buys are already
+    # gasless. Bootstrap a sliver of that same USDC into SOL first, the same
+    # way a cross-chain buy does, rather than blocking a wallet that in fact
+    # has enough USDC to cover its own gas.
     lamports = int(_rpc_call(url, 'getBalance', [owner_text, {'commitment':'confirmed'}]).get('value') or 0)
-    if lamports < 10000:
-        raise ValueError('Not enough SOL in your trading wallet to pay the network fee')
+    if Decimal(lamports) / _bridge_gas._LAMPORTS_PER_SOL < _GAS_RESERVE_SOL:
+        shortfall = _GAS_RESERVE_SOL - (Decimal(lamports) / _bridge_gas._LAMPORTS_PER_SOL)
+        reserved_for_send = amount if token_address == _USDC_MINT else Decimal(0)
+        usdc_balance = Decimal(str(d._get_solana_usdc_balance(owner_text) or 0))
+        usdc_available = usdc_balance - reserved_for_send
+        if usdc_available < _bridge_gas._MIN_BOOTSTRAP_USDC:
+            raise ValueError(
+                'Not enough SOL in your trading wallet to pay the network fee, and not '
+                'enough spare USDC to create it automatically. Add a little SOL or USDC.')
+        try:
+            with d._use_key(enc, wallet) as private_key:
+                _used_usdc, gas_order, _quoted_sol = _bridge_gas._pick_gasless_order(
+                    private_key, usdc_available, shortfall)
+                _bridge_gas._execute_order(private_key, gas_order)
+        except Exception as exc:
+            raise ValueError('Could not fund the network fee from your USDC: %s' % str(exc)[:200])
+
+        for _ in range(8):
+            lamports = int(_rpc_call(url, 'getBalance', [owner_text, {'commitment':'confirmed'}]).get('value') or 0)
+            if Decimal(lamports) / _bridge_gas._LAMPORTS_PER_SOL >= _GAS_RESERVE_SOL:
+                break
+            time.sleep(0.5)
+        else:
+            raise ValueError('Gasless SOL bootstrap completed, but the balance has not updated yet. Try again shortly.')
+        try:
+            d.add_user_log(wallet, '[tip] Converted USDC to SOL gas automatically before sending')
+        except Exception:
+            pass
 
     blockhash = (_rpc_call(url, 'getLatestBlockhash', [{'commitment':'confirmed'}]) or {}).get('value', {}).get('blockhash')
     if not blockhash:
