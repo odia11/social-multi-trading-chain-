@@ -50,3 +50,22 @@ html,body{background:#080e11;color:#f6f7f9;overflow-x:clip}
 @media(min-width:769px){.stat-grid{display:grid;margin-top:25px}}
 
 .ai-analysis-card{display:flex;align-items:center;gap:13px;padding:16px 17px}.ai-wave{color:#42e8a3;background:#103529;border-radius:13px;flex:0 0 45px;height:45px;font:700 40px var(--ui);display:grid;place-items:center;line-height:1}.ai-analysis-copy{flex:1;min-width:0}.ai-analysis-card .narrative-hdr{margin-bottom:3px}.ai-analysis-card .narrative-desc{line-height:1.35}.ai-analysis-card .na-toggle{width:38px;height:22px}.ai-analysis-card .na-track:before{width:16px;height:16px}.ai-analysis-card .na-toggle input:checked+.na-track:before{transform:translateX(16px)}@media(max-width:768px){.narrative-card:not(.ai-analysis-card){display:none}}
+
+/* iPhone visual QA, 2026-09-21: keep bot page in the approved compact viewport.
+   Scoped to this route: other pages retain the global mobile search. */
+body.oa-bot-page .pt-nb-topbar .pt-nb-search-wrap{display:none!important}
+body.oa-bot-page .page-wrap{padding-top:4px}
+body.oa-bot-page .page-title-row{margin-top:0;margin-bottom:16px}
+body.oa-bot-page .bot-field{display:inline-flex;justify-content:flex-start;align-items:baseline;gap:4px;width:fit-content;max-width:100%;min-height:28px;white-space:nowrap}
+body.oa-bot-page .bot-field input{flex:0 0 auto;min-width:0!important;max-width:none!important;margin:0!important;display:inline-block;vertical-align:baseline;text-align:left}
+body.oa-bot-page #bot-tp,body.oa-bot-page #bot-sl{width:4.5ch!important}
+body.oa-bot-page #bot-max-trade,body.oa-bot-page #bot-loss-limit{width:7ch!important}
+body.oa-bot-page .bot-field span{flex:0 0 auto;margin:0!important}
+body.oa-bot-page .strategy-row{gap:3px}
+@media(max-width:768px){
+ body.oa-bot-page .pt-nb-topbar{padding-bottom:6px}
+ body.oa-bot-page .page-wrap{padding:3px 16px 130px!important}
+ body.oa-bot-page .page-title-row{margin:7px 0 16px!important}
+ body.oa-bot-page .strategy-row{padding:11px 0}
+ body.oa-bot-page .status-head{padding-bottom:15px}
+}
