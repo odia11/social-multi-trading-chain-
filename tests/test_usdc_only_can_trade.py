@@ -23,10 +23,11 @@ it refuses anyone.
 import ast
 import re
 import sys
+from pathlib import Path
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
-SRC = open(REPO + '/dashboard.py', encoding='utf-8').read()
-JS = open(REPO + '/static/dashboard.js', encoding='utf-8').read()
+REPO = Path(__file__).resolve().parents[1]
+SRC = (REPO / 'dashboard.py').read_text(encoding='utf-8')
+JS = (REPO / 'static/dashboard.js').read_text(encoding='utf-8')
 TREE = ast.parse(SRC)
 
 checks = []

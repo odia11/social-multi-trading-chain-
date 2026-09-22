@@ -18,9 +18,10 @@ into USDC would misstate the profit on every trade opened before today.
 import ast
 import re
 import sys
+from pathlib import Path
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
-SRC = open(REPO + '/dashboard.py').read()
+REPO = Path(__file__).resolve().parents[1]
+SRC = (REPO / 'dashboard.py').read_text(encoding='utf-8')
 TREE = ast.parse(SRC)
 
 checks = []
@@ -101,8 +102,8 @@ check('a SELL still routes back into whatever the position was opened with. '
       SRC.count("base=pos.get('base', 'SOL')") >= 4)
 
 # ── the screens ──
-LM = open(REPO + '/static/live-market-pro.js').read()
-TC = open(REPO + '/static/token-card.js').read()
+LM = (REPO / 'static/live-market-pro.js').read_text(encoding='utf-8')
+TC = (REPO / 'static/token-card.js').read_text(encoding='utf-8')
 # The buy screen is the full sheet now; the label moved with it, from the
 # in-card panel's markup into openBuySheet(). Same statement, same currency,
 # read where it is actually written today.
@@ -116,22 +117,24 @@ check('the token card says USDC for every chain it trades',
       "function _tcUnit(chain){ return 'USDC'; }" in TC)
 check('...and sends both names too', 'amount_usdc:amount, amount_sol:amount' in TC)
 
-ST = open(REPO + '/templates/settings.html').read()
+ST = (REPO / 'templates/settings.html').read_text(encoding='utf-8')
 check('the setting is stated rather than offered, since there is nothing to '
       'choose', 'st-row-value">USDC<' in ST and 'id="s-solbase"' not in ST)
 check('...and the page no longer sends a field the server ignores',
       'pref_solana_base_currency:' not in ST)
 check('...with the styling for a stated value actually defined, not a class '
       'name that renders as nothing', '.st-row-value{' in ST)
-check('...and it says plainly that SOL is still needed for fees, because a '
-      'wallet holding only USDC cannot trade',
-      'network fees' in ST and 'SOL is still needed' in ST)
+check('...and it presents USDC as the trading currency across supported chains; '
+      'native gas handling is server-side and must not make the UI tell a USDC-only '
+      'user to acquire another trading currency',
+      'Bot trade sizing is configured in USDC across supported chains.' in ST
+      and 'st-row-value">USDC<' in ST)
 
 # ── the wallet page ────────────────────────────────────────────────────────
 # It led with SOL as "Available balance" and put USDC in a card below. After
 # the currency change that is backwards: a wallet holding $4.64 of tradeable
 # balance and no SOL read as completely empty.
-W = open(REPO + '/templates/wallet.html').read()
+W = (REPO / 'templates/wallet.html').read_text(encoding='utf-8')
 
 check('the headline balance is what a trade is funded from',
       'Available to trade' in W and 'USDC across all chains' in W)
