@@ -2324,9 +2324,308 @@ function loadTape(){
     var rows = (d && d.ok && d.trades) || [];
     if(!rows.length){ el.innerHTML = '<div class="pt-tape-empty">Waiting for trades…</div>'; return; }
     el.innerHTML = rows.slice(0,14).map(function(r){
+      var side = String(r.side||'').toLowerCase()==='sell' ? 'sell' : 'buy';
       return '<div class="pt-tape-row">'
-        + '<span class="pt-tape-pill '+r.side+'">'+r.side.toUpperCase()+'</span>'
-        + '<span class="pt-tape-sym">$'+esc(r.symbol)+'</span>'
+        + '<span class="pt-tape-pill '+side+'">'+side.toUpperCase()+'</span>'
+        + '<span class="pt-tape-sym">
+        + '<span class="pt-tape-amt">'+Number(r.sol_amount||0).toFixed(3)+' SOL</span>'
+        + '<span class="pt-tape-age">'+fmtAgeSeconds(r.age_seconds)+'</span>'
+        + '</div>';
+    }).join('');
+  }).catch(function(){});
+}
+
+/* ── top traders / copy trade ──
+   /api/leaderboard is the real rolling-24h leaderboard (see its own
+   docstring server-side) -- this used to call /api/leaderboard/full, the
+   ALL-TIME ranking, while both the right-rail card and this rail's own
+   heading say "24h". Fetched once and rendered into both the compact
+   top-of-feed rail (renderTraderRail, mobile+desktop, above the fold) and
+   the fuller right-rail list (desktop only, has the Copy-trade button). */
+function loadTraders(){
+  fetch('/api/leaderboard').then(function(r){ return r.json(); }).then(function(rows){
+    rows = Array.isArray(rows) ? rows : [];
+    renderTraderRail(rows);
+    var el = document.getElementById('pt-traders-list');
+    if(!el) return;
+    if(!rows.length){ el.innerHTML = '<div class="pt-tape-empty">No traders yet</div>'; return; }
+    el.innerHTML = rows.slice(0,8).map(function(t){
+      var isCopying = _copyStatus.copying && _copyStatus.target === t.wallet_address;
+      var pnl = Number(t.total_pnl||0);
+      return '<div class="pt-trader-row">'
+        + '<span class="pt-trader-rank">'+t.rank+'</span>'
+        + '<span class="pt-trader-click" data-action="trader-profile" data-wallet="'+esc(t.wallet_address)+'">'
+        +   logoTile(t.avatar_url, t.username, 'pt-trader-av', 'pt-trader-av-ph')
+        +   '<div class="pt-trader-mid"><div class="pt-trader-name">'+esc(t.username)+'</div>'
+        +     '<div class="pt-trader-sub">'+(t.win_rate||0)+'% win · '+(t.trade_count||0)+' trades</div></div>'
+        + '</span>'
+        + '<div class="pt-trader-right"><div class="pt-trader-pnl mono '+(pnl>=0?'up':'down')+'">'+fmtTraderPnl(t)+'</div>'
+        +   '<button class="pt-copy-link'+(isCopying?' active':'')+'" data-action="copy" data-wallet="'+esc(t.wallet_address)+'">'+(isCopying?'Copying':'Copy')+'</button></div>'
+        + '</div>';
+    }).join('');
+  }).catch(function(){});
+}
+
+/* Compact horizontal spotlight, same visual language as the token story
+   rail directly above it (ring + circle avatar + name + a stat underneath)
+   but for people instead of tokens -- sits inside the always-visible center
+   feed so it doesn't need the desktop-only right rail to be seen, and
+   answers exactly what was asked: which traders are actually up real money
+   (shown in USD, see fmtTraderPnl()) today, one tap to their profile. */
+function renderTraderRail(rows){
+  var wrap = document.getElementById('pt-trader-rail-wrap');
+  var el = document.getElementById('pt-trader-rail');
+  if(!wrap || !el) return;
+  var top = (rows||[]).filter(function(t){ return Number(t.total_pnl||0) > 0; }).slice(0, 10);
+  if(!top.length){ wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  el.innerHTML = top.map(function(t){
+    var verified = t.badges && t.badges.indexOf('verified') !== -1;
+    return '<div class="pt-story pt-trader-story" data-action="trader-profile" data-wallet="'+esc(t.wallet_address)+'">'
+      + '<div class="pt-trader-rank-badge'+(t.rank===1?' gold':'')+'">'+esc(String(t.rank))+'</div>'
+      + '<div class="pt-story-ring">'
+      +   '<div class="pt-story-inner">'
+      +     logoTile(t.avatar_url, t.username, 'pt-story-img', 'pt-story-img-ph')
+      +   '</div>'
+      + '</div>'
+      + '<div class="pt-story-name">'+esc(t.username||'')+(verified?' ✓':'')+'</div>'
+      + '<div class="pt-story-chg up">'+fmtTraderPnl(t)+'</div>'
+      + '</div>';
+  }).join('');
+}
+function toggleCopy(btn){
+  var wallet = btn.dataset.wallet;
+  var alreadyCopying = _copyStatus.copying && _copyStatus.target === wallet;
+  fetch('/api/copy-trade/toggle', {
+    method:'POST', credentials:'include', headers: authHeaders(),
+    body: JSON.stringify({wallet: wallet, sol_amount: alreadyCopying ? 0 : 0.05})
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if(d && d.ok){
+      var copying = d.copying!=null ? d.copying : d.active;
+      _copyStatus.copying = !!copying;
+      _copyStatus.target  = copying ? wallet : null;
+      loadTraders();
+      toast(copying ? 'Copy-trading enabled' : 'Copy-trading stopped');
+    } else {
+      toast((d && d.msg) || 'Could not update copy-trade');
+    }
+  }).catch(function(){ toast('Network error'); });
+}
+
+/* ── market pulse ── */
+function loadPulse(){
+  fetch('/api/platform/stats').then(function(r){ return r.json(); }).then(function(d){
+    if(!d || !d.ok) return;
+    var tradesEl = document.getElementById('pt-pulse-trades');
+    var netEl    = document.getElementById('pt-pulse-net');
+    if(tradesEl) tradesEl.textContent = d.trades_today;
+    if(netEl){
+      var net = Number(d.net_pnl_today||0);
+      netEl.textContent = (net>=0?'+':'')+net.toFixed(2);
+      netEl.classList.toggle('green', net>=0);
+      netEl.style.color = net<0 ? 'var(--red)' : '';
+    }
+  }).catch(function(){});
+  fetch('/api/online-count').then(function(r){ return r.json(); }).then(function(d){
+    var el = document.getElementById('pt-pulse-online');
+    if(d && d.ok && el) el.textContent = d.online;
+  }).catch(function(){});
+}
+
+/* ── deep-linked token (shared navbar's search redirects here as ?mint=) ── */
+function scrollToCard(idx){
+  var card = document.getElementById('pt-card-'+idx);
+  if(!card) return;
+  card.scrollIntoView({behavior:'smooth', block:'center'});
+  var wasHi = card.classList.contains('hi');
+  card.classList.add('hi');
+  if(!wasHi) setTimeout(function(){ card.classList.remove('hi'); }, 1600);
+}
+
+function prependSearchedToken(mint, sym, pairAddr){
+  fetch('/api/token/info/'+encodeURIComponent(mint)).then(function(r){ return r.json(); }).then(function(info){
+    var tok;
+    if(info && info.ok){
+      var pc = info.price_change || {};
+      tok = {
+        mint: info.address||mint, symbol: info.symbol||sym, name: info.name||sym,
+        chain: info.chain||'solana', pair_address: info.pair_address||pairAddr,
+        image_url: info.image_url||'', price_usd: Number(info.price_usd||info.price||0),
+        market_cap: Number(info.market_cap||info.mcap||0), liquidity_usd: Number(info.liquidity_usd||info.liquidity||0),
+        volume_24h: Number(info.volume_24h||0), buys_24h: Number(info.buyers_24h||0), sells_24h: Number(info.sellers_24h||0),
+        price_change_24h: Number(pc.h24||0), pair_created_at: null, verified_socials:false, score:3
+      };
+    } else {
+      tok = {mint:mint, symbol:sym, name:sym, chain:'solana', pair_address:pairAddr, image_url:'',
+        price_usd:0, market_cap:0, liquidity_usd:0, volume_24h:0, buys_24h:0, sells_24h:0,
+        price_change_24h:0, pair_created_at:null, verified_socials:false, score:3};
+    }
+    ST.tokens = [tok].concat(ST.tokens.filter(function(t){ return t.mint !== tok.mint; }));
+    renderStoryRail();
+    renderFeedList();
+    updateHeaderCounts();
+    setTimeout(function(){ scrollToCard(0); }, 60);
+  }).catch(function(){});
+}
+
+/* ── event wiring ── */
+document.addEventListener('click', function(e){
+  var el;
+  if((el = e.target.closest('[data-action="story"]'))){ scrollToCard(el.dataset.idx); return; }
+  if((el = e.target.closest('[data-action="watch"]'))){ toggleWatch(el.dataset.mint, el.dataset.sym, el); return; }
+  if((el = e.target.closest('[data-action="buy-open"]'))){ openBuyPanel(el.dataset.idx); return; }
+  if((el = e.target.closest('[data-action="confirm-buy"]'))){ confirmBuy(el.dataset.idx); return; }
+  if((el = e.target.closest('[data-action="sell"]'))){ handleSell(el.dataset.idx, el); return; }
+  if((el = e.target.closest('[data-action="copy"]'))){ toggleCopy(el); return; }
+  if((el = e.target.closest('[data-action="copy-ca"]'))){ copyCA(el.dataset.mint, el); return; }
+  if((el = e.target.closest('[data-action="open-surge"]'))){
+    // Reuses the same path the navbar search uses -- a surging token is
+    // usually not in the current sorted feed yet, so it has to be injected
+    // rather than scrolled to.
+    prependSearchedToken(el.dataset.mint, el.dataset.symbol || '', el.dataset.pair || '');
+    return;
+  }
+  if((el = e.target.closest('[data-action="trader-profile"]'))){
+    if(el.dataset.wallet) location.href = '/profile/' + encodeURIComponent(el.dataset.wallet);
+    return;
+  }
+  if((el = e.target.closest('.pt-tf-pill'))){
+    var wrap = el.closest('.pt-chart-tfs');
+    var idx = wrap.id.replace('pt-chart-tfs-','');
+    wrap.querySelectorAll('.pt-tf-pill').forEach(function(b){ b.classList.toggle('active', b===el); });
+    setChartTf(idx, el.dataset.tf);
+    return;
+  }
+  if((el = e.target.closest('[data-sort]'))){ setSort(el.dataset.sort); return; }
+  if((el = e.target.closest('.pt-age-chip'))){ setAge(el.dataset.age); return; }
+  if((el = e.target.closest('.pt-toggle-row'))){ toggleFilter(el); return; }
+  if((el = e.target.closest('#pt-wl-edit-btn'))){ toggleWlEdit(); return; }
+  if((el = e.target.closest('.pt-wl-remove'))){ removeWatchFromList(el.dataset.mint); return; }
+});
+
+/* ── init ── */
+document.addEventListener('DOMContentLoaded', function(){
+  var liqSlider  = document.getElementById('pt-liq-slider');
+  var liqValueEl = document.getElementById('pt-liq-value');
+  var _liqDebounce = null;
+  liqSlider.addEventListener('input', function(){
+    ST.minLiquidity = parseInt(liqSlider.value, 10);
+    liqValueEl.textContent = '$'+fmtShort(ST.minLiquidity)+' of $500K';
+    updateAdvCount();
+    clearTimeout(_liqDebounce);
+    _liqDebounce = setTimeout(loadFeed, 350);
+  });
+
+  // Folded by default on a phone, open on desktop. Set from JS rather than
+  // CSS because <details> is driven by an attribute, not a display property —
+  // and only at startup, so reopening it is not undone on the next resize.
+  var advEl = document.getElementById('pt-adv');
+  if(advEl && window.matchMedia && window.matchMedia('(max-width: 900px)').matches){
+    advEl.open = false;
+  }
+  updateAdvCount();
+
+  /* mobile: left-rail filters drawer (the nav drawer is the shared navbar's
+     own, see static/navbar.js) */
+  var filtersBtn = document.getElementById('pt-mobile-filters-btn');
+  var leftEl     = document.getElementById('pt-left');
+  var scrimEl    = document.getElementById('pt-scrim');
+
+  // How tall the navbar actually is, published as a CSS variable so the
+  // drawer and the scrim can start underneath it.
+  //
+  // Measured, not assumed: at this breakpoint the search field wraps onto a
+  // second line, so the bar is not one fixed height, and a notch or a font
+  // that loads late moves it again. Guessing produced the bug this fixes --
+  // the drawer began at the top of the screen, underneath a navbar sitting
+  // 105 z-index levels above it, so its first rows were simply not visible.
+  function syncNavbarHeight(){
+    var nb = document.querySelector('.pt-nb-topbar');
+    if(!nb) return;
+    var h = Math.round(nb.getBoundingClientRect().height);
+    if(h > 0) document.documentElement.style.setProperty('--pt-nb-h', h + 'px');
+  }
+  syncNavbarHeight();
+  // Again after webfonts settle, which is the common way the bar ends up a
+  // few pixels taller than it measured on first paint.
+  if(document.fonts && document.fonts.ready) document.fonts.ready.then(syncNavbarHeight);
+  window.addEventListener('resize', syncNavbarHeight);
+  window.addEventListener('orientationchange', syncNavbarHeight);
+
+  if(filtersBtn) filtersBtn.addEventListener('click', function(){
+    var opening = !leftEl.classList.contains('mobile-open');
+    closeMobileOverlays();
+    // Re-measured on open rather than only at startup: the bar can have
+    // grown or shrunk since (a wrapped search field, a badge appearing).
+    if(opening){
+      syncNavbarHeight();
+      leftEl.classList.add('mobile-open');
+      scrimEl.classList.add('show');
+      // The feed behind it must not scroll: scrolling it moves nothing the
+      // reader can see and takes the page somewhere else once they close it.
+      try{ document.body.style.overflow = 'hidden'; }catch(e){}
+    }
+  });
+  if(scrimEl) scrimEl.addEventListener('click', closeMobileOverlays);
+
+  /* re-measure & redraw mounted charts on resize/rotation (e.g. desktop<->mobile
+     breakpoint change) -- renderChartSvg() re-reads clientWidth each call, it
+     just isn't re-triggered by a resize on its own between 5s poll ticks */
+  var _resizeTimer = null;
+  window.addEventListener('resize', function(){
+    clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(function(){
+      Object.keys(_chartTimers).forEach(function(idx){ chartTick(idx); });
+    }, 200);
+  });
+
+  enableDragScroll(document.getElementById('pt-story-rail'));
+  enableDragScroll(document.getElementById('pt-surge-rail'));
+  enableDragScroll(document.getElementById('pt-trader-rail'));
+
+  _prefetchBalances();
+  renderSortList();
+  loadWatchlistSet().then(function(){ loadFeed(); });
+  loadSurges();
+  loadTape();
+  loadTraders();
+  loadWatchlist();
+  loadPulse();
+  fetch('/api/copy-trade/status', {credentials:'include'}).then(function(r){ return r.json(); }).then(function(d){
+    if(d && d.ok){ _copyStatus.copying = d.copying; _copyStatus.target = d.target_wallet; loadTraders(); }
+  }).catch(function(){});
+
+  // A token arrives here as ?mint=<addr> from the shared navbar's search, the
+  // wallet, the calls page and a surge push notification -- all plain
+  // full-page navigations, since none of those have this feed to inject into.
+  //
+  // It has to be injected AFTER the first scanner load, which replaces
+  // ST.tokens wholesale and would wipe it. That used to be a 900ms guess:
+  // fine on a fast connection, and on a slow one the token silently vanished
+  // -- worst of all on a notification tap, which is the one moment it has to
+  // work. It is now queued and injected when that first load actually
+  // finishes, however long it takes.
+  var _qMint = new URLSearchParams(location.search).get('mint');
+  if(_qMint){
+    history.replaceState(null, '', location.pathname);
+    _pendingDeepLinkMint = _qMint;
+  }
+
+  // Background tabs do zero market polling. Mobile browsers otherwise keep
+  // old pages alive long enough to burn through rate limits for data nobody
+  // can see, then return to the foreground already throttled.
+  setInterval(function(){ if(!document.hidden) loadFeed(true); }, 15000);
+  setInterval(function(){ if(!document.hidden) loadSurges(); }, 12000);
+  setInterval(function(){ if(!document.hidden) loadTape(); }, 8000);
+  setInterval(function(){ if(!document.hidden) loadTraders(); }, 30000);
+  setInterval(function(){ if(!document.hidden) loadPulse(); }, 20000);
+  // The one that makes the charts move. Started once for the whole page, not
+  // per card -- it batches every visible chart into a single request.
+  startLivePrices();
+});
+
+})();
++esc(r.symbol)+'</span>'
         + '<span class="pt-tape-amt">'+Number(r.sol_amount||0).toFixed(3)+' SOL</span>'
         + '<span class="pt-tape-age">'+fmtAgeSeconds(r.age_seconds)+'</span>'
         + '</div>';

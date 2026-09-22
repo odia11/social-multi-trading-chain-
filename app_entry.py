@@ -32,6 +32,8 @@ from canonical_domain import install as _install_canonical_domain
 from browser_shared_secret_hardening import install as _install_browser_shared_secret_hardening
 from secret_hygiene import install as _install_secret_hygiene
 from security_hardening import install as _install_security_hardening
+from authenticated_csrf_hardening import install as _install_authenticated_csrf_hardening
+from injection_hardening import install as _install_injection_hardening
 from ssrf_hardening import install as _install_ssrf_hardening
 from auth_replay_hardening import install as _install_auth_replay_hardening
 from authorization_hardening import install as _install_authorization_hardening
@@ -86,6 +88,8 @@ _install_browser_shared_secret_hardening(_dashboard)
 # Security layers.
 _install_secret_hygiene(_dashboard)
 _install_security_hardening(_dashboard)
+_install_authenticated_csrf_hardening(_dashboard)
+_install_injection_hardening(_dashboard)
 _install_ssrf_hardening(_dashboard)
 _install_auth_replay_hardening(_dashboard)
 _install_authorization_hardening(_dashboard)

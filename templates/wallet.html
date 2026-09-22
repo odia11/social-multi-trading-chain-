@@ -2186,7 +2186,7 @@ function _wTrade(i, side){
 
   fetch('/api/instant-trade',{
     method:'POST',credentials:'include',
-    headers:{'Content-Type':'application/json'},
+    headers:{'Content-Type':'application/json','X-CSRF-Token':_csrf},
     body:JSON.stringify({token_address:tok.mint,symbol:tok.symbol||'',side:side,amount_sol:amount_sol})
   }).then(function(r){return r.json()}).then(function(d){
     if(d.success||d.ok){

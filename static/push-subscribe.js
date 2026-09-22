@@ -1,4 +1,17 @@
 // OrcAgent push notification subscription flow.
+async function _pushCsrfToken() {
+  var meta = document.querySelector('meta[name="csrf-token"]');
+  if (meta && meta.content) return meta.content;
+  if (typeof window._csrf === 'string' && window._csrf) return window._csrf;
+  if (typeof window._csrfToken === 'string' && window._csrfToken) return window._csrfToken;
+  try {
+    var response = await fetch('/api/csrf-token', {credentials:'include', cache:'no-store'});
+    var data = await response.json();
+    return data && data.token ? String(data.token) : '';
+  } catch (_) {
+    return '';
+  }
+}
 // Call _enablePushNotifications() from a button click (must be a real user
 // gesture — browsers block permission prompts triggered automatically).
 function _urlBase64ToUint8Array(base64String) {
@@ -33,9 +46,11 @@ async function _enablePushNotifications() {
       });
     }
     var subJson = sub.toJSON();
+    var csrf = await _pushCsrfToken();
     var res = await fetch('/api/push/subscribe', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
       body: JSON.stringify(subJson)
     }).then(function(r) { return r.json(); });
     return res;
@@ -50,9 +65,11 @@ async function _disablePushNotifications() {
     if (!reg) return { ok: true };
     var sub = await reg.pushManager.getSubscription();
     if (sub) {
+      var csrf = await _pushCsrfToken();
       await fetch('/api/push/unsubscribe', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
         body: JSON.stringify({ endpoint: sub.endpoint })
       }).catch(function() {});
       await sub.unsubscribe();

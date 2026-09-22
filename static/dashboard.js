@@ -840,7 +840,7 @@ async function _inviteRespond(action){
   if(btn) btn.disabled = true;
   var r = await fetch('/api/invite/respond',{
     method:'POST', credentials:'include',
-    headers:{'Content-Type':'application/json'},
+    headers:{'Content-Type':'application/json','X-CSRF-Token':_csrfToken},
     body: JSON.stringify({action: action, invite_id: _pendingInviteId})
   }).then(r=>r.json()).catch(()=>null);
   document.getElementById('admin-invite-modal').style.display = 'none';
@@ -1463,6 +1463,16 @@ function esc(s){
   return String(s==null?'':s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
+}
+function safeImageUrl(value){
+  var raw=String(value==null?'':value).trim();
+  if(!raw)return '';
+  if(/^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(raw))return raw;
+  if(/^blob:/i.test(raw))return raw;
+  try{
+    var u=new URL(raw,location.origin);
+    return (u.protocol==='http:'||u.protocol==='https:')?u.href:'';
+  }catch(_){return ''}
 }
 function safeMint(m){
   // Solana addresses are base58: 32–44 chars from a restricted alphabet
@@ -2290,8 +2300,8 @@ async function runFeeRecovery(){
   try{
     const r=await fetch('/api/admin/recover-fees',{method:'POST',headers:{'Content-Type':'application/json'}});
     const d=await r.json();
-    if(d.error){out.innerHTML=`<span style="color:var(--red)">Error: ${d.error}</span>`;}
-    else if(!d.ok){out.innerHTML=`<span style="color:var(--red)">${d.error||'Recovery failed'}</span>`;}
+    if(d.error){out.innerHTML=`<span style="color:var(--red)">Error: ${esc(d.error)}</span>`;}
+    else if(!d.ok){out.innerHTML=`<span style="color:var(--red)">${esc(d.error||'Recovery failed')}</span>`;}
     else{
       const lines=[];
       lines.push(`<b style="color:#4ade80">Total recovered: ${(d.total_sol||0).toFixed(5)} SOL</b>`);
@@ -2303,13 +2313,13 @@ async function runFeeRecovery(){
           ?`${res.fee?.toFixed(5)} SOL  TX:${(res.tx||'').slice(0,14)}…  (${res.trades} trade(s))`
           :res.status==='skipped_dust'?`${res.fee?.toFixed(6)} SOL — dust`
           :`FAILED: ${res.error||'unknown'}`;
-        lines.push(`<span style="color:${col}">${icon} ${res.wallet}  ${detail}</span>`);
+        lines.push(`<span style="color:${col}">${esc(icon)} ${esc(res.wallet||'')}  ${esc(detail)}</span>`);
       });
       if(!d.results?.length) lines.push('<span style="color:var(--muted)">No unpaid fees found</span>');
       out.innerHTML=lines.join('<br>');
       if(typeof loadAdminFees==='function') loadAdminFees();
     }
-  }catch(e){out.innerHTML=`<span style="color:var(--red)">Request failed: ${e.message}</span>`;}
+  }catch(e){out.innerHTML=`<span style="color:var(--red)">Request failed: ${esc(e&&e.message||'Request failed')}</span>`;}
   finally{btn.disabled=false; btn.textContent='💰 RECOVER FEES NOW';}
 }
 
@@ -3574,7 +3584,7 @@ async function loadWalletTokens(){
       return `<div onclick="window.openTokenPanel&&window.openTokenPanel('${t.mint}')" style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #2e2e2e;cursor:pointer;transition:background .12s" onmouseover="this.style.background='#1c1c1c'" onmouseout="this.style.background=\'\'">${logoHtml}<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;color:#fff">${esc(t.symbol||'?')}</div><div style="font-size:11px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.name||'')}</div><div style="font-size:11px;color:#aaa;margin-top:1px">${amtStr}</div></div><div style="text-align:right;flex-shrink:0"><div style="font-size:13px;font-weight:700;color:#fff">${valStr}</div><div style="font-size:11px;color:${chgColor};margin-top:2px">${chgStr}</div></div></div>`;
     }).join('');
   }catch(e){
-    list.innerHTML='<div style="padding:20px;color:#ff1744;text-align:center">'+e.message+'</div>';
+    list.innerHTML='<div style="padding:20px;color:#ff1744;text-align:center">'+esc(e&&e.message||'Failed to load wallet')+'</div>';
   }
 }
 function _startWalletRefresh(){
@@ -5164,11 +5174,12 @@ async function confirmWithdraw() {
     const data = await resp.json();
     const resultEl = document.getElementById('wd-result');
     if (data.ok) {
-      const sig = data.signature || '';
-      const explorer = sig ? `https://solscan.io/tx/${sig}` : '';
+      const sig = String(data.signature || '');
+      const explorer = /^[1-9A-HJ-NP-Za-km-z]{40,100}$/.test(sig)
+        ? `https://solscan.io/tx/${encodeURIComponent(sig)}` : '';
       resultEl.style.cssText = 'display:block;margin-bottom:14px;padding:10px 14px;border-radius:8px;font-size:11px;line-height:1.7;word-break:break-all;background:rgba(0,0,0,.07);border:1px solid rgba(0,0,0,.28);color:var(--green)';
       resultEl.innerHTML = `✓ Sent ${amount} SOL successfully!` +
-        (explorer ? `<br><a href="${explorer}" target="_blank" rel="noopener noreferrer" style="color:var(--blue);font-size:10px;text-decoration:underline">View on Solscan ↗</a>` : '') +
+        (explorer ? `<br><a href="${esc(explorer)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue);font-size:10px;text-decoration:underline">View on Solscan ↗</a>` : '') +
         (sig ? `<br><span style="color:var(--muted);font-size:9px;word-break:break-all">TX: ${esc(sig)}</span>` : '');
       btn.style.display = 'none';
       showLfToast('◎',`Sent ${amount} SOL`,'pos');
@@ -5830,7 +5841,7 @@ function _dmRenderConvoList(){
     const name=c.peer_username||_dmShort(c.peer_wallet||'');
     div.innerHTML=`
       <div class="dm-convo-av-wrap">
-        <div class="dm-convo-av" id="dm-cav-${c.peer_id}">${_dmInitials(name)}</div>
+        <div class="dm-convo-av" id="dm-cav-${c.peer_id}">${_esc(_dmInitials(name))}</div>
         ${c.peer_online?'<span class="dm-online-dot"></span>':''}
       </div>
       <div class="dm-convo-info">
@@ -6042,7 +6053,7 @@ async function dmOpenConvo(peerId, peerWallet, peerUsername){
 }
 
 function _esc(str){
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(str==null?'':str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 async function _dmFetchMessages(){
@@ -6887,7 +6898,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
   let _st = null;
 
-  function _e(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function _e(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
   function _short(a){ return a.length>14 ? a.slice(0,5)+'…'+a.slice(-4) : a; }
   function _avHtml(u){
     const ini=_e((u.username||'?')[0].toUpperCase());
@@ -7148,11 +7159,15 @@ function searchUserTag(q){
   fetch('/api/users/search?q='+encodeURIComponent(q))
   .then(r=>r.json()).then(d=>{
     const users=(d&&d.users)||[]
-    document.getElementById('userTagResults').innerHTML=users.length?
-    users.map(u=>`<div onclick="selectUserTag('${u.username.replace(/'/g,"\\'")}')" style="padding:10px;cursor:pointer;border-bottom:1px solid #16191f;color:#eef1f5">
-      <span style="color:#f7b955;font-weight:700">@${esc(u.username)}</span>
+    var results=document.getElementById('userTagResults');
+    results.innerHTML=users.length?
+    users.map(u=>`<div class="oa-user-tag-result" data-username="${esc(u.username||'')}" style="padding:10px;cursor:pointer;border-bottom:1px solid #16191f;color:#eef1f5">
+      <span style="color:#f7b955;font-weight:700">@${esc(u.username||'')}</span>
     </div>`).join('')
-    :'<div style="color:#565d68;padding:10px">No users found</div>'
+    :'<div style="color:#565d68;padding:10px">No users found</div>';
+    results.querySelectorAll('.oa-user-tag-result').forEach(function(row){
+      row.addEventListener('click',function(){selectUserTag(row.dataset.username||'')});
+    })
   })
 }
 function selectUserTag(username){
@@ -8255,7 +8270,7 @@ async function loadHomeFeed(){
         _handleNotifDeepLink();
       }catch(e){
         console.error('[feed] render error:', e);
-        if(el) el.innerHTML='<div class="fc-loading" style="color:#f76b62">Feed render error: '+e.message+'</div>';
+        if(el) el.innerHTML='<div class="fc-loading" style="color:#f76b62">Feed render error: '+esc(e&&e.message||'Unknown error')+'</div>';
       }
     } else {
       console.warn('[feed] unexpected response format:', data);
@@ -8527,10 +8542,19 @@ async function _liveChartPoll(cardEl, pairAddress, symbol, mint){
       if(buysBarEl) buysBarEl.style.width = (_tot>0?((_b/_tot)*100).toFixed(1):'50')+'%';
     }
     if(bannerEl&&p.info&&p.info.header&&!bannerEl.style.backgroundImage){
-      bannerEl.style.backgroundImage='url('+p.info.header+')';
+      var safeHeader=safeImageUrl(p.info.header);
+      if(safeHeader)bannerEl.style.backgroundImage='url("'+safeHeader.replace(/["\\]/g,'')+'")';
     }
     if(logoEl&&p.info&&p.info.imageUrl&&!logoEl.querySelector('img')){
-      logoEl.innerHTML='<img src="'+p.info.imageUrl+'" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.remove()">';
+      var safeLogo=safeImageUrl(p.info.imageUrl);
+      if(safeLogo){
+        var logoImg=document.createElement('img');
+        logoImg.src=safeLogo;
+        logoImg.alt='';
+        logoImg.style.cssText='width:100%;height:100%;object-fit:cover;border-radius:50%';
+        logoImg.addEventListener('error',function(){logoImg.remove()},{once:true});
+        logoEl.replaceChildren(logoImg);
+      }
     }
     _ccDrawSparkline(cardEl, _liveChartHistory[key]);
   }catch(e){}

@@ -1,3 +1,15 @@
+async function _notifCsrfToken(){
+  var meta=document.querySelector('meta[name="csrf-token"]');
+  if(meta&&meta.content)return meta.content;
+  if(typeof window._csrf==='string'&&window._csrf)return window._csrf;
+  if(typeof window._csrfToken==='string'&&window._csrfToken)return window._csrfToken;
+  try{
+    var response=await fetch('/api/csrf-token',{credentials:'include',cache:'no-store'});
+    var data=await response.json();
+    return data&&data.token?String(data.token):'';
+  }catch(_){return ''}
+}
+
 function _pushNotif(title, body){
   if(!document.hidden) return;
   if(!('Notification' in window) || Notification.permission !== 'granted') return;
@@ -67,7 +79,8 @@ async function _silentPushResubscribeCheck(){
     var arr = new Uint8Array(raw.length);
     for(var i=0;i<raw.length;i++) arr[i]=raw.charCodeAt(i);
     var newSub = await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:arr});
-    await fetch('/api/push/subscribe', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(newSub.toJSON())});
+    var csrf=await _notifCsrfToken();
+    await fetch('/api/push/subscribe', {method:'POST', credentials:'include', headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, body:JSON.stringify(newSub.toJSON())});
   }catch(e){}
 }
 _silentPushResubscribeCheck();

@@ -526,13 +526,13 @@ function _openCopyModal(wallet, username, userId, btn){
   var amountField   = document.getElementById('modal-amount-field');
   if(isCopying){
     document.getElementById('modal-desc').innerHTML =
-      'Stop copying <strong>'+username+'</strong>? No new trades will be mirrored.';
+      'Stop copying <strong>'+esc(username)+'</strong>? No new trades will be mirrored.';
     amountField.style.display = 'none';
     confirmBtn.textContent = 'Stop Copying';
     confirmBtn.className   = 'modal-btn danger';
   } else {
     document.getElementById('modal-desc').innerHTML =
-      'When <strong>'+username+'</strong> opens a trade, you automatically mirror it with the amount below.';
+      'When <strong>'+esc(username)+'</strong> opens a trade, you automatically mirror it with the amount below.';
     amountField.style.display = '';
     document.getElementById('modal-sol-inp').value = '0.1';
     document.getElementById('modal-hint').textContent = 'Each mirrored trade will spend this amount of SOL.';
