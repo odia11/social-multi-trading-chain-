@@ -1,0 +1,85 @@
+/* OrcAgent profile: approved filled-gold Tip USDC call to action.
+   Only the existing profile button is restyled; _openTip() and the
+   transaction/confirmation flow remain exactly as they were. */
+.oa-profile-v2 .pf-action-row .pf-btn-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 49px;
+  padding: 8px 14px;
+  border: 1px solid #ffe19a;
+  border-radius: 13px;
+  color: #15120d;
+  background: linear-gradient(108deg, #ffc05f 0%, #ffdb87 48%, #edb052 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 223, 155, .22),
+    0 0 24px rgba(247, 185, 85, .27),
+    inset 0 1px 0 rgba(255, 250, 217, .74);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: box-shadow .18s ease, transform .18s ease, filter .18s ease;
+}
+
+/* Replace only the cosmetic icon. Keep the original button and click route. */
+.oa-profile-v2 .pf-action-row .pf-btn-tip > svg {
+  display: none;
+}
+.oa-profile-v2 .pf-action-row .pf-btn-tip::before {
+  content: '$';
+  display: grid;
+  place-items: center;
+  width: 33px;
+  height: 33px;
+  min-width: 33px;
+  border: 1px solid rgba(255, 211, 123, .78);
+  border-radius: 50%;
+  background: radial-gradient(circle at 33% 24%, #4a3617, #1a160f 75%);
+  box-shadow: 0 2px 7px rgba(74, 45, 5, .24), inset 0 1px 0 rgba(255, 222, 161, .14);
+  color: #ffcb6b;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1;
+}
+.oa-profile-v2 .pf-action-row .pf-btn-tip:hover {
+  color: #14110c;
+  background: linear-gradient(108deg, #ffce77, #ffe3a2 48%, #f5bc69);
+  border-color: #ffe6ae;
+  box-shadow:
+    0 0 0 1px rgba(255, 229, 179, .34),
+    0 0 29px rgba(247, 185, 85, .39),
+    inset 0 1px 0 rgba(255, 253, 232, .84);
+}
+.oa-profile-v2 .pf-action-row .pf-btn-tip:active {
+  transform: scale(.985);
+}
+.oa-profile-v2 .pf-action-row .pf-btn-tip:focus-visible {
+  outline: 2px solid #fff0c8;
+  outline-offset: 3px;
+}
+@media (max-width: 767px) {
+  .oa-profile-v2 .pf-action-row .pf-btn-tip {
+    min-height: 49px;
+    padding-inline: 9px;
+    gap: 8px;
+    font-size: 13px;
+    flex: 1 1 132px;
+    min-width: 0;
+  }
+  .oa-profile-v2 .pf-action-row .pf-btn-tip::before {
+    width: 30px;
+    height: 30px;
+    min-width: 30px;
+    font-size: 18px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .oa-profile-v2 .pf-action-row .pf-btn-tip {
+    transition: none;
+  }
+}
