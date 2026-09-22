@@ -51,6 +51,7 @@ def test_money_and_social_clients_send_csrf_tokens():
 def test_high_risk_dom_sinks_escape_or_avoid_untrusted_html():
     js=_read("static/dashboard.js"); traders=_read("templates/traders.html")
     profile=_read("templates/profile.html"); live=_read("static/live-market-pro.js")
+    messages=_read("templates/messages.html")
     assert "function safeImageUrl(value)" in js
     assert 'onclick="selectUserTag' not in js
     assert "data-username=" in js
@@ -60,6 +61,7 @@ def test_high_risk_dom_sinks_escape_or_avoid_untrusted_html():
     assert "logoImg.src=safeLogo" in js and "logoEl.replaceChildren(logoImg)" in js
     assert "esc(username)" in traders
     assert "esc(u.avatar_url)" in profile and "esc(ini)+img" in profile
+    assert ".replace(/'/g,'&#39;')" in messages
     assert "var side = String(r.side||'').toLowerCase()==='sell' ? 'sell' : 'buy';" in live
 
 def test_shell_command_injection_primitives_are_not_used():
@@ -72,6 +74,8 @@ def test_security_modules_are_installed_at_app_entry():
     entry=_read("app_entry.py")
     assert "_install_authenticated_csrf_hardening(_dashboard)" in entry
     assert "_install_injection_hardening(_dashboard)" in entry
+    security=_read("security_hardening.py")
+    assert "Cross-Origin-Resource-Policy" in security
 
 if __name__=="__main__":
     for name in sorted(k for k in globals() if k.startswith("test_")):

@@ -126,6 +126,7 @@ def install(dashboard_module):
         response.headers.setdefault('X-Permitted-Cross-Domain-Policies', 'none')
         response.headers.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
         response.headers.setdefault('Cross-Origin-Opener-Policy', 'same-origin')
+        response.headers.setdefault('Cross-Origin-Resource-Policy', 'same-site')
         response.headers.setdefault('Origin-Agent-Cluster', '?1')
         response.headers.setdefault('X-DNS-Prefetch-Control', 'off')
         response.headers.pop('X-Powered-By', None)
