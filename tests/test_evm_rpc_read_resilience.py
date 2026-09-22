@@ -1,4 +1,4 @@
-"""Regression guards for cached/single-flight EVM balance reads and Base fallback."""
+"""Regression guards for cached/single-flight EVM reads and RPC fallbacks."""
 import ast
 import concurrent.futures
 import threading
@@ -15,6 +15,12 @@ def test_base_has_read_only_fallbacks_and_env_override():
     assert 'BASE_RPC_FALLBACK_URLS' in block
     assert 'https://public.1rpc.io/base' in block
     assert 'https://base.publicnode.com' in block
+
+
+def test_polygon_default_rpc_is_keyless_and_transaction_capable():
+    block=SRC[SRC.index("    'polygon': {"):SRC.index("    'robinhood': {")]
+    assert 'https://polygon-bor-rpc.publicnode.com' in block
+    assert 'https://polygon-rpc.com' not in block
 
 
 def test_transactions_keep_configured_primary_web3():

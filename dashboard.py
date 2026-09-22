@@ -1116,7 +1116,10 @@ EVM_CHAINS = {
     },
     'polygon': {
         'chain_id': 137, 'native_symbol': 'POL', 'usdc_symbol': 'USDC',
-        'rpc_url': os.environ.get('POLYGON_RPC_URL', '') or 'https://polygon-rpc.com',
+        # polygon-rpc.com started answering 401 without an API key in production.
+        # PublicNode is currently keyless and is used only when POLYGON_RPC_URL
+        # is not explicitly configured.
+        'rpc_url': os.environ.get('POLYGON_RPC_URL', '') or 'https://polygon-bor-rpc.publicnode.com',
         'usdc': '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359',
         'explorer': 'https://polygonscan.com', 'dex_chain': 'polygon', 'zerox_chain_id': 137,
     },
