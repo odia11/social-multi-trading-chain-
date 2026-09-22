@@ -15717,7 +15717,8 @@ def api_group_posts(group_id):
             return jsonify({'ok': False, 'msg': 'Members only'}), 403
         rows = conn.execute('''
             SELECT gp.id, gp.content, gp.created_at, gp.user_id, u.username, u.avatar_url,
-                   u.wallet_address, u.is_verified, gp.image_url
+                   u.wallet_address, u.is_verified, gp.image_url,
+                   (SELECT COUNT(*) FROM feed_replies WHERE post_id='g'||gp.id)
             FROM group_posts gp
             LEFT JOIN users u ON gp.user_id = u.id
             WHERE gp.group_id = ?
@@ -15728,7 +15729,7 @@ def api_group_posts(group_id):
             'id': r[0], 'content': r[1], 'created_at': r[2], 'user_id': r[3],
             'username': r[4], 'avatar_url': r[5], 'wallet': r[6] or '',
             'wallet_short': (r[6][:4]+'...'+r[6][-4:]) if r[6] and len(r[6]) >= 8 else (r[6] or ''),
-            'is_verified': bool(r[7]), 'image_url': r[8],
+            'is_verified': bool(r[7]), 'image_url': r[8], 'reply_count': r[9],
         } for r in rows]
         return jsonify({'ok': True, 'posts': posts})
     finally:
@@ -16515,7 +16516,8 @@ def api_group_search(group_id):
             return jsonify({'ok': False, 'msg': 'Members only'}), 403
         rows = conn.execute('''
             SELECT gp.id, gp.content, gp.created_at, gp.user_id, u.username, u.avatar_url,
-                   u.wallet_address, u.is_verified, gp.image_url
+                   u.wallet_address, u.is_verified, gp.image_url,
+                   (SELECT COUNT(*) FROM feed_replies WHERE post_id='g'||gp.id)
             FROM group_posts gp LEFT JOIN users u ON gp.user_id = u.id
             WHERE gp.group_id = ? AND gp.content LIKE ?
             ORDER BY gp.created_at DESC LIMIT 50
@@ -16524,7 +16526,7 @@ def api_group_search(group_id):
             'id': r[0], 'content': r[1], 'created_at': r[2], 'user_id': r[3],
             'username': r[4], 'avatar_url': r[5], 'wallet': r[6] or '',
             'wallet_short': (r[6][:4]+'...'+r[6][-4:]) if r[6] and len(r[6]) >= 8 else (r[6] or ''),
-            'is_verified': bool(r[7]), 'image_url': r[8],
+            'is_verified': bool(r[7]), 'image_url': r[8], 'reply_count': r[9],
         } for r in rows]
         return jsonify({'ok': True, 'posts': posts})
     finally:
