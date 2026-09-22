@@ -6,7 +6,7 @@ const assert=require('assert');
 const source=fs.readFileSync('static/tip-experience.js','utf8');
 const nodes={};
 for(const id of ['oa-profile-balance-value','oa-profile-balance-available',
-                 'oa-profile-balance-other','oa-profile-balance-state']){
+                 'oa-profile-balance-other']){
   nodes[id]={textContent:''};
 }
 const cssClasses=new Set();
@@ -35,14 +35,15 @@ vm.runInNewContext(source,{
  assert(nodes['oa-profile-balance-value'].textContent.includes('0.106 USDC'));
  assert.strictEqual(nodes['oa-profile-balance-available'].textContent,'0.00 USDC');
  assert(nodes['oa-profile-balance-other'].textContent.includes('0.106 USDC'));
- assert(nodes['oa-profile-balance-state'].textContent.includes('15 seconds'));
- console.log('PASS market value and actual USDC remain distinct');
+ assert(!source.includes('oa-profile-balance-state'));
+ assert(source.includes('},15000);'));
+ console.log('PASS market value and actual USDC remain distinct; refresh stays background-only');
 
  networkError=true;
  await win.OrcAgentRefreshProfileBalance();
  assert(nodes['oa-profile-balance-value'].textContent.includes('0.106 USDC'));
- assert(nodes['oa-profile-balance-state'].textContent.includes('last known balance'));
- console.log('PASS RPC failure preserves last known real balance');
+ assert(nodes['oa-profile-balance-value'].textContent.includes('0.106 USDC'));
+ console.log('PASS RPC failure preserves last known real balance without status text');
 
  networkError=false;response={...response,user_id:999,portfolio_value_usdc_approx:50};
  await win.OrcAgentRefreshProfileBalance();

@@ -56,13 +56,7 @@ function refreshProfileBalance(){
     $('oa-profile-balance-available').textContent=money(available)+' USDC';
     $('oa-profile-balance-other').textContent='≈ '+money(other)+' USDC';
     profileBalanceLastGood=true;
-    var updated=Number(d.generated_at||0);
-    var date=updated>0?new Date(updated*1000):null;
-    var clock=date&&!isNaN(date.getTime())
-      ?date.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'just now';
-    $('oa-profile-balance-state').textContent=d.stale
-      ?'Last known balance · live update temporarily delayed'
-      :'Updated '+clock+' · refreshes every 15 seconds';
+    // Refresh state stays internal; users only see the balance values.
     card.classList.toggle('is-stale',!!d.stale);
   }).catch(function(){
     if(!sameProfile())return;
@@ -71,10 +65,9 @@ function refreshProfileBalance(){
       $('oa-profile-balance-available').textContent='—';
       $('oa-profile-balance-other').textContent='—';
     }
+    // Keep the last good values on transient RPC failures. If no good
+    // snapshot has ever loaded, the value fields already say Unavailable.
     card.classList.add('is-stale');
-    $('oa-profile-balance-state').textContent=profileBalanceLastGood
-      ?'Live update delayed · displaying last known balance'
-      :'Balance temporarily unavailable · try again shortly';
   }).finally(function(){profileBalanceInFlight=false});
 }
 window.OrcAgentRefreshProfileBalance=refreshProfileBalance;

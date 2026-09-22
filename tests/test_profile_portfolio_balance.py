@@ -185,6 +185,10 @@ def test_display_uses_named_profile_id_and_privacy_template_flag():
     assert 'other_assets_usdc_approx' in script
     assert '15000' in script
     assert 'visibilitychange' in script
+    assert '15000' in script
+    assert 'oa-profile-balance-state' not in profile
+    assert 'oa-profile-balance-state' not in script
+    assert 'oa-profile-balance-state' not in styles
     assert "textContent='Unavailable'" in script
     assert '.oa-profile-balance-value' in styles
 
