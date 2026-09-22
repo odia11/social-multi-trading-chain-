@@ -262,7 +262,7 @@ def install(d):
             if '</head>' in html and '/static/wallet-onboarding.css?v=5' not in html:
                 html = html.replace('</head>', '<link rel="stylesheet" href="/static/wallet-onboarding.css?v=5"></head>', 1)
             if '</body>' in html and '/static/wallet-onboarding.js?v=5' not in html:
-                html = html.replace('</body>', '<script src="/static/wallet-onboarding.js?v=5"></script></body>', 1)
+                html = html.replace('</body>', '<script src="/static/wallet-onboarding.js?v=5" defer></script></body>', 1)
             response.set_data(html)
             response.content_length = len(response.get_data())
         except Exception:

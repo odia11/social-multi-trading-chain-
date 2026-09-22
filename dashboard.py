@@ -13079,7 +13079,6 @@ def api_copy_trade_stop():
 
 
 @app.route('/api/copy-trade/toggle', methods=['POST'])
-@csrf_exempt
 @rate_limit(20, 60)
 def api_copy_trade_toggle():
     wallet = _authenticated_wallet()
@@ -15886,6 +15885,9 @@ def api_group_demote_mod(group_id, user_id):
 
 def _group_image_upload(group_id, field, data):
     """Shared validation + write for group avatar/banner uploads (owner or mod only)."""
+    # field becomes an SQL identifier below, so it must stay on this server-side allowlist.
+    if field not in {'avatar_url', 'banner_url'}:
+        return jsonify({'ok': False, 'msg': 'Invalid group image field'}), 400
     wallet = _authenticated_wallet()
     if not wallet:
         return jsonify({'ok': False, 'msg': 'No wallet connected'})
@@ -17003,7 +17005,6 @@ def push_vapid_public_key():
     return jsonify({'key': VAPID_PUBLIC_KEY})
 
 @app.route('/api/push/subscribe', methods=['POST'])
-@csrf_exempt
 @rate_limit(10, 60)
 def push_subscribe():
     wallet = _authenticated_wallet()
@@ -17030,7 +17031,6 @@ def push_subscribe():
     return jsonify({'ok': True})
 
 @app.route('/api/push/unsubscribe', methods=['POST'])
-@csrf_exempt
 @rate_limit(10, 60)
 def push_unsubscribe():
     # SECURITY FIX (see commit): previously deleted by endpoint alone, with no
@@ -18527,7 +18527,6 @@ def settings_get():
     })
 
 @app.route('/api/settings/save', methods=['POST'])
-@csrf_exempt
 @rate_limit(20, 60)
 def settings_save():
     wallet = _authenticated_wallet()
@@ -18644,7 +18643,6 @@ def settings_save():
     return jsonify({'ok': True})
 
 @app.route('/api/settings/trading-profile', methods=['POST'])
-@csrf_exempt
 @rate_limit(20, 60)
 def api_trading_profile():
     """Sets stop_loss/take_profit/trailing (tiered_tp_enabled) from one of the
@@ -20248,6 +20246,7 @@ def _instant_trade_cors(resp):
                 'Content-Type, X-CSRF-Token, X-API-Shared-Secret, X-Requested-With'
             )
             resp.headers['Access-Control-Max-Age'] = '86400'
+            resp.headers.add('Vary', 'Origin')
     return resp
 
 def _get_token_decimals_rpc(mint: str) -> int:
@@ -21155,7 +21154,6 @@ def feed_post_delete(post_id):
         conn.close()
 
 @app.route('/api/post/<int:post_id>/edit', methods=['POST'])
-@csrf_exempt
 @rate_limit(20, 60)
 def feed_post_edit(post_id):
     wallet = _authenticated_wallet()
@@ -21185,7 +21183,6 @@ def feed_post_edit(post_id):
         conn.close()
 
 @app.route('/api/post/<int:post_id>/delete', methods=['POST'])
-@csrf_exempt
 @rate_limit(20, 60)
 def feed_post_delete_v2(post_id):
     _log_readonly_attempt()
@@ -22842,7 +22839,6 @@ def toggle_follow_notify(target_user_id: int):
 
 
 @app.route('/api/follow/toggle', methods=['POST'])
-@csrf_exempt
 @rate_limit(60, 60)
 def follow_toggle_by_wallet():
     """Wallet-address-based follow toggle used by traders.html."""
@@ -30728,7 +30724,6 @@ def invite_check():
 
 
 @app.route('/api/invite/respond', methods=['POST'])
-@csrf_exempt
 def invite_respond():
     wallet = _authenticated_wallet()
     if not wallet:

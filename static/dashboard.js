@@ -1,3 +1,37 @@
+// ── PERFORMANCE: lazy-load heavyweight chart engine only when a chart is opened ──
+// The 160 KB LightweightCharts bundle used to be parsed before Home could become
+// interactive even though most sessions never open a chart. Keep one shared
+// promise so simultaneous PnL/position requests cannot load it twice.
+var _oaChartsPromise = null;
+function _ensureLightweightCharts(){
+  if(window.LightweightCharts) return Promise.resolve(window.LightweightCharts);
+  if(_oaChartsPromise) return _oaChartsPromise;
+  _oaChartsPromise = new Promise(function(resolve,reject){
+    var existing=document.querySelector('script[data-oa-lightweight-charts="1"]');
+    if(existing){
+      existing.addEventListener('load',function(){resolve(window.LightweightCharts)},{once:true});
+      existing.addEventListener('error',reject,{once:true});
+      return;
+    }
+    var sc=document.createElement('script');
+    sc.src='/static/vendor/lightweight-charts.standalone.production.js?v=4.1.3';
+    sc.defer=true;sc.dataset.oaLightweightCharts='1';
+    sc.onload=function(){resolve(window.LightweightCharts)};
+    sc.onerror=function(){_oaChartsPromise=null;reject(new Error('chart engine failed to load'))};
+    document.head.appendChild(sc);
+  });
+  return _oaChartsPromise;
+}
+
+// Spread non-essential startup work across idle slices instead of firing a
+// dozen fetch/DOM updates in the same frame. This is the main-thread jank users
+// perceive as a page "hitch" even when the server itself is fast.
+function _oaIdle(fn, timeout){
+  var run=function(){try{fn()}catch(e){console.error('[idle]',e)}};
+  if('requestIdleCallback' in window){requestIdleCallback(run,{timeout:timeout||1200});}
+  else {setTimeout(run, Math.min(timeout||1200,350));}
+}
+
 let traderOn=false, phantomKey=null, walletType=null, currentStep=0, _isAdmin=false, _copySource=null;
 var _isReadonly = false;
 let guestMode = false;
@@ -540,13 +574,20 @@ const _CLIENT_SECRET = window.__API_SHARED_SECRET||'';
   window.fetch = function(url, opts) {
     opts = Object.assign({}, opts || {});
     const method = ((opts.method || 'GET') + '').toUpperCase();
-    if (['POST','PUT','PATCH','DELETE'].includes(method)) {
+    const mutating = ['POST','PUT','PATCH','DELETE'].includes(method);
+    if (!mutating) return _origFetch(url, opts);
+    const send = function(){
       const extra = {};
       if (_csrfToken) extra['X-CSRF-Token'] = _csrfToken;
       if (_CLIENT_SECRET) extra['X-API-Shared-Secret'] = _CLIENT_SECRET;
       opts.headers = Object.assign({}, opts.headers || {}, extra);
+      return _origFetch(url, opts);
+    };
+    // User actions must not race the asynchronous CSRF bootstrap.
+    if (!_csrfToken && typeof _csrfReady !== 'undefined' && _csrfReady && typeof _csrfReady.then === 'function') {
+      return Promise.resolve(_csrfReady).then(send);
     }
-    return _origFetch(url, opts);
+    return send();
   };
 })();
 
@@ -840,7 +881,7 @@ async function _inviteRespond(action){
   if(btn) btn.disabled = true;
   var r = await fetch('/api/invite/respond',{
     method:'POST', credentials:'include',
-    headers:{'Content-Type':'application/json'},
+    headers:{'Content-Type':'application/json','X-CSRF-Token':_csrfToken},
     body: JSON.stringify({action: action, invite_id: _pendingInviteId})
   }).then(r=>r.json()).catch(()=>null);
   document.getElementById('admin-invite-modal').style.display = 'none';
@@ -987,24 +1028,28 @@ async function launchApp(){
   // (including loadHomeFeed) via this same await. _safeInit swallows +
   // console.errors instead of letting anything here propagate.
   await _safeInit('fetchState', fetchState());
-  _safeInit('fetchTrades', fetchTrades());
-  _safeInit('fetchPnlChart', fetchPnlChart());
-  _safeInit('fetchLeaderboard', fetchLeaderboard());
-  _safeInit('fetchBadges', fetchBadges());
-  _safeInit('fetchCopyStatus', fetchCopyStatus());
-  _safeInit('fetchMyProfile', fetchMyProfile());
-  _safeInit('dmFetchUnread', dmFetchUnread());
-  fetch('/api/heartbeat', {method:'POST', headers:{'X-CSRF-Token': _csrfToken}}).catch(function(){});
+  // Feed first: it is the content the user came to Home to see. Everything
+  // else can hydrate just after the first frame instead of competing with it.
+  _safeInit('loadHomeFeed', loadHomeFeed());
+  _oaIdle(function(){ _safeInit('fetchTrades', fetchTrades()); }, 450);
+  _oaIdle(function(){ _safeInit('fetchLeaderboard', fetchLeaderboard()); }, 650);
+  _oaIdle(function(){ _safeInit('fetchBadges', fetchBadges()); }, 850);
+  _oaIdle(function(){ _safeInit('fetchCopyStatus', fetchCopyStatus()); }, 950);
+  _oaIdle(function(){ _safeInit('fetchMyProfile', fetchMyProfile()); }, 1050);
+  _oaIdle(function(){ _safeInit('dmFetchUnread', dmFetchUnread()); }, 1150);
+  // PnL is below the first viewport on Home and requires a 160 KB chart engine.
+  // Load it after first paint/idle, never on the critical interaction path.
+  _oaIdle(function(){ _safeInit('fetchPnlChart', fetchPnlChart()); }, 1400);
+  _oaIdle(function(){ fetch('/api/heartbeat', {method:'POST', headers:{'X-CSRF-Token': _csrfToken}}).catch(function(){}); }, 1600);
   if (!window._heartbeatTimer) {
     window._heartbeatTimer = setInterval(function(){
       fetch('/api/heartbeat', {method:'POST', headers:{'X-CSRF-Token': _csrfToken}}).catch(function(){});
       _checkAdminInvite();
     }, 45000);
   }
-  _safeInit('fetchPumpScanner', fetchPumpScanner());
-  _safeInit('loadHomeFeed', loadHomeFeed());
-  _safeInit('_loadRightRail', _loadRightRail());
-  _safeInit('_checkAdminInvite', _checkAdminInvite());
+  _oaIdle(function(){ _safeInit('fetchPumpScanner', fetchPumpScanner()); }, 1700);
+  _oaIdle(function(){ _safeInit('_loadRightRail', _loadRightRail()); }, 1850);
+  _oaIdle(function(){ _safeInit('_checkAdminInvite', _checkAdminInvite()); }, 2000);
 }
 
 // ── RIGHT DISCOVERY RAIL ────────────────────────────────────────────────────
@@ -1089,15 +1134,16 @@ async function _loadRrTraders(){
       var bg=_rrColor(t.username||t.wallet_address||'?');
       var pnl=(t.total_pnl>=0?'+':'')+t.total_pnl.toFixed(3)+' SOL';
       var badge=t.badges&&t.badges.includes('verified')?'<span class="rr-verified">✓</span>':'';
-      return '<div class="rr-trader-row" onclick="location.href=\'/profile/'+encodeURIComponent(t.wallet_address||'')+'\'">'
-        +'<span class="rr-trader-rank">'+t.rank+'</span>'
-        +'<div class="rr-trader-av" style="background:'+bg+'">'+ini+'</div>'
+      var href='/profile/'+encodeURIComponent(t.wallet_address||'');
+      return '<a class="rr-trader-row" href="'+esc(href)+'" style="text-decoration:none;color:inherit">'
+        +'<span class="rr-trader-rank">'+esc(t.rank)+'</span>'
+        +'<div class="rr-trader-av" style="background:'+bg+'">'+esc(ini)+'</div>'
         +'<div class="rr-trader-info">'
         +'<div class="rr-trader-name"><span class="rr-trader-uname">'+esc(t.username||ini)+'</span>'+badge+'</div>'
         +'<div class="rr-trader-handle">@'+esc(t.username||t.wallet_address.slice(0,6))+'</div>'
         +'</div>'
-        +'<div class="rr-trader-pnl">'+pnl+'</div>'
-        +'</div>';
+        +'<div class="rr-trader-pnl">'+esc(pnl)+'</div>'
+        +'</a>';
     }).join('');
   }catch(e){ el.innerHTML='<div class="rr-empty">—</div>'; }
 }
@@ -1463,6 +1509,16 @@ function esc(s){
   return String(s==null?'':s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
+}
+function safeImageUrl(value){
+  var raw=String(value==null?'':value).trim();
+  if(!raw)return '';
+  if(/^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(raw))return raw;
+  if(/^blob:/i.test(raw))return raw;
+  try{
+    var u=new URL(raw,location.origin);
+    return (u.protocol==='http:'||u.protocol==='https:')?u.href:'';
+  }catch(_){return ''}
 }
 function safeMint(m){
   // Solana addresses are base58: 32–44 chars from a restricted alphabet
@@ -2290,8 +2346,8 @@ async function runFeeRecovery(){
   try{
     const r=await fetch('/api/admin/recover-fees',{method:'POST',headers:{'Content-Type':'application/json'}});
     const d=await r.json();
-    if(d.error){out.innerHTML=`<span style="color:var(--red)">Error: ${d.error}</span>`;}
-    else if(!d.ok){out.innerHTML=`<span style="color:var(--red)">${d.error||'Recovery failed'}</span>`;}
+    if(d.error){out.innerHTML=`<span style="color:var(--red)">Error: ${esc(d.error)}</span>`;}
+    else if(!d.ok){out.innerHTML=`<span style="color:var(--red)">${esc(d.error||'Recovery failed')}</span>`;}
     else{
       const lines=[];
       lines.push(`<b style="color:#4ade80">Total recovered: ${(d.total_sol||0).toFixed(5)} SOL</b>`);
@@ -2303,13 +2359,13 @@ async function runFeeRecovery(){
           ?`${res.fee?.toFixed(5)} SOL  TX:${(res.tx||'').slice(0,14)}…  (${res.trades} trade(s))`
           :res.status==='skipped_dust'?`${res.fee?.toFixed(6)} SOL — dust`
           :`FAILED: ${res.error||'unknown'}`;
-        lines.push(`<span style="color:${col}">${icon} ${res.wallet}  ${detail}</span>`);
+        lines.push(`<span style="color:${col}">${esc(icon)} ${esc(res.wallet||'')}  ${esc(detail)}</span>`);
       });
       if(!d.results?.length) lines.push('<span style="color:var(--muted)">No unpaid fees found</span>');
       out.innerHTML=lines.join('<br>');
       if(typeof loadAdminFees==='function') loadAdminFees();
     }
-  }catch(e){out.innerHTML=`<span style="color:var(--red)">Request failed: ${e.message}</span>`;}
+  }catch(e){out.innerHTML=`<span style="color:var(--red)">Request failed: ${esc(String(e.message||e))}</span>`;}
   finally{btn.disabled=false; btn.textContent='💰 RECOVER FEES NOW';}
 }
 
@@ -2642,6 +2698,10 @@ async function openPosChart(mint,symbol,currentPrice){
   document.querySelectorAll('#pos-chart-tf-bar .chart-tf-btn').forEach(b=>b.classList.toggle('active',b.textContent==='5m'));
   document.getElementById('pos-chart-modal').classList.add('open');
   document.body.style.overflow='hidden';
+  try{ await _ensureLightweightCharts(); }catch(e){
+    var le=document.getElementById('pos-chart-loading'); if(le){le.textContent='Chart unavailable';le.style.display='flex';}
+    return;
+  }
   _initPosChart(currentPrice);
   await _loadPosChartData();
 }
@@ -3574,7 +3634,7 @@ async function loadWalletTokens(){
       return `<div onclick="window.openTokenPanel&&window.openTokenPanel('${t.mint}')" style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #2e2e2e;cursor:pointer;transition:background .12s" onmouseover="this.style.background='#1c1c1c'" onmouseout="this.style.background=\'\'">${logoHtml}<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;color:#fff">${esc(t.symbol||'?')}</div><div style="font-size:11px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.name||'')}</div><div style="font-size:11px;color:#aaa;margin-top:1px">${amtStr}</div></div><div style="text-align:right;flex-shrink:0"><div style="font-size:13px;font-weight:700;color:#fff">${valStr}</div><div style="font-size:11px;color:${chgColor};margin-top:2px">${chgStr}</div></div></div>`;
     }).join('');
   }catch(e){
-    list.innerHTML='<div style="padding:20px;color:#ff1744;text-align:center">'+e.message+'</div>';
+    list.innerHTML='<div style="padding:20px;color:#ff1744;text-align:center">'+esc(String(e.message||e))+'</div>';
   }
 }
 function _startWalletRefresh(){
@@ -4684,7 +4744,9 @@ async function fetchPnlChart(){
   if(!appVisible()) return;
   try{
     const r=await fetch('/api/pnl_chart?range='+_pnlcRange).then(r=>r.json());
-    _renderPnlcChart(r.data||[]);
+    var pts=r.data||[];
+    if(pts.length) await _ensureLightweightCharts();
+    _renderPnlcChart(pts);
   }catch(e){console.error('[pnl_chart] fetch error:',e);}
 }
 
@@ -5164,11 +5226,12 @@ async function confirmWithdraw() {
     const data = await resp.json();
     const resultEl = document.getElementById('wd-result');
     if (data.ok) {
-      const sig = data.signature || '';
-      const explorer = sig ? `https://solscan.io/tx/${sig}` : '';
+      const sig = String(data.signature || '');
+      const explorer = /^[1-9A-HJ-NP-Za-km-z]{40,100}$/.test(sig)
+        ? `https://solscan.io/tx/${encodeURIComponent(sig)}` : '';
       resultEl.style.cssText = 'display:block;margin-bottom:14px;padding:10px 14px;border-radius:8px;font-size:11px;line-height:1.7;word-break:break-all;background:rgba(0,0,0,.07);border:1px solid rgba(0,0,0,.28);color:var(--green)';
       resultEl.innerHTML = `✓ Sent ${amount} SOL successfully!` +
-        (explorer ? `<br><a href="${explorer}" target="_blank" rel="noopener noreferrer" style="color:var(--blue);font-size:10px;text-decoration:underline">View on Solscan ↗</a>` : '') +
+        (explorer ? `<br><a href="${esc(explorer)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue);font-size:10px;text-decoration:underline">View on Solscan ↗</a>` : '') +
         (sig ? `<br><span style="color:var(--muted);font-size:9px;word-break:break-all">TX: ${esc(sig)}</span>` : '');
       btn.style.display = 'none';
       showLfToast('◎',`Sent ${amount} SOL`,'pos');
@@ -5830,7 +5893,7 @@ function _dmRenderConvoList(){
     const name=c.peer_username||_dmShort(c.peer_wallet||'');
     div.innerHTML=`
       <div class="dm-convo-av-wrap">
-        <div class="dm-convo-av" id="dm-cav-${c.peer_id}">${_dmInitials(name)}</div>
+        <div class="dm-convo-av" id="dm-cav-${c.peer_id}">${_esc(_dmInitials(name))}</div>
         ${c.peer_online?'<span class="dm-online-dot"></span>':''}
       </div>
       <div class="dm-convo-info">
@@ -6042,7 +6105,7 @@ async function dmOpenConvo(peerId, peerWallet, peerUsername){
 }
 
 function _esc(str){
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(str==null?'':str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 async function _dmFetchMessages(){
@@ -6887,7 +6950,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
   let _st = null;
 
-  function _e(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function _e(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
   function _short(a){ return a.length>14 ? a.slice(0,5)+'…'+a.slice(-4) : a; }
   function _avHtml(u){
     const ini=_e((u.username||'?')[0].toUpperCase());
@@ -7148,11 +7211,27 @@ function searchUserTag(q){
   fetch('/api/users/search?q='+encodeURIComponent(q))
   .then(r=>r.json()).then(d=>{
     const users=(d&&d.users)||[]
-    document.getElementById('userTagResults').innerHTML=users.length?
-    users.map(u=>`<div onclick="selectUserTag('${u.username.replace(/'/g,"\\'")}')" style="padding:10px;cursor:pointer;border-bottom:1px solid #16191f;color:#eef1f5">
-      <span style="color:#f7b955;font-weight:700">@${esc(u.username)}</span>
-    </div>`).join('')
-    :'<div style="color:#565d68;padding:10px">No users found</div>'
+    var resultBox=document.getElementById('userTagResults')
+    resultBox.replaceChildren()
+    var safeUsers=users.filter(function(u){return /^[a-zA-Z0-9_]{1,20}$/.test(String(u.username||''))})
+    if(!safeUsers.length){
+      var empty=document.createElement('div')
+      empty.style.cssText='color:#565d68;padding:10px'
+      empty.textContent='No users found'
+      resultBox.appendChild(empty)
+      return
+    }
+    safeUsers.forEach(function(u){
+      var row=document.createElement('button')
+      row.type='button'
+      row.style.cssText='display:block;width:100%;padding:10px;text-align:left;cursor:pointer;border:0;border-bottom:1px solid #16191f;background:transparent;color:#eef1f5'
+      var label=document.createElement('span')
+      label.style.cssText='color:#f7b955;font-weight:700'
+      label.textContent='@'+u.username
+      row.appendChild(label)
+      row.addEventListener('click',function(){selectUserTag(u.username)})
+      resultBox.appendChild(row)
+    })
   })
 }
 function selectUserTag(username){
@@ -8255,7 +8334,7 @@ async function loadHomeFeed(){
         _handleNotifDeepLink();
       }catch(e){
         console.error('[feed] render error:', e);
-        if(el) el.innerHTML='<div class="fc-loading" style="color:#f76b62">Feed render error: '+e.message+'</div>';
+        if(el) el.innerHTML='<div class="fc-loading" style="color:#f76b62">Feed render error: '+esc(String(e.message||e))+'</div>';
       }
     } else {
       console.warn('[feed] unexpected response format:', data);
@@ -8352,13 +8431,14 @@ async function loadRightRail(){
         const pnlStr=(isPos?'+':'')+pnl.toFixed(2)+' SOL';
         const handle='@'+(e.username||((e.wallet_address||'').slice(0,6)+'…'));
         const rankColors=['#f7b955','#8a919c','#cd7f32','#565d68'];
-        return '<div style="display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid #16191f;cursor:pointer" onclick="location.href=\'/profile/'+encodeURIComponent(e.wallet_address||'')+'\'">'
-          +'<span style="font-size:12px;font-weight:700;color:'+rankColors[i]+';width:16px;flex-shrink:0">#'+(e.rank||i+1)+'</span>'
-          +'<div style="width:32px;height:32px;border-radius:50%;background:'+bg+';flex-shrink:0;position:relative;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff">'+imgHtml+ini+'</div>'
+        var profileHref='/profile/'+encodeURIComponent(e.wallet_address||'');
+        return '<a href="'+esc(profileHref)+'" style="display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid #16191f;text-decoration:none;color:inherit">'
+          +'<span style="font-size:12px;font-weight:700;color:'+rankColors[i]+';width:16px;flex-shrink:0">#'+esc(e.rank||i+1)+'</span>'
+          +'<div style="width:32px;height:32px;border-radius:50%;background:'+bg+';flex-shrink:0;position:relative;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff">'+imgHtml+esc(ini)+'</div>'
           +'<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(e.username||'Trader')+'</div>'
           +'<div style="font-size:11px;color:#565d68">'+esc(handle)+'</div></div>'
           +'<div style="font-size:12px;font-weight:700;color:'+(isPos?'#3ad29b':'#f76b62')+';flex-shrink:0">'+esc(pnlStr)+'</div>'
-          +'</div>';
+          +'</a>';
       }).join('');
     } else {
       lEl.innerHTML='<div style="padding:8px 0;font-size:12px;color:#565d68">No traders yet.</div>';
@@ -8527,10 +8607,19 @@ async function _liveChartPoll(cardEl, pairAddress, symbol, mint){
       if(buysBarEl) buysBarEl.style.width = (_tot>0?((_b/_tot)*100).toFixed(1):'50')+'%';
     }
     if(bannerEl&&p.info&&p.info.header&&!bannerEl.style.backgroundImage){
-      bannerEl.style.backgroundImage='url('+p.info.header+')';
+      var safeHeader=safeImageUrl(p.info.header);
+      if(safeHeader)bannerEl.style.backgroundImage='url("'+safeHeader.replace(/["\\]/g,'')+'")';
     }
     if(logoEl&&p.info&&p.info.imageUrl&&!logoEl.querySelector('img')){
-      logoEl.innerHTML='<img src="'+p.info.imageUrl+'" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.remove()">';
+      var safeLogo=safeImageUrl(p.info.imageUrl);
+      if(safeLogo){
+        var logoImg=document.createElement('img');
+        logoImg.src=safeLogo;
+        logoImg.alt='';
+        logoImg.style.cssText='width:100%;height:100%;object-fit:cover;border-radius:50%';
+        logoImg.addEventListener('error',function(){logoImg.remove()},{once:true});
+        logoEl.replaceChildren(logoImg);
+      }
     }
     _ccDrawSparkline(cardEl, _liveChartHistory[key]);
   }catch(e){}
@@ -8963,10 +9052,12 @@ async function showTokenCard(symbol,knownAddr){
     const _lbl=function(l){var s=(l.type||l.label||'link');return s.charAt(0).toUpperCase()+s.slice(1);};
     const _addr=p.pairAddress||'';
     const _addrShort=_addr?(_addr.slice(0,6)+'...'+_addr.slice(-4)):'';
+    const _safeHeader=safeImageUrl(p.info?.header||'');
+    const _safeLogo=safeImageUrl(p.info?.imageUrl||'');
     body.innerHTML=`
-      ${p.info?.header?`<img src="${esc(p.info.header)}" style="width:100%;max-height:80px;object-fit:cover;border-radius:8px;margin-bottom:14px;display:block" onerror="this.style.display='none'">` : ''}
+      ${_safeHeader?`<img src="${esc(_safeHeader)}" style="width:100%;max-height:80px;object-fit:cover;border-radius:8px;margin-bottom:14px;display:block" onerror="this.style.display='none'">` : ''}
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
-        ${p.info?.imageUrl?`<img src="${esc(p.info.imageUrl)}" style="width:40px;height:40px;border-radius:50%;object-fit:cover" onerror="this.style.display='none'">`:'<div style="width:40px;height:40px;border-radius:50%;background:#21252c;display:flex;align-items:center;justify-content:center;font-weight:700;color:#f7b955;font-size:15px">'+esc(symbol.slice(0,2))+'</div>'}
+        ${_safeLogo?`<img src="${esc(_safeLogo)}" style="width:40px;height:40px;border-radius:50%;object-fit:cover" onerror="this.style.display='none'">`:'<div style="width:40px;height:40px;border-radius:50%;background:#21252c;display:flex;align-items:center;justify-content:center;font-weight:700;color:#f7b955;font-size:15px">'+esc(symbol.slice(0,2))+'</div>'}
         <div style="flex:1;min-width:0">
           <div style="font-size:18px;font-weight:700;color:#eef1f5;font-family:\'JetBrains Mono\',monospace">$${esc(p.baseToken?.symbol||symbol)}</div>
           <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:3px">

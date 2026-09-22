@@ -11,6 +11,16 @@ function esc(s){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
   });
 }
+function safeMediaUrl(value){
+  var raw=String(value==null?'':value).trim();
+  if(!raw) return '';
+  if(/^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(raw)) return raw;
+  if(/^blob:/i.test(raw)) return raw;
+  try{
+    var u=new URL(raw,location.origin);
+    return (u.protocol==='http:'||u.protocol==='https:') ? u.href : '';
+  }catch(_){ return ''; }
+}
 function fmtUsd(n){
   n = Number(n)||0;
   if(!n) return '—';
@@ -705,8 +715,9 @@ function resetCardState(){
 /* ── markup builders ── */
 function logoTile(imgUrl, symbol, cls, phCls){
   var initials = esc((symbol||'?').slice(0,2).toUpperCase());
-  if(!imgUrl) return '<div class="'+phCls+'">'+initials+'</div>';
-  return '<img class="'+cls+'" src="'+esc(imgUrl)+'" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">'
+  var safeUrl = safeMediaUrl(imgUrl);
+  if(!safeUrl) return '<div class="'+phCls+'">'+initials+'</div>';
+  return '<img class="'+cls+'" src="'+esc(safeUrl)+'" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">'
     + '<div class="'+phCls+'" style="display:none">'+initials+'</div>';
 }
 function statRow(lbl, val, id){
@@ -2324,8 +2335,9 @@ function loadTape(){
     var rows = (d && d.ok && d.trades) || [];
     if(!rows.length){ el.innerHTML = '<div class="pt-tape-empty">Waiting for trades…</div>'; return; }
     el.innerHTML = rows.slice(0,14).map(function(r){
+      var side = String(r.side||'').toLowerCase()==='sell' ? 'sell' : 'buy';
       return '<div class="pt-tape-row">'
-        + '<span class="pt-tape-pill '+r.side+'">'+r.side.toUpperCase()+'</span>'
+        + '<span class="pt-tape-pill '+side+'">'+side.toUpperCase()+'</span>'
         + '<span class="pt-tape-sym">$'+esc(r.symbol)+'</span>'
         + '<span class="pt-tape-amt">'+Number(r.sol_amount||0).toFixed(3)+' SOL</span>'
         + '<span class="pt-tape-age">'+fmtAgeSeconds(r.age_seconds)+'</span>'

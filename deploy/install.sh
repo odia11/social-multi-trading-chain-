@@ -150,6 +150,11 @@ if grep -q '\$proxy_add_x_forwarded_for' "$NGINX_SITE"; then
   die "unsafe X-Forwarded-For append is still present in nginx configuration"
 fi
 
+# Preserve Certbot TLS, but repair the live /static/ block on every deploy.
+# Without this, older production sites keep serving the 474 KB dashboard bundle
+# uncompressed even though the fresh-install template already enables gzip.
+bash "$REPO_DIR/deploy/apply-nginx-performance.sh"
+
 ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/orcagent
 rm -f /etc/nginx/sites-enabled/default
 nginx -t || die "nginx security configuration failed validation"

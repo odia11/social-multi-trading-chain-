@@ -50,8 +50,10 @@ import re
 import sys
 import tempfile
 import time
+from pathlib import Path
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+ROOT = Path(__file__).resolve().parents[1]
+REPO = str(ROOT)
 sys.path.insert(0, REPO)
 
 _DATA = tempfile.mkdtemp()
@@ -71,7 +73,7 @@ def check(name, cond):
     print(('PASS ' if cond else 'FAIL ') + name)
 
 
-SRC = open(REPO + '/dashboard.py', encoding='utf-8').read()
+SRC = (ROOT / 'dashboard.py').read_text(encoding='utf-8')
 
 # ── 1. every manual buy tells the copy path, on every chain ──────────────
 inst = SRC.split('def api_instant_trade')[1].split('\ndef ')[0]

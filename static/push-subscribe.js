@@ -11,6 +11,18 @@ function _urlBase64ToUint8Array(base64String) {
   }
   return outputArray;
 }
+async function _pushCsrfHeaders() {
+  var meta = document.querySelector('meta[name="csrf-token"]');
+  var token = (meta && meta.content) || window._csrfToken || '';
+  if (!token) {
+    try {
+      var r = await fetch('/api/csrf-token', {credentials:'include', cache:'no-store'});
+      var data = await r.json();
+      token = (data && data.token) || '';
+    } catch (_) {}
+  }
+  return {'Content-Type':'application/json','X-CSRF-Token':token,'X-CSRFToken':token};
+}
 async function _enablePushNotifications() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     openAlertModal({text:'Push notifications are not supported on this browser.'});
@@ -35,7 +47,8 @@ async function _enablePushNotifications() {
     var subJson = sub.toJSON();
     var res = await fetch('/api/push/subscribe', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      headers: await _pushCsrfHeaders(),
       body: JSON.stringify(subJson)
     }).then(function(r) { return r.json(); });
     return res;
@@ -50,9 +63,10 @@ async function _disablePushNotifications() {
     if (!reg) return { ok: true };
     var sub = await reg.pushManager.getSubscription();
     if (sub) {
-      await fetch('/api/push/unsubscribe', {
+        await fetch('/api/push/unsubscribe', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        headers: await _pushCsrfHeaders(),
         body: JSON.stringify({ endpoint: sub.endpoint })
       }).catch(function() {});
       await sub.unsubscribe();

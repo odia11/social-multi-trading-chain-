@@ -26,8 +26,9 @@ reason to print.
 import ast
 import re
 import sys
+from pathlib import Path
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = str(Path(__file__).resolve().parents[1])
 SRC = open(REPO + '/dashboard.py', encoding='utf-8').read()
 TREE = ast.parse(SRC)
 

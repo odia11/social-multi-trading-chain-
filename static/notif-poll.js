@@ -50,6 +50,18 @@ function _shouldLegacyPoll(){
 setInterval(function(){if(_shouldLegacyPoll())_pollNotifCount()},30000);
 if(!document.getElementById('pt-nb-notif-badge'))_pollNotifCount();
 
+async function _notifCsrfHeaders(){
+  var meta=document.querySelector('meta[name="csrf-token"]');
+  var token=(meta&&meta.content)||window._csrfToken||'';
+  if(!token){
+    try{
+      var r=await fetch('/api/csrf-token',{credentials:'include',cache:'no-store'});
+      var data=await r.json();
+      token=(data&&data.token)||'';
+    }catch(_){}
+  }
+  return {'Content-Type':'application/json','X-CSRF-Token':token,'X-CSRFToken':token};
+}
 async function _silentPushResubscribeCheck(){
   if(!('serviceWorker' in navigator) || !('PushManager' in window)) return;
   if(!('Notification' in window) || Notification.permission !== 'granted') return;
@@ -67,7 +79,7 @@ async function _silentPushResubscribeCheck(){
     var arr = new Uint8Array(raw.length);
     for(var i=0;i<raw.length;i++) arr[i]=raw.charCodeAt(i);
     var newSub = await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:arr});
-    await fetch('/api/push/subscribe', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(newSub.toJSON())});
+    await fetch('/api/push/subscribe', {method:'POST', credentials:'include', headers:await _notifCsrfHeaders(), body:JSON.stringify(newSub.toJSON())});
   }catch(e){}
 }
 _silentPushResubscribeCheck();

@@ -28,10 +28,11 @@ applies to all of them, exempt or not.
 import ast
 import re
 import sys
+from pathlib import Path
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
-SRC = open(REPO + '/dashboard.py', encoding='utf-8').read()
-CB = open(REPO + '/templates/phantom_callback.html', encoding='utf-8').read()
+ROOT = Path(__file__).resolve().parents[1]
+SRC = (ROOT / 'dashboard.py').read_text(encoding='utf-8')
+CB = (ROOT / 'templates' / 'phantom_callback.html').read_text(encoding='utf-8')
 TREE = ast.parse(SRC)
 
 checks = []

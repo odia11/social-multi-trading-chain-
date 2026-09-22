@@ -387,7 +387,8 @@ function _short(w) {
 
 function _esc(s) {
   return String(s == null ? '' : s)
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 
@@ -1288,18 +1289,28 @@ function searchUsers(q) {
           el.innerHTML = '<div style="color:#565d68;font-size:12px;padding:6px 2px">No users found</div>';
           return;
         }
-        el.innerHTML = users.map(function(u) {
+        el.replaceChildren();
+        users.forEach(function(u) {
           var name = u.username || _short(u.wallet || '');
-          var col  = _avatarColor(u.wallet || '');
-          return '<div onclick="document.getElementById(\'newMsgBar\').style.display=\'none\';_openThread('+u.user_id+','+_esc(JSON.stringify(u.username||''))+','+_esc(JSON.stringify(u.wallet||''))+')"'
-            + ' style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-radius:9px;cursor:pointer"'
-            + ' onmouseover="this.style.background=\'#101216\'" onmouseout="this.style.background=\'\'">'
-            + '<div style="width:30px;height:30px;border-radius:50%;background:'+col+';color:#0a0b0e;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0">'
-            +   _esc(name[0] ? name[0].toUpperCase() : '?')
-            + '</div>'
-            + '<div style="font-size:13px;font-weight:600;color:#eef1f5">'+_esc(name)+'</div>'
-            + '</div>';
-        }).join('');
+          var row = document.createElement('button');
+          row.type = 'button';
+          row.style.cssText = 'display:flex;width:100%;align-items:center;gap:10px;padding:8px 4px;border:0;border-radius:9px;cursor:pointer;background:transparent;text-align:left';
+          row.addEventListener('mouseenter', function(){ row.style.background='#101216'; });
+          row.addEventListener('mouseleave', function(){ row.style.background=''; });
+          row.addEventListener('click', function(){
+            document.getElementById('newMsgBar').style.display='none';
+            _openThread(Number(u.user_id)||0, String(u.username||''), String(u.wallet||''));
+          });
+          var avatar=document.createElement('div');
+          avatar.style.cssText='width:30px;height:30px;border-radius:50%;color:#0a0b0e;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0';
+          avatar.style.background=_avatarColor(u.wallet||'');
+          avatar.textContent=name[0] ? name[0].toUpperCase() : '?';
+          var label=document.createElement('div');
+          label.style.cssText='font-size:13px;font-weight:600;color:#eef1f5';
+          label.textContent=name;
+          row.append(avatar,label);
+          el.appendChild(row);
+        });
       }).catch(function(){ el.innerHTML = ''; });
   }, 300);
 }

@@ -12,11 +12,13 @@ Link 3 is where it was broken, and in a way no error would ever reveal.
 The service worker is executed in node against a fake `clients` registry, so
 these drive the real handler rather than reading it."""
 import json, os, re, subprocess, sys, tempfile
+from pathlib import Path
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
-SW   = open(REPO + '/static/sw.js').read()
-LM   = open(REPO + '/static/live-market-pro.js').read()
-PY_  = open(REPO + '/dashboard.py').read()
+ROOT = Path(__file__).resolve().parents[1]
+REPO = str(ROOT)
+SW   = (ROOT / 'static/sw.js').read_text()
+LM   = (ROOT / 'static/live-market-pro.js').read_text()
+PY_  = (ROOT / 'dashboard.py').read_text()
 
 checks = []
 def check(name, cond):

@@ -654,7 +654,8 @@ function _followUser() {
   var wallet = '{{ wallet }}';
   fetch('/api/follow/toggle', {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    credentials: 'include',
+    headers: {'Content-Type': 'application/json', 'X-CSRF-Token': _csrf},
     body: JSON.stringify({wallet: wallet})
   }).then(function(r){ return r.json(); }).then(function(d) {
     var btn = document.getElementById('pf-follow-btn');
@@ -735,13 +736,14 @@ async function openFollowListModal(type){
     body.innerHTML = users.map(function(u){
       var ini   = (u.username||u.wallet||'?')[0].toUpperCase();
       var color = _flmColor(u.wallet_address||u.username||'');
-      var img   = u.avatar_url ? '<img src="'+u.avatar_url.replace(/"/g,'&quot;')+'" onerror="this.style.display=\'none\'">' : '';
+      var img   = u.avatar_url ? '<img src="'+esc(u.avatar_url)+'" onerror="this.style.display=\'none\'">' : '';
       var handle = u.wallet ? '<div class="flm-handle">'+esc(u.wallet)+'</div>' : '';
       var verifiedBadge = u.verified ? ' <svg width="14" height="14" viewBox="0 0 24 24" style="vertical-align:-2px"><circle cx="12" cy="12" r="12" fill="#f7b955"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#0a0b0e" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '';
-      return '<div class="flm-row" onclick="window.location.href=\'/profile/'+encodeURIComponent(u.wallet_address||'')+'\'">'
-        +'<div class="flm-av" style="background:'+color+'">'+ini+img+'</div>'
+      var profileHref='/profile/'+encodeURIComponent(u.wallet_address||'');
+      return '<a class="flm-row" href="'+esc(profileHref)+'" style="text-decoration:none;color:inherit">'
+        +'<div class="flm-av" style="background:'+color+'">'+esc(ini)+img+'</div>'
         +'<div style="flex:1;min-width:0"><div class="flm-name">'+esc(u.username)+verifiedBadge+'</div>'+handle+'</div>'
-        +'</div>';
+        +'</a>';
     }).join('');
   }catch(e){
     body.innerHTML='<div class="flm-empty">Failed to load.</div>';

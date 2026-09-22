@@ -524,15 +524,19 @@ function _openCopyModal(wallet, username, userId, btn){
   document.getElementById('modal-username').textContent = username;
   var confirmBtn    = document.getElementById('modal-confirm-btn');
   var amountField   = document.getElementById('modal-amount-field');
+  var desc          = document.getElementById('modal-desc');
+  desc.replaceChildren();
   if(isCopying){
-    document.getElementById('modal-desc').innerHTML =
-      'Stop copying <strong>'+username+'</strong>? No new trades will be mirrored.';
+    desc.append(document.createTextNode('Stop copying '));
+    var strong=document.createElement('strong'); strong.textContent=String(username||''); desc.append(strong);
+    desc.append(document.createTextNode('? No new trades will be mirrored.'));
     amountField.style.display = 'none';
     confirmBtn.textContent = 'Stop Copying';
     confirmBtn.className   = 'modal-btn danger';
   } else {
-    document.getElementById('modal-desc').innerHTML =
-      'When <strong>'+username+'</strong> opens a trade, you automatically mirror it with the amount below.';
+    desc.append(document.createTextNode('When '));
+    var strong2=document.createElement('strong'); strong2.textContent=String(username||''); desc.append(strong2);
+    desc.append(document.createTextNode(' opens a trade, you automatically mirror it with the amount below.'));
     amountField.style.display = '';
     document.getElementById('modal-sol-inp').value = '0.1';
     document.getElementById('modal-hint').textContent = 'Each mirrored trade will spend this amount of SOL.';

@@ -38,18 +38,18 @@ check('ordinary mobile bottom space is tightened from the old 132px reserve',
       and 'calc(132px + env' not in CSS)
 check('portfolio gets a compact but safe fixed-nav reserve',
       'body.oa-shared-ux.oa-portfolio .wlt-center' in CSS)
-check('every HTML response gets the shared v4 performance assets early',
-      'app-ux.css?v=4' in PERF and 'app-ux.js?v=4' in PERF)
+check('every HTML response gets the current shared performance assets early',
+      'app-ux.css?v=5' in PERF and 'app-ux.js?v=4' in PERF)
 check('route-critical redesign assets are applied before first paint',
       'portfolio-redesign.css?v=6' in PERF
       and 'live-market-redesign.css?v=7' in PERF
-      and 'home-mobile.css?v=7' in PERF
-      and 'home-mobile-polish.css?v=5' in PERF)
+      and 'home-mobile.css?v=8' in PERF
+      and 'home-mobile-polish.css?v=6' in PERF)
 check('production WSGI installs the performance adapter',
       'from app_performance import install as _install_app_performance' in ENTRY
       and '_install_app_performance(_dashboard)' in ENTRY)
 check('fallback loader no longer duplicates document prefetching',
-      'app-ux.css?v=4' in LOADER and 'app-ux.js?v=4' in LOADER
+      'app-ux.css?v=5' in LOADER and 'app-ux.js?v=4' in LOADER
       and 'fetchDocument' not in LOADER and 'primeCore' not in LOADER)
 check('nginx compresses text assets while retaining live proxy streaming',
       'gzip on;' in NGINX and 'application/javascript' in NGINX
@@ -70,4 +70,13 @@ check('route asset prefetch is restricted to public versioned CSS/JS',
 check('portfolio boot does not hide its entire document',
       'visibility:hidden!important' not in (ROOT / 'static' / 'navbar.js').read_text(encoding='utf-8'))
 
-print('\n17/17 checks passed')
+check('dashboard chart engine is lazy instead of render-blocking',
+      'lightweight-charts.standalone.production.js?v=4.1.3" defer' not in (ROOT/'dashboard.html').read_text(encoding='utf-8')
+      and '_ensureLightweightCharts' in (ROOT/'static'/'dashboard.js').read_text(encoding='utf-8'))
+check('noncritical dashboard hydration is staggered through idle work',
+      '_oaIdle' in (ROOT/'static'/'dashboard.js').read_text(encoding='utf-8')
+      and "_safeInit('loadHomeFeed', loadHomeFeed())" in (ROOT/'static'/'dashboard.js').read_text(encoding='utf-8'))
+check('normal deploys repair nginx static compression on Certbot sites',
+      'apply-nginx-performance.sh' in (ROOT/'deploy'/'install.sh').read_text(encoding='utf-8'))
+
+print('\n20/20 checks passed')
