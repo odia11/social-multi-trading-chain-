@@ -446,12 +446,16 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
         <span class="oa-profile-balance-chain">All chains</span>
       </div>
       <strong class="oa-profile-balance-value" id="oa-profile-balance-value">Loading…</strong>
-      <span class="oa-profile-balance-unit">USDC equivalent · estimated market value</span>
+      <span class="oa-profile-balance-unit">Estimated value of USDC and other tokens</span>
       <div class="oa-profile-balance-foot">
-        <span>Available USDC</span>
+        <span>Actual USDC balance</span>
         <strong id="oa-profile-balance-available">—</strong>
       </div>
-      <small class="oa-profile-balance-state" id="oa-profile-balance-state"></small>
+      <div class="oa-profile-balance-foot oa-profile-balance-other">
+        <span>Other assets · estimated USDC equivalent</span>
+        <strong id="oa-profile-balance-other">—</strong>
+      </div>
+      <small class="oa-profile-balance-state" id="oa-profile-balance-state">Updating live balance…</small>
     </section>
     {% endif %}
 
@@ -1255,7 +1259,7 @@ function _sendTip(){
 }
 </script>
 
-<link rel="stylesheet" href="/static/tip-experience.css?v={{ app_version }}-profile-balance-1">
-<script src="/static/tip-experience.js?v={{ app_version }}-profile-balance-1" defer></script>
+<link rel="stylesheet" href="/static/tip-experience.css?v={{ app_version }}-profile-balance-live-2">
+<script src="/static/tip-experience.js?v={{ app_version }}-profile-balance-live-2" defer></script>
 </body>
 </html>

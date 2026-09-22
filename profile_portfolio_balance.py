@@ -56,13 +56,37 @@ def install(d):
         try:
             snap = _portfolio_snapshot(d, wallet)
             value = _amount(snap.get('total_usd'))
-            available = _amount(snap.get('available_to_trade_usdc'))
+            # The shared Portfolio snapshot includes trading stables such as
+            # Robinhood's USDG in available_to_trade_usdc. A public label
+            # saying 'Available USDC' must only contain actual USDC, never
+            # silently add USDG or other stablecoin balances.
+            stables = snap.get('stable')
+            if isinstance(stables, dict) and isinstance(stables.get('evm_chains'), dict):
+                available = _amount(stables.get('solana_usdc'))
+                if available is None:
+                    raise ValueError('Solana USDC balance unavailable')
+                chains = getattr(d, 'EVM_CHAINS', {})
+                for chain, balance in stables['evm_chains'].items():
+                    cfg = chains.get(chain, {})
+                    if str(cfg.get('usdc_symbol') or 'USDC').upper() != 'USDC':
+                        continue
+                    part = _amount(balance)
+                    if part is None:
+                        raise ValueError('Chain USDC balance unavailable')
+                    available += part
+                available = round(available, 6)
+            else:
+                # Retain compatibility with an older complete snapshot.
+                available = _amount(snap.get('available_to_trade_usdc'))
             if value is None or available is None:
                 raise ValueError('Incomplete portfolio valuation')
+            others = round(max(0.0, value - available), 6)
             result = {
                 'ok': True, 'user_id': user_id,
                 'portfolio_value_usdc_approx': value,
                 'available_usdc': available,
+                'other_assets_usdc_approx': others,
+                'generated_at': snap.get('generated_at'),
                 'stale': bool(snap.get('stale')),
                 'unit': 'USDC',
                 'approximate': True,

@@ -25,31 +25,57 @@ function refreshStats(){
     if($('oa-tip-sent')&&d.sent_usdc!==undefined)$('oa-tip-sent').textContent=money(d.sent_usdc)+' USDC';
   }).catch(function(){});
 }
+var profileBalanceInFlight=false;
+var profileBalanceLastGood=false;
+var profileBalanceSeq=0;
 function refreshProfileBalance(){
   var card=$('oa-profile-balance');
-  if(!card)return;
+  if(!card||profileBalanceInFlight||document.hidden)return Promise.resolve();
   var userId=String(card.dataset.userId||'');
-  if(!/^\d+$/.test(userId))return;
-  fetch('/api/profile/'+encodeURIComponent(userId)+'/portfolio-balance',{
+  if(!/^\d+$/.test(userId))return Promise.resolve();
+  profileBalanceInFlight=true;
+  var seq=++profileBalanceSeq;
+  function sameProfile(){
+    var current=$('oa-profile-balance');
+    return !!current&&current===card&&current.dataset.userId===userId&&seq===profileBalanceSeq;
+  }
+  return fetch('/api/profile/'+encodeURIComponent(userId)+'/portfolio-balance',{
     credentials:'same-origin',cache:'no-store'
   }).then(function(r){
     if(!r.ok)throw new Error('Balance unavailable');
     return r.json();
   }).then(function(d){
+    if(!sameProfile())return;
     if(!d.ok||Number(d.user_id)!==Number(userId))throw new Error('Balance unavailable');
     var value=Number(d.portfolio_value_usdc_approx);
     var available=Number(d.available_usdc);
-    if(!Number.isFinite(value)||value<0||!Number.isFinite(available)||available<0)
-      throw new Error('Balance unavailable');
+    var other=Number(d.other_assets_usdc_approx);
+    if(!Number.isFinite(value)||value<0||!Number.isFinite(available)||available<0||
+       !Number.isFinite(other)||other<0)throw new Error('Balance unavailable');
     $('oa-profile-balance-value').textContent='≈ '+money(value)+' USDC';
     $('oa-profile-balance-available').textContent=money(available)+' USDC';
-    $('oa-profile-balance-state').textContent=d.stale?'Last available portfolio snapshot':'';
+    $('oa-profile-balance-other').textContent='≈ '+money(other)+' USDC';
+    profileBalanceLastGood=true;
+    var updated=Number(d.generated_at||0);
+    var date=updated>0?new Date(updated*1000):null;
+    var clock=date&&!isNaN(date.getTime())
+      ?date.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'just now';
+    $('oa-profile-balance-state').textContent=d.stale
+      ?'Last known balance · live update temporarily delayed'
+      :'Updated '+clock+' · refreshes every 15 seconds';
+    card.classList.toggle('is-stale',!!d.stale);
   }).catch(function(){
-    if(!$('oa-profile-balance-value'))return;
-    $('oa-profile-balance-value').textContent='Unavailable';
-    $('oa-profile-balance-available').textContent='—';
-    $('oa-profile-balance-state').textContent='Balance temporarily unavailable';
-  });
+    if(!sameProfile())return;
+    if(!profileBalanceLastGood){
+      $('oa-profile-balance-value').textContent='Unavailable';
+      $('oa-profile-balance-available').textContent='—';
+      $('oa-profile-balance-other').textContent='—';
+    }
+    card.classList.add('is-stale');
+    $('oa-profile-balance-state').textContent=profileBalanceLastGood
+      ?'Live update delayed · displaying last known balance'
+      :'Balance temporarily unavailable · try again shortly';
+  }).finally(function(){profileBalanceInFlight=false});
 }
 window.OrcAgentRefreshProfileBalance=refreshProfileBalance;
 
@@ -194,7 +220,14 @@ function boot(){
     });
   }
   if($('oa-tip-stats'))setInterval(function(){if(!document.hidden)refreshStats()},30000);
-  if($('oa-profile-balance'))setInterval(function(){if(!document.hidden)refreshProfileBalance()},45000);
+  if($('oa-profile-balance')){
+    setInterval(function(){if(!document.hidden)refreshProfileBalance()},15000);
+    document.addEventListener('visibilitychange',function(){
+      if(!document.hidden)refreshProfileBalance();
+    });
+    window.addEventListener('pageshow',function(){refreshProfileBalance()});
+    window.addEventListener('focus',function(){refreshProfileBalance()});
+  }
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});
 else boot();
