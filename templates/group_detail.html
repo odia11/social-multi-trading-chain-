@@ -152,6 +152,39 @@ html,body{overflow-x:clip}  /* clip, not hidden: hidden makes the root a scroll 
 .gd-react-picker button{background:none;border:none;font-size:16px;padding:5px;border-radius:6px;cursor:pointer}
 .gd-react-picker button:hover{background:var(--bg3)}
 
+.gd-post-actions{display:flex;align-items:center;gap:4px;margin-top:6px}
+.gd-reply-toggle{background:none;border:none;color:var(--muted);font-size:12px;font-weight:600;cursor:pointer;padding:4px 6px;display:flex;align-items:center;gap:5px;font-family:var(--ui)}
+.gd-reply-toggle:hover{color:var(--text)}
+.gd-reply-box{display:none;margin-top:10px}
+.gd-reply-box.open{display:block}
+.gd-reply-row1{display:flex;align-items:center;gap:8px}
+.gd-reply-avatar{width:26px;height:26px;border-radius:50%;background:var(--bg3);border:1px solid var(--border2);flex-shrink:0;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--text)}
+.gd-reply-avatar img{width:100%;height:100%;object-fit:cover}
+.gd-reply-pill{flex:1;min-width:0;position:relative;display:flex;align-items:center;gap:4px;background:var(--bg3);border:1px solid var(--border2);border-radius:999px;padding:6px 6px 6px 12px}
+.gd-reply-pill:focus-within{border-color:var(--accent-border)}
+.gd-reply-inp{flex:1;min-width:0;background:none;border:none;color:var(--text);font-size:13px;font-family:var(--ui);outline:none}
+.gd-reply-inp::placeholder{color:var(--muted)}
+.gd-reply-send{background:var(--accent);color:#0a0b0e;border:none;border-radius:50%;width:26px;height:26px;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:12px}
+.gd-reply-send:disabled{opacity:.5;cursor:default}
+.gd-reply-list{margin-top:10px;display:flex;flex-direction:column;gap:12px}
+.gd-reply-item{display:flex;flex-direction:column}
+.gd-reply-item.gd-reply-nested{margin-left:22px;border-left:2px solid var(--border2);padding-left:10px;margin-top:10px}
+.gd-ri-row{display:flex;gap:8px;align-items:flex-start}
+.gd-ri-avatar{width:24px;height:24px;border-radius:50%;background:var(--bg3);border:1px solid var(--border2);flex-shrink:0;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--text);text-decoration:none}
+.gd-ri-avatar img{width:100%;height:100%;object-fit:cover}
+.gd-ri-body{flex:1;min-width:0}
+.gd-ri-line{font-size:13px;color:var(--sub);line-height:1.45;word-break:break-word}
+.gd-ri-name{font-weight:700;color:var(--text);text-decoration:none}
+.gd-ri-name:hover{text-decoration:underline}
+.gd-ri-you{color:var(--muted);font-weight:600;font-size:12px}
+.gd-ri-meta{display:flex;align-items:center;gap:10px;margin-top:2px}
+.gd-ri-time{font-size:11px;color:var(--muted)}
+.gd-ri-reply-btn,.gd-ri-delete{background:none;border:none;color:var(--muted);font-size:11px;font-weight:600;cursor:pointer;padding:0;font-family:var(--ui)}
+.gd-ri-reply-btn:hover,.gd-ri-delete:hover{color:var(--text)}
+.gd-ri-like{background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:3px;flex-shrink:0;padding:2px}
+.gd-ri-like.liked{color:#ff4757}
+.gd-ri-nested-box{margin-top:8px}
+
 .gd-empty{text-align:center;padding:60px 20px;color:var(--muted);font-size:13px}
 
 .gd-modal-backdrop{display:none;position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.72);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:20px}
@@ -716,8 +749,228 @@ function _postHtml(p){
         +tradeHtml
         +(p.image_url ? '<img class="gd-post-img" src="'+esc(p.image_url)+'" alt="" onclick="_openLightbox(this.src)">' : '')
         +'<div class="gd-react-bar" id="gd-react-g'+p.id+'" data-post-id="g'+p.id+'"></div>'
+        +'<div class="gd-post-actions">'
+          +'<button class="gd-reply-toggle" onclick="_gdToggleReplyBox('+p.id+',this)">💬 <span class="gd-reply-count">'+(p.reply_count||0)+'</span></button>'
+        +'</div>'
+        +'<div class="gd-reply-box" id="gd-rbox-'+p.id+'" onclick="event.stopPropagation()">'
+          +'<div class="gd-reply-row1">'
+            +'<div class="gd-reply-avatar">'+_gdReplyAvatarHtml()+'</div>'
+            +'<div class="gd-reply-pill">'
+              +'<input class="gd-reply-inp" id="gd-rinp-'+p.id+'" type="text" placeholder="Reply to '+esc(name)+'…" maxlength="500" '
+                +'oninput="_onComposerInput(this,\'gd-mm-'+p.id+'\')" '
+                +'onkeydown="if(event.key===\'Enter\'){event.preventDefault();_gdSubmitReply('+p.id+',this)}else{_onComposerKeydown(event)}">'
+              +'<button class="gd-reply-send" onclick="_gdSubmitReply('+p.id+',document.getElementById(\'gd-rinp-'+p.id+'\'))" title="Reageren">'+_GD_SEND_ICON_SVG+'</button>'
+              +'<div class="gd-mention-menu" id="gd-mm-'+p.id+'"></div>'
+            +'</div>'
+          +'</div>'
+          +'<div class="gd-reply-list" id="gd-rlist-'+p.id+'"></div>'
+        +'</div>'
       +'</div>'
     +'</div>';
+}
+
+var _GD_SEND_ICON_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg>';
+
+// ── Replies (comments on a group post) ──────────────────────────────────
+// Reuses the same generic feed-reply backend the home feed uses
+// (/api/feed/reply, /api/feed/replies/<post_id>, ...): it already accepts a
+// 'g'-prefixed post_id and gates access via _group_post_access_ok, so no
+// server-side change was needed beyond exposing reply_count. This mirrors
+// dashboard.js's _feedSubmitReply/_renderReplyRow/_feedToggleNestedReply,
+// trimmed to what this page already has (esc/_timeAgo/_apiHeaders/_showToast).
+
+function _gdReplyAvatarHtml(){
+  if(_myAvatar) return '<img src="'+esc(_myAvatar)+'" alt="">';
+  return esc((_myUsername||'?')[0].toUpperCase());
+}
+
+function _gdToggleReplyBox(postId, btn){
+  var box = document.getElementById('gd-rbox-'+postId);
+  if(!box) return;
+  var open = box.classList.toggle('open');
+  if(open){
+    if(!box.dataset.loaded){
+      box.dataset.loaded = '1';
+      _gdLoadReplies(postId);
+    }
+    var inp = document.getElementById('gd-rinp-'+postId);
+    if(inp) setTimeout(function(){ inp.focus(); }, 60);
+  }
+}
+
+function _gdRenderReplyRow(r, postId, depth){
+  depth = depth || 0;
+  var name = esc(r.username || (r.wallet ? r.wallet.slice(0,6)+'…' : 'Unknown'));
+  var profileHref = r.wallet ? '/profile/'+encodeURIComponent(r.wallet) : '';
+  var nameHtml = profileHref
+    ? '<a class="gd-ri-name" href="'+esc(profileHref)+'" onclick="event.stopPropagation()">'+name+'</a>'
+    : '<span class="gd-ri-name">'+name+'</span>';
+  var avatarInner = r.avatar_url
+    ? '<img src="'+esc(r.avatar_url)+'" alt="" onerror="this.style.display=\'none\'">'
+    : esc((r.username||name||'?')[0].toUpperCase());
+  var avatarHtml = profileHref
+    ? '<a class="gd-ri-avatar" href="'+esc(profileHref)+'" onclick="event.stopPropagation()">'+avatarInner+'</a>'
+    : '<div class="gd-ri-avatar">'+avatarInner+'</div>';
+  var youChip = r.is_mine ? ' <span class="gd-ri-you">· You</span>' : '';
+  var verifiedBadge = r.verified ? ' <span class="gd-verified">✓</span>' : '';
+  var likedCls = r.liked_by_me ? ' liked' : '';
+  var likeCnt = Number(r.like_count)||0;
+  // /api/feed/reply/<id> DELETE only allows the reply's own author, unlike
+  // group posts -- so unlike canDelete on a post, this can't extend to mods.
+  var delBtn = r.is_mine
+    ? '<button class="gd-ri-delete" onclick="_gdDeleteReply('+r.id+',this.closest(\'.gd-reply-item\'),'+postId+')">Delete</button>'
+    : '';
+  return '<div class="gd-reply-item'+(depth>0?' gd-reply-nested':'')+'" data-reply-id="'+r.id+'" data-parent-id="'+(r.parent_reply_id||'')+'">'
+    +'<div class="gd-ri-row">'
+      +avatarHtml
+      +'<div class="gd-ri-body">'
+        +'<div class="gd-ri-line">'+nameHtml+verifiedBadge+youChip+' '+_renderMentionText(r.message)+'</div>'
+        +'<div class="gd-ri-meta">'
+          +'<span class="gd-ri-time">'+esc(_timeAgo(r.created_at))+'</span>'
+          +'<button class="gd-ri-reply-btn" onclick="_gdToggleNestedReply('+r.id+','+postId+',this)">Reply</button>'
+          +delBtn
+        +'</div>'
+      +'</div>'
+      +'<button class="gd-ri-like'+likedCls+'" onclick="_gdLikeReply('+r.id+',this)">'+(r.liked_by_me?'❤️':'♡')+(likeCnt>0?' '+likeCnt:'')+'</button>'
+    +'</div>'
+    +'<div class="gd-ri-nested-box" id="gd-rnbox-'+r.id+'" style="display:none"></div>'
+  +'</div>';
+}
+
+function _gdLoadReplies(postId){
+  var list = document.getElementById('gd-rlist-'+postId);
+  if(!list) return;
+  fetch('/api/feed/replies/g'+postId, {credentials:'include'}).then(function(r){return r.json();}).then(function(d){
+    if(!d.ok){ list.innerHTML=''; return; }
+    if(!d.replies || !d.replies.length){
+      list.innerHTML = '<div style="font-size:12px;color:var(--muted)">No replies yet — be the first.</div>';
+      return;
+    }
+    var byParent = {};
+    d.replies.forEach(function(r){
+      var key = r.parent_reply_id || 'root';
+      (byParent[key] = byParent[key] || []).push(r);
+    });
+    var html = '';
+    (function renderBranch(parentKey, depth){
+      (byParent[parentKey] || []).forEach(function(r){
+        html += _gdRenderReplyRow(r, postId, depth);
+        renderBranch(r.id, depth+1);
+      });
+    })('root', 0);
+    list.innerHTML = html;
+  }).catch(function(){});
+}
+
+function _gdBumpReplyCount(postId, delta){
+  var post = document.querySelector('.gd-post[data-post-id="'+postId+'"]');
+  var cnt = post && post.querySelector('.gd-reply-count');
+  if(cnt) cnt.textContent = Math.max(0, (parseInt(cnt.textContent,10)||0)+delta);
+}
+
+function _gdSubmitReply(postId, inp){
+  if(!inp) return;
+  var text = inp.value.trim();
+  if(!text) return;
+  inp.disabled = true;
+  var sendBtn = inp.parentNode ? inp.parentNode.querySelector('.gd-reply-send') : null;
+  if(sendBtn) sendBtn.disabled = true;
+  fetch('/api/feed/reply', {
+    method: 'POST', credentials: 'include', headers: _apiHeaders(),
+    body: JSON.stringify({post_id: 'g'+postId, message: text})
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d.ok){
+      inp.value = '';
+      var list = document.getElementById('gd-rlist-'+postId);
+      if(list){
+        if(!list.children.length || (list.children[0].tagName==='DIV' && !list.querySelector('.gd-reply-item'))) list.innerHTML='';
+        list.insertAdjacentHTML('beforeend', _gdRenderReplyRow({
+          id: d.id, user_id: d.user_id, username: d.username, wallet: d.wallet || '',
+          message: d.message, created_at: d.created_at, like_count: 0, liked_by_me: false,
+          is_mine: true, verified: false, avatar_url: _myAvatar || ''
+        }, postId, 0));
+      }
+      _gdBumpReplyCount(postId, 1);
+    } else {
+      _showToast(d.msg||'Could not post reply', 'err');
+    }
+  }).catch(function(){ _showToast('Network error', 'err'); }).finally(function(){
+    inp.disabled = false;
+    if(sendBtn) sendBtn.disabled = false;
+  });
+}
+
+function _gdToggleNestedReply(parentId, postId, btn){
+  var box = document.getElementById('gd-rnbox-'+parentId);
+  if(!box) return;
+  var isOpen = box.style.display !== 'none';
+  document.querySelectorAll('#gd-rlist-'+postId+' .gd-ri-nested-box').forEach(function(b){ b.style.display='none'; b.innerHTML=''; });
+  if(isOpen) return;
+  var row = btn ? btn.closest('.gd-reply-item') : null;
+  var authorName = (row && row.querySelector('.gd-ri-name') && row.querySelector('.gd-ri-name').textContent) || 'trader';
+  var inpId = 'gd-rninp-'+parentId, menuId = 'gd-mm-n'+parentId;
+  box.innerHTML = '<div class="gd-reply-row1" style="margin-top:8px">'
+    +'<div class="gd-reply-avatar">'+_gdReplyAvatarHtml()+'</div>'
+    +'<div class="gd-reply-pill">'
+      +'<input class="gd-reply-inp" id="'+inpId+'" type="text" placeholder="Reply to '+esc(authorName)+'…" maxlength="500" '
+        +'oninput="_onComposerInput(this,\''+menuId+'\')" '
+        +'onkeydown="if(event.key===\'Enter\'){event.preventDefault();_gdSubmitNestedReply(document.getElementById(\''+inpId+'\'),'+postId+','+parentId+')}else{_onComposerKeydown(event)}">'
+      +'<button class="gd-reply-send" onclick="_gdSubmitNestedReply(document.getElementById(\''+inpId+'\'),'+postId+','+parentId+')" title="Reageren">'+_GD_SEND_ICON_SVG+'</button>'
+      +'<div class="gd-mention-menu" id="'+menuId+'"></div>'
+    +'</div>'
+  +'</div>';
+  box.style.display = '';
+  var inp = document.getElementById(inpId);
+  if(inp) setTimeout(function(){ inp.focus(); }, 60);
+}
+
+function _gdSubmitNestedReply(inp, postId, parentReplyId){
+  if(!inp) return;
+  var text = inp.value.trim();
+  if(!text) return;
+  inp.disabled = true;
+  fetch('/api/feed/reply', {
+    method: 'POST', credentials: 'include', headers: _apiHeaders(),
+    body: JSON.stringify({post_id: 'g'+postId, message: text, parent_reply_id: parentReplyId})
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d.ok){
+      var parentRow = document.querySelector('#gd-rlist-'+postId+' .gd-reply-item[data-reply-id="'+parentReplyId+'"]');
+      var box = document.getElementById('gd-rnbox-'+parentReplyId);
+      if(box){ box.style.display='none'; box.innerHTML=''; }
+      if(parentRow){
+        var depth = parentRow.dataset.parentId ? 2 : 1;
+        parentRow.insertAdjacentHTML('afterend', _gdRenderReplyRow({
+          id: d.id, user_id: d.user_id, username: d.username, wallet: d.wallet || '',
+          message: d.message, created_at: d.created_at, like_count: 0, liked_by_me: false,
+          is_mine: true, verified: false, avatar_url: _myAvatar || '', parent_reply_id: parentReplyId
+        }, postId, depth));
+      }
+      _gdBumpReplyCount(postId, 1);
+    } else {
+      _showToast(d.msg||'Could not post reply', 'err');
+    }
+  }).catch(function(){ _showToast('Network error', 'err'); }).finally(function(){
+    inp.disabled = false;
+  });
+}
+
+function _gdLikeReply(replyId, btn){
+  fetch('/api/feed/reply/like/'+replyId, {method:'POST', credentials:'include', headers:_apiHeaders()})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok) return;
+      btn.classList.toggle('liked', d.liked);
+      var lc = Number(d.like_count)||0;
+      btn.innerHTML = (d.liked?'❤️':'♡')+(lc>0?' '+lc:'');
+    }).catch(function(){});
+}
+
+function _gdDeleteReply(replyId, rowEl, postId){
+  fetch('/api/feed/reply/'+replyId, {method:'DELETE', credentials:'include', headers:_apiHeaders()})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){ _showToast(d.msg||d.error||'Could not delete', 'err'); return; }
+      if(rowEl) rowEl.remove();
+      _gdBumpReplyCount(postId, -1);
+    }).catch(function(){ _showToast('Network error', 'err'); });
 }
 
 var _REACTION_EMOJIS = ['👍', '❤️', '😂', '🔥', '💰', '🚀', '😢', '😮'];
@@ -814,6 +1067,9 @@ document.addEventListener('click', function(e){
     var tdd = document.getElementById('gd-trade-dropdown');
     if(tdd) tdd.classList.remove('open');
   }
+  if(_mentionInput && e.target !== _mentionInput && !e.target.closest('.gd-mention-menu')){
+    _closeMentionMenu();
+  }
 });
 
 function _toggleReaction(postId, emoji){
@@ -829,8 +1085,16 @@ var _mentionTimer = null;
 var _mentionMatches = [];
 var _mentionActiveIdx = -1;
 var _mentionStart = -1;
+// Which input/menu pair a mention search is currently targeting. Set on every
+// call so the same autocomplete works for the group composer AND any reply
+// or nested-reply input, which are created dynamically and each carry their
+// own <div class="gd-mention-menu"> anchored right below that one field.
+var _mentionInput = null;
+var _mentionMenuId = 'gd-mention-menu';
 
-function _onComposerInput(inp){
+function _onComposerInput(inp, menuId){
+  _mentionInput = inp;
+  _mentionMenuId = menuId || 'gd-mention-menu';
   var pos = inp.selectionStart;
   var textBefore = inp.value.slice(0, pos);
   var m = /@([a-zA-Z0-9_]*)$/.exec(textBefore);
@@ -851,7 +1115,7 @@ function _fetchMentions(q){
 }
 
 function _renderMentionMenu(){
-  var menu = document.getElementById('gd-mention-menu');
+  var menu = document.getElementById(_mentionMenuId);
   if(!menu) return;
   if(!_mentionMatches.length){ menu.classList.remove('open'); return; }
   menu.innerHTML = _mentionMatches.map(function(m, i){
@@ -867,12 +1131,12 @@ function _renderMentionMenu(){
 function _closeMentionMenu(){
   _mentionMatches = [];
   _mentionActiveIdx = -1;
-  var menu = document.getElementById('gd-mention-menu');
+  var menu = document.getElementById(_mentionMenuId);
   if(menu) menu.classList.remove('open');
 }
 
 function _selectMention(idx){
-  var inp = document.getElementById('gd-composer-inp');
+  var inp = _mentionInput;
   var m = _mentionMatches[idx];
   if(!inp || !m) return;
   var pos = inp.selectionStart;
@@ -883,11 +1147,12 @@ function _selectMention(idx){
   var newPos = (before + insertion).length;
   inp.focus();
   inp.setSelectionRange(newPos, newPos);
+  if(inp.tagName === 'TEXTAREA'){ inp.style.height='auto'; inp.style.height=inp.scrollHeight+'px'; }
   _closeMentionMenu();
 }
 
 function _onComposerKeydown(ev){
-  var menu = document.getElementById('gd-mention-menu');
+  var menu = document.getElementById(_mentionMenuId);
   if(!menu || !menu.classList.contains('open')) return;
   if(ev.key === 'ArrowDown'){
     ev.preventDefault();
