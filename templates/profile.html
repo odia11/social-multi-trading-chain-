@@ -437,6 +437,23 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
       <div class="pf-follow-item"><span class="pf-follow-count">{{ copiers|default(0) }}</span><span class="pf-follow-label">Copiers</span></div>
     </section>
 
+    {% if can_view_sensitive|default(false) %}
+    <section class="oa-profile-balance" id="oa-profile-balance" data-user-id="{{ user_id }}" aria-label="User portfolio balance in USDC" aria-live="polite">
+      <div class="oa-profile-balance-head">
+        <span class="oa-profile-balance-symbol" aria-hidden="true">$</span>
+        <span class="oa-profile-balance-label">Portfolio balance</span>
+        <span class="oa-profile-balance-chain">All chains</span>
+      </div>
+      <strong class="oa-profile-balance-value" id="oa-profile-balance-value">Loading…</strong>
+      <span class="oa-profile-balance-unit">USDC equivalent · estimated market value</span>
+      <div class="oa-profile-balance-foot">
+        <span>Available USDC</span>
+        <strong id="oa-profile-balance-available">—</strong>
+      </div>
+      <small class="oa-profile-balance-state" id="oa-profile-balance-state"></small>
+    </section>
+    {% endif %}
+
     <section class="oa-tip-stats" id="oa-tip-stats" data-user-id="{{ user_id }}" aria-label="USDC tip support" aria-live="polite">
       <div class="oa-tip-stat"><span>Tips received</span><strong id="oa-tip-received">—</strong></div>
       <div class="oa-tip-stat"><span>Supporters</span><strong id="oa-tip-supporters">—</strong></div>
@@ -1237,7 +1254,7 @@ function _sendTip(){
 }
 </script>
 
-<link rel="stylesheet" href="/static/tip-experience.css?v={{ app_version }}">
-<script src="/static/tip-experience.js?v={{ app_version }}" defer></script>
+<link rel="stylesheet" href="/static/tip-experience.css?v={{ app_version }}-profile-balance-1">
+<script src="/static/tip-experience.js?v={{ app_version }}-profile-balance-1" defer></script>
 </body>
 </html>

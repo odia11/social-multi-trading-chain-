@@ -25,6 +25,34 @@ function refreshStats(){
     if($('oa-tip-sent')&&d.sent_usdc!==undefined)$('oa-tip-sent').textContent=money(d.sent_usdc)+' USDC';
   }).catch(function(){});
 }
+function refreshProfileBalance(){
+  var card=$('oa-profile-balance');
+  if(!card)return;
+  var userId=String(card.dataset.userId||'');
+  if(!/^\d+$/.test(userId))return;
+  fetch('/api/profile/'+encodeURIComponent(userId)+'/portfolio-balance',{
+    credentials:'same-origin',cache:'no-store'
+  }).then(function(r){
+    if(!r.ok)throw new Error('Balance unavailable');
+    return r.json();
+  }).then(function(d){
+    if(!d.ok||Number(d.user_id)!==Number(userId))throw new Error('Balance unavailable');
+    var value=Number(d.portfolio_value_usdc_approx);
+    var available=Number(d.available_usdc);
+    if(!Number.isFinite(value)||value<0||!Number.isFinite(available)||available<0)
+      throw new Error('Balance unavailable');
+    $('oa-profile-balance-value').textContent='≈ '+money(value)+' USDC';
+    $('oa-profile-balance-available').textContent=money(available)+' USDC';
+    $('oa-profile-balance-state').textContent=d.stale?'Last available portfolio snapshot':'';
+  }).catch(function(){
+    if(!$('oa-profile-balance-value'))return;
+    $('oa-profile-balance-value').textContent='Unavailable';
+    $('oa-profile-balance-available').textContent='—';
+    $('oa-profile-balance-state').textContent='Balance temporarily unavailable';
+  });
+}
+window.OrcAgentRefreshProfileBalance=refreshProfileBalance;
+
 window.OrcAgentRefreshTipStats=refreshStats;
 var receiptTimer=null,receiptId=null,noteCallback=null,noteDelivered=false,receiptAttempts=0;
 var receiptVisible=false;
@@ -156,6 +184,7 @@ function loadHistory(){
 window.OrcAgentRefreshTipHistory=loadHistory;
 function boot(){
   refreshStats();
+  refreshProfileBalance();
   if($('oa-tip-history')){
     loadHistory();
     var btn=$('oa-tip-history-refresh');
@@ -165,6 +194,7 @@ function boot(){
     });
   }
   if($('oa-tip-stats'))setInterval(function(){if(!document.hidden)refreshStats()},30000);
+  if($('oa-profile-balance'))setInterval(function(){if(!document.hidden)refreshProfileBalance()},45000);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});
 else boot();
