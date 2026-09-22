@@ -8764,6 +8764,48 @@ def get_0x_bridge_quote(origin_chain: str, origin_token: str, origin_amount_raw:
     except Exception as e:
         return {'ok': False, 'msg': f'malformed quote response: {e}'}
 
+def _evm_tx_fee_fields(w3, chain: str, quoted_gas_price=None) -> dict:
+    """Return fee fields that stay valid while the next block's base fee moves.
+
+    Robinhood Chain is EIP-1559. Using eth_gasPrice as a fixed legacy gasPrice
+    leaves no headroom between building an approval and broadcasting it; a
+    normal base-fee increase can then reject the transaction with
+    "max fee per gas less than block base fee". On EIP-1559 chains a max fee
+    is only a ceiling: the user still pays the actual base fee plus priority.
+    """
+    quoted = int(quoted_gas_price or 0)
+    try:
+        latest = w3.eth.get_block('latest')
+        base = latest.get('baseFeePerGas')
+    except Exception:
+        base = None
+    try:
+        node_price = int(w3.eth.gas_price or 0)
+    except Exception:
+        node_price = 0
+
+    # Keep BSC on the broadly-compatible legacy format. Base, Arbitrum,
+    # Polygon and Robinhood all support dynamic-fee transactions.
+    if base is not None and chain != 'bsc':
+        base = int(base)
+        try:
+            priority = int(w3.eth.max_priority_fee or 0)
+        except Exception:
+            priority = 0
+        # eth_gasPrice often already includes the node's suggested tip.
+        priority = max(priority, node_price - base, 0)
+        max_fee = max(base * 2 + priority, quoted, node_price + priority, 1)
+        return {
+            'type': 2,
+            'maxFeePerGas': max_fee,
+            'maxPriorityFeePerGas': priority,
+        }
+
+    # Legacy chains need explicit headroom because gasPrice itself is the cap.
+    suggested = max(quoted, node_price, 1)
+    return {'gasPrice': (suggested * 125 + 99) // 100}
+
+
 def _ensure_evm_allowance(w3, owner_address: str, private_key: str, token_address: str,
                            spender: str, needed_amount_raw: int, chain: str = 'bsc') -> bool:
     """Approves exactly `needed_amount_raw` (not an unlimited/infinite approval)
@@ -8783,7 +8825,7 @@ def _ensure_evm_allowance(w3, owner_address: str, private_key: str, token_addres
         'from': owner,
         'nonce': w3.eth.get_transaction_count(owner),
         'chainId': EVM_CHAINS[chain]['chain_id'],
-        'gasPrice': w3.eth.gas_price,
+        **_evm_tx_fee_fields(w3, chain),
     })
     tx['gas'] = w3.eth.estimate_gas(tx)
     signed = acct.sign_transaction(tx)
@@ -8878,9 +8920,9 @@ def _execute_evm_swap(wallet: str, private_key: str, action: str, token_address:
             'data': txn['data'],
             'value': int(txn.get('value', '0')),
             'gas': int(txn['gas']) if txn.get('gas') else 350000,
-            'gasPrice': int(txn['gasPrice']) if txn.get('gasPrice') else w3.eth.gas_price,
             'nonce': w3.eth.get_transaction_count(wallet_cs),
             'chainId': EVM_CHAINS[chain]['chain_id'],
+            **_evm_tx_fee_fields(w3, chain, txn.get('gasPrice')),
         }
         try:
             signed = acct.sign_transaction(tx)
@@ -9000,9 +9042,9 @@ def _execute_evm_gas_topup(wallet: str, private_key: str, chain: str, usdc_amoun
             'data': txn['data'],
             'value': int(txn.get('value', '0')),
             'gas': int(txn['gas']) if txn.get('gas') else 350000,
-            'gasPrice': int(txn['gasPrice']) if txn.get('gasPrice') else w3.eth.gas_price,
             'nonce': w3.eth.get_transaction_count(wallet_cs),
             'chainId': EVM_CHAINS[chain]['chain_id'],
+            **_evm_tx_fee_fields(w3, chain, txn.get('gasPrice')),
         }
         try:
             signed = acct.sign_transaction(tx)
@@ -9062,9 +9104,9 @@ def _execute_evm_native_to_usdc(wallet: str, private_key: str, chain: str, nativ
             'data': txn['data'],
             'value': int(txn.get('value', '0')),
             'gas': int(txn['gas']) if txn.get('gas') else 350000,
-            'gasPrice': int(txn['gasPrice']) if txn.get('gasPrice') else w3.eth.gas_price,
             'nonce': w3.eth.get_transaction_count(wallet_cs),
             'chainId': EVM_CHAINS[chain]['chain_id'],
+            **_evm_tx_fee_fields(w3, chain, txn.get('gasPrice')),
         }
         try:
             signed = acct.sign_transaction(tx)
