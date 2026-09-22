@@ -42,7 +42,7 @@ def install(appmod) -> None:
                     '</script>'
                 )
 
-            style('app-ux.css', '/static/app-ux.css?v=4', ' id="oa-app-ux-css"')
+            style('app-ux.css', '/static/app-ux.css?v=5', ' id="oa-app-ux-css"')
             script('app-ux.js', '/static/app-ux.js?v=4', ' id="oa-app-ux-js"')
             style('shared-trade-card-v2.css', '/static/shared-trade-card-v2.css?v=1', ' id="oa-shared-trade-card-css"')
             script('shared-trade-card-v2.js', '/static/shared-trade-card-v2.js?v=1', ' id="oa-shared-trade-card-js"')
@@ -69,9 +69,9 @@ def install(appmod) -> None:
                 style('groups-redesign.css', '/static/groups-redesign.css?v=1')
                 script('groups-redesign.js', '/static/groups-redesign.js?v=1')
             elif path == '/':
-                style('home-mobile.css', '/static/home-mobile.css?v=7', ' media="(max-width:767px)"')
-                style('home-mobile-polish.css', '/static/home-mobile-polish.css?v=5', ' media="(max-width:767px)"')
-                style('home-composer-mobile.css', '/static/home-composer-mobile.css?v=1', ' media="(max-width:767px)"')
+                style('home-mobile.css', '/static/home-mobile.css?v=8', ' media="(max-width:768px)"')
+                style('home-mobile-polish.css', '/static/home-mobile-polish.css?v=6', ' media="(max-width:768px)"')
+                style('home-composer-mobile.css', '/static/home-composer-mobile.css?v=1', ' media="(max-width:768px)"')
                 style('home-desktop.css', '/static/home-desktop.css?v=1', ' media="(min-width:1025px)"')
 
             # Chromium/Android uses document.documentElement as the root
@@ -100,14 +100,14 @@ def install(appmod) -> None:
             if not _uses_internal_mobile_scroller and 'data-oa-native-mobile-scroll="1"' not in html:
                 tags.append(
                     '<script data-oa-native-mobile-scroll="1">'
-                    '(function(){if(window.matchMedia&&window.matchMedia("(max-width:767px)").matches){'
+                    '(function(){if(window.matchMedia&&window.matchMedia("(max-width:768px)").matches){'
                     'document.documentElement.classList.add("oa-native-mobile-scroll");'
                     '}})();'
                     '</script>'
                 )
                 tags.append(
                     '<style data-oa-native-mobile-scroll-css="1">'
-                    '@media(max-width:767px){'
+                    '@media(max-width:768px){'
                     'html.oa-native-mobile-scroll{height:auto!important;min-height:100%!important;max-height:none!important;'
                     'overflow-x:hidden!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important;'
                     'overscroll-behavior-y:none!important;touch-action:pan-y!important}'

@@ -52,7 +52,7 @@
 .pt-nb-sr-sub{font-size:11px;color:#565d68;font-family:'JetBrains Mono',monospace}
 .pt-nb-sr-chain{font-size:9px;font-weight:700;color:#9aa3af;background:#20242c;border-radius:4px;padding:1px 5px;margin-left:4px;letter-spacing:.02em;vertical-align:1px}
 .pt-nb-sr-empty{padding:16px;text-align:center;color:#565d68;font-size:12px}
-@media(max-width:767px){
+@media(max-width:768px){
   #pt-nb-search-portal{position:fixed!important;inset:0!important;width:100vw!important;height:100dvh!important;box-sizing:border-box!important;z-index:5000!important;background:#050b11!important;padding:calc(14px + env(safe-area-inset-top,0px)) 14px calc(14px + env(safe-area-inset-bottom,0px))!important;overflow:hidden!important}
   #pt-nb-search-portal>.pt-nb-search-wrap.mobile-search-open{position:relative!important;inset:auto!important;display:grid!important;grid-template-columns:minmax(0,1fr) 48px!important;grid-template-rows:48px minmax(0,1fr)!important;gap:10px!important;width:100%!important;max-width:none!important;height:100%!important;margin:0!important;padding:0!important;justify-self:stretch!important;transform:none!important;background:transparent!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
   #pt-nb-search-portal .pt-nb-search{grid-column:1!important;grid-row:1!important;width:100%!important;height:48px!important;margin:0!important;padding:0 16px 0 42px!important;border-radius:14px!important;color:#eef1f5!important;caret-color:#f7b955!important;background:#0c141d!important}

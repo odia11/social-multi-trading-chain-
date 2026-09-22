@@ -41,10 +41,10 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
 
 (function(){
   var here=location.pathname.replace(/\/+$/,'')||'/';
-  if(here!=='/'||!window.matchMedia('(max-width:767px)').matches)return;
+  if(here!=='/'||!window.matchMedia('(max-width:768px)').matches)return;
   document.documentElement.classList.add('oa-home-mobile-root');
-  ensureStyle('/static/home-mobile.css?v=7','home-mobile.css');
-  ensureScript('/static/home-mobile.js?v=6','home-mobile.js');
+  ensureStyle('/static/home-mobile.css?v=8','home-mobile.css');
+  ensureScript('/static/home-mobile.js?v=7','home-mobile.js');
 })();
 
 (function(){
@@ -63,8 +63,8 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
 
 /* Shared premium mobile bottom nav across OrcAgent. */
 (function(){
-  if(!window.matchMedia('(max-width:767px)').matches)return;
-  ensureStyle('/static/mobile-bottom-nav.css?v=4','mobile-bottom-nav.css');
+  if(!window.matchMedia('(max-width:768px)').matches)return;
+  ensureStyle('/static/mobile-bottom-nav.css?v=5','mobile-bottom-nav.css');
   ensureScript('/static/mobile-bottom-nav.js?v=5','mobile-bottom-nav.js');
 })();
 
@@ -109,7 +109,7 @@ document.addEventListener('DOMContentLoaded',function(){
   var _searchTimer=null,_searchSeq=0;
   var searchHome=searchWrap&&searchWrap.parentNode,searchNext=searchWrap&&searchWrap.nextSibling,searchPortal=null;
   function openMobileSearch(){
-    if(!searchWrap||!window.matchMedia('(max-width:767px)').matches)return;
+    if(!searchWrap||!window.matchMedia('(max-width:768px)').matches)return;
     // A fixed child of the sticky/backdrop-filter navbar uses that navbar as
     // its containing block on iOS. Portal it to body so inset:0 really means
     // the viewport instead of starting in the navbar's second grid column.

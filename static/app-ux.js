@@ -11,7 +11,7 @@ function closestLink(e){var n=e.target;return n&&n.closest?n.closest('a[href]'):
    entry. Warm ONLY versioned public route assets (never API or wallet data).
    Cross-document View Transitions keep the old page painted during navigation. */
 var ROUTE_ASSETS={
-  '/':['home-mobile.css?v=7','home-mobile-polish.css?v=5','home-composer-mobile.css?v=1','home-desktop.css?v=1','home-mobile.js?v=6','home-desktop.js?v=1'],
+  '/':['home-mobile.css?v=8','home-mobile-polish.css?v=6','home-composer-mobile.css?v=1','home-desktop.css?v=1','home-mobile.js?v=7','home-desktop.js?v=1'],
   '/wallet':['portfolio-redesign.css?v=7','portfolio-redesign.js?v=10','portfolio-assets.js?v=1'],
   '/live-market':['live-market-redesign.css?v=7','live-market-final.css?v=4','live-market-redesign.js?v=5','live-market-hotfix.js?v=8'],
   '/groups':['groups-redesign.css?v=1','groups-redesign.js?v=1']
@@ -50,7 +50,7 @@ var modalLocked=false,modalY=0;
 function isModalNode(el){return !!(el&&el.matches&&el.matches(MODAL_SEL))}
 function isVisible(el){if(!el)return false;if(el.classList.contains('open'))return true;var st=el.style&&el.style.display;if(st&&st!=='none')return true;try{return getComputedStyle(el).display!=='none'}catch(e){return false}}
 function anyOpenModal(){var list=document.querySelectorAll(MODAL_SEL);for(var i=0;i<list.length;i++){if(isVisible(list[i]))return true}return false}
-function syncModalLock(){if(!window.matchMedia('(max-width:767px)').matches)return;if(document.documentElement.classList.contains('oa-groups-modal-open'))return;var open=anyOpenModal();if(open&&!modalLocked){modalLocked=true;modalY=window.scrollY||document.documentElement.scrollTop||0;document.documentElement.classList.add('oa-modal-open');document.body.style.position='fixed';document.body.style.top=(-modalY)+'px';document.body.style.left='0';document.body.style.right='0';document.body.style.width='100%'}else if(!open&&modalLocked){modalLocked=false;document.documentElement.classList.remove('oa-modal-open');document.body.style.position='';document.body.style.top='';document.body.style.left='';document.body.style.right='';document.body.style.width='';window.scrollTo(0,modalY)}}
+function syncModalLock(){if(!window.matchMedia('(max-width:768px)').matches)return;if(document.documentElement.classList.contains('oa-groups-modal-open'))return;var open=anyOpenModal();if(open&&!modalLocked){modalLocked=true;modalY=window.scrollY||document.documentElement.scrollTop||0;document.documentElement.classList.add('oa-modal-open');document.body.style.position='fixed';document.body.style.top=(-modalY)+'px';document.body.style.left='0';document.body.style.right='0';document.body.style.width='100%'}else if(!open&&modalLocked){modalLocked=false;document.documentElement.classList.remove('oa-modal-open');document.body.style.position='';document.body.style.top='';document.body.style.left='';document.body.style.right='';document.body.style.width='';window.scrollTo(0,modalY)}}
 
 /* Observe class/style only on modal shells. */
 var modalObserved=typeof WeakSet!=='undefined'?new WeakSet():null;

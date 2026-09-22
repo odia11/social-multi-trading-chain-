@@ -1,5 +1,5 @@
 /* Shared OrcAgent mobile bottom navigation */
-@media(max-width:767px){
+@media(max-width:768px){
   body{padding-bottom:calc(118px + env(safe-area-inset-bottom,0px))!important}
   #mobile-nav{display:none!important}
   .pt-nb-menu-btn{display:none!important}
@@ -65,4 +65,4 @@
   .oa-app-menu-sep{grid-column:1/-1;height:1px;background:#17202a;margin:3px 0}
   html.oa-app-menu-open,html.oa-app-menu-open body{overflow:hidden!important;overscroll-behavior:none!important}
 }
-@media(min-width:768px){.oa-bottom-nav,.oa-wallet-actions,.oa-app-menu{display:none!important}}
+@media(min-width:769px){.oa-bottom-nav,.oa-wallet-actions,.oa-app-menu{display:none!important}}

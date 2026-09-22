@@ -2,7 +2,7 @@
 (function(){
 'use strict';
 var path=location.pathname.replace(/\/+$/,'')||'/';
-if(path!=='/' || !window.matchMedia('(max-width:767px)').matches) return;
+if(path!=='/' || !window.matchMedia('(max-width:768px)').matches) return;
 /* Do not rely on CSS :has() to unlock document scrolling. Older Android
    WebViews either do not support it or can evaluate it too late, leaving the
    dashboard's base html{overflow:hidden} rule active for the whole page. */
