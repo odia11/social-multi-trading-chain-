@@ -415,23 +415,70 @@ def install(d):
         except Exception as exc:
             gasless_error = d._redact_keys(str(exc))[:350]
 
-        # Some meme tokens do not implement EIP-2612. 0x can relay their swap
-        # only after an ordinary allowance exists. Instead of asking the user
-        # to manually deposit gas, buy a small amount of native gas using the
-        # user's own remaining USDC/USDG through a separate gasless swap, then
-        # use the existing approval+sell implementation. OrcAgent contributes
-        # no funds and takes no platform fee on this gas conversion.
+        # Some meme tokens do not implement EIP-2612. CHUMP on Robinhood
+        # Chain is one concrete example: the swap can be relayed gaslessly,
+        # but its first ERC-20 approval cannot. Never strand such a position.
+        #
+        # 1. If the trading wallet already has enough native gas, use the
+        #    mature approval + Swap API path immediately. The previous code
+        #    tried to buy MORE gas first and could therefore reject a sell
+        #    simply because no stablecoin remained after an all-in buy.
+        taker = Account.from_key(private_key).address
+        fallback_errors = []
+        try:
+            w3 = d._get_web3(chain)
+            native_wei = w3.eth.get_balance(w3.to_checksum_address(taker))
+            needed_wei = w3.eth.gas_price * int(
+                getattr(d, 'GAS_TOPUP_TX_GAS_UNITS', 500000))
+            if native_wei >= needed_wei:
+                return original_execute(
+                    wallet, private_key, 'sell', token_address, amount_str, chain)
+        except Exception as exc:
+            fallback_errors.append(
+                'native gas check: ' + d._redact_keys(str(exc))[:160])
+
+        # 2. Prefer the user's own stablecoin. The chain stable (USDG on
+        #    Robinhood, USDC elsewhere) supports the gasless top-up path, so
+        #    this creates native gas without asking the user to leave OrcAgent.
         try:
             _gasless_native_topup(d, private_key, chain)
             return original_execute(
                 wallet, private_key, 'sell', token_address, amount_str, chain)
-        except Exception as fallback_exc:
-            fallback_error = d._redact_keys(str(fallback_exc))[:350]
-            return False, (
-                'Gasless sell could not be completed'
-                + (f': {gasless_error}' if gasless_error else '')
-                + f'; automatic gas setup also failed: {fallback_error}'
-            )[:700], ''
+        except Exception as exc:
+            fallback_errors.append(
+                'user-funded gas: ' + d._redact_keys(str(exc))[:220])
+
+        # 3. A fully-invested wallet can legitimately have the token but no
+        #    stablecoin left. OrcAgent already has an audited/capped exit-gas
+        #    recovery path specifically for that case; the gasless adapter
+        #    accidentally bypassed it. Reconnect it here as the final fallback
+        #    so an open position can always attempt its ordinary approve+sell.
+        try:
+            conn = sqlite3.connect(d.DB_FILE)
+            try:
+                row = conn.execute(
+                    'SELECT id FROM users WHERE wallet_address=?', (wallet,)
+                ).fetchone()
+            finally:
+                conn.close()
+            if row and callable(getattr(d, '_sponsor_evm_gas', None)):
+                ok, msg, _tx = d._sponsor_evm_gas(
+                    int(row[0]), wallet, taker, chain)
+                if ok:
+                    return original_execute(
+                        wallet, private_key, 'sell', token_address, amount_str, chain)
+                fallback_errors.append(
+                    'exit gas recovery: ' + d._redact_keys(str(msg))[:180])
+        except Exception as exc:
+            fallback_errors.append(
+                'exit gas recovery: ' + d._redact_keys(str(exc))[:180])
+
+        details = '; '.join(fallback_errors)
+        return False, (
+            'This token needs a one-time on-chain approval before it can be sold. '
+            'Automatic gas setup could not complete'
+            + (f' ({details})' if details else '')
+        )[:700], ''
 
     def charge_fee(private_key, wallet, user_id, symbol, usdc_amount, kind,
                    chain='bsc', trade_ts=None, gross_profit=0.0):

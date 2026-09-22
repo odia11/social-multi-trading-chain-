@@ -2,8 +2,12 @@
 import os
 import sys
 import types
+import sqlite3
+import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import bsc_gasless_trading as gasless
+
+TEST_KEY = '0x' + '11' * 32
 
 
 class Chain:
@@ -72,7 +76,7 @@ def test_gasless_sell_is_first_choice():
         gasless._submit_and_wait = lambda *a, **k: '0xgaslesssell'
         gasless.install(d)
         result = d._execute_evm_swap(
-            'wallet', 'key', 'sell', '0x' + '5' * 40, '12.5', 'base')
+            'wallet', TEST_KEY, 'sell', '0x' + '5' * 40, '12.5', 'base')
         assert result == (True, '', '0xgaslesssell')
         assert calls['execute'] == []
     finally:
@@ -91,7 +95,7 @@ def test_nonpermit_token_uses_user_stablecoin_for_gas_then_legacy_sell():
         gasless._gasless_native_topup = lambda *a, **k: topups.append('user-funded') or '0xtopup'
         gasless.install(d)
         result = d._execute_evm_swap(
-            'wallet', 'key', 'sell', '0x' + '6' * 40, '3', 'base')
+            'wallet', TEST_KEY, 'sell', '0x' + '6' * 40, '3', 'base')
         assert result == (True, '', '0xlegacy')
         assert topups == ['user-funded']
         assert len(calls['execute']) == 1
@@ -99,6 +103,70 @@ def test_nonpermit_token_uses_user_stablecoin_for_gas_then_legacy_sell():
     finally:
         gasless._gasless_sell_quote = old_quote
         gasless._gasless_native_topup = old_topup
+
+
+def test_nonpermit_sell_uses_existing_native_gas_before_buying_more():
+    d, calls = dashboard()
+    d.GAS_TOPUP_TX_GAS_UNITS = 500000
+    class Eth:
+        gas_price = 1
+        def get_balance(self, _addr): return 900000
+    class Web3:
+        eth = Eth()
+        def to_checksum_address(self, addr): return addr
+    d._get_web3 = lambda chain: Web3()
+    old_quote, old_topup = gasless._gasless_sell_quote, gasless._gasless_native_topup
+    try:
+        gasless._gasless_sell_quote = lambda *a, **k: (_ for _ in ()).throw(
+            RuntimeError('gasless approval unavailable'))
+        gasless._gasless_native_topup = lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError('must not top up when native gas already exists'))
+        gasless.install(d)
+        result = d._execute_evm_swap(
+            'wallet', TEST_KEY, 'sell', '0x' + '7' * 40, '0.92', 'base')
+        assert result == (True, '', '0xlegacy')
+        assert len(calls['execute']) == 1
+    finally:
+        gasless._gasless_sell_quote, gasless._gasless_native_topup = old_quote, old_topup
+
+
+def test_fully_invested_nonpermit_position_reaches_exit_gas_recovery():
+    d, calls = dashboard()
+    d.GAS_TOPUP_TX_GAS_UNITS = 500000
+    class Eth:
+        gas_price = 1
+        def get_balance(self, _addr): return 0
+    class Web3:
+        eth = Eth()
+        def to_checksum_address(self, addr): return addr
+    d._get_web3 = lambda chain: Web3()
+
+    fd, db_path = tempfile.mkstemp(suffix='.db')
+    os.close(fd)
+    conn = sqlite3.connect(db_path)
+    conn.execute('CREATE TABLE users (id INTEGER PRIMARY KEY, wallet_address TEXT)')
+    conn.execute('INSERT INTO users(id,wallet_address) VALUES (?,?)', (7, 'wallet'))
+    conn.commit(); conn.close()
+    d.DB_FILE = db_path
+    sponsor_calls = []
+    d._sponsor_evm_gas = lambda uid, wallet, taker, chain: (
+        sponsor_calls.append((uid, wallet, chain)) or (True, '', '0xgrant'))
+
+    old_quote, old_topup = gasless._gasless_sell_quote, gasless._gasless_native_topup
+    try:
+        gasless._gasless_sell_quote = lambda *a, **k: (_ for _ in ()).throw(
+            RuntimeError('gasless approval unavailable'))
+        gasless._gasless_native_topup = lambda *a, **k: (_ for _ in ()).throw(
+            RuntimeError('not enough stablecoin remains'))
+        gasless.install(d)
+        result = d._execute_evm_swap(
+            'wallet', TEST_KEY, 'sell', '0x' + '8' * 40, '0.92', 'base')
+        assert result == (True, '', '0xlegacy')
+        assert sponsor_calls == [(7, 'wallet', 'base')]
+        assert len(calls['execute']) == 1
+    finally:
+        gasless._gasless_sell_quote, gasless._gasless_native_topup = old_quote, old_topup
+        os.unlink(db_path)
 
 
 def test_topup_quote_has_no_orcagent_platform_fee():
