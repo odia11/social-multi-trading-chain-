@@ -19,6 +19,8 @@ PORTFOLIO_CSS = (ROOT / 'static' / 'portfolio-redesign.css').read_text(encoding=
 PORTFOLIO_JS = (ROOT / 'static' / 'portfolio-redesign.js').read_text(encoding='utf-8')
 NAVBAR_JS = (ROOT / 'static' / 'navbar.js').read_text(encoding='utf-8')
 APP_PERF = (ROOT / 'app_performance.py').read_text(encoding='utf-8')
+CHART_SCRUB = (ROOT / 'static' / 'chart-scrub.js').read_text(encoding='utf-8')
+LIVE_CRITICAL = (ROOT / 'static' / 'live-market-critical.js').read_text(encoding='utf-8')
 
 
 def test_home_scroll_does_not_require_has_support():
@@ -48,9 +50,11 @@ def test_route_bootstrap_sets_scroll_classes_before_dynamic_assets():
     assert portfolio_class < portfolio_css
 
 
-def test_android_uses_document_element_as_single_native_scroll_owner():
-    assert "_root_scroll_excluded = ('/messages', '/live-market')" in APP_PERF
-    assert "if path not in _root_scroll_excluded" in APP_PERF
+def test_android_and_ios_share_one_document_root_scroller():
+    assert "_root_scroll_excluded_prefixes = ('/messages', '/live-market')" in APP_PERF
+    assert "_uses_internal_mobile_scroller = any(" in APP_PERF
+    assert "path.startswith(prefix + '/')" in APP_PERF
+    assert "if not _uses_internal_mobile_scroller" in APP_PERF
     assert 'oa-native-mobile-scroll' in APP_PERF
     assert 'html.oa-native-mobile-scroll{height:auto!important' in APP_PERF
     assert 'overflow-y:auto!important' in APP_PERF
@@ -60,7 +64,22 @@ def test_android_uses_document_element_as_single_native_scroll_owner():
     assert 'html.oa-native-mobile-scroll.oa-modal-open' in APP_PERF
     assert 'html.oa-native-mobile-scroll.oa-wallet-actions-open' in APP_PERF
     assert 'html.oa-native-mobile-scroll.oa-app-menu-open' in APP_PERF
-    assert 'oa-android-scroll' in APP_PERF
-    assert 'body.oa-home-mobile #main-content.wrap' in APP_PERF
-    assert 'overflow-y:auto!important' in APP_PERF
-    assert 'touch-action:pan-y!important' in APP_PERF
+    # Android must no longer get a viewport-height inner #main-content scroller.
+    assert 'oa-android-scroll' not in APP_PERF
+    assert 'body.oa-home-mobile #main-content.wrap' not in APP_PERF
+
+
+def test_vertical_swipes_started_on_charts_are_never_hijacked():
+    # Shared LightweightCharts scrub waits for a clear horizontal gesture.
+    assert "container.style.touchAction = 'pan-y pinch-zoom'" in CHART_SCRUB
+    assert "Math.abs(dx) > Math.abs(dy) * 1.15 ? 'scrub' : 'scroll'" in CHART_SCRUB
+    assert "if(touchIntent !== 'scrub'){ clearScrub(); return; }" in CHART_SCRUB
+    assert "if(e.cancelable) e.preventDefault();" in CHART_SCRUB
+
+    # Live Market's custom SVG also permits native pan-y and does not cancel
+    # pointerdown. It captures only after horizontal intent is established.
+    assert 'touch-action:pan-y pinch-zoom!important' in LIVE_CRITICAL
+    pointerdown = LIVE_CRITICAL.split("st.svg.addEventListener('pointerdown'", 1)[1].split("st.svg.addEventListener('pointermove'", 1)[0]
+    assert 'preventDefault' not in pointerdown
+    assert "intent=Math.abs(dx)>Math.abs(dy)*1.15?'scrub':'scroll'" in LIVE_CRITICAL
+    assert "if(intent!=='scrub')return;" in LIVE_CRITICAL

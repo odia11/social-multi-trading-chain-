@@ -69,22 +69,44 @@ function attachChartScrub(containerId, container, chart, series, dataRef, getPri
     tip.style.display = 'none';
   }
 
-  function onTouchStart(e){ if(e.touches[0]) scrubToX(e.touches[0].clientX); }
-  function onTouchMove(e){ if(e.touches[0]){ e.preventDefault(); scrubToX(e.touches[0].clientX); } }
+  // Android Chromium obeys touch-action and preventDefault more strictly
+  // than iOS. Claim ONLY a clearly horizontal chart scrub; vertical movement
+  // always belongs to the page so a swipe that begins over a chart scrolls
+  // naturally up/down.
+  var touchStartX = 0, touchStartY = 0, touchIntent = '';
+  var previousTouchAction = container.style.touchAction;
+  container.style.touchAction = 'pan-y pinch-zoom';
+  function onTouchStart(e){
+    var t = e.touches[0]; if(!t) return;
+    touchStartX = t.clientX; touchStartY = t.clientY; touchIntent = '';
+  }
+  function onTouchMove(e){
+    var t = e.touches[0]; if(!t) return;
+    var dx = t.clientX - touchStartX, dy = t.clientY - touchStartY;
+    if(!touchIntent){
+      if(Math.max(Math.abs(dx), Math.abs(dy)) < 7) return;
+      touchIntent = Math.abs(dx) > Math.abs(dy) * 1.15 ? 'scrub' : 'scroll';
+    }
+    if(touchIntent !== 'scrub'){ clearScrub(); return; }
+    if(e.cancelable) e.preventDefault();
+    scrubToX(t.clientX);
+  }
+  function onTouchEnd(){ touchIntent = ''; clearScrub(); }
   function onMouseMove(e){ scrubToX(e.clientX); }
   container.addEventListener('touchstart', onTouchStart, {passive: true});
   container.addEventListener('touchmove', onTouchMove, {passive: false});
-  container.addEventListener('touchend', clearScrub, {passive: true});
-  container.addEventListener('touchcancel', clearScrub, {passive: true});
+  container.addEventListener('touchend', onTouchEnd, {passive: true});
+  container.addEventListener('touchcancel', onTouchEnd, {passive: true});
   container.addEventListener('mousemove', onMouseMove);
   container.addEventListener('mouseleave', clearScrub);
   function teardown(){
     container.removeEventListener('touchstart', onTouchStart);
     container.removeEventListener('touchmove', onTouchMove);
-    container.removeEventListener('touchend', clearScrub);
-    container.removeEventListener('touchcancel', clearScrub);
+    container.removeEventListener('touchend', onTouchEnd);
+    container.removeEventListener('touchcancel', onTouchEnd);
     container.removeEventListener('mousemove', onMouseMove);
     container.removeEventListener('mouseleave', clearScrub);
+    container.style.touchAction = previousTouchAction;
     if(tip.parentNode) tip.parentNode.removeChild(tip);
   }
   _chartScrubByContainer[containerId] = {teardown: teardown};
