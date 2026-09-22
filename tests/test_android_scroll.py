@@ -20,7 +20,7 @@ PORTFOLIO_JS = (ROOT / 'static' / 'portfolio-redesign.js').read_text(encoding='u
 NAVBAR_JS = (ROOT / 'static' / 'navbar.js').read_text(encoding='utf-8')
 APP_PERF = (ROOT / 'app_performance.py').read_text(encoding='utf-8')
 CHART_SCRUB = (ROOT / 'static' / 'chart-scrub.js').read_text(encoding='utf-8')
-LIVE_CRITICAL = (ROOT / 'static' / 'live-market-critical.js').read_text(encoding='utf-8')
+LIVE_PRO = (ROOT / 'static' / 'live-market-pro.js').read_text(encoding='utf-8')
 
 
 def test_home_scroll_does_not_require_has_support():
@@ -76,10 +76,10 @@ def test_vertical_swipes_started_on_charts_are_never_hijacked():
     assert "if(touchIntent !== 'scrub'){ clearScrub(); return; }" in CHART_SCRUB
     assert "if(e.cancelable) e.preventDefault();" in CHART_SCRUB
 
-    # Live Market's custom SVG also permits native pan-y and does not cancel
-    # pointerdown. It captures only after horizontal intent is established.
-    assert 'touch-action:pan-y pinch-zoom!important' in LIVE_CRITICAL
-    pointerdown = LIVE_CRITICAL.split("st.svg.addEventListener('pointerdown'", 1)[1].split("st.svg.addEventListener('pointermove'", 1)[0]
-    assert 'preventDefault' not in pointerdown
-    assert "intent=Math.abs(dx)>Math.abs(dy)*1.15?'scrub':'scroll'" in LIVE_CRITICAL
-    assert "if(intent!=='scrub')return;" in LIVE_CRITICAL
+    # Live Market's active custom SVG scrub follows the same rule. Vertical
+    # intent is handed back to the browser; only a clear horizontal scrub
+    # cancels the touch event.
+    assert "wrap.style.touchAction = 'pan-y pinch-zoom'" in LIVE_PRO
+    assert "touchIntent = Math.abs(dx) > Math.abs(dy) * 1.15 ? 'scrub' : 'scroll'" in LIVE_PRO
+    assert "if(touchIntent !== 'scrub'){ clearScrub(); return; }" in LIVE_PRO
+    assert "if(e.cancelable) e.preventDefault();" in LIVE_PRO

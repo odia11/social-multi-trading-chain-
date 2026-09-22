@@ -319,6 +319,8 @@ function attachChartSvgScrub(idx){
   // now overwrites `pendingX` instead of queuing more work, and only the
   // latest position by the time the frame is due to paint gets applied.
   var rafId = null, pendingX = null;
+  var touchIntent = null, touchStartX = 0, touchStartY = 0;
+  wrap.style.touchAction = 'pan-y pinch-zoom';
   function scheduleScrub(clientX){
     pendingX = clientX;
     if(rafId != null) return;
@@ -379,8 +381,24 @@ function attachChartSvgScrub(idx){
     if(rafId != null){ cancelAnimationFrame(rafId); rafId = null; }
     line.style.display = 'none'; dot.style.display = 'none'; tip.style.display = 'none';
   }
-  function onTouchStart(e){ if(e.touches[0]) scheduleScrub(e.touches[0].clientX); }
-  function onTouchMove(e){ if(e.touches[0]){ e.preventDefault(); scheduleScrub(e.touches[0].clientX); } }
+  function onTouchStart(e){
+    if(!e.touches[0]) return;
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+    touchIntent = null;
+  }
+  function onTouchMove(e){
+    if(!e.touches[0]) return;
+    var dx = e.touches[0].clientX - touchStartX;
+    var dy = e.touches[0].clientY - touchStartY;
+    if(touchIntent == null){
+      if(Math.max(Math.abs(dx), Math.abs(dy)) < 7) return;
+      touchIntent = Math.abs(dx) > Math.abs(dy) * 1.15 ? 'scrub' : 'scroll';
+    }
+    if(touchIntent !== 'scrub'){ clearScrub(); return; }
+    if(e.cancelable) e.preventDefault();
+    scheduleScrub(e.touches[0].clientX);
+  }
   function onMouseMove(e){ scheduleScrub(e.clientX); }
   wrap.addEventListener('touchstart', onTouchStart, {passive:true});
   wrap.addEventListener('touchmove', onTouchMove, {passive:false});

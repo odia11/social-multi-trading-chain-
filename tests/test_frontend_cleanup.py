@@ -26,3 +26,15 @@ def test_route_specific_mobile_assets_are_scoped():
 def test_messages_use_two_bundles():
     assert 'messages-ui.css?v=1' in MESSAGES and 'messages-ui.js?v=1' in MESSAGES
     assert 'messages-premium-v2.css' not in MESSAGES
+
+
+def test_retired_frontend_layers_are_deleted():
+    retired = (
+        'live-market-critical.js',
+        'live-market-goldline.js',
+        'live-market-goldline-v2.js',
+        'live-market-smooth.js',
+        'portfolio-value-authority.js',
+    )
+    for asset in retired:
+        assert not (ROOT / 'static' / asset).exists(), asset
