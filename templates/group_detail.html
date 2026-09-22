@@ -128,11 +128,12 @@ html,body{overflow-x:clip}  /* clip, not hidden: hidden makes the root a scroll 
 .gd-post{display:flex;gap:10px;padding:16px;border-bottom:1px solid var(--border)}
 .gd-post:first-child{border-top-left-radius:14px;border-top-right-radius:14px}
 .gd-post:last-child{border-bottom-left-radius:14px;border-bottom-right-radius:14px;border-bottom:none}
-.gd-post-avatar{width:36px;height:36px;border-radius:50%;background:var(--bg3);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--text);flex-shrink:0;overflow:hidden}
+.gd-post-avatar{width:36px;height:36px;border-radius:50%;background:var(--bg3);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--text);flex-shrink:0;overflow:hidden;text-decoration:none;cursor:pointer}
 .gd-post-avatar img{width:100%;height:100%;object-fit:cover}
 .gd-post-body{flex:1;min-width:0}
 .gd-post-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.gd-post-name{font-weight:700;font-size:13.5px;color:var(--text)}
+.gd-post-name{font-weight:700;font-size:13.5px;color:var(--text);text-decoration:none;cursor:pointer}
+.gd-post-name:hover{text-decoration:underline}
 .gd-post-time{font-size:12.5px;color:var(--muted)}
 .gd-post-text{font-size:13.5px;color:var(--sub);line-height:1.5;margin-top:3px;word-break:break-word;white-space:pre-wrap}
 .gd-post-del{background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;margin-left:auto;opacity:0;transition:opacity .15s}
@@ -685,6 +686,7 @@ function _postHtml(p){
     ? '<img src="'+esc(p.avatar_url)+'" alt="" onerror="this.style.display=\'none\'">'
     : esc((p.username||p.wallet_short||'?')[0].toUpperCase());
   var name = p.username || p.wallet_short || 'Unknown';
+  var profileHref = p.wallet ? '/profile/'+encodeURIComponent(p.wallet) : '';
   var textContent = p.content || '';
   var tradeHtml = '';
   var tradeIdx = textContent.indexOf('__TRADE__');
@@ -697,10 +699,14 @@ function _postHtml(p){
   }
   return ''
     +'<div class="gd-post" data-post-id="'+p.id+'">'
-      +'<div class="gd-post-avatar">'+avatarInner+'</div>'
+      +(profileHref
+        ? '<a class="gd-post-avatar" href="'+esc(profileHref)+'" onclick="event.stopPropagation()">'+avatarInner+'</a>'
+        : '<div class="gd-post-avatar">'+avatarInner+'</div>')
       +'<div class="gd-post-body">'
         +'<div class="gd-post-head">'
-          +'<span class="gd-post-name">'+esc(name)+'</span>'
+          +(profileHref
+            ? '<a class="gd-post-name" href="'+esc(profileHref)+'" onclick="event.stopPropagation()">'+esc(name)+'</a>'
+            : '<span class="gd-post-name">'+esc(name)+'</span>')
           +(p.is_verified ? '<span class="gd-verified">✓</span>' : '')
           +'<span class="gd-post-time">· '+esc(_timeAgo(p.created_at))+'</span>'
           +(canPin ? '<button class="gd-post-del" data-post-id="'+p.id+'" onclick="_pinPost('+p.id+')" title="Pin this post">Pin</button>' : '')
@@ -941,11 +947,17 @@ function _renderPinned(g){
     var p = d.posts.find(function(x){ return x.id === g.pinned_post_id; });
     if(!p){ wrap.innerHTML = ''; return; }
     var name = p.username || p.wallet_short || 'Unknown';
+    var profileHref = p.wallet ? '/profile/'+encodeURIComponent(p.wallet) : '';
+    var avatarInner = p.avatar_url?'<img src="'+esc(p.avatar_url)+'" alt="">':esc(name[0].toUpperCase());
     wrap.innerHTML = '<div class="gd-pinned">'
-      +'<div class="gd-post-avatar">'+(p.avatar_url?'<img src="'+esc(p.avatar_url)+'" alt="">':esc(name[0].toUpperCase()))+'</div>'
+      +(profileHref
+        ? '<a class="gd-post-avatar" href="'+esc(profileHref)+'">'+avatarInner+'</a>'
+        : '<div class="gd-post-avatar">'+avatarInner+'</div>')
       +'<div style="flex:1;min-width:0">'
         +'<div class="gd-pinned-label">📌 Pinned'+(g.is_mod?'<button class="gd-pinned-unpin" onclick="_unpinPost()">Unpin</button>':'')+'</div>'
-        +'<span class="gd-post-name">'+esc(name)+'</span>'
+        +(profileHref
+          ? '<a class="gd-post-name" href="'+esc(profileHref)+'">'+esc(name)+'</a>'
+          : '<span class="gd-post-name">'+esc(name)+'</span>')
         +'<div class="gd-post-text">'+_renderMentionText(p.content)+'</div>'
       +'</div>'
     +'</div>';

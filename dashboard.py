@@ -15726,7 +15726,7 @@ def api_group_posts(group_id):
         ''', (group_id,)).fetchall()
         posts = [{
             'id': r[0], 'content': r[1], 'created_at': r[2], 'user_id': r[3],
-            'username': r[4], 'avatar_url': r[5],
+            'username': r[4], 'avatar_url': r[5], 'wallet': r[6] or '',
             'wallet_short': (r[6][:4]+'...'+r[6][-4:]) if r[6] and len(r[6]) >= 8 else (r[6] or ''),
             'is_verified': bool(r[7]), 'image_url': r[8],
         } for r in rows]
@@ -16522,7 +16522,7 @@ def api_group_search(group_id):
         ''', (group_id, '%'+q+'%')).fetchall()
         posts = [{
             'id': r[0], 'content': r[1], 'created_at': r[2], 'user_id': r[3],
-            'username': r[4], 'avatar_url': r[5],
+            'username': r[4], 'avatar_url': r[5], 'wallet': r[6] or '',
             'wallet_short': (r[6][:4]+'...'+r[6][-4:]) if r[6] and len(r[6]) >= 8 else (r[6] or ''),
             'is_verified': bool(r[7]), 'image_url': r[8],
         } for r in rows]
