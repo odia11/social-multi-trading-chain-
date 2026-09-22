@@ -131,7 +131,20 @@ function buildMarkets(afterEl){
 }
 document.addEventListener('visibilitychange',function(){if(!document.hidden)updateMajorMarkets()});
 window.addEventListener('pageshow',function(){updateMajorMarkets()});
-function shortcutIcon(type){var p={market:'<path d="M4 18V9m5 9V5m5 13v-7m5 7V3"/><path d="M3 21h18"/>',trade:'<path d="M4 7h15"/><path d="m16 4 3 3-3 3"/><path d="M20 17H5"/><path d="m8 14-3 3 3 3"/>',portfolio:'<rect x="3" y="5" width="18" height="15" rx="3"/><path d="M8 5V3h8v2"/><path d="M3 10h18"/><path d="M9 14h6"/>',social:'<path d="M21 12a8 8 0 0 1-8 8H6l-4 2 1.3-4.2A9 9 0 1 1 21 12Z"/><path d="M8 12h.01M12 12h.01M16 12h.01"/>',groups:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>'};return '<svg class="oa-m-shortcut-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+p[type]+'</svg>'}
+// Duotone glyphs (amber primary #f7b955, darker amber secondary #a9762f, dark
+// cutouts #080d12) so each shortcut reads distinctly at a glance -- Social and
+// Groups used to both be generic "people" outlines and were easy to mix up.
+// Kept in sync with the nth-child background-image icons in
+// home-mobile-polish.css, which is what actually paints on mobile (this
+// inline SVG is hidden there via `.oa-m-shortcuts b svg{display:none}`) but
+// still renders wherever that stylesheet doesn't apply.
+function shortcutIcon(type){var p={
+  market:'<rect fill="#a9762f" x="8.25" y="13" width="1" height="12"/><rect fill="#f7b955" x="7" y="16" width="3.5" height="8" rx="0.75"/><rect fill="#a9762f" x="15.5" y="7" width="1" height="18"/><rect fill="#f7b955" x="14.25" y="10" width="3.5" height="14" rx="0.75"/><rect fill="#a9762f" x="22.75" y="2" width="1" height="23"/><rect fill="#f7b955" x="21.5" y="4" width="3.5" height="20" rx="0.75"/>',
+  trade:'<rect fill="#a9762f" x="6" y="10" width="15" height="2" rx="1"/><polygon fill="#f7b955" points="18,6.5 24,11 18,15.5"/><rect fill="#a9762f" x="11" y="20" width="15" height="2" rx="1"/><polygon fill="#f7b955" points="14,16.5 8,21 14,25.5"/>',
+  portfolio:'<rect fill="#a9762f" x="8" y="5" width="14" height="8" rx="2"/><rect fill="#f7b955" x="4.5" y="11" width="23" height="16" rx="3.5"/><circle fill="#080d12" cx="22" cy="19" r="1.7"/>',
+  social:'<rect fill="#f7b955" x="4.5" y="6.5" width="23" height="16" rx="7.5"/><polygon fill="#f7b955" points="10,22.5 10,28 16,22.5"/><circle fill="#080d12" cx="11" cy="14.5" r="1.4"/><circle fill="#080d12" cx="16" cy="14.5" r="1.4"/><circle fill="#080d12" cx="21" cy="14.5" r="1.4"/>',
+  groups:'<circle fill="#a9762f" cx="9" cy="15" r="5.5"/><circle fill="#a9762f" cx="23" cy="15" r="5.5"/><circle fill="#080d12" cx="16" cy="11" r="7.5"/><circle fill="#f7b955" cx="16" cy="11" r="6.5"/>'
+};return '<svg class="oa-m-shortcut-icon" viewBox="0 0 32 32" aria-hidden="true">'+p[type]+'</svg>'}
 function buildShortcuts(afterEl){var old=document.getElementById('oa-m-shortcuts');if(old)old.remove();var el=document.createElement('nav');el.className='oa-m-shortcuts';el.id='oa-m-shortcuts';el.innerHTML='<a href="/live-market"><b>'+shortcutIcon('market')+'</b><span>Live Market</span></a><a href="/live-market"><b>'+shortcutIcon('trade')+'</b><span>Trade</span></a><a href="/wallet"><b>'+shortcutIcon('portfolio')+'</b><span>Portfolio</span></a><a href="#feed-composer"><b>'+shortcutIcon('social')+'</b><span>Social</span></a><a href="/groups"><b>'+shortcutIcon('groups')+'</b><span>Groups</span></a>';afterEl.insertAdjacentElement('afterend',el);return el}
 function moveComposer(afterEl){var c=document.getElementById('feed-composer');if(c){afterEl.insertAdjacentElement('afterend',c);c.onclick=function(e){if(!e.target.closest('button,a,input,textarea')){var t=document.getElementById('postText');if(t)t.focus()}}}return c}
 function keepComposerOpen(c){if(!c)return;var t=document.getElementById('postText');c.classList.add('expanded');if(!t)return;t.addEventListener('focus',function(){c.classList.add('expanded')});t.addEventListener('blur',function(){requestAnimationFrame(function(){c.classList.add('expanded')})});t.addEventListener('input',function(){c.classList.add('expanded')})}
