@@ -2427,7 +2427,8 @@ function toggleCopy(btn){
   var alreadyCopying = _copyStatus.copying && _copyStatus.target === wallet;
   fetch('/api/copy-trade/toggle', {
     method:'POST', credentials:'include', headers: authHeaders(),
-    body: JSON.stringify({wallet: wallet, sol_amount: alreadyCopying ? 0 : 0.05})
+    // No amount: the copy spends this user's own trade size, in USDC.
+    body: JSON.stringify({wallet: wallet})
   }).then(function(r){ return r.json(); }).then(function(d){
     if(d && d.ok){
       var copying = d.copying!=null ? d.copying : d.active;

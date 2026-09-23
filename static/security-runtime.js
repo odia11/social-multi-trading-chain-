@@ -148,8 +148,8 @@ function safeCopyModal(){
       var strong2=document.createElement('strong');strong2.textContent=String(username||'');desc.append(strong2);
       desc.append(document.createTextNode(' opens a trade, you automatically mirror it with the amount below.'));
       amountField.style.display='';
-      var inp=document.getElementById('modal-sol-inp');if(inp)inp.value='0.1';
-      var hint=document.getElementById('modal-hint');if(hint)hint.textContent='Each mirrored trade will spend this amount of SOL.';
+      var inp=document.getElementById('modal-sol-inp');if(inp)inp.value='10';
+      var hint=document.getElementById('modal-hint');if(hint)hint.textContent='Each mirrored trade will spend this amount of USDC.';
       confirmBtn.textContent='Start Copying';
       confirmBtn.className='modal-btn primary';
     }

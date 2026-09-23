@@ -3755,7 +3755,9 @@ async function _botToggle(){
     } else {
       btn=_botApplyUI(prevRunning)   // rollback
       if(btn) btn.disabled=false
-      if(d.low_balance){ showLowBalanceModal(d) } else { openAlertModal({text:d.msg||'Failed'}) }
+      // The shared low-balance modal's markup isn't on this page; its message
+      // (in the currency the bot trades) goes in the normal alert instead.
+      if(d.low_balance && document.getElementById('low-balance-modal')){ showLowBalanceModal(d) } else { openAlertModal({text:d.msg||'Failed'}) }
     }
   }catch(e){
     btn=_botApplyUI(prevRunning)   // rollback

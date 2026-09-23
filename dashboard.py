@@ -2853,6 +2853,10 @@ def run_migrations():
         "ALTER TABLE users ADD COLUMN password_hash TEXT DEFAULT NULL",
         "ALTER TABLE user_tokens ADD COLUMN avg_price REAL NOT NULL DEFAULT 0",
         "ALTER TABLE users ADD COLUMN copy_amount REAL DEFAULT NULL",
+        # Per-copy amount in USDC. copy_amount above is the legacy per-copy
+        # amount in SOL; readers convert it at the live SOL price until the
+        # copier saves a USDC amount (see _copy_followers()).
+        "ALTER TABLE users ADD COLUMN copy_amount_usdc REAL DEFAULT NULL",
         "ALTER TABLE users ADD COLUMN bot_enabled INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN bridging_enabled INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN narrative_agent_enabled INTEGER DEFAULT 0",
@@ -7798,21 +7802,29 @@ def _narrative_agent_process_candidate(user_id: int, wallet: str, mint: str, cha
         # ~10 SOL, not $10 of SOL). Convert here first, same pattern as
         # every other USD->SOL site in this file (e.g. min_trade_usdc /
         # _sol_price_usd in the BSC-cap-mirroring bot-buy paths).
-        amount_sol = amount / _sol_price_usd if _sol_price_usd else 0
+        # In USDC mode the USD amount IS the spend -- no conversion, and it
+        # is paid in the currency every other Solana buy now uses.
+        if SOLANA_BASE_CURRENCY == 'USDC':
+            amount_sol = round(amount, 2)
+            _impact = _check_price_impact(mint, amount_sol, input_mint=USDC_MINT, input_decimals=6)
+        else:
+            amount_sol = amount / _sol_price_usd if _sol_price_usd else 0
+            _impact = _check_price_impact(mint, amount_sol)
         # Dynamic risk management (section 5): same hard price-impact/
         # slippage gate the main bot loop and copy-trade auto-buy use --
         # an AI-approved thesis doesn't override an unbuyable-without-
         # severe-slippage pool.
-        _impact = _check_price_impact(mint, amount_sol)
         if not _impact['ok'] or _impact['price_impact_pct'] > MAX_ENTRY_PRICE_IMPACT_PCT:
             _agent_journal_log(user_id, mint, chain, symbol, phase='buy', decision='buy',
                                 size_usd=amount, filter_result=_log_prefix +
-                                'price impact too high or no route for ' + str(round(amount_sol, 4)) + ' SOL')
+                                'price impact too high or no route for ' + str(round(amount_sol, 4)) +
+                                ' ' + SOLANA_BASE_CURRENCY)
             return
 
     with _use_key(row[0], wallet) as pk:
         if chain == 'solana':
-            ok, tx_hash, err, _tok_amt, _sol_amt = _execute_user_swap_ex(wallet, pk, 'buy', mint, str(amount_sol))
+            ok, tx_hash, err, _tok_amt, _sol_amt = _execute_user_swap_ex(
+                wallet, pk, 'buy', mint, str(amount_sol), base=SOLANA_BASE_CURRENCY)
         else:
             # Same auto-gas mechanism every other EVM buy path uses (see
             # _ensure_evm_gas's own module comment) -- the narrative agent's
@@ -7849,6 +7861,8 @@ def _narrative_agent_process_candidate(user_id: int, wallet: str, mint: str, cha
             pos['spend']     = pos.get('spend', 0.0) + amount_sol
             pos['symbol']    = symbol
             pos['opened_at'] = time.time()
+            # So the exit sells back into the currency this buy spent.
+            pos['base']      = SOLANA_BASE_CURRENCY
             pos.update(_snapshot_entry_risk(wallet, entry_price))
             _upsert_open_position(user_id, wallet, mint, pos, source='narrative')
         else:
@@ -11566,11 +11580,15 @@ def _copy_followers(leader_wallet: str):
     try:
         conn = sqlite3.connect(DB_FILE)
         try:
+            # The per-copy amount, always in USDC: the saved USDC amount, else
+            # a legacy SOL amount at the live SOL price (0 -> unset -> the
+            # copier's own trade size, when the price isn't known yet).
             return conn.execute(
                 'SELECT id, wallet_address, encrypted_private_key, min_trade_size, '
-                'copy_amount, max_positions, daily_loss_limit, max_trade_size '
+                'COALESCE(copy_amount_usdc, copy_amount * ?), max_positions, '
+                'daily_loss_limit, max_trade_size '
                 'FROM users WHERE copy_source=? AND wallet_address != ?',
-                (leader_wallet, leader_wallet)).fetchall()
+                (float(_sol_price_usd or 0), leader_wallet, leader_wallet)).fetchall()
         finally:
             conn.close()
     except Exception as e:
@@ -11793,9 +11811,9 @@ def _trigger_copy_buy(buyer_wallet: str, mint: str, price: float, symbol: str,
             try:
                 rows = conn.execute(
                     'SELECT id, wallet_address, encrypted_private_key, min_trade_size, copy_amount, '
-                    'max_positions, daily_loss_limit FROM users '
+                    'max_positions, daily_loss_limit, COALESCE(copy_amount_usdc, copy_amount * ?) FROM users '
                     'WHERE copy_source=? AND encrypted_private_key != "" AND encrypted_private_key IS NOT NULL',
-                    (buyer_wallet,)
+                    (float(_sol_price_usd or 0), buyer_wallet)
                 ).fetchall()
             finally:
                 conn.close()
@@ -11803,7 +11821,8 @@ def _trigger_copy_buy(buyer_wallet: str, mint: str, price: float, symbol: str,
             print(f'[copy-trade] DB error: {e}', flush=True)
             return
 
-        for c_uid, c_wallet, c_enc, c_min_usdc, c_copy_amount, c_max_positions, c_daily_loss_limit in rows:
+        for (c_uid, c_wallet, c_enc, c_min_usdc, c_copy_amount, c_max_positions,
+             c_daily_loss_limit, c_copy_usdc) in rows:
             try:
                 c_short = c_wallet[:6] + '...' + c_wallet[-4:]
                 c_us    = get_user_state(c_wallet)
@@ -11826,6 +11845,31 @@ def _trigger_copy_buy(buyer_wallet: str, mint: str, price: float, symbol: str,
                     continue
                 if c_us['positions'].get(mint, {}).get('amount', 0) > 0:
                     continue  # already holding
+
+                if SOLANA_BASE_CURRENCY == 'USDC':
+                    # A copy is an ordinary USDC buy for the copier: same flow as
+                    # a Live Market buy (gasless USDC, position recorded with
+                    # base='USDC', fee only when actually collected), sized by
+                    # their own per-copy amount, else their own trade size --
+                    # never the leader's amount.
+                    spend_usdc = (float(c_copy_usdc) if c_copy_usdc and float(c_copy_usdc) > 0
+                                  else float(c_min_usdc or 1.0))
+                    _impact = _check_price_impact(mint, spend_usdc, input_mint=USDC_MINT, input_decimals=6)
+                    if not _impact['ok'] or _impact['price_impact_pct'] > MAX_ENTRY_PRICE_IMPACT_PCT:
+                        add_user_log(c_wallet, f'[copy] Skip {symbol}: price impact too high or no route '
+                                               f'for {spend_usdc:.2f} USDC')
+                        continue
+                    with app.app_context():
+                        resp = _solana_buy_flow(
+                            c_wallet, mint,
+                            log_label=f'COPY BUY (copying {buyer_wallet[:6]}…{buyer_wallet[-4:]})',
+                            enforce_position_cap=False, idle_note='', requested_usdc=spend_usdc,
+                            source='copy', copy_of_wallet=buyer_wallet,
+                            trigger_copies=False, respect_max=False)
+                        body = (resp[0] if isinstance(resp, tuple) else resp).get_json() or {}
+                    if not body.get('ok'):
+                        add_user_log(c_wallet, f'[copy] {symbol} not copied — {body.get("msg") or "buy failed"}')
+                    continue
 
                 # Decrypt key to get trading wallet address for balance check
                 try:
@@ -13133,8 +13177,11 @@ def api_copy_trade_toggle():
     body   = request.get_json(silent=True) or {}
     # accept both 'wallet' (new) and 'target_wallet' (legacy)
     target = str(body.get('wallet') or body.get('target_wallet', '')).strip()
-    # accept both 'sol_amount' (new) and 'amount_sol' (legacy)
-    raw_amount = body.get('sol_amount') if body.get('sol_amount') is not None else body.get('amount_sol', 0.1)
+    # 'usdc_amount' is the per-copy amount in USDC. 'sol_amount'/'amount_sol'
+    # are older SOL-denominated clients; they're converted at the live price
+    # in USDC mode. No amount at all means "use my own trade size".
+    raw_usdc   = body.get('usdc_amount')
+    raw_amount = body.get('sol_amount') if body.get('sol_amount') is not None else body.get('amount_sol')
     if not is_valid_solana_address(target):
         return jsonify({'ok': False, 'msg': 'Invalid target wallet'}), 400
     if target == wallet:
@@ -13147,24 +13194,44 @@ def api_copy_trade_toggle():
         row = conn.execute('SELECT copy_source FROM users WHERE wallet_address=?', (wallet,)).fetchone()
         currently_copying_target = row and row[0] == target
         if currently_copying_target:
-            conn.execute('UPDATE users SET copy_source=NULL, copy_amount=NULL WHERE wallet_address=?', (wallet,))
+            conn.execute('UPDATE users SET copy_source=NULL, copy_amount=NULL, copy_amount_usdc=NULL '
+                         'WHERE wallet_address=?', (wallet,))
             new_active = 0
         else:
-            try:
-                amount_sol = round(float(raw_amount), 4)
-                if amount_sol < 0.01 or amount_sol > 100:
-                    return jsonify({'ok': False, 'msg': 'Amount must be 0.01–100 SOL'}), 400
-            except (TypeError, ValueError):
-                return jsonify({'ok': False, 'msg': 'Invalid amount'}), 400
             key_row = conn.execute('SELECT encrypted_private_key FROM users WHERE wallet_address=?', (wallet,)).fetchone()
             if not key_row or not key_row[0]:
                 return jsonify({'ok': False, 'msg': 'No trading key saved — add it in Settings first'}), 400
-            _bal_msg, _bal_wallet, _bal_sol, _bal_required = _insufficient_trade_balance(wallet, key_row[0])
-            if _bal_msg:
-                return jsonify({'ok': False, 'low_balance': True, 'trading_wallet': _bal_wallet,
-                                'current_sol': _bal_sol, 'required_sol': _bal_required, 'msg': _bal_msg}), 400
-            conn.execute('UPDATE users SET copy_source=?, copy_amount=? WHERE wallet_address=?',
-                         (target, amount_sol, wallet))
+            if SOLANA_BASE_CURRENCY == 'USDC':
+                amount_usdc = None
+                try:
+                    if raw_usdc is not None:
+                        amount_usdc = round(float(raw_usdc), 2)
+                    elif raw_amount is not None and _sol_price_usd > 0:
+                        amount_usdc = round(float(raw_amount) * _sol_price_usd, 2)
+                except (TypeError, ValueError):
+                    return jsonify({'ok': False, 'msg': 'Invalid amount'}), 400
+                if amount_usdc is not None and not (math.isfinite(amount_usdc) and 1 <= amount_usdc <= 10000):
+                    return jsonify({'ok': False, 'msg': 'Amount must be 1–10,000 USDC'}), 400
+                _bal_msg, _bal_wallet, _bal_cur, _bal_required, _bal_ccy = _insufficient_bot_balance(wallet, key_row[0])
+                if _bal_msg:
+                    return jsonify({'ok': False, 'low_balance': True, 'trading_wallet': _bal_wallet,
+                                    'currency': _bal_ccy, 'current': _bal_cur, 'required': _bal_required,
+                                    'current_sol': _bal_cur, 'required_sol': _bal_required, 'msg': _bal_msg}), 400
+                conn.execute('UPDATE users SET copy_source=?, copy_amount=NULL, copy_amount_usdc=? '
+                             'WHERE wallet_address=?', (target, amount_usdc, wallet))
+            else:
+                try:
+                    amount_sol = round(float(0.1 if raw_amount is None else raw_amount), 4)
+                    if amount_sol < 0.01 or amount_sol > 100:
+                        return jsonify({'ok': False, 'msg': 'Amount must be 0.01–100 SOL'}), 400
+                except (TypeError, ValueError):
+                    return jsonify({'ok': False, 'msg': 'Invalid amount'}), 400
+                _bal_msg, _bal_wallet, _bal_sol, _bal_required = _insufficient_trade_balance(wallet, key_row[0])
+                if _bal_msg:
+                    return jsonify({'ok': False, 'low_balance': True, 'trading_wallet': _bal_wallet,
+                                    'current_sol': _bal_sol, 'required_sol': _bal_required, 'msg': _bal_msg}), 400
+                conn.execute('UPDATE users SET copy_source=?, copy_amount=? WHERE wallet_address=?',
+                             (target, amount_sol, wallet))
             new_active = 1
         _sync_copy_relationship(conn, wallet, target if new_active else None)
         conn.commit()
@@ -25824,6 +25891,15 @@ def copy_trade_from_message():
         return jsonify({'ok': False, 'msg': 'Connect a wallet first'}), 401
     body = request.json or {}
     token_address = str(body.get('token_address', '')).strip()
+    if SOLANA_BASE_CURRENCY == 'USDC':
+        # Same buy as Live Market: USDC, sized by the copier's own trade size.
+        # The shared message's amount_sol is the SHARER's size in SOL, which
+        # is neither this user's size nor the currency they trade in.
+        if not is_valid_solana_address(token_address):
+            return jsonify({'ok': False, 'msg': 'Invalid token address'}), 400
+        return _solana_buy_flow(wallet, token_address, log_label='COPY TRADE',
+                                enforce_position_cap=True,
+                                idle_note=' — start the bot for automatic TP/SL')
     amount_sol    = float(body.get('amount_sol', 0) or 0)
     if not is_valid_solana_address(token_address):
         return jsonify({'ok': False, 'msg': 'Invalid token address'}), 400
@@ -26117,7 +26193,9 @@ def api_manual_buy():
 
 def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
                      enforce_position_cap: bool, idle_note: str,
-                     requested_usdc: float = None):
+                     requested_usdc: float = None, source: str = 'manual',
+                     copy_of_wallet: str = None, trigger_copies: bool = True,
+                     respect_max: bool = True):
     """One Solana buy, for both /api/manual_buy and /api/pump-scanner/buy.
 
     These were two copies of the same function differing only in the field
@@ -26245,8 +26323,11 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
         if requested_usdc is not None and float(requested_usdc) < min_trade_usdc:
             return jsonify({'ok': False,
                             'msg': f'Minimum trade amount is {min_trade_usdc:.2f} USDC'}), 400
+        # A copy passes respect_max=False: its per-copy amount is its own
+        # explicit setting, not bounded by the manual max trade size.
         target_usdc = (min_trade_usdc if requested_usdc is None
-                       else min(max_trade_usdc, float(requested_usdc)))
+                       else (min(max_trade_usdc, float(requested_usdc)) if respect_max
+                             else float(requested_usdc)))
         spend = round(min(target_usdc, us_usdc), 2)
         if spend < SOLANA_MIN_SPEND_USDC:
             return jsonify({
@@ -26283,7 +26364,8 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
             # into SOL, mis-stating the profit on every USDC trade.
             pos['base']            = SOLANA_BASE_CURRENCY
             pos.update(_snapshot_entry_risk(wallet, entry_price))
-            _upsert_open_position(user_id, wallet, mint, pos, source='manual')
+            _upsert_open_position(user_id, wallet, mint, pos, source=source,
+                                  copy_of_wallet=copy_of_wallet)
 
             # Only when the fee really rode along inside the swap. Recording
             # one that did not would book revenue nobody received and pay a
@@ -26303,8 +26385,9 @@ def _solana_buy_flow(wallet: str, mint: str, *, log_label: str,
     add_user_log(wallet, '[' + short + '] ' + log_label + ': ' + pos['symbol'] +
                  ' for ' + str(spend) + ' ' + SOLANA_BASE_CURRENCY +
                  ' @ $' + str(token_data['price']))
-    _trigger_copy_buy(wallet, mint, token_data['price'], pos['symbol'],
-                      float(token_data.get('liquidity', 0) or 0))
+    if trigger_copies:
+        _trigger_copy_buy(wallet, mint, token_data['price'], pos['symbol'],
+                          float(token_data.get('liquidity', 0) or 0))
     note = '' if us.get('trader_running') else idle_note
     return jsonify({'ok': True, 'msg': 'Bought ' + pos['symbol'] + note,
                     'symbol': pos['symbol'], 'spend': spend,
@@ -26353,7 +26436,10 @@ def api_manual_sell():
         with _use_key(enc_blob, wallet) as _pk:
             # '0' = sell the actual on-chain balance, not the tracked pos['amount']
             # -- they can drift, and this is a full close so no dust should remain.
-            sell_ok, cur_price, amount = _sell_and_get_realized(wallet, _pk, mint, '0', cur_price, amount)
+            # Proceeds go back into the currency this position was opened with
+            # (USDC for everything the app buys now), like /api/trade/sell.
+            sell_ok, cur_price, amount = _sell_and_get_realized(wallet, _pk, mint, '0', cur_price, amount,
+                                                                base=pos.get('base', 'SOL'))
     except InvalidToken:
         return jsonify({'ok': False, 'msg': 'Cannot decrypt trading key — please re-save it in Settings'}), 400
     except Exception as e:
@@ -26366,7 +26452,8 @@ def api_manual_sell():
                                exit_reason='MANUAL SELL', opened_at=pos.get('opened_at', 0.0), source='manual',
                                entry_liquidity=pos.get('entry_liquidity'), entry_lp_locked_pct=pos.get('entry_lp_locked_pct'),
                                entry_mint_authority_active=pos.get('entry_mint_authority_active'),
-                               entry_freeze_authority_active=pos.get('entry_freeze_authority_active'))
+                               entry_freeze_authority_active=pos.get('entry_freeze_authority_active'),
+                               base=pos.get('base', 'SOL'))
         _close_open_position(user_id, wallet, mint)
         add_user_log(wallet, f'[{short}] MANUAL SELL: {symbol} ✓')
     else:
@@ -26846,7 +26933,10 @@ def manual_sell():
         with _use_key(enc_blob, wallet) as _pk:
             # '0' = sell the actual on-chain balance, not the tracked pos['amount']
             # -- they can drift, and this is a full close so no dust should remain.
-            sell_ok, cur_price, amount = _sell_and_get_realized(wallet, _pk, mint, '0', cur_price, amount)
+            # Proceeds go back into the currency this position was opened with
+            # (USDC for everything the app buys now), like /api/trade/sell.
+            sell_ok, cur_price, amount = _sell_and_get_realized(wallet, _pk, mint, '0', cur_price, amount,
+                                                                base=pos.get('base', 'SOL'))
     except InvalidToken:
         return jsonify({'ok': False, 'msg': 'Cannot decrypt trading key — please re-save it in Settings'}), 400
     except Exception as e:
@@ -26859,7 +26949,8 @@ def manual_sell():
                                exit_reason='MANUAL SELL', opened_at=pos.get('opened_at', 0.0), source='manual',
                                entry_liquidity=pos.get('entry_liquidity'), entry_lp_locked_pct=pos.get('entry_lp_locked_pct'),
                                entry_mint_authority_active=pos.get('entry_mint_authority_active'),
-                               entry_freeze_authority_active=pos.get('entry_freeze_authority_active'))
+                               entry_freeze_authority_active=pos.get('entry_freeze_authority_active'),
+                               base=pos.get('base', 'SOL'))
         _close_open_position(user_id, wallet, mint)
         add_user_log(wallet, f'[{short}] MANUAL SELL: {symbol} ✓')
     else:
@@ -29897,7 +29988,8 @@ def admin_force_close_all():
             with _use_key(enc_blob, target) as _pk:
                 # '0' = sell the actual on-chain balance, not the tracked pos['amount']
                 # -- they can drift, and this is a full close so no dust should remain.
-                sell_ok = _execute_user_swap(target, _pk, 'sell', mint, '0')
+                sell_ok = _execute_user_swap(target, _pk, 'sell', mint, '0',
+                                             base=pos.get('base', 'SOL'))
             if sell_ok:
                 _close_open_position(user_id, target, mint)
                 closed += 1
