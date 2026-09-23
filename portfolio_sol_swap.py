@@ -1,7 +1,8 @@
-"""Portfolio USDC -> native SOL: user-funded gasless orders, no sponsor.
+"""Portfolio USDC -> native SOL with funded and gasless execution paths.
 
-Persist the reviewed order across workers; consume it atomically before signing.
-An uncertain execution must never create a second transaction automatically.
+A wallet that already has enough SOL uses the normal Jupiter swap path. Only a
+wallet below the network-fee reserve requires a genuinely gasless Jupiter Ultra
+order. Reviewed gasless orders are persisted across workers and consumed once.
 """
 import json
 import secrets
@@ -9,6 +10,7 @@ import sqlite3
 import time
 from decimal import Decimal, ROUND_DOWN
 
+import requests
 from flask import jsonify, request
 import solana_source_bridge_gasless as provider
 
@@ -78,10 +80,43 @@ def install(d):
         try:
             wallet = identity()
             amount = amount6(request.args.get('amount', '0'))
-            _, usdc = balances(wallet)
+            sol, usdc = balances(wallet)
             if amount > usdc:
                 return fail('Amount exceeds your Solana USDC balance')
-            # This helper insists on gasless=True even for a funded wallet.
+
+            reserve = Decimal(str(d.SOL_NETWORK_RESERVE))
+            if sol >= reserve:
+                # Funded wallet: use the normal Jupiter quote/execution path.
+                # Returning no quote_id intentionally makes the UI submit to
+                # /api/wallet/convert, which signs the ordinary swap with the
+                # user's own SOL paying network fees.
+                jup_url = ((d.JUPITER_PROXY + '/quote') if d.JUPITER_PROXY
+                           else 'https://api.jup.ag/swap/v1/quote')
+                headers = {'Accept': 'application/json',
+                           'User-Agent': 'Mozilla/5.0 OrcAgent/1.0'}
+                if d.PROXY_SECRET:
+                    headers['X-Proxy-Secret'] = d.PROXY_SECRET
+                response = requests.get(jup_url, params={
+                    'inputMint': d.USDC_MINT,
+                    'outputMint': d.SOL_MINT,
+                    'amount': int(amount * 1000000),
+                    'slippageBps': 300,
+                }, headers=headers, timeout=10)
+                if response.status_code != 200:
+                    return fail(f'Quote unavailable (HTTP {response.status_code})', 502)
+                quote = response.json()
+                out_raw = int(quote.get('outAmount', 0) or 0)
+                min_raw = int(quote.get('otherAmountThreshold', 0) or 0)
+                if out_raw <= 0:
+                    return fail('No route found', 502)
+                return jsonify(ok=True, chain='solana', direction='stable_to_native',
+                               from_symbol='USDC', to_symbol='SOL',
+                               out_amount=out_raw / 1e9,
+                               min_out_amount=(min_raw / 1e9) if min_raw > 0 else 0,
+                               price_impact_pct=float(quote.get('priceImpactPct') or 0),
+                               network_reserve_native=float(reserve), gasless=False)
+
+            # Low-SOL wallet: only accept a genuinely gasless Jupiter order.
             # No key is sent to Jupiter: only its derived public address.
             with d._use_key(key_blob(wallet), wallet) as key:
                 order, output = provider._gasless_order(key, amount)
