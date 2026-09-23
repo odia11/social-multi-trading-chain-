@@ -11,6 +11,7 @@ import html
 import json
 import os
 import re
+import secrets
 import sqlite3
 from urllib.parse import quote
 
@@ -185,7 +186,7 @@ def install(dashboard_module):
     @app.after_request
     def _canonical_share_routes(response):
         try:
-            from flask import request
+            from flask import g, request
             if response.status_code != 200 or response.mimetype != 'text/html':
                 return response
 
@@ -201,9 +202,28 @@ def install(dashboard_module):
 
                 if _POST_ID_RE.fullmatch(post_id or '') and '</body>' in body:
                     pid_js = json.dumps(post_id)
+                    # The postId is templated in per response, so this can't
+                    # become a static external file the way a fixed script
+                    # could. Instead it carries CSP's own per-response nonce
+                    # directly: `g.orca_csp_nonce` is set by
+                    # security_hardening.py's before_request hook, which runs
+                    # (like every before_request hook) before any
+                    # after_request hook of any module, so it is always
+                    # already set here regardless of after_request
+                    # registration order. Without this, the tag would rely
+                    # on security_hardening.py's after_request nonce-
+                    # injection pass to nonce it after the fact -- but that
+                    # pass actually runs BEFORE this hook's response, since
+                    # Flask calls after_request hooks in REVERSE install()
+                    # order and this module installs before security_hardening
+                    # (see app_entry.py). The tag would never get nonced and
+                    # CSP would silently drop it, meaning a shared post link
+                    # (e.g. from X/Twitter) would never scroll to / highlight
+                    # the exact post it pointed at.
+                    nonce = getattr(g, 'orca_csp_nonce', '') or secrets.token_urlsafe(18)
                     script = """
-<script id=\"orca-canonical-post-jump\">
-(function(){
+<script nonce=\"%s\" id=\"orca-canonical-post-jump\">
+(function(){""" % nonce + """
   var postId = %s;
   var jumpTries = 0;
   var sessionTries = 0;

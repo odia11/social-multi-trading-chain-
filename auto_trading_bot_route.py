@@ -137,40 +137,15 @@ def install(dashboard):
         # bundle that creates a /live-market Start Trading anchor later.
         # Capture phase is deliberate: stop the old target before any bubble
         # handler or SPA navigation controller sees the tap.
-        guard = r'''<script id="oa-auto-bot-route-guard">
-(function(){
-  var TARGET='/auto-trading-bot';
-  function label(el){return String((el&&el.textContent)||'').replace(/\s+/g,' ').trim().toLowerCase();}
-  function isBotToggle(el){
-    return !!(el && (el.id==='bot-toggle-btn' || el.id==='sb-start-btn' ||
-      (el.closest && el.closest('#bot-dashboard,.status-card'))));
-  }
-  function isStartNavigation(el){
-    if(!el || isBotToggle(el)) return false;
-    if(el.id==='bot-start-landing' || el.id==='oa-home-bot-btn' || el.id==='mn-drawer-trade-btn') return true;
-    if(el.classList && (el.classList.contains('oa-home-primary') ||
-       el.classList.contains('oa-m-primary') || el.classList.contains('hero-cta'))) return true;
-    var t=label(el);
-    return t==='start trading' || t.indexOf('start trading →')===0 || t.indexOf('start trading ➜')===0;
-  }
-  document.addEventListener('click',function(e){
-    var el=e.target&&e.target.closest?e.target.closest('a,button'):null;
-    if(!isStartNavigation(el)) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if(e.stopImmediatePropagation) e.stopImmediatePropagation();
-    window.location.href=TARGET;
-  },true);
-  document.addEventListener('touchend',function(e){
-    var el=e.target&&e.target.closest?e.target.closest('a,button'):null;
-    if(!isStartNavigation(el)) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if(e.stopImmediatePropagation) e.stopImmediatePropagation();
-    window.location.href=TARGET;
-  },{capture:true,passive:false});
-})();
-</script>'''
+        #
+        # A same-origin <script src>, not an inline block: this hook installs
+        # before security_hardening.py in app_entry.py, and Flask runs
+        # after_request hooks in REVERSE install() order, so an inline
+        # script appended here would run after security_hardening's CSP
+        # nonce-injection pass already completed -- it would never get a
+        # nonce and CSP would silently drop the whole guard. See
+        # static/auto-bot-route-guard.js for the full explanation.
+        guard = '<script src="/static/auto-bot-route-guard.js?v=1" id="oa-auto-bot-route-guard"></script>'
         if 'id="oa-auto-bot-route-guard"' not in body:
             if '<head>' in body:
                 body = body.replace('<head>', '<head>\n' + guard, 1)
