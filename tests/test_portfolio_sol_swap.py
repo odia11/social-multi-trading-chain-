@@ -29,6 +29,7 @@ class SwapTests(unittest.TestCase):
         provider._gasless_order = Mock(side_effect=lambda key, amount:(dict(self.order, inAmount=str(int(amount*1000000))),Decimal('0.12')))
         provider._execute_order = Mock(return_value=('tx', {}))
         d = types.SimpleNamespace(app=self.app, DB_FILE=self.db, SOL_NETWORK_RESERVE=0.005,
+            JUPITER_PROXY='', PROXY_SECRET='', USDC_MINT='usdc', SOL_MINT='sol',
             _authenticated_wallet=lambda:self.wallet, _validate_csrf=lambda v:v=='valid',
             _get_trading_wallet_address=lambda w:'trading', _get_user_sol=lambda a:self.sol,
             _get_solana_usdc_balance=lambda a:self.usdc, _use_key=lambda b,w:contextlib.nullcontext('test-key'),
@@ -55,6 +56,20 @@ class SwapTests(unittest.TestCase):
         self.sol='0.123456789'
         b=self.client.get('/api/wallet/sol-swap/balance').json
         self.assertEqual(b['max_sol'],'0.118456789')
+    def test_funded_wallet_uses_normal_swap_instead_of_requiring_gasless(self):
+        self.sol='0.005'
+        response=types.SimpleNamespace(status_code=200, json=lambda:{
+            'outAmount':'120000000', 'otherAmountThreshold':'119000000',
+            'priceImpactPct':'0.0001'})
+        with patch.object(swap.requests,'get',return_value=response) as request_quote:
+            q=self.quote('1')
+        self.assertEqual(q.status_code,200)
+        self.assertFalse(q.json['gasless'])
+        self.assertNotIn('quote_id',q.json)
+        self.assertEqual(q.json['network_reserve_native'],0.005)
+        provider._gasless_order.assert_not_called()
+        self.assertEqual(request_quote.call_args.kwargs['params']['inputMint'],'usdc')
+        self.assertEqual(request_quote.call_args.kwargs['params']['outputMint'],'sol')
     def test_auth_csrf_and_ownership(self):
         token=self.quote().json['quote_id']
         self.assertEqual(self.execute(token,'wrong').status_code,403)
