@@ -23,28 +23,45 @@ var EDGE_ZONE   = 24;   // px from the left edge a drag must start within
 var THRESHOLD   = 70;   // px of rightward drag that commits the navigation
 var MAX_PULL    = 120;  // px at which the indicator reaches full strength
 
-var el = null;
-function indicator(){
-  if(el) return el;
-  el = document.createElement('div');
-  el.id = 'oa-swipe-back-indicator';
-  el.setAttribute('aria-hidden', 'true');
-  el.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>';
-  el.style.cssText = 'position:fixed;top:50%;left:0;z-index:2000;width:40px;height:40px;'
-    + 'margin-top:-20px;border-radius:0 999px 999px 0;background:rgba(18,22,28,.92);'
-    + 'color:#f7b955;display:flex;align-items:center;justify-content:center;'
-    + 'transform:translateX(-100%);opacity:0;pointer-events:none;'
-    + 'transition:transform .18s ease,opacity .18s ease;will-change:transform,opacity';
-  document.body.appendChild(el);
-  return el;
-}
+// Created once up front, not lazily on first touch -- inserting it mid-drag
+// forced a layout on the very first frame of every gesture, which read as a
+// stutter right as the finger started moving. defer already guarantees body
+// exists by the time this runs.
+var el = document.createElement('div');
+el.id = 'oa-swipe-back-indicator';
+el.setAttribute('aria-hidden', 'true');
+el.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>';
+el.style.cssText = 'position:fixed;top:50%;left:0;z-index:2000;width:40px;height:40px;'
+  + 'margin-top:-20px;border-radius:0 999px 999px 0;background:rgba(18,22,28,.92);'
+  + 'color:#f7b955;display:flex;align-items:center;justify-content:center;'
+  + 'transform:translateX(-100%);opacity:0;pointer-events:none;'
+  + 'transition:transform .18s ease,opacity .18s ease;will-change:transform,opacity';
+document.body.appendChild(el);
 
-function setPull(px, animated){
-  var ind = indicator();
+// touchmove can fire far more often than the screen repaints, so writing
+// style directly from every event is what made the drag feel like it was
+// catching up rather than following the finger. Only the LATEST value is
+// kept and applied once per animation frame; the event handler itself never
+// touches layout/style, which is also what keeps it fast enough that the
+// browser isn't left waiting on a slow passive:false handler mid-swipe.
+var rafId = 0, pendingPx = 0;
+function applyPull(px, animated){
   var pct = Math.max(0, Math.min(1, px / MAX_PULL));
-  ind.style.transition = animated ? 'transform .18s ease,opacity .18s ease' : 'none';
-  ind.style.transform  = 'translateX(' + (-100 + pct * 100) + '%)';
-  ind.style.opacity    = String(pct);
+  el.style.transition = animated ? 'transform .18s ease,opacity .18s ease' : 'none';
+  el.style.transform   = 'translateX(' + (-100 + pct * 100) + '%)';
+  el.style.opacity     = String(pct);
+}
+function queuePull(px){
+  pendingPx = px;
+  if(rafId) return;
+  rafId = requestAnimationFrame(function(){
+    rafId = 0;
+    applyPull(pendingPx, false);
+  });
+}
+function setPull(px, animated){
+  if(rafId){ cancelAnimationFrame(rafId); rafId = 0; }
+  applyPull(px, animated);
 }
 
 function resetPull(){ setPull(0, true); }
@@ -87,7 +104,7 @@ document.addEventListener('touchmove', function(e){
   }
   if(intent !== 'back') return;
   if(e.cancelable) e.preventDefault(); // confirmed horizontal drag -- stop the page from also panning/selecting
-  setPull(Math.max(0, dx), false);
+  queuePull(Math.max(0, dx));
 }, {passive: false});
 
 function endDrag(e){
