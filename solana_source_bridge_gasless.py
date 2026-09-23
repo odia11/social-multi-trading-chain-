@@ -32,8 +32,11 @@ def _q6(value) -> Decimal:
     return Decimal(str(value)).quantize(_Q6, rounding=ROUND_DOWN)
 
 
-def _gasless_order(private_key: str, amount_usdc: Decimal):
-    """Quote a gasless USDC -> SOL order without spending anything yet."""
+def _gasless_order(private_key: str, amount_usdc: Decimal, require_gasless: bool = True):
+    """Quote a gasless USDC -> SOL order without spending anything yet.
+
+    require_gasless=False also accepts an ordinary executable Ultra order
+    (gasless=False) -- for callers that check the taker can pay its fees."""
     amount_usdc = _q6(amount_usdc)
     if amount_usdc <= 0:
         raise RuntimeError('gas bootstrap amount must be positive')
@@ -60,7 +63,7 @@ def _gasless_order(private_key: str, amount_usdc: Decimal):
     if not order.get('transaction'):
         raise RuntimeError(str(order.get('errorMessage') or order.get('error')
                                or 'Jupiter returned no executable gas-bootstrap transaction')[:300])
-    if not bool(order.get('gasless')):
+    if require_gasless and not bool(order.get('gasless')):
         raise RuntimeError('Jupiter did not provide a gasless USDC -> SOL route')
 
     try:

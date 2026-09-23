@@ -26,7 +26,7 @@ class SwapTests(unittest.TestCase):
             c.execute("INSERT INTO users VALUES ('alice','encrypted')")
         self.order = dict(inAmount='20088712', outAmount='120000000', otherAmountThreshold='119000000',
                           requestId='request', transaction='unsigned', gasless=True)
-        provider._gasless_order = Mock(side_effect=lambda key, amount:(dict(self.order, inAmount=str(int(amount*1000000))),Decimal('0.12')))
+        provider._gasless_order = Mock(side_effect=lambda key, amount, **kw:(dict(self.order, inAmount=str(int(amount*1000000))),Decimal('0.12')))
         provider._execute_order = Mock(return_value=('tx', {}))
         d = types.SimpleNamespace(app=self.app, DB_FILE=self.db, SOL_NETWORK_RESERVE=0.005,
             JUPITER_PROXY='', PROXY_SECRET='', USDC_MINT='usdc', SOL_MINT='sol',
@@ -70,6 +70,40 @@ class SwapTests(unittest.TestCase):
         provider._gasless_order.assert_not_called()
         self.assertEqual(request_quote.call_args.kwargs['params']['inputMint'],'usdc')
         self.assertEqual(request_quote.call_args.kwargs['params']['outputMint'],'sol')
+    def test_low_sol_wallet_takes_ordinary_ultra_order_it_can_pay_for(self):
+        # Jupiter withholds gasless from a wallet that can pay its own fees.
+        self.sol='0.003'
+        self.order=dict(self.order, gasless=False, taker='trading', signatureFeeLamports=5000,
+                        prioritizationFeeLamports=100000, rentFeeLamports=0)
+        q=self.quote()
+        self.assertEqual(q.status_code,200,q.json)
+        self.assertFalse(q.json['gasless'])
+        self.assertAlmostEqual(q.json['network_reserve_native'],0.000105)
+        self.assertEqual(provider._gasless_order.call_args.kwargs,{'require_gasless':False})
+        e=self.execute(q.json['quote_id'])
+        self.assertEqual(e.status_code,200)
+        self.assertFalse(e.json['gasless'])
+        provider._execute_order.assert_called_once()
+    def test_non_gasless_order_the_wallet_cannot_pay_is_refused_clearly(self):
+        self.order=dict(self.order, gasless=False, taker='trading', signatureFeeLamports=5000,
+                        prioritizationFeeLamports=100000, rentFeeLamports=0)
+        q=self.quote()
+        self.assertEqual(q.status_code,400)
+        self.assertIn('needs about 0.000105 SOL',q.json['msg'])
+        self.assertNotIn('quote_id',q.json)
+        provider._execute_order.assert_not_called()
+    def test_fees_paid_by_someone_else_are_not_counted(self):
+        self.sol='0.0001'
+        self.order=dict(self.order, gasless=False, taker='trading', signatureFeeLamports=5000,
+                        prioritizationFeeLamports=100000, prioritizationFeePayer='jupiter',
+                        rentFeeLamports=2039280, rentFeePayer='jupiter')
+        self.assertEqual(self.quote().status_code,200)
+    def test_missing_fee_breakdown_uses_conservative_fallback(self):
+        self.order=dict(self.order, gasless=False)
+        self.sol='0.002'
+        self.assertEqual(self.quote().status_code,400)
+        self.sol='0.003'
+        self.assertEqual(self.quote().status_code,200)
     def test_auth_csrf_and_ownership(self):
         token=self.quote().json['quote_id']
         self.assertEqual(self.execute(token,'wrong').status_code,403)
