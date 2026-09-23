@@ -39,7 +39,7 @@ check('ordinary mobile bottom space is tightened from the old 132px reserve',
 check('portfolio gets a compact but safe fixed-nav reserve',
       'body.oa-shared-ux.oa-portfolio .wlt-center' in CSS)
 check('every HTML response gets the current shared performance assets early',
-      'app-ux.css?v=5' in PERF and 'app-ux.js?v=4' in PERF)
+      'app-ux.css?v=6' in PERF and 'app-ux.js?v=4' in PERF)
 check('route-critical redesign assets are applied before first paint',
       'portfolio-redesign.css?v=6' in PERF
       and 'live-market-redesign.css?v=7' in PERF
