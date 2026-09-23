@@ -268,10 +268,30 @@ function renderChartSvg(idx, candles, currentPrice){
 
 // Move only the still-forming candle. Rebuilding the complete SVG every two
 // seconds caused visible flashing/jank on mobile, especially while swiping.
+//
+// Two things made this look like a series of little flicks-and-holds instead
+// of one continuously moving line, the way a real exchange ticker reads:
+//
+// 1. The ease ran for only 220ms out of every ~2000ms between price ticks
+//    (tickLivePrices' _pricePollBaseMs) -- 90% of the time the line was
+//    sitting dead still, waiting for the next tick to give it something to
+//    do. Duration now tracks the poll cadence instead of a fixed 220ms, so
+//    the line is still easing toward the last known price when the next one
+//    lands, rather than resting between moves.
+// 2. `previous` was read from st.renderedPrice, which this function itself
+//    only ever set once an animation finished -- so a tick that arrived
+//    before the prior one's ease completed (normal: network jitter routinely
+//    makes two ticks land closer than the nominal 2s apart) restarted the
+//    ease from wherever the LAST completed animation ended, not from the
+//    line's actual current on-screen position -- a visible snap backwards
+//    before it eased forward again. st.animPrice is now updated on every
+//    single frame, completed or not, so a new tick always continues from
+//    the line's true current position.
 function updateLiveChartPrice(idx, nextPrice){
   var st=_chartTimers[idx], wrap=document.getElementById('pt-chart-wrap-'+idx);
   if(!st || !wrap || !st.candles || !st.candles.length || !(nextPrice>0)) return;
-  var last=st.candles[st.candles.length-1], previous=Number(st.renderedPrice||last.c||nextPrice);
+  var last=st.candles[st.candles.length-1];
+  var previous=Number((st.liveRaf&&st.animPrice!=null)?st.animPrice:(st.renderedPrice||last.c||nextPrice));
   last.c=nextPrice; last.h=Math.max(Number(last.h||nextPrice),nextPrice); last.l=Math.min(Number(last.l||nextPrice),nextPrice);
   // A move outside the current scale needs fresh axes; ordinary ticks stay GPU-smooth.
   if(nextPrice<=st.min || nextPrice>=st.max){ renderChartSvg(idx,st.candles,nextPrice); return; }
@@ -279,9 +299,10 @@ function updateLiveChartPrice(idx, nextPrice){
   var pill=wrap.querySelector('.pt-price-pill');
   if(!body || !wick || !guide){ renderChartSvg(idx,st.candles,nextPrice); return; }
   if(st.liveRaf) cancelAnimationFrame(st.liveRaf);
-  var started=performance.now(), duration=220;
+  var started=performance.now(), duration=Math.max(900,(typeof _pricePollBaseMs==='number'?_pricePollBaseMs:2000)-150);
   function frame(now){
     var q=Math.min(1,(now-started)/duration), eased=1-Math.pow(1-q,3), p=previous+(nextPrice-previous)*eased;
+    st.animPrice=p;
     var y=function(v){return st.priceH-((v-st.min)/(st.max-st.min))*st.priceH;};
     var yo=y(Number(last.o!=null?last.o:p)), yc=y(p), yh=y(Math.max(Number(last.h)||p,p)), yl=y(Math.min(Number(last.l)||p,p));
     var color=p>=Number(last.o!=null?last.o:p)?'#3ad29b':'#f76b62';
@@ -289,7 +310,7 @@ function updateLiveChartPrice(idx, nextPrice){
     wick.setAttribute('y1',yh.toFixed(2)); wick.setAttribute('y2',yl.toFixed(2)); wick.setAttribute('stroke',color);
     guide.setAttribute('y1',yc.toFixed(2)); guide.setAttribute('y2',yc.toFixed(2));
     if(pill){pill.style.top=yc+'px'; pill.textContent=fmtPrice(p);}
-    if(q<1) st.liveRaf=requestAnimationFrame(frame); else {st.liveRaf=null; st.renderedPrice=nextPrice;}
+    if(q<1) st.liveRaf=requestAnimationFrame(frame); else {st.liveRaf=null; st.animPrice=null; st.renderedPrice=nextPrice;}
   }
   st.liveRaf=requestAnimationFrame(frame);
 }

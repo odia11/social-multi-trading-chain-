@@ -17579,7 +17579,13 @@ def _navbar_html(active_nav: str = '') -> Markup:
       </button>
       <div class="pt-nb-more-dd" id="pt-nb-more-dd">%(more_items_desktop)s</div>
     </div>
-    <div class="pt-nb-sol-chip"><span class="dot"></span><span class="pt-nb-sol-num" id="pt-nb-sol-balance">0.00</span> <span class="pt-nb-sol-unit">SOL</span></div>
+    <!-- header-stable-balance.js overwrites this with the dollar-formatted
+         total portfolio value (e.g. "$20.95") as soon as it loads; the
+         placeholder matches that shape so nothing flashes an unformatted
+         number first. The "SOL" unit span is legacy markup from when this
+         chip showed a raw SOL amount -- kept only so old cached HTML
+         without a fresh navbar.css still hides it via .pt-nb-sol-unit. -->
+    <div class="pt-nb-sol-chip"><span class="dot"></span><span class="pt-nb-sol-num" id="pt-nb-sol-balance">$0.00</span> <span class="pt-nb-sol-unit">SOL</span></div>
     <a href="/profile"><img class="pt-nb-avatar" id="pt-nb-avatar" style="display:none"></a>
     <a href="/profile"><div class="pt-nb-avatar" id="pt-nb-avatar-ph">?</div></a>
   </div>
