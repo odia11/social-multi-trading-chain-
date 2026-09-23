@@ -20514,9 +20514,15 @@ def api_wallet_convert():
         if not row or not row[0]:
             return jsonify({'ok': False, 'msg': 'No Solana trading wallet configured'}), 400
         enc_blob = row[0]
-        fetch_user_balances(wallet)
-        current_sol = float(get_user_state(wallet).get('sol', 0) or 0)
-        trading_wallet = _get_trading_wallet_address(wallet) or wallet
+        # Match Portfolio Max: funds belong to the signing trading wallet,
+        # not necessarily the wallet used to authenticate the session.
+        trading_wallet = _get_trading_wallet_address(wallet)
+        if not trading_wallet:
+            return jsonify({'ok': False, 'msg': 'No Solana trading wallet configured'}), 400
+        try:
+            current_sol = _get_user_sol(trading_wallet)
+        except Exception:
+            return jsonify({'ok': False, 'msg': 'SOL balance unavailable. Please retry.'}), 502
 
         if direction == 'native_to_stable':
             max_convert = max(0.0, current_sol - SOL_NETWORK_RESERVE)

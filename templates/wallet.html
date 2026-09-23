@@ -412,6 +412,10 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
 .br-form-swap:hover{background:var(--accent);color:#0a0b0e;transform:translate(-50%,-50%) rotate(180deg)}
 .br-form-amount-wrap{position:relative;margin-top:14px}
 .br-form-amount-inp{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:11px 66px 11px 14px;font-size:15px;font-family:var(--mono);outline:none;margin-bottom:0}
+.cv-amount-wrap{display:flex;align-items:center;gap:8px;background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:8px 10px}
+.cv-amount-wrap #cv-amount{width:0;min-width:0;flex:1;border:0;background:transparent;padding:4px;font-size:16px}
+.cv-amount-wrap #cv-max{margin:0!important;min-height:36px;padding:6px 10px!important}
+.cv-amount-wrap #cv-from-sym{position:static;transform:none;flex:0 0 auto}
 .br-form-amount-inp:focus{border-color:var(--accent)}
 .br-form-amount-sym{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-family:var(--mono);font-size:11px;font-weight:700;color:var(--sub);background:var(--bg4);padding:4px 8px;border-radius:6px;pointer-events:none}
 .br-bal-row{display:flex;justify-content:space-between;align-items:center;margin-top:7px;font-size:11px;color:var(--muted);font-family:var(--mono)}
@@ -1435,7 +1439,7 @@ function _modalConvert(){
         +'</select>'
       +'</div>'
     +'</div>'
-    +'<div class="br-form-amount-wrap">'
+    +'<div class="br-form-amount-wrap cv-amount-wrap">'
       +'<input class="br-form-amount-inp" id="cv-amount" type="number" placeholder="0.00" min="0.000001" step="any" oninput="_convertInvalidate()">'
       +'<button type="button" class="w-modal-btn w-modal-secondary" id="cv-max" onclick="_convertUseMax()" style="width:auto;flex:0 0 auto;padding:8px 12px;margin-right:8px">Max</button>'
       +'<span class="br-form-amount-sym" id="cv-from-sym">SOL</span>'
