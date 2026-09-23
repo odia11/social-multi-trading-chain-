@@ -79,10 +79,41 @@ function blockedByOverlay(){
     || html.classList.contains('oa-search-open');
 }
 
-var startX = 0, startY = 0, tracking = false, intent = null;
+var startX = 0, startY = 0, tracking = false, intent = null, moveBound = false;
+
+// A non-passive touchmove listener makes the BROWSER wait for this handler
+// to run, and decide whether to call preventDefault(), before it dares start
+// scrolling -- on every touchmove it could see, anywhere on the page, for as
+// long as that listener exists. Registering it for the page's whole
+// lifetime (as an earlier version of this file did) meant an ordinary
+// scroll starting anywhere near the left edge -- including the follow-up
+// scroll right after a completed back-swipe, since a thumb that just swiped
+// in from the edge is often still close to it -- paid that wait every time,
+// which read as the page briefly refusing to scroll. Attaching it only for
+// the duration of a touch that actually started inside the edge zone, and
+// removing it the instant that touch ends or turns out not to be a
+// horizontal drag, keeps that cost limited to the one situation it exists
+// for; every other touch on the page is never slowed down at all.
+function onTouchMove(e){
+  if(!tracking || e.touches.length !== 1) return;
+  var t = e.touches[0];
+  var dx = t.clientX - startX, dy = t.clientY - startY;
+  if(intent === null){
+    if(Math.abs(dx) < 10 && Math.abs(dy) < 10) return; // not enough movement to tell yet
+    intent = (dx > 0 && Math.abs(dx) > Math.abs(dy) * 1.15) ? 'back' : 'none';
+    if(intent !== 'back'){ stopTracking(); return; }
+  }
+  if(e.cancelable) e.preventDefault(); // confirmed horizontal drag -- stop the page from also panning/selecting
+  queuePull(Math.max(0, dx));
+}
+
+function stopTracking(){
+  tracking = false; intent = null;
+  if(moveBound){ document.removeEventListener('touchmove', onTouchMove); moveBound = false; }
+}
 
 document.addEventListener('touchstart', function(e){
-  tracking = false; intent = null;
+  stopTracking();
   if(e.touches.length !== 1) return;
   if(blockedByOverlay()) return;
   var t = e.touches[0];
@@ -91,28 +122,15 @@ document.addEventListener('touchstart', function(e){
   if(active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return;
   if(e.target.closest && e.target.closest('.oa-swipe-mode,[data-no-swipe-back]')) return;
   startX = t.clientX; startY = t.clientY; tracking = true;
+  document.addEventListener('touchmove', onTouchMove, {passive: false});
+  moveBound = true;
 }, {passive: true});
 
-document.addEventListener('touchmove', function(e){
-  if(!tracking || e.touches.length !== 1) return;
-  var t = e.touches[0];
-  var dx = t.clientX - startX, dy = t.clientY - startY;
-  if(intent === null){
-    if(Math.abs(dx) < 10 && Math.abs(dy) < 10) return; // not enough movement to tell yet
-    intent = (dx > 0 && Math.abs(dx) > Math.abs(dy) * 1.15) ? 'back' : 'none';
-    if(intent !== 'back'){ tracking = false; return; }
-  }
-  if(intent !== 'back') return;
-  if(e.cancelable) e.preventDefault(); // confirmed horizontal drag -- stop the page from also panning/selecting
-  queuePull(Math.max(0, dx));
-}, {passive: false});
-
 function endDrag(e){
-  if(!tracking || intent !== 'back'){ tracking = false; intent = null; return; }
-  tracking = false;
+  if(!tracking || intent !== 'back'){ stopTracking(); return; }
   var t = (e.changedTouches && e.changedTouches[0]) || null;
   var dx = t ? t.clientX - startX : 0;
-  intent = null;
+  stopTracking();
   if(dx >= THRESHOLD){
     setPull(MAX_PULL, true);
     goBack();
@@ -121,5 +139,5 @@ function endDrag(e){
   }
 }
 document.addEventListener('touchend', endDrag, {passive: true});
-document.addEventListener('touchcancel', function(){ tracking = false; intent = null; resetPull(); }, {passive: true});
+document.addEventListener('touchcancel', function(){ stopTracking(); resetPull(); }, {passive: true});
 })();
