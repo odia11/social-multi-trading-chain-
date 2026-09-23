@@ -674,31 +674,31 @@ function showStep(n){
 function nextStep(n){currentStep=n+1;showStep(currentStep);}
 function gotoSetupGuide(){currentStep=1;showStep(1);}
 
-async function connectWalletOnboard(type){
+// The legacy #onboard panel (and its #wallet-install-msg) is never displayed
+// any more -- Connect now starts from the wallet sheet in wallet-onboarding.js
+// -- so wallet connect feedback has to go to a toast the user can actually see.
+function _walletConnectNotice(msg){
+  if(typeof showLfToast==='function') showLfToast('👛', msg, 'warn');
+}
+
+async function connectWalletOnboard(type, afterLoginUrl){
   try{ localStorage.removeItem('orca_manual_disconnect'); }catch(e){}
   const isPhantom=type==='phantom';
   const provider=isPhantom?_phantomProvider():window.solflare;
   const name=isPhantom?'Phantom':'Solflare';
-  const installUrl=isPhantom?'https://phantom.app':'https://solflare.com';
   const check=!!provider;
-  const msgEl=document.getElementById('wallet-install-msg');
 
   if(!check){
     /* On mobile without the extension, use deep link */
     if(isMobile){ if(isPhantom){ window.location.href=_phantomBrowseConnectUrl(); return; } window.location.href=solflareDeepLink; return; }
-    const other=isPhantom?'Solflare':'Phantom';
-    const otherUrl=isPhantom?'https://solflare.com':'https://phantom.app';
-    msgEl.innerHTML=name+' wallet not detected. <a href="'+installUrl+'" target="_blank" style="color:var(--blue);text-decoration:underline">Install '+name+'</a> or try <a href="'+otherUrl+'" target="_blank" style="color:var(--blue);text-decoration:underline">'+other+'</a>.';
-    msgEl.style.display='block';
+    _walletConnectNotice(name+' wallet not detected — install the '+name+' browser extension and reload this page.');
     return;
   }
-  msgEl.style.display='none';
   try{
     const resp=await provider.connect();
     const pubkey=provider.publicKey||resp?.publicKey;
     if(!pubkey){
-      msgEl.textContent='Could not get wallet address — please try again.';
-      msgEl.style.display='block';
+      _walletConnectNotice('Could not get your wallet address — please try again.');
       return;
     }
     phantomKey=pubkey.toString();
@@ -715,18 +715,26 @@ async function connectWalletOnboard(type){
     document.getElementById('wallet-back-btn').style.display='flex';
     const r=await _connectWalletSigned(provider, phantomKey);
     if(!r?.ok && (r?.msg==='Signature rejected'||(r?.msg||'').startsWith('Nonce expired'))){
-      msgEl.textContent='Sign the request in your wallet to log in — please try again';
-      msgEl.style.display='block'; return;
+      _walletConnectNotice('Sign the request in your wallet to log in — please try again.');
+      return;
     }
     if(r?.csrf_token) _csrfToken=r.csrf_token;
     settingsHasKey=r?.has_trading_key||false; _isAdmin=r?.is_admin||false; _updateKeyStatus();
     if(r?.success){
-      if(r.status==='new_user'){ gotoSetupGuide(); return; }
-      await launchApp(); return;
+      // Signed in server-side. Reload into that session, the same way the
+      // wallet sheet's Create/Import flows finish: the header, guest banner,
+      // feed and every other widget were booted as a guest and only pick the
+      // new session up on a fresh load. (This used to call gotoSetupGuide()
+      // for new wallets and launchApp() for returning ones, both of which
+      // only touched the hidden #onboard panel -- so a successful login
+      // looked like nothing happened at all.)
+      if(afterLoginUrl && afterLoginUrl !== '/') window.location.replace(afterLoginUrl);
+      else window.location.reload();
+      return;
     }
+    _walletConnectNotice((r&&typeof r.msg==='string'&&r.msg)||'Could not log in with this wallet — please try again.');
   }catch(e){
-    msgEl.textContent='Connection rejected or failed — please try again.';
-    msgEl.style.display='block';
+    _walletConnectNotice('Connection rejected or failed — please try again.');
     console.error(e);
   }
 }
@@ -749,9 +757,8 @@ async function connectWalletOnboard(type){
       attempts += 1;
       if(window.solana && window.solana.isPhantom){
         clearInterval(timer);
-        connectWalletOnboard('phantom').then(function(){
-          if(phantomKey && returnTo && returnTo !== '/') window.location.replace(returnTo);
-        }).catch(function(e){ console.error('[phantom-browser-connect]', e); });
+        connectWalletOnboard('phantom', returnTo)
+          .catch(function(e){ console.error('[phantom-browser-connect]', e); });
       }else if(attempts >= 20){
         clearInterval(timer);
         var msgEl=document.getElementById('wallet-install-msg');
