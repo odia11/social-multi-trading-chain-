@@ -145,7 +145,7 @@ def install(dashboard_module):
                 )
                 if 'data-orca-security-runtime="1"' not in body:
                     runtime = (
-                        '<script nonce="' + nonce + '" src="/static/security-runtime.js?v=3" '
+                        '<script nonce="' + nonce + '" src="/static/security-runtime.js?v=4" '
                         'defer data-orca-security-runtime="1"></script>'
                     )
                     if '</head>' in body:

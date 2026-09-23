@@ -49,7 +49,7 @@ check('MIME sniffing is disabled', 'X-Content-Type-Options' in HARDENING and 'no
 check('legacy framing is denied', 'X-Frame-Options' in HARDENING and 'DENY' in HARDENING)
 check('cross-origin opener isolation is enabled', 'Cross-Origin-Opener-Policy' in HARDENING)
 check('security runtime is injected in HTML',
-      'security-runtime.js?v=3' in HARDENING and 'data-orca-security-runtime' in HARDENING)
+      'security-runtime.js?v=4' in HARDENING and 'data-orca-security-runtime' in HARDENING)
 
 check('runtime blocks javascript URLs', "javascript:" in RUNTIME)
 check('runtime blocks vbscript URLs', "vbscript:" in RUNTIME)

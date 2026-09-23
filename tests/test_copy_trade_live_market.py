@@ -153,7 +153,9 @@ import sqlite3  # noqa: E402
 f_uid = m.get_or_create_user(FOLLOW)
 m.get_or_create_user(LEADER)
 con = sqlite3.connect(m.DB_FILE)
-con.execute('UPDATE users SET copy_source=?, copy_amount=?, max_trade_size=?, '
+# The per-copy amount lives in copy_amount_usdc. The legacy copy_amount column
+# always held SOL (the copy button asked for 0.01-100 SOL); readers convert it.
+con.execute('UPDATE users SET copy_source=?, copy_amount_usdc=?, max_trade_size=?, '
             'max_positions=5, daily_loss_limit=50 WHERE wallet_address=?',
             (LEADER, 7.5, 25.0, FOLLOW))
 con.commit()
@@ -165,6 +167,17 @@ check('the followers of a wallet are found without filtering on the Solana '
       [r[1] for r in m._copy_followers(LEADER)] == [FOLLOW])
 check('...and a wallet is never its own follower',
       all(r[1] != LEADER for r in m._copy_followers(LEADER)))
+
+_con = sqlite3.connect(m.DB_FILE)
+_con.execute('UPDATE users SET copy_amount_usdc=NULL, copy_amount=0.1 WHERE wallet_address=?', (FOLLOW,))
+_con.commit()
+_saved_price, m._sol_price_usd = m._sol_price_usd, 120.0
+check('a legacy per-copy amount, stored in SOL, is read as its USDC value',
+      [r[4] for r in m._copy_followers(LEADER)] == [12.0])
+m._sol_price_usd = _saved_price
+_con.execute('UPDATE users SET copy_amount_usdc=7.5, copy_amount=NULL WHERE wallet_address=?', (FOLLOW,))
+_con.commit()
+_con.close()
 
 calls = []
 
