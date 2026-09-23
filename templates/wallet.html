@@ -99,6 +99,9 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
 .wlt-action:hover .wlt-action-ic{border-color:rgba(255,255,255,.16)}
 .wlt-action.primary .wlt-action-ic{background:rgba(247,185,85,.14);border-color:rgba(247,185,85,.32);color:var(--accent)}
 .wlt-action.primary:hover .wlt-action-ic{background:rgba(247,185,85,.22)}
+/* Portfolio action icons are inline duotone SVGs (same gold/dark-gold style as
+   the Home shortcut tiles), not unicode glyphs that render differently per OS. */
+.wlt-ic-svg{display:block;width:28px;height:28px;flex:0 0 auto}
 
 .wlt-hero-inpos{
   display:flex;align-items:center;justify-content:space-between;
@@ -661,10 +664,10 @@ html,body{background:#080e11}
         <svg class="pf-spark" viewBox="0 0 122 73" role="img" aria-label="Portfolio trend during this session"><path id="pf-spark-fill" fill="url(#pf-spark-gradient)" d=""></path><path id="pf-spark-line" d="" stroke="#37dc9d" stroke-width="2.5" fill="none" stroke-linejoin="round" stroke-linecap="round"></path><defs><linearGradient id="pf-spark-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#32d99a" stop-opacity=".27"></stop><stop offset="100%" stop-color="#32d99a" stop-opacity="0"></stop></linearGradient></defs></svg><button class="wlt-hero-refresh" onclick="loadBalance()" aria-label="Refresh balance" title="Refresh">↻</button>
       </div>
       <div class="wlt-hero-actions" style="grid-template-columns:repeat(4,minmax(0,1fr))">
-        <button class="wlt-action primary" onclick="_modalDeposit()"><span class="wlt-action-ic">↓</span>Deposit</button>
-        <button class="wlt-action" onclick="_modalSend()"><span class="wlt-action-ic">→</span>Send</button>
-        <button class="wlt-action" onclick="_modalDeposit()"><span class="wlt-action-ic">▣</span>Receive</button>
-        <button class="wlt-action" type="button" onclick="_modalSolUsdcSwap()" aria-label="Swap SOL and USDC on Solana"><span class="wlt-action-ic" aria-hidden="true">⇄</span>Swap</button>
+        <button class="wlt-action primary" onclick="_modalDeposit()"><span class="wlt-action-ic" aria-hidden="true"><svg class="wlt-ic-svg" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="14" width="17" height="7" rx="2.2" fill="#a9762f"/><rect x="10.6" y="2.5" width="2.8" height="10" rx="1.2" fill="#f7b955"/><path d="M6.5 10.2h11L12 16.2z" fill="#f7b955" stroke="#f7b955" stroke-width="1.2" stroke-linejoin="round"/></svg></span>Deposit</button>
+        <button class="wlt-action" onclick="_modalSend()"><span class="wlt-action-ic" aria-hidden="true"><svg class="wlt-ic-svg" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 11.2 20.5 3.6l-6.8 17-2.6-7.3z" fill="#f7b955"/><path d="M11.1 13.3 20.5 3.6l-7.2 9.7z" fill="#a9762f"/></svg></span>Send</button>
+        <button class="wlt-action" onclick="_modalDeposit()"><span class="wlt-action-ic" aria-hidden="true"><svg class="wlt-ic-svg" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g fill="none" stroke="#f7b955" stroke-width="2.4"><rect x="4.2" y="4.2" width="5.1" height="5.1" rx=".6"/><rect x="14.7" y="4.2" width="5.1" height="5.1" rx=".6"/><rect x="4.2" y="14.7" width="5.1" height="5.1" rx=".6"/></g><rect x="13.5" y="13.5" width="3.3" height="3.3" rx=".8" fill="#a9762f"/><rect x="17.7" y="17.7" width="3.3" height="3.3" rx=".8" fill="#a9762f"/><rect x="17.7" y="13.5" width="3.3" height="3.3" rx=".8" fill="#f7b955"/><rect x="13.5" y="17.7" width="3.3" height="3.3" rx=".8" fill="#f7b955"/></svg></span>Receive</button>
+        <button class="wlt-action" type="button" onclick="_modalSolUsdcSwap()" aria-label="Swap SOL and USDC on Solana"><span class="wlt-action-ic" aria-hidden="true"><svg class="wlt-ic-svg" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="5.6" width="13" height="2.8" rx="1.4" fill="#a9762f"/><path d="M14.5 2.5 21 7l-6.5 4.5z" fill="#f7b955" stroke="#f7b955" stroke-width="1" stroke-linejoin="round"/><rect x="8" y="15.6" width="13" height="2.8" rx="1.4" fill="#a9762f"/><path d="M9.5 12.5 3 17l6.5 4.5z" fill="#f7b955" stroke="#f7b955" stroke-width="1" stroke-linejoin="round"/></svg></span>Swap</button>
         <!-- No Bridge button. Buying on a chain with no USDC already bridges
              by itself (_maybe_start_auto_bridge_for_buy): it finds a chain
              with enough balance, moves the funds with a buffer, and finishes
