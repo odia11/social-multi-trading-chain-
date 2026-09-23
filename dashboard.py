@@ -17543,6 +17543,18 @@ def _navbar_more_items_html(extra_class: str = '') -> str:
                  % (cls_suffix, _nav_icon('disconnect')))
     return ''.join(parts)
 
+# No HTML comments (nothing containing "-->") inside the markup below: this
+# string gets spliced into pages at spots that can themselves sit inside an
+# HTML comment, and a "-->" in here would close that comment early and dump
+# half a navbar -- stray closing tags included -- into the live DOM. That is
+# exactly how Home once rendered as an empty screen with only the avatar.
+#
+# #pt-nb-sol-balance: header-stable-balance.js overwrites it with the
+# dollar-formatted total portfolio value (e.g. "$20.95") as soon as it loads;
+# the "$0.00" placeholder matches that shape so nothing flashes an unformatted
+# number first. The "SOL" unit span is legacy markup from when the chip showed
+# a raw SOL amount -- kept only so old cached HTML without a fresh navbar.css
+# still hides it via .pt-nb-sol-unit.
 def _navbar_html(active_nav: str = '') -> Markup:
     nav_links = ''.join(
         '<a href="%s" class="%s">%s<span>%s</span></a>'
@@ -17579,12 +17591,6 @@ def _navbar_html(active_nav: str = '') -> Markup:
       </button>
       <div class="pt-nb-more-dd" id="pt-nb-more-dd">%(more_items_desktop)s</div>
     </div>
-    <!-- header-stable-balance.js overwrites this with the dollar-formatted
-         total portfolio value (e.g. "$20.95") as soon as it loads; the
-         placeholder matches that shape so nothing flashes an unformatted
-         number first. The "SOL" unit span is legacy markup from when this
-         chip showed a raw SOL amount -- kept only so old cached HTML
-         without a fresh navbar.css still hides it via .pt-nb-sol-unit. -->
     <div class="pt-nb-sol-chip"><span class="dot"></span><span class="pt-nb-sol-num" id="pt-nb-sol-balance">$0.00</span> <span class="pt-nb-sol-unit">SOL</span></div>
     <a href="/profile"><img class="pt-nb-avatar" id="pt-nb-avatar" style="display:none"></a>
     <a href="/profile"><div class="pt-nb-avatar" id="pt-nb-avatar-ph">?</div></a>

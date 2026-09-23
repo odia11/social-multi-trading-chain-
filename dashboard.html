@@ -3845,7 +3845,9 @@ __IMAGE_LIGHTBOX__
 
   <!-- HEADER: now the shared top navbar (static/navbar.css/.js). Splice happens
        in dashboard.py's _get_index_base_html() (dashboard.html isn't Jinja-rendered),
-       see the __NAVBAR__ replace() there. -->
+       see the navbar placeholder replace() there. Never write that
+       placeholder's literal token inside a comment: every occurrence gets
+       replaced, and a navbar spliced into a comment breaks the page. -->
   __NAVBAR__
 
   <!-- DASHBOARD UTILITY ROW — owner-only admin/health toggles for the in-page
