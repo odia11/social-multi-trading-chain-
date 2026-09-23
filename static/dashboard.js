@@ -478,22 +478,46 @@ function _phantomMobileV1Connect(){
   });   // _pairPromise
 }
 
+// window.solana is a single global that any installed Solana wallet
+// extension can claim, so with more than one installed, whichever extension
+// injects last "wins" it -- even when Phantom itself is present and working.
+// Phantom's own docs recommend window.phantom.solana instead, which is
+// namespaced to Phantom specifically and can't be clobbered this way.
+// window.solana stays as a fallback for older Phantom builds that only ever
+// set that global.
+function _phantomProvider(){
+  if(window.phantom && window.phantom.solana && window.phantom.solana.isPhantom) return window.phantom.solana;
+  if(window.solana && window.solana.isPhantom) return window.solana;
+  return null;
+}
+
 function _applyPhantomDetection(phantomBtn, phantomNote){
   if(!phantomBtn||!phantomNote) return;
-  if(window.solana&&window.solana.isPhantom) return; // extension present — nothing to do
+  if(_phantomProvider()) return; // extension present — nothing to do
   if(isMobile){
     /* Mobile: use Phantom v1/connect Universal Link */
     phantomBtn.onclick=function(){ _phantomMobileV1Connect(); };
     var lbl=document.getElementById('phantom-ob-label');
     if(lbl) lbl.textContent='Connect Phantom →';
     if(phantomNote){ phantomNote.textContent='Opens Phantom to approve connection'; phantomNote.style.color='var(--muted)'; }
-  } else {
-    /* Desktop: not installed — change button to install link */
+    return;
+  }
+  /* Desktop: Phantom's content script can inject its provider a beat after
+     DOMContentLoaded has already fired (same reason _applySolflareDetection
+     below waits before giving up on window.solflare). Checking immediately
+     and now, before that injection lands, used to permanently replace this
+     button's working connectWalletOnboard('phantom') onclick with an
+     "install Phantom" link -- even though Phantom was already installed and
+     would have been detected a few hundred ms later, well before a real
+     user's next click. Re-check once, after a short wait, before concluding
+     it really isn't installed. */
+  setTimeout(function(){
+    if(_phantomProvider()) return;
     var _pLbl=document.getElementById('phantom-ob-label');
     if(_pLbl) _pLbl.textContent='Install Phantom ↗';
     phantomBtn.onclick=function(){ window.open('https://phantom.app','_blank','noopener'); };
     if(phantomNote) phantomNote.innerHTML='';
-  }
+  }, 400);
 }
 
 function _applySolflareDetection(solflareBtn, solflareNote){
@@ -653,10 +677,10 @@ function gotoSetupGuide(){currentStep=1;showStep(1);}
 async function connectWalletOnboard(type){
   try{ localStorage.removeItem('orca_manual_disconnect'); }catch(e){}
   const isPhantom=type==='phantom';
-  const provider=isPhantom?window.solana:window.solflare;
+  const provider=isPhantom?_phantomProvider():window.solflare;
   const name=isPhantom?'Phantom':'Solflare';
   const installUrl=isPhantom?'https://phantom.app':'https://solflare.com';
-  const check=isPhantom?provider?.isPhantom:!!provider;
+  const check=!!provider;
   const msgEl=document.getElementById('wallet-install-msg');
 
   if(!check){
@@ -1186,7 +1210,7 @@ document.addEventListener('visibilitychange', async function(){
   try{
     const sr=await fetch('/api/state').then(r=>r.json()).catch(()=>null);
     if(sr && !sr.wallet){
-      const _wp=walletType==='Phantom'?window.solana:window.solflare;
+      const _wp=walletType==='Phantom'?_phantomProvider():window.solflare;
       const wr=await _connectWalletSigned(_wp, phantomKey);
       if(!wr?.ok && (wr?.msg==='Signature rejected'||(wr?.msg||'').startsWith('Nonce expired'))){
         showLfToast('🔑','Sign the request in your wallet to log in — please try again','warn');
@@ -3202,9 +3226,10 @@ var _sessionBootstrapComplete = false;
     }catch(e){}
   }
   // Check extension wallet before using session wallet
-  const phantomReady  = window.solana?.isPhantom   && window.solana?.isConnected && window.solana?.publicKey;
+  const _phantomExt   = _phantomProvider();
+  const phantomReady  = _phantomExt && _phantomExt.isConnected && _phantomExt.publicKey;
   const solflareReady = window.solflare?.isSolflare && window.solflare?.isConnected && window.solflare?.publicKey;
-  const _p = phantomReady ? window.solana : solflareReady ? window.solflare : null;
+  const _p = phantomReady ? _phantomExt : solflareReady ? window.solflare : null;
   const _n = phantomReady ? 'Phantom'    : solflareReady ? 'Solflare'      : null;
 
   // If session wallet exists but doesn't match the connected extension wallet → clear session & reload
