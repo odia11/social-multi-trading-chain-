@@ -6,8 +6,16 @@ let _lbDepositAddr = null;
 
 function showLowBalanceModal(data){
   _lbDepositAddr = data.trading_wallet || null;
-  document.getElementById('lb-current').textContent  = (typeof data.current_sol  === 'number' ? data.current_sol.toFixed(4)  : '—') + ' SOL';
-  document.getElementById('lb-required').textContent  = (typeof data.required_sol === 'number' ? data.required_sol.toFixed(4) : '—') + ' SOL';
+  // The bot start gate reports in the currency it trades with (USDC);
+  // copy trading still reports SOL and omits `currency`.
+  const ccy = data.currency === 'USDC' ? 'USDC' : 'SOL';
+  const dp = ccy === 'USDC' ? 2 : 4;
+  const cur = typeof data.current === 'number' ? data.current : data.current_sol;
+  const req = typeof data.required === 'number' ? data.required : data.required_sol;
+  const title = document.getElementById('lb-title');
+  if (title) title.textContent = '⚠ Insufficient ' + ccy + ' Balance';
+  document.getElementById('lb-current').textContent  = (typeof cur === 'number' ? cur.toFixed(dp) : '—') + ' ' + ccy;
+  document.getElementById('lb-required').textContent  = (typeof req === 'number' ? req.toFixed(dp) : '—') + ' ' + ccy;
   document.getElementById('lb-addr-text').textContent = _lbDepositAddr || '—';
   document.getElementById('lb-copy-msg').textContent  = '';
   document.getElementById('lb-copy-btn').textContent  = '📋';

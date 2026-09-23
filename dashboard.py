@@ -11212,7 +11212,8 @@ def user_trader_loop(stop_event, config, wallet: str):
                     _blacklisted = frozenset()
 
                 # ── Pass 2: pick the single best entry ──
-                if (not stop_event.is_set() and open_pos < max_positions and us_sol >= _GAS_MIN
+                if (not stop_event.is_set() and open_pos < max_positions
+                        and (us_sol >= _GAS_MIN or _gasless_usdc_buy)
                         and not _pc_locked and not _streak_paused):
                     # Trained from this wallet's own trade history -- see
                     # _learned_liquidity_bias()/_learned_lp_bias() -- {} until
@@ -26405,6 +26406,48 @@ def _insufficient_trade_balance(wallet: str, enc_blob: str):
                 f'Deposit at least {required:.4f} SOL to {trading_wallet}.'), trading_wallet, us_sol, required
     return None, trading_wallet, us_sol, required
 
+
+def _insufficient_bot_balance(wallet: str, enc_blob: str):
+    """The auto-trading bot's start gate, in the currency the bot actually
+    buys with. With SOLANA_BASE_CURRENCY = 'USDC' the bot spends Solana USDC,
+    and Jupiter Ultra gasless covers the network fee from that USDC -- so the
+    old SOL-denominated gate (at least 0.05 SOL) refused to start a bot whose
+    wallet was fully funded in USDC. SOL is only required for gas when gasless
+    USDC buys are not configured.
+
+    Returns (error_msg, trading_wallet, current, required, currency)."""
+    if SOLANA_BASE_CURRENCY != 'USDC':
+        return (*_insufficient_trade_balance(wallet, enc_blob), 'SOL')
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        row  = conn.execute('SELECT min_trade_size FROM users WHERE wallet_address=?', (wallet,)).fetchone()
+        conn.close()
+    except Exception:
+        row = None
+    min_trade_usdc = float(row[0]) if row and row[0] is not None else 1.0
+    try:
+        with _use_key(enc_blob, wallet) as _pk:
+            from solders.keypair import Keypair as _KP_bal
+            trading_wallet = str(_KP_bal.from_base58_string(_pk).pubkey())
+    except Exception:
+        return None, None, None, None, 'USDC'  # key errors surface in the loop itself
+    try:
+        usdc = _get_solana_usdc_balance(trading_wallet)
+    except Exception:
+        # Unknown is not empty: let it start; the loop re-checks every cycle.
+        return None, trading_wallet, None, round(min_trade_usdc, 2), 'USDC'
+    if usdc < min_trade_usdc:
+        return (f'Insufficient USDC balance to trade — trading wallet has {usdc:.2f} USDC, '
+                f'need at least {min_trade_usdc:.2f} USDC (your minimum trade size). '
+                f'Deposit USDC on Solana to {trading_wallet}.'), trading_wallet, usdc, round(min_trade_usdc, 2), 'USDC'
+    if not _solana_usdc_buy_gasless_enabled():
+        gas_min = 0.005  # matches _GAS_MIN used by the trading loop
+        us_sol = _get_user_sol(trading_wallet)
+        if us_sol < gas_min:
+            return (f'Insufficient SOL for network fees — trading wallet has {us_sol:.4f} SOL, '
+                    f'need at least {gas_min:.4f} SOL. Deposit SOL to {trading_wallet}.'), trading_wallet, us_sol, gas_min, 'SOL'
+    return None, trading_wallet, usdc, round(min_trade_usdc, 2), 'USDC'
+
 @app.route('/api/trader/start', methods=['POST'])
 @rate_limit(5, 60)
 def start_trader():
@@ -26424,10 +26467,11 @@ def start_trader():
         return jsonify({'ok': False, 'msg': 'Internal error — please try again'}), 500
     if not kr or not kr[0]:
         return jsonify({'ok': False, 'msg': 'No trading key saved — add it in Settings first'}), 400
-    _bal_msg, _bal_wallet, _bal_sol, _bal_required = _insufficient_trade_balance(wallet, kr[0])
+    _bal_msg, _bal_wallet, _bal_cur, _bal_required, _bal_ccy = _insufficient_bot_balance(wallet, kr[0])
     if _bal_msg:
         return jsonify({'ok': False, 'low_balance': True, 'trading_wallet': _bal_wallet,
-                        'current_sol': _bal_sol, 'required_sol': _bal_required, 'msg': _bal_msg}), 400
+                        'currency': _bal_ccy, 'current': _bal_cur, 'required': _bal_required,
+                        'current_sol': _bal_cur, 'required_sol': _bal_required, 'msg': _bal_msg}), 400
     if _sec_check_state.get('trading_paused'):
         return jsonify({'ok': False,
                         'msg': 'Trading suspended — security check failure. Contact admin to resume.'}), 503
@@ -26472,10 +26516,11 @@ def bot_start():
         return jsonify({'ok': False, 'msg': 'Internal error'}), 500
     if not kr or not kr[0]:
         return jsonify({'ok': False, 'msg': 'No trading key saved — add it in Settings first'}), 400
-    _bal_msg, _bal_wallet, _bal_sol, _bal_required = _insufficient_trade_balance(wallet, kr[0])
+    _bal_msg, _bal_wallet, _bal_cur, _bal_required, _bal_ccy = _insufficient_bot_balance(wallet, kr[0])
     if _bal_msg:
         return jsonify({'ok': False, 'low_balance': True, 'trading_wallet': _bal_wallet,
-                        'current_sol': _bal_sol, 'required_sol': _bal_required, 'msg': _bal_msg}), 400
+                        'currency': _bal_ccy, 'current': _bal_cur, 'required': _bal_required,
+                        'current_sol': _bal_cur, 'required_sol': _bal_required, 'msg': _bal_msg}), 400
     if _sec_check_state.get('trading_paused'):
         return jsonify({'ok': False, 'msg': 'Trading suspended — security check failure'}), 503
     with _trader_lock:
