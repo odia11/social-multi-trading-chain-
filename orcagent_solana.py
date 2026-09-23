@@ -500,14 +500,15 @@ def _get_sol_balance_raw(owner: str) -> int:
     on the token side. Returns 0 on any failure -- callers must treat that
     as 'unmeasurable', not 'zero received'."""
     try:
-        r = _rpc_post({'jsonrpc': '2.0', 'id': 1, 'method': 'getBalance', 'params': [owner]}, timeout=10)
+        r = _rpc_post({'jsonrpc': '2.0', 'id': 1, 'method': 'getBalance',
+                       'params': [owner, {'commitment': 'confirmed'}]}, timeout=10)
         return int(r['result']['value'])
     except Exception:
         return 0
 
 
 def _reconciled_token_balance(mint: str, expect_change: str, baseline_raw: int,
-                               attempts: int = 4, delay_s: float = 1.5) -> tuple:
+                               attempts: int = 8, delay_s: float = 1.5) -> tuple:
     """Poll get_token_balance_raw(mint) until it reflects a change from
     baseline_raw in the expected direction ('increase' or 'decrease'), or
     give up after `attempts` reads. RPC reads can lag a couple seconds behind
@@ -1093,7 +1094,11 @@ def get_token_balance_raw(mint: str) -> tuple:
         r = _rpc_post({
             'jsonrpc': '2.0', 'id': 1,
             'method': 'getTokenAccountsByOwner',
-            'params': [owner, {'mint': mint}, {'encoding': 'jsonParsed'}],
+            # 'confirmed', matching _confirm_transaction(). Without it the RPC
+            # answers at its default 'finalized', ~13s behind -- so the
+            # reconciliation read right after a confirmed swap still saw the
+            # pre-swap balance and reported a swap that had landed as failed.
+            'params': [owner, {'mint': mint}, {'encoding': 'jsonParsed', 'commitment': 'confirmed'}],
         }, timeout=10)
         accounts = r.get('result', {}).get('value', [])
         if accounts:
