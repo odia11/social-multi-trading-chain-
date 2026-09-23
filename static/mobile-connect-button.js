@@ -124,7 +124,13 @@ function boot(){
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 window.addEventListener('orca:phantom-trusted-connected',function(){if(!manualDisconnectRequested()){if(!serverSaysGuest)showUser();setTimeout(function(){sync(true)},500);}});
 window.addEventListener('orca:manual-disconnect',onManualDisconnect);
-window.addEventListener('pageshow',function(){sync(true);});
+// pageshow fires after EVERY load, not just a bfcache restore -- without
+// the event.persisted check this force-refetched /api/me a second time on
+// every single page view, right on top of the one boot() just did two lines
+// above, on every page site-wide (this script is shared-injected everywhere).
+// Only a real bfcache restore needs a forced re-check; dashboard.js's own
+// pageshow handler already uses this same guard.
+window.addEventListener('pageshow',function(e){if(e.persisted)sync(true);});
 document.addEventListener('visibilitychange',function(){if(!document.hidden)sync(true);});
 window.addEventListener('online',function(){sync(true);});
 document.addEventListener('click',function(e){

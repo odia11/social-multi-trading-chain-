@@ -68,6 +68,11 @@
 .pt-nb-sol-chip{display:flex;align-items:center;gap:7px;background:#101216;border:1px solid #21252c;border-radius:11px;padding:7px 13px;font-size:12.5px;font-weight:600;color:#eef1f5;font-family:'Geist',system-ui,sans-serif}
 .pt-nb-sol-chip .dot{width:6px;height:6px;border-radius:50%;background:#f7b955}
 .pt-nb-sol-num{font-family:'JetBrains Mono',monospace}
+/* header-stable-balance.js repurposed this chip from a raw SOL amount into
+   the total multi-chain portfolio value (dollar-formatted, e.g. "$20.95").
+   The "SOL" unit label that made sense for the old value doesn't for the
+   new one -- unhidden on desktop it rendered literally as "$20.95 SOL". */
+.pt-nb-sol-unit{display:none}
 .pt-nb-avatar{width:34px;height:34px;border-radius:50%;background:#21252c;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#8a919c;flex-shrink:0;object-fit:cover;border:1px solid #21252c;font-family:'JetBrains Mono',monospace}
 .pt-nb-profile-link{display:flex;align-items:center;justify-content:center;border-radius:50%}
 
@@ -155,7 +160,8 @@
   .pt-nb-nav > .pt-nb-more-item.danger{grid-column:1/-1}
   .pt-nb-search-wrap{order:5;flex-basis:100%;max-width:none;margin-left:0}
   .pt-nb-search{font-size:16px}
-  .pt-nb-sol-unit{display:none}
+  /* .pt-nb-sol-unit is hidden unconditionally now (see the base rule) --
+     removed here to avoid two rules quietly agreeing by coincidence. */
   /* The separate "More" (⋮) button is now redundant -- its destinations are
      merged into the hamburger menu above. */
   .pt-nb-more-wrap{display:none}
