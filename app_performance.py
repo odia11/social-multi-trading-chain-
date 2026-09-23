@@ -32,15 +32,15 @@ def install(appmod) -> None:
                 if asset not in html:
                     tags.append(f'<script src="{src}" defer{extra}></script>')
 
-            if 'data-orca-bfcache-guard="1"' not in html:
-                tags.append(
-                    '<script data-orca-bfcache-guard="1">'
-                    '(function(){window.addEventListener("pageshow",function(e){'
-                    'if(!e.persisted)return;e.stopImmediatePropagation();'
-                    'setTimeout(function(){document.dispatchEvent(new CustomEvent("orca:bfcache-restored"));},0);'
-                    '},true);})();'
-                    '</script>'
-                )
+            # See static/bfcache-guard.js for why this is a same-origin
+            # <script src>, not an inline block: an inline script appended
+            # by this hook never gets CSP's per-response nonce (confirmed
+            # by testing) because security_hardening.py's nonce-injection
+            # pass actually runs before this hook in the real per-request
+            # order, despite installing after it -- Flask runs after_request
+            # hooks in reverse install() order (see app_entry.py).
+            if 'bfcache-guard.js' not in html:
+                tags.append('<script src="/static/bfcache-guard.js?v=1"></script>')
 
             # Tells app-ux.css's mobile view-transition rules which direction
             # to slide: forward (default, no attribute) or back.
@@ -120,14 +120,15 @@ def install(appmod) -> None:
                 path == prefix or path.startswith(prefix + '/')
                 for prefix in _root_scroll_excluded_prefixes
             )
-            if not _uses_internal_mobile_scroller and 'data-oa-native-mobile-scroll="1"' not in html:
-                tags.append(
-                    '<script data-oa-native-mobile-scroll="1">'
-                    '(function(){if(window.matchMedia&&window.matchMedia("(max-width:768px)").matches){'
-                    'document.documentElement.classList.add("oa-native-mobile-scroll");'
-                    '}})();'
-                    '</script>'
-                )
+            if not _uses_internal_mobile_scroller and 'native-mobile-scroll.js' not in html:
+                # See static/native-mobile-scroll.js for why this is a same-
+                # origin <script src>, not an inline block -- the same CSP/
+                # after_request-ordering issue as bfcache-guard.js above
+                # meant this class was never actually applied on any page.
+                # The <style> tag right below is unaffected: CSP's style-src
+                # here still allows 'unsafe-inline', so only script elements
+                # needed this fix.
+                tags.append('<script src="/static/native-mobile-scroll.js?v=1"></script>')
                 tags.append(
                     '<style data-oa-native-mobile-scroll-css="1">'
                     '@media(max-width:768px){'
