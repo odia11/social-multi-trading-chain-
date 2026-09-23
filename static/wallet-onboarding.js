@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-var generated=null,bypass=false;
+var generated=null;
 var AAD='orcagent-wallet-onboarding-v1';
 var EVM_ORDER=BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
 var ICON_COPY='<svg class="oa-ob-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" stroke="currentColor" stroke-width="1.8"/></svg>';
@@ -35,13 +35,25 @@ async function csrf(){if(window._csrfToken)return window._csrfToken;if(window._c
 async function post(url,body){var t=await csrf();var r=await fetch(url,{method:'POST',credentials:'include',cache:'no-store',headers:{'Content-Type':'application/json','X-CSRF-Token':t},body:JSON.stringify(body||{})});var d={};try{d=await r.json();}catch(_){}if(!r.ok||!d.ok)throw new Error((d.error&&d.error.message)||d.error||'Request failed');return d;}
 async function seal(payload){var raw=crypto.getRandomValues(new Uint8Array(32));var nonce=crypto.getRandomValues(new Uint8Array(12));var key=await crypto.subtle.importKey('raw',raw,{name:'AES-GCM'},false,['encrypt']);var plain=new TextEncoder().encode(JSON.stringify(payload));var encrypted=await crypto.subtle.encrypt({name:'AES-GCM',iv:nonce,additionalData:new TextEncoder().encode(AAD),tagLength:128},key,plain);var envelope={transport_key:bytesToB64(raw),nonce:bytesToB64(nonce),sealed:bytesToB64(new Uint8Array(encrypted)),alg:'A256GCM'};raw.fill(0);plain.fill(0);return envelope;}
 async function securePost(url,payload){return post(url,await seal(payload));}
-function connectControl(){return document.getElementById('oa-guest-connect-btn')||document.querySelector('.pt-nb-profile-link[data-oa-auth="guest"]')||document.querySelector('#guest-banner .gb-link,.gb-link');}
+// Start Phantom's signed login directly. This used to "click" whichever
+// guest connect control was on the page -- but once Phantom silently
+// reconnects to a site it already trusts, the header drops its Connect
+// button, the only control left is the guest banner's link, and that link
+// just reopens this sheet: the click did nothing at all, Phantom was never
+// asked. connectWalletOnboard lives in dashboard.js, which only some pages
+// load; elsewhere hand off to the home page's existing phantom_connect
+// auto-start, which returns here once signed in.
+function connectPhantom(){
+  close();
+  if(typeof window.connectWalletOnboard==='function'){window.connectWalletOnboard('phantom');return;}
+  location.href='/?phantom_connect=1&return_to='+encodeURIComponent(location.pathname+location.search);
+}
 function modal(){
   var m=document.getElementById('oa-wallet-onboarding');if(m)return m;
   m=document.createElement('div');m.id='oa-wallet-onboarding';m.className='oa-ob-backdrop';
   m.innerHTML='<div class="oa-ob-card" role="dialog" aria-modal="true" aria-label="Wallet setup"><div class="oa-ob-handle"></div><button class="oa-ob-close" aria-label="Close">×</button><div class="oa-ob-intro"><div class="oa-ob-brand">ORCAGENT</div><h2>Set up your wallet</h2><p class="oa-ob-sub">Choose how you want to continue.</p><div class="oa-ob-trust">'+ICON_TRUST+'<span>Self-custodial <b>•</b> Your keys, your funds</span></div></div><div class="oa-ob-actions"><button class="oa-ob-option oa-ob-option-featured" data-action="create"><span class="oa-ob-option-icon">'+ICON_WALLET_PLUS+'</span><span class="oa-ob-option-copy"><span class="oa-ob-option-title">Create new wallet <em>RECOMMENDED</em></span><span class="oa-ob-option-sub">Generate securely on this device.</span></span>'+ICON_CHEVRON+'</button><button class="oa-ob-option" data-action="import"><span class="oa-ob-option-icon">'+ICON_IMPORT+'</span><span class="oa-ob-option-copy"><span class="oa-ob-option-title">Import existing wallet</span><span class="oa-ob-option-sub">Use your Solana private key.</span></span>'+ICON_CHEVRON+'</button><button class="oa-ob-option" data-action="phantom"><span class="oa-ob-option-icon oa-ob-option-phantom">'+ICON_PHANTOM+'</span><span class="oa-ob-option-copy"><span class="oa-ob-option-title">Connect Phantom</span><span class="oa-ob-option-sub">Continue with your Phantom app.</span></span>'+ICON_CHEVRON+'</button></div><div class="oa-ob-chooser-foot">'+ICON_LOCK+'<span>Secure connection <b>•</b> Keys are never exposed</span></div><div class="oa-ob-stage" hidden></div></div>';
   document.body.appendChild(m);m.querySelector('.oa-ob-close').onclick=close;
-  m.addEventListener('click',function(e){if(e.target===m)close();var b=e.target.closest('[data-action]');if(!b)return;if(b.dataset.action==='create')showCreate();if(b.dataset.action==='import')showImport();if(b.dataset.action==='phantom'){close();bypass=true;var x=connectControl();if(x){try{x.click();}catch(_){}}else if(typeof window.connectWalletOnboard==='function'){try{window.connectWalletOnboard('phantom');}catch(_){}}else if(typeof window.connectWallet==='function'){try{window.connectWallet();}catch(_){}}setTimeout(function(){bypass=false;},80);}});
+  m.addEventListener('click',function(e){if(e.target===m)close();var b=e.target.closest('[data-action]');if(!b)return;if(b.dataset.action==='create')showCreate();if(b.dataset.action==='import')showImport();if(b.dataset.action==='phantom')connectPhantom();});
   return m;
 }
 function open(){var m=modal();m.style.display='flex';m.querySelector('.oa-ob-card').scrollTop=0;m.querySelector('.oa-ob-intro').hidden=false;m.querySelector('.oa-ob-actions').hidden=false;var s=m.querySelector('.oa-ob-stage');s.hidden=true;s.innerHTML='';}
@@ -88,6 +100,6 @@ async function doImport(){
   var s=stage('<button class="oa-ob-back" data-back>← Back</button><div class="oa-ob-hero"><div class="oa-ob-brand">ORCAGENT</div><h3>Secure your EVM wallet</h3><p class="oa-ob-sub">Save this new key before activation.</p></div><div class="oa-ob-warning">'+ICON_SHIELD+'<span>This key was created securely on your device. It cannot be recovered later.</span></div><div class="oa-ob-fields">'+secretCard('EVM PRIVATE KEY','oa-import-generated-evm','evm_private_key')+'</div><div class="oa-ob-security-note">'+ICON_LOCK+'<span>Never share your private key with anyone.</span></div><label class="oa-ob-check"><input type="checkbox" id="oa-import-confirm"><span class="oa-ob-checkbox"></span><span>I saved this EVM private key securely.</span></label><button class="oa-ob-primary oa-ob-finish" id="oa-import-done" disabled>Activate imported wallet</button><div class="oa-ob-lock-note">'+ICON_LOCK+'<span>Encrypted during activation</span></div><div class="oa-ob-msg" id="oa-import-final-msg"></div>');
   s.querySelector('#oa-import-generated-evm').value=evm;backButton(s);bindSecureFields(s);var c=s.querySelector('#oa-import-confirm'),done=s.querySelector('#oa-import-done');c.onchange=function(){done.disabled=!c.checked;};done.onclick=function(){finishImport(generated.solana_private_key,generated.evm_private_key,done,document.getElementById('oa-import-final-msg'));};
 }
-document.addEventListener('click',function(e){var t=e.target&&e.target.closest?e.target.closest('#oa-guest-connect-btn,.pt-nb-profile-link[data-oa-auth="guest"],#guest-banner .gb-link,.gb-link'):null;if(!t||bypass)return;e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();open();},true);
+document.addEventListener('click',function(e){var t=e.target&&e.target.closest?e.target.closest('#oa-guest-connect-btn,.pt-nb-profile-link[data-oa-auth="guest"],#guest-banner .gb-link,.gb-link'):null;if(!t)return;e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();open();},true);
 window.OrcAgentWalletOnboarding={open:open};
 })();

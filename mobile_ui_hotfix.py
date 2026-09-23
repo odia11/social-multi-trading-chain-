@@ -14,7 +14,7 @@ def install(dashboard_module):
     shared_tags = (
         '<link rel="stylesheet" href="/static/mobile-share-menu-fix.css?v=4" ' + marker + '>'
         '<script src="/static/mobile-share-menu-fix.js?v=5" defer ' + marker + '></script>'
-        '<script src="/static/mobile-connect-button.js?v=5" defer ' + marker + '></script>'
+        '<script src="/static/mobile-connect-button.js?v=6" defer ' + marker + '></script>'
     )
     home_tags = (
         '<script src="/static/home-start-trading-route.js?v=1" defer ' + marker + '></script>'
