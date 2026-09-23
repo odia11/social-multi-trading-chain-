@@ -175,4 +175,7 @@ _install_audit_hardening(_dashboard)
 _install_security_monitoring(_dashboard)
 _install_backup_scheduler(_dashboard)
 
+from portfolio_sol_swap import install as _install_portfolio_sol_swap
+_install_portfolio_sol_swap(_dashboard)
+
 app = _dashboard.app

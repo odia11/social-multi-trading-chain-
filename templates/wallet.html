@@ -1168,6 +1168,8 @@ function _showModal(html){
   document.getElementById('w-modal').style.display='flex'
 }
 function _closeModal(){
+  if(_convertBusy) return
+  _convertRevision++
   document.getElementById('w-modal').style.display='none'
 }
 
@@ -1372,6 +1374,9 @@ var _CONVERT_CHAINS=[
 ]
 var _convertQuote=null
 var _convertBalance=null
+var _convertMax=null
+var _convertBusy=false
+var _convertRevision=0
 
 function _convertCfg(){
   var el=document.getElementById('cv-chain')
@@ -1388,6 +1393,7 @@ function _convertOptions(selected){
   }).join('')
 }
 function _modalSolUsdcSwap(){
+  if(_convertBusy) return
   _modalConvert()
   document.querySelector('#w-modal .w-modal-title').textContent='Swap SOL ↔ USDC'
   var chain=document.getElementById('cv-chain')
@@ -1410,7 +1416,8 @@ function _modalSolUsdcSwap(){
   document.getElementById('cv-amount').setAttribute('inputmode','decimal')
 }
 function _modalConvert(){
-  _convertQuote=null
+  if(_convertBusy) return
+  _convertInvalidate()
   _convertBalance=null
   _showModal(
     '<div class="w-modal-title">Convert assets</div>'
@@ -1429,7 +1436,8 @@ function _modalConvert(){
       +'</div>'
     +'</div>'
     +'<div class="br-form-amount-wrap">'
-      +'<input class="br-form-amount-inp" id="cv-amount" type="number" placeholder="0.00" min="0.000001" step="any" oninput="_convertQuote=null;document.getElementById(\'cv-quote\').innerHTML=\'\'">'
+      +'<input class="br-form-amount-inp" id="cv-amount" type="number" placeholder="0.00" min="0.000001" step="any" oninput="_convertInvalidate()">'
+      +'<button type="button" class="w-modal-btn w-modal-secondary" id="cv-max" onclick="_convertUseMax()" style="width:auto;flex:0 0 auto;padding:8px 12px;margin-right:8px">Max</button>'
       +'<span class="br-form-amount-sym" id="cv-from-sym">SOL</span>'
     +'</div>'
     +'<div class="br-bal-row"><span id="cv-balance">Balance: —</span></div>'
@@ -1442,7 +1450,8 @@ function _modalConvert(){
   _convertChanged()
 }
 function _convertChanged(){
-  _convertQuote=null
+  _convertInvalidate()
+  _convertMax=null
   var q=document.getElementById('cv-quote'); if(q) q.innerHTML=''
   var cfg=_convertCfg(), dir=_convertDirection()
   var from=dir==='native_to_stable'?cfg.native:cfg.stable
@@ -1460,11 +1469,25 @@ function _convertLoadBalance(){
   var txt=document.getElementById('cv-balance')
   if(!txt) return
   txt.textContent='Balance: …'
+  var revision=_convertRevision
+  var maxBtn=document.getElementById('cv-max')
+  if(maxBtn) maxBtn.hidden=cfg.v!=='solana'
+  _convertBalance=null
+  _convertMax=null
   if(cfg.v==='solana'){
-    var native=parseFloat((document.getElementById('sol')||{}).textContent||0)
-    var stable=_usdcSummaryCache?parseFloat(_usdcSummaryCache.solana_usdc||0):0
-    _convertBalance=dir==='native_to_stable'?native:stable
-    txt.textContent='Balance: '+_convertBalance.toFixed(4)+' '+(dir==='native_to_stable'?'SOL':'USDC')
+    if(maxBtn) maxBtn.disabled=true
+    fetch('/api/wallet/sol-swap/balance',{credentials:'include'})
+      .then(function(r){return r.json()})
+      .then(function(d){
+        if(cfg.v!==_convertCfg().v||dir!==_convertDirection()||txt!==document.getElementById('cv-balance')) return
+        if(!d.ok) throw new Error(d.msg||'Balance unavailable')
+        _convertBalance=Number(dir==='native_to_stable'?d.sol:d.usdc)
+        _convertMax=dir==='native_to_stable'?d.max_sol:d.max_usdc
+        txt.textContent='Balance: '+_convertBalance.toFixed(dir==='native_to_stable'?9:6)+' '+(dir==='native_to_stable'?'SOL':'USDC')
+        if(maxBtn) maxBtn.disabled=false
+      }).catch(function(){
+        if(txt===document.getElementById('cv-balance')&&cfg.v===_convertCfg().v&&dir===_convertDirection()) txt.textContent='Balance unavailable — reopen to retry'
+      })
     return
   }
   fetch('/api/evm/'+cfg.v+'/balance',{credentials:'include'})
@@ -1477,11 +1500,25 @@ function _convertLoadBalance(){
     })
     .catch(function(){txt.textContent='Balance: unavailable'})
 }
+function _convertInvalidate(){
+  _convertQuote=null
+  _convertRevision++
+  var out=document.getElementById('cv-quote')
+  if(out) out.innerHTML=''
+}
+function _convertUseMax(){
+  if(_convertBusy||_convertMax==null) return
+  document.getElementById('cv-amount').value=_convertMax
+  _convertInvalidate()
+}
 function _convertGetQuote(){
+  if(_convertBusy) return
+  _convertInvalidate()
+  var revision=_convertRevision
   var cfg=_convertCfg(), dir=_convertDirection()
   var amount=parseFloat((document.getElementById('cv-amount')||{}).value)||0
   var out=document.getElementById('cv-quote')
-  if(!(amount>0)){out.innerHTML='<div class="w-modal-note" style="color:var(--red)">Enter an amount greater than 0.</div>';return}
+  if(!Number.isFinite(amount)||!(amount>0)){out.innerHTML='<div class="w-modal-note" style="color:var(--red)">Enter an amount greater than 0.</div>';return}
   if(_convertBalance!=null&&amount>_convertBalance+1e-12){
     out.innerHTML='<div class="w-modal-note" style="color:var(--red)">Amount exceeds your available balance.</div>';return
   }
@@ -1489,11 +1526,12 @@ function _convertGetQuote(){
   btn.disabled=true;btn.textContent='Getting quote…'
   out.innerHTML='<div class="w-modal-note">Fetching live quote…</div>'
   var qs=new URLSearchParams({chain:cfg.v,direction:dir,amount:amount})
-  fetch('/api/wallet/convert/quote?'+qs.toString(),{credentials:'include'})
+  fetch((cfg.v==='solana'&&dir==='stable_to_native'?'/api/wallet/sol-swap/quote?':'/api/wallet/convert/quote?')+qs.toString(),{credentials:'include'})
     .then(function(r){return r.json()})
     .then(function(d){
+      if(revision!==_convertRevision||out!==document.getElementById('cv-quote')) return
       if(!d.ok){out.innerHTML='<div class="w-modal-note" style="color:var(--red)">'+esc(d.msg||'Quote unavailable')+'</div>';return}
-      _convertQuote={chain:cfg.v,direction:dir,amount:amount,from_symbol:d.from_symbol,to_symbol:d.to_symbol}
+      _convertQuote={chain:cfg.v,direction:dir,amount:amount,from_symbol:d.from_symbol,to_symbol:d.to_symbol,quote_id:d.quote_id,expires_at:Date.now()+(d.expires_in||45)*1000}
       var min=d.min_out_amount>0?parseFloat(d.min_out_amount).toFixed(6):'—'
       var receive=parseFloat(d.out_amount||0).toFixed(6)
       var impact=(parseFloat(d.price_impact_pct||0)*100).toFixed(3)+'%'
@@ -1509,33 +1547,40 @@ function _convertGetQuote(){
           +'<div class="br-quote-row"><span class="br-quote-row-lbl">Price impact</span><span class="br-quote-row-val">'+impact+'</span></div>'
           +'<div class="br-quote-row"><span class="br-quote-row-lbl">Network reserve</span><span class="br-quote-row-val">'+reserve+'</span></div>'
         +'</div>'
-        +'<div class="w-modal-note">Network fees are paid from your own wallet. OrcAgent does not advance funds for this conversion.</div>'
+        +'<div class="w-modal-note">'+(d.gasless?'Network costs are included in this swap. No SOL deposit is needed.':'Network fees are paid from your '+esc(cfg.native)+' balance.')+'</div>'
         +'<div class="w-modal-btns"><button class="w-modal-btn w-modal-primary" onclick="_convertConfirm()">Confirm '+esc(d.from_symbol)+' → '+esc(d.to_symbol)+'</button></div>'
     })
     .catch(function(){out.innerHTML='<div class="w-modal-note" style="color:var(--red)">Network error — try again</div>'})
     .finally(function(){btn.disabled=false;btn.textContent='Get Quote'})
 }
 function _convertConfirm(){
-  if(!_convertQuote) return
+  if(!_convertQuote||_convertBusy) return
+  if(Date.now()>_convertQuote.expires_at){_convertInvalidate();_convertGetQuote();return}
+  var quote=_convertQuote
+  _convertQuote=null
+  _convertBusy=true
+  var controls=document.querySelectorAll('#w-modal button,#w-modal input,#w-modal select')
+  controls.forEach(function(el){el.disabled=true})
   var out=document.getElementById('cv-quote')
   out.innerHTML='<div class="w-modal-note">Signing and submitting…</div>'
-  fetch('/api/wallet/convert',{
+  fetch(quote.quote_id?'/api/wallet/sol-swap/execute':'/api/wallet/convert',{
     method:'POST',credentials:'include',
     headers:{'Content-Type':'application/json','X-CSRF-Token':_csrf},
-    body:JSON.stringify(_convertQuote)
+    body:JSON.stringify(quote)
   }).then(function(r){return r.json()}).then(function(d){
     if(!d.ok){
       out.innerHTML='<div class="w-modal-note" style="color:var(--red)">'+esc(d.msg||'Conversion failed')+'</div>'
       return
     }
     _wToast('✓ Conversion confirmed',true)
+    _convertBusy=false
     _closeModal()
     setTimeout(function(){
       loadBalance();loadUsdcSummary();loadTokens(true);_loadActivity()
     },1500)
   }).catch(function(){
     out.innerHTML='<div class="w-modal-note" style="color:var(--red)">Network error — check your activity before retrying.</div>'
-  })
+  }).finally(function(){_convertBusy=false;controls.forEach(function(el){el.disabled=false})})
 }
 
 // ── bridge modal (cross-chain, via 0x Cross-Chain API -- /api/bridge/*) ──
