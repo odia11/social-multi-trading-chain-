@@ -42,7 +42,29 @@ def install(appmod) -> None:
                     '</script>'
                 )
 
-            style('app-ux.css', '/static/app-ux.css?v=5', ' id="oa-app-ux-css"')
+            # Tells app-ux.css's mobile view-transition rules which direction
+            # to slide: forward (default, no attribute) or back.
+            #
+            # This is a plain external <script src>, not an inline block, on
+            # purpose: CSP's script-src-elem here is 'self' plus a per-response
+            # nonce, and the nonce only gets stamped onto <script> tags that
+            # already exist in the body by the time security_hardening.py's
+            # own after_request runs. Because Flask calls after_request hooks
+            # in REVERSE install() order (see app_entry.py's "register SEO
+            # first so its pass runs last" comment) and this module installs
+            # before security_hardening, an inline block appended here would
+            # never get nonced and CSP would silently drop it -- confirmed by
+            # testing (this route direction attribute never got set). A same-
+            # origin src= script is covered by the 'self' source expression
+            # instead, independent of the nonce, so it always runs. Not
+            # deferred like the scripts below: the Navigation API's
+            # pagereveal event this listens for can fire before a deferred
+            # script would even run, and missing it just silently falls back
+            # to a forward slide for that one navigation instead of erroring.
+            if 'page-transition-direction.js' not in html:
+                tags.append('<script src="/static/page-transition-direction.js?v=1"></script>')
+
+            style('app-ux.css', '/static/app-ux.css?v=6', ' id="oa-app-ux-css"')
             script('app-ux.js', '/static/app-ux.js?v=4', ' id="oa-app-ux-js"')
             style('shared-trade-card-v2.css', '/static/shared-trade-card-v2.css?v=1', ' id="oa-shared-trade-card-css"')
             script('shared-trade-card-v2.js', '/static/shared-trade-card-v2.js?v=1', ' id="oa-shared-trade-card-js"')

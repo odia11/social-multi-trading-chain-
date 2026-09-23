@@ -72,7 +72,18 @@ html.oa-page-hidden *,html.oa-page-hidden *::before,html.oa-page-hidden *::after
 /* Keep the outgoing document visible until the next route can paint.
    This is a progressive enhancement: unsupported browsers use normal links.
    Do NOT swap server-rendered trading/wallet HTML into an SPA: each route
-   owns its API subscriptions, authentication checks and teardown lifecycle. */
+   owns its API subscriptions, authentication checks and teardown lifecycle.
+
+   Desktop keeps the original subtle cross-fade below. On mobile widths this
+   becomes a full directional slide instead -- forward navigation pushes the
+   new screen in from the right, a back navigation (the edge swipe-back
+   gesture in swipe-back.js, the browser's own back control, or a plain
+   history.back()) pulls the previous screen back in from the left, the way
+   Instagram/X's own apps move between screens rather than just fading.
+   Direction is set on <html> by the external pagereveal listener script
+   (page-transition-direction.js, injected by app_performance.py), before
+   each transition starts -- it has to run earlier than this deferred
+   file's own script can, so it is loaded eagerly, not deferred. */
 @view-transition {
   navigation: auto;
 }
@@ -89,6 +100,27 @@ html.oa-page-hidden *,html.oa-page-hidden *::before,html.oa-page-hidden *::after
 @keyframes oa-route-in {
   from { opacity: .90 }
   to { opacity: 1 }
+}
+@media (max-width: 768px) {
+  ::view-transition-group(root) {
+    animation-duration: .32s;
+  }
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: .32s;
+    animation-timing-function: cubic-bezier(.22, 1, .36, 1);
+    animation-fill-mode: both;
+    mix-blend-mode: normal; /* two solid slides now, not the desktop cross-fade */
+  }
+  ::view-transition-old(root) { animation-name: oa-route-hold-left; }
+  ::view-transition-new(root) { animation-name: oa-route-in-right; }
+  html[data-vt-direction="back"]::view-transition-old(root) { animation-name: oa-route-hold-right; }
+  html[data-vt-direction="back"]::view-transition-new(root) { animation-name: oa-route-in-left; }
+
+  @keyframes oa-route-in-right   { from { transform: translateX(100%) } to { transform: translateX(0) } }
+  @keyframes oa-route-in-left    { from { transform: translateX(-100%) } to { transform: translateX(0) } }
+  @keyframes oa-route-hold-left  { from { transform: translateX(0) } to { transform: translateX(-22%) } }
+  @keyframes oa-route-hold-right { from { transform: translateX(0) } to { transform: translateX(22%) } }
 }
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-old(root),::view-transition-new(root) {
