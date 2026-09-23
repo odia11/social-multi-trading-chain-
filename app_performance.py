@@ -48,6 +48,7 @@ def install(appmod) -> None:
             script('shared-trade-card-v2.js', '/static/shared-trade-card-v2.js?v=1', ' id="oa-shared-trade-card-js"')
             style('feed-action-icons.css', '/static/feed-action-icons.css?v=2')
             script('feed-action-icons.js', '/static/feed-action-icons.js?v=3')
+            script('swipe-back.js', '/static/swipe-back.js?v=1')
 
             if 'fonts.googleapis.com' in html and 'rel="preconnect" href="https://fonts.googleapis.com"' not in html:
                 tags.append('<link rel="preconnect" href="https://fonts.googleapis.com">')
