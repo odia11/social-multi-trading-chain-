@@ -656,11 +656,10 @@ html,body{background:#080e11}
         </div>
         <svg class="pf-spark" viewBox="0 0 122 73" role="img" aria-label="Portfolio trend during this session"><path id="pf-spark-fill" fill="url(#pf-spark-gradient)" d=""></path><path id="pf-spark-line" d="" stroke="#37dc9d" stroke-width="2.5" fill="none" stroke-linejoin="round" stroke-linecap="round"></path><defs><linearGradient id="pf-spark-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#32d99a" stop-opacity=".27"></stop><stop offset="100%" stop-color="#32d99a" stop-opacity="0"></stop></linearGradient></defs></svg><button class="wlt-hero-refresh" onclick="loadBalance()" aria-label="Refresh balance" title="Refresh">↻</button>
       </div>
-      <div class="wlt-hero-actions" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+      <div class="wlt-hero-actions">
         <button class="wlt-action primary" onclick="_modalDeposit()"><span class="wlt-action-ic">↓</span>Deposit</button>
         <button class="wlt-action" onclick="_modalSend()"><span class="wlt-action-ic">→</span>Send</button>
         <button class="wlt-action" onclick="_modalDeposit()"><span class="wlt-action-ic">▣</span>Receive</button>
-        <button class="wlt-action" type="button" onclick="_modalSolUsdcSwap()" aria-label="Swap SOL and USDC on Solana"><span class="wlt-action-ic" aria-hidden="true">⇄</span>Swap</button>
         <!-- No Bridge button. Buying on a chain with no USDC already bridges
              by itself (_maybe_start_auto_bridge_for_buy): it finds a chain
              with enough balance, moves the funds with a buffer, and finishes
@@ -1386,28 +1385,6 @@ function _convertOptions(selected){
   return _CONVERT_CHAINS.map(function(c){
     return '<option value="'+c.v+'"'+(c.v===selected?' selected':'')+'>'+c.label+'</option>'
   }).join('')
-}
-function _modalSolUsdcSwap(){
-  _modalConvert()
-  document.querySelector('#w-modal .w-modal-title').textContent='Swap SOL ↔ USDC'
-  var chain=document.getElementById('cv-chain')
-  chain.value='solana'
-  chain.closest('.br-form-box').style.display='none'
-  var note=document.querySelector('#w-modal .w-modal-note')
-  if(note) note.textContent='Swap SOL and USDC in your Solana trading wallet.'
-  var direction=document.getElementById('cv-direction')
-  var flip=document.createElement('button')
-  flip.type='button'
-  flip.className='w-modal-btn w-modal-secondary'
-  flip.textContent='⇄ Reverse'
-  flip.setAttribute('aria-label','Reverse SOL and USDC')
-  flip.onclick=function(){
-    direction.value=direction.value==='native_to_stable'?'stable_to_native':'native_to_stable'
-    document.getElementById('cv-amount').value=''
-    _convertChanged()
-  }
-  direction.parentNode.appendChild(flip)
-  document.getElementById('cv-amount').setAttribute('inputmode','decimal')
 }
 function _modalConvert(){
   _convertQuote=null

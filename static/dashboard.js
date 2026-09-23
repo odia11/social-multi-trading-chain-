@@ -747,7 +747,12 @@ async function connectWalletOnboard(type, afterLoginUrl){
   try{
     var u = new URL(window.location.href);
     if(u.searchParams.get('phantom_connect') !== '1') return;
-    var returnTo = u.searchParams.get('return_to') || '/';
+    var returnTo = '/';
+    try{
+      // Only ever return to a path on this site.
+      var rt = new URL(u.searchParams.get('return_to') || '/', window.location.origin);
+      if(rt.origin === window.location.origin && rt.pathname !== '/phantom-callback') returnTo = rt.pathname + rt.search + rt.hash;
+    }catch(_){}
     u.searchParams.delete('phantom_connect');
     u.searchParams.delete('return_to');
     var clean = u.pathname + (u.searchParams.toString() ? '?'+u.searchParams.toString() : '') + u.hash;
@@ -755,14 +760,15 @@ async function connectWalletOnboard(type, afterLoginUrl){
     var attempts = 0;
     var timer = setInterval(function(){
       attempts += 1;
-      if(window.solana && window.solana.isPhantom){
+      if(_phantomProvider()){
         clearInterval(timer);
         connectWalletOnboard('phantom', returnTo)
           .catch(function(e){ console.error('[phantom-browser-connect]', e); });
       }else if(attempts >= 20){
         clearInterval(timer);
-        var msgEl=document.getElementById('wallet-install-msg');
-        if(msgEl){msgEl.textContent='Open this page inside Phantom and tap Connect again.';msgEl.style.display='block';}
+        _walletConnectNotice(isMobile
+          ? 'Open this page inside Phantom and tap Connect again.'
+          : 'Phantom wallet not detected — install the Phantom browser extension and reload this page.');
       }
     }, 250);
   }catch(e){ console.error('[phantom-browser-connect:init]', e); }

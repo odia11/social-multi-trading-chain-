@@ -54,7 +54,7 @@ check('...and that generated key has to be saved before the import activates '
       'i saved this evm private key securely' in _jsl
       and 'disabled=!c.checked' in js.replace(' ', ''))
 check('onboarding assets are cache-busted',
-      'wallet-onboarding.js?v=5' in py and 'wallet-onboarding.css?v=5' in py)
+      'wallet-onboarding.js?v=6' in py and 'wallet-onboarding.css?v=5' in py)
 
 check('backup UI masks keys and exposes explicit show/copy controls',
       'type="password"' in js and 'data-show=' in js and 'data-copy=' in js

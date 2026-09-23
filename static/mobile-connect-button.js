@@ -12,7 +12,7 @@
 (function(){
 'use strict';
 
-var checking=false,last=0,INTERVAL=15000;
+var checking=false,last=0,INTERVAL=15000,serverSaysGuest=false;
 
 function manualDisconnectRequested(){
   try{return localStorage.getItem('orca_manual_disconnect')==='1';}catch(_){return false;}
@@ -87,7 +87,9 @@ function showGuest(force){
 }
 function sync(force){
   if(manualDisconnectRequested()){showGuest(true);return;}
-  if(providerConnected()){showUser();return;}
+  // A trusted Phantom may show the user optimistically, but /api/me below
+  // still gets the final say -- see the guest branch there.
+  if(!serverSaysGuest&&providerConnected())showUser();
   var now=Date.now();if(checking||(!force&&now-last<INTERVAL))return;
   checking=true;last=now;
   fetch('/api/me',{credentials:'include',cache:'no-store'}).then(function(r){
@@ -97,9 +99,14 @@ function sync(force){
     return r.json();
   }).then(function(d){
     if(manualDisconnectRequested()){showGuest(true);return;}
+    if(d&&d.ok){serverSaysGuest=false;showUser(d);return;}
+    // The server already tried this browser's remembered-device cookie
+    // before answering, so 401/403 means there really is no OrcAgent session
+    // -- even when Phantom still silently trusts the site. Showing the user
+    // as signed in here used to hide the only Connect button, leaving no way
+    // to actually sign in.
+    if(d&&d.guest){serverSaysGuest=true;showGuest(true);return;}
     if(providerConnected()){showUser(d);return;}
-    if(d&&d.ok){showUser(d);return;}
-    if(d&&d.guest){showGuest(true);return;}
     if(d&&!d.ok&&!d.unknown){showGuest(true);return;}
   }).catch(function(){}).finally(function(){checking=false;});
 }
@@ -115,7 +122,7 @@ function boot(){
   sync(true);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
-window.addEventListener('orca:phantom-trusted-connected',function(){if(!manualDisconnectRequested()){showUser();setTimeout(function(){sync(true)},500);}});
+window.addEventListener('orca:phantom-trusted-connected',function(){if(!manualDisconnectRequested()){if(!serverSaysGuest)showUser();setTimeout(function(){sync(true)},500);}});
 window.addEventListener('orca:manual-disconnect',onManualDisconnect);
 window.addEventListener('pageshow',function(){sync(true);});
 document.addEventListener('visibilitychange',function(){if(!document.hidden)sync(true);});
@@ -130,7 +137,7 @@ document.addEventListener('click',function(e){
 try{
   var p=provider();
   if(p&&typeof p.on==='function'){
-    p.on('connect',function(){if(!manualDisconnectRequested()){showUser();setTimeout(function(){sync(true)},500);}});
+    p.on('connect',function(){if(!manualDisconnectRequested()){if(!serverSaysGuest)showUser();setTimeout(function(){sync(true)},500);}});
     p.on('disconnect',function(){showGuest(true);setTimeout(function(){sync(true)},400);});
   }
 }catch(_){}
