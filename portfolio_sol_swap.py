@@ -25,6 +25,27 @@ def amount6(value):
     return rounded
 
 
+# Fallback when Jupiter's order omits its fee breakdown: two signatures,
+# priority fee and a temporary wrapped-SOL account's rent, rounded up.
+_FALLBACK_TAKER_FEE_SOL = Decimal('0.0025')
+
+
+def taker_fee_sol(order):
+    """SOL the taker itself must hold to land this Ultra order."""
+    lamports = 0
+    for field in ('signatureFeeLamports', 'prioritizationFeeLamports', 'rentFeeLamports'):
+        payer = order.get(field[:-len('Lamports')] + 'Payer')
+        if payer and payer != order.get('taker'):
+            continue
+        try:
+            lamports += max(0, int(order.get(field) or 0))
+        except (TypeError, ValueError):
+            return _FALLBACK_TAKER_FEE_SOL
+    if lamports <= 0:
+        return _FALLBACK_TAKER_FEE_SOL
+    return Decimal(lamports) / Decimal(1_000_000_000)
+
+
 def install(d):
     app = d.app
     with sqlite3.connect(d.DB_FILE) as conn:
@@ -116,10 +137,20 @@ def install(d):
                                price_impact_pct=float(quote.get('priceImpactPct') or 0),
                                network_reserve_native=float(reserve), gasless=False)
 
-            # Low-SOL wallet: only accept a genuinely gasless Jupiter order.
+            # Low-SOL wallet: prefer a gasless Jupiter Ultra order. Jupiter only
+            # offers gasless when the wallet cannot pay the fees itself, so a
+            # wallet holding a few thousand lamports gets an ordinary Ultra
+            # order instead. Take that one when this wallet can cover its
+            # stated fees, rather than failing with "no gasless route".
             # No key is sent to Jupiter: only its derived public address.
             with d._use_key(key_blob(wallet), wallet) as key:
-                order, output = provider._gasless_order(key, amount)
+                order, output = provider._gasless_order(key, amount, require_gasless=False)
+            gasless = bool(order.get('gasless'))
+            fee_sol = Decimal(0) if gasless else taker_fee_sol(order)
+            if not gasless and sol < fee_sol:
+                return fail(f'Jupiter has no gasless route for this swap right now, and it needs about '
+                            f'{fee_sol:.6f} SOL for network fees (this wallet holds {sol:.6f} SOL). '
+                            'Add a little SOL to your trading wallet or try again later.', 400)
             if int(order.get('inAmount', 0)) != int(amount * 1000000):
                 return fail('Provider returned a different input amount', 502)
             minimum = int(order.get('otherAmountThreshold') or 0)
@@ -135,7 +166,7 @@ def install(d):
                            direction='stable_to_native', from_symbol='USDC', to_symbol='SOL',
                            out_amount=float(output), min_out_amount=minimum / 1e9,
                            price_impact_pct=float(order.get('priceImpactPct') or 0),
-                           network_reserve_native=0, gasless=True)
+                           network_reserve_native=float(fee_sol), gasless=gasless)
         except PermissionError as exc:
             return fail(exc, 401)
         except Exception as exc:
@@ -166,7 +197,7 @@ def install(d):
                 signature, result = provider._execute_order(key, order)
             # No fallible balance/token RPC after a successful transaction.
             return jsonify(ok=True, tx_hash=signature, from_symbol='USDC', to_symbol='SOL',
-                           amount_in=amount, gasless=True)
+                           amount_in=amount, gasless=bool(order.get('gasless')))
         except PermissionError as exc:
             return fail(exc, 401)
         except Exception as exc:
