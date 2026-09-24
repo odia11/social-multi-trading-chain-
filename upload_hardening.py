@@ -47,6 +47,24 @@ def _validate_image_bytes(raw: bytes) -> None:
         raise
     except Exception as exc:
         raise ValueError('Invalid image data') from exc
+    # Pornographic / sexually explicit images are refused here, the one
+    # place every image upload passes through (posts, avatars, banners,
+    # group and chat images) -- see nsfw_filter.py.
+    reason = _nsfw_check(raw)
+    if reason:
+        raise NsfwRejected(reason)
+
+
+class NsfwRejected(ValueError):
+    """An upload refused for explicit content (logged for moderators)."""
+
+
+def _nsfw_check(raw: bytes):
+    try:
+        import nsfw_filter
+    except Exception:
+        return None
+    return nsfw_filter.check_image_bytes(raw)
 
 
 def _validate_data_uri(value: str) -> None:
@@ -115,6 +133,14 @@ def install(dashboard_module):
                 raw = storage.stream.read(_MAX_IMAGE_BYTES + 1)
                 storage.stream.seek(pos)
                 _validate_image_bytes(raw)
+        except NsfwRejected as exc:
+            try:
+                wallet = dashboard_module._authenticated_wallet() or 'unknown'
+                dashboard_module._log_security_event('nsfw_blocked', wallet,
+                                                     f'explicit image refused on {request.path}')
+            except Exception:
+                pass
+            return jsonify({'ok': False, 'error': str(exc), 'msg': str(exc)}), 400
         except ValueError as exc:
             return jsonify({'ok': False, 'error': str(exc)}), 400
         return None

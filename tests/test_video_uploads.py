@@ -49,6 +49,15 @@ BOB = 'Cdn8WftaYycdudV9yeeQPY1A1Tgo1bMa9eV4Tv9SeAM9'
 for w in (ALICE, BOB):
     d.get_or_create_user(w)
 who = {'w': ALICE}
+# Start from a clean per-wallet daily video quota (MAX_UPLOADS_PER_DAY) so
+# repeated local runs don't trip the limit these tests aren't about.
+import sqlite3 as _sq
+_c = _sq.connect(d.DB_FILE)
+try:
+    _c.execute('DELETE FROM video_uploads'); _c.commit()
+except _sq.OperationalError:
+    pass
+_c.close()
 d._authenticated_wallet = lambda: who['w']
 
 def upload(path, mime='video/mp4'):

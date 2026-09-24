@@ -25,7 +25,7 @@ id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --create-home --shell /usr
 say "Installing the application into $APP_DIR"
 if command -v rsync >/dev/null 2>&1; then
   rsync -a --delete --exclude '.git' --exclude '__pycache__' --exclude '*.db' \
-        --exclude 'venv' --exclude '.secret_key' "$REPO_DIR"/ "$APP_DIR"/
+        --exclude 'venv' --exclude '.secret_key' --exclude '/models' "$REPO_DIR"/ "$APP_DIR"/
   if [ -e "$REPO_DIR/.git" ]; then
     git -C "$REPO_DIR" rev-parse --short HEAD > "$APP_DIR/VERSION" 2>/dev/null || true
   fi
@@ -66,6 +66,30 @@ fi
 python3 -m venv "$APP_DIR/venv"
 "$APP_DIR/venv/bin/pip" install --quiet --upgrade pip
 "$APP_DIR/venv/bin/pip" install --quiet -r "$APP_DIR/requirements.txt"
+
+# Explicit-content filter model (nsfw_filter.py): Yahoo's open_nsfw
+# (BSD-2-Clause) as ONNX, taken from the MIT-licensed opennsfw-standalone
+# wheel. Only the model file is extracted -- installing that package would
+# pin Pillow<9. Pinned version + sha256, re-fetched only when missing/changed.
+NSFW_MODEL="$APP_DIR/models/open-nsfw.onnx"
+NSFW_SHA=864bb37bf8863564b87eb330ab8c785a79a773f4e7c43cb96db52ed8611305fa
+if [ "$(sha256sum "$NSFW_MODEL" 2>/dev/null | awk '{print $1}')" != "$NSFW_SHA" ]; then
+  say "Installing the explicit-content filter model"
+  NSFW_TMP="$(mktemp -d)"
+  "$APP_DIR/venv/bin/pip" download --quiet --no-deps opennsfw-standalone==0.0.6 -d "$NSFW_TMP"
+  mkdir -p "$APP_DIR/models"
+  "$APP_DIR/venv/bin/python" - "$NSFW_TMP" "$NSFW_MODEL" <<'PY'
+import glob, sys, zipfile
+whl = glob.glob(sys.argv[1] + '/opennsfw_standalone-0.0.6-*.whl')[0]
+with zipfile.ZipFile(whl) as z, open(sys.argv[2], 'wb') as out:
+    out.write(z.read('opennsfw_standalone/open-nsfw.onnx'))
+PY
+  rm -rf "$NSFW_TMP"
+  [ "$(sha256sum "$NSFW_MODEL" | awk '{print $1}')" = "$NSFW_SHA" ] \
+    || { rm -f "$NSFW_MODEL"; die "explicit-content model checksum mismatch — refusing to use it"; }
+fi
+chown -R "$APP_USER:$APP_USER" "$APP_DIR/models"
+echo "  explicit-content filter model ready"
 chown -R "$APP_USER:$APP_USER" "$APP_DIR/venv"
 
 if ! VENV_ERR="$(cd "$APP_DIR" && sudo -u "$APP_USER" "$APP_DIR/venv/bin/gunicorn" --version 2>&1)"; then
