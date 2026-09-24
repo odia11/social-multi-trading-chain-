@@ -48,6 +48,7 @@ from cross_chain_budget_guard import install as _install_cross_chain_budget_guar
 from solana_source_bridge_gasless import install as _install_solana_source_bridge_gasless
 from header_stable_balance import install as _install_header_stable_balance
 from portfolio_multichain_holdings import install as _install_portfolio_multichain_holdings
+from video_uploads import install as _install_video_uploads
 from portfolio_trade_history import install as _install_portfolio_trade_history
 from portfolio_token_withdraw import install as _install_portfolio_token_withdraw
 from live_market_sheet_overlap_fix import install as _install_live_market_sheet_overlap_fix
@@ -114,6 +115,10 @@ _install_multichain_auto_bot(_dashboard)
 # network fee/rent is recovered by Jupiter from the swap instead of requiring
 # the user to pre-fund SOL.
 _install_solana_gasless_trading(_dashboard)
+
+# Short (<=30s) video posts: chunked upload, server-side ffmpeg re-encode to
+# H.264 MP4 with metadata stripped, public media dir served by nginx.
+_install_video_uploads(_dashboard)
 
 # Cross-chain buying follows the same economic invariant: the number entered
 # by the user is the absolute all-in ceiling. It also lets settled EVM->Solana

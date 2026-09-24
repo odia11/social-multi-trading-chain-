@@ -15,7 +15,9 @@ die(){ printf '\n\033[1;31m✗ %s\033[0m\n' "$*"; exit 1; }
 
 say "Installing system packages"
 apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip nginx sqlite3 curl ca-certificates rsync openssl
+# ffmpeg: video posts are re-encoded (H.264, metadata stripped, <=720p) and
+# length-checked server-side before they can be published (video_uploads.py).
+apt-get install -y -qq python3 python3-venv python3-pip nginx sqlite3 curl ca-certificates rsync openssl ffmpeg
 
 say "Creating the service user (no login shell — it only runs the app)"
 id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin "$APP_USER"
@@ -42,6 +44,17 @@ find "$DATA_DIR" -xdev -type d -exec chmod 700 {} +
 find "$DATA_DIR" -xdev -type f -exec chmod 600 {} +
 chmod 700 "$DATA_DIR" "$DATA_DIR/backups"
 echo "  persistent state is owner-only"
+
+# Published video posts are PUBLIC content that nginx serves straight from
+# disk, so they cannot live under the owner-only $DATA_DIR. Raw uploads (which
+# may still carry location metadata) stay private under $DATA_DIR until
+# ffmpeg has re-encoded them.
+MEDIA_DIR=/var/lib/orcagent-media
+say "Creating the public media directory ($MEDIA_DIR)"
+mkdir -p "$MEDIA_DIR/videos"
+chown -R "$APP_USER:$APP_USER" "$MEDIA_DIR"
+chmod 755 "$MEDIA_DIR" "$MEDIA_DIR/videos"
+find "$MEDIA_DIR/videos" -type f -exec chmod 644 {} +
 
 say "Building the Python environment"
 if [ -x "$APP_DIR/venv/bin/gunicorn" ] \
@@ -154,6 +167,9 @@ fi
 # Without this, older production sites keep serving the 474 KB dashboard bundle
 # uncompressed even though the fresh-install template already enables gzip.
 bash "$REPO_DIR/deploy/apply-nginx-performance.sh"
+# Serve published video posts directly from disk (range requests, no Flask
+# thread held per viewer). Idempotent, preserves Certbot's TLS config.
+bash "$REPO_DIR/deploy/apply-nginx-media.sh"
 
 ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/orcagent
 rm -f /etc/nginx/sites-enabled/default
