@@ -12782,7 +12782,8 @@ def api_token_candles(mint):
             else:
                 gt_path = 'day?aggregate=1&limit=30'
             gt_url = (f'https://api.geckoterminal.com/api/v2/networks/solana'
-                      f'/pools/{pair_address}/ohlcv/{gt_path}&currency=usd')
+                      f'/pools/{pair_address}/ohlcv/{gt_path}&currency=usd'
+                      f'&token={_gt_token_param("solana", mint)}')
             r2 = requests.get(gt_url, headers={'Accept': 'application/json'}, timeout=8)
             if r2.status_code == 200:
                 rows = (r2.json().get('data') or {}).get('attributes', {}).get('ohlcv_list') or []
@@ -29124,10 +29125,26 @@ def _gt_try_take(reserve: int = 0) -> bool:
         return False
 
 
-def _chart_cache_lookup(chain: str, pair_address: str, tf_key: str):
+def _gt_token_param(chain: str, mint: str) -> str:
+    """GeckoTerminal's `token=` for OHLCV: the token's own address.
+
+    `token=base` meant "GeckoTerminal's base token of this pool", and
+    GeckoTerminal does not always agree with DexScreener (where every card's
+    mint, header price and live price come from) about which side of a pool
+    is the base. When they disagreed the chart plotted the OTHER token --
+    e.g. a $0.001979 token drawn as a $773 line. Asking for the address
+    always charts the right side. EVM addresses are sent lowercase, Solana
+    ones are case-sensitive and sent as-is."""
+    mint = (mint or '').strip()
+    if not mint:
+        return 'base'
+    return mint.lower() if chain in EVM_CHAINS else mint
+
+
+def _chart_cache_lookup(chain: str, pair_address: str, tf_key: str, token: str = 'base'):
     """(candles, fresh) for a cached entry, or (None, False) on a miss."""
     with _chart_cache_lock:
-        cached = _chart_cache.get((chain, pair_address, tf_key))
+        cached = _chart_cache.get((chain, pair_address, tf_key, token))
     if not cached:
         return None, False
     age = time.time() - cached[0]
@@ -29135,7 +29152,7 @@ def _chart_cache_lookup(chain: str, pair_address: str, tf_key: str):
     return cached[1], age < ttl
 
 
-def _gt_fetch_ohlcv(chain: str, pair_address: str, tf_key: str) -> list:
+def _gt_fetch_ohlcv(chain: str, pair_address: str, tf_key: str, token: str = 'base') -> list:
     """One GeckoTerminal OHLCV call, parsed and written to _chart_cache.
     The caller must already hold a budget token."""
     gt_network = _GECKOTERMINAL_NETWORK.get(chain)
@@ -29148,7 +29165,7 @@ def _gt_fetch_ohlcv(chain: str, pair_address: str, tf_key: str) -> list:
             f'https://api.geckoterminal.com/api/v2/networks/{gt_network}'
             f'/pools/{pair_address}/ohlcv/{tcfg_local["gt_tf"]}'
             f'?aggregate={tcfg_local["gt_agg"]}&limit={tcfg_local["limit"]}'
-            f'&currency=usd&token=base'
+            f'&currency=usd&token={token}'
         )
         rg = requests.get(gt_url, timeout=10, headers={'Accept': 'application/json;version=20230302'})
         if rg.status_code == 200:
@@ -29176,7 +29193,7 @@ def _gt_fetch_ohlcv(chain: str, pair_address: str, tf_key: str) -> list:
     # rate-limited pair backs off -- but only briefly (_CHART_EMPTY_TTL).
     now = time.time()
     with _chart_cache_lock:
-        _chart_cache[(chain, pair_address, tf_key)] = (now, candles_local)
+        _chart_cache[(chain, pair_address, tf_key, token)] = (now, candles_local)
         # Evict stale entries once the cache grows large (mirrors _dex_get's eviction)
         if len(_chart_cache) > 300:
             cutoff = now - 900
@@ -29187,11 +29204,12 @@ def _gt_fetch_ohlcv(chain: str, pair_address: str, tf_key: str) -> list:
 
 
 def _chart_refresh_async(chain: str, pair_address: str, tf_key: str,
-                         reserve: int = 0, max_wait: float = 30.0) -> None:
+                         reserve: int = 0, max_wait: float = 30.0,
+                         token: str = 'base') -> None:
     """Refresh one chart in the background, once, whenever budget allows."""
     if not _GECKOTERMINAL_NETWORK.get(chain) or tf_key not in _CHART_TF_CFG:
         return
-    key = (chain, pair_address, tf_key)
+    key = (chain, pair_address, tf_key, token)
     with _chart_inflight_lock:
         if key in _chart_inflight:
             return
@@ -29204,7 +29222,7 @@ def _chart_refresh_async(chain: str, pair_address: str, tf_key: str,
                 if time.time() > deadline:
                     return
                 time.sleep(1.0)
-            _gt_fetch_ohlcv(chain, pair_address, tf_key)
+            _gt_fetch_ohlcv(chain, pair_address, tf_key, token)
         finally:
             with _chart_inflight_lock:
                 _chart_inflight.discard(key)
@@ -29223,9 +29241,10 @@ def _warm_scanner_charts(tokens: list, limit: int = 12) -> None:
         chain = (t.get('chain') or 'solana').strip().lower()
         if not pair:
             continue
-        candles, fresh = _chart_cache_lookup(chain, pair, '5m')
+        token = _gt_token_param(chain, t.get('mint') or '')
+        candles, fresh = _chart_cache_lookup(chain, pair, '5m', token)
         if candles is None or not fresh:
-            _chart_refresh_async(chain, pair, '5m', reserve=_GT_WARM_RESERVE)
+            _chart_refresh_async(chain, pair, '5m', reserve=_GT_WARM_RESERVE, token=token)
 
 
 @app.route('/api/chart/<mint>')
@@ -29246,6 +29265,7 @@ def api_chart(mint):
         return jsonify({'candles': [], 'error': 'invalid mint'})
     dex_chain_id = EVM_CHAINS[chain]['dex_chain'] if chain in EVM_CHAINS else 'solana'
     gt_network   = _GECKOTERMINAL_NETWORK.get(chain)
+    gt_token     = _gt_token_param(chain, mint)
     tf   = request.args.get('tf', '5m')
     _TF  = _CHART_TF_CFG
     # Young tokens often don't have enough daily/4h/1h candles yet -- fall
@@ -29290,17 +29310,17 @@ def api_chart(mint):
         def _fetch_candles_for_tf(tf_key):
             if not gt_network:
                 return []  # Unknown future network: use durable observed-price history below.
-            candles_local, fresh = _chart_cache_lookup(chain, pair_address, tf_key)
+            candles_local, fresh = _chart_cache_lookup(chain, pair_address, tf_key, gt_token)
             if candles_local is not None:
                 if not fresh:
                     # Stale-while-revalidate: answer now, refresh behind it.
-                    _chart_refresh_async(chain, pair_address, tf_key)
+                    _chart_refresh_async(chain, pair_address, tf_key, token=gt_token)
                 return candles_local
             if _gt_try_take():
-                return _gt_fetch_ohlcv(chain, pair_address, tf_key)
+                return _gt_fetch_ohlcv(chain, pair_address, tf_key, gt_token)
             # Budget spent this minute: answer from stored candles right away
             # and let the cache fill in the background for the next request.
-            _chart_refresh_async(chain, pair_address, tf_key)
+            _chart_refresh_async(chain, pair_address, tf_key, token=gt_token)
             return []
 
         def _fetch_current_price():
@@ -29315,8 +29335,15 @@ def api_chart(mint):
                     timeout=8, headers={'Accept': 'application/json;version=20230302'}
                 )
                 if r.status_code == 200:
-                    attrs = (r.json().get('data') or {}).get('attributes') or {}
-                    price = attrs.get('base_token_price_usd')
+                    data = r.json().get('data') or {}
+                    attrs = data.get('attributes') or {}
+                    # Same base/quote caveat as the OHLCV call: take the
+                    # side whose address is this token.
+                    quote_id = (((data.get('relationships') or {}).get('quote_token') or {})
+                                .get('data') or {}).get('id') or ''
+                    side = ('quote' if quote_id.lower().endswith('_' + mint.lower())
+                            else 'base')
+                    price = attrs.get(side + '_token_price_usd')
                     return float(price) if price is not None else None
             except Exception as e:
                 print(f'[chart] current_price fetch error: {e}', flush=True)

@@ -59,7 +59,7 @@ check('fresh cache answers instantly', dt < 0.3)
 
 # 3. Stale cache: answered instantly with the old candles, refreshed behind it.
 with d._chart_cache_lock:
-    k = ('solana', PAIR, '5m'); d._chart_cache[k] = (time.time() - d._CHART_CACHE_TTL - 5, d._chart_cache[k][1])
+    k = ('solana', PAIR, '5m', MINT); d._chart_cache[k] = (time.time() - d._CHART_CACHE_TTL - 5, d._chart_cache[k][1])
 calls.clear()
 j, dt = get_chart()
 check('stale cache is answered instantly (stale-while-revalidate)', dt < 0.3 and len(j['candles']) == 20)
@@ -77,7 +77,7 @@ check('the next request gets the background-filled candles instantly', dt < 0.3 
 
 # 5. An empty/failed fetch backs off briefly, not for the full 5 minutes.
 with d._chart_cache_lock:
-    d._chart_cache[('solana', 'EmptyPair', '5m')] = (time.time() - d._CHART_EMPTY_TTL - 1, [])
+    d._chart_cache[('solana', 'EmptyPair', '5m', 'base')] = (time.time() - d._CHART_EMPTY_TTL - 1, [])
 _, fresh = d._chart_cache_lookup('solana', 'EmptyPair', '5m')
 check('an empty result is retried after _CHART_EMPTY_TTL', fresh is False)
 

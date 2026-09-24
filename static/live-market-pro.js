@@ -554,12 +554,37 @@ function startObservedCandle(st, price){
   return {t:Math.floor(now/seconds)*seconds,o:price,h:price,l:price,c:price,v:0};
 }
 
+// The card's own price (the scanner's, or the live tick once one arrived).
+function _cardRefPrice(st, idx){
+  var t=ST.tokens && ST.tokens[idx];
+  if(t && t.mint===st.mint) return Number(t._livePx||t.price_usd)||0;
+  return Number(st.seedPrice)||0;
+}
+// Candles that sit 10x or more away from the token's real price are another
+// token's chart -- the other side of the pool -- not a price move. Never
+// draw a $773 line beside a $0.001979 token; start from the real price.
+function _candlesMatchPrice(candles, ref){
+  if(!(ref>0) || !candles || !candles.length) return true;
+  var c=Number(candles[candles.length-1].c)||0;
+  if(!(c>0)) return true;
+  var ratio=c/ref;
+  return ratio<10 && ratio>0.1;
+}
+
 function chartTick(idx){
   var st = _chartTimers[idx];
   if(!st || st.destroyed) return;
   var requestedTf=st.tf;
   fetchChart(st.mint, requestedTf, st.pair, st.chain, st).then(function(r){
     if(!st || st.destroyed || st.tf!==requestedTf) return;
+    var ref=_cardRefPrice(st, idx);
+    if(r && r.candles && r.candles.length && !_candlesMatchPrice(r.candles, ref)){
+      if(st.candles && st.candles.length && _candlesMatchPrice(st.candles, ref)) return;
+      st.price=ref;
+      st.candles=[startObservedCandle(st,ref)];
+      renderChartSvg(idx,st.candles,ref);
+      return;
+    }
     if(r && r.candles && r.candles.length){
       // Kept so a live price can redraw this chart without fetching the
       // candles again -- the candles are the shape, the price is the movement.
@@ -725,6 +750,7 @@ function primeChart(idx, mint, pairAddr, chain, seedPrice){
   _chartTimers[idx] = st;
   // Already seen this session: paint the real history immediately.
   var cached=candleCacheGet(mint,pairAddr,st.tf);
+  if(cached && !_candlesMatchPrice(cached.c, st.seedPrice)) cached=null;
   if(cached){
     st.candles=cached.c.slice();
     st.price=st.seedPrice>0?st.seedPrice:(Number(cached.p)||cached.c[cached.c.length-1].c);
@@ -765,6 +791,7 @@ function setChartTf(idx, tf){
   if(!st) return;
   st.tf = tf;
   var cached=candleCacheGet(st.mint,st.pair,tf);
+  if(cached && !_candlesMatchPrice(cached.c, st.price||st.seedPrice)) cached=null;
   if(cached){
     st.candles=cached.c.slice();
     renderChartSvg(idx,st.candles,st.price>0?st.price:cached.p);
