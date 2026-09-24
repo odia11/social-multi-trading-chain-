@@ -59,9 +59,15 @@ MEDIA_DST=/data/backups/media/videos
 MEDIA_DEL=/data/backups/media-deleted
 if [ -d "$MEDIA_SRC" ] && command -v rsync >/dev/null; then
   mkdir -p "$MEDIA_DST" "$MEDIA_DEL"
-  if rsync -a --delete --backup --backup-dir="$MEDIA_DEL/$STAMP" \
+  # --chmod: rsync -a would otherwise copy the PUBLIC media dir's 755/644
+  # modes into /data, and security-smoke.sh (run on every app start) refuses
+  # to start the app while anything under /data is group/world accessible.
+  # That exact mistake took the site down on the first deploy of this mirror.
+  if rsync -a --chmod=D700,F600 --delete --backup --backup-dir="$MEDIA_DEL/$STAMP" \
        --include='*.mp4' --include='*.jpg' --exclude='*' \
        "$MEDIA_SRC"/ "$MEDIA_DST"/; then
+    chmod 700 /data/backups/media "$MEDIA_DST" "$MEDIA_DEL" 2>/dev/null || true
+    find "$MEDIA_DEL" -mindepth 1 \( -type d -exec chmod 700 {} + \) -o \( -type f -exec chmod 600 {} + \) 2>/dev/null || true
     find "$MEDIA_DEL" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} + 2>/dev/null || true
     printf 'backup: mirrored %s video files\n' "$(find "$MEDIA_DST" -type f | wc -l)"
   else
