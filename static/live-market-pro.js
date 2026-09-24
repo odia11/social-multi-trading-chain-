@@ -229,25 +229,42 @@ function renderChartSvg(idx, candles, currentPrice){
   var st = _chartTimers[idx];
   if(st){ st.pts = pts; st.candles = candles; st.min = min; st.max = max; st.h = h; st.w = w; st.priceH = priceH; st.plotW = w-46; }
 
+  // Gold line + area (the approved "gold chart" look), not red/green
+  // candles: one continuous gold price line over a soft gold gradient, a
+  // dashed guide and glowing dot at the live price, faint gold volume.
+  // Reads as a clean exchange-style line chart and stays honest with sparse
+  // history -- a young token with few bars is still one clear line.
   var maxVol = Math.max.apply(null,candles.map(function(c){return Number(c.v)||0;}))||1;
-  var plotW=w-46, step=plotW/Math.max(n,1), bodyW=Math.max(2,Math.min(7,step*.62)), chartHtml='';
+  var plotW=w-46, step=plotW/Math.max(n,1), barW=Math.max(1.5,Math.min(6,step*.55)), chartHtml='';
+  var gid='ptGoldGrad'+String(idx).replace(/[^a-zA-Z0-9_-]/g,'_');
+  chartHtml+='<defs><linearGradient id="'+gid+'" x1="0" y1="0" x2="0" y2="1">'
+    +'<stop offset="0%" stop-color="#f7b955" stop-opacity=".30"></stop>'
+    +'<stop offset="100%" stop-color="#f7b955" stop-opacity="0"></stop></linearGradient></defs>';
   for(var gy=0;gy<5;gy++){
     var yy=(priceH/4)*gy, label=max-((max-min)/4)*gy;
     chartHtml+='<line x1="0" y1="'+yy.toFixed(2)+'" x2="'+plotW.toFixed(2)+'" y2="'+yy.toFixed(2)+'" stroke="#1a2530" stroke-width="1" vector-effect="non-scaling-stroke"></line>';
     chartHtml+='<text x="'+(plotW+5).toFixed(2)+'" y="'+Math.max(10,yy+4).toFixed(2)+'" fill="#657180" font-size="9" font-family="monospace">'+fmtPrice(label).replace('$','')+'</text>';
   }
   candles.forEach(function(c,i){
-    var x=pts[i].x, open=Number(c.o!=null?c.o:c.c)||0, close=Number(c.c)||0, high=Number(c.h!=null?c.h:c.c)||0, low=Number(c.l!=null?c.l:c.c)||0;
-    var yo=priceH-((open-min)/(max-min))*priceH, yc=priceH-((close-min)/(max-min))*priceH, yh=priceH-((high-min)/(max-min))*priceH, yl=priceH-((low-min)/(max-min))*priceH;
-    var color=close>=open?'#3ad29b':'#f76b62', top=Math.min(yo,yc), bh=Math.max(1.5,Math.abs(yc-yo));
-    var liveIds=i===candles.length-1?' id="pt-live-wick-'+idx+'"':'';
-    var liveBodyId=i===candles.length-1?' id="pt-live-body-'+idx+'"':'';
-    chartHtml+='<line'+liveIds+' x1="'+x.toFixed(2)+'" y1="'+yh.toFixed(2)+'" x2="'+x.toFixed(2)+'" y2="'+yl.toFixed(2)+'" stroke="'+color+'" stroke-width="1" vector-effect="non-scaling-stroke"></line>';
-    chartHtml+='<rect'+liveBodyId+' x="'+(x-bodyW/2).toFixed(2)+'" y="'+top.toFixed(2)+'" width="'+bodyW.toFixed(2)+'" height="'+bh.toFixed(2)+'" rx=".6" fill="'+color+'"></rect>';
     var vh=((Number(c.v)||0)/maxVol)*volH;
-    chartHtml+='<rect x="'+(x-bodyW/2).toFixed(2)+'" y="'+(volTop+volH-vh).toFixed(2)+'" width="'+bodyW.toFixed(2)+'" height="'+vh.toFixed(2)+'" fill="'+color+'" opacity=".45"></rect>';
+    if(vh>0.5) chartHtml+='<rect x="'+(pts[i].x-barW/2).toFixed(2)+'" y="'+(volTop+volH-vh).toFixed(2)+'" width="'+barW.toFixed(2)+'" height="'+vh.toFixed(2)+'" fill="#f7b955" opacity=".16"></rect>';
   });
-  svg.innerHTML=chartHtml+'<line id="pt-live-guide-'+idx+'" x1="0" y1="'+priceY.toFixed(2)+'" x2="'+plotW.toFixed(2)+'" y2="'+priceY.toFixed(2)+'" stroke="#f7b955" stroke-width="1" stroke-dasharray="4,4" opacity=".72" vector-effect="non-scaling-stroke"></line>';
+  // The line ends exactly at the live price, like the pill beside it.
+  pts[pts.length-1] = {x:pts[pts.length-1].x, y:priceY};
+  var head='';
+  for(var pi=0;pi<pts.length-1;pi++) head+=(pi?' L':'M')+pts[pi].x.toFixed(2)+' '+pts[pi].y.toFixed(2);
+  var lastPt=pts[pts.length-1], firstX=pts[0].x;
+  var lineD=head+(head?' L':'M')+lastPt.x.toFixed(2)+' '+lastPt.y.toFixed(2);
+  var areaD=lineD+' L'+lastPt.x.toFixed(2)+' '+priceH.toFixed(2)+' L'+firstX.toFixed(2)+' '+priceH.toFixed(2)+' Z';
+  if(st){ st.lineHead=head; st.lastX=lastPt.x; st.firstX=firstX; }
+  if(n>1){
+    chartHtml+='<path id="pt-live-area-'+idx+'" d="'+areaD+'" fill="url(#'+gid+')"></path>';
+    chartHtml+='<path id="pt-live-line-'+idx+'" d="'+lineD+'" fill="none" stroke="#f7b955" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path>';
+  }
+  chartHtml+='<line id="pt-live-guide-'+idx+'" x1="0" y1="'+priceY.toFixed(2)+'" x2="'+plotW.toFixed(2)+'" y2="'+priceY.toFixed(2)+'" stroke="#f7b955" stroke-width="1" stroke-dasharray="4,4" opacity=".6" vector-effect="non-scaling-stroke"></line>';
+  chartHtml+='<circle id="pt-live-halo-'+idx+'" cx="'+lastPt.x.toFixed(2)+'" cy="'+priceY.toFixed(2)+'" r="7" fill="#f7b955" opacity=".18"></circle>';
+  chartHtml+='<circle id="pt-live-dot-'+idx+'" cx="'+lastPt.x.toFixed(2)+'" cy="'+priceY.toFixed(2)+'" r="3.2" fill="#f7b955"></circle>';
+  svg.innerHTML=chartHtml;
 
   // Reused across renders (not removed+recreated) so the CSS `top`
   // transition on .pt-price-pill actually animates between positions
@@ -295,20 +312,24 @@ function updateLiveChartPrice(idx, nextPrice){
   last.c=nextPrice; last.h=Math.max(Number(last.h||nextPrice),nextPrice); last.l=Math.min(Number(last.l||nextPrice),nextPrice);
   // A move outside the current scale needs fresh axes; ordinary ticks stay GPU-smooth.
   if(nextPrice<=st.min || nextPrice>=st.max){ renderChartSvg(idx,st.candles,nextPrice); return; }
-  var body=document.getElementById('pt-live-body-'+idx), wick=document.getElementById('pt-live-wick-'+idx), guide=document.getElementById('pt-live-guide-'+idx);
+  var line=document.getElementById('pt-live-line-'+idx), area=document.getElementById('pt-live-area-'+idx);
+  var dot=document.getElementById('pt-live-dot-'+idx), halo=document.getElementById('pt-live-halo-'+idx), guide=document.getElementById('pt-live-guide-'+idx);
   var pill=wrap.querySelector('.pt-price-pill');
-  if(!body || !wick || !guide){ renderChartSvg(idx,st.candles,nextPrice); return; }
+  if(!dot || !guide || st.lastX==null){ renderChartSvg(idx,st.candles,nextPrice); return; }
   if(st.liveRaf) cancelAnimationFrame(st.liveRaf);
   var started=performance.now(), duration=Math.max(900,(typeof _pricePollBaseMs==='number'?_pricePollBaseMs:2000)-150);
+  var head=st.lineHead||'', lx=Number(st.lastX).toFixed(2), fx=Number(st.firstX).toFixed(2), base=Number(st.priceH).toFixed(2);
   function frame(now){
     var q=Math.min(1,(now-started)/duration), eased=1-Math.pow(1-q,3), p=previous+(nextPrice-previous)*eased;
     st.animPrice=p;
-    var y=function(v){return st.priceH-((v-st.min)/(st.max-st.min))*st.priceH;};
-    var yo=y(Number(last.o!=null?last.o:p)), yc=y(p), yh=y(Math.max(Number(last.h)||p,p)), yl=y(Math.min(Number(last.l)||p,p));
-    var color=p>=Number(last.o!=null?last.o:p)?'#3ad29b':'#f76b62';
-    body.setAttribute('y',Math.min(yo,yc).toFixed(2)); body.setAttribute('height',Math.max(1.5,Math.abs(yc-yo)).toFixed(2)); body.setAttribute('fill',color);
-    wick.setAttribute('y1',yh.toFixed(2)); wick.setAttribute('y2',yl.toFixed(2)); wick.setAttribute('stroke',color);
-    guide.setAttribute('y1',yc.toFixed(2)); guide.setAttribute('y2',yc.toFixed(2));
+    var yc=(st.priceH-((p-st.min)/(st.max-st.min))*st.priceH).toFixed(2);
+    // Only the line's live end moves; every settled point stays put.
+    var d=head+(head?' L':'M')+lx+' '+yc;
+    if(line) line.setAttribute('d', d);
+    if(area) area.setAttribute('d', d+' L'+lx+' '+base+' L'+fx+' '+base+' Z');
+    dot.setAttribute('cy', yc); if(halo) halo.setAttribute('cy', yc);
+    guide.setAttribute('y1',yc); guide.setAttribute('y2',yc);
+    if(st.pts && st.pts.length) st.pts[st.pts.length-1].y=Number(yc);
     if(pill){pill.style.top=yc+'px'; pill.textContent=fmtPrice(p);}
     if(q<1) st.liveRaf=requestAnimationFrame(frame); else {st.liveRaf=null; st.animPrice=null; st.renderedPrice=nextPrice;}
   }
@@ -739,7 +760,7 @@ function fetchFriends(idx, mint){
       var ftEl = document.getElementById('pt-ft-stats-'+idx);
       if(!ftEl || !d || !d.ok) return;
       var t = ST.tokens[Number(idx)];
-      var txns = t ? (t.buys_24h+t.sells_24h) : 0;
+      var txns = t ? ((Number(t.buys_24h)||0)+(Number(t.sells_24h)||0)) : 0;
       var txnsStr = txns >= 1000 ? (txns/1000).toFixed(1)+'K' : String(txns);
       var ratio = t ? ratioStr(t.buys_24h, t.sells_24h) : '—';
       // 'holders' here is a count of OrcAgent users with a position in this

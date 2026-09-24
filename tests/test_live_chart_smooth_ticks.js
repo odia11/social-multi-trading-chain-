@@ -30,15 +30,20 @@ vm.runInContext(js.slice(fmtStart,fmtEnd)+'\n'+js.slice(fnStart,fnEnd), ctx);
 
 function makeEl(){ return {attrs:{}, setAttribute(k,v){this.attrs[k]=v;}}; }
 const idx=0;
-const body=makeEl(), wick=makeEl(), guide=makeEl();
+// The gold line chart: only the line's live end, its area, the dot/halo
+// and the guide move on a tick.
+const line=makeEl(), area=makeEl(), dot=makeEl(), halo=makeEl(), guide=makeEl();
 const pill={style:{}, textContent:''};
-ctx._els['pt-live-body-'+idx]=body;
-ctx._els['pt-live-wick-'+idx]=wick;
+ctx._els['pt-live-line-'+idx]=line;
+ctx._els['pt-live-area-'+idx]=area;
+ctx._els['pt-live-dot-'+idx]=dot;
+ctx._els['pt-live-halo-'+idx]=halo;
 ctx._els['pt-live-guide-'+idx]=guide;
 ctx._els['pt-chart-wrap-'+idx]={querySelector:()=>pill};
 
 const last={t:0,o:1.00,h:1.00,l:1.00,c:1.00,v:0};
-const st={candles:[last], min:0.5, max:1.5, priceH:200, liveRaf:null, animPrice:null, renderedPrice:1.00};
+const st={candles:[last], min:0.5, max:1.5, priceH:200, liveRaf:null, animPrice:null, renderedPrice:1.00,
+            lineHead:'M0.00 150.00 L50.00 120.00', lastX:100, firstX:0};
 // updateLiveChartPrice() reads _chartTimers[idx] as a plain global lookup
 // (the real file declares it with module-level `var`) -- a context property
 // of the same name is what a vm script sees as that global.
@@ -52,6 +57,9 @@ ctx._now=210; rafCb(ctx._now); // 220ms used to be the ENTIRE old duration
 assert(st.liveRaf!==null, 'with a ~2s poll cadence, a 220ms-long ease must not already be finished at t=210ms');
 const priceAt210=st.animPrice;
 assert(priceAt210>1.00 && priceAt210<1.10, 'price should be partway through the ease, not at either end');
+assert(line.attrs.d.startsWith('M0.00 150.00 L50.00 120.00 L100.00 '),'only the live end of the gold line moves; settled points stay put');
+assert(/ Z$/.test(area.attrs.d),'the gold area follows the line and closes at the baseline');
+assert.equal(dot.attrs.cy, guide.attrs.y1,'the live dot and the dashed guide sit on the same price');
 
 // ---- A second tick arriving mid-animation must continue from the line's
 //      actual current position, not snap back to the stale renderedPrice ----
@@ -71,5 +79,12 @@ ctx._now+=5000; rafCb(ctx._now); // run past duration
 assert.equal(st.liveRaf,null,'animation must end once its duration has elapsed');
 assert.equal(st.renderedPrice,1.20,'a completed animation must land exactly on the target price');
 assert.equal(st.animPrice,null,'animPrice must clear once nothing is in flight, so the next tick reads renderedPrice');
+
+// The approved gold line/area look: one gold line over a gold gradient,
+// not red/green candles.
+const rStart=js.indexOf('function renderChartSvg('), rEnd=js.indexOf('\nfunction ',rStart+1);
+const render=js.slice(rStart,rEnd);
+assert(render.includes('id="pt-live-line-')&&render.includes('id="pt-live-area-')&&render.includes('stroke="#f7b955"'),'renderChartSvg draws the gold line + area');
+assert(!/#3ad29b|#f76b62/.test(render),'no red/green candle bodies in the Live Market chart');
 
 console.log('PASS live market chart: ticks ease across the full poll interval, and a tick arriving mid-animation continues forward instead of snapping backwards');
