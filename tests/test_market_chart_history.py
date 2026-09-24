@@ -75,7 +75,11 @@ with tempfile.TemporaryDirectory() as tmp:
 with open(os.path.join(ROOT, 'static', 'live-market-pro.js'), encoding='utf-8') as fh:
     js = fh.read()
 assert '_chartFetchQueue' in js
-assert '2100-(Date.now()-_lastChartFetchAt)' in js
+# GeckoTerminal's rate limit is protected by the SERVER now (shared budget,
+# stale-while-revalidate, scanner pre-warm), not by a 2.1s client queue that
+# made the tenth card wait ~20s for history the server already had cached.
+assert 'var _CHART_FETCH_CONCURRENCY = 4;' in js
+assert '_GT_BUDGET_PER_MIN = 25' in SOURCE and 'def _gt_try_take(' in SOURCE
 assert 'setInterval(function(){ chartTick(idx); }, 300000)' in js
 
 print('market chart history tests passed')
