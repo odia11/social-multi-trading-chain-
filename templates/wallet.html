@@ -2767,8 +2767,23 @@ _loadManualTrades()
 <script src="/static/auto-refresh.js?v={{ app_version }}"></script>
 <script src="/static/pull-to-refresh.js?v={{ app_version }}"></script>
 <script>
-initPullToRefresh({ onRefresh: function(){
-  return Promise.all([loadBalance(), loadTokens(true), _loadActivity(), _loadManualTrades()]);
+// Pull down at the top of Portfolio (like Instagram) to refresh everything
+// on it in place -- no page reload. One forced-fresh snapshot fetch first;
+// every painter below then reads that same fresh snapshot from the shared
+// cache instead of each busting it again.
+initPullToRefresh({ pull: true, onRefresh: function(){
+  function safe(fn){ try{ return Promise.resolve(fn()); }catch(e){ return Promise.resolve(); } }
+  return _getPortfolioSnapshot(true).catch(function(){}).then(function(){
+    return Promise.allSettled([
+      safe(loadBalance),
+      safe(loadUsdcSummary),
+      safe(function(){ return loadTokens(false); }),
+      safe(function(){ return window.OrcAgentRepaintPortfolioTotal && window.OrcAgentRepaintPortfolioTotal(false); }),
+      safe(_loadActivity),
+      safe(_loadManualTrades),
+      safe(function(){ return document.body.classList.contains('pf-view-history') && window.OrcAgentRefreshPortfolioHistory && window.OrcAgentRefreshPortfolioHistory(); })
+    ]);
+  });
 }});
 </script>
 

@@ -111,4 +111,8 @@ document.addEventListener('orca:trade-complete',function(){queue(refreshHoldings
 document.addEventListener('orca:bfcache-restored',function(){queue(function(){refreshValue(false)},100)});
 window.OrcAgentRefreshPortfolio=refreshHoldings;
 window.OrcAgentRefreshPortfolioValue=refreshValue;
+// Unambiguous name for the Portfolio total repaint: header-stable-balance.js
+// also assigns OrcAgentRefreshPortfolioValue, so which one wins that name
+// depends on script order. Portfolio pull-to-refresh calls this one.
+window.OrcAgentRepaintPortfolioTotal=refreshValue;
 })();
