@@ -41,13 +41,15 @@ RestartSec=5
 KillSignal=SIGTERM
 TimeoutStopSec=30
 
-# Filesystem isolation: application state belongs only under /data.
+# Filesystem isolation: application state belongs only under /data; published
+# video posts go to the public media directory nginx serves (the '-' keeps the
+# service starting even before install.sh has created it).
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/data
+ReadWritePaths=/data -/var/lib/orcagent-media
 
 # Kernel/host hardening. The web process does not need to alter the host,
 # load modules, create namespaces, acquire capabilities, use realtime

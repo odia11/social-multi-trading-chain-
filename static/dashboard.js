@@ -7332,17 +7332,24 @@ function _updatePostCharCounter(ta){
 async function submitPost(){
   const t=document.getElementById('postText')
   var text = t.value.trim()
-  if(!text && !_composerChart && !_composerTrade && !_composerImageData) return
+  if(!text && !_composerChart && !_composerTrade && !_composerImageData && !_composerVideo) return
+  if(_composerVideo && _composerVideo.status !== 'ready'){
+    openAlertModal({text: _composerVideo.status === 'failed'
+      ? 'That video could not be uploaded — remove it or pick another one'
+      : 'Your video is still uploading — it will be ready in a moment'});
+    return
+  }
   var content = text
   if(_composerTrade) content = (content ? content+'\n' : '') + '__TRADE__'+JSON.stringify(_composerTrade)
   if(_composerChart) content = (content ? content+'\n' : '') + '__CHART__'+JSON.stringify(_composerChart)
-  const r=await fetch('/api/feed/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:content, image_data:_composerImageData||''})})
+  const r=await fetch('/api/feed/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:content, image_data:_composerImageData||'', video_id:(_composerVideo&&_composerVideo.id)||''})})
   const d=await r.json()
   if(r.ok){
     t.value=''
     _updatePostCharCounter(t)
     _composerChart=null; _composerTrade=null
     _clearComposerImage()
+    _clearComposerVideo()
     var prev=document.getElementById('composer-chart-preview')
     if(prev) prev.style.display='none'
     var tprev=document.getElementById('composer-trade-preview')
@@ -7592,6 +7599,7 @@ function _composerImageSelected(input){
   }
   var reader = new FileReader();
   reader.onload = function(){
+    _clearComposerVideo();
     _composerImageData = reader.result;
     var img = document.getElementById('composer-image-preview-img');
     if(img) img.src = _composerImageData;
@@ -7610,6 +7618,146 @@ function _clearComposerImage(){
   if(prev) prev.style.display = 'none';
   var img = document.getElementById('composer-image-preview-img');
   if(img) img.src = '';
+}
+
+/* ── Video posts (max 30 seconds) ──
+   The video starts uploading the moment it's picked -- in 4 MB pieces, so it
+   fits the server's request limit and a dropped mobile connection only
+   resends one piece -- while the user writes their caption. The server then
+   re-encodes it (H.264, location metadata stripped, <=720p) and checks the
+   30-second limit on the real file; this page only pre-checks it so nobody
+   waits on an upload that was always going to be refused. See
+   video_uploads.py. */
+var _composerVideo = null;   // {token, id, status, url, objectUrl}
+var _COMPOSER_VIDEO_MAX_SECONDS = 30;
+var _COMPOSER_VIDEO_MAX_BYTES = 100 * 1024 * 1024;
+var _COMPOSER_VIDEO_TYPES = ['video/mp4','video/quicktime','video/webm','video/x-m4v','video/3gpp','video/3gpp2','video/x-matroska',''];
+
+function _composerVideoUi(label, pct, state){
+  var st = document.getElementById('composer-video-status');
+  var lb = document.getElementById('composer-video-label');
+  var bar = document.getElementById('composer-video-progress');
+  if(lb) lb.textContent = label;
+  if(bar) bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+  if(st){ st.classList.toggle('ready', state==='ready'); st.classList.toggle('failed', state==='failed'); }
+}
+
+function _composerVideoSelected(input){
+  var file = input.files && input.files[0];
+  input.value = '';
+  if(!file) return;
+  var type = String(file.type || '').toLowerCase();
+  if(_COMPOSER_VIDEO_TYPES.indexOf(type) === -1){
+    openAlertModal({text:'Only MP4, MOV or WebM videos are accepted'});
+    return;
+  }
+  if(file.size > _COMPOSER_VIDEO_MAX_BYTES){
+    openAlertModal({text:'Video too large (max ' + (_COMPOSER_VIDEO_MAX_BYTES/(1024*1024)) + ' MB)'});
+    return;
+  }
+  var objectUrl = URL.createObjectURL(file);
+  var probe = document.createElement('video');
+  var decided = false;
+  function go(){ if(decided) return; decided = true; _startComposerVideo(file, objectUrl); }
+  probe.preload = 'metadata'; probe.muted = true;
+  probe.onloadedmetadata = function(){
+    if(decided) return;
+    var dur = probe.duration;
+    if(isFinite(dur) && dur > _COMPOSER_VIDEO_MAX_SECONDS + 0.5){
+      decided = true;
+      URL.revokeObjectURL(objectUrl);
+      openAlertModal({text:'Videos can be at most ' + _COMPOSER_VIDEO_MAX_SECONDS + ' seconds (this one is ' + Math.round(dur) + 's). Trim it and try again.'});
+      return;
+    }
+    go();
+  };
+  // Some browsers can't read every codec's metadata (e.g. HEVC). The server
+  // checks the real length anyway, so don't block the upload on that.
+  probe.onerror = go;
+  setTimeout(go, 4000);
+  probe.src = objectUrl;
+}
+
+function _startComposerVideo(file, objectUrl){
+  _clearComposerImage();
+  _clearComposerVideo();
+  var token = {};
+  _composerVideo = {token: token, id: null, status: 'uploading', objectUrl: objectUrl};
+  var el = document.getElementById('composer-video-preview-el');
+  if(el) el.src = objectUrl;
+  var prev = document.getElementById('composer-video-preview');
+  if(prev) prev.style.display = '';
+  _composerVideoUi('Uploading… 0%', 0);
+  _uploadComposerVideo(file, token);
+}
+
+async function _uploadComposerVideo(file, token){
+  function alive(){ return _composerVideo && _composerVideo.token === token; }
+  function fail(msg){
+    if(!alive()) return;
+    _composerVideo.status = 'failed';
+    _composerVideoUi(msg || 'Upload failed', 100, 'failed');
+  }
+  try{
+    var r = await fetch('/api/feed/video/start', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({size: file.size, mime: file.type || ''})});
+    var d = await r.json().catch(function(){ return {}; });
+    if(!alive()) return;
+    if(!r.ok || !d.ok) return fail(d.msg || 'Upload failed');
+    _composerVideo.id = d.id;
+    var chunk = d.chunk_size || (4*1024*1024), offset = 0, tries = 0;
+    while(offset < file.size){
+      if(!alive()) return;
+      var piece = file.slice(offset, Math.min(file.size, offset + chunk));
+      var cr;
+      try{
+        cr = await fetch('/api/feed/video/' + d.id + '/chunk?offset=' + offset,
+          {method:'POST', headers:{'Content-Type':'application/octet-stream'}, body: piece});
+      }catch(_){ cr = null; }
+      if(!alive()) return;
+      var cd = cr ? await cr.json().catch(function(){ return {}; }) : {};
+      if(cr && cr.ok && cd.ok){
+        offset = cd.received; tries = 0;
+        _composerVideoUi('Uploading… ' + Math.round(offset / file.size * 100) + '%', offset / file.size * 90);
+        continue;
+      }
+      if(cr && cr.status === 409 && typeof cd.received === 'number'){ offset = cd.received; continue; }
+      if(cr && cr.status >= 400 && cr.status < 500 && cr.status !== 429) return fail(cd.msg || 'Upload failed');
+      if(++tries > 4) return fail('Upload failed — check your connection and try again');
+      await new Promise(function(res){ setTimeout(res, 1000 * tries); });
+    }
+    var fr = await fetch('/api/feed/video/' + d.id + '/finish', {method:'POST'});
+    var fd = await fr.json().catch(function(){ return {}; });
+    if(!alive()) return;
+    if(!fr.ok || !fd.ok) return fail(fd.msg || 'Upload failed');
+    _composerVideo.status = 'processing';
+    _composerVideoUi('Processing…', 94);
+    var started = Date.now();
+    while(alive() && Date.now() - started < 5*60*1000){
+      if(fd.status === 'ready'){
+        _composerVideo.status = 'ready';
+        _composerVideo.url = fd.url;
+        _composerVideoUi('Ready to post ✓', 100, 'ready');
+        return;
+      }
+      if(fd.status === 'failed') return fail(fd.msg);
+      await new Promise(function(res){ setTimeout(res, 1500); });
+      var sr = await fetch('/api/feed/video/' + d.id, {cache:'no-store'}).catch(function(){ return null; });
+      fd = sr ? await sr.json().catch(function(){ return {}; }) : {};
+    }
+    fail('Processing took too long — try again');
+  }catch(e){
+    fail('Upload failed — check your connection and try again');
+  }
+}
+
+function _clearComposerVideo(){
+  if(_composerVideo && _composerVideo.objectUrl){ try{ URL.revokeObjectURL(_composerVideo.objectUrl); }catch(_){} }
+  _composerVideo = null;
+  var prev = document.getElementById('composer-video-preview');
+  if(prev) prev.style.display = 'none';
+  var el = document.getElementById('composer-video-preview-el');
+  if(el){ el.removeAttribute('src'); try{ el.load(); }catch(_){} }
 }
 
 function _renderTradeTerminalCard(t){
@@ -8895,6 +9043,7 @@ function renderHomeFeed(appendItems){
   var html = items.map(_renderFeedCard).join('');
   if(appendItems) el.insertAdjacentHTML('beforeend', html);
   else el.innerHTML = html;
+  _observeFeedVideos(el);
   _initLiveCharts();
   _initTradeBanners();
   _hydrateFumbles();
@@ -8947,6 +9096,7 @@ function _devirtualizeCard(card){
   if(card.contains(document.activeElement)) return;
   var h = card.offsetHeight;
   if(!h) return; // never measured (e.g. still content-visibility-skipped) -- leave it alone
+  if(_feedVideoObserver) card.querySelectorAll('video[data-feed-video]').forEach(function(v){ _feedVideoObserver.unobserve(v); });
   // Stop this card's own live-chart poller before tearing its DOM out --
   // don't rely on _initLiveCharts()'s document.contains() sweep, which only
   // runs on the next full/append render and would otherwise keep fetching
@@ -8966,6 +9116,7 @@ function _revirtualizeCard(card){
   card.style.height = '';
   card.style.overflow = '';
   delete card.dataset.virtualized;
+  _observeFeedVideos(card);
   // Restore chart polling / trade-banner images for the content just rebuilt
   // -- scoped to this one card, not the whole-document versions those
   // helpers normally do at full-feed-render time.
@@ -9164,6 +9315,26 @@ function _teamBadgeHtml(role){
   return ' <span style="display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border-radius:999px;'
     +'background:'+s[1]+';color:'+s[0]+';border:1px solid '+s[0]+'4d;font-size:9.5px;font-weight:700;'
     +'letter-spacing:.02em;vertical-align:1px" title="OrcAgent team — '+esc(role)+'">'+s[2]+'</span>';
+}
+// Only the server's own processed files -- never an arbitrary URL.
+var _FEED_VIDEO_URL_RE = /^\/media\/videos\/[a-f0-9]{32}\.mp4$/;
+var _FEED_POSTER_URL_RE = /^\/media\/videos\/[a-f0-9]{32}\.jpg$/;
+// Instagram-style: a feed video plays (muted, looping) while it is mostly on
+// screen and pauses when scrolled away, so only what is being watched is
+// downloaded. Tapping the controls unmutes.
+var _feedVideoObserver = ('IntersectionObserver' in window) ? new IntersectionObserver(function(entries){
+  entries.forEach(function(en){
+    var v = en.target;
+    if(en.isIntersecting && en.intersectionRatio >= 0.6){ var p = v.play(); if(p && p.catch) p.catch(function(){}); }
+    else if(!v.paused) v.pause();
+  });
+}, {threshold:[0, 0.6]}) : null;
+function _observeFeedVideos(root){
+  if(!_feedVideoObserver) return;
+  (root || document).querySelectorAll('video[data-feed-video]:not([data-observed])').forEach(function(v){
+    v.setAttribute('data-observed', '1');
+    _feedVideoObserver.observe(v);
+  });
 }
 function _renderFeedCard(e){
   var repostBanner = '';
@@ -9391,6 +9562,11 @@ function _renderFeedCard(e){
     +'</div>'
     +(e.image_url
       ? '<div class="fc-post-image-wrap" onclick="event.stopPropagation();_openImgLightbox('+esc(JSON.stringify(e.image_url))+')"><img class="fc-post-image" src="'+esc(e.image_url)+'" alt="" loading="lazy"></div>'
+      : '')
+    +(_FEED_VIDEO_URL_RE.test(e.video_url||'')
+      ? '<div class="fc-post-video-wrap" onclick="event.stopPropagation()"><video class="fc-post-video" data-feed-video="1" src="'+esc(e.video_url)+'"'
+        +(_FEED_POSTER_URL_RE.test(e.video_poster||'') ? ' poster="'+esc(e.video_poster)+'"' : '')
+        +' playsinline muted loop controls preload="none"></video></div>'
       : '')
     +editHtml
     +'<div class="fc-actions" onclick="event.stopPropagation()">'

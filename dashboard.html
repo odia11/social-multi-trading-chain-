@@ -499,6 +499,12 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
    push the rest of the feed off the screen. */
 .fc-post-image-wrap{margin-bottom:10px;border-radius:14px;overflow:hidden;border:1px solid #16191f;cursor:pointer;background:#0d0f13}
 .fc-post-image{display:block;width:100%;height:auto;max-height:560px;object-fit:contain}
+.fc-post-video-wrap{margin-bottom:10px;border-radius:14px;overflow:hidden;border:1px solid #16191f;background:#000;position:relative}
+.fc-post-video{display:block;width:100%;height:auto;max-height:560px;object-fit:contain;background:#000}
+.composer-video-status{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:11px;color:#8a95a1;font-weight:600}
+.composer-video-bar{flex:1;height:4px;border-radius:4px;background:#1a2129;overflow:hidden}
+.composer-video-bar>i{display:block;height:100%;width:0;background:#f7b955;transition:width .2s ease}
+.composer-video-status.ready{color:#3ad29b}.composer-video-status.failed{color:#f76b62}
 .fc-actions{display:flex;align-items:center;gap:24px;margin-top:4px}
 .fc-view-count{font-size:11.5px;color:#565d68;font-family:'JetBrains Mono',monospace;margin-left:auto;user-select:none}
 .fc-action{display:flex;align-items:center;gap:5px;color:#565d68;font-size:13px;background:transparent;border:none;cursor:pointer;padding:0;font-family:'Geist',system-ui,sans-serif;transition:color .15s}
@@ -4043,7 +4049,15 @@ __IMAGE_LIGHTBOX__
       <img id="composer-image-preview-img" src="" alt="Selected image" style="max-width:100%;max-height:240px;border-radius:14px;display:block;object-fit:contain">
     </div>
 
+    <!-- video preview + upload progress (shown after a video is picked) -->
+    <div id="composer-video-preview" style="display:none;margin-bottom:10px;position:relative;width:fit-content;max-width:100%" onclick="event.stopPropagation()">
+      <button onclick="_clearComposerVideo()" aria-label="Remove video" title="Remove video" style="position:absolute;top:8px;right:8px;background:rgba(10,11,14,.78);border:1px solid rgba(255,255,255,.18);border-radius:50%;width:28px;height:28px;color:#eef1f5;cursor:pointer;font-size:14px;line-height:1;z-index:1;display:flex;align-items:center;justify-content:center">&#10005;</button>
+      <video id="composer-video-preview-el" playsinline muted controls preload="metadata" style="max-width:100%;max-height:240px;border-radius:14px;display:block;background:#000"></video>
+      <div class="composer-video-status" id="composer-video-status"><span id="composer-video-label">Uploading…</span><span class="composer-video-bar"><i id="composer-video-progress"></i></span></div>
+    </div>
+
     <input type="file" id="composer-image-input" accept="image/jpeg,image/png,image/webp,image/gif" style="display:none" onchange="_composerImageSelected(this)">
+    <input type="file" id="composer-video-input" accept="video/mp4,video/quicktime,video/webm,video/*" style="display:none" onchange="_composerVideoSelected(this)">
 
     <div class="feed-composer-actions">
       <!-- Chart chip -->
@@ -4057,6 +4071,11 @@ __IMAGE_LIGHTBOX__
       <button class="feed-composer-pill" id="image-pill-btn" onclick="event.stopPropagation();document.getElementById('composer-image-input').click()">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
         + Image
+      </button>
+      <!-- Video chip (max 30 seconds) -->
+      <button class="feed-composer-pill" id="video-pill-btn" onclick="event.stopPropagation();if(checkGuest())return;document.getElementById('composer-video-input').click()">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="14" height="14" rx="3"/><polygon points="22 8 16 12 22 16 22 8"/></svg>
+        + Video
       </button>
       <!-- Emoji picker -->
       <div class="feed-emoji-wrap">

@@ -17927,7 +17927,9 @@ def _persist_remembered_session(response):
     well as older sessions which never received the new HttpOnly cookie.
     This does not rely on JavaScript running or localStorage being writable.
     """
-    if (request.path.startswith('/static/') or request.path == '/api/logout'
+    # /media/ is public, immutable video-post files (video_uploads.py) --
+    # like /static/, never per-user, so never 'no-store, private'.
+    if (request.path.startswith(('/static/', '/media/')) or request.path == '/api/logout'
             or request.method == 'OPTIONS' or response.status_code >= 400):
         return response
     wallet = _authenticated_wallet()
@@ -20352,6 +20354,16 @@ def social_feed():
             'repost_of':   repost_of,
             'original':    originals.get(repost_of) if kind == 'r' else None,
         })
+    _attach_videos = globals().get('_attach_feed_videos')
+    if callable(_attach_videos) and feed:
+        try:
+            _vconn = sqlite3.connect(DB_FILE)
+            try:
+                _attach_videos(_vconn, feed)
+            finally:
+                _vconn.close()
+        except Exception as _ve:
+            print(f'[feed] video attach skipped: {_ve}', flush=True)
     next_cursor = None
     if feed:
         last_created = feed[-1]['created_at']
@@ -21176,8 +21188,11 @@ def feed_post_create():
     body = request.json or {}
     content = _sanitize(str(body.get('content', '')))
     image_data = str(body.get('image_data', '')).strip()
-    if not content and not image_data:
+    video_id = str(body.get('video_id', '') or '').strip()
+    if not content and not image_data and not video_id:
         return jsonify({'ok': False, 'msg': 'Content cannot be empty'}), 400
+    if image_data and video_id:
+        return jsonify({'ok': False, 'msg': 'A post can have an image or a video, not both'}), 400
     # Two separate limits, both enforced here regardless of what the client
     # sent: the user's own text against the same 500 the composer shows them,
     # and the whole stored string against a hard ceiling so an attached
@@ -21211,11 +21226,28 @@ def feed_post_create():
             return jsonify({'ok': False, 'msg': 'File is not a valid image'}), 400
     conn = sqlite3.connect(DB_FILE)
     try:
+        video_url = video_poster = None
+        if video_id:
+            # A processed (<=30s, re-encoded, metadata-stripped) video that
+            # this same wallet uploaded -- see video_uploads.py.
+            claim = globals().get('_claim_feed_video')
+            if not callable(claim):
+                return jsonify({'ok': False, 'msg': 'Video posts are not available right now'}), 503
+            video_url, video_poster, _verr = claim(conn, wallet, video_id)
+            if _verr:
+                return jsonify({'ok': False, 'msg': _verr}), 400
         now = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-        cur = conn.execute(
-            'INSERT INTO feed_posts (wallet, content, created_at, image_url) VALUES (?,?,?,?)',
-            (wallet, content, now, image_data if image_data else None)
-        )
+        if video_url:
+            cur = conn.execute(
+                'INSERT INTO feed_posts (wallet, content, created_at, image_url, video_url, video_poster) VALUES (?,?,?,?,?,?)',
+                (wallet, content, now, None, video_url, video_poster)
+            )
+            _mark_feed_video_posted(conn, video_id, cur.lastrowid)
+        else:
+            cur = conn.execute(
+                'INSERT INTO feed_posts (wallet, content, created_at, image_url) VALUES (?,?,?,?)',
+                (wallet, content, now, image_data if image_data else None)
+            )
         conn.commit()
         post_id = cur.lastrowid
         author_row = conn.execute('SELECT COALESCE(username,"") FROM users WHERE wallet_address=?', (wallet,)).fetchone()
@@ -21249,7 +21281,7 @@ def feed_post_create():
             preview = text_part[:60] + ('…' if len(text_part) > 60 else '')
             post_desc = 'posted: ' + preview
         else:
-            post_desc = 'posted a photo'
+            post_desc = 'posted a video' if video_url else 'posted a photo'
         me = _get_uid(conn, wallet)
         if me:
             follower_ids = _notify_followers(
@@ -21619,6 +21651,16 @@ def get_feed_post(post_id):
         'verified':    bool(is_verified),
         'image_url':   image_url or '',
     }
+    _attach_videos = globals().get('_attach_feed_videos')
+    if callable(_attach_videos) and not is_trade:
+        try:
+            _vconn = sqlite3.connect(DB_FILE)
+            try:
+                _attach_videos(_vconn, [post])
+            finally:
+                _vconn.close()
+        except Exception as _ve:
+            print(f'[feed] video attach skipped: {_ve}', flush=True)
     return jsonify({'ok': True, 'post': post})
 
 _REACTION_EMOJIS = frozenset({'👍', '❤️', '😂', '🔥', '💰', '🚀', '😢', '😮'})
