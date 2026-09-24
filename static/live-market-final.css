@@ -58,7 +58,7 @@
   body.oa-live-v2 .pt-chart-tfs{top:8px!important;right:8px!important;z-index:6!important;gap:4px!important}
   body.oa-live-v2 .pt-tf-pill{min-width:35px!important;height:30px!important;padding:0 7px!important;border:1px solid #263746!important;border-radius:8px!important;background:#0a141e!important;color:#95a3b6!important;font:650 10px/28px Geist,system-ui,sans-serif!important}
   body.oa-live-v2 .pt-tf-pill.active{background:linear-gradient(180deg,#ffd36a,#f5b13b)!important;border-color:#ffc85a!important;color:#111820!important;box-shadow:0 4px 14px rgba(247,185,85,.2)!important}
-  body.oa-live-v2 .pt-chart-axis,body.oa-live-v2 .pt-price-pill,body.oa-live-v2 .pt-chart-scrub-line,body.oa-live-v2 .pt-chart-scrub-dot,body.oa-live-v2 .pt-chart-scrub-tip{display:none!important}
+  body.oa-live-v2 .pt-chart-axis,body.oa-live-v2 .pt-price-pill{display:none!important}
 
   body.oa-live-v2 .pt-card-ft{grid-column:1/-1!important;order:6!important;min-height:54px!important;margin:0 14px 11px!important;padding:0 12px!important;display:grid!important;grid-template-columns:1fr 2fr!important;align-items:center!important;background:#0a151f!important;border:1px solid #223340!important;border-radius:14px!important}
   body.oa-live-v2 .pt-friends{font:500 11px/1 Geist,system-ui,sans-serif!important;color:#9aa8ba!important}
@@ -80,3 +80,13 @@
 .pt-price{transition:color .6s ease-out}
 body.oa-live-v2 .pt-price.pt-tick-up,.pt-price.pt-tick-up{color:#3ddc97!important;transition:none}
 body.oa-live-v2 .pt-price.pt-tick-down,.pt-price.pt-tick-down{color:#ff6b6b!important;transition:none}
+
+/* Finger on the chart (see attachChartSvgScrub): a gold crosshair, dot and
+   price/time tag. These used to be hidden on phones by the rule above, so
+   touching the chart showed nothing. The live price tag dims meanwhile, and
+   the header price (which shows the scrubbed price) turns gold. */
+body.oa-live-v2 .pt-chart-scrub-line{width:1px!important;background:rgba(247,185,85,.55)!important;opacity:1!important;z-index:6!important}
+body.oa-live-v2 .pt-chart-scrub-dot{width:10px!important;height:10px!important;box-sizing:border-box!important;background:#f7b955!important;border:2px solid #081018!important;box-shadow:0 0 0 4px rgba(247,185,85,.22)!important;z-index:7!important}
+body.oa-live-v2 .pt-chart-scrub-tip{background:#0d1824!important;border:1px solid rgba(247,185,85,.45)!important;color:#f3f5f8!important;font:700 11px/1.2 'JetBrains Mono',monospace!important;padding:5px 8px!important;border-radius:7px!important;z-index:8!important}
+.pt-chart-wrap.pt-scrubbing .pt-price-pill{opacity:.25!important;transition:opacity .15s}
+body.oa-live-v2 .pt-price.pt-scrubbing,.pt-price.pt-scrubbing{color:#f7b955!important;transition:none}

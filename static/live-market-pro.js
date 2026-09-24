@@ -366,6 +366,43 @@ function updateLiveChartPrice(idx, nextPrice){
 // is the same drag/hover -> nearest-point -> crosshair+tooltip idea, done
 // in plain pixel math against the {x,y} points renderChartSvg() already
 // computed (stored on the timer state each render).
+// While a finger is on the chart the card's big price shows the price at
+// that point, with the move since the start of the chart and its time --
+// like Robinhood/Coinbase. Letting go puts the live price back.
+function _scrubTimeLabel(ts){
+  var d=new Date(ts*1000), now=new Date();
+  var hm=('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
+  if(d.toDateString()===now.toDateString()) return hm;
+  var mon=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'][d.getMonth()];
+  return d.getDate()+' '+mon+' '+hm;
+}
+function _showScrubHeader(idx, st, i){
+  var t=ST.tokens && ST.tokens[idx], c=st.candles && st.candles[i], first=st.candles && st.candles[0];
+  if(!t || t.mint!==st.mint || !c) return;
+  st.scrubbing=true;
+  var px=Number(c.c)||0, base=Number(first.o||first.c)||0;
+  var pct=base>0 ? (px/base-1)*100 : 0, down=pct<0;
+  var el=document.getElementById('pt-price-'+idx);
+  if(el){ el.textContent=fmtPrice(px); el.classList.add('pt-scrubbing'); el.classList.remove('pt-tick-up','pt-tick-down'); }
+  if((el=document.getElementById('pt-chg-'+idx))){
+    el.textContent=fmtPct(pct)+' · '+_scrubTimeLabel(c.t);
+    el.classList.toggle('down',down); el.classList.toggle('up',!down);
+  }
+}
+function _restoreLiveHeader(idx, st){
+  if(!st || !st.scrubbing) return;
+  st.scrubbing=false;
+  var t=ST.tokens && ST.tokens[idx];
+  if(!t || t.mint!==st.mint) return;
+  var el=document.getElementById('pt-price-'+idx);
+  if(el){ el.textContent=fmtPrice(t.price_usd); el.classList.remove('pt-scrubbing'); }
+  if((el=document.getElementById('pt-chg-'+idx))){
+    var down=(t.price_change_24h||0)<0;
+    el.textContent=fmtPct(t.price_change_24h)+' · 24h';
+    el.classList.toggle('down',down); el.classList.toggle('up',!down);
+  }
+}
+
 function attachChartSvgScrub(idx){
   var wrap = document.getElementById('pt-chart-wrap-'+idx);
   var st   = _chartTimers[idx];
@@ -383,7 +420,7 @@ function attachChartSvgScrub(idx){
   // one update per animation frame": a burst of events between two frames
   // now overwrites `pendingX` instead of queuing more work, and only the
   // latest position by the time the frame is due to paint gets applied.
-  var rafId = null, pendingX = null;
+  var rafId = null, pendingX = null, lastBest = -1, holdTimer = null;
   var touchIntent = null, touchStartX = 0, touchStartY = 0;
   wrap.style.touchAction = 'pan-y pinch-zoom';
   function scheduleScrub(clientX){
@@ -414,19 +451,28 @@ function attachChartSvgScrub(idx){
     }
     var c = s.candles && s.candles[best], pt = pts[best];
     if(!c || !pt) return;
+    if(best !== lastBest){
+      // A light tick under the finger per point, like an exchange app.
+      if(lastBest >= 0 && touchIntent === 'scrub'){ try{ navigator.vibrate && navigator.vibrate(3); }catch(_){} }
+      lastBest = best;
+      _showScrubHeader(idx, s, best);
+    }
+    wrap.classList.add('pt-scrubbing');
+    var svgTop = svgRect.top - wrapRect.top;
     var pxX = (pt.x / (s.w||1)) * svgRect.width  + (svgRect.left - wrapRect.left);
     var pxY = (pt.y / (s.h||1)) * svgRect.height + (svgRect.top  - wrapRect.top);
     // `transform: translate(...)`, never left/top -- keeps every per-frame
     // update on the compositor (GPU) instead of forcing a full layout+paint
     // each time, which is the other half of what made this feel sluggish.
+    // The chart sits below the LIVE/timeframe row, so the line starts at
+    // the chart's own top, not the card's.
     line.style.height    = svgRect.height+'px';
     line.style.display   = 'block';
-    line.style.transform = 'translateX('+pxX.toFixed(1)+'px)';
+    line.style.transform = 'translate('+pxX.toFixed(1)+'px,'+svgTop.toFixed(1)+'px)';
     dot.style.display    = 'block';
-    dot.style.transform  = 'translate('+(pxX-4).toFixed(1)+'px,'+(pxY-4).toFixed(1)+'px)';
-    var d = new Date(c.t*1000);
-    var hh = ('0'+d.getHours()).slice(-2), mm = ('0'+d.getMinutes()).slice(-2);
-    tip.textContent    = fmtPrice(c.c)+'  ·  '+hh+':'+mm;
+    var dw = (dot.offsetWidth || 8) / 2, dh = (dot.offsetHeight || 8) / 2;
+    dot.style.transform  = 'translate('+(pxX-dw).toFixed(1)+'px,'+(pxY-dh).toFixed(1)+'px)';
+    tip.textContent    = fmtPrice(c.c)+'  ·  '+_scrubTimeLabel(c.t);
     tip.style.display  = 'block';
     // Manually centered + clamped here (both axes) via the transform's own
     // offset -- there is no separate CSS transform layered on top (that
@@ -439,18 +485,32 @@ function attachChartSvgScrub(idx){
     // (4px..svgRect.height) so it never overlaps the LIVE/timeframe pills
     // above the chart or spills past the bottom into the axis labels.
     var tipH = tip.offsetHeight || 20;
-    var tipY = Math.max(4, Math.min(svgRect.height - tipH - 4, pxY - tipH - 10));
+    var tipY = Math.max(svgTop + 4, Math.min(svgTop + svgRect.height - tipH - 4, pxY - tipH - 10));
     tip.style.transform = 'translate('+tipX.toFixed(1)+'px,'+tipY.toFixed(1)+'px)';
   }
   function clearScrub(){
     if(rafId != null){ cancelAnimationFrame(rafId); rafId = null; }
+    if(holdTimer){ clearTimeout(holdTimer); holdTimer = null; }
     line.style.display = 'none'; dot.style.display = 'none'; tip.style.display = 'none';
+    wrap.classList.remove('pt-scrubbing');
+    lastBest = -1;
+    _restoreLiveHeader(idx, _chartTimers[idx]);
   }
   function onTouchStart(e){
     if(!e.touches[0]) return;
     touchStartX = e.touches[0].clientX;
     touchStartY = e.touches[0].clientY;
     touchIntent = null;
+    // Holding a finger still on the chart also starts scrubbing (then any
+    // direction scrubs); a quick vertical swipe still scrolls the page.
+    if(holdTimer) clearTimeout(holdTimer);
+    holdTimer = setTimeout(function(){
+      holdTimer = null;
+      if(touchIntent != null) return;
+      touchIntent = 'scrub';
+      try{ navigator.vibrate && navigator.vibrate(8); }catch(_){}
+      scheduleScrub(touchStartX);
+    }, 260);
   }
   function onTouchMove(e){
     if(!e.touches[0]) return;
@@ -458,6 +518,7 @@ function attachChartSvgScrub(idx){
     var dy = e.touches[0].clientY - touchStartY;
     if(touchIntent == null){
       if(Math.max(Math.abs(dx), Math.abs(dy)) < 7) return;
+      if(holdTimer){ clearTimeout(holdTimer); holdTimer = null; }
       touchIntent = Math.abs(dx) > Math.abs(dy) * 1.15 ? 'scrub' : 'scroll';
     }
     if(touchIntent !== 'scrub'){ clearScrub(); return; }
@@ -649,6 +710,7 @@ function _syncCardPrice(st, idx, px){
   t._livePx=px; t._liveAt=Date.now();
   if(old===px) return;
   _rebaseTokenPrice(t, old, px);
+  if(st.scrubbing) return;   // the finger is on the chart; restored on release
   var el=document.getElementById('pt-price-'+idx);
   if(el){ el.textContent=fmtPrice(px); if(old>0) _flashTick(el, px>old); }
   if((el=document.getElementById('pt-chg-'+idx))){
@@ -1226,9 +1288,9 @@ function mergeTokenUpdates(freshTokens){
 // the chart) is disturbed. Companion to mergeTokenUpdates().
 function patchFeedList(){
   ST.tokens.forEach(function(t, idx){
-    var el;
-    if((el = document.getElementById('pt-price-'+idx))) el.textContent = fmtPrice(t.price_usd);
-    if((el = document.getElementById('pt-chg-'+idx))){
+    var el, scrubbing = !!(_chartTimers[idx] && _chartTimers[idx].scrubbing);
+    if(!scrubbing && (el = document.getElementById('pt-price-'+idx))) el.textContent = fmtPrice(t.price_usd);
+    if(!scrubbing && (el = document.getElementById('pt-chg-'+idx))){
       var down = (t.price_change_24h||0) < 0;
       el.textContent = fmtPct(t.price_change_24h)+' · 24h';
       el.classList.toggle('down', down);
