@@ -44,9 +44,15 @@ function intercept(e){
   window.location.assign(TARGET);
 }
 
-/* Capture before any old Home bundle gets the event. */
-window.addEventListener('pointerdown',intercept,{capture:true,passive:false});
-window.addEventListener('touchstart',intercept,{capture:true,passive:false});
+/* Capture before any old Home bundle gets the event. Click only: this used
+   to also listen to pointerdown and touchstart ({passive:false}) on window.
+   A non-passive window touchstart makes Android Chrome wait for JS on EVERY
+   touch anywhere on Home before it may scroll, and passive:false also opts
+   out of Chrome's own "window touch listeners are passive" intervention --
+   so Home scrolled late and jerkily or not at all under load. It also
+   navigated away the moment a scroll merely started on the CTA. A tap still
+   produces a click, and a capture-phase window click listener still runs
+   before any handler an old bundle put on the button itself. */
 window.addEventListener('click',intercept,true);
 
 function boot(){

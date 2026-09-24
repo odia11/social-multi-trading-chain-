@@ -145,7 +145,7 @@ def install(dashboard):
         # nonce-injection pass already completed -- it would never get a
         # nonce and CSP would silently drop the whole guard. See
         # static/auto-bot-route-guard.js for the full explanation.
-        guard = '<script src="/static/auto-bot-route-guard.js?v=1" id="oa-auto-bot-route-guard"></script>'
+        guard = '<script src="/static/auto-bot-route-guard.js?v=2" id="oa-auto-bot-route-guard"></script>'
         if 'id="oa-auto-bot-route-guard"' not in body:
             if '<head>' in body:
                 body = body.replace('<head>', '<head>\n' + guard, 1)

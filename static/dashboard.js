@@ -9399,7 +9399,7 @@ function _renderFeedCard(e){
     +'<button class="fc-action fc-like-btn'+(e.liked_by_me ? ' liked' : '')+'" id="lkbtn-'+esc(safePostId)+'" '
       +'onclick="_feedToggleLike(this,\''+esc(safePostId)+'\')" '
       +'onmousedown="_fcLikePressStart(\''+esc(safePostId)+'\')" onmouseup="_fcLikePressEnd()" onmouseleave="_fcLikePressEnd()" '
-      +'ontouchstart="_fcLikePressStart(\''+esc(safePostId)+'\')" ontouchend="_fcLikePressEnd()" ontouchmove="_fcLikePressCancel()">'
+      +'data-like-press="'+esc(safePostId)+'">'
       +'<span class="fc-heart-ico">'+(e.liked_by_me ? '❤️' : '♡')+'</span>'
       +'<span class="fc-like-count" onclick="event.stopPropagation();_fcOpenLikedBy(\''+esc(safePostId)+'\')" title="See who liked this">'+esc(String(e.like_count||0))+'</span>'
     +'</button>'
@@ -9553,6 +9553,20 @@ function _fcLikePressStart(postId){
 }
 function _fcLikePressEnd(){ clearTimeout(_fcLikePressTimer); }
 function _fcLikePressCancel(){ clearTimeout(_fcLikePressTimer); _fcLikePressFired=false; }
+// Touch side of the long-press, delegated and PASSIVE. It used to be inline
+// ontouchstart/ontouchmove attributes on every like button; inline handlers
+// are always non-passive, so Android Chrome had to stop and wait for JS
+// before it could start scrolling any swipe that began on one -- a blocking
+// spot in every single feed card.
+var _fcLikeTouchActive=false;
+document.addEventListener('touchstart',function(e){
+  var b=e.target&&e.target.closest?e.target.closest('[data-like-press]'):null;
+  _fcLikeTouchActive=!!b;
+  if(b) _fcLikePressStart(b.dataset.likePress);
+},{passive:true});
+document.addEventListener('touchmove',function(){ if(_fcLikeTouchActive){ _fcLikeTouchActive=false; _fcLikePressCancel(); } },{passive:true});
+document.addEventListener('touchend',function(){ if(_fcLikeTouchActive){ _fcLikeTouchActive=false; _fcLikePressEnd(); } },{passive:true});
+document.addEventListener('touchcancel',function(){ if(_fcLikeTouchActive){ _fcLikeTouchActive=false; _fcLikePressCancel(); } },{passive:true});
 
 /* ── "Liked by" modal ── */
 function _fcOpenLikedBy(postId){

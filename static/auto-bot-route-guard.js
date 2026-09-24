@@ -46,12 +46,9 @@ document.addEventListener('click', function(e){
   if(e.stopImmediatePropagation) e.stopImmediatePropagation();
   window.location.href = TARGET;
 }, true);
-document.addEventListener('touchend', function(e){
-  var el = e.target && e.target.closest ? e.target.closest('a,button') : null;
-  if(!isStartNavigation(el)) return;
-  e.preventDefault();
-  e.stopPropagation();
-  if(e.stopImmediatePropagation) e.stopImmediatePropagation();
-  window.location.href = TARGET;
-}, {capture: true, passive: false});
+// Click only. A touchend listener used to navigate here too, but touchend
+// also fires at the end of a SCROLL whose finger happened to start on the
+// CTA -- so trying to scroll Home past the hero's big "Start Trading"
+// button sent people to the bot page instead. A real tap always produces a
+// click, which the capture-phase listener above already owns.
 })();

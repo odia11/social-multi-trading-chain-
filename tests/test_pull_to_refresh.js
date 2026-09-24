@@ -52,7 +52,7 @@ assert(home.indexOf('/static/pull-to-refresh.js')>0&&home.indexOf('/static/pull-
 assert(/initPullToRefresh\(\{\s*onRefresh:[^]*loadHomeFeed\(\)[^]*OrcAgentRefreshHome/.test(dash),'Home refresh must reload the feed and the Home cards');
 assert(homeMobile.includes('window.OrcAgentRefreshHome=function(){return Promise.allSettled([refreshHomePortfolio(),updateMajorMarkets(),refreshBot()])}'));
 for(const f of ['static/navbar.js','static/app-ux.js'])
-  assert(fs.readFileSync(f,'utf8').includes('home-mobile.js?v=8'),f+' must cache-bust home-mobile.js');
+  assert(fs.readFileSync(f,'utf8').includes('home-mobile.js?v=9'),f+' must cache-bust home-mobile.js');
 
 // Portfolio: one forced-fresh snapshot, then every painter reads it.
 assert(/_getPortfolioSnapshot\(true\)/.test(wallet.slice(wallet.indexOf('initPullToRefresh('))),'Portfolio refresh must force one fresh snapshot fetch');
