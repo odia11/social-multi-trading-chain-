@@ -1,9 +1,14 @@
 /* OrcAgent mobile Home — screenshot-matched presentation. */
 @media(max-width:767px){
+/* ONE scroller on mobile Home: the root (html). body must stay
+   overflow:visible -- with html already overflow:auto, any non-visible body
+   overflow (even overflow-x:hidden alone, which turns overflow-y into auto)
+   makes body a second, nested scroll container, and Android Chrome then
+   splits touch scrolling between the two. */
 /* Keep this selector free of :has(). In older Android WebViews an unsupported
    selector invalidates the entire comma-separated rule, including fallbacks. */
 html.oa-home-mobile-root{height:auto!important;min-height:100%!important;overflow-y:auto!important;overflow-x:hidden!important;-webkit-overflow-scrolling:touch!important;touch-action:pan-y!important}
-body.oa-home-mobile{--oa-gold:#f7b955;--oa-card:#0c131b;--oa-line:rgba(255,255,255,.075);background:#071019!important;color:#eef1f5;height:auto!important;min-height:100dvh!important;overflow-y:auto!important;overflow-x:hidden!important;position:static!important;touch-action:pan-y!important;-webkit-overflow-scrolling:touch!important}
+body.oa-home-mobile{--oa-gold:#f7b955;--oa-card:#0c131b;--oa-line:rgba(255,255,255,.075);background:#071019!important;color:#eef1f5;height:auto!important;min-height:100dvh!important;overflow:visible!important;position:static!important;touch-action:pan-y!important}
 body.oa-home-mobile #app{background:radial-gradient(circle at 50% -10%,#0d1b25 0,#071019 32%,#050b11 100%)!important;height:auto!important;min-height:100dvh!important;max-height:none!important;overflow:visible!important;position:static!important;padding-bottom:calc(92px + env(safe-area-inset-bottom,0px))}
 body.oa-home-mobile .app-body{display:block!important;overflow:visible!important;height:auto!important;max-height:none!important;min-height:100dvh!important;position:static!important}
 body.oa-home-mobile .wrap{height:auto!important;max-height:none!important;overflow:visible!important;position:static!important;touch-action:pan-y!important;width:100%!important;max-width:100%!important;padding:8px 14px 34px!important;border:0!important;background:transparent!important}
