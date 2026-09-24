@@ -68,6 +68,16 @@ function fmtPrice(n){
   if(n>=0.0001) return '$'+n.toFixed(6);
   return '$'+n.toFixed(8);
 }
+// Chart axis: three significant digits, so a $0.0000876 token reads
+// "0.0000876" rather than eight padded decimals.
+function fmtAxisPrice(n){
+  n = Number(n);
+  if(!(n>0)) return '0';
+  if(n>=1000) return Math.round(n).toLocaleString('en-US');
+  if(n>=1) return n.toFixed(2);
+  var dec = Math.min(12, 2 - Math.floor(Math.log10(n)));
+  return n.toFixed(dec);
+}
 function fmtPct(n){
   n = Number(n)||0;
   return (n>=0?'+':'')+n.toFixed(2)+'%';
@@ -210,9 +220,18 @@ function renderChartSvg(idx, candles, currentPrice){
   var pad = (max-min)*0.12;
   min = Math.max(0,min-pad); max += pad;
 
+  // The right-hand price labels get as much room as the longest one needs
+  // (9px monospace is ~5.4px per character). A fixed 46px cut sub-cent
+  // labels like "0.000158" off at the card edge.
+  var axisLabels=[], axisChars=0;
+  for(var ai=0;ai<5;ai++){
+    var lbl=fmtAxisPrice(max-((max-min)/4)*ai);
+    axisLabels.push(lbl); axisChars=Math.max(axisChars,lbl.length);
+  }
+  var axisW=Math.max(46,Math.ceil(axisChars*5.4)+9);
   var n = candles.length, priceH = h*.77, volTop = h*.79, volH = h*.18;
   var pts = candles.map(function(c,i){
-    var x = n===1 ? (w-46)/2 : (i/(n-1))*(w-46);
+    var x = n===1 ? (w-axisW)/2 : (i/(n-1))*(w-axisW);
     var y = priceH - ((c.c-min)/(max-min))*priceH;
     return {x:x, y:y};
   });
@@ -227,7 +246,7 @@ function renderChartSvg(idx, candles, currentPrice){
   // pointer position maps straight to "nearest x" -> "that candle's price
   // and time" with no unit conversion.
   var st = _chartTimers[idx];
-  if(st){ st.pts = pts; st.candles = candles; st.min = min; st.max = max; st.h = h; st.w = w; st.priceH = priceH; st.plotW = w-46; }
+  if(st){ st.pts = pts; st.candles = candles; st.min = min; st.max = max; st.h = h; st.w = w; st.priceH = priceH; st.plotW = w-axisW; }
 
   // Gold line + area (the approved "gold chart" look), not red/green
   // candles: one continuous gold price line over a soft gold gradient, a
@@ -235,15 +254,15 @@ function renderChartSvg(idx, candles, currentPrice){
   // Reads as a clean exchange-style line chart and stays honest with sparse
   // history -- a young token with few bars is still one clear line.
   var maxVol = Math.max.apply(null,candles.map(function(c){return Number(c.v)||0;}))||1;
-  var plotW=w-46, step=plotW/Math.max(n,1), barW=Math.max(1.5,Math.min(6,step*.55)), chartHtml='';
+  var plotW=w-axisW, step=plotW/Math.max(n,1), barW=Math.max(1.5,Math.min(6,step*.55)), chartHtml='';
   var gid='ptGoldGrad'+String(idx).replace(/[^a-zA-Z0-9_-]/g,'_');
   chartHtml+='<defs><linearGradient id="'+gid+'" x1="0" y1="0" x2="0" y2="1">'
     +'<stop offset="0%" stop-color="#f7b955" stop-opacity=".30"></stop>'
     +'<stop offset="100%" stop-color="#f7b955" stop-opacity="0"></stop></linearGradient></defs>';
   for(var gy=0;gy<5;gy++){
-    var yy=(priceH/4)*gy, label=max-((max-min)/4)*gy;
+    var yy=(priceH/4)*gy, label=axisLabels[gy];
     chartHtml+='<line x1="0" y1="'+yy.toFixed(2)+'" x2="'+plotW.toFixed(2)+'" y2="'+yy.toFixed(2)+'" stroke="#1a2530" stroke-width="1" vector-effect="non-scaling-stroke"></line>';
-    chartHtml+='<text x="'+(plotW+5).toFixed(2)+'" y="'+Math.max(10,yy+4).toFixed(2)+'" fill="#657180" font-size="9" font-family="monospace">'+fmtPrice(label).replace('$','')+'</text>';
+    chartHtml+='<text x="'+(plotW+5).toFixed(2)+'" y="'+Math.max(10,yy+4).toFixed(2)+'" fill="#657180" font-size="9" font-family="monospace">'+label+'</text>';
   }
   candles.forEach(function(c,i){
     var vh=((Number(c.v)||0)/maxVol)*volH;
@@ -310,8 +329,12 @@ function updateLiveChartPrice(idx, nextPrice){
   var last=st.candles[st.candles.length-1];
   var previous=Number((st.liveRaf&&st.animPrice!=null)?st.animPrice:(st.renderedPrice||last.c||nextPrice));
   last.c=nextPrice; last.h=Math.max(Number(last.h||nextPrice),nextPrice); last.l=Math.min(Number(last.l||nextPrice),nextPrice);
-  // A move outside the current scale needs fresh axes; ordinary ticks stay GPU-smooth.
-  if(nextPrice<=st.min || nextPrice>=st.max){ renderChartSvg(idx,st.candles,nextPrice); return; }
+  // A move outside the current scale needs fresh axes; ordinary ticks stay
+  // GPU-smooth. "Outside" includes the top 16px: a rising price drawn up
+  // there puts the live price tag under the 1M/5M/1H/4H/1D buttons, so it
+  // rescales first and keeps its headroom.
+  var nextY=st.priceH-((nextPrice-st.min)/(st.max-st.min))*st.priceH;
+  if(nextPrice<=st.min || nextPrice>=st.max || nextY<16){ renderChartSvg(idx,st.candles,nextPrice); return; }
   var line=document.getElementById('pt-live-line-'+idx), area=document.getElementById('pt-live-area-'+idx);
   var dot=document.getElementById('pt-live-dot-'+idx), halo=document.getElementById('pt-live-halo-'+idx), guide=document.getElementById('pt-live-guide-'+idx);
   var pill=wrap.querySelector('.pt-price-pill');
@@ -572,10 +595,51 @@ var _priceFailures = 0;
 var _priceNextAt = 0;
 var _pricePollBaseMs = 2000;
 
+// The big price, the 24h change and the market cap on the card follow the
+// same live tick as the chart. They used to change only with the 15s feed
+// poll, whose scanner price can be minutes old -- so the header could read
+// $0.000161 while the chart beside it was already at $0.000186.
+function _flashTick(el, up){
+  if(!el) return;
+  el.classList.remove('pt-tick-up','pt-tick-down');
+  void el.offsetWidth;   // restart the flash on back-to-back ticks
+  el.classList.add(up?'pt-tick-up':'pt-tick-down');
+  clearTimeout(el._tickTimer);
+  el._tickTimer=setTimeout(function(){el.classList.remove('pt-tick-up','pt-tick-down');},700);
+}
+// Re-bases a token's 24h change and market cap from `from` to price `to`:
+// both scale with price over the same 24h window / the same supply.
+function _rebaseTokenPrice(t, from, to){
+  if(from>0){
+    var open=from/(1+(Number(t.price_change_24h)||0)/100);
+    if(open>0 && isFinite(open)) t.price_change_24h=(to/open-1)*100;
+    if(Number(t.market_cap)>0) t.market_cap=Number(t.market_cap)*to/from;
+  }
+  t.price_usd=to;
+}
+function _syncCardPrice(st, idx, px){
+  var t=ST.tokens && ST.tokens[idx];
+  if(!t || t.mint!==st.mint) return;
+  var old=Number(t.price_usd)||0;
+  t._livePx=px; t._liveAt=Date.now();
+  if(old===px) return;
+  _rebaseTokenPrice(t, old, px);
+  var el=document.getElementById('pt-price-'+idx);
+  if(el){ el.textContent=fmtPrice(px); if(old>0) _flashTick(el, px>old); }
+  if((el=document.getElementById('pt-chg-'+idx))){
+    var down=(t.price_change_24h||0)<0;
+    el.textContent=fmtPct(t.price_change_24h)+' · 24h';
+    el.classList.toggle('down',down); el.classList.toggle('up',!down);
+  }
+  if((el=document.getElementById('pt-mcap-'+idx))) el.textContent=fmtUsd(t.market_cap);
+}
+
 function _applyLivePrice(st, idx, px){
-  if(!st || st.destroyed || !st.candles || !st.candles.length) return;
+  if(!st || st.destroyed) return;
   px=Number(px);
-  if(!(px>0) || px===st.price) return;
+  if(!(px>0)) return;
+  _syncCardPrice(st, idx, px);
+  if(!st.candles || !st.candles.length || px===st.price) return;
   st.price=px;
   var last=st.candles[st.candles.length-1];
   var seconds=chartBucketSeconds(st.tf), now=Math.floor(Date.now()/1000);
@@ -1119,7 +1183,12 @@ function mergeTokenUpdates(freshTokens){
   (freshTokens||[]).forEach(function(t){ byMint[t.mint] = t; });
   ST.tokens.forEach(function(t){
     var fresh = byMint[t.mint];
-    if(fresh) Object.assign(t, fresh);
+    if(!fresh) return;
+    Object.assign(t, fresh);
+    // The poll's scanner price can be older than the live tick already on
+    // screen; keep the live one so the header never jumps back in time.
+    if(t._livePx>0 && Date.now()-(t._liveAt||0)<30000)
+      _rebaseTokenPrice(t, Number(fresh.price_usd)||0, t._livePx);
   });
 }
 
