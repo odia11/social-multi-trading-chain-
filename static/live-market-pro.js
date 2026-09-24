@@ -440,38 +440,65 @@ function attachChartSvgScrub(idx){
   };
 }
 
-// GeckoTerminal's free endpoint is shared by every card. Starting all visible
-// history requests in the same millisecond made the first one succeed and the
-// rest hit its rate limit. One paced queue gives every token a fair turn while
-// seed/live prices keep each card rendered immediately.
-var _chartFetchQueue = [], _chartFetchBusy = false, _lastChartFetchAt = 0;
+// Chart history loads like an exchange app: whatever is already known
+// paints immediately, the network only fills in behind it.
+//  * Requests run in parallel (a few at a time). They used to go through a
+//    strict one-at-a-time queue spaced 2.1s apart to spare GeckoTerminal's
+//    rate limit, so the tenth card waited ~20s even when the server already
+//    had its candles cached. The server now owns that limit (shared budget,
+//    stale-while-revalidate, pre-warming from the scanner), so the browser
+//    no longer has to wait on it.
+//  * Every answer is kept per token+pair+timeframe, in memory and in
+//    sessionStorage. Scrolling a card back into view, switching back to a
+//    timeframe or reopening Live Market in the same session repaints at
+//    once instead of starting from a single seed candle.
+var _CHART_FETCH_CONCURRENCY = 4;
+var _chartFetchQueue = [], _chartFetchActive = 0;
 function drainChartFetchQueue(){
-  if(_chartFetchBusy || !_chartFetchQueue.length) return;
-  var wait=Math.max(0,2100-(Date.now()-_lastChartFetchAt));
-  _chartFetchBusy=true;
-  setTimeout(function(){
+  while(_chartFetchActive < _CHART_FETCH_CONCURRENCY && _chartFetchQueue.length){
     var job=_chartFetchQueue.shift();
-    if(!job || (job.state && job.state.destroyed)){
-      if(job) job.resolve(null);
-      _chartFetchBusy=false;
-      drainChartFetchQueue();
-      return;
-    }
-    _lastChartFetchAt=Date.now();
-    fetch(job.url).then(function(r){return r.json();}).then(job.resolve).catch(function(){job.resolve(null);}).then(function(){
-      _chartFetchBusy=false;
-      drainChartFetchQueue();
-    });
-  },wait);
+    if(!job) continue;
+    if(job.state && job.state.destroyed){ job.resolve(null); continue; }
+    _chartFetchActive++;
+    fetch(job.url).then(function(r){return r.json();}).then(job.resolve,function(){job.resolve(null);})
+      .then(function(){ _chartFetchActive--; drainChartFetchQueue(); });
+  }
 }
 function fetchChart(mint, tf, pairAddr, chain, state){
   var url = '/api/chart/'+encodeURIComponent(mint)+'?tf='+encodeURIComponent(tf);
   if(pairAddr) url += '&pair='+encodeURIComponent(pairAddr);
   if(chain) url += '&chain='+encodeURIComponent(chain);
   return new Promise(function(resolve){
-    _chartFetchQueue.push({url:url,resolve:resolve,state:state});
+    // Newest request first: the card the user just scrolled to or the
+    // timeframe they just tapped matters more than one already off screen.
+    _chartFetchQueue.unshift({url:url,resolve:resolve,state:state});
     drainChartFetchQueue();
   });
+}
+
+var _CANDLE_CACHE_KEY = 'oa-lm-candles-v1', _CANDLE_CACHE_MAX = 60;
+var _candleCache = (function(){
+  try{ return JSON.parse(sessionStorage.getItem(_CANDLE_CACHE_KEY) || '{}') || {}; }catch(_){ return {}; }
+})();
+var _candleSaveTimer = null;
+function candleCacheKey(mint, pair, tf){ return mint+'|'+(pair||'')+'|'+tf; }
+function candleCacheGet(mint, pair, tf){
+  var e=_candleCache[candleCacheKey(mint,pair,tf)];
+  return (e && e.c && e.c.length) ? e : null;
+}
+function candleCachePut(mint, pair, tf, candles, price){
+  if(!candles || !candles.length) return;
+  _candleCache[candleCacheKey(mint,pair,tf)] = {c:candles, p:price, at:Date.now()};
+  var keys=Object.keys(_candleCache);
+  if(keys.length > _CANDLE_CACHE_MAX){
+    keys.sort(function(a,b){ return (_candleCache[a].at||0)-(_candleCache[b].at||0); });
+    keys.slice(0, keys.length-_CANDLE_CACHE_MAX).forEach(function(k){ delete _candleCache[k]; });
+  }
+  if(_candleSaveTimer) return;
+  _candleSaveTimer=setTimeout(function(){
+    _candleSaveTimer=null;
+    try{ sessionStorage.setItem(_CANDLE_CACHE_KEY, JSON.stringify(_candleCache)); }catch(_){}
+  }, 800);
 }
 
 function chartBucketSeconds(tf){
@@ -494,6 +521,7 @@ function chartTick(idx){
       // candles again -- the candles are the shape, the price is the movement.
       st.candles = r.candles;
       st.price   = r.current_price;
+      candleCachePut(st.mint, st.pair, requestedTf, r.candles, r.current_price);
       renderChartSvg(idx, st.candles, st.price);
     } else if(!st.candles || !st.candles.length){
       // Some new/EVM pools expose a current price but no OHLC history.
@@ -610,8 +638,16 @@ function primeChart(idx, mint, pairAddr, chain, seedPrice){
   if(_chartTimers[idx]) return _chartTimers[idx];
   var st = {destroyed:false, mint:mint, pair:pairAddr, chain:(chain||'solana'), seedPrice:Number(seedPrice)||0, tf:'5m', timer:null};
   _chartTimers[idx] = st;
-  // Paint one still-forming candle from the scanner's observed real price.
-  // Provider history replaces it as soon as it arrives.
+  // Already seen this session: paint the real history immediately.
+  var cached=candleCacheGet(mint,pairAddr,st.tf);
+  if(cached){
+    st.candles=cached.c.slice();
+    st.price=st.seedPrice>0?st.seedPrice:(Number(cached.p)||cached.c[cached.c.length-1].c);
+    renderChartSvg(idx,st.candles,st.price);
+    return st;
+  }
+  // Otherwise paint one still-forming candle from the scanner's observed
+  // real price. Provider history replaces it as soon as it arrives.
   if(st.seedPrice>0){
     st.price=st.seedPrice;
     st.candles=[startObservedCandle(st,st.seedPrice)];
@@ -643,7 +679,11 @@ function setChartTf(idx, tf){
   var st = _chartTimers[idx];
   if(!st) return;
   st.tf = tf;
-  if(st.price>0){
+  var cached=candleCacheGet(st.mint,st.pair,tf);
+  if(cached){
+    st.candles=cached.c.slice();
+    renderChartSvg(idx,st.candles,st.price>0?st.price:cached.p);
+  } else if(st.price>0){
     st.candles=[startObservedCandle(st,st.price)];
     renderChartSvg(idx,st.candles,st.price);
   }

@@ -28652,6 +28652,10 @@ def api_market_scanner():
         t['score'] = _scanner_score(t, t.get('_safety'))
         t.pop('_safety', None)
 
+    try:
+        _warm_scanner_charts(tokens)
+    except Exception as e:
+        print(f'[chart] warm skipped: {e}', flush=True)
     return jsonify({'ok': True, 'tokens': tokens, 'counts': counts})
 
 
@@ -29033,6 +29037,155 @@ def api_market_prices_batch():
     return jsonify({'ok': True, 'chains': out, 'server_ts': time.time()})
 
 
+
+# ── Instant charts: stale-while-revalidate + a shared GeckoTerminal budget ──
+# GeckoTerminal's free OHLCV API allows ~30 calls/minute for the whole
+# server. The browser used to protect it by queueing every chart request
+# 2.1s apart, so the tenth card on screen waited ~20s for its history even
+# when the server already had it cached. The server now owns that limit:
+#   * a cached answer -- fresh OR stale -- is returned immediately; a stale
+#     one is refreshed in the background (stale-while-revalidate),
+#   * a cold miss fetches synchronously only while the shared budget
+#     allows; otherwise it answers at once from OrcAgent's own stored
+#     candles and fills the cache in the background,
+#   * the scanner pre-warms the top tokens' charts, so opening Live Market
+#     finds them already cached.
+_CHART_TF_CFG = {
+    '1m':  {'gt_tf': 'minute', 'gt_agg': 1,  'limit': 60},
+    '5m':  {'gt_tf': 'minute', 'gt_agg': 5,  'limit': 60},
+    '15m': {'gt_tf': 'minute', 'gt_agg': 15, 'limit': 60},
+    '1h':  {'gt_tf': 'hour',   'gt_agg': 1,  'limit': 48},
+    '4h':  {'gt_tf': 'hour',   'gt_agg': 4,  'limit': 42},
+    'D':   {'gt_tf': 'day',    'gt_agg': 1,  'limit': 30},
+}
+_CHART_EMPTY_TTL = 20          # a failed/empty fetch (e.g. 429) retries soon, not in 5 min
+_GT_BUDGET_PER_MIN = 25        # under GeckoTerminal's ~30/min free limit
+_GT_WARM_RESERVE = 6           # background warming never spends the last few calls
+_gt_budget_lock = threading.Lock()
+_gt_budget = {'tokens': float(_GT_BUDGET_PER_MIN), 'at': time.time()}
+_chart_refresh_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='chart-warm')
+_chart_inflight_lock = threading.Lock()
+_chart_inflight: set = set()
+
+
+def _gt_try_take(reserve: int = 0) -> bool:
+    """Take one GeckoTerminal call from the shared per-minute budget."""
+    with _gt_budget_lock:
+        now = time.time()
+        b = _gt_budget
+        b['tokens'] = min(float(_GT_BUDGET_PER_MIN),
+                          b['tokens'] + (now - b['at']) * _GT_BUDGET_PER_MIN / 60.0)
+        b['at'] = now
+        if b['tokens'] >= 1 + reserve:
+            b['tokens'] -= 1
+            return True
+        return False
+
+
+def _chart_cache_lookup(chain: str, pair_address: str, tf_key: str):
+    """(candles, fresh) for a cached entry, or (None, False) on a miss."""
+    with _chart_cache_lock:
+        cached = _chart_cache.get((chain, pair_address, tf_key))
+    if not cached:
+        return None, False
+    age = time.time() - cached[0]
+    ttl = _CHART_CACHE_TTL if cached[1] else _CHART_EMPTY_TTL
+    return cached[1], age < ttl
+
+
+def _gt_fetch_ohlcv(chain: str, pair_address: str, tf_key: str) -> list:
+    """One GeckoTerminal OHLCV call, parsed and written to _chart_cache.
+    The caller must already hold a budget token."""
+    gt_network = _GECKOTERMINAL_NETWORK.get(chain)
+    if not gt_network:
+        return []
+    tcfg_local = _CHART_TF_CFG[tf_key]
+    candles_local = []
+    try:
+        gt_url = (
+            f'https://api.geckoterminal.com/api/v2/networks/{gt_network}'
+            f'/pools/{pair_address}/ohlcv/{tcfg_local["gt_tf"]}'
+            f'?aggregate={tcfg_local["gt_agg"]}&limit={tcfg_local["limit"]}'
+            f'&currency=usd&token=base'
+        )
+        rg = requests.get(gt_url, timeout=10, headers={'Accept': 'application/json;version=20230302'})
+        if rg.status_code == 200:
+            items = (rg.json().get('data') or {}).get('attributes', {}).get('ohlcv_list', [])
+            for row in items:
+                # row = [timestamp_ms, open, high, low, close, volume]
+                if len(row) < 6: continue
+                c_val = float(row[4] or 0)
+                if c_val <= 0: continue
+                candles_local.append({
+                    't': int(row[0]) // 1000 if int(row[0]) > 1e10 else int(row[0]),
+                    'o': float(row[1] or c_val),
+                    'h': float(row[2] or c_val),
+                    'l': float(row[3] or c_val),
+                    'c': c_val,
+                    'v': float(row[5] or 0),
+                })
+            candles_local.sort(key=lambda x: x['t'])
+        else:
+            print(f'[chart] GeckoTerminal {rg.status_code} for {pair_address[:8]} tf={tf_key}', flush=True)
+    except Exception as e:
+        print(f'[chart] GeckoTerminal error (tf={tf_key}): {e}', flush=True)
+
+    # Cache the result even on failure/empty (429s, GeckoTerminal errors) so a
+    # rate-limited pair backs off -- but only briefly (_CHART_EMPTY_TTL).
+    now = time.time()
+    with _chart_cache_lock:
+        _chart_cache[(chain, pair_address, tf_key)] = (now, candles_local)
+        # Evict stale entries once the cache grows large (mirrors _dex_get's eviction)
+        if len(_chart_cache) > 300:
+            cutoff = now - 900
+            stale = [k for k, v in _chart_cache.items() if v[0] < cutoff]
+            for k in stale:
+                del _chart_cache[k]
+    return candles_local
+
+
+def _chart_refresh_async(chain: str, pair_address: str, tf_key: str,
+                         reserve: int = 0, max_wait: float = 30.0) -> None:
+    """Refresh one chart in the background, once, whenever budget allows."""
+    if not _GECKOTERMINAL_NETWORK.get(chain) or tf_key not in _CHART_TF_CFG:
+        return
+    key = (chain, pair_address, tf_key)
+    with _chart_inflight_lock:
+        if key in _chart_inflight:
+            return
+        _chart_inflight.add(key)
+
+    def _job():
+        try:
+            deadline = time.time() + max_wait
+            while not _gt_try_take(reserve):
+                if time.time() > deadline:
+                    return
+                time.sleep(1.0)
+            _gt_fetch_ohlcv(chain, pair_address, tf_key)
+        finally:
+            with _chart_inflight_lock:
+                _chart_inflight.discard(key)
+    try:
+        _chart_refresh_pool.submit(_job)
+    except Exception:
+        with _chart_inflight_lock:
+            _chart_inflight.discard(key)
+
+
+def _warm_scanner_charts(tokens: list, limit: int = 12) -> None:
+    """Pre-fetch the default (5m) chart of the tokens Live Market is about to
+    show, so their cards open with history instead of waiting for it."""
+    for t in (tokens or [])[:limit]:
+        pair = (t.get('pair_address') or '').strip()
+        chain = (t.get('chain') or 'solana').strip().lower()
+        if not pair:
+            continue
+        candles, fresh = _chart_cache_lookup(chain, pair, '5m')
+        if candles is None or not fresh:
+            _chart_refresh_async(chain, pair, '5m', reserve=_GT_WARM_RESERVE)
+
+
 @app.route('/api/chart/<mint>')
 @rate_limit(60, 60)
 def api_chart(mint):
@@ -29052,14 +29205,7 @@ def api_chart(mint):
     dex_chain_id = EVM_CHAINS[chain]['dex_chain'] if chain in EVM_CHAINS else 'solana'
     gt_network   = _GECKOTERMINAL_NETWORK.get(chain)
     tf   = request.args.get('tf', '5m')
-    _TF  = {
-        '1m':  {'gt_tf': 'minute', 'gt_agg': 1,  'limit': 60},
-        '5m':  {'gt_tf': 'minute', 'gt_agg': 5,  'limit': 60},
-        '15m': {'gt_tf': 'minute', 'gt_agg': 15, 'limit': 60},
-        '1h':  {'gt_tf': 'hour',   'gt_agg': 1,  'limit': 48},
-        '4h':  {'gt_tf': 'hour',   'gt_agg': 4,  'limit': 42},
-        'D':   {'gt_tf': 'day',    'gt_agg': 1,  'limit': 30},
-    }
+    _TF  = _CHART_TF_CFG
     # Young tokens often don't have enough daily/4h/1h candles yet -- fall
     # back to a finer granularity within this chain until there's enough
     # points to draw a chart, or the finest option has been tried.
@@ -29102,60 +29248,24 @@ def api_chart(mint):
         def _fetch_candles_for_tf(tf_key):
             if not gt_network:
                 return []  # Unknown future network: use durable observed-price history below.
-            tcfg_local = _TF[tf_key]
-            cache_key_local = (chain, pair_address, tf_key)
-            with _chart_cache_lock:
-                cached_local = _chart_cache.get(cache_key_local)
-            if cached_local and now - cached_local[0] < _CHART_CACHE_TTL:
-                return cached_local[1]
-            candles_local = []
-            try:
-                gt_url = (
-                    f'https://api.geckoterminal.com/api/v2/networks/{gt_network}'
-                    f'/pools/{pair_address}/ohlcv/{tcfg_local["gt_tf"]}'
-                    f'?aggregate={tcfg_local["gt_agg"]}&limit={tcfg_local["limit"]}'
-                    f'&currency=usd&token=base'
-                )
-                rg = requests.get(gt_url, timeout=10, headers={'Accept': 'application/json;version=20230302'})
-                if rg.status_code == 200:
-                    items = (rg.json().get('data') or {}).get('attributes', {}).get('ohlcv_list', [])
-                    for row in items:
-                        # row = [timestamp_ms, open, high, low, close, volume]
-                        if len(row) < 6: continue
-                        c_val = float(row[4] or 0)
-                        if c_val <= 0: continue
-                        candles_local.append({
-                            't': int(row[0]) // 1000 if int(row[0]) > 1e10 else int(row[0]),
-                            'o': float(row[1] or c_val),
-                            'h': float(row[2] or c_val),
-                            'l': float(row[3] or c_val),
-                            'c': c_val,
-                            'v': float(row[5] or 0),
-                        })
-                    candles_local.sort(key=lambda x: x['t'])
-                else:
-                    print(f'[chart] GeckoTerminal {rg.status_code} for {pair_address[:8]} tf={tf_key}', flush=True)
-            except Exception as e:
-                print(f'[chart] GeckoTerminal error (tf={tf_key}): {e}', flush=True)
-
-            # Cache the result even on failure/empty (429s, GeckoTerminal errors) --
-            # otherwise every request for a rate-limited pair retries immediately
-            # instead of backing off, which just makes the rate limiting worse.
-            with _chart_cache_lock:
-                _chart_cache[cache_key_local] = (now, candles_local)
-                # Evict stale entries once the cache grows large (mirrors _dex_get's eviction)
-                if len(_chart_cache) > 300:
-                    cutoff = now - 300
-                    stale = [k for k, v in _chart_cache.items() if v[0] < cutoff]
-                    for k in stale:
-                        del _chart_cache[k]
-            return candles_local
+            candles_local, fresh = _chart_cache_lookup(chain, pair_address, tf_key)
+            if candles_local is not None:
+                if not fresh:
+                    # Stale-while-revalidate: answer now, refresh behind it.
+                    _chart_refresh_async(chain, pair_address, tf_key)
+                return candles_local
+            if _gt_try_take():
+                return _gt_fetch_ohlcv(chain, pair_address, tf_key)
+            # Budget spent this minute: answer from stored candles right away
+            # and let the cache fill in the background for the next request.
+            _chart_refresh_async(chain, pair_address, tf_key)
+            return []
 
         def _fetch_current_price():
             """Direct pool-price lookup -- fallback for when there aren't
             enough OHLCV candles yet (brand-new pool) but the frontend still
             wants a live number to plot while it waits for real candles."""
-            if not gt_network:
+            if not gt_network or not _gt_try_take():
                 return None
             try:
                 r = requests.get(
