@@ -1028,7 +1028,8 @@ var PT_FEE_RATE_TXN = {{ fee_rate_txn|default(0.0075) }};
 // this point in the parse -- DOMContentLoaded fires only after every
 // deferred script has already run, which is what guarantees they exist here.
 document.addEventListener('DOMContentLoaded', function(){
-  initPullToRefresh({ onRefresh: function(){
+  // Dragging a finger over a chart scrubs its price; it must never start a pull.
+  initPullToRefresh({ ignoreTarget: '.pt-chart-wrap', onRefresh: function(){
     if(typeof window.OrcAgentRefreshLiveMarket==='function') window.OrcAgentRefreshLiveMarket();
   }});
 });

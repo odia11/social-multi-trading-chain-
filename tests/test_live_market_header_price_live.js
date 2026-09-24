@@ -69,5 +69,5 @@ const css=fs.readFileSync('static/live-market-final.css','utf8');
 assert(/\.pt-price\.pt-tick-up\{color:#3ddc97!important/.test(css));
 assert(/\.pt-price\.pt-tick-down\{color:#ff6b6b!important/.test(css));
 for(const f of ['app_performance.py','static/app-ux.js','static/live-market-redesign.js'])
-  assert(fs.readFileSync(f,'utf8').includes('live-market-final.css?v=5'),f+' loads live-market-final.css?v=5');
+  assert(fs.readFileSync(f,'utf8').includes('live-market-final.css?v=6'),f+' loads live-market-final.css?v=5');
 console.log('PASS Live Market header price, 24h change and market cap follow the live tick');
