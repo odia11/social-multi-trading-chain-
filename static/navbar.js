@@ -50,7 +50,7 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
 (function(){
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/live-market')return;
-  ensureStyle('/static/live-market-redesign.css?v=7','live-market-redesign.css');
+  ensureStyle('/static/live-market-redesign.css?v=8','live-market-redesign.css');
   ensureScript('/static/live-market-redesign.js?v=5','live-market-redesign.js');
 })();
 

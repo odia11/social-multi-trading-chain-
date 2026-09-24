@@ -22,7 +22,7 @@ def install(dashboard_module):
         '<script src="/static/home-feed-chart-redesign.js?v=3" defer ' + marker + '></script>'
     )
     live_market_tags = (
-        '<link rel="stylesheet" href="/static/live-market-mobile-drawer-fix.css?v=1" ' + marker + '>'
+        '<link rel="stylesheet" href="/static/live-market-mobile-drawer-fix.css?v=2" ' + marker + '>'
     )
 
     @app.after_request

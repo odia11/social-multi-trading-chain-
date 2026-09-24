@@ -302,11 +302,15 @@ const TRADE_DATA = ROWS.map(r => ({
   pnlPct: parseFloat(r.querySelector('td:nth-child(7)').textContent),
 }));
 
+// The filter bar is only rendered when there are trades ({% raw %}{% if trades %}{% endraw %}),
+// but this still runs on load -- read the fields null-safely so an empty
+// history doesn't throw and abort the rest of this script.
+function _fval(id, dflt) { const el = document.getElementById(id); return el ? el.value : dflt; }
 function applyFilters() {
-  const tok  = document.getElementById('f-token').value.trim().toLowerCase();
-  const res  = document.getElementById('f-result').value;
-  const from = document.getElementById('f-from').value;
-  const to   = document.getElementById('f-to').value;
+  const tok  = _fval('f-token', '').trim().toLowerCase();
+  const res  = _fval('f-result', 'all');
+  const from = _fval('f-from', '');
+  const to   = _fval('f-to', '');
 
   let visible = [];
   TRADE_DATA.forEach(d => {
