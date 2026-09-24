@@ -10,7 +10,13 @@ img{max-width:100%}
 html.oa-page-hidden *,html.oa-page-hidden *::before,html.oa-page-hidden *::after{animation-play-state:paused!important}
 
 @media(max-width:768px){
-  html,body{max-width:100%;overflow-x:hidden;background:#080d12!important;-webkit-text-size-adjust:100%}
+  html,/* overflow-x:clip, not just hidden: any non-visible overflow on body turns
+   its overflow-y into auto, making body a second scroll container nested
+   inside the real root scroller (html) -- which Android Chrome handles
+   badly (touch scrolls split between the two, URL bar stops collapsing).
+   clip trims horizontal overflow without creating a scroll container;
+   browsers without clip keep the hidden fallback. */
+body{max-width:100%;overflow-x:hidden;overflow-x:clip;background:#080d12!important;-webkit-text-size-adjust:100%}
   body{min-height:100dvh}
   a,button,[role="button"]{touch-action:manipulation}
 

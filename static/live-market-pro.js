@@ -1671,6 +1671,14 @@ function _slideRelease(){
 }
 
 (function bindSlide(){
+  // Touch listeners are PASSIVE. They used to be {passive:false} on the
+  // whole document, only so a drag on the knob wouldn't also scroll the
+  // page -- but a non-passive document touchstart/touchmove makes Android
+  // Chrome wait for this JS before it may start ANY scroll anywhere on Live
+  // Market. The knob now declares touch-action:none in CSS, which stops the
+  // browser scrolling for touches that start on it without blocking the
+  // rest of the page. Mouse events keep preventDefault (no text selection
+  // while dragging); they never delay scrolling.
   function down(e){
     if(!_slideOn || _sheetIdx === null) return;
     var els = _slideEls();
@@ -1678,18 +1686,18 @@ function _slideRelease(){
     _sliding = true;
     els.wrap.classList.add('dragging');
     els.wrap._x0 = (e.touches ? e.touches[0].clientX : e.clientX) - _slideAt;
-    e.preventDefault();
+    if(!e.touches) e.preventDefault();
   }
   function move(e){
     if(!_sliding) return;
     var els = _slideEls();
     var x = (e.touches ? e.touches[0].clientX : e.clientX) - els.wrap._x0;
     _slideMove(x);
-    e.preventDefault();
+    if(!e.touches) e.preventDefault();
   }
   function up(){ if(!_sliding) return; _sliding = false; _slideRelease(); }
-  document.addEventListener('touchstart', down, {passive:false});
-  document.addEventListener('touchmove',  move, {passive:false});
+  document.addEventListener('touchstart', down, {passive:true});
+  document.addEventListener('touchmove',  move, {passive:true});
   document.addEventListener('touchend',   up);
   document.addEventListener('touchcancel',up);
   document.addEventListener('mousedown',  down);

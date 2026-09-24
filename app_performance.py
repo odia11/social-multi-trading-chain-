@@ -64,7 +64,7 @@ def install(appmod) -> None:
             if 'page-transition-direction.js' not in html:
                 tags.append('<script src="/static/page-transition-direction.js?v=1"></script>')
 
-            style('app-ux.css', '/static/app-ux.css?v=6', ' id="oa-app-ux-css"')
+            style('app-ux.css', '/static/app-ux.css?v=7', ' id="oa-app-ux-css"')
             script('app-ux.js', '/static/app-ux.js?v=4', ' id="oa-app-ux-js"')
             style('shared-trade-card-v2.css', '/static/shared-trade-card-v2.css?v=1', ' id="oa-shared-trade-card-css"')
             script('shared-trade-card-v2.js', '/static/shared-trade-card-v2.js?v=1', ' id="oa-shared-trade-card-js"')
@@ -84,7 +84,7 @@ def install(appmod) -> None:
                 script('portfolio-redesign.js', '/static/portfolio-redesign.js?v=9')
                 script('portfolio-assets.js', '/static/portfolio-assets.js?v=1')
             elif path == '/live-market':
-                style('live-market-redesign.css', '/static/live-market-redesign.css?v=7')
+                style('live-market-redesign.css', '/static/live-market-redesign.css?v=8')
                 style('live-market-final.css', '/static/live-market-final.css?v=4', ' data-oa-live-final="1"')
                 script('live-market-redesign.js', '/static/live-market-redesign.js?v=5')
                 script('live-market-hotfix.js', '/static/live-market-hotfix.js?v=8', ' data-oa-live-hotfix="1"')
