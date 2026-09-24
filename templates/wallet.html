@@ -351,6 +351,67 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
 .sb-stat-lbl{font-size:11px;color:var(--muted)}
 .sb-stat-val{font-family:var(--mono);font-size:15px;font-weight:700;color:var(--text)}
 
+/* ── SOL ⇄ USDC swap (Portfolio "Swap" button) ─────────────────────────
+   Wallet-app style: two token cards with a round flip button between them,
+   a live quote that updates while you type, one big Swap button. */
+.w-modal-box.sx-box{max-width:420px;padding:20px 18px 18px;border-radius:24px;background:linear-gradient(180deg,#121820,#0c1016);border-color:#253039;box-shadow:0 30px 80px rgba(0,0,0,.55)}
+.sx-box .w-modal-close{top:18px;right:18px;width:34px;height:34px;border-radius:50%;background:#18212a;color:#9aa6b2;font-size:15px;display:flex;align-items:center;justify-content:center}
+.sx-hd{display:flex;align-items:center;gap:10px;margin:0 44px 16px 2px}
+.sx-title{font-size:20px;font-weight:700;color:#f3f5f8;letter-spacing:-.01em}
+.sx-net{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border:1px solid #243039;border-radius:99px;background:#0e151c;color:#9aa6b2;font-size:11px;font-weight:600}
+.sx-net i{width:6px;height:6px;border-radius:50%;background:#3ad29b;box-shadow:0 0 8px rgba(58,210,155,.6)}
+.sx-card{background:#0a0f14;border:1px solid #1d2731;border-radius:18px;padding:14px 16px;transition:border-color .15s,box-shadow .15s}
+.sx-card:focus-within{border-color:rgba(247,185,85,.55);box-shadow:0 0 0 3px rgba(247,185,85,.08)}
+.sx-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.sx-lbl{font-size:12px;font-weight:600;color:#8b96a3}
+.sx-bal{font-family:var(--mono);font-size:11.5px;color:#8b96a3;white-space:nowrap}
+.sx-bal.err{color:var(--red)}
+.sx-mid{margin:8px 0 6px}
+.sx-amt{flex:1;min-width:0;width:100%;background:none;border:0;outline:0;padding:0;color:#f3f5f8;font:700 34px/1.1 var(--mono);letter-spacing:-.03em}
+.sx-amt::placeholder{color:#3a4550}
+.sx-amt.over{color:var(--red)}
+.sx-out{flex:1;min-width:0;color:#f3f5f8;font:700 34px/1.1 var(--mono);letter-spacing:-.03em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sx-out.dim{color:#3a4550}
+.sx-out.loading{background:linear-gradient(90deg,#1a232c 0%,#2a3540 50%,#1a232c 100%);background-size:200% 100%;color:transparent;border-radius:8px;animation:sx-shimmer 1s linear infinite;max-width:60%}
+@keyframes sx-shimmer{to{background-position:-200% 0}}
+.sx-tok{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;padding:6px 12px 6px 6px;border:1px solid #243039;border-radius:99px;background:#141c24;color:#f3f5f8;font-size:15px;font-weight:700}
+.sx-tok svg{width:24px;height:24px;display:block}
+.sx-usd{font-family:var(--mono);font-size:12px;color:#6f7b88;min-height:15px}
+.sx-chips{display:flex;gap:6px}
+.sx-chip{padding:5px 10px;border:1px solid #243039;border-radius:99px;background:#111921;color:#c3cad2;font:700 11px/1 var(--mono);cursor:pointer;transition:border-color .12s,color .12s,transform .08s}
+.sx-chip:active{transform:scale(.94)}
+.sx-chip:hover,.sx-chip.on{border-color:rgba(247,185,85,.6);color:#f7b955}
+.sx-chip:disabled{opacity:.4;cursor:default}
+.sx-flipwrap{position:relative;height:6px;z-index:2}
+.sx-flip{position:absolute;left:50%;top:50%;width:42px;height:42px;margin:-21px 0 0 -21px;border-radius:14px;border:4px solid #0f141b;background:linear-gradient(180deg,#ffd36a,#f7b955);color:#111318;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .35s cubic-bezier(.2,.8,.2,1),box-shadow .15s;box-shadow:0 6px 18px rgba(247,185,85,.18)}
+.sx-flip:active{box-shadow:0 2px 8px rgba(247,185,85,.25)}
+.sx-flip svg{width:18px;height:18px}
+.sx-flip.turn{transform:rotate(180deg)}
+.sx-recv{background:#0d141b}
+.sx-rate{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:12px 4px 0;min-height:18px;font-family:var(--mono);font-size:12px;color:#9aa6b2}
+.sx-rate button{background:none;border:0;padding:0;color:#8b96a3;font:600 12px/1 var(--mono);cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.sx-rate button svg{width:12px;height:12px;transition:transform .2s}
+.sx-rate button.open svg{transform:rotate(180deg)}
+.sx-details{display:none;margin:10px 0 0;padding:10px 14px;border:1px solid #1d2731;border-radius:14px;background:#0a0f14}
+.sx-details.open{display:block}
+.sx-drow{display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:12px;color:#8b96a3}
+.sx-drow b{font:600 12px var(--mono);color:#dfe4ea}
+.sx-drow b.good{color:#3ad29b}
+.sx-drow b.warn{color:#f7b955}
+.sx-drow b.bad{color:var(--red)}
+.sx-msg:empty{display:none}
+.sx-msg{margin-top:10px;font-size:12px}
+.sx-msg .w-modal-note{margin:0}
+.sx-cta{width:100%;height:56px;margin-top:14px;border:0;border-radius:16px;background:linear-gradient(180deg,#ffd36a,#f7b955);color:#111318;font-size:16px;font-weight:800;letter-spacing:.01em;cursor:pointer;transition:transform .08s,opacity .15s,box-shadow .15s;box-shadow:0 10px 24px rgba(247,185,85,.16)}
+.sx-cta:active{transform:scale(.985)}
+.sx-cta:disabled{background:#1a232c;color:#6f7b88;box-shadow:none;cursor:default}
+.sx-cta.bad:disabled{background:rgba(247,107,98,.12);color:var(--red)}
+.sx-foot{margin-top:10px;text-align:center;font-size:11px;color:#5f6b77}
+/* A site-wide input rule forces 16px!important (stops iOS zoom on focus);
+   the amount must stay big, and >=16px keeps that protection. */
+#w-modal input.sx-amt{font-size:34px!important;line-height:1.1!important;height:auto!important;min-height:0!important;padding:0!important;border:0!important;background:none!important;box-shadow:none!important}
+@media(max-width:420px){.w-modal-box.sx-box{padding:18px 14px 14px}.sx-out{font-size:30px}#w-modal input.sx-amt{font-size:30px!important}}
+
 /* ── shared modal ── */
 .w-modal-back{
   display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);
@@ -1171,6 +1232,7 @@ async function convertGasToUsdc(chain){
 
 // ── modals ────────────────────────────────────────────────
 function _showModal(html){
+  var box=document.querySelector('#w-modal .w-modal-box'); if(box) box.classList.remove('sx-box')
   document.getElementById('w-modal-body').innerHTML=html
   document.getElementById('w-modal').style.display='flex'
 }
@@ -1399,28 +1461,225 @@ function _convertOptions(selected){
     return '<option value="'+c.v+'"'+(c.v===selected?' selected':'')+'>'+c.label+'</option>'
   }).join('')
 }
+// ── SOL ⇄ USDC swap ───────────────────────────────────────────────────
+// Same endpoints and the same confirm step (_convertConfirm) as before; the
+// screen is new: live quote while typing (debounced, refreshed every 20s),
+// 25/50/Max chips, a flip button, and one Swap button that says what's
+// missing ("Enter an amount", "Insufficient SOL") instead of a separate
+// Get Quote -> Review -> Confirm round trip.
+var _SX_ICON={
+  SOL:'<svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="sxSolG" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#9945FF"/><stop offset="1" stop-color="#14F195"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="#0b0b12"/><path d="M10.2 20.3h11.9l-2.3 2.4H7.9zM10.2 9.3h11.9l-2.3 2.4H7.9zM21.8 14.8H9.9l2.3 2.4h11.9z" fill="url(#sxSolG)"/></svg>',
+  USDC:'<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#2775CA"/><path d="M12.6 8.9a8 8 0 0 0 0 14.2M19.4 8.9a8 8 0 0 1 0 14.2" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/><text x="16" y="20.3" text-anchor="middle" font-family="Arial,sans-serif" font-size="11.5" font-weight="700" fill="#fff">$</text></svg>'
+}
+var _sx=null
+function _sxEl(id){return document.getElementById(id)}
+// Closing the modal only hides it (its HTML stays), so "is the swap screen
+// still up" means visible AND showing this screen.
+function _sxOpen(){
+  var m=document.getElementById('w-modal')
+  return !!(_sx&&_sxEl('sx-cta')&&m&&m.style.display!=='none')
+}
+function _sxFrom(){return _sx.dir==='native_to_stable'?'SOL':'USDC'}
+function _sxTo(){return _sx.dir==='native_to_stable'?'USDC':'SOL'}
+function _sxFmt(n,sym){
+  n=Number(n)||0
+  if(sym==='USDC') return n>=1?n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):String(parseFloat(n.toFixed(6)))
+  return String(parseFloat(n.toFixed(n>=1?4:6)))
+}
+function _sxAmount(){
+  var el=_sxEl('cv-amount'); if(!el) return 0
+  var v=parseFloat(String(el.value||'').replace(',','.'))
+  return Number.isFinite(v)&&v>0?v:0
+}
 function _modalSolUsdcSwap(){
   if(_convertBusy) return
-  _modalConvert()
-  document.querySelector('#w-modal .w-modal-title').textContent='Swap SOL ↔ USDC'
-  var chain=document.getElementById('cv-chain')
-  chain.value='solana'
-  chain.closest('.br-form-box').style.display='none'
-  var note=document.querySelector('#w-modal .w-modal-note')
-  if(note) note.textContent='Swap SOL and USDC in your Solana trading wallet.'
-  var direction=document.getElementById('cv-direction')
-  var flip=document.createElement('button')
-  flip.type='button'
-  flip.className='w-modal-btn w-modal-secondary'
-  flip.textContent='⇄ Reverse'
-  flip.setAttribute('aria-label','Reverse SOL and USDC')
-  flip.onclick=function(){
-    direction.value=direction.value==='native_to_stable'?'stable_to_native':'native_to_stable'
-    document.getElementById('cv-amount').value=''
-    _convertChanged()
+  _convertInvalidate()
+  if(_sx&&_sx.timer) clearTimeout(_sx.timer)
+  if(_sx&&_sx.refresh) clearInterval(_sx.refresh)
+  _sx={dir:'native_to_stable',bal:null,seq:0,timer:null,refresh:null,quote:null,loading:false}
+  _showModal(
+    '<div class="sx-hd"><div class="sx-title">Swap</div><span class="sx-net"><i></i>Solana</span></div>'
+    // Kept for _convertCfg()/_convertDirection(), which _convertConfirm uses.
+    +'<select id="cv-chain" hidden><option value="solana" selected>Solana</option></select>'
+    +'<select id="cv-direction" hidden><option value="native_to_stable" selected>SOL → USDC</option><option value="stable_to_native">USDC → SOL</option></select>'
+    +'<div class="sx-card">'
+      +'<div class="sx-row"><span class="sx-lbl">You pay</span><span class="sx-bal" id="sx-bal">Balance …</span></div>'
+      +'<div class="sx-row sx-mid"><input class="sx-amt" id="cv-amount" type="text" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="Amount to swap" oninput="_sxInput()"><span class="sx-tok" id="sx-from-tok"></span></div>'
+      +'<div class="sx-row"><span class="sx-usd" id="sx-pay-usd"></span><span class="sx-chips">'
+        +'<button type="button" class="sx-chip" data-p="0.25" onclick="_sxPct(this)">25%</button>'
+        +'<button type="button" class="sx-chip" data-p="0.5" onclick="_sxPct(this)">50%</button>'
+        +'<button type="button" class="sx-chip" data-p="1" id="cv-max" onclick="_sxPct(this)">Max</button>'
+      +'</span></div>'
+    +'</div>'
+    +'<div class="sx-flipwrap"><button type="button" class="sx-flip" id="sx-flip" aria-label="Reverse SOL and USDC" onclick="_sxFlip()">'
+      +'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4v16M3 16l4 4 4-4M17 20V4M21 8l-4-4-4 4"/></svg>'
+    +'</button></div>'
+    +'<div class="sx-card sx-recv">'
+      +'<div class="sx-row"><span class="sx-lbl">You receive</span><span class="sx-bal" id="sx-bal-to"></span></div>'
+      +'<div class="sx-row sx-mid"><div class="sx-out dim" id="sx-out">0</div><span class="sx-tok" id="sx-to-tok"></span></div>'
+      +'<div class="sx-row"><span class="sx-usd" id="sx-recv-usd"></span></div>'
+    +'</div>'
+    +'<div class="sx-rate" id="sx-rate"></div>'
+    +'<div class="sx-details" id="sx-details"></div>'
+    +'<div class="sx-msg" id="cv-quote"></div>'
+    +'<button type="button" class="sx-cta" id="sx-cta" disabled onclick="_sxSwap()">Enter an amount</button>'
+    +'<div class="sx-foot">Swaps run in your Solana trading wallet</div>'
+  )
+  var box=document.querySelector('#w-modal .w-modal-box'); if(box) box.classList.add('sx-box')
+  _sxPaintTokens()
+  _sxLoadBalance()
+  // Refresh an idle quote so the shown price never goes stale (quotes live
+  // ~45s; 20s keeps well inside the endpoint's 30/min limit).
+  _sx.refresh=setInterval(function(){
+    if(!_sxOpen()){clearInterval(_sx.refresh);return}
+    if(!_convertBusy&&!_sx.loading&&_sxAmount()>0&&!_sxOver()) _sxQuote()
+  },20000)
+  setTimeout(function(){var i=_sxEl('cv-amount'); if(i) i.focus()},60)
+}
+function _sxPaintTokens(){
+  var f=_sxFrom(),t=_sxTo()
+  _sxEl('sx-from-tok').innerHTML=_SX_ICON[f]+f
+  _sxEl('sx-to-tok').innerHTML=_SX_ICON[t]+t
+  _sxEl('cv-direction').value=_sx.dir
+  _sxPaintBalance()
+}
+function _sxPaintBalance(){
+  var el=_sxEl('sx-bal'), to=_sxEl('sx-bal-to'); if(!el) return
+  if(!_sx.bal){ el.textContent=_sx.balErr?'Balance unavailable':'Balance …'; el.classList.toggle('err',!!_sx.balErr); if(to) to.textContent=''; return }
+  var f=_sxFrom(), t=_sxTo()
+  el.classList.remove('err')
+  el.textContent='Balance '+_sxFmt(f==='SOL'?_sx.bal.sol:_sx.bal.usdc,f)+' '+f
+  if(to) to.textContent='Balance '+_sxFmt(t==='SOL'?_sx.bal.sol:_sx.bal.usdc,t)+' '+t
+  _convertBalance=Number(f==='SOL'?_sx.bal.sol:_sx.bal.usdc)
+  _convertMax=f==='SOL'?_sx.bal.max_sol:_sx.bal.max_usdc
+}
+function _sxLoadBalance(){
+  _sx.balErr=false
+  fetch('/api/wallet/sol-swap/balance',{credentials:'include'})
+    .then(function(r){return r.json()})
+    .then(function(d){
+      if(!_sxEl('sx-bal')) return
+      if(!d.ok) throw new Error(d.msg||'Balance unavailable')
+      _sx.bal={sol:Number(d.sol)||0,usdc:Number(d.usdc)||0,max_sol:Number(d.max_sol)||0,max_usdc:Number(d.max_usdc)||0}
+      _sxPaintBalance(); _sxInput(true)
+    })
+    .catch(function(){ if(_sxEl('sx-bal')){ _sx.balErr=true; _sxPaintBalance() } })
+}
+function _sxMax(){ return _sx.bal?(_sxFrom()==='SOL'?_sx.bal.max_sol:_sx.bal.max_usdc):0 }
+function _sxOver(){
+  if(!_sx.bal) return false
+  var have=_sxFrom()==='SOL'?_sx.bal.sol:_sx.bal.usdc
+  return _sxAmount()>have+1e-12
+}
+function _sxPct(btn){
+  if(_convertBusy||!_sx.bal) return
+  var p=Number(btn.getAttribute('data-p'))||0, max=_sxMax()
+  var dec=_sxFrom()==='SOL'?9:6, v=Math.floor(max*p*Math.pow(10,dec))/Math.pow(10,dec)
+  var el=_sxEl('cv-amount'); el.value=v>0?String(parseFloat(v.toFixed(dec))):''
+  document.querySelectorAll('.sx-chip').forEach(function(c){c.classList.toggle('on',c===btn)})
+  _sxInput()
+}
+function _sxFlip(){
+  if(_convertBusy) return
+  var b=_sxEl('sx-flip'); if(b) b.classList.toggle('turn')
+  _sx.dir=_sx.dir==='native_to_stable'?'stable_to_native':'native_to_stable'
+  _sxEl('cv-amount').value=''
+  document.querySelectorAll('.sx-chip').forEach(function(c){c.classList.remove('on')})
+  _sxPaintTokens(); _sxInput()
+  var i=_sxEl('cv-amount'); if(i) i.focus()
+}
+function _sxSetCta(text,enabled,bad){
+  var b=_sxEl('sx-cta'); if(!b) return
+  b.textContent=text; b.disabled=!enabled; b.classList.toggle('bad',!!bad)
+}
+function _sxClearQuote(){
+  _sx.quote=null; _convertQuote=null
+  var o=_sxEl('sx-out'); if(o){o.textContent='0'; o.className='sx-out dim'}
+  ;['sx-recv-usd','sx-pay-usd','sx-rate'].forEach(function(id){var e=_sxEl(id); if(e) e.innerHTML=''})
+  var d=_sxEl('sx-details'); if(d){d.innerHTML=''; d.classList.remove('open')}
+}
+// keepQuote: a balance refresh shouldn't drop a quote that is still valid.
+function _sxInput(keepQuote){
+  if(!_sx||!_sxEl('cv-amount')) return
+  var el=_sxEl('cv-amount')
+  // Dutch keyboards type a comma; the amount must still parse.
+  if(el.value.indexOf(',')>=0) el.value=el.value.replace(',','.')
+  var amt=_sxAmount(), over=_sxOver()
+  el.classList.toggle('over',over)
+  var m=_sxEl('cv-quote'); if(m) m.innerHTML=''
+  if(keepQuote!==true){ _sx.seq++; _sxClearQuote(); if(_sx.timer) clearTimeout(_sx.timer) }
+  var pay=_sxEl('sx-pay-usd'); if(pay) pay.textContent=(_sxFrom()==='USDC'&&amt>0)?'≈ $'+_sxFmt(amt,'USDC'):''
+  if(!(amt>0)){ _sxSetCta('Enter an amount',false); return }
+  if(over){ _sxSetCta('Insufficient '+_sxFrom(),false,true); return }
+  if(keepQuote===true&&_sx.quote) return
+  _sxSetCta('Getting best price…',false)
+  var o=_sxEl('sx-out'); if(o){o.textContent='0.000000'; o.className='sx-out loading'}
+  _sx.timer=setTimeout(_sxQuote,450)
+}
+function _sxQuote(){
+  var amt=_sxAmount(); if(!_sxOpen()||!(amt>0)||_sxOver()) return
+  var seq=++_sx.seq, dir=_sx.dir
+  _sx.loading=true
+  var qs=new URLSearchParams({chain:'solana',direction:dir,amount:amt})
+  return fetch((dir==='stable_to_native'?'/api/wallet/sol-swap/quote?':'/api/wallet/convert/quote?')+qs.toString(),{credentials:'include'})
+    .then(function(r){return r.json()})
+    .then(function(d){
+      if(seq!==_sx.seq||!_sxEl('sx-out')) return
+      if(!d.ok){ _sxClearQuote(); _sxSetCta(d.msg&&d.msg.length<40?d.msg:'Quote unavailable',false,true)
+        if(d.msg&&d.msg.length>=40) _sxEl('cv-quote').innerHTML='<div class="w-modal-note" style="color:var(--red)">'+esc(d.msg)+'</div>'
+        return }
+      _sxShowQuote(d,amt,dir)
+    })
+    .catch(function(){ if(seq===_sx.seq&&_sxEl('sx-out')){ _sxClearQuote(); _sxSetCta('Network error — tap to retry',true,true); _sx.retry=true } })
+    .finally(function(){ if(seq===_sx.seq) _sx.loading=false })
+}
+function _sxShowQuote(d,amt,dir){
+  var from=d.from_symbol||_sxFrom(), to=d.to_symbol||_sxTo()
+  var out=parseFloat(d.out_amount||0), min=parseFloat(d.min_out_amount||0)
+  _sx.quote={chain:'solana',direction:dir,amount:amt,from_symbol:from,to_symbol:to,quote_id:d.quote_id,expires_at:Date.now()+(d.expires_in||45)*1000}
+  _convertQuote=_sx.quote
+  var o=_sxEl('sx-out'); o.textContent=_sxFmt(out,to); o.className='sx-out'
+  var usd=to==='USDC'?out:amt
+  _sxEl('sx-recv-usd').textContent=usd>0?'≈ $'+_sxFmt(usd,'USDC'):''
+  var rate=dir==='native_to_stable'?out/amt:amt/out
+  var impactPct=parseFloat(d.price_impact_pct||0)*100
+  var ic=impactPct<1?'good':impactPct<3?'warn':'bad'
+  _sxEl('sx-rate').innerHTML='<span>1 SOL ≈ '+_sxFmt(rate,'USDC')+' USDC</span>'
+    +'<button type="button" id="sx-more" onclick="_sxToggleDetails()">Details<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>'
+  var det=_sxEl('sx-details'), wasOpen=det.classList.contains('open')
+  det.innerHTML=
+    '<div class="sx-drow"><span>Minimum received</span><b>'+(min>0?_sxFmt(min,to)+' '+esc(to):'—')+'</b></div>'
+    +'<div class="sx-drow"><span>Price impact</span><b class="'+ic+'">'+(impactPct<0.01?'&lt;0.01':impactPct.toFixed(2))+'%</b></div>'
+    +'<div class="sx-drow"><span>Network fee</span><b>'+(d.gasless?'Included':(d.network_reserve_native>0?_sxFmt(d.network_reserve_native,'SOL')+' SOL reserve':'Paid in SOL'))+'</b></div>'
+  if(wasOpen){ det.classList.add('open'); var mb=_sxEl('sx-more'); if(mb) mb.classList.add('open') }
+  _sxSetCta('Swap '+from+' → '+to,true)
+}
+function _sxToggleDetails(){
+  var d=_sxEl('sx-details'), b=_sxEl('sx-more'); if(!d) return
+  d.classList.toggle('open'); if(b) b.classList.toggle('open',d.classList.contains('open'))
+}
+function _sxSwap(){
+  if(_convertBusy) return
+  if(_sx.retry){ _sx.retry=false; _sxInput(); return }
+  var q=_sx.quote
+  if(!q) return
+  // A quote about to expire is refreshed first, then confirmed.
+  if(Date.now()>q.expires_at-3000){
+    _sxSetCta('Refreshing price…',false)
+    var p=_sxQuote(); if(p) p.then(function(){ if(_sx.quote&&_sx.quote!==q) _sxSwap() })
+    return
   }
-  direction.parentNode.appendChild(flip)
-  document.getElementById('cv-amount').setAttribute('inputmode','decimal')
+  _convertQuote=q
+  _sxSetCta('Swapping…',false)
+  _convertConfirm()
+  // _convertConfirm closes the modal on success; on failure it re-enables
+  // the controls and shows the reason, and the quote must be fetched again.
+  var wait=setInterval(function(){
+    if(_convertBusy) return
+    clearInterval(wait)
+    var m=_sxEl('cv-quote')
+    if(m&&_sxOpen()){ var why=m.innerHTML; _sx.quote=null; _sxInput(); m.innerHTML=why }
+  },250)
 }
 function _modalConvert(){
   if(_convertBusy) return
