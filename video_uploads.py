@@ -222,6 +222,39 @@ def install(d):
         finally:
             conn.close()
 
+    def _nsfw_video_check(vid: str, out_path: str, poster_path: str):
+        """Sample a frame every 2 seconds (max 15) plus the poster and refuse
+        the video if any of them is explicit -- see nsfw_filter.py."""
+        try:
+            import nsfw_filter
+        except Exception:
+            return None
+        import tempfile
+        frames_dir = tempfile.mkdtemp(prefix='nsfw-', dir=_tmp_dir(d))
+        try:
+            subprocess.run([_ffmpeg(), '-hide_banner', '-loglevel', 'error', '-y', '-i', out_path,
+                            '-vf', 'fps=1/2,scale=256:256:force_original_aspect_ratio=increase',
+                            '-frames:v', '15', '-q:v', '4', os.path.join(frames_dir, 'f%02d.jpg')],
+                           capture_output=True, timeout=120)
+            frames = sorted(os.path.join(frames_dir, f) for f in os.listdir(frames_dir))
+            if os.path.exists(poster_path):
+                frames.insert(0, poster_path)
+            reason, score = nsfw_filter.check_frame_files(frames)
+        finally:
+            shutil.rmtree(frames_dir, ignore_errors=True)
+        if reason == nsfw_filter.BLOCKED_MSG:
+            try:
+                c = _db()
+                try:
+                    row = c.execute('SELECT wallet FROM video_uploads WHERE id=?', (vid,)).fetchone()
+                finally:
+                    c.close()
+                d._log_security_event('nsfw_blocked', row[0] if row else 'unknown',
+                                      f'explicit video refused (score {score:.2f})')
+            except Exception:
+                pass
+        return reason
+
     def _transcode(vid: str):
         src = os.path.join(_tmp_dir(d), vid)
         vids = _videos_dir(d)
@@ -266,6 +299,11 @@ def install(d):
                             '-ss', str(min(0.5, max(0.0, duration / 2))), '-i', out_path,
                             '-frames:v', '1', '-q:v', '4', poster_path],
                            capture_output=True, timeout=60)
+            # Explicit content check, BEFORE the files are made readable for
+            # nginx -- a refused video is never public, not even briefly.
+            reason = _nsfw_video_check(vid, out_path, poster_path)
+            if reason:
+                return _fail(reason)
             for p in (out_path, poster_path):
                 if os.path.exists(p):
                     os.chmod(p, 0o644)
@@ -293,6 +331,12 @@ def install(d):
             return jsonify({'ok': False, 'msg': 'Not logged in'}), 401
         if not _ffmpeg():
             return jsonify({'ok': False, 'msg': 'Video uploads are not available right now'}), 503
+        try:
+            import nsfw_filter
+            if nsfw_filter.required() and not nsfw_filter.available():
+                return jsonify({'ok': False, 'msg': nsfw_filter.UNAVAILABLE_MSG}), 503
+        except ImportError:
+            pass
         body = request.get_json(silent=True) or {}
         try:
             size = int(body.get('size') or 0)

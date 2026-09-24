@@ -48,3 +48,4 @@ _sw.js
 # Video posts (video_uploads.py): private raw uploads + local fallback media dir
 video_uploads_tmp/
 /media/
+/models/

@@ -44,3 +44,27 @@ sqlite3 "$RESTORE" 'PRAGMA integrity_check;' | grep -qx ok
 # Retain 14 daily restore points.
 ls -1t "$OUT"/orcagent-*.db.gz.enc 2>/dev/null | tail -n +15 | xargs -r rm -f
 printf 'backup: verified encrypted backup %s\n' "$ENC"
+
+# ── Video posts (video_uploads.py) ──
+# Published videos are public content in /var/lib/orcagent-media, outside
+# /data. They are mirrored here nightly -- only new files are copied, so this
+# costs no more than the videos themselves -- and a video that disappears
+# from the site (post deleted, cleanup) is kept for the same 14 days as the
+# database restore points, under media-deleted/<date>/.
+# Restore everything with:
+#     sudo rsync -a /data/backups/media/videos/ /var/lib/orcagent-media/videos/
+# Never allowed to fail the database backup above.
+MEDIA_SRC=/var/lib/orcagent-media/videos
+MEDIA_DST=/data/backups/media/videos
+MEDIA_DEL=/data/backups/media-deleted
+if [ -d "$MEDIA_SRC" ] && command -v rsync >/dev/null; then
+  mkdir -p "$MEDIA_DST" "$MEDIA_DEL"
+  if rsync -a --delete --backup --backup-dir="$MEDIA_DEL/$STAMP" \
+       --include='*.mp4' --include='*.jpg' --exclude='*' \
+       "$MEDIA_SRC"/ "$MEDIA_DST"/; then
+    find "$MEDIA_DEL" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} + 2>/dev/null || true
+    printf 'backup: mirrored %s video files\n' "$(find "$MEDIA_DST" -type f | wc -l)"
+  else
+    echo 'backup: video mirror failed (database backup is unaffected)' >&2
+  fi
+fi
