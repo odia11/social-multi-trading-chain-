@@ -36,6 +36,14 @@ else
        -exec cp -r {} "$APP_DIR"/ \;
 fi
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+# rsync -a copies the clone's modes. If the clone ever loses its read bits
+# (e.g. an accidental `chmod -R go-rwx ~/orcagent`), nginx could no longer
+# read /static/ and every page rendered without CSS/JS. nginx must always be
+# able to traverse the app dir and read the public static assets; the rest of
+# the tree keeps whatever the clone has (the service reads it as its owner).
+chmod 755 "$APP_DIR"
+find "$APP_DIR/static" -type d -exec chmod 755 {} +
+find "$APP_DIR/static" -type f -exec chmod 644 {} +
 
 say "Creating and locking down the data directory ($DATA_DIR)"
 mkdir -p "$DATA_DIR/backups"
