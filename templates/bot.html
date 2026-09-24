@@ -146,6 +146,6 @@ window.addEventListener('pageshow',function(e){if(e.persisted)location.reload()}
 <script src="/static/page-loader.js?v={{ app_version }}"></script>
 <script src="/static/auto-refresh.js?v={{ app_version }}"></script>
 <script src="/static/pull-to-refresh.js?v={{ app_version }}"></script>
-<script>if(_showTrading&&typeof initPullToRefresh==='function')initPullToRefresh({onRefresh:loadOverview});</script>
+<script>if(typeof initPullToRefresh==='function')initPullToRefresh(_showTrading?{onRefresh:loadOverview}:{});</script>
 </body>
 </html>

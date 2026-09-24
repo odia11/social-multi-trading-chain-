@@ -1029,7 +1029,7 @@ var PT_FEE_RATE_TXN = {{ fee_rate_txn|default(0.0075) }};
 // deferred script has already run, which is what guarantees they exist here.
 document.addEventListener('DOMContentLoaded', function(){
   initPullToRefresh({ onRefresh: function(){
-    loadFeed(); loadTape(); loadTraders(); loadWatchlist(); loadPulse();
+    if(typeof window.OrcAgentRefreshLiveMarket==='function') window.OrcAgentRefreshLiveMarket();
   }});
 });
 </script>

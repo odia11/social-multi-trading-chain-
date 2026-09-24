@@ -10169,3 +10169,14 @@ document.addEventListener('DOMContentLoaded', function(){
   _refreshOnlineCount();
   setInterval(_refreshOnlineCount, 30000);
 });
+
+// Pull down at the top of Home (like Instagram) to refresh the feed and the
+// mobile Home cards (portfolio value, markets, AI bot) in place.
+if(typeof initPullToRefresh==='function'){
+  initPullToRefresh({ onRefresh: function(){
+    var jobs=[];
+    try{ jobs.push(loadHomeFeed()); }catch(e){}
+    try{ if(typeof window.OrcAgentRefreshHome==='function') jobs.push(window.OrcAgentRefreshHome()); }catch(e){}
+    return Promise.allSettled(jobs);
+  }});
+}

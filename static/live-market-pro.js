@@ -2675,4 +2675,12 @@ document.addEventListener('DOMContentLoaded', function(){
   startLivePrices();
 });
 
+// Pull-to-refresh (live_market_pro.html). Every loader lives inside this
+// closure, so the page can only reach them through this one export. The
+// feed refreshes in poll mode -- merged in place, no flash of a re-rendered
+// list.
+window.OrcAgentRefreshLiveMarket=function(){
+  loadFeed(true); loadSurges(); loadTape(); loadTraders(); loadWatchlist(); loadPulse();
+};
+
 })();
