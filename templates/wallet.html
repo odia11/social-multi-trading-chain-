@@ -373,7 +373,7 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
 .rx-copy.done{background:#3ad29b;color:#07130e;box-shadow:0 10px 24px rgba(58,210,155,.18)}
 .rx-sec{border:1px solid #243039;background:#111921;color:#dfe4ea}
 .rx-warn{display:flex;gap:9px;align-items:flex-start;margin-top:12px;padding:10px 12px;border:1px solid rgba(247,185,85,.22);border-radius:12px;background:rgba(247,185,85,.05);color:#c9b48a;font-size:12px;line-height:1.45}
-.rx-warn svg{flex:0 0 auto;width:16px;height:16px;margin-top:1px;color:#f7b955}
+.rx-warn b{color:#f3d9a6}.rx-warn svg{flex:0 0 auto;width:16px;height:16px;margin-top:1px;color:#f7b955}
 .rx-scan{display:block;margin-top:10px;text-align:center;font-size:12px;color:#8b96a3;text-decoration:none}
 .rx-scan:hover{color:#f7b955}
 
@@ -1264,7 +1264,9 @@ function _closeModal(){
   document.getElementById('w-modal').style.display='none'
 }
 
-var _RX_SOL_MARK='<svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="rxSolG" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#9945FF"/><stop offset="1" stop-color="#14F195"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="#0b0b12"/><path d="M10.2 20.3h11.9l-2.3 2.4H7.9zM10.2 9.3h11.9l-2.3 2.4H7.9zM21.8 14.8H9.9l2.3 2.4h11.9z" fill="url(#rxSolG)"/></svg>'
+// USDC mark (Circle's blue coin): everything on OrcAgent is priced and
+// traded in USDC, so that is what this address is for.
+var _RX_USDC_MARK='<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#2775CA"/><path d="M12.3 7.6a9.2 9.2 0 0 0 0 16.8M19.7 7.6a9.2 9.2 0 0 1 0 16.8" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/><path d="M16 9.4v13.2M19 12.6c-.5-1.2-1.6-1.8-3.1-1.8-1.8 0-3 .9-3 2.2 0 3.3 6.4 1.6 6.4 5 0 1.4-1.3 2.4-3.3 2.4-1.6 0-2.9-.7-3.4-2" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 function _modalDeposit(){
   var addr=_walletAddr
   if(!addr){
@@ -1279,9 +1281,9 @@ function _modalDeposit(){
   var pretty=groups.map(function(g,i){return '<span'+(i===0||i===groups.length-1?' class="hl"':'')+'>'+esc(g)+'</span>'}).join('')
   var canShare=typeof navigator.share==='function'
   _showModal(
-    '<div class="sx-hd"><div class="sx-title">Receive</div><span class="sx-net"><i></i>Solana</span></div>'
+    '<div class="sx-hd"><div class="sx-title">Receive USDC</div><span class="sx-net"><i></i>Solana</span></div>'
     +'<div class="rx-qr" id="rx-qr"></div>'
-    +'<div class="rx-hint">Scan with any Solana wallet or exchange app</div>'
+    +'<div class="rx-hint">Scan to send USDC on the Solana network</div>'
     +'<button type="button" class="rx-addr" onclick="_rxCopy()" aria-label="Copy address">'+pretty+'</button>'
     +'<div class="rx-btns">'
       +'<button type="button" class="rx-btn rx-copy" id="rx-copy" onclick="_rxCopy()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2.5"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy address</span></button>'
@@ -1290,7 +1292,7 @@ function _modalDeposit(){
         :'<a class="rx-btn rx-sec" href="https://solscan.io/account/'+encodeURIComponent(addr)+'" target="_blank" rel="noopener">Solscan ↗</a>')
     +'</div>'
     +'<div class="rx-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>'
-      +'<span>Only send SOL or Solana (SPL) tokens, on the Solana network. Funds sent from another network can be lost.</span></div>'
+      +'<span>Send USDC (or SOL) on the <b>Solana</b> network only. USDC sent from another network (Ethereum, Base, BSC…) can be lost.</span></div>'
     +(canShare?'<a class="rx-scan" href="https://solscan.io/account/'+encodeURIComponent(addr)+'" target="_blank" rel="noopener">View on Solscan ↗</a>':'')
   )
   var box=document.querySelector('#w-modal .w-modal-box'); if(box) box.classList.add('sx-box')
@@ -1303,7 +1305,7 @@ function _modalDeposit(){
       if(tries<40){ setTimeout(function(){paint(tries+1)},100); return }
       el.style.display='none'; return   // never show a fake code
     }
-    el.innerHTML=svg+'<div class="rx-logo">'+_RX_SOL_MARK+'</div>'
+    el.innerHTML=svg+'<div class="rx-logo">'+_RX_USDC_MARK+'</div>'
   })(0)
 }
 function _rxCopy(){
@@ -1317,7 +1319,7 @@ function _rxCopy(){
 }
 function _rxShare(){
   if(!_walletAddr||typeof navigator.share!=='function') return
-  navigator.share({title:'My Solana address',text:_walletAddr}).catch(function(){})
+  navigator.share({title:'My USDC address (Solana)',text:_walletAddr}).catch(function(){})
 }
 
 
