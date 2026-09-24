@@ -22,8 +22,10 @@ check('Jupiter API key gates the gasless route instead of an OrcAgent payer key'
       and 'SOL_GAS_SPONSOR_PRIVATE_KEY' not in src)
 check('gasless path uses Jupiter order and execute endpoints',
       "_API + '/order'" in src and "_API + '/execute'" in src)
-check('only USDC-funded BUY is intercepted; other Solana actions keep existing executor',
-      "str(action).lower() != 'buy'" in src and "str(base).upper() != 'USDC'" in src
+check('only USDC-based BUYs, and USDC SELLs from a low-SOL wallet, are intercepted; '
+      'everything else keeps the existing executor',
+      "str(base).upper() != 'USDC'" in src and "act not in ('buy', 'sell')" in src
+      and '_sol_balance(d, trading_address) >= _SELL_LEGACY_SOL_MIN' in src
       and 'return original(' in src)
 check('a low-SOL wallet refuses a non-gasless Jupiter order',
       "low_sol and not bool(data.get('gasless'))" in src
