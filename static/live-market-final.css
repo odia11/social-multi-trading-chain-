@@ -74,3 +74,9 @@
 }
 
 .pt-chart-svg{transform:translateZ(0);will-change:contents}.pt-price-pill{will-change:top,transform}
+
+/* Live tick: the header price flashes green/red for a moment on every move,
+   like an exchange ticker, then settles back to its normal colour. */
+.pt-price{transition:color .6s ease-out}
+body.oa-live-v2 .pt-price.pt-tick-up,.pt-price.pt-tick-up{color:#3ddc97!important;transition:none}
+body.oa-live-v2 .pt-price.pt-tick-down,.pt-price.pt-tick-down{color:#ff6b6b!important;transition:none}
