@@ -39,25 +39,48 @@
   body.oa-home-mobile .feed-composer-input::placeholder{
     color:#6f7b88!important;
   }
-  body.oa-home-mobile .feed-composer-actions{
-    display:flex!important;
-    flex-wrap:wrap!important;
-    align-items:center!important;
-    gap:8px!important;
+  /* One tidy row: four equal attachment buttons + a square emoji button,
+     then the full-width POST. A wrapping flex row used to push "Video" and
+     the emoji onto a ragged second line. */
+  /* #feed-composer.feed-composer in the selector: home-mobile-polish.css
+     forces display:flex (and home-mobile.css a 48px left indent) on this row
+     with `body.oa-home-mobile #feed-composer ...`, and it is injected at
+     runtime, so with equal specificity whichever loaded LAST won -- the grid
+     sometimes applied and sometimes didn't. One extra class settles it
+     regardless of load order. */
+  body.oa-home-mobile #feed-composer.feed-composer .feed-composer-actions{
+    display:grid!important;
+    grid-template-columns:repeat(4,minmax(0,1fr)) 46px!important;
+    align-items:stretch!important;
+    gap:7px!important;
     padding:12px 0 0!important;
     border-top:1px solid rgba(255,255,255,.065)!important;
   }
-  body.oa-home-mobile .feed-composer-pill,
-  body.oa-home-mobile .feed-emoji-btn{
-    min-height:36px!important;
-    padding:8px 10px!important;
+  /* Icon above a short label (like the Portfolio action buttons): the full
+     word fits even on a 360px phone, no truncated "Cha…". */
+  body.oa-home-mobile #feed-composer.feed-composer .feed-composer-pill,
+  body.oa-home-mobile #feed-composer.feed-composer .feed-emoji-btn{
+    min-width:0!important;
+    height:52px!important;
+    min-height:52px!important;
+    padding:0 2px!important;
+    display:flex!important;
+    flex-direction:column!important;
+    align-items:center!important;
+    justify-content:center!important;
+    gap:4px!important;
     border:1px solid #22303c!important;
-    border-radius:10px!important;
+    border-radius:11px!important;
     background:#0b131b!important;
-    color:#aab3be!important;
+    color:#c3cad2!important;
     font-size:11px!important;
     font-weight:650!important;
+    line-height:1!important;
+    white-space:nowrap!important;
   }
+  body.oa-home-mobile #feed-composer.feed-composer .feed-composer-pill svg{flex:0 0 auto!important;width:17px!important;height:17px!important;color:#f7b955!important}
+  body.oa-home-mobile .feed-pill-label{overflow:hidden!important;text-overflow:ellipsis!important}
+  body.oa-home-mobile #feed-composer.feed-composer .feed-emoji-btn{width:46px!important;padding:0!important;font-size:19px!important}
   body.oa-home-mobile .feed-composer-pill:active,
   body.oa-home-mobile .feed-emoji-btn:active{
     border-color:rgba(247,185,85,.42)!important;
@@ -66,16 +89,23 @@
   }
   body.oa-home-mobile .feed-emoji-wrap{
     display:flex!important;
+    min-width:0!important;
   }
   body.oa-home-mobile .feed-composer-counter{
-    margin-left:auto!important;
-    align-self:center!important;
+    grid-column:1/-1!important;
+    order:98!important;
+    justify-self:end!important;
   }
   body.oa-home-mobile .feed-composer-actions>div[style*="flex:1"]{
     display:none!important;
   }
-  body.oa-home-mobile .feed-composer-post{
+  /* Very narrow phones (<340px): icons only, still one row. */
+  @media(max-width:339px){
+    body.oa-home-mobile .feed-pill-label{display:none!important}
+  }
+  body.oa-home-mobile #feed-composer.feed-composer .feed-composer-post{
     order:99!important;
+    grid-column:1/-1!important;
     flex:0 0 100%!important;
     width:100%!important;
     min-height:46px!important;
@@ -95,6 +125,7 @@
     transform:translateY(1px)!important;
   }
   body.oa-home-mobile #composer-image-preview,
+  body.oa-home-mobile #composer-video-preview,
   body.oa-home-mobile #composer-chart-preview,
   body.oa-home-mobile #composer-trade-preview{
     margin:0 0 12px!important;

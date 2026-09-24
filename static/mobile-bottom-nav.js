@@ -55,7 +55,7 @@ function openAppMenu(){var m=buildAppMenu();m.classList.add('open');document.doc
 
 function ensureHomeComposerStyles(){
   if(here()!=='/'||document.getElementById('oa-home-composer-mobile-css'))return;
-  var css=document.createElement('link');css.id='oa-home-composer-mobile-css';css.rel='stylesheet';css.href='/static/home-composer-mobile.css?v=1';document.head.appendChild(css);
+  var css=document.createElement('link');css.id='oa-home-composer-mobile-css';css.rel='stylesheet';css.href='/static/home-composer-mobile.css?v=5';document.head.appendChild(css);
 }
 /* Dock to the *visible* viewport when mobile browser chrome expands/collapses.
    CSS bottom:0 anchors the layout viewport; on some iOS/Android builds its

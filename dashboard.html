@@ -4060,22 +4060,27 @@ __IMAGE_LIGHTBOX__
     <input type="file" id="composer-video-input" accept="video/mp4,video/quicktime,video/webm,video/*" style="display:none" onchange="_composerVideoSelected(this)">
 
     <div class="feed-composer-actions">
+      <!-- Attachment chips: icon + short label, so all four and the emoji
+           button fit ONE tidy row on a phone (home-composer-mobile.css). -->
       <!-- Chart chip -->
       <button class="feed-composer-pill" id="chart-pill-btn" onclick="_feedComposerChart()">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        + Chart
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span class="feed-pill-label">Chart</span>
       </button>
       <!-- Share Trade chip (kept for JS) -->
-      <button class="feed-composer-pill" id="trade-pill-btn" onclick="_feedComposerTrade()">&#9889; Share Trade</button>
+      <button class="feed-composer-pill" id="trade-pill-btn" onclick="_feedComposerTrade()" aria-label="Share trade">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        <span class="feed-pill-label">Trade</span>
+      </button>
       <!-- Image chip -->
       <button class="feed-composer-pill" id="image-pill-btn" onclick="event.stopPropagation();document.getElementById('composer-image-input').click()">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-        + Image
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        <span class="feed-pill-label">Image</span>
       </button>
       <!-- Video chip (max 30 seconds) -->
       <button class="feed-composer-pill" id="video-pill-btn" onclick="event.stopPropagation();if(checkGuest())return;document.getElementById('composer-video-input').click()">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="14" height="14" rx="3"/><polygon points="22 8 16 12 22 16 22 8"/></svg>
-        + Video
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="14" height="14" rx="3"/><polygon points="22 8 16 12 22 16 22 8"/></svg>
+        <span class="feed-pill-label">Video</span>
       </button>
       <!-- Emoji picker -->
       <div class="feed-emoji-wrap">
