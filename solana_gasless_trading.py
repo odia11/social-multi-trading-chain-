@@ -1,4 +1,12 @@
-"""Gasless Solana USDC BUY adapter using Jupiter Ultra order/execute.
+"""Gasless Solana USDC BUY (and low-SOL USDC SELL) adapter using Jupiter
+Ultra order/execute.
+
+SELLs back into USDC only come through here when the trading wallet holds
+too little SOL to pay a normal swap's network fee itself (below
+_SELL_LEGACY_SOL_MIN). Without this, a wallet funded purely in USDC could
+buy gaslessly and then never sell: the position would be stuck until the
+user deposited SOL. With enough SOL, sells keep using the existing executor
+unchanged.
 
 The amount passed to this adapter is an ALL-IN ceiling: Jupiter receives that
 exact USDC input amount and may recover its gasless/network costs and an
@@ -27,6 +35,9 @@ from solders.transaction import VersionedTransaction
 _API = 'https://api.jup.ag/ultra/v1'
 _USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 _GASLESS_SOL_THRESHOLD = 0.01
+# A legacy (non-Ultra) Solana sell pays its own network + priority fee in
+# SOL. Below this the wallet can't reliably pay it, so the sell goes gasless.
+_SELL_LEGACY_SOL_MIN = 0.002
 
 
 def _api_key() -> str:
@@ -82,6 +93,45 @@ def _token_decimals(d, mint: str) -> int:
     return int((result.get('value') or {}).get('decimals'))
 
 
+def _token_balance_raw(d, owner: str, mint: str):
+    """(raw integer balance summed over the owner's accounts for this mint,
+    decimals or None). Filtering by mint covers Token and Token-2022."""
+    result = _rpc(d, 'getTokenAccountsByOwner', [
+        owner, {'mint': mint}, {'encoding': 'jsonParsed', 'commitment': 'confirmed'}]) or {}
+    total, decimals = 0, None
+    for acc in result.get('value') or []:
+        info = ((((acc.get('account') or {}).get('data') or {}).get('parsed') or {}).get('info') or {})
+        amt = info.get('tokenAmount') or {}
+        total += int(amt.get('amount') or 0)
+        if decimals is None and amt.get('decimals') is not None:
+            decimals = int(amt['decimals'])
+    return total, decimals
+
+
+def _sell_raw_amount(d, owner: str, mint: str, amount_str: str):
+    """Resolve a sell request the same way orcagent_solana.py does: '0' (or
+    any amount <= 0) sells everything held, 'N%' sells that share of the raw
+    balance, a positive number sells that many tokens clamped to what is held.
+    Returns (raw_amount, decimals)."""
+    raw_balance, decimals = _token_balance_raw(d, owner, mint)
+    if decimals is None:
+        decimals = _token_decimals(d, mint)
+    if raw_balance <= 0:
+        raise RuntimeError('on-chain balance is 0, nothing to sell')
+    text = str(amount_str).strip()
+    if text.endswith('%'):
+        pct = Decimal(text[:-1])
+        if not (Decimal(0) < pct <= Decimal(100)):
+            raise RuntimeError(f'sell percentage must be above 0 and at most 100, got {text}')
+        raw = raw_balance if pct == 100 else int(Decimal(raw_balance) * pct / Decimal(100))
+    else:
+        amount = Decimal(text)
+        raw = raw_balance if amount <= 0 else min(raw_balance, int(amount * (Decimal(10) ** decimals)))
+    if raw <= 0:
+        raise RuntimeError('computed sell amount is 0, nothing to sell')
+    return raw, decimals
+
+
 def _sign_for_taker(private_key: str, tx_b64: str) -> str:
     """Add only the user's signature and preserve any Jupiter payer signature."""
     kp = Keypair.from_base58_string(private_key)
@@ -105,11 +155,15 @@ def _order(d, wallet: str, mint: str, amount_usdc: str):
     raw = amount * Decimal(1_000_000)
     if raw != raw.to_integral_value():
         raise RuntimeError('USDC amount has more than 6 decimal places')
+    return _ultra_order(d, wallet, _USDC, mint, int(raw), side='buy')
 
+
+def _ultra_order(d, wallet: str, input_mint: str, output_mint: str, raw_amount: int,
+                 side: str = 'buy'):
     params = {
-        'inputMint': _USDC,
-        'outputMint': mint,
-        'amount': str(int(raw)),
+        'inputMint': input_mint,
+        'outputMint': output_mint,
+        'amount': str(int(raw_amount)),
         'taker': wallet,
     }
 
@@ -132,6 +186,11 @@ def _order(d, wallet: str, mint: str, amount_usdc: str):
         code = data.get('errorCode')
         message = data.get('errorMessage') or data.get('error') or 'Jupiter returned no executable transaction'
         if code == 3:
+            if side == 'sell':
+                raise RuntimeError(
+                    "This sale is below Jupiter's current gasless minimum, and the trading "
+                    'wallet has too little SOL to pay the network fee itself. Add about '
+                    f'{_SELL_LEGACY_SOL_MIN} SOL to the trading wallet to sell it.')
             raise RuntimeError(
                 "This Solana buy is below Jupiter's current gasless minimum. "
                 'Increase the USDC amount; OrcAgent will not ask for SOL or subsidize the trade.')
@@ -199,10 +258,15 @@ def install(d):
 
     def execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str,
                              amount_str: str, base: str = 'SOL', capture: dict = None):
-        # Only USDC-funded BUYs use Ultra gasless. If no API key is configured,
-        # preserve the legacy path instead of breaking deployment startup.
-        if str(action).lower() != 'buy' or str(base).upper() != 'USDC' or not _api_key():
+        # USDC-funded BUYs always use Ultra gasless; USDC SELLs only when the
+        # wallet is too low on SOL for the legacy executor (see _sell_gasless).
+        # Everything else -- and everything when no API key is configured --
+        # keeps the legacy path instead of breaking deployment startup.
+        act = str(action).lower()
+        if str(base).upper() != 'USDC' or not _api_key() or act not in ('buy', 'sell'):
             return original(wallet, private_key, action, mint, amount_str, base, capture)
+        if act == 'sell':
+            return _sell_gasless(wallet, private_key, mint, amount_str, base, capture)
         try:
             kp = Keypair.from_base58_string(private_key)
             trading_address = str(kp.pubkey())
@@ -223,6 +287,36 @@ def install(d):
             # Ultra ExactIn spends exactly amount_str. Gasless and integrator
             # costs are recovered inside that amount, never on top of it.
             return True, signature, '', token_amount, float(Decimal(str(amount_str)))
+        except Exception as exc:
+            return False, '', d._redact_keys(str(exc))[:500], 0.0, 0.0
+
+    def _sell_gasless(wallet, private_key, mint, amount_str, base, capture):
+        try:
+            kp = Keypair.from_base58_string(private_key)
+            trading_address = str(kp.pubkey())
+            if _sol_balance(d, trading_address) >= _SELL_LEGACY_SOL_MIN:
+                return original(wallet, private_key, 'sell', mint, amount_str, base, capture)
+        except Exception:
+            # Can't read the balance: the existing executor is the known path.
+            return original(wallet, private_key, 'sell', mint, amount_str, base, capture)
+        try:
+            raw, decimals = _sell_raw_amount(d, trading_address, mint, amount_str)
+            order = _ultra_order(d, trading_address, mint, _USDC, raw, side='sell')
+            signed = _sign_for_taker(private_key, order['transaction'])
+            signature, result = _execute(order, signed)
+            in_raw = result.get('inputAmountResult') or order.get('inAmount') or raw
+            out_raw = result.get('outputAmountResult') or order.get('outAmount') or 0
+            token_amount = Decimal(str(in_raw)) / (Decimal(10) ** decimals)
+            usdc_received = Decimal(str(out_raw)) / Decimal(1_000_000)
+            if capture is not None:
+                capture['gasless'] = bool(order.get('gasless'))
+                capture['fee_bundled'] = bool(order.get('_orcagent_fee_applied'))
+                capture['fee_bps'] = int(order.get('_orcagent_fee_requested_bps') or 0)
+                capture['fee_mint'] = order.get('feeMint') or ''
+                capture['router'] = order.get('router')
+            # Same (ok, tx, err, token_amount, base_amount) shape the legacy
+            # executor returns, so realized-fill math downstream is unchanged.
+            return True, signature, '', float(token_amount), float(usdc_received)
         except Exception as exc:
             return False, '', d._redact_keys(str(exc))[:500], 0.0, 0.0
 
