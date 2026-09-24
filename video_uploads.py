@@ -80,13 +80,26 @@ def _media_root(d) -> str:
 
 
 def _videos_dir(d) -> str:
-    path = os.path.join(_media_root(d), 'videos')
+    root = _media_root(d)
+    path = os.path.join(root, 'videos')
     os.makedirs(path, exist_ok=True)
-    try:
-        os.chmod(path, 0o755)   # the service runs with UMask=0077; nginx must read this
-    except OSError:
-        pass
+    # The service runs with UMask=0077 and nginx must read the PUBLIC media
+    # dir -- but never open up anything inside the owner-only data dir:
+    # security-smoke.sh refuses to start the app if /data has group/world
+    # access (the fallback location is served by the Flask route instead).
+    if not _is_within(root, d._DATA_DIR):
+        try:
+            os.chmod(path, 0o755)
+        except OSError:
+            pass
     return path
+
+
+def _is_within(path: str, parent: str) -> bool:
+    try:
+        return os.path.commonpath([os.path.realpath(path), os.path.realpath(parent)]) == os.path.realpath(parent)
+    except ValueError:
+        return False
 
 
 def _tmp_dir(d) -> str:
@@ -304,9 +317,10 @@ def install(d):
             reason = _nsfw_video_check(vid, out_path, poster_path)
             if reason:
                 return _fail(reason)
-            for p in (out_path, poster_path):
-                if os.path.exists(p):
-                    os.chmod(p, 0o644)
+            if not _is_within(_media_root(d), d._DATA_DIR):
+                for p in (out_path, poster_path):
+                    if os.path.exists(p):
+                        os.chmod(p, 0o644)
             final_dur, _ = _probe_duration(out_path)
             _remove(src)
             c = _db()
