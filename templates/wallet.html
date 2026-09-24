@@ -10,6 +10,7 @@
 <script src="/static/portfolio-redesign.js?v={{ app_version }}" defer></script>
 <script src="/static/portfolio-history-redesign.js?v={{ app_version }}" defer></script>
 <script src="/static/approved-portfolio.js?v={{ app_version }}" defer></script>
+<script src="/static/vendor/qrcode-generator-1.4.4.js" defer></script>
 <link rel="manifest" href="/app.webmanifest" crossorigin="use-credentials">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -351,6 +352,31 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
 .sb-stat-lbl{font-size:11px;color:var(--muted)}
 .sb-stat-val{font-family:var(--mono);font-size:15px;font-weight:700;color:var(--text)}
 
+/* ── Receive (Portfolio "Receive"/"Deposit") ── a REAL, scannable QR code.
+   It used to be a 7x7 decorative pattern hashed from the address, which no
+   wallet or exchange could scan. Dark modules on white with a quiet zone,
+   error correction H so the Solana mark in the middle never breaks a scan. */
+.rx-qr{width:min(248px,72vw);margin:4px auto 0;padding:14px;border-radius:22px;background:#fff;box-shadow:0 14px 40px rgba(0,0,0,.45),0 0 0 1px rgba(247,185,85,.25),0 0 0 7px rgba(247,185,85,.06);position:relative}
+.rx-qr svg.rx-code{display:block;width:100%;height:auto;shape-rendering:crispEdges}
+.rx-logo{position:absolute;left:50%;top:50%;width:21%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:24%;background:#fff;padding:3%;box-sizing:border-box}
+.rx-logo svg{display:block;width:100%;height:100%}
+.rx-hint{margin:14px 0 12px;text-align:center;font-size:12.5px;color:#8b96a3}
+.rx-addr{display:block;width:100%;padding:12px 14px;border:1px solid #1d2731;border-radius:14px;background:#0a0f14;color:#c9d1da;font:600 13.5px/1.7 var(--mono);text-align:center;cursor:pointer;transition:border-color .15s}
+.rx-addr:active{border-color:rgba(247,185,85,.55)}
+.rx-addr span{display:inline-block;margin:0 .18em;white-space:nowrap}
+.rx-addr .hl{color:#f7b955}
+.rx-btns{display:flex;gap:8px;margin-top:12px}
+.rx-btn{flex:1;height:52px;border-radius:15px;display:inline-flex;align-items:center;justify-content:center;gap:8px;font-size:15px;font-weight:750;cursor:pointer;text-decoration:none;transition:transform .08s,background .2s,color .2s,border-color .2s}
+.rx-btn:active{transform:scale(.98)}
+.rx-btn svg{width:18px;height:18px}
+.rx-copy{border:0;background:linear-gradient(180deg,#ffd36a,#f7b955);color:#111318;box-shadow:0 10px 24px rgba(247,185,85,.16)}
+.rx-copy.done{background:#3ad29b;color:#07130e;box-shadow:0 10px 24px rgba(58,210,155,.18)}
+.rx-sec{border:1px solid #243039;background:#111921;color:#dfe4ea}
+.rx-warn{display:flex;gap:9px;align-items:flex-start;margin-top:12px;padding:10px 12px;border:1px solid rgba(247,185,85,.22);border-radius:12px;background:rgba(247,185,85,.05);color:#c9b48a;font-size:12px;line-height:1.45}
+.rx-warn svg{flex:0 0 auto;width:16px;height:16px;margin-top:1px;color:#f7b955}
+.rx-scan{display:block;margin-top:10px;text-align:center;font-size:12px;color:#8b96a3;text-decoration:none}
+.rx-scan:hover{color:#f7b955}
+
 /* ── SOL ⇄ USDC swap (Portfolio "Swap" button) ─────────────────────────
    Wallet-app style: two token cards with a round flip button between them,
    a live quote that updates while you type, one big Swap button. */
@@ -455,11 +481,6 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
 .w-modal-secondary{background:transparent;color:var(--sub);border:1px solid #21252c}
 .w-modal-secondary:hover{border-color:var(--accent);color:var(--accent)}
 .w-modal-note{font-size:11px;color:var(--muted);line-height:1.5;margin-top:10px}
-.w-modal-qr{
-  width:100%;aspect-ratio:1;max-width:160px;margin:0 auto 14px;
-  display:grid;grid-template-columns:repeat(7,1fr);gap:2.5px;
-}
-.w-modal-qr-cell{border-radius:1.5px}
 
 /* ── Bridge: origin/destination form ── */
 .br-form-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:14px 16px;position:relative;margin-top:14px}
@@ -1113,30 +1134,31 @@ function _symColor(sym){
   var h=_hash(sym||'?')
   return 'hsl('+(h%360)+',46%,33%)'
 }
-function _qrPattern(seed, size){
-  // returns flat bool array, symmetric 5×5 or 7×7
-  var bits=[]
-  var half=Math.ceil(size/2)
-  for(var r=0;r<size;r++){
-    var row=[]
-    for(var c=0;c<half;c++){seed=(seed*1664525+1013904223)&0x7fffffff;row.push((seed>>8)%3>0)}
-    for(var c=half;c<size;c++) row.push(row[size-1-c])
-    bits.push.apply(bits,row)
-  }
-  return bits
+
+// ── real QR codes ─────────────────────────────────────────
+// Encoded in the browser by the vendored qrcode-generator (MIT, Kazuhiko
+// Arase), so the address never goes to a third-party QR service. Returns ''
+// when the library isn't loaded: better no QR than a fake one.
+function _qrSvg(text, ecc){
+  if(typeof qrcode!=='function'||!text) return ''
+  try{
+    var qr=qrcode(0, ecc||'M'); qr.addData(String(text)); qr.make()
+    var n=qr.getModuleCount(), q=4, size=n+q*2, d=''
+    for(var r=0;r<n;r++) for(var c=0;c<n;c++) if(qr.isDark(r,c)) d+='M'+(c+q)+' '+(r+q)+'h1v1h-1z'
+    return '<svg class="rx-code" viewBox="0 0 '+size+' '+size+'" role="img" aria-label="QR code of the wallet address" xmlns="http://www.w3.org/2000/svg">'
+      +'<rect width="'+size+'" height="'+size+'" fill="#fff"/><path d="'+d+'" fill="#0b0f14"/></svg>'
+  }catch(e){ return '' }
 }
 
 // ── small QR in dep-card ──────────────────────────────────
-;(function(){
+;(function paintSmallQr(tries){
   var g=document.getElementById('dep-qr-sm')
-  if(!g) return
-  var bits=_qrPattern(_hash(_walletAddr),5)
-  bits.forEach(function(on){
-    var c=document.createElement('div')
-    c.className='dep-qr-cell'
-    c.style.background=on?'#f7b955':'#1a1f26'
-    g.appendChild(c)
-  })
+  if(!g||!_walletAddr) return
+  var svg=_qrSvg(_walletAddr,'M')
+  // The library loads with `defer`; wait for it briefly.
+  if(!svg){ if((tries||0)<40) setTimeout(function(){paintSmallQr((tries||0)+1)},100); return }
+  g.style.display='block'; g.style.background='#fff'; g.style.borderRadius='8px'; g.style.padding='0'
+  g.innerHTML=svg
 })()
 
 // ── copy address ──────────────────────────────────────────
@@ -1242,6 +1264,7 @@ function _closeModal(){
   document.getElementById('w-modal').style.display='none'
 }
 
+var _RX_SOL_MARK='<svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="rxSolG" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#9945FF"/><stop offset="1" stop-color="#14F195"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="#0b0b12"/><path d="M10.2 20.3h11.9l-2.3 2.4H7.9zM10.2 9.3h11.9l-2.3 2.4H7.9zM21.8 14.8H9.9l2.3 2.4h11.9z" fill="url(#rxSolG)"/></svg>'
 function _modalDeposit(){
   var addr=_walletAddr
   if(!addr){
@@ -1251,21 +1274,50 @@ function _modalDeposit(){
     )
     return
   }
-  var bits=_qrPattern(_hash(addr),7)
-  var cells=bits.map(function(on){
-    return '<div class="w-modal-qr-cell" style="background:'+(on?'#f7b955':'#16191f')+'"></div>'
-  }).join('')
+  // Groups of 4 are easy to compare by eye; first and last group in gold.
+  var groups=addr.match(/.{1,4}/g)||[addr]
+  var pretty=groups.map(function(g,i){return '<span'+(i===0||i===groups.length-1?' class="hl"':'')+'>'+esc(g)+'</span>'}).join('')
+  var canShare=typeof navigator.share==='function'
   _showModal(
-    '<div class="w-modal-title">Receive SOL / Tokens</div>'
-    +'<div class="w-modal-qr">'+cells+'</div>'
-    +'<div class="w-modal-label">YOUR SOLANA ADDRESS</div>'
-    +'<div class="w-modal-addr">'+addr+'</div>'
-    +'<div class="w-modal-btns">'
-      +'<button class="w-modal-btn w-modal-primary" onclick="_copyAddr()">Copy Address</button>'
-      +'<a class="w-modal-btn w-modal-secondary" href="https://solscan.io/account/'+addr+'" target="_blank" rel="noopener">Solscan ↗</a>'
+    '<div class="sx-hd"><div class="sx-title">Receive</div><span class="sx-net"><i></i>Solana</span></div>'
+    +'<div class="rx-qr" id="rx-qr"></div>'
+    +'<div class="rx-hint">Scan with any Solana wallet or exchange app</div>'
+    +'<button type="button" class="rx-addr" onclick="_rxCopy()" aria-label="Copy address">'+pretty+'</button>'
+    +'<div class="rx-btns">'
+      +'<button type="button" class="rx-btn rx-copy" id="rx-copy" onclick="_rxCopy()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2.5"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy address</span></button>'
+      +(canShare
+        ?'<button type="button" class="rx-btn rx-sec" onclick="_rxShare()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v13M7 8l5-5 5 5M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>Share</button>'
+        :'<a class="rx-btn rx-sec" href="https://solscan.io/account/'+encodeURIComponent(addr)+'" target="_blank" rel="noopener">Solscan ↗</a>')
     +'</div>'
-    +'<div class="w-modal-note">Only send SOL or SPL tokens on Solana mainnet to this address.</div>'
+    +'<div class="rx-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>'
+      +'<span>Only send SOL or Solana (SPL) tokens, on the Solana network. Funds sent from another network can be lost.</span></div>'
+    +(canShare?'<a class="rx-scan" href="https://solscan.io/account/'+encodeURIComponent(addr)+'" target="_blank" rel="noopener">View on Solscan ↗</a>':'')
   )
+  var box=document.querySelector('#w-modal .w-modal-box'); if(box) box.classList.add('sx-box')
+  ;(function paint(tries){
+    var el=document.getElementById('rx-qr'); if(!el) return
+    // Error correction H: the Solana mark covers the middle without
+    // making the code unreadable.
+    var svg=_qrSvg(addr,'H')
+    if(!svg){
+      if(tries<40){ setTimeout(function(){paint(tries+1)},100); return }
+      el.style.display='none'; return   // never show a fake code
+    }
+    el.innerHTML=svg+'<div class="rx-logo">'+_RX_SOL_MARK+'</div>'
+  })(0)
+}
+function _rxCopy(){
+  _copyAddr()
+  var b=document.getElementById('rx-copy'); if(!b) return
+  var label=b.querySelector('span')
+  b.classList.add('done'); if(label) label.textContent='Copied'
+  try{ navigator.vibrate&&navigator.vibrate(10) }catch(_){}
+  clearTimeout(b._t)
+  b._t=setTimeout(function(){ b.classList.remove('done'); if(label) label.textContent='Copy address' },1600)
+}
+function _rxShare(){
+  if(!_walletAddr||typeof navigator.share!=='function') return
+  navigator.share({title:'My Solana address',text:_walletAddr}).catch(function(){})
 }
 
 
