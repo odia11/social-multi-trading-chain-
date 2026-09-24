@@ -1,19 +1,22 @@
-/* Instagram-style pull-to-refresh, OPT-IN per page.
+/* Instagram-style pull-to-refresh, used on every page that calls
  *
- *   initPullToRefresh({pull:true, onRefresh:function(){return promise}})
+ *   initPullToRefresh({onRefresh:function(){return promise}})
  *
- * Only a page that passes pull:true gets the gesture (currently Portfolio).
- * Every other caller keeps the old no-op, so swiping there only scrolls.
- *
- * It never reloads the page. On release past the threshold it calls
- * onRefresh() and shows a spinner until that promise settles (capped, so a
- * hung request can't leave it spinning).
+ * Pull down while at the very top, release past the threshold, and a gold
+ * spinner shows while onRefresh() refetches the page's data in place. A page
+ * that passes no onRefresh (mostly server-rendered pages: profile,
+ * leaderboard, traders, info...) gets a normal reload instead, the same
+ * thing the browser's own pull-to-refresh would do. pull:false opts a page
+ * out.
  *
  * All touch listeners are passive and nothing calls preventDefault, so
- * native scrolling, momentum and pinch zoom are untouched. The pull only
- * starts when the page is already scrolled to the very top and the finger
- * moves mostly downward. mobile-overscroll-guard.js turns the browser's own
- * pull-to-refresh off, so there's nothing native to fight with.
+ * native scrolling, momentum and pinch zoom are untouched. A pull only
+ * starts when the first movement is mostly downward and neither the page nor
+ * any scrollable box under the finger is scrolled down. Touches that start
+ * in a fixed/sticky layer (modals, sheets, menus, bottom nav, an open chat
+ * thread) or on opts.ignoreTarget never start one. mobile-overscroll-guard.js
+ * turns the browser's own pull-to-refresh off, so there's nothing native to
+ * fight with.
  */
 (function(){
 'use strict';
@@ -32,9 +35,17 @@ function inOverlay(node){
   }
   return false;
 }
-function pageLocked(){
-  var b=document.body,h=document.documentElement;
-  return getComputedStyle(b).overflow==='hidden'||getComputedStyle(h).overflowY==='hidden';
+// On pages that scroll an inner box instead of the document, "at the top"
+// has to mean that box too -- otherwise pulling down to scroll back up a
+// feed would fire a refresh.
+function innerScrolled(node){
+  for(var el=node;el&&el!==document.body&&el!==document.documentElement&&el.nodeType===1;el=el.parentElement){
+    if(el.scrollTop>0&&el.scrollHeight>el.clientHeight+1){
+      var oy=getComputedStyle(el).overflowY;
+      if(oy==='auto'||oy==='scroll'||oy==='overlay')return true;
+    }
+  }
+  return false;
 }
 
 function injectStyle(){
@@ -69,8 +80,16 @@ function headerBottom(){
 
 window.initPullToRefresh=function(opts){
   opts=opts||{};
-  if(!opts.pull||typeof opts.onRefresh!=='function')return;
+  if(opts.pull===false)return;
   if(window.__oaPtrInit)return;window.__oaPtrInit=true;
+  var onRefresh=typeof opts.onRefresh==='function'?opts.onRefresh:function(){
+    location.reload();
+    return new Promise(function(){});   // keep spinning until the new page replaces this one
+  };
+  // A page whose content lives in its own inner scroller while some mode is
+  // active (an open chat thread) passes scrollEl; while it returns an
+  // element, pulling is off -- dragging down there means "scroll up".
+  function customScrollerActive(){try{return !!(typeof opts.scrollEl==='function'&&opts.scrollEl())}catch(_){return false}}
 
   var ind=null,arc=null,startX=0,startY=0,tracking=false,pulling=false,dist=0,refreshing=false,armedOnce=false;
 
@@ -93,7 +112,7 @@ window.initPullToRefresh=function(opts){
     ind.classList.add('oa-ptr-spin');
     place(THRESHOLD*.8,1,.9,true);
     var started=Date.now(),p;
-    try{p=Promise.resolve(opts.onRefresh());}catch(e){p=Promise.resolve();}
+    try{p=Promise.resolve(onRefresh());}catch(e){p=Promise.resolve();}
     var cap=new Promise(function(res){setTimeout(res,MAX_SPIN_MS)});
     Promise.race([p.catch(function(){}),cap]).then(function(){
       var wait=Math.max(0,MIN_SPIN_MS-(Date.now()-started));
@@ -104,7 +123,8 @@ window.initPullToRefresh=function(opts){
   document.addEventListener('touchstart',function(e){
     tracking=pulling=false;dist=0;armedOnce=false;
     if(refreshing||e.touches.length!==1)return;
-    if(scrollTop()>0||pageLocked()||inOverlay(e.target))return;
+    if(scrollTop()>0||customScrollerActive()||inOverlay(e.target)||innerScrolled(e.target))return;
+    if(opts.ignoreTarget&&e.target&&e.target.closest&&e.target.closest(opts.ignoreTarget))return;
     tracking=true;startX=e.touches[0].clientX;startY=e.touches[0].clientY;
   },{passive:true});
 
