@@ -49,6 +49,7 @@ from solana_source_bridge_gasless import install as _install_solana_source_bridg
 from header_stable_balance import install as _install_header_stable_balance
 from portfolio_multichain_holdings import install as _install_portfolio_multichain_holdings
 from video_uploads import install as _install_video_uploads
+from trending_hero import install as _install_trending_hero
 from portfolio_trade_history import install as _install_portfolio_trade_history
 from portfolio_token_withdraw import install as _install_portfolio_token_withdraw
 from live_market_sheet_overlap_fix import install as _install_live_market_sheet_overlap_fix
@@ -119,6 +120,10 @@ _install_solana_gasless_trading(_dashboard)
 # Short (<=30s) video posts: chunked upload, server-side ffmpeg re-encode to
 # H.264 MP4 with metadata stripped, public media dir served by nginx.
 _install_video_uploads(_dashboard)
+
+# Home feed "Trending now" hero card: the scanner's hottest scam-filtered
+# token while it is trending, with bull/bear votes and likes.
+_install_trending_hero(_dashboard)
 
 # Cross-chain buying follows the same economic invariant: the number entered
 # by the user is the absolute all-in ceiling. It also lets settled EVM->Solana
