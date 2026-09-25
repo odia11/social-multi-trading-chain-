@@ -52,6 +52,28 @@ function ago(time){
   return Math.floor(sec/86400)+'d ago';
 }
 function safeExplorer(url){return EXPLORERS.some(function(re){return re.test(String(url||''))})}
+// Only our own profile paths (/profile/<wallet>), never an arbitrary URL.
+function safeProfile(url){return /^\/profile\/[A-Za-z0-9]{20,64}$/.test(String(url||''))}
+function openProfile(ev,url){
+  ev.preventDefault();ev.stopPropagation();
+  if(safeProfile(url))location.href=url;
+}
+// "To @MJ": the @name opens that member's profile. In the day list the row
+// itself is a <button> (it expands the details), and a link inside a button
+// is invalid HTML whose clicks also toggle the row -- so the name is a
+// role=link span that stops the click from reaching the row.
+function subLine(e){
+  var small=node('small','');
+  if(!(e.peer&&safeProfile(e.profile))){small.textContent=e.sub;return small}
+  small.appendChild(document.createTextNode(e.peerPrefix));
+  var name=node('span','oa-h-user','@'+e.peer);
+  name.setAttribute('role','link');name.tabIndex=0;
+  name.setAttribute('aria-label','Open @'+e.peer+"'s profile");
+  name.addEventListener('click',function(ev){openProfile(ev,e.profile)});
+  name.addEventListener('keydown',function(ev){if(ev.key==='Enter'||ev.key===' ')openProfile(ev,e.profile)});
+  small.appendChild(name);
+  return small;
+}
 function normalizeTips(tips){
   return (tips||[]).map(function(t){
     var sent=t.direction==='sent',time=parsedDate(t.created_at);
@@ -65,7 +87,9 @@ function normalizeTips(tips){
       amount:(sent?-1:1)*Math.abs(Number(t.amount||0)),unit:'USDC',
       time:time.getTime(),status:t.status||'submitted',
       hash:t.tx_hash||'',url:t.explorer_url||'',message:t.message||'',
-      profile:sent?t.recipient_profile:t.sender_profile
+      profile:sent?t.recipient_profile:t.sender_profile,
+      peer:String((sent?t.recipient_username:t.sender_username)||'').replace(/^@/,''),
+      peerPrefix:sent?'To ':'From '
     };
   }).filter(function(e){return Number.isFinite(e.time)});
 }
@@ -126,7 +150,7 @@ function line(e){
   row.appendChild(iconTile(e));
   var main=node('span','oa-h-main');
   main.appendChild(node('strong','',e.title));
-  main.appendChild(node('small','',e.sub));
+  main.appendChild(subLine(e));
   row.appendChild(main);
   var right=node('span','oa-h-right');
   var amt=node('strong',e.amount>0?'incoming':'',amountText(e));
@@ -188,6 +212,10 @@ function details(e){
   if(e.message)pair('Message',e.message);
   if(e.hash)pair('Tx',e.hash.slice(0,10)+'…'+e.hash.slice(-8));
   block.appendChild(grid);
+  if(e.peer&&safeProfile(e.profile)){
+    var prof=node('a','oa-h-profile-link','View @'+e.peer+"'s profile →");prof.href=e.profile;
+    block.appendChild(prof);
+  }
   if(safeExplorer(e.url)){
     var link=node('a','','View on blockchain ↗');link.href=e.url;link.target='_blank';
     link.rel='noopener noreferrer';block.appendChild(link);
@@ -200,7 +228,7 @@ function activityRow(e,highlight){
   button.appendChild(iconTile(e));
   var main=node('span','oa-h-main');
   main.appendChild(node('strong','',e.title));
-  main.appendChild(node('small','',e.sub));
+  main.appendChild(subLine(e));
   button.appendChild(main);
   var right=node('span','oa-h-right');
   right.appendChild(node('strong',e.amount>0?'incoming':'',amountText(e)));
