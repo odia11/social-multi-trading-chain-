@@ -22,6 +22,19 @@ on a slightly looser bar (hysteresis) so it does not flicker in and out on
 one noisy refresh. When nothing qualifies the endpoint returns no token and
 the card disappears from the feed.
 
+ANNOUNCING IT
+When a token becomes the hero, every member who has notifications on gets an
+in-app notification and a phone push ("$WOJAK is trending"), tagged
+TREND_PUSH_TAG so a newer one replaces an older one on the phone. Tapping it
+opens the home feed scrolled to the card (TREND_LINK). Once the card is
+actually on screen in the app, the app closes that phone notification and
+marks the in-app one read (POST /api/home/trending-hero/seen). A background
+loop checks every ANNOUNCE_POLL_SECONDS, so it does not wait for a visitor.
+Limits, so it never becomes noise: each token is announced at most once per
+ANNOUNCE_REPEAT_HOURS, and at most one announcement per ANNOUNCE_MIN_GAP
+seconds across all tokens. The claim is a database row inserted in one
+transaction, so a restart or a second worker cannot announce twice.
+
 VOTES AND LIKES
 One bull/bear vote and one like per member per token (tapping again takes it
 back). Only tokens that have actually been the hero can be voted on, so the
@@ -30,6 +43,7 @@ advice, and it never touches a wallet.
 """
 from __future__ import annotations
 
+import os
 import re
 import sqlite3
 import threading
@@ -43,6 +57,11 @@ ENTER = {'change': 25.0, 'volume': 50_000.0, 'liquidity': 20_000.0, 'mcap': 50_0
 STAY = {'change': 15.0, 'volume': 30_000.0, 'liquidity': 15_000.0, 'mcap': 30_000.0,
         'buy_min': 0.50, 'buy_max': 0.985}
 CACHE_SECONDS = 20
+TREND_PUSH_TAG = 'orc-trending'
+TREND_LINK = '/?trending=1#trending'
+ANNOUNCE_POLL_SECONDS = 60
+ANNOUNCE_REPEAT_HOURS = 12
+ANNOUNCE_MIN_GAP = 30 * 60
 MAX_SAFETY_CHECKS = 6
 _MINT_RE = re.compile(r'^(?:[1-9A-HJ-NP-Za-km-z]{32,44}|0x[0-9a-fA-F]{40})$')
 
@@ -168,6 +187,93 @@ def _schema(d):
         conn.execute('''CREATE TABLE IF NOT EXISTS trending_hero_likes (
             mint TEXT NOT NULL, user_id INTEGER NOT NULL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (mint, user_id))''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS trending_hero_announcements (
+            mint TEXT PRIMARY KEY, announced_at REAL NOT NULL)''')
+
+
+def _fmt_usd(v):
+    v = _f(v)
+    for cut, suf in ((1e9, 'B'), (1e6, 'M'), (1e3, 'K')):
+        if v >= cut:
+            n = v / cut
+            return '$' + (f'{n:.1f}'.rstrip('0').rstrip('.') if n < 100 else f'{n:.0f}') + suf
+    return f'${v:.0f}'
+
+
+def announcement_text(t) -> tuple:
+    """(title, body) for the push: ticker first, then the numbers."""
+    sym = (t.get('symbol') or '?').upper()
+    sym = sym if len(sym) <= 12 else sym[:11] + '…'
+    chain = {'solana': 'Solana', 'bsc': 'BNB Chain', 'base': 'Base', 'arbitrum': 'Arbitrum',
+             'polygon': 'Polygon', 'robinhood': 'Robinhood Chain'}.get(t.get('chain'), (t.get('chain') or '').title())
+    title = f'🔥 ${sym} is trending'
+    body = f"{_f(t.get('price_change_24h')):+.1f}% · {_fmt_usd(t.get('volume_24h'))} volume · {chain}"
+    return title, body
+
+
+def _claim_announcement(d, mint, now) -> bool:
+    """Atomically reserve the right to announce `mint` now. False when this
+    token was announced within ANNOUNCE_REPEAT_HOURS, or any token within
+    ANNOUNCE_MIN_GAP."""
+    with _db(d) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        last_any = conn.execute('SELECT MAX(announced_at) FROM trending_hero_announcements').fetchone()[0]
+        if last_any and now - float(last_any) < ANNOUNCE_MIN_GAP:
+            return False
+        row = conn.execute('SELECT announced_at FROM trending_hero_announcements WHERE mint=?', (mint,)).fetchone()
+        if row and now - float(row['announced_at']) < ANNOUNCE_REPEAT_HOURS * 3600:
+            return False
+        conn.execute('INSERT OR REPLACE INTO trending_hero_announcements (mint, announced_at) VALUES (?,?)',
+                     (mint, now))
+    return True
+
+
+def announce(d, token, now=None) -> int:
+    """Notify members that `token` is trending. Returns how many members got
+    the in-app notification (0 when throttled). Never raises."""
+    if not token or not token.get('mint'):
+        return 0
+    now = now or time.time()
+    try:
+        if not _claim_announcement(d, token['mint'], now):
+            return 0
+        title, body = announcement_text(token)
+        content = f'{title} · {body}'
+        with _db(d) as conn:
+            # Only the newest trending alert matters: older ones point at a
+            # card that has already been replaced.
+            conn.execute("UPDATE notifications SET is_read=1 WHERE type='trending' AND is_read=0")
+            cur = conn.execute(
+                "INSERT INTO notifications (user_id, type, content, link, actor_wallet) "
+                "SELECT id, 'trending', ?, ?, NULL FROM users WHERE COALESCE(pref_notifications, 1) = 1",
+                (content, TREND_LINK))
+            count = cur.rowcount
+            push_ids = [r[0] for r in conn.execute(
+                'SELECT DISTINCT u.id FROM users u JOIN push_subscriptions p ON p.user_id = u.id '
+                'WHERE COALESCE(u.pref_notifications, 1) = 1').fetchall()]
+        icon = (token.get('image_url') or '').strip()
+        if not icon.startswith('https://') or len(icon) > 500:
+            icon = ''
+        if push_ids:
+            d._send_push_notifications_bulk(push_ids, title, body, TREND_LINK, icon, TREND_PUSH_TAG)
+        print(f"[trending-hero] announced ${token.get('symbol')} to {count} member(s), "
+              f"{len(push_ids)} with push", flush=True)
+        return count
+    except Exception as e:
+        print(f'[trending-hero] announcement failed: {type(e).__name__}: {e}', flush=True)
+        return 0
+
+
+def _announce_loop(d):
+    time.sleep(90)   # let the scanner warm up after a restart
+    while True:
+        try:
+            token = current_hero(d)
+            if token:
+                announce(d, token)
+        except Exception as e:
+            print(f'[trending-hero] loop error: {type(e).__name__}', flush=True)
+        time.sleep(ANNOUNCE_POLL_SECONDS)
 
 
 def _uid(d):
@@ -237,6 +343,18 @@ def install(d):
                              (mint, uid, vote))
         return jsonify({'ok': True, 'social': social(d, mint, uid)})
 
+    @app.post('/api/home/trending-hero/seen')
+    @d.rate_limit(30, 60)
+    def trending_hero_seen():
+        """The card is on screen: the trending alert has been seen."""
+        uid = _uid(d)
+        if uid is None:
+            return jsonify({'ok': True, 'marked': 0})
+        with _db(d) as conn:
+            cur = conn.execute("UPDATE notifications SET is_read=1 WHERE user_id=? AND type='trending' AND is_read=0",
+                               (uid,))
+        return jsonify({'ok': True, 'marked': cur.rowcount})
+
     @app.post('/api/home/trending-hero/like')
     @d.rate_limit(30, 60)
     def trending_hero_like():
@@ -251,3 +369,8 @@ def install(d):
             if cur.rowcount == 0:
                 conn.execute('INSERT INTO trending_hero_likes (mint, user_id) VALUES (?,?)', (mint, uid))
         return jsonify({'ok': True, 'social': social(d, mint, uid)})
+
+    # Announce new trending tokens even when nobody has the home page open.
+    if os.environ.get('ORCAGENT_TRENDING_ALERTS', '1') != '0':
+        threading.Thread(target=_announce_loop, args=(d,), name='orca-trending-alerts',
+                         daemon=True).start()

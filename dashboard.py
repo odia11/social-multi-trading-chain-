@@ -16713,7 +16713,7 @@ def notifications_mark_read():
         conn.close()
     return jsonify({'ok': True})
 
-def _send_push_notification_sync(user_id, title, body, url='/', icon=''):
+def _send_push_notification_sync(user_id, title, body, url='/', icon='', tag=''):
     if not _PYWEBPUSH_OK or not VAPID_PRIVATE_KEY:
         return
     try:
@@ -16729,9 +16729,11 @@ def _send_push_notification_sync(user_id, title, body, url='/', icon=''):
         try:
             webpush(
                 subscription_info={'endpoint': endpoint, 'keys': {'p256dh': p256dh, 'auth': auth}},
-                data=json.dumps({'title': title, 'body': body, 'url': url,
-                                 'icon': icon} if icon else
-                                {'title': title, 'body': body, 'url': url}),
+                # tag: a later push with the same tag replaces the earlier one
+                # on the phone, and the app can close it once it is on screen.
+                data=json.dumps(dict({'title': title, 'body': body, 'url': url},
+                                     **({'icon': icon} if icon else {}),
+                                     **({'tag': tag} if tag else {}))),
                 vapid_private_key=VAPID_PRIVATE_KEY,
                 vapid_claims=dict(VAPID_CLAIMS),
                 timeout=5
@@ -16759,7 +16761,7 @@ def _send_push_notification(user_id, title, body, url='/'):
         daemon=True
     ).start()
 
-def _send_push_notifications_bulk(user_ids, title, body, url='/', icon=''):
+def _send_push_notifications_bulk(user_ids, title, body, url='/', icon='', tag=''):
     """Same as _send_push_notification but for many recipients at once, run
     from a single background thread instead of spawning one OS thread per
     recipient -- a popular account's follower fan-out could otherwise spawn
@@ -16767,7 +16769,7 @@ def _send_push_notifications_bulk(user_ids, title, body, url='/', icon=''):
     request."""
     def _run():
         for uid in user_ids:
-            _send_push_notification_sync(uid, title, body, url, icon)
+            _send_push_notification_sync(uid, title, body, url, icon, tag)
     threading.Thread(target=_run, daemon=True).start()
 
 # ── SURGE ALERTS ──

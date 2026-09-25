@@ -52,6 +52,9 @@
   background:linear-gradient(180deg,#ffd36a,#f0b85c);color:#111318;font:800 17px/1 Geist,system-ui,sans-serif;text-decoration:none;
   box-shadow:0 12px 28px rgba(247,185,85,.18);transition:transform .08s}
 .oa-th-trade:active{transform:scale(.985)}
+/* Arriving from a "trending" alert: one gold pulse so the eye lands on it. */
+.oa-th.oa-th-focus{animation:oa-th-focus 1.1s ease-out 2}
+@keyframes oa-th-focus{0%{box-shadow:0 18px 44px rgba(0,0,0,.38),0 0 0 0 rgba(247,185,85,.55)}100%{box-shadow:0 18px 44px rgba(0,0,0,.38),0 0 0 14px rgba(247,185,85,0)}}
 @media(max-width:380px){.oa-th{padding:16px 14px 14px}.oa-th-id strong{font-size:19px}.oa-th-px strong{font-size:18px}.oa-th-logo{width:50px;height:50px}
   .oa-th-social button{padding:0 8px;font-size:12px}}
 @media(prefers-reduced-motion:reduce){.oa-th,.oa-th-bar i{transition:none}.oa-th-live i{animation:none}}
