@@ -126,6 +126,38 @@ sed -i '/^[[:space:]]*ORCAGENT_FRONTS_GAS=/d' "$ENV_FILE"
 printf '\nORCAGENT_FRONTS_GAS=0\n' >> "$ENV_FILE"
 echo "  gas policy enforced: users fund their own native gas"
 
+# Phone (web push) notifications for tips, messages, @tags, likes... need a
+# VAPID key pair. Without one the app silently sends nothing to phones. Make
+# one ONCE when the env file has none; never replace an existing pair, since
+# every phone's subscription is bound to the public key.
+_vapid_val() { sed -n "s/^[[:space:]]*$1=//p" "$ENV_FILE" | tail -1 | tr -d '[:space:]"'"'"; }
+if [ -z "$(_vapid_val VAPID_PRIVATE_KEY)" ] && [ -z "$(_vapid_val VAPID_PUBLIC_KEY)" ]; then
+  VAPID_PAIR="$("$APP_DIR/venv/bin/python" - <<'PY'
+import base64
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+k = ec.generate_private_key(ec.SECP256R1())
+b64 = lambda raw: base64.urlsafe_b64encode(raw).rstrip(b'=').decode()
+print(b64(k.private_numbers().private_value.to_bytes(32, 'big')),
+      b64(k.public_key().public_bytes(serialization.Encoding.X962,
+                                      serialization.PublicFormat.UncompressedPoint)))
+PY
+)" || VAPID_PAIR=''   # never let a key-generation hiccup abort a deploy
+  VAPID_PRIV="${VAPID_PAIR% *}"; VAPID_PUB="${VAPID_PAIR#* }"
+  if [ -n "$VAPID_PRIV" ] && [ -n "$VAPID_PUB" ] && [ "$VAPID_PRIV" != "$VAPID_PUB" ]; then
+    sed -i '/^[[:space:]]*VAPID_PRIVATE_KEY=/d;/^[[:space:]]*VAPID_PUBLIC_KEY=/d' "$ENV_FILE"
+    printf '\nVAPID_PUBLIC_KEY=%s\nVAPID_PRIVATE_KEY=%s\n' "$VAPID_PUB" "$VAPID_PRIV" >> "$ENV_FILE"
+    echo "  phone notifications: created a VAPID key pair (kept from now on)"
+  else
+    echo "  phone notifications: could not create a VAPID key pair — push stays off"
+  fi
+  unset VAPID_PAIR VAPID_PRIV VAPID_PUB
+elif [ -z "$(_vapid_val VAPID_PRIVATE_KEY)" ] || [ -z "$(_vapid_val VAPID_PUBLIC_KEY)" ]; then
+  echo "  phone notifications: only one of VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY is set — left as is, push stays off"
+else
+  echo "  phone notifications: VAPID key pair present"
+fi
+
 chown root:"$APP_USER" "$ENV_FILE"
 chmod 640 "$ENV_FILE"
 
