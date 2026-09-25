@@ -18833,14 +18833,11 @@ def wallet_set_key():
     if not is_valid_solana_private_key(private_key_raw):
         _record_ip_failure(ip)
         return jsonify({'ok': False, 'msg': 'Invalid key format — paste the full base58 key from your wallet'})
-    try:
-        from solders.keypair import Keypair as _KP_wsk
-        pasted_address = str(_KP_wsk.from_base58_string(private_key_raw).pubkey())
-        if pasted_address == wallet:
-            return jsonify({'ok': False, 'msg': 'This is the wallet you connected with — paste the private key of a separate, dedicated trading wallet instead'})
-    except Exception:
-        pass  # not base58 (e.g. a JSON-array-format key) -- can't derive an address
-              # to compare, so skip the check rather than block a legitimate key
+    # A member may trade with the same wallet they signed in with: it is their
+    # own wallet and their own key, and the modal they confirmed already says
+    # this wallet becomes the trading wallet and warns against keeping main
+    # funds in it. Refusing it ("paste a separate, dedicated wallet") blocked
+    # people who simply wanted to trade from their wallet.
     try:
         encrypted = encrypt_private_key(private_key_raw, wallet)
         _verify = decrypt_private_key(encrypted, wallet)
