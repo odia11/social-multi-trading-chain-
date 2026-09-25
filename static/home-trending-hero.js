@@ -115,8 +115,71 @@ function loadSpark(t,up){
     }).catch(function(){});
 }
 
+// ── trending alert: arriving from it, and clearing it once seen ─────────
+// The push/in-app alert links to /?trending=1#trending. Arriving that way,
+// scroll the card into view (below the sticky header) and pulse it once.
+var wantScroll=/(?:^|[?&])trending=1(?:&|$)/.test(location.search)||location.hash==='#trending';
+var seenFor='', observer=null;
+function afterRender(){
+  if(wantScroll&&host){
+    wantScroll=false;
+    var h=host;
+    // The feed above (composer, market strip, images) keeps growing for a
+    // moment after load, which pushes the card down again. Re-align a few
+    // times until it sits just below the header, then stop -- and stop at
+    // once if the member starts scrolling themselves.
+    var tries=0, userMoved=false;
+    function stopOnUser(){userMoved=true}
+    window.addEventListener('touchstart',stopOnUser,{passive:true,once:true});
+    window.addEventListener('wheel',stopOnUser,{passive:true,once:true});
+    function align(){
+      if(userMoved||!document.body.contains(h))return;
+      var off=h.getBoundingClientRect().top-84;
+      if(Math.abs(off)>24)window.scrollTo({top:Math.max(0,window.pageYOffset+off),behavior:tries?'auto':'smooth'});
+      if(++tries<6)setTimeout(align,tries===1?700:450);
+    }
+    setTimeout(align,120);
+    h.classList.add('oa-th-focus');
+    setTimeout(function(){h.classList.remove('oa-th-focus')},2400);
+    try{history.replaceState(null,'',location.pathname)}catch(_){}
+  }
+  watchSeen();
+}
+// When the card is actually on screen, the alert has done its job: close
+// the phone notification (same tag the server pushes with) and mark the
+// in-app one read. Once per hero token.
+function watchSeen(){
+  if(!host||!current||seenFor===current.mint||!('IntersectionObserver' in window))return;
+  if(observer)observer.disconnect();
+  var mint=current.mint;
+  observer=new IntersectionObserver(function(entries){
+    if(!entries.some(function(e){return e.isIntersecting}))return;
+    observer.disconnect();observer=null;
+    if(seenFor===mint)return;
+    seenFor=mint;
+    clearTrendingAlert();
+  },{threshold:0.5});
+  observer.observe(host);
+}
+function clearTrendingAlert(){
+  try{
+    if(navigator.serviceWorker&&navigator.serviceWorker.getRegistration){
+      navigator.serviceWorker.getRegistration('/sw.js').then(function(reg){
+        if(!reg||!reg.getNotifications)return;
+        return reg.getNotifications({tag:'orc-trending'}).then(function(list){
+          list.forEach(function(n){n.close()});
+        });
+      }).catch(function(){});
+    }
+  }catch(_){}
+  fetch('/api/home/trending-hero/seen',{method:'POST',credentials:'same-origin',
+        headers:{'Content-Type':'application/json'},body:'{}'}).catch(function(){});
+}
+window.OrcAgentClearTrendingAlert=clearTrendingAlert;
+
 function hide(){
   if(!host||!document.body.contains(host))return;
+  if(observer){observer.disconnect();observer=null;}
   var h=host;host=null;chartFor='';sparkHtml='';
   h.classList.add('oa-th-leaving');h.classList.remove('oa-th-in');
   setTimeout(function(){if(h.parentNode)h.parentNode.removeChild(h)},420);
@@ -132,6 +195,7 @@ function refresh(){
       if(!d.token){current=null;hide();return;}
       if(current&&current.mint!==d.token.mint){chartFor='';sparkHtml='';}
       current=d.token;render(d.token,d.social);
+      afterRender();
     }).catch(function(){})
     .then(function(){busy=false});
 }

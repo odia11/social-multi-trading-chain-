@@ -21,12 +21,15 @@ self.addEventListener('push', function(event) {
     // badge deliberately stays ours: it is the tiny monochrome glyph the
     // system stamps to say WHICH APP buzzed, and a token logo there would
     // be both unreadable at that size and a lie about the sender.
-    self.registration.showNotification(title, {
+    // tag (optional): a newer alert with the same tag replaces the older one
+    // instead of stacking, and the app can close it once the same thing is
+    // on screen (e.g. the "Trending now" card on the home feed).
+    self.registration.showNotification(title, Object.assign({
       body: body,
       icon: data.icon || '/favicon.svg?v=2',
       badge: '/favicon.svg?v=2',
       data: { url: url }
-    })
+    }, data.tag ? { tag: String(data.tag).slice(0, 64), renotify: true } : {}))
   );
 });
 self.addEventListener('notificationclick', function(event) {
