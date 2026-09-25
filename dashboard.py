@@ -21830,6 +21830,30 @@ def _delete_feed_post_interactions(conn, post_id):
     conn.execute('DELETE FROM feed_reposts WHERE post_id=?', (post_id,))
 
 
+def _notify_reply_mentions(conn, message, me, wallet, owner_uid, post_id):
+    """Notify each member @tagged in a reply (in-app + push). Never raises:
+    the reply is already saved, a notification must not undo it."""
+    try:
+        names = set(m.lower() for m in re.findall(r'@([a-zA-Z0-9_]+)', message or ''))
+        if not names:
+            return
+        author = conn.execute('SELECT COALESCE(username,"") FROM users WHERE id=?', (me,)).fetchone()
+        author_name = (author[0] if author and author[0] else wallet[:8]+'…')
+        link = '/#post-'+post_id
+        for uname in list(names)[:10]:
+            row = conn.execute(
+                'SELECT id FROM users WHERE username=? COLLATE NOCASE AND wallet_address!=?',
+                (uname, wallet)).fetchone()
+            if not row or row[0] == owner_uid:
+                continue
+            conn.execute(
+                'INSERT INTO notifications (user_id, type, content, link, actor_wallet) VALUES (?,?,?,?,?)',
+                (row[0], 'mention', author_name+' mentioned you in a reply', link, wallet))
+            conn.commit()
+            _send_push_notification(row[0], 'New mention', author_name+' mentioned you in a reply', link)
+    except Exception as e:
+        print(f'[mention] reply mention notify failed: {type(e).__name__}', flush=True)
+
 @app.route('/api/feed/reply', methods=['POST'])
 @rate_limit(15, 60)
 def post_feed_reply():
@@ -21885,6 +21909,10 @@ def post_feed_reply():
                 (owner_uid, 'reply', replier_name+': replied to your post — '+preview, '/#post-'+post_id, wallet))
             conn.commit()
             _send_push_notification(owner_uid, 'New reply', replier_name+' replied to your post', '/#post-'+post_id)
+        # @tags in a reply notify the tagged member too, exactly like @tags in
+        # a post. The post owner already got the reply notification above, and
+        # nobody is notified for tagging themselves.
+        _notify_reply_mentions(conn, message, me, wallet, owner_uid, post_id)
         reply_id = cur.lastrowid
         row = conn.execute(
             'SELECT COALESCE(username,""), COALESCE(avatar_url,"") FROM users WHERE id=?', (me,)

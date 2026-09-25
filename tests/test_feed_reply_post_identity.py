@@ -88,10 +88,12 @@ class ReplyIdentityTests(unittest.TestCase):
             '_post_owner_uid': lambda c, pid: None,
             '_REACTION_EMOJIS': frozenset(('🔥', '❤️')),
             're': __import__('re'),
+            '_send_push_notification': lambda *a, **k: None,
         }
         extract(self.ns, '_feed_post_created_at', '_valid_post_interaction_sql',
                 '_require_interaction_post', '_delete_feed_post_interactions',
-                'get_feed_replies', 'post_feed_reply', 'social_feed', 'get_feed_post',
+                'get_feed_replies', 'post_feed_reply', '_notify_reply_mentions',
+                'social_feed', 'get_feed_post',
                 'get_feed_likes', 'get_feed_like_users', 'feed_reactions_batch',
                 'toggle_feed_like', 'toggle_feed_repost', 'toggle_feed_reaction')
 
