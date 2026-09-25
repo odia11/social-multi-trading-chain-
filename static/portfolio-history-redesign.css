@@ -122,3 +122,9 @@ body.oa-portfolio.pf-view-history{--oa-h-bg:#111a20;--oa-h-border:#2a3942;--oa-h
   .oa-h-filters svg{max-width:14px}
   .oa-h-day-header strong{font-size:14px}
 }
+
+/* Tips: the @name opens that member's profile (see subLine in the JS). */
+.oa-h-main small .oa-h-user{color:#f7b955;font-weight:700;cursor:pointer;text-decoration:underline;text-decoration-color:rgba(247,185,85,.35);text-underline-offset:2px;padding:4px 2px;margin:-4px -2px;border-radius:5px;-webkit-tap-highlight-color:transparent}
+.oa-h-main small .oa-h-user:active,.oa-h-main small .oa-h-user:hover{color:#ffd36a;background:rgba(247,185,85,.10)}
+.oa-h-main small .oa-h-user:focus-visible{outline:2px solid rgba(247,185,85,.6);outline-offset:1px}
+.oa-h-detail .oa-h-profile-link{margin-right:14px}
