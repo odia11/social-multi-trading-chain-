@@ -64,6 +64,8 @@ check('a trending token appears automatically', r['token'] and r['token']['symbo
 check('...a scam-flagged token is never promoted, however big', r['token']['mint'] != 'ScamMint1111111111111111111111111111111pump')
 check('...with the card data the UI needs', all(k in r['token'] for k in
       ('price_usd', 'price_change_24h', 'volume_24h', 'buys_24h', 'sells_24h', 'chain', 'pair_address')))
+check('...with when it started trending (the post time)',
+      isinstance(r['token'].get('trending_since'), int) and abs(r['token']['trending_since'] - __import__('time').time()) < 60)
 check('...and zeroed social counts', r['social'] == {'bull': 0, 'bear': 0, 'likes': 0, 'my_vote': 0, 'liked': False})
 
 # PEPE now out-trades WOJAK, but WOJAK is still (loosely) trending: it stays.
@@ -114,4 +116,13 @@ check('garbage mints are refused', like(mint='<script>').status_code == 409)
 html = open(os.path.join(os.path.dirname(__file__), '..', 'dashboard.html')).read()
 check('home loads the hero script and styles',
       '/static/home-trending-hero.js?v=__ASSET_VER__' in html and '/static/home-trending-hero.css?v=__ASSET_VER__' in html)
+# Shown as a POST in the feed, not a block above it.
+js = open(os.path.join(os.path.dirname(__file__), '..', 'static', 'home-trending-hero.js')).read()
+check('rendered as a feed post (fc-card) from OrcAgent',
+      "host.className='fc-card oa-th-post'" in js and '<span class="fc-name">OrcAgent</span>' in js)
+check('...placed in the feed, right before the posts',
+      "document.getElementById('center-feed')" in js and 'feed.parentNode.insertBefore(host,feed)' in js)
+check('...with the token card as its attachment and votes/like as its action row',
+      'oa-th-embed' in js and 'oa-th-act oa-th-vote bull' in js and 'oa-th-act oa-th-like' in js)
+check('...only on the For You tab', "active.dataset.tab!=='foryou'" in js)
 raise SystemExit(0 if all(checks) else 1)
