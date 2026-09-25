@@ -458,6 +458,10 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
 .token-tag{color:#f7b955;font-weight:700;text-decoration:underline;cursor:pointer}
 .fc-card:hover{background:#0d0f12}
 .fc-body{flex:1;min-width:0}
+/* A contract address or long link is one unbroken "word": without this it
+   runs straight off the side of the card instead of wrapping. Inherited by
+   every text block inside the post body (plain text, links, $cashtags). */
+[id^="fc-text-"]{overflow-wrap:anywhere;word-break:break-word;min-width:0}
 .fc-header{display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap}
 .fc-avatar{width:44px;height:44px;border-radius:50%;flex-shrink:0;align-self:flex-start;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;font-size:16px;font-weight:700;color:#fff}
 #avatar-lightbox{display:none;position:fixed;inset:0;background:rgba(10,11,14,.85);z-index:9999;align-items:center;justify-content:center;cursor:pointer}
