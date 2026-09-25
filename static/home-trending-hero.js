@@ -1,4 +1,4 @@
-/* Home feed "Trending now" hero card.
+/* Home feed "Trending now" card, shown as a post from OrcAgent.
  *
  * Shows the one token /api/home/trending-hero says is trending right now
  * (see trending_hero.py for the bar), refreshed every 20s. When nothing is
@@ -30,15 +30,42 @@ function fmtInt(n){return (Number(n)||0).toLocaleString('en-US')}
 var CHAINS={solana:['S','#9945ff','Solana'],bsc:['B','#f0b90b','BNB Chain'],base:['B','#0052ff','Base'],
   arbitrum:['A','#28a0f0','Arbitrum'],polygon:['P','#8247e5','Polygon'],robinhood:['R','#00c805','Robinhood Chain']};
 
+// Rendered as a POST in the feed: first item under the For You tab, from
+// OrcAgent, with the token card as its attachment and Bullish / Bearish /
+// Like as its action row. It sits right before #center-feed rather than
+// inside it, so the feed's own re-renders never wipe it.
 function ensureHost(){
   if(host&&document.body.contains(host))return host;
-  var tabs=document.querySelector('.feed-tabs');
-  if(!tabs||!tabs.parentNode)return null;
-  host=document.createElement('section');
-  host.id='oa-trend-hero';host.className='oa-th';host.setAttribute('aria-label','Trending token');
-  tabs.parentNode.insertBefore(host,tabs);
+  var feed=document.getElementById('center-feed');
+  if(!feed||!feed.parentNode)return null;
+  host=document.createElement('article');
+  host.id='oa-trend-hero';host.className='fc-card oa-th-post';host.setAttribute('aria-label','Trending token');
+  feed.parentNode.insertBefore(host,feed);
+  syncTab();
   return host;
 }
+// Only on For You: Following is posts from people you follow.
+function syncTab(){
+  if(!host)return;
+  var active=document.querySelector('.feed-tab.active');
+  host.hidden=!!(active&&active.dataset.tab&&active.dataset.tab!=='foryou');
+}
+// Follow whichever tab is active, however it was switched (the mobile home
+// has its own tab bar that drives the hidden .feed-tab buttons).
+function watchTabs(){
+  var bar=document.querySelector('.feed-tabs');
+  if(bar&&'MutationObserver' in window)
+    new MutationObserver(syncTab).observe(bar,{subtree:true,attributes:true,attributeFilter:['class']});
+}
+function ago(sec){
+  var d=Math.max(0,Math.floor(Date.now()/1000-(Number(sec)||0)));
+  if(!sec||d<60)return 'now';
+  if(d<3600)return Math.floor(d/60)+'m';
+  if(d<86400)return Math.floor(d/3600)+'h';
+  return Math.floor(d/86400)+'d';
+}
+var ORC_MARK='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 21 19H3Z" fill="#111318"/></svg>';
+var VERIFIED='<svg class="oa-th-verified" viewBox="0 0 24 24" aria-label="Verified"><circle cx="12" cy="12" r="12" fill="#f7b955"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#0a0b0e" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 function render(t,s){
   var h=ensureHost();if(!h)return;
@@ -48,28 +75,40 @@ function render(t,s){
   // Only http(s) logos; a broken one falls back to the letter underneath.
   var logo=/^https?:\/\//.test(t.image_url||'')?'<img src="'+esc(t.image_url)+'" alt="" loading="lazy">':'';
   var sym=esc(t.symbol||'?');
+  var chg=(up?'+':'')+t.price_change_24h.toFixed(1)+'%';
   h.innerHTML=
-    '<div class="oa-th-top"><span class="oa-th-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c1 4 5 5.5 5 11a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.3C9.8 10 11 10.5 11.5 12c1.3-2.6.5-6 .5-10Z"/></svg>'
-      +(t.surging?'Surging now':'Trending now')+'</span><span class="oa-th-live"><i></i>LIVE</span></div>'
-    +'<div class="oa-th-head">'
-      +'<div class="oa-th-logo"><span>'+esc((t.symbol||'?').charAt(0).toUpperCase())+'</span>'+logo
-        +'<b style="background:'+chain[1]+'" title="'+esc(chain[2])+'">'+esc(chain[0])+'</b></div>'
-      +'<div class="oa-th-id"><strong>$'+sym+'</strong><small>'+esc(t.name||t.symbol)+' · '+esc(chain[2])+'</small></div>'
-      +'<div class="oa-th-px"><strong>'+fmtPrice(t.price_usd)+'</strong>'
-        +'<span class="oa-th-chg '+(up?'up':'down')+'">'+(up?'↗ +':'↘ ')+t.price_change_24h.toFixed(1)+'%</span></div>'
-    +'</div>'
-    // The 20s refresh re-renders the card; keep the already-drawn sparkline
-    // instead of blanking it until the next chart fetch.
-    +'<svg class="oa-th-spark'+(chartFor===t.mint&&!sparkHtml?' empty':'')+'" id="oa-th-spark" viewBox="0 0 300 90" preserveAspectRatio="none" aria-hidden="true">'+(chartFor===t.mint?sparkHtml:'')+'</svg>'
-    +'<div class="oa-th-pressure"><span>Buy pressure</span><span><em class="b">'+buyPct+'% buy</em> · <em class="s">'+sellPct+'% sell</em></span></div>'
-    +'<div class="oa-th-bar"><i style="width:'+buyPct+'%"></i></div>'
-    +'<div class="oa-th-stats">'
-      +'<div><strong class="b">'+fmtInt(t.buys_24h)+'</strong><small>Buys</small></div>'
-      +'<div><strong>'+fmtUsd(t.volume_24h)+'</strong><small>Vol · 24h</small></div>'
-      +'<div><strong class="s">'+fmtInt(t.sells_24h)+'</strong><small>Sells</small></div>'
-    +'</div>'
-    +'<div class="oa-th-social" id="oa-th-social"></div>'
-    +'<a class="oa-th-trade" href="/live-market?mint='+encodeURIComponent(t.mint)+'">Trade $'+sym+' <span aria-hidden="true">→</span></a>';
+    '<div class="fc-avatar oa-th-avatar">'+ORC_MARK+'</div>'
+    +'<div class="fc-body">'
+      +'<div class="fc-header">'
+        +'<span class="fc-name">OrcAgent</span>'+VERIFIED
+        +'<span class="oa-th-tag"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c1 4 5 5.5 5 11a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.3C9.8 10 11 10.5 11.5 12c1.3-2.6.5-6 .5-10Z"/></svg>'+(t.surging?'Surging':'Trending')+'</span>'
+        +'<span class="fc-sep">·</span><span class="fc-time" id="oa-th-time">'+ago(t.trending_since)+'</span>'
+        +'<span class="oa-th-live" title="Live"><i></i>LIVE</span>'
+      +'</div>'
+      +'<div class="oa-th-text"><b>$'+sym+'</b> is trending on '+esc(chain[2])+' 🔥 '
+        +'<span class="'+(up?'b':'s')+'">'+chg+'</span> in 24h with '+fmtUsd(t.volume_24h)+' volume.</div>'
+      +'<div class="oa-th-embed">'
+        +'<div class="oa-th-head">'
+          +'<div class="oa-th-logo"><span>'+esc((t.symbol||'?').charAt(0).toUpperCase())+'</span>'+logo
+            +'<b style="background:'+chain[1]+'" title="'+esc(chain[2])+'">'+esc(chain[0])+'</b></div>'
+          +'<div class="oa-th-id"><strong>$'+sym+'</strong><small>'+esc(t.name||t.symbol)+' · '+esc(chain[2])+'</small></div>'
+          +'<div class="oa-th-px"><strong>'+fmtPrice(t.price_usd)+'</strong>'
+            +'<span class="oa-th-chg '+(up?'up':'down')+'">'+(up?'↗ ':'↘ ')+chg+'</span></div>'
+        +'</div>'
+        // The 20s refresh re-renders the post; keep the already-drawn
+        // sparkline instead of blanking it until the next chart fetch.
+        +'<svg class="oa-th-spark'+(chartFor===t.mint&&!sparkHtml?' empty':'')+'" id="oa-th-spark" viewBox="0 0 300 90" preserveAspectRatio="none" aria-hidden="true">'+(chartFor===t.mint?sparkHtml:'')+'</svg>'
+        +'<div class="oa-th-pressure"><span>Buy pressure</span><span><em class="b">'+buyPct+'% buy</em> · <em class="s">'+sellPct+'% sell</em></span></div>'
+        +'<div class="oa-th-bar"><i style="width:'+buyPct+'%"></i></div>'
+        +'<div class="oa-th-stats">'
+          +'<div><strong class="b">'+fmtInt(t.buys_24h)+'</strong><small>Buys</small></div>'
+          +'<div><strong>'+fmtUsd(t.volume_24h)+'</strong><small>Vol · 24h</small></div>'
+          +'<div><strong class="s">'+fmtInt(t.sells_24h)+'</strong><small>Sells</small></div>'
+        +'</div>'
+        +'<a class="oa-th-trade" href="/live-market?mint='+encodeURIComponent(t.mint)+'">Trade $'+sym+' <span aria-hidden="true">→</span></a>'
+      +'</div>'
+      +'<div class="oa-th-social" id="oa-th-social"></div>'
+    +'</div>';
   var img=h.querySelector('.oa-th-logo img');
   if(img)img.addEventListener('error',function(){img.remove()},{once:true});
   renderSocial(s);
@@ -78,14 +117,15 @@ function render(t,s){
   requestAnimationFrame(function(){h.classList.add('oa-th-in')});
 }
 
+// The post's action row, in the feed's own style: icon + count.
 function renderSocial(s){
   var box=document.getElementById('oa-th-social');if(!box||!s)return;
   box.innerHTML=
-    '<button type="button" class="oa-th-vote bull'+(s.my_vote===1?' on':'')+'" data-vote="bull" aria-pressed="'+(s.my_vote===1)+'">'
-      +'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5l7 9H5z"/></svg>Bullish <b>'+fmtInt(s.bull)+'</b></button>'
-    +'<button type="button" class="oa-th-vote bear'+(s.my_vote===-1?' on':'')+'" data-vote="bear" aria-pressed="'+(s.my_vote===-1)+'">'
-      +'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19l7-9H5z"/></svg>Bearish <b>'+fmtInt(s.bear)+'</b></button>'
-    +'<button type="button" class="oa-th-like'+(s.liked?' on':'')+'" aria-pressed="'+(!!s.liked)+'" aria-label="Like">'
+    '<button type="button" class="oa-th-act oa-th-vote bull'+(s.my_vote===1?' on':'')+'" data-vote="bull" aria-pressed="'+(s.my_vote===1)+'" aria-label="Bullish">'
+      +'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l6-6 4 4 7-8"/><path d="M15 7h6v6"/></svg><span>Bullish</span><b>'+fmtInt(s.bull)+'</b></button>'
+    +'<button type="button" class="oa-th-act oa-th-vote bear'+(s.my_vote===-1?' on':'')+'" data-vote="bear" aria-pressed="'+(s.my_vote===-1)+'" aria-label="Bearish">'
+      +'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7l6 6 4-4 7 8"/><path d="M15 17h6v-6"/></svg><span>Bearish</span><b>'+fmtInt(s.bear)+'</b></button>'
+    +'<button type="button" class="oa-th-act oa-th-like'+(s.liked?' on':'')+'" aria-pressed="'+(!!s.liked)+'" aria-label="Like">'
       +'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-8-5.4-9.4-10A5 5 0 0 1 12 6a5 5 0 0 1 9.4 5C20 15.6 12 21 12 21Z"/></svg><b>'+fmtInt(s.likes)+'</b></button>';
 }
 
@@ -222,6 +262,7 @@ document.addEventListener('click',function(e){
 function boot(){
   var path=location.pathname.replace(/\/+$/,'')||'/';
   if(path!=='/'&&path!=='/dashboard')return;
+  watchTabs();
   refresh();
   setInterval(refresh,POLL_MS);
   document.addEventListener('visibilitychange',function(){if(!document.hidden)refresh()});

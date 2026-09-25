@@ -66,7 +66,8 @@ MAX_SAFETY_CHECKS = 6
 _MINT_RE = re.compile(r'^(?:[1-9A-HJ-NP-Za-km-z]{32,44}|0x[0-9a-fA-F]{40})$')
 
 _lock = threading.Lock()
-_state = {'at': 0.0, 'token': None, 'mint': None, 'recent': {}}   # recent: mint -> last time it was the hero
+_state = {'at': 0.0, 'token': None, 'mint': None, 'recent': {},   # recent: mint -> last time it was the hero
+          'since': 0.0}                                             # when the current hero started trending
 
 
 def _f(v):
@@ -156,6 +157,12 @@ def current_hero(d) -> dict | None:
         candidates = []
     token = pick(d, candidates, _surging(d), now)
     with _lock:
+        if token and token['mint'] != _state.get('mint'):
+            _state['since'] = now
+        if token:
+            # When it started trending: the home feed shows the card as a post
+            # with this as its time ("12m").
+            token = dict(token, trending_since=int(_state['since'] or now))
         _state.update(at=now, token=token, mint=token['mint'] if token else None)
         if token:
             _state['recent'][token['mint']] = now
