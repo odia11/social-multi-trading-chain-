@@ -1,0 +1,57 @@
+/* Home feed "Trending now" hero card (home-trending-hero.js). */
+.oa-th{position:relative;margin:14px 0 16px;padding:18px 18px 16px;border:1px solid #242c36;border-radius:24px;
+  background:linear-gradient(180deg,#12171e 0%,#0d1117 100%);box-shadow:0 18px 44px rgba(0,0,0,.38),0 0 0 1px rgba(247,185,85,.05);
+  color:#eef1f5;opacity:0;transform:translateY(8px) scale(.985);transition:opacity .35s ease,transform .35s cubic-bezier(.2,.8,.2,1);overflow:hidden}
+.oa-th.oa-th-in{opacity:1;transform:none}
+.oa-th.oa-th-leaving{opacity:0;transform:translateY(-6px) scale(.98)}
+.oa-th-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.oa-th-badge{display:inline-flex;align-items:center;gap:7px;padding:7px 13px;border-radius:99px;background:rgba(247,185,85,.12);
+  color:#f7b955;font:800 12px/1 Geist,system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase}
+.oa-th-badge svg{width:14px;height:14px;fill:none;stroke:#f7b955;stroke-width:2;stroke-linejoin:round}
+.oa-th-live{display:inline-flex;align-items:center;gap:7px;color:#9aa6b2;font:800 12px/1 Geist,system-ui,sans-serif;letter-spacing:.08em}
+.oa-th-live i{width:9px;height:9px;border-radius:50%;background:#5fd39b;box-shadow:0 0 0 4px rgba(95,211,155,.14);animation:oa-th-pulse 1.8s ease-in-out infinite}
+@keyframes oa-th-pulse{50%{box-shadow:0 0 0 7px rgba(95,211,155,.04)}}
+.oa-th-head{display:flex;align-items:center;gap:13px}
+.oa-th-logo{position:relative;flex:0 0 auto;width:58px;height:58px;border-radius:50%;border:1.5px solid rgba(247,185,85,.55);background:#141a21;
+  display:flex;align-items:center;justify-content:center;color:#f7b955;font:800 22px/1 Geist,system-ui,sans-serif}
+.oa-th-logo img{position:absolute;inset:3px;width:calc(100% - 6px);height:calc(100% - 6px);border-radius:50%;object-fit:cover}
+.oa-th-logo b{position:absolute;right:-5px;bottom:-4px;width:22px;height:22px;border-radius:7px;border:2px solid #0f141a;color:#fff;
+  display:flex;align-items:center;justify-content:center;font:800 11px/1 Geist,system-ui,sans-serif}
+.oa-th-id{flex:1;min-width:0}
+.oa-th-id strong{display:block;font:800 22px/1.15 Geist,system-ui,sans-serif;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.oa-th-id small{display:block;margin-top:5px;color:#8b96a3;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.oa-th-px{flex:0 0 auto;text-align:right}
+.oa-th-px strong{display:block;font:800 21px/1.1 'JetBrains Mono',monospace;letter-spacing:-.03em}
+.oa-th-chg{display:inline-block;margin-top:7px;padding:5px 9px;border-radius:9px;font:800 12.5px/1 'JetBrains Mono',monospace}
+.oa-th-chg.up{background:rgba(95,211,155,.12);color:#5fd39b}
+.oa-th-chg.down{background:rgba(240,113,120,.12);color:#f07178}
+.oa-th-spark{display:block;width:100%;height:92px;margin:14px 0 12px}
+.oa-th-spark.empty{height:10px}
+.oa-th-pressure{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font:700 12px/1 'JetBrains Mono',monospace;color:#8b96a3;letter-spacing:.06em;text-transform:uppercase}
+.oa-th-pressure em{font-style:normal;text-transform:none;letter-spacing:0}
+.oa-th .b{color:#5fd39b}.oa-th .s{color:#f07178}
+.oa-th-bar{height:10px;margin:10px 0 14px;border-radius:99px;background:#f07178;overflow:hidden}
+.oa-th-bar i{display:block;height:100%;border-radius:99px 0 0 99px;background:#5fd39b;transition:width .5s ease}
+.oa-th-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.oa-th-stats div{padding:12px 6px;border-radius:14px;background:#141a21;text-align:center;min-width:0}
+.oa-th-stats strong{display:block;font:800 17px/1.1 'JetBrains Mono',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.oa-th-stats small{display:block;margin-top:7px;color:#8b96a3;font:700 10.5px/1 Geist,system-ui,sans-serif;letter-spacing:.1em;text-transform:uppercase}
+.oa-th-social{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-top:10px}
+.oa-th-social button{height:42px;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:0 12px;border:1px solid #242c36;border-radius:13px;
+  background:#10151b;color:#c3cad2;font:700 13px/1 Geist,system-ui,sans-serif;cursor:pointer;transition:border-color .15s,background .15s,color .15s,transform .08s;-webkit-tap-highlight-color:transparent}
+.oa-th-social button:active{transform:scale(.96)}
+.oa-th-social button:disabled{opacity:.6}
+.oa-th-social svg{width:15px;height:15px;fill:currentColor}
+.oa-th-social b{font-family:'JetBrains Mono',monospace;font-weight:800}
+.oa-th-vote.bull.on{border-color:rgba(95,211,155,.55);background:rgba(95,211,155,.12);color:#5fd39b}
+.oa-th-vote.bear.on{border-color:rgba(240,113,120,.55);background:rgba(240,113,120,.12);color:#f07178}
+.oa-th-like svg{fill:none;stroke:currentColor;stroke-width:2}
+.oa-th-like.on{border-color:rgba(247,185,85,.55);background:rgba(247,185,85,.12);color:#f7b955}
+.oa-th-like.on svg{fill:currentColor}
+.oa-th-trade{display:flex;align-items:center;justify-content:center;gap:10px;height:58px;margin-top:12px;border-radius:17px;
+  background:linear-gradient(180deg,#ffd36a,#f0b85c);color:#111318;font:800 17px/1 Geist,system-ui,sans-serif;text-decoration:none;
+  box-shadow:0 12px 28px rgba(247,185,85,.18);transition:transform .08s}
+.oa-th-trade:active{transform:scale(.985)}
+@media(max-width:380px){.oa-th{padding:16px 14px 14px}.oa-th-id strong{font-size:19px}.oa-th-px strong{font-size:18px}.oa-th-logo{width:50px;height:50px}
+  .oa-th-social button{padding:0 8px;font-size:12px}}
+@media(prefers-reduced-motion:reduce){.oa-th,.oa-th-bar i{transition:none}.oa-th-live i{animation:none}}
