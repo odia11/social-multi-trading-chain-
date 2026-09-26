@@ -97,7 +97,7 @@ jobs:
 
       - name: Check tracked secret files
         run: |
-          if git ls-files | grep -Ei '(^|/)(\.env($|\.)|\.secret_key$|id_rsa$|id_ed25519$|backups?/|dumps?/|.*\.(pem|key|p12|pfx|bak|backup|dump|db|sqlite|sqlite3|sql)(\.(gz|enc))?$)' ; then
+          if git ls-files | grep -Ei '(^|/)(\.env($|\.)|\.secret_key$|id_rsa$|id_ed25519$|backups?/|dumps?/|.*\.(pem|key|p12|pfx|bak|backup|dump|db|sqlite|sqlite3|sql)($|[.-]))' ; then
             echo "ERROR: secret/database/backup-like file is tracked by git."
             exit 1
           fi
