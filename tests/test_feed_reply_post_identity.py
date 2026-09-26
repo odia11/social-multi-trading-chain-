@@ -92,7 +92,7 @@ class ReplyIdentityTests(unittest.TestCase):
         }
         extract(self.ns, '_feed_post_created_at', '_valid_post_interaction_sql',
                 '_require_interaction_post', '_delete_feed_post_interactions',
-                'get_feed_replies', 'post_feed_reply', '_notify_reply_mentions',
+                'get_feed_replies', 'post_feed_reply', '_notify_reply_mentions', '_post_link', '_group_post_link',
                 'social_feed', 'get_feed_post',
                 'get_feed_likes', 'get_feed_like_users', 'feed_reactions_batch',
                 'toggle_feed_like', 'toggle_feed_repost', 'toggle_feed_reaction')

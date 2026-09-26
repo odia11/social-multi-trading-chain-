@@ -69,9 +69,12 @@ html,body{overflow-x:clip}  /* clip, not hidden: hidden makes the root a scroll 
 .gd-claim-banner b{color:#ff4d6a}
 .gd-claim-banner-icon{font-size:16px;flex-shrink:0}
 
-.gd-quicklinks{display:flex;gap:14px;margin-top:8px}
+.gd-quicklinks{display:flex;flex-wrap:wrap;gap:14px;margin-top:8px}
 .gd-quicklink{background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;font-family:var(--ui);padding:0}
 .gd-quicklink:hover{color:var(--text)}
+.gd-quicklink[hidden]{display:none}
+.gd-post.gd-post-focus{animation:gd-post-focus 1.1s ease-out 2}
+@keyframes gd-post-focus{0%{background:rgba(247,185,85,.14);box-shadow:inset 3px 0 0 #f7b955}100%{background:transparent;box-shadow:inset 3px 0 0 transparent}}
 
 .gd-search-wrap{margin:14px 0}
 .gd-search-inp{width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:11px;padding:10px 14px;color:var(--text);font-size:13.5px;font-family:var(--ui);outline:none}
@@ -269,6 +272,7 @@ html,body{overflow-x:clip}  /* clip, not hidden: hidden makes the root a scroll 
         <button class="gd-quicklink" onclick="_openRules()">📋 Rules</button>
         <button class="gd-quicklink" onclick="_toggleSearch()">🔍 Search</button>
         <button class="gd-quicklink" onclick="_shareGroupLink()">🔗 Share</button>
+        <button class="gd-quicklink" id="gd-notify-btn" onclick="_toggleGroupNotify()" hidden></button>
       </div>
       <div class="gd-desc" id="gd-desc" style="display:none"></div>
     </div>
@@ -472,6 +476,7 @@ function _renderHeader(g){
     btn.classList.remove('joined');
   }
 
+  _renderNotifyBtn(g);
   document.getElementById('gd-mods-btn').style.display = g.is_owner ? '' : 'none';
   document.getElementById('gd-settings-btn').style.display = g.is_owner ? '' : 'none';
   document.getElementById('gd-delete-btn').style.display = (g.is_owner || g.is_platform_owner) ? '' : 'none';
@@ -988,7 +993,48 @@ function _loadPosts(){
     _lastPostsSignature = d.posts.map(function(p){ return p.id; }).join(',');
     el.innerHTML = d.posts.map(_postHtml).join('');
     _loadReactions(d.posts.map(function(p){ return 'g'+p.id; }));
+    _focusLinkedPost();
   }).catch(function(){});
+}
+
+/* A group notification links to /groups/<id>#gpost-<postId>: bring that post
+   into view once and pulse it so the eye lands on it. */
+var _focusedHash = '';
+function _focusLinkedPost(){
+  var m = /^#gpost-(\d+)$/.exec(location.hash || '');
+  if(!m || _focusedHash === location.hash) return;
+  var post = document.querySelector('#gd-feed .gd-post[data-post-id="'+m[1]+'"]');
+  if(!post) return;
+  _focusedHash = location.hash;
+  post.scrollIntoView({block:'center', behavior:'smooth'});
+  post.classList.remove('gd-post-focus'); void post.offsetWidth; post.classList.add('gd-post-focus');
+}
+window.addEventListener('hashchange', function(){ _focusedHash = ''; _focusLinkedPost(); });
+
+/* Per-group notification switch for members (new posts in this group). */
+function _renderNotifyBtn(g){
+  var b = document.getElementById('gd-notify-btn');
+  if(!b) return;
+  b.hidden = !g.is_member;
+  b.textContent = g.notify ? '🔔 Alerts' : '🔕 Muted';
+  b.title = g.notify ? 'Notifications for new posts are on. Tap to mute this group.'
+                     : 'This group is muted. Tap to get notified of new posts.';
+  b.setAttribute('aria-label', g.notify ? 'Group notifications on' : 'Group notifications off');
+  b.setAttribute('aria-pressed', g.notify ? 'true' : 'false');
+}
+function _toggleGroupNotify(){
+  if(!_groupData || !_groupData.is_member) return;
+  var b = document.getElementById('gd-notify-btn');
+  var on = !_groupData.notify;
+  b.disabled = true;
+  fetch('/api/groups/'+_groupId+'/notifications', {method:'POST', credentials:'include', headers:_apiHeaders(), body:JSON.stringify({on:on})})
+    .then(function(r){return r.json();}).then(function(d){
+      b.disabled = false;
+      if(!d.ok){ _showToast(d.msg||'Could not update notifications', 'err'); return; }
+      _groupData.notify = !!d.notify;
+      _renderNotifyBtn(_groupData);
+      _showToast(d.notify ? 'You will be notified of new posts' : 'Notifications for this group are off');
+    }).catch(function(){ b.disabled = false; _showToast('Network error', 'err'); });
 }
 
 /* Poll for new posts every 5s, same cadence as DMs -- only touches the DOM
