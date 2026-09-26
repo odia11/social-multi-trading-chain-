@@ -605,15 +605,15 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
 .fc-ri-delete:hover{color:#f76b62}
 /* A reply like is a readable horizontal heart + count, including zero.
    Its filled heart and red pill stay visible after the request completes. */
-.fc-ri-like{background:rgba(154,165,181,.07);border:1px solid rgba(154,165,181,.12);cursor:pointer;display:inline-flex;flex-direction:row;align-items:center;justify-content:center;gap:6px;flex-shrink:0;min-width:58px;min-height:38px;padding:7px 9px;border-radius:12px;color:#c4ccd7;font-family:inherit;font-variant-numeric:tabular-nums;transition:background .15s,border-color .15s,color .15s}
-.fc-ri-heart{font-size:16px;line-height:1;filter:none;display:inline-flex;align-items:center;justify-content:center;min-width:17px;transition:transform .1s}
+.fc-ri-like{background:transparent;border:1px solid transparent;cursor:pointer;display:inline-flex;flex-direction:row;align-items:center;justify-content:center;gap:5px;flex-shrink:0;min-width:48px;min-height:38px;padding:7px 3px;border-radius:8px;color:#c4ccd7;font-family:inherit;font-variant-numeric:tabular-nums;transition:background .15s,border-color .15s,color .15s}
+.fc-ri-heart{font-size:15px;line-height:1;filter:none;display:inline-flex;align-items:center;justify-content:center;min-width:16px;transition:transform .1s}
 .fc-ri-like:hover{background:rgba(255,96,117,.10);border-color:rgba(255,96,117,.22)}
-.fc-ri-like.liked{background:rgba(255,96,117,.14);border-color:rgba(255,96,117,.38);color:#ff778a}
+.fc-ri-like.liked{background:transparent;border-color:transparent;color:#ff778a}
 .fc-ri-like:active .fc-ri-heart{transform:scale(1.13)}
 .fc-ri-like:disabled{cursor:wait;opacity:1}
-.fc-ri-lc{display:inline-block;min-width:10px;font:750 15px/1 'Geist',system-ui,sans-serif;color:inherit;text-align:center}
+.fc-ri-lc{display:inline-block;min-width:10px;font:750 14px/1 'Geist',system-ui,sans-serif;color:inherit;text-align:center}
 .fc-ri-like.liked .fc-ri-lc{color:#ff778a}
-@media(max-width:767px){.fc-ri-like{min-width:58px;min-height:40px;padding:7px 8px}.fc-ri-lc{font-size:15px}}
+@media(max-width:767px){.fc-ri-like{min-width:48px;min-height:40px;padding:7px 3px}.fc-ri-lc{font-size:14px}}
 
 /* New-reply badge on the Reply action of your own post -- lets a reply
    someone left on your post actually stand out while scrolling the feed,

@@ -30,3 +30,24 @@
   .fc-actions .fc-action.oa-action-like{gap:6px!important;min-height:42px;padding:7px 6px!important}
   .fc-actions .fc-action.oa-action-like .fc-like-count{font-size:16px!important}
 }
+
+/* Compact likes: the large pink pill, not only the icon, was making the
+   control dominate the feed. Keep the 40px touch target without a large
+   painted background or border. Counts stay high contrast and adjacent. */
+.fc-actions .fc-action.oa-action-like,
+.fc-actions .fc-action.oa-action-like.liked,
+.fc-actions .fc-action.oa-action-like:hover{
+  min-height:40px!important;
+  min-width:48px!important;
+  padding:7px 3px!important;
+  gap:5px!important;
+  border:0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+  border-radius:8px!important;
+}
+.fc-actions .fc-action.oa-action-like .oa-feed-action-icon{
+  width:17px!important;height:17px!important;flex:0 0 17px!important;
+}
+.fc-actions .fc-action.oa-action-like .fc-like-count{font-size:14px!important}
+.fc-actions .fc-action.oa-action-like.liked{color:#ff778a!important}
