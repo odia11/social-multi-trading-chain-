@@ -2,16 +2,42 @@
 .env
 .env.*
 .secret_key
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
 
-# Database
+# Database — source trees and historical recovery files are NEVER publishable
 *.db
 *.sqlite
 *.sqlite3
+*.db.*
+*.sqlite.*
+*.sqlite3.*
+*.db-*
+*.sqlite-*
+*.sqlite3-*
+*.bak
+*.backup
+*.dump
+*.sql
+*.sql.gz
+*.db.gz
+*.db.gz.enc
+/backups/
+/dump.sql
+/orcagent_corrupt.db.bak
+
+# Local Python environment must never enter commits
+/venv/
+.venv/
 
 # Logs
 *.log
