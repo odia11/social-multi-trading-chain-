@@ -126,8 +126,59 @@ function renderSocial(s){
     +'<button type="button" class="oa-th-act oa-th-vote bear'+(s.my_vote===-1?' on':'')+'" data-vote="bear" aria-pressed="'+(s.my_vote===-1)+'" aria-label="Bearish">'
       +'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7l6 6 4-4 7 8"/><path d="M15 17h6v-6"/></svg><span>Bearish</span><b>'+fmtInt(s.bear)+'</b></button>'
     +'<button type="button" class="oa-th-act oa-th-like'+(s.liked?' on':'')+'" aria-pressed="'+(!!s.liked)+'" aria-label="Like">'
-      +'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-8-5.4-9.4-10A5 5 0 0 1 12 6a5 5 0 0 1 9.4 5C20 15.6 12 21 12 21Z"/></svg><b>'+fmtInt(s.likes)+'</b></button>';
+      +'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-8-5.4-9.4-10A5 5 0 0 1 12 6a5 5 0 0 1 9.4 5C20 15.6 12 21 12 21Z"/></svg><b>'+fmtInt(s.likes)+'</b></button>'
+    +'<button type="button" class="oa-th-act oa-th-share" aria-label="Share" aria-haspopup="menu">'
+      +'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg><span>Share</span></button>';
 }
+
+// ── share: a public link that unfurls on X as this card ──────────────────
+// /trending/<chain>/<token> (trending_share.py) carries the card image and
+// the live numbers; opening it lands on this card in the app.
+function shareLink(t){
+  // A fresh query per hour so X fetches the current numbers, not an old unfurl.
+  return location.origin+'/trending/'+encodeURIComponent(t.chain)+'/'+encodeURIComponent(t.mint)
+    +'?s='+Math.floor(Date.now()/3600000);
+}
+function shareText(t){
+  var chg=(Number(t.price_change_24h)>=0?'+':'')+(Number(t.price_change_24h)||0).toFixed(1)+'%';
+  return '$'+(t.symbol||'')+' is trending on @Orcagent 🔥 '+chg+' in 24h with '+fmtUsd(t.volume_24h)+' volume';
+}
+function closeShare(){var m=document.getElementById('oa-th-share-menu');if(m)m.remove();}
+function openShare(btn){
+  if(document.getElementById('oa-th-share-menu')){closeShare();return;}
+  var t=current;if(!t)return;
+  var url=shareLink(t), text=shareText(t);
+  var m=document.createElement('div');
+  m.id='oa-th-share-menu';m.className='oa-th-share-menu';m.setAttribute('role','menu');
+  m.innerHTML=
+    '<a role="menuitem" class="oa-th-share-x" target="_blank" rel="noopener" href="https://x.com/intent/post?text='
+      +encodeURIComponent(text)+'&url='+encodeURIComponent(url)+'">'
+      +'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.8 3h3.1l-6.8 7.8 8 10.2h-6.3l-4.9-6.4L5.3 21H2.2l7.3-8.3L1.8 3h6.4l4.4 5.9L17.8 3Zm-1.1 16.2h1.7L7.4 4.7H5.6l11.1 14.5Z" fill="currentColor" stroke="none"/></svg>'
+      +'Post on X</a>'
+    +'<button type="button" role="menuitem" class="oa-th-share-copy">'
+      +'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>'
+      +'<span>Copy link</span></button>'
+    +(navigator.share?'<button type="button" role="menuitem" class="oa-th-share-more">'
+      +'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>'
+      +'More…</button>':'');
+  btn.parentNode.appendChild(m);
+  m.querySelector('.oa-th-share-x').addEventListener('click',function(){setTimeout(closeShare,50)});
+  m.querySelector('.oa-th-share-copy').addEventListener('click',function(){
+    var lbl=this.querySelector('span');
+    var done=function(){lbl.textContent='Link copied';setTimeout(closeShare,900)};
+    if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(url).then(done,function(){prompt('Copy this link',url)});
+    else prompt('Copy this link',url);
+  });
+  var more=m.querySelector('.oa-th-share-more');
+  if(more)more.addEventListener('click',function(){
+    closeShare();
+    navigator.share({title:'$'+t.symbol+' is trending on OrcAgent',text:text,url:url}).catch(function(){});
+  });
+}
+document.addEventListener('click',function(e){
+  var m=document.getElementById('oa-th-share-menu');
+  if(m&&!m.contains(e.target)&&!(e.target.closest&&e.target.closest('.oa-th-share')))closeShare();
+});
 
 function loadSpark(t,up){
   var qs='?tf=5m'+(t.pair_address?'&pair='+encodeURIComponent(t.pair_address):'')+'&chain='+encodeURIComponent(t.chain);
@@ -248,6 +299,9 @@ document.addEventListener('click',function(e){
   var b=e.target.closest&&e.target.closest('#oa-th-social button');
   if(!b||!current)return;
   e.preventDefault();
+  // Anyone may share, signed in or not.
+  if(b.classList.contains('oa-th-share')){openShare(b);return;}
+  if(b.closest('.oa-th-share-menu'))return;
   if(typeof checkGuest==='function'&&checkGuest())return;
   var mint=current.mint, isLike=b.classList.contains('oa-th-like');
   b.disabled=true;
