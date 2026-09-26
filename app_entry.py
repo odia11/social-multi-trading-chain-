@@ -3,6 +3,9 @@
 OrcAgent never subsidizes user gas. EVM BUYs use 0x Gasless and Solana
 USDC BUYs use Jupiter gasless support, so a user can trade without first
 holding the chain's native gas token when the provider offers a gasless route.
+Where no gasless route exists (e.g. Robinhood Chain), the sponsor wallet fronts
+the gas and the user pays it back in the same trade (sponsored_gas.py) -- float,
+not a subsidy.
 """
 import os
 
@@ -45,6 +48,7 @@ from abuse_rate_hardening import install as _install_abuse_rate_hardening
 from upload_hardening import install as _install_upload_hardening
 from bsc_gasless_trading import install as _install_evm_gasless_trading
 from solana_gasless_trading import install as _install_solana_gasless_trading
+from sponsored_gas import install as _install_sponsored_gas
 from cross_chain_budget_guard import install as _install_cross_chain_budget_guard
 from solana_source_bridge_gasless import install as _install_solana_source_bridge_gasless
 from header_stable_balance import install as _install_header_stable_balance
@@ -108,6 +112,12 @@ _install_upload_hardening(_dashboard)
 # 0x Gasless: native BNB/ETH/POL is not a prerequisite for a stablecoin-funded
 # buy, and OrcAgent does not front it.
 _install_evm_gasless_trading(_dashboard)
+
+# Where 0x Gasless cannot take the trade (a chain it does not cover, such as
+# Robinhood Chain, or a token without a gasless route), the sponsor wallet
+# fronts exactly the gas the trade needs and the user's wallet pays it back
+# in USDC/USDG in the same trade, out of the amount they entered.
+_install_sponsored_gas(_dashboard)
 
 # The autonomous bot used to perform its own native-gas precheck before the
 # shared EVM BUY flow, which meant a USDC-only wallet never reached 0x Gasless.
