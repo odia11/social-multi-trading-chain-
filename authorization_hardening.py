@@ -162,7 +162,11 @@ def _row_owned_by(conn, table: str, row_id: int, uid: int | None, wallet: str) -
 
 
 def _message_owned(conn, message_id: int, uid: int | None, wallet: str) -> bool | None:
-    for table in ('messages', 'direct_messages', 'dm_messages'):
+    # direct_messages FIRST: it is the table PUT/DELETE /api/messages/<id>
+    # actually edits. The legacy wallet-keyed `messages` table always exists
+    # too, so checking it first judged every DM id against the wrong table and
+    # refused to let people edit or delete their own messages.
+    for table in ('direct_messages', 'messages', 'dm_messages'):
         result = _row_owned_by(conn, table, message_id, uid, wallet)
         if result is not None:
             return result

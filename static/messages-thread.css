@@ -1,0 +1,51 @@
+/* The open chat (thread). Loaded last; rules are scoped under #msgs-area /
+   #msgs-right so they win over the older layered overrides.
+
+   Why: bubbles and shared-trade cards were sized in vw (89vw, 100vw - 74px,
+   ...) without counting the avatar gutter on each row, so a card could stick
+   out past the side of the chat. On iPhone that made the whole conversation
+   pannable sideways and cut cards off. Everything is now sized from the space
+   the row really has, and the chat only scrolls up and down. */
+#msgs-right{overflow-x:hidden!important;max-width:100vw}
+#msgs-area{overflow-x:hidden!important;overscroll-behavior-x:none;touch-action:pan-y}
+body.oa-thread-open{overflow-x:hidden!important}
+
+#msgs-area .msg-wrap{box-sizing:border-box!important;max-width:100%!important;min-width:0}
+#msgs-area .msg-bubble-wrap{max-width:100%!important;min-width:0}
+#msgs-area .msg-bubble:not(.msg-trade):not(.msg-image){max-width:min(560px,100%)!important;overflow-wrap:anywhere}
+
+/* Shared-trade cards: as wide as the row allows, never wider. */
+#msgs-area .msg-bubble-wrap:has(> .msg-trade){display:block!important;width:min(520px,100%)!important}
+#msgs-area .msg-bubble.msg-trade{width:100%!important;max-width:100%!important;box-sizing:border-box}
+#msgs-area .msg-bubble.msg-trade *{max-width:100%;box-sizing:border-box}
+
+/* Message menu (Edit / Delete): opens under the bubble, on the side the
+   bubble is on, so it is always fully on screen. */
+#msgs-area .msg-wrap.mine .msg-menu{left:auto!important;right:0!important;top:calc(100% + 6px)!important;
+  min-width:140px;padding:5px!important;border-radius:14px!important;background:#121821!important;
+  border:1px solid #262d38!important;box-shadow:0 14px 34px rgba(0,0,0,.45)!important;z-index:30!important}
+#msgs-area .msg-menu button{padding:10px 12px!important;font-size:15px!important;border-radius:10px!important}
+#msgs-area .msg-wrap.mine .msg-menu-btn{left:-34px!important;top:50%!important;transform:translateY(-50%);width:30px;height:30px;
+  border-radius:50%;color:#8a93a0!important;line-height:1}
+
+/* Editing a message: readable, with clear Cancel / Save. */
+#msgs-area .msg-bubble.msg-editing{width:min(560px,100%)!important;max-width:100%!important;box-sizing:border-box;
+  background:#121821!important;border:1px solid rgba(247,185,85,.55)!important;color:#eef1f5!important;padding:10px!important}
+#msgs-area .msg-edit-input{width:100%!important;box-sizing:border-box;font-size:16px!important;padding:10px 12px!important;
+  border-radius:12px!important;background:#0a0d12!important;border:1px solid #2a313b!important;color:#eef1f5!important}
+#msgs-area .msg-edit-actions{justify-content:flex-end;gap:8px!important;margin-top:8px!important}
+#msgs-area .msg-edit-actions button{height:34px;padding:0 14px!important;border-radius:10px;font:700 13px/1 Geist,system-ui,sans-serif!important}
+#msgs-area .msg-edit-cancel{background:#1a2029!important;color:#c9cfd8!important}
+#msgs-area .msg-edit-save{background:#f7b955!important;color:#111318!important}
+
+/* Tip messages. */
+#msgs-area .msg-bubble.msg-tip{display:flex;flex-direction:column;gap:5px;min-width:170px}
+#msgs-area .msg-tip-head{display:flex;align-items:center;gap:7px;font-weight:600;font-size:14px}
+#msgs-area .msg-tip-head b{font-weight:800}
+#msgs-area .msg-tip-ico{width:18px;height:18px;flex-shrink:0;border-radius:6px;background:currentColor;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20 12v10H4V12M2 7h20v5H2zM12 22V7M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z' fill='none' stroke='black' stroke-width='2.2' stroke-linejoin='round'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20 12v10H4V12M2 7h20v5H2zM12 22V7M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z' fill='none' stroke='black' stroke-width='2.2' stroke-linejoin='round'/%3E%3C/svg%3E") center/contain no-repeat}
+#msgs-area .msg-tip-note{font-weight:500;overflow-wrap:anywhere}
+#msgs-area .msg-wrap.theirs .msg-bubble.msg-tip{border-color:rgba(53,214,162,.35)!important}
+#msgs-area .msg-wrap.theirs .msg-tip-head{color:#35d6a2}
+#msgs-area .msg-wrap.theirs .msg-tip-note{color:#e8ebf0}

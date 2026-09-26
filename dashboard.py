@@ -25666,6 +25666,10 @@ def delete_dm(message_id):
         conn.close()
     return jsonify({'ok': True})
 
+# "Tipped 15.00 USDC — note": the DM sent after a confirmed tip (profile.html).
+_DM_TIP_TEXT_RE = re.compile(r'^\s*Tipped\s+[\d.,]+\s+[A-Za-z]{2,6}\b')
+
+
 @app.route('/api/messages/<int:message_id>', methods=['PUT'])
 @rate_limit(30, 60)
 def edit_dm(message_id):
@@ -25693,6 +25697,11 @@ def edit_dm(message_id):
             return jsonify({'ok': False, 'msg': 'Not your message'}), 403
         if row[1] != 'text':
             return jsonify({'ok': False, 'msg': 'Only text messages can be edited'}), 400
+        # A tip message records money that was sent: it can be deleted, not
+        # rewritten -- and an ordinary message cannot be edited into one.
+        current = conn.execute('SELECT message FROM direct_messages WHERE id=?', (message_id,)).fetchone()
+        if _DM_TIP_TEXT_RE.match((current[0] if current else '') or '') or _DM_TIP_TEXT_RE.match(text):
+            return jsonify({'ok': False, 'msg': 'A tip cannot be edited. You can delete it.'}), 400
         conn.execute(
             'UPDATE direct_messages SET message=?, edited_at=CURRENT_TIMESTAMP WHERE id=?',
             (text, message_id)
