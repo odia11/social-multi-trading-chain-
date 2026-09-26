@@ -13,10 +13,12 @@ assert "aria-pressed=\"'+(e.liked_by_me?'true':'false')" in js
 assert "if(heart)heart.textContent=liked?'❤️':'♡';" in js
 assert "btn.disabled=true;" in js and "btn.disabled=false" in js
 assert 'min-height:38px' in html and '.fc-ri-lc{display:inline-block' in html
+assert '.fc-ri-heart{font-size:16px' in html
+assert '.oa-action-like .oa-feed-action-icon{width:19px;height:19px;flex-basis:19px}' in css
 assert '.fc-action.oa-action-like .fc-like-count{font:750 16px' in css
 assert "'liked': not existing, 'like_count': count" in server
-assert 'feed-action-icons.css?v=3' in (root/'app_performance.py').read_text()
-assert 'feed-action-icons.css?v=3' in (root/'static/navbar.js').read_text()
+assert 'feed-action-icons.css?v=4' in (root/'app_performance.py').read_text()
+assert 'feed-action-icons.css?v=4' in (root/'static/navbar.js').read_text()
 # Execute the actual reply toggle with a fake DOM node and mocked API to catch
 # rendering regressions, including unlike-to-zero and the failed-request rollback.
 fn=js[js.index('function _feedLikeReply(replyId, btn){'):js.index('\nfunction _feedDeleteReply(',js.index('function _feedLikeReply(replyId, btn){'))]

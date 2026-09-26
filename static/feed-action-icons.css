@@ -23,7 +23,7 @@
    hidden by feed-action-icons.js; the SVG fill follows the same liked class. */
 .fc-actions .fc-action.oa-action-like{color:#c2cbd7!important;gap:8px!important;min-height:40px;border:1px solid transparent!important}
 .fc-actions .fc-action.oa-action-like .fc-like-count{font:750 16px/1 'Geist',system-ui,sans-serif!important;font-variant-numeric:tabular-nums;min-width:10px;color:inherit!important}
-.fc-actions .fc-action.oa-action-like .oa-feed-action-icon{width:23px;height:23px;flex-basis:23px}
+.fc-actions .fc-action.oa-action-like .oa-feed-action-icon{width:19px;height:19px;flex-basis:19px}
 .fc-actions .fc-action.oa-action-like.liked{color:#ff778a!important;background:rgba(255,96,117,.15)!important;border-color:rgba(255,96,117,.28)!important}
 .fc-actions .fc-action.oa-action-like.liked .oa-feed-action-icon{fill:currentColor}
 @media(max-width:767px){
