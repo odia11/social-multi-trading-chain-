@@ -9625,7 +9625,7 @@ function _renderFeedCard(e, cardIndex){
     +'<div class="fc-actions" onclick="event.stopPropagation()">'
     +'<button class="fc-action fc-reply-btn'+(hasNewReply?' has-new':'')+'" data-last-reply="'+esc(e.last_reply_at||'')+'" onclick="_feedToggleReply(this,\''+esc(safePostId)+'\')">'+_REPLY_ICON_SVG+'<span class="fc-reply-label">Reply</span><span class="fc-reply-count">'+esc(String(e.reply_count||0))+'</span>'+(hasNewReply?'<span class="fc-reply-new-dot"></span>':'')+'</button>'
     +'<button class="fc-action fc-repost-btn'+(e.reposted_by_me ? ' reposted' : '')+'" onclick="event.stopPropagation();_feedToggleRepost(this,\''+esc(safePostId)+'\')" title="'+(e.reposted_by_me?'Undo repost':'Repost')+'">'+_REPOST_ICON_SVG+'<span class="fc-repost-count">'+esc(String(e.repost_count||0))+'</span></button>'
-    +'<button class="fc-action fc-like-btn'+(e.liked_by_me ? ' liked' : '')+'" id="lkbtn-'+esc(safePostId)+'" '
+    +'<button type="button" class="fc-action fc-like-btn'+(e.liked_by_me ? ' liked' : '')+'" id="lkbtn-'+esc(safePostId)+'" aria-label="'+(e.liked_by_me?'Unlike post':'Like post')+'" aria-pressed="'+(e.liked_by_me?'true':'false')+'" '
       +'onclick="_feedToggleLike(this,\''+esc(safePostId)+'\')" '
       +'onmousedown="_fcLikePressStart(\''+esc(safePostId)+'\')" onmouseup="_fcLikePressEnd()" onmouseleave="_fcLikePressEnd()" '
       +'data-like-press="'+esc(safePostId)+'">'
@@ -9749,6 +9749,8 @@ function _feedToggleLike(btn, postId){
   var cur = parseInt(countEl ? countEl.textContent : '0', 10) || 0;
   function setState(isLiked, count){
     btn.classList.toggle('liked', isLiked);
+    btn.setAttribute('aria-pressed',isLiked?'true':'false');
+    btn.setAttribute('aria-label',isLiked?'Unlike post':'Like post');
     if(heartEl) heartEl.textContent = isLiked ? '❤️' : '♡';
     if(countEl) countEl.textContent = count;
   }
@@ -10197,7 +10199,7 @@ function _renderReplyRow(r, postId, depth){
     +delBtn
     +'</div>'
     +'</div>'
-    +'<button class="fc-ri-like'+likedCls+'" data-rid="'+r.id+'" onclick="_feedLikeReply('+r.id+',this)"><span class="fc-ri-heart">'+(r.liked_by_me?'❤️':'♡')+'</span>'+(likeCnt>0?'<span class="fc-ri-lc">'+likeCnt+'</span>':'')+'</button>'
+    +'<button type="button" class="fc-ri-like'+likedCls+'" data-rid="'+r.id+'" aria-label="'+(r.liked_by_me?'Unlike reply':'Like reply')+'" aria-pressed="'+(r.liked_by_me?'true':'false')+'" onclick="_feedLikeReply('+r.id+',this)"><span class="fc-ri-heart" aria-hidden="true">'+(r.liked_by_me?'❤️':'♡')+'</span><span class="fc-ri-lc">'+likeCnt+'</span></button>'
     +'</div>'
     +'<div class="fc-ri-nested-box" id="rnbox-'+r.id+'" style="display:none"></div>'
     +'</div>';
@@ -10311,15 +10313,30 @@ function _feedLoadReplies(postId){
 }
 
 function _feedLikeReply(replyId, btn){
+  if(!btn || btn.disabled) return;
+  var heart=btn.querySelector('.fc-ri-heart');
+  var countEl=btn.querySelector('.fc-ri-lc');
+  var previouslyLiked=btn.classList.contains('liked');
+  var previousCount=Math.max(0,parseInt(countEl ? countEl.textContent : '0',10)||0);
+  function setState(liked,count){
+    btn.classList.toggle('liked',!!liked);
+    btn.setAttribute('aria-pressed',liked?'true':'false');
+    btn.setAttribute('aria-label',liked?'Unlike reply':'Like reply');
+    if(heart)heart.textContent=liked?'❤️':'♡';
+    if(countEl)countEl.textContent=String(Math.max(0,Number(count)||0));
+  }
+  // The heart and number must change together; repeated taps cannot race
+  // each other and leave the UI disagreeing with the server.
+  btn.disabled=true;
+  setState(!previouslyLiked,previousCount+(previouslyLiked?-1:1));
   fetch('/api/feed/reply/like/'+replyId, {method:'POST', credentials:'include'})
-    .then(function(r){ return r.json(); })
+    .then(function(r){return r.json()})
     .then(function(d){
-      if(!d.ok) return;
-      btn.classList.toggle('liked', d.liked);
-      var lc = btn.querySelector('.fc-ri-lc');
-      if(lc) lc.textContent = d.like_count;
+      if(!d.ok){setState(previouslyLiked,previousCount);return;}
+      setState(d.liked,d.like_count);
     })
-    .catch(function(){});
+    .catch(function(){setState(previouslyLiked,previousCount)})
+    .finally(function(){btn.disabled=false});
 }
 
 function _feedDeleteReply(replyId, rowEl, postId){
