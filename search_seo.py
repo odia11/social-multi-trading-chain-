@@ -50,7 +50,7 @@ _PRIVATE_PREFIXES = (
     "/api/", "/admin", "/messages", "/notifications", "/wallet",
     "/settings", "/phantom", "/solflare", "/callback", "/logout",
 )
-_PUBLIC_PREVIEW_IMAGE_PREFIXES = ("/api/trade-card/", "/api/post-og-image/", "/static/og-")
+_PUBLIC_PREVIEW_IMAGE_PREFIXES = ("/api/trade-card/", "/api/post-og-image/", "/api/trending-card/", "/static/og-")
 _TITLE_RE = re.compile(r"<title\b[^>]*>.*?</title>", re.I | re.S)
 _DESCRIPTION_RE = re.compile(
     r"<meta\b(?=[^>]*\bname\s*=\s*[\"']description[\"'])[^>]*>\s*",
@@ -78,6 +78,13 @@ def _public_meta(path: str):
         return (
             "Crypto Trading Post | OrcAgent",
             "View this crypto trading post, token card and community discussion on OrcAgent.",
+        )
+    if path.startswith("/trending/"):
+        # Shared Trending cards (trending_share.py); the page carries its own
+        # og:/twitter: tags with the token's live numbers.
+        return (
+            "Trending Token | OrcAgent",
+            "This token is trending on OrcAgent: live price, 24h change, volume and buy pressure.",
         )
     if path.startswith("/profile/"):
         return (
@@ -268,6 +275,7 @@ def install(dashboard_module):
             # the first applicable rule rather than the longest prefix.
             "Allow: /api/trade-card/",
             "Allow: /api/post-og-image/",
+            "Allow: /api/trending-card/",
             "Disallow: /api/",
             "Disallow: /admin/",
             "Disallow: /phantom/",

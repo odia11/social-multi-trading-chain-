@@ -55,6 +55,7 @@ from header_stable_balance import install as _install_header_stable_balance
 from portfolio_multichain_holdings import install as _install_portfolio_multichain_holdings
 from video_uploads import install as _install_video_uploads
 from trending_hero import install as _install_trending_hero
+from trending_share import install as _install_trending_share
 from portfolio_trade_history import install as _install_portfolio_trade_history
 from portfolio_token_withdraw import install as _install_portfolio_token_withdraw
 from live_market_sheet_overlap_fix import install as _install_live_market_sheet_overlap_fix
@@ -137,6 +138,9 @@ _install_video_uploads(_dashboard)
 # Home feed "Trending now" hero card: the scanner's hottest scam-filtered
 # token while it is trending, with bull/bear votes and likes.
 _install_trending_hero(_dashboard)
+# ...and a share link for it: /trending/<chain>/<token> unfurls on X as that
+# card (/api/trending-card/<chain>/<token>.png) and opens it in the app.
+_install_trending_share(_dashboard)
 
 # Cross-chain buying follows the same economic invariant: the number entered
 # by the user is the absolute all-in ceiling. It also lets settled EVM->Solana
