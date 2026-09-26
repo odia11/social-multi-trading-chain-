@@ -16,6 +16,11 @@ from flask import Response, request
 _INSTALLED = False
 _BASE_URL = "https://orcagent.fun"
 _LOGO_URL = _BASE_URL + "/static/icon-512.png"
+# The link preview X / Telegram / Discord / WhatsApp show for a page without a
+# preview of its own: 1200x630, rendered by tools/make_og_image.py.
+_SHARE_IMAGE_URL = _BASE_URL + "/static/og-orcagent.png"
+_SHARE_IMAGE_ALT = "OrcAgent — Trade it. Share it. Multi-chain social trading with USDC."
+_X_HANDLE = "@Orcagent"
 
 _PAGE_META = {
     "/": (
@@ -45,7 +50,7 @@ _PRIVATE_PREFIXES = (
     "/api/", "/admin", "/messages", "/notifications", "/wallet",
     "/settings", "/phantom", "/solflare", "/callback", "/logout",
 )
-_PUBLIC_PREVIEW_IMAGE_PREFIXES = ("/api/trade-card/", "/api/post-og-image/")
+_PUBLIC_PREVIEW_IMAGE_PREFIXES = ("/api/trade-card/", "/api/post-og-image/", "/static/og-")
 _TITLE_RE = re.compile(r"<title\b[^>]*>.*?</title>", re.I | re.S)
 _DESCRIPTION_RE = re.compile(
     r"<meta\b(?=[^>]*\bname\s*=\s*[\"']description[\"'])[^>]*>\s*",
@@ -119,6 +124,47 @@ def _graph_json() -> str:
     return json.dumps(graph, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
 
 
+_HEAD_OPEN_RE = re.compile(r"<head\b[^>]*>", re.I)
+_CHARSET_RE = re.compile(r"<meta\b[^>]*charset[^>]*>", re.I)
+
+
+def _inject_early_in_head(body: str, markup: str) -> str:
+    """Put `markup` at the top of <head> (after the charset meta, which must
+    stay first). Link-preview crawlers read only the start of a page, and the
+    home page's head carries a few hundred KB of inline styles and scripts
+    before </head>."""
+    head = _HEAD_OPEN_RE.search(body)
+    if not head:
+        return _inject_before_head_close(body, markup)
+    at = head.end()
+    charset = _CHARSET_RE.search(body, at, at + 400)
+    if charset:
+        at = charset.end()
+    return body[:at] + "\n" + markup + body[at:]
+
+
+def _social_tags(title: str, description: str, url: str) -> str:
+    return "\n".join([
+        '<meta property="og:type" content="website">',
+        '<meta property="og:site_name" content="OrcAgent">',
+        '<meta property="og:title" content="' + title + '">',
+        '<meta property="og:description" content="' + description + '">',
+        '<meta property="og:url" content="' + url + '">',
+        '<meta property="og:image" content="' + _SHARE_IMAGE_URL + '">',
+        '<meta property="og:image:secure_url" content="' + _SHARE_IMAGE_URL + '">',
+        '<meta property="og:image:type" content="image/png">',
+        '<meta property="og:image:width" content="1200">',
+        '<meta property="og:image:height" content="630">',
+        '<meta property="og:image:alt" content="' + html.escape(_SHARE_IMAGE_ALT, quote=True) + '">',
+        '<meta name="twitter:card" content="summary_large_image">',
+        '<meta name="twitter:site" content="' + _X_HANDLE + '">',
+        '<meta name="twitter:title" content="' + title + '">',
+        '<meta name="twitter:description" content="' + description + '">',
+        '<meta name="twitter:image" content="' + _SHARE_IMAGE_URL + '">',
+        '<meta name="twitter:image:alt" content="' + html.escape(_SHARE_IMAGE_ALT, quote=True) + '">',
+    ])
+
+
 def _inject_before_head_close(body: str, markup: str) -> str:
     index = body.lower().find("</head>")
     if index < 0:
@@ -153,15 +199,7 @@ def _decorate_html(body: str, path: str) -> str:
     ]
     lower = body.lower()
     if 'property="og:title"' not in lower and "property='og:title'" not in lower:
-        tags.extend([
-            '<meta property="og:type" content="website">',
-            '<meta property="og:site_name" content="OrcAgent">',
-            '<meta property="og:title" content="' + safe_title + '">',
-            '<meta property="og:description" content="' + safe_description + '">',
-            '<meta property="og:url" content="' + canonical + '">',
-            '<meta property="og:image" content="' + _LOGO_URL + '">',
-            '<meta name="twitter:card" content="summary_large_image">',
-        ])
+        body = _inject_early_in_head(body, _social_tags(safe_title, safe_description, canonical))
     if path == "/":
         tags.append('<script type="application/ld+json">' + _graph_json() + "</script>")
     return _inject_before_head_close(body, "\n".join(tags))
