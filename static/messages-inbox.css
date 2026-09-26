@@ -1,0 +1,159 @@
+/* Messages inbox (the chat list). Loaded after messages-ui.css; every rule is
+   scoped under #msgs-left so it wins over the older layered overrides. */
+#msgs-left{--ib-bg:#080b10;--ib-card:#0f1319;--ib-card2:#131821;--ib-line:rgba(255,255,255,.065);--ib-gold:#f7b955;
+  --ib-green:#35d6a2;--ib-red:#ff4d5e;--ib-text:#f3f5f7;--ib-sub:#9aa3b0;--ib-muted:#6f7886}
+
+/* ── Header: title + live unread line, compose, search, filters ── */
+#msgs-left .msgs-left-hdr{height:auto!important;display:block!important;padding:14px 16px 10px!important;
+  background:rgba(8,11,16,.94)!important;backdrop-filter:blur(18px)!important;-webkit-backdrop-filter:blur(18px)!important;
+  border-bottom:1px solid var(--ib-line)!important}
+#msgs-left .msgs-left-title-row{height:auto!important;margin:0 0 12px!important;display:flex!important;align-items:center!important;gap:6px}
+#msgs-left .msgs-left-title-row:after{content:none!important;display:none!important}
+#msgs-left .oa-inbox-titles{flex:1;min-width:0}
+#msgs-left .msgs-left-title{margin:0!important;font:800 26px/1.1 Geist,system-ui,sans-serif!important;letter-spacing:-.03em!important;color:var(--ib-text)!important}
+#msgs-left .oa-inbox-sub{margin-top:4px;min-height:16px;color:var(--ib-muted);font:500 12.5px/1.3 Geist,system-ui,sans-serif}
+#msgs-left .oa-inbox-sub.has-unread{color:var(--ib-gold);font-weight:650}
+#msgs-left .msgs-home-back{min-width:40px!important;height:44px!important;margin:0 2px 0 -6px!important;display:inline-flex!important;
+  align-items:center!important;justify-content:center!important;border-radius:12px;font-size:26px!important;color:var(--ib-gold)!important}
+#msgs-left .msgs-new-btn{width:46px!important;height:46px!important;border-radius:16px!important;flex-shrink:0;
+  background:linear-gradient(180deg,#ffd06e,#f5b041)!important;color:#111318!important;border:0!important;
+  box-shadow:0 8px 22px rgba(247,185,85,.22),inset 0 1px 0 rgba(255,255,255,.35)!important;transition:transform .12s}
+#msgs-left .msgs-new-btn:active{transform:scale(.94)}
+#msgs-left .msgs-new-btn svg{width:20px!important;height:20px!important}
+
+#msgs-left .msgs-search-wrap{display:block!important;position:relative}
+#msgs-left .msgs-search-icon{left:14px!important;color:var(--ib-muted)!important}
+#msgs-left .msgs-search{height:44px;padding:0 14px 0 40px!important;border-radius:14px!important;background:#0d1117!important;
+  border:1px solid #1f2630!important;color:var(--ib-text)!important;font-size:16px!important}
+#msgs-left .msgs-search::placeholder{color:#5f6875}
+#msgs-left .msgs-search:focus{border-color:rgba(247,185,85,.55)!important;box-shadow:0 0 0 3px rgba(247,185,85,.08)!important}
+
+#msgs-left .oa-inbox-filters{display:flex;gap:8px;margin-top:10px}
+#msgs-left .oa-inbox-filters[hidden]{display:none}
+#msgs-left .oa-inbox-chip{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px;border-radius:99px;cursor:pointer;
+  border:1px solid #232a34;background:#0e1218;color:var(--ib-sub);font:650 13px/1 Geist,system-ui,sans-serif;
+  -webkit-tap-highlight-color:transparent;transition:background .15s,color .15s,border-color .15s}
+#msgs-left .oa-inbox-chip b{font-weight:800;color:var(--ib-gold)}
+#msgs-left .oa-inbox-chip b:empty{display:none}
+#msgs-left .oa-inbox-chip.on{background:var(--ib-text);border-color:var(--ib-text);color:#0b0d10}
+#msgs-left .oa-inbox-chip.on b{color:#0b0d10}
+
+/* ── New message ── */
+#msgs-left #newMsgBar{margin:10px 16px 2px;padding:12px;border:1px solid rgba(247,185,85,.22);border-radius:16px;
+  background:linear-gradient(160deg,#141922,#0e1218);box-shadow:0 12px 30px rgba(0,0,0,.25)}
+#msgs-left .new-msg-input{height:44px;border-radius:12px!important;background:#0a0d12!important;border:1px solid #232a34!important;
+  font-size:16px!important;color:var(--ib-text)!important;padding:0 14px!important}
+#msgs-left .new-msg-input:focus{border-color:rgba(247,185,85,.55)!important}
+#msgs-left #searchResults button{padding:9px 6px!important;border-radius:12px!important}
+#msgs-left #searchResults button div:first-child{width:36px!important;height:36px!important;font-size:14px!important}
+#msgs-left #searchResults button div:last-child{font-size:15px!important}
+
+/* ── Active now ── */
+#msgs-left .oa-active-strip{padding:12px 0 2px}
+#msgs-left .oa-active-strip[hidden]{display:none}
+#msgs-left .oa-active-title{padding:0 18px 8px;color:var(--ib-muted);font:750 11px/1 Geist,system-ui,sans-serif;letter-spacing:.09em;text-transform:uppercase}
+#msgs-left .oa-active-row{display:flex;gap:14px;overflow-x:auto;padding:2px 18px 6px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+#msgs-left .oa-active-row::-webkit-scrollbar{display:none}
+#msgs-left .oa-active-peer{flex:0 0 auto;width:62px;display:flex;flex-direction:column;align-items:center;gap:6px;padding:0;border:0;
+  background:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
+#msgs-left .oa-active-peer:active .oa-active-av{transform:scale(.94)}
+#msgs-left .oa-active-av{position:relative;width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(circle at 30% 25%,rgba(255,255,255,.18),transparent 60%),var(--oa-av,#3b82f6);color:#fff;
+  font:800 19px/1 Geist,system-ui,sans-serif;box-shadow:0 0 0 2px var(--ib-bg),0 0 0 4px rgba(53,214,162,.55);transition:transform .12s}
+#msgs-left .oa-active-av img{position:absolute;inset:0;width:100%;height:100%;border-radius:50%;object-fit:cover}
+#msgs-left .oa-active-av i{position:absolute;right:0;bottom:1px;width:14px;height:14px;border-radius:50%;background:var(--ib-green);border:2.5px solid var(--ib-bg)}
+#msgs-left .oa-active-name{max-width:62px;color:#c9cfd8;font:600 11.5px/1.2 Geist,system-ui,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ── Chat list ── */
+#msgs-left .conv-list{padding:10px 12px 20px!important}
+#msgs-left .conv-row-wrap{position:relative;margin:0 0 8px!important;border-radius:20px;overflow:hidden!important;isolation:isolate}
+/* The red delete action sits under the card and is only painted while the
+   card is swiped (oa-swiping), so nothing shows through at rest. */
+#msgs-left .conv-delete-btn{position:absolute;top:0;right:0;bottom:0;height:auto;width:84px;z-index:0;visibility:hidden;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:0;border-radius:0 20px 20px 0;
+  background:linear-gradient(180deg,#ff5a6a,#e63a4c);color:#fff;font:700 12px/1 Geist,system-ui,sans-serif}
+#msgs-left .conv-delete-btn svg{width:20px;height:20px}
+#msgs-left .conv-row-wrap.oa-swiping .conv-delete-btn{visibility:visible}
+#msgs-left .conv-row{position:relative;z-index:1;display:flex!important;align-items:center!important;gap:13px!important;
+  min-height:0!important;padding:13px 14px!important;margin:0!important;border-radius:20px!important;
+  border:1px solid var(--ib-line)!important;background:var(--ib-card)!important;box-shadow:none!important;
+  transition:background .15s,border-color .15s}
+#msgs-left .conv-row:after{content:none!important;display:none!important}
+#msgs-left .conv-row:active{background:var(--ib-card2)!important}
+@media(hover:hover){#msgs-left .conv-row:hover{background:var(--ib-card2)!important}}
+#msgs-left .conv-row.active{border-color:rgba(247,185,85,.35)!important;background:var(--ib-card2)!important}
+#msgs-left .conv-row-wrap.is-unread .conv-row{background:linear-gradient(100deg,rgba(247,185,85,.075),rgba(247,185,85,0) 55%),var(--ib-card)!important;
+  border-color:rgba(247,185,85,.22)!important}
+
+#msgs-left .conv-avatar-wrap{position:relative;flex-shrink:0}
+#msgs-left .conv-avatar{position:relative;width:52px!important;height:52px!important;border-radius:50%!important;overflow:hidden;
+  display:flex;align-items:center;justify-content:center;color:#fff!important;font:800 18px/1 Geist,system-ui,sans-serif!important;
+  background:radial-gradient(circle at 30% 25%,rgba(255,255,255,.18),transparent 60%),var(--oa-av,#3b82f6)!important;
+  border:0!important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)!important}
+#msgs-left .conv-avatar img{position:absolute;inset:0;width:100%;height:100%;border-radius:50%;object-fit:cover}
+#msgs-left .conv-row-wrap.is-unread .conv-avatar{box-shadow:0 0 0 2px var(--ib-card),0 0 0 4px var(--ib-gold)!important}
+#msgs-left .msgs-online-dot.avatar-badge{position:absolute;right:0;bottom:1px;width:14px!important;height:14px!important;
+  border-radius:50%;background:var(--ib-green)!important;border:2.5px solid var(--ib-card)!important;box-sizing:border-box}
+
+#msgs-left .conv-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}
+#msgs-left .conv-top,#msgs-left .conv-bottom{display:flex;align-items:center;gap:10px;min-width:0}
+#msgs-left .conv-name{flex:1;min-width:0;display:flex;align-items:center;gap:5px;font:650 16px/1.2 Geist,system-ui,sans-serif!important;
+  letter-spacing:-.01em;color:#e6e9ee!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#msgs-left .conv-verified{width:15px;height:15px;flex-shrink:0}
+#msgs-left .conv-row-wrap.is-unread .conv-name{font-weight:800!important;color:#fff!important}
+#msgs-left .conv-time{flex-shrink:0;color:var(--ib-muted)!important;font:600 12px/1 Geist,system-ui,sans-serif!important}
+#msgs-left .conv-row-wrap.is-unread .conv-time{color:var(--ib-gold)!important}
+#msgs-left .conv-preview{flex:1;min-width:0;max-width:none!important;margin:0!important;color:#8a93a0!important;
+  font:500 14px/1.3 Geist,system-ui,sans-serif!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#msgs-left .conv-preview.unread{color:#e3e7ec!important;font-weight:600!important}
+#msgs-left .oa-you{color:var(--ib-muted);font-weight:500}
+#msgs-left .oa-tip-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:8px;vertical-align:1px;
+  font:600 12px/1.2 Geist,system-ui,sans-serif}
+#msgs-left .oa-tip-chip:before{content:'';width:13px;height:13px;flex-shrink:0;background:currentColor;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20 12v10H4V12M2 7h20v5H2zM12 22V7M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z' fill='none' stroke='black' stroke-width='2.2' stroke-linejoin='round'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20 12v10H4V12M2 7h20v5H2zM12 22V7M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z' fill='none' stroke='black' stroke-width='2.2' stroke-linejoin='round'/%3E%3C/svg%3E") center/contain no-repeat}
+#msgs-left .oa-tip-chip b{font-weight:800}
+#msgs-left .oa-tip-chip.got{background:rgba(53,214,162,.12);color:var(--ib-green)}
+#msgs-left .oa-tip-chip.sent{background:rgba(247,185,85,.11);color:var(--ib-gold)}
+#msgs-left .oa-tip-note{color:inherit}
+#msgs-left .conv-badge{flex-shrink:0;min-width:22px!important;width:auto!important;height:22px!important;padding:0 7px!important;
+  display:inline-flex!important;align-items:center;justify-content:center;border-radius:99px!important;
+  background:var(--ib-gold)!important;color:#111318!important;font:800 12px/1 Geist,system-ui,sans-serif!important;
+  box-shadow:0 4px 12px rgba(247,185,85,.3)!important}
+#msgs-left .conv-meta{display:none!important}
+
+/* Desktop: the trash icon appears on hover, as before. */
+@media (hover:hover) and (pointer:fine){
+  /* Floats over the card's bottom-right corner so it takes no room at rest. */
+  #msgs-left .conv-del-icon{display:flex!important;position:absolute;right:10px;bottom:9px;opacity:0;margin:0;
+    background:var(--ib-card2)!important}
+  #msgs-left .conv-row:hover .conv-del-icon{opacity:1}
+  #msgs-left .conv-row:hover .conv-badge{visibility:hidden}
+}
+
+/* ── Empty states ── */
+#msgs-left .oa-inbox-empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:56px 28px!important;text-align:center}
+#msgs-left .oa-inbox-empty-ico{width:64px;height:64px;margin-bottom:6px;border-radius:22px;display:flex;align-items:center;justify-content:center;
+  background:rgba(247,185,85,.1);color:var(--ib-gold);font-size:28px}
+#msgs-left .oa-inbox-empty-ico svg{width:30px;height:30px}
+#msgs-left .oa-inbox-empty strong{color:var(--ib-text);font:800 18px/1.2 Geist,system-ui,sans-serif}
+#msgs-left .oa-inbox-empty span{max-width:260px;color:var(--ib-muted);font:500 14px/1.45 Geist,system-ui,sans-serif}
+#msgs-left .oa-inbox-empty-cta{margin-top:10px;height:44px;padding:0 22px;border:0;border-radius:14px;cursor:pointer;
+  background:linear-gradient(180deg,#ffd06e,#f5b041);color:#111318;font:800 15px/1 Geist,system-ui,sans-serif}
+#msgs-left .oa-inbox-empty-cta.ghost{background:#141922;color:var(--ib-text);border:1px solid #262d38}
+
+@media(min-width:768px){
+  #msgs-left .msgs-home-back{display:none!important}
+  #msgs-left .msgs-left-title{font-size:22px!important}
+  #msgs-left .conv-list{padding:10px 10px 20px!important}
+  #msgs-left .conv-avatar{width:48px!important;height:48px!important}
+  #msgs-left .conv-name{font-size:15px!important}
+  #msgs-left .conv-preview{font-size:13.5px!important}
+}
+@media(max-width:360px){
+  #msgs-left .conv-row{padding:12px!important;gap:11px!important}
+  #msgs-left .conv-avatar{width:46px!important;height:46px!important}
+  #msgs-left .conv-name{font-size:15px!important}
+  #msgs-left .conv-preview{font-size:13.5px!important}
+}
+@media(prefers-reduced-motion:reduce){#msgs-left .conv-row,#msgs-left .oa-active-av{transition:none}}

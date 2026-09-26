@@ -21,6 +21,9 @@ def install(dashboard_module):
                 return response
             if 'messages-ui.css' not in body and '</head>' in body:
                 body = body.replace('</head>', '<link rel="stylesheet" href="/static/messages-ui.css?v=1">\n</head>', 1)
+            # The inbox (chat list) design; loaded last so it wins.
+            if 'messages-inbox.css' not in body and '</head>' in body:
+                body = body.replace('</head>', '<link rel="stylesheet" href="/static/messages-inbox.css?v=1">\n</head>', 1)
             if 'messages-ui.js' not in body and '</body>' in body:
                 body = body.replace('</body>', '<script src="/static/messages-ui.js?v=1" defer></script>\n</body>', 1)
             response.set_data(body)
