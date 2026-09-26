@@ -1795,11 +1795,11 @@ async function iadminFetchUsers(){
     const pnlClr=u.pnl_today>0?'var(--green)':u.pnl_today<0?'var(--red)':'';
     const botClr=u.trading?'var(--green)':'var(--muted)';
     const isSel=_iadminSelWallet&&_iadminSelWallet===(u.wallet_full||'');
-    return `<tr class="${isSel?'ia-sel':''}" onclick="iadminSelectUser(${JSON.stringify(u.wallet_full||'')},${JSON.stringify(u.wallet||'')})">
+    return `<tr class="${isSel?'ia-sel':''}" onclick="iadminSelectUser(${esc(JSON.stringify(u.wallet_full||''))},${esc(JSON.stringify(u.wallet||''))})">
       <td title="${esc(u.wallet_full||u.wallet||'')}">${esc(u.wallet||'')}</td>
       <td style="color:${botClr}">${u.trading?'ON':'OFF'}</td>
-      <td>${u.positions??0}</td>
-      <td>${u.total_trades??0}</td>
+      <td>${Number(u.positions)||0}</td>
+      <td>${Number(u.total_trades)||0}</td>
       <td style="color:${pnlClr}">${pnl}</td>
       <td style="color:var(--muted)">${esc(u.last_seen||'—')}</td>
     </tr>`;
@@ -3669,7 +3669,7 @@ async function loadWalletTokens(){
       const logoHtml=t.logo_url
         ?`<img src="${esc(t.logo_url)}" onerror="this.style.display='none';this.nextSibling.style.display='flex'" style="width:36px;height:36px;border-radius:50%;object-fit:cover;flex-shrink:0" alt=""><div style="display:none;width:36px;height:36px;border-radius:50%;background:#2e2e2e;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0">${esc((t.symbol||'?')[0].toUpperCase())}</div>`
         :`<div style="width:36px;height:36px;border-radius:50%;background:#2e2e2e;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0">${esc((t.symbol||'?')[0].toUpperCase())}</div>`;
-      return `<div onclick="window.openTokenPanel&&window.openTokenPanel('${t.mint}')" style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #2e2e2e;cursor:pointer;transition:background .12s" onmouseover="this.style.background='#1c1c1c'" onmouseout="this.style.background=\'\'">${logoHtml}<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;color:#fff">${esc(t.symbol||'?')}</div><div style="font-size:11px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.name||'')}</div><div style="font-size:11px;color:#aaa;margin-top:1px">${amtStr}</div></div><div style="text-align:right;flex-shrink:0"><div style="font-size:13px;font-weight:700;color:#fff">${valStr}</div><div style="font-size:11px;color:${chgColor};margin-top:2px">${chgStr}</div></div></div>`;
+      return `<div onclick="window.openTokenPanel&&window.openTokenPanel(${esc(JSON.stringify(String(t.mint||'')))})" style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #2e2e2e;cursor:pointer;transition:background .12s" onmouseover="this.style.background='#1c1c1c'" onmouseout="this.style.background=\'\'">${logoHtml}<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;color:#fff">${esc(t.symbol||'?')}</div><div style="font-size:11px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.name||'')}</div><div style="font-size:11px;color:#aaa;margin-top:1px">${amtStr}</div></div><div style="text-align:right;flex-shrink:0"><div style="font-size:13px;font-weight:700;color:#fff">${valStr}</div><div style="font-size:11px;color:${chgColor};margin-top:2px">${chgStr}</div></div></div>`;
     }).join('');
   }catch(e){
     list.innerHTML='<div style="padding:20px;color:#ff1744;text-align:center">'+esc(String(e.message||e))+'</div>';
@@ -4894,9 +4894,9 @@ function _incRenderRow(t, i){
   } else if(t.value_usd!=null){
     const v=t.value_usd;
     const vStr=v<0.000001?v.toExponential(2):v<0.01?v.toFixed(6):v.toFixed(4);
-    sub=(t.balance||'0')+' tokens &nbsp;·&nbsp; $'+vStr;
+    sub=esc(t.balance||'0')+' tokens &nbsp;·&nbsp; $'+vStr;
   } else {
-    sub=(t.balance||'0')+' tokens';
+    sub=esc(t.balance||'0')+' tokens';
   }
 
   const disAttr=t.can_close?'':'disabled';
@@ -4905,10 +4905,10 @@ function _incRenderRow(t, i){
   const solLabel=t.can_close?solRent:'No key';
 
   return `<label class="${rowCls}">
-    <input type="checkbox" class="inc-checkbox" data-idx="${i}" data-account="${t.pubkey||''}" data-sol="${t.sol_rent||0.00203928}" ${preChecked?'checked':''} ${disAttr} onchange="_incUpdateSummary()">
+    <input type="checkbox" class="inc-checkbox" data-idx="${i}" data-account="${esc(t.pubkey||'')}" data-sol="${Number(t.sol_rent||0.00203928)}" ${preChecked?'checked':''} ${disAttr} onchange="_incUpdateSummary()">
     <div class="inc-token-info">
       <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
-        <a class="inc-token-mint" href="${solscanUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${t.mint||''}">${esc(label)}</a>
+        <a class="inc-token-mint" href="${esc(solscanUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${esc(t.mint||'')}">${esc(label)}</a>
         ${badge}
       </div>
       <span class="inc-value">${sub}</span>
@@ -7037,7 +7037,7 @@ document.addEventListener('DOMContentLoaded', function(){
         const priceStr=pVal!=null?(pVal<0.01?pVal.toFixed(8):pVal<1?pVal.toFixed(4):pVal.toFixed(2)):'';
         const chg=t.price_change_24h!=null?Number(t.price_change_24h):null;
         const chgHtml=chg!=null?`<span style="color:${chg>=0?'#00e676':'#ff1744'};font-size:10px">${chg>=0?'+':''}${chg.toFixed(1)}%</span>`:'';
-        html+=`<div class="hdr-sd-item" onclick="window.openTokenPanel&&window.openTokenPanel('${addr}');if(window._hdrCloseDD)window._hdrCloseDD();" style="cursor:pointer">
+        html+=`<div class="hdr-sd-item" onclick="window.openTokenPanel&&window.openTokenPanel(${esc(JSON.stringify(String(addr)))});if(window._hdrCloseDD)window._hdrCloseDD();" style="cursor:pointer">
           <div style="min-width:0;flex:1">
             <div class="hdr-sd-name"><strong>${_e(t.symbol||'?')}</strong>${t.name&&t.name!==t.symbol?` <span style="color:#555555;font-size:11px;font-weight:400">${_e(t.name)}</span>`:''}${priceStr?` <span style="color:#00e676;font-size:11px">$${_e(priceStr)}</span>`:''}</div>
             <div class="hdr-sd-sub" style="display:flex;justify-content:space-between;align-items:center">${_e(_short(addr))}${chgHtml}</div>
@@ -9266,13 +9266,13 @@ async function showTokenCard(symbol,knownAddr){
         <div style="background:#161b22;border-radius:10px;padding:10px 12px"><div style="font-size:10px;color:#565d68;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Liquidity</div><div style="font-family:\'JetBrains Mono\',monospace;font-size:13px;font-weight:700;color:#eef1f5">${fmtBig(p.liquidity?.usd)}</div></div>
         <div style="background:#161b22;border-radius:10px;padding:10px 12px"><div style="font-size:10px;color:#565d68;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Market Cap</div><div style="font-family:\'JetBrains Mono\',monospace;font-size:13px;font-weight:700;color:#eef1f5">${fmtBig(p.marketCap)}</div></div>
         <div style="background:#161b22;border-radius:10px;padding:10px 12px"><div style="font-size:10px;color:#565d68;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">FDV</div><div style="font-family:\'JetBrains Mono\',monospace;font-size:13px;font-weight:700;color:#eef1f5">${fmtBig(p.fdv)}</div></div>
-        <div style="background:#161b22;border-radius:10px;padding:10px 12px;grid-column:span 2"><div style="font-size:10px;color:#565d68;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Buys / Sells (24h)</div><div style="font-family:\'JetBrains Mono\',monospace;font-size:13px;font-weight:700"><span style="color:#f7b955">${p.txns?.h24?.buys||0}</span><span style="color:#565d68"> / </span><span style="color:#f76b62">${p.txns?.h24?.sells||0}</span></div></div>
+        <div style="background:#161b22;border-radius:10px;padding:10px 12px;grid-column:span 2"><div style="font-size:10px;color:#565d68;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Buys / Sells (24h)</div><div style="font-family:\'JetBrains Mono\',monospace;font-size:13px;font-weight:700"><span style="color:#f7b955">${Number(p.txns?.h24?.buys)||0}</span><span style="color:#565d68"> / </span><span style="color:#f76b62">${Number(p.txns?.h24?.sells)||0}</span></div></div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">
         ${pctBadge(p.priceChange?.m5,'5m')}${pctBadge(p.priceChange?.h1,'1h')}${pctBadge(p.priceChange?.h6,'6h')}${pctBadge(p.priceChange?.h24,'24h')}
       </div>
       ${_links.length?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">${_links.slice(0,6).map(function(l){return '<a href="'+esc(l.url||'')+'" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;background:#1a1f2e;border:1px solid #21252c;border-radius:20px;padding:4px 10px;font-size:11px;color:#adb5bd;text-decoration:none" onmouseover="this.style.color=\'#f7b955\';this.style.borderColor=\'#f7b955\'" onmouseout="this.style.color=\'#adb5bd\';this.style.borderColor=\'#21252c\'">'+_li(l)+' '+esc(_lbl(l))+'</a>';}).join('')}</div>`:''}
-      ${_addr?`<div style="display:flex;align-items:center;gap:8px;background:#161b22;border-radius:10px;padding:8px 12px;margin-bottom:4px"><span style="font-size:10px;color:#565d68;text-transform:uppercase;letter-spacing:.06em;flex-shrink:0">Pair</span><span style="font-family:\'JetBrains Mono\',monospace;font-size:11px;color:#8a919c;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_addrShort}</span><button onclick="navigator.clipboard.writeText('${_addr}').then(function(){this.textContent='✓';var b=this;setTimeout(function(){b.textContent='⧉'},1500)}.bind(this)).catch(function(){})" style="background:none;border:none;color:#565d68;cursor:pointer;font-size:13px;padding:2px 6px;flex-shrink:0">⧉</button></div>`:''}
+      ${_addr?`<div style="display:flex;align-items:center;gap:8px;background:#161b22;border-radius:10px;padding:8px 12px;margin-bottom:4px"><span style="font-size:10px;color:#565d68;text-transform:uppercase;letter-spacing:.06em;flex-shrink:0">Pair</span><span style="font-family:\'JetBrains Mono\',monospace;font-size:11px;color:#8a919c;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(_addrShort)}</span><button onclick="navigator.clipboard.writeText(${esc(JSON.stringify(String(_addr)))}).then(function(){this.textContent='✓';var b=this;setTimeout(function(){b.textContent='⧉'},1500)}.bind(this)).catch(function(){})" style="background:none;border:none;color:#565d68;cursor:pointer;font-size:13px;padding:2px 6px;flex-shrink:0">⧉</button></div>`:''}
       `
   }catch(e){
     clearTimeout(_timeout);

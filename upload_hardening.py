@@ -103,7 +103,7 @@ def _walk_images(obj, key='', *, _state=None, _depth=0):
         for v in obj:
             yield from _walk_images(v, key, _state=_state, _depth=_depth + 1)
     elif isinstance(obj, str):
-        if obj.lower().startswith('data:') or key in _IMAGE_KEYS or key.endswith('_image'):
+        if obj.strip().lower().startswith('data:') or key in _IMAGE_KEYS or key.endswith('_image'):
             yield obj
 
 
@@ -123,7 +123,9 @@ def install(dashboard_module):
                 if body is not None:
                     for value in _walk_images(body):
                         _validate_data_uri(value)
-            for storage in request.files.values():
+            # MultiDict.values() only returns the first file for each field.
+            # Handlers using getlist() must never receive unchecked siblings.
+            for _field, storage in request.files.items(multi=True):
                 mime = str(storage.mimetype or '').lower()
                 if not mime.startswith('image/'):
                     continue
