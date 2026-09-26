@@ -2863,6 +2863,7 @@ function _toggleUsdcTiles(){
 }
 var _usdcLoadedOnce=false
 var _EVM_CHAIN_LABELS={bsc:'BSC',base:'Base',arbitrum:'Arbitrum',polygon:'Polygon',robinhood:'Robinhood'}
+var _usdcEvmTilesMarkup=null // avoid rebuilding chain tiles on every 8s balance poll
 var _usdcSummaryCache=null   // last-fetched {solana_usdc, evm_chains} -- the Bridge modal's balance/MAX reads this instead of its own fetch
 function loadUsdcSummary(){
   _getPortfolioSnapshot(false).then(function(snap){
@@ -2883,11 +2884,15 @@ function loadUsdcSummary(){
     // shows up here without a template change.
     var evmTiles=document.getElementById('usdc-evm-tiles')
     if(evmTiles && d.evm_chains){
-      evmTiles.innerHTML=Object.keys(d.evm_chains).map(function(chain){
+      var tilesMarkup=Object.keys(d.evm_chains).map(function(chain){
         var label=_EVM_CHAIN_LABELS[chain]||chain
         return '<div class="wlt-bsc-bal-item"><span class="wlt-bsc-bal-lbl">'+label+'</span>'
           +'<span class="wlt-bsc-bal-val">$'+parseFloat(d.evm_chains[chain]).toFixed(2)+'</span></div>'
       }).join('')
+      if(tilesMarkup!==_usdcEvmTilesMarkup){
+        evmTiles.innerHTML=tilesMarkup
+        _usdcEvmTilesMarkup=tilesMarkup
+      }
     }
     _usdcLoadedOnce=true
     _usdcSummaryCache=d
