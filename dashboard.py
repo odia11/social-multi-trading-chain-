@@ -2878,6 +2878,9 @@ def run_migrations():
         # should start receiving it without asking.
         "ALTER TABLE users ADD COLUMN pref_surge_alerts INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN pref_scam_filter INTEGER DEFAULT 1",
+        # Per-group "notify me about new posts" (the 🔔 on a group). On by
+        # default: joining a group is asking to hear from it.
+        "ALTER TABLE group_members ADD COLUMN notify INTEGER DEFAULT 1",
         "ALTER TABLE users ADD COLUMN pref_sound_alerts INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'",
         "ALTER TABLE direct_messages ADD COLUMN edited_at TIMESTAMP DEFAULT NULL",
@@ -15760,6 +15763,7 @@ def api_group_detail(group_id):
             'pinned_post_id': row[11],
             'is_official': bool(row[12]),
             'is_muted': is_muted,
+            'notify': _group_notify_on(conn, group_id, uid) if role is not None else False,
             'is_platform_owner': bool(wallet and _is_owner(wallet)),
             'member_count': _group_member_count(conn, group_id),
         }
@@ -15803,6 +15807,101 @@ def api_group_posts(group_id):
         return jsonify({'ok': True, 'posts': posts})
     finally:
         conn.close()
+
+
+def _group_notify_on(conn, group_id, uid):
+    try:
+        r = conn.execute('SELECT COALESCE(notify, 1) FROM group_members WHERE group_id=? AND user_id=?',
+                         (group_id, uid)).fetchone()
+        return bool(r[0]) if r else False
+    except sqlite3.OperationalError:
+        return True
+
+
+def _group_post_link(group_id, post_id):
+    """Opens the group and scrolls to that post (see group_detail.html)."""
+    return f'/groups/{int(group_id)}#gpost-{int(post_id)}'
+
+
+GROUP_PUSH_QUIET_SECONDS = 600   # at most one phone push per member per group per 10 min
+
+
+def _notify_group_members(conn, group_id, group_name, author_uid, author_wallet,
+                          author_name, content, has_image, post_id, skip_ids=()):
+    """A new group post: every other member who has notifications on (and has
+    not turned this group's 🔔 off) gets an in-app notification; those with a
+    phone registered also get a push. Members @tagged in the post were already
+    told (a 'mention'), so they are skipped here.
+
+    Pushes are grouped: they carry a per-group tag so a newer one replaces the
+    older one on the phone, and a member who was pushed about this group in the
+    last GROUP_PUSH_QUIET_SECONDS is not buzzed again -- a busy group must not
+    ring a phone for every message. The in-app list still gets every post.
+    Never raises: the post is already saved."""
+    try:
+        text = re.sub(r'\s+', ' ', (content or '')).strip()
+        preview = (text[:80] + ('…' if len(text) > 80 else '')) if text else ('📷 Photo' if has_image else 'New post')
+        link = _group_post_link(group_id, post_id)
+        skip = set(skip_ids or ()) | {author_uid}
+        rows = conn.execute(
+            'SELECT gm.user_id FROM group_members gm JOIN users u ON u.id = gm.user_id '
+            'WHERE gm.group_id=? AND COALESCE(gm.notify, 1) = 1 AND COALESCE(u.pref_notifications, 1) = 1',
+            (group_id,)).fetchall()
+        recipients = [r[0] for r in rows if r[0] not in skip]
+        if not recipients:
+            return 0
+        # Who may be buzzed: has a device, and no push from this group recently.
+        # Read BEFORE inserting this post's notifications.
+        marks = ','.join('?' * len(recipients))
+        with_phone = {r[0] for r in conn.execute(
+            f'SELECT DISTINCT user_id FROM push_subscriptions WHERE user_id IN ({marks})', recipients).fetchall()}
+        recent = {r[0] for r in conn.execute(
+            f"SELECT DISTINCT user_id FROM notifications WHERE type='group_post' AND link LIKE ? "
+            f"AND created_at > datetime('now', ?) AND user_id IN ({marks})",
+            [f'/groups/{int(group_id)}#%', f'-{GROUP_PUSH_QUIET_SECONDS} seconds'] + recipients).fetchall()}
+        conn.executemany(
+            'INSERT INTO notifications (user_id, type, content, link, actor_wallet) VALUES (?,?,?,?,?)',
+            [(r, 'group_post', f'{author_name} posted in {group_name}: {preview}', link, author_wallet)
+             for r in recipients])
+        conn.commit()
+        push_ids = [r for r in recipients if r in with_phone and r not in recent]
+        if push_ids:
+            _send_push_notifications_bulk(push_ids, group_name, f'{author_name}: {preview}', link,
+                                          '', f'orc-group-{int(group_id)}')
+        return len(recipients)
+    except Exception as e:
+        print(f'[groups] member notification failed for group {group_id}: {type(e).__name__}: {e}', flush=True)
+        return 0
+
+
+def _post_link(conn, post_id):
+    """Where a notification about post `post_id` should open: group posts
+    live on their group's page, everything else on the home feed."""
+    if isinstance(post_id, str) and post_id.startswith('g') and post_id[1:].isdigit():
+        row = conn.execute('SELECT group_id FROM group_posts WHERE id=?', (post_id[1:],)).fetchone()
+        return _group_post_link(row[0], post_id[1:]) if row else '/groups'
+    return '/#post-' + post_id
+
+
+@app.route('/api/groups/<int:group_id>/notifications', methods=['POST'])
+@rate_limit(30, 60)
+def api_group_notifications(group_id):
+    """The member's 🔔 for this group: {"on": true|false}."""
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'msg': 'Not logged in'}), 401
+    on = bool((request.get_json(silent=True) or {}).get('on'))
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        uid = _get_uid(conn, wallet)
+        cur = conn.execute('UPDATE group_members SET notify=? WHERE group_id=? AND user_id=?',
+                           (1 if on else 0, group_id, uid))
+        conn.commit()
+        if cur.rowcount != 1:
+            return jsonify({'ok': False, 'msg': 'Join the group first'}), 403
+    finally:
+        conn.close()
+    return jsonify({'ok': True, 'notify': on})
 
 
 @app.route('/api/groups/<int:group_id>/posts', methods=['POST'])
@@ -15853,6 +15952,8 @@ def api_group_post_create(group_id):
         group_row = conn.execute('SELECT name FROM groups WHERE id=?', (group_id,)).fetchone()
         group_name = group_row[0] if group_row else 'a group'
         mentioned = set(m.lower() for m in re.findall(r'@([a-zA-Z0-9_]+)', content))
+        post_link = _group_post_link(group_id, post_id)
+        mentioned_ids = set()
         for uname in mentioned:
             m_row = conn.execute('''
                 SELECT u.id FROM users u
@@ -15860,12 +15961,14 @@ def api_group_post_create(group_id):
                 WHERE u.username=? COLLATE NOCASE AND u.id != ? AND gm.group_id = ?
             ''', (uname, uid, group_id)).fetchone()
             if m_row:
-                link = '/groups/'+str(group_id)
+                mentioned_ids.add(m_row[0])
                 conn.execute(
                     'INSERT INTO notifications (user_id, type, content, link, actor_wallet) VALUES (?,?,?,?,?)',
-                    (m_row[0], 'mention', author_name+' mentioned you in '+group_name, link, wallet))
+                    (m_row[0], 'mention', author_name+' mentioned you in '+group_name, post_link, wallet))
                 conn.commit()
-                _send_push_notification(m_row[0], 'New mention', author_name+' mentioned you in '+group_name, link)
+                _send_push_notification(m_row[0], 'New mention', author_name+' mentioned you in '+group_name, post_link)
+        _notify_group_members(conn, group_id, group_name, uid, wallet, author_name,
+                              content, bool(image_data), post_id, mentioned_ids)
         return jsonify({'ok': True, 'post_id': post_id})
     finally:
         conn.close()
@@ -21841,7 +21944,7 @@ def _notify_reply_mentions(conn, message, me, wallet, owner_uid, post_id):
             return
         author = conn.execute('SELECT COALESCE(username,"") FROM users WHERE id=?', (me,)).fetchone()
         author_name = (author[0] if author and author[0] else wallet[:8]+'…')
-        link = '/#post-'+post_id
+        link = _post_link(conn, post_id)
         for uname in list(names)[:10]:
             row = conn.execute(
                 'SELECT id FROM users WHERE username=? COLLATE NOCASE AND wallet_address!=?',
@@ -21906,11 +22009,12 @@ def post_feed_reply():
             replier_row = conn.execute('SELECT COALESCE(username,"") FROM users WHERE id=?', (me,)).fetchone()
             replier_name = (replier_row[0] if replier_row and replier_row[0] else wallet[:8]+'…')
             preview = message[:60] + ('…' if len(message) > 60 else '')
+            reply_link = _post_link(conn, post_id)
             conn.execute(
                 'INSERT INTO notifications (user_id, type, content, link, actor_wallet) VALUES (?,?,?,?,?)',
-                (owner_uid, 'reply', replier_name+': replied to your post — '+preview, '/#post-'+post_id, wallet))
+                (owner_uid, 'reply', replier_name+': replied to your post — '+preview, reply_link, wallet))
             conn.commit()
-            _send_push_notification(owner_uid, 'New reply', replier_name+' replied to your post', '/#post-'+post_id)
+            _send_push_notification(owner_uid, 'New reply', replier_name+' replied to your post', reply_link)
         # @tags in a reply notify the tagged member too, exactly like @tags in
         # a post. The post owner already got the reply notification above, and
         # nobody is notified for tagging themselves.
