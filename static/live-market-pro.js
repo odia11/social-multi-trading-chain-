@@ -2568,6 +2568,7 @@ function surgeCardHtml(s){
   + '</div>';
 }
 
+var _surgeMarkup=null, _tapeIdentity=null, _traderIdentity=null;
 function loadSurges(){
   fetch('/api/market/surges', {credentials:'include'})
     .then(function(r){ return r.json(); })
@@ -2583,11 +2584,15 @@ function loadSurges(){
       var list = (d && d.surges) || [];
       // Hidden entirely when nothing is surging -- an empty "SURGING NOW"
       // strip would read as a broken feature rather than a quiet market.
-      if(!list.length){ wrap.style.display = 'none'; return; }
+      if(!list.length){ wrap.style.display = 'none'; _surgeMarkup=null; return; }
       wrap.style.display = '';
-      var keepScroll = rail.scrollLeft;
-      rail.innerHTML = list.map(surgeCardHtml).join('');
-      rail.scrollLeft = keepScroll;
+      var newMarkup=list.map(surgeCardHtml).join('');
+      if(newMarkup!==_surgeMarkup){
+        var keepScroll=rail.scrollLeft;
+        rail.innerHTML=newMarkup;
+        _surgeMarkup=newMarkup;
+        rail.scrollLeft=keepScroll;
+      }
       var sub = document.getElementById('pt-surge-sub');
       if(sub) sub.textContent = list.length + (list.length === 1 ? ' token' : ' tokens')
         + ' · vs their own 5m average';
@@ -2599,6 +2604,9 @@ function loadTape(){
   fetch('/api/market/tape').then(function(r){ return r.json(); }).then(function(d){
     var el = document.getElementById('pt-tape-list');
     var rows = (d && d.ok && d.trades) || [];
+    var identity=JSON.stringify(rows.slice(0,14).map(function(t){return [t.id,t.tx_hash,t.timestamp,t.side,t.symbol,t.sol_amount];}));
+    if(identity===_tapeIdentity) return;
+    _tapeIdentity=identity;
     if(!rows.length){ el.innerHTML = '<div class="pt-tape-empty">Waiting for trades…</div>'; return; }
     el.innerHTML = rows.slice(0,14).map(function(r){
       var side = String(r.side||'').toLowerCase()==='sell' ? 'sell' : 'buy';
@@ -2622,6 +2630,9 @@ function loadTape(){
 function loadTraders(){
   fetch('/api/leaderboard').then(function(r){ return r.json(); }).then(function(rows){
     rows = Array.isArray(rows) ? rows : [];
+    var identity=JSON.stringify([rows,_copyStatus.copying,_copyStatus.target]);
+    if(identity===_traderIdentity) return;
+    _traderIdentity=identity;
     renderTraderRail(rows);
     var el = document.getElementById('pt-traders-list');
     if(!el) return;

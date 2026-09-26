@@ -1458,8 +1458,13 @@ function checkForTrades(lines){
   lastLogCount=lines.length;
 }
 
+var _renderedLogSig=null;
 function renderLog(lines){
   const el=document.getElementById('log-body');
+  if(!el) return;
+  var logSig=JSON.stringify(lines);
+  if(logSig===_renderedLogSig) return;
+  _renderedLogSig=logSig;
   el.innerHTML=lines.map(l=>{
     let cls='c-info';const m=l.msg||'';
     if(m.startsWith('BUY ')&&!m.includes('FAILED'))cls='c-buy';
@@ -2632,11 +2637,13 @@ function renderPnlChart(curve){
   `;
 }
 
+var _renderedPositionIds=null;
 function renderPositions(detail){
   _openMints=new Set((detail||[]).map(p=>p.mint).filter(Boolean));
   const emptyEl=document.getElementById('top-pos-empty');
   const listEl=document.getElementById('top-pos-list');
   if(!detail||!detail.length){
+    _renderedPositionIds=null;
     if(emptyEl) emptyEl.style.display='block';
     if(listEl) listEl.style.display='none';
     return;
@@ -2647,6 +2654,36 @@ function renderPositions(detail){
   if(posCount) posCount.textContent=detail.length+'/5';
   if(!listEl) return; // #top-pos-list isn't in the current DOM -- nothing to render into,
                        // but the rest of fetchState() (live feed, SOL price) must still run
+  var ids=detail.map(function(p){return p.mint||''}).join('|');
+  if(_renderedPositionIds===ids && listEl.querySelectorAll('.pos-mini-card').length===detail.length){
+    // Preserve an open Confirm Sell sheet and every existing card. Change only
+    // the live figures, never the controls the user is currently touching.
+    detail.forEach(function(p){
+      var row=Array.prototype.find.call(listEl.querySelectorAll('.pos-mini-card'),
+        function(el){return el.dataset.mint===(p.mint||'')});
+      if(!row) return;
+      var pnl=row.querySelector('.pos-mini-pnl');
+      if(pnl){
+        var positive=p.pnl>=0;
+        var sign=positive?'+':'-';
+        var value=sign+fmtSolToUsdc(Math.abs(p.pnl||0));
+        var pct=sign+Math.abs(p.pnl_pct||0).toFixed(1)+'%';
+        var text=value+' '+pct;
+        if(pnl.dataset.lastValue!==text){
+          pnl.dataset.lastValue=text;
+          pnl.classList.toggle('td-pos',positive);
+          pnl.classList.toggle('td-neg',!positive);
+          pnl.innerHTML=value+' <span style="font-size:9px;opacity:.7">'+pct+'</span>';
+        }
+      }
+      var chart=row.querySelector('.pos-chart-btn');
+      if(chart)chart.dataset.current=p.current||0;
+    });
+    return;
+  }
+  // A position opening/closing must not erase a pending sale confirmation.
+  if(listEl.querySelector('.pos-sell-conf')) return;
+  _renderedPositionIds=ids;
   listEl.innerHTML=detail.map(p=>{
     const isPos=p.pnl>=0;
     const cls=isPos?'td-pos':'td-neg';
@@ -8489,7 +8526,10 @@ document.addEventListener('keydown', function(e){
   if(e.key === 'Escape') _closeImgLightbox();
 });
 
+var _homeFeedRequestSeq=0;
+var _homeFeedLastRenderedFilter='';
 async function loadHomeFeed(){
+  var requestSeq=++_homeFeedRequestSeq;
   const filter = _homeFeedFilter === 'following' ? 'following' : 'all';
   const el = document.getElementById('center-feed');
   if(el && !_homeFeedData.length) el.innerHTML = '<div class="fc-loading">Loading…</div>';
@@ -8501,8 +8541,16 @@ async function loadHomeFeed(){
     console.log('[feed] status:', r.status);
     if(!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
+    if(requestSeq !== _homeFeedRequestSeq || filter !== (_homeFeedFilter === 'following' ? 'following' : 'all')) return;
     if(data && Array.isArray(data.items)){
+      // Keep the existing post nodes (including loaded images, media state,
+      // reply fields and scroll position) when a background poll is identical.
+      var currentTop=_homeFeedData.slice(0,data.items.length);
+      var unchanged=_homeFeedLastRenderedFilter===filter && currentTop.length===data.items.length
+        && currentTop.every(function(item,i){return JSON.stringify(item)===JSON.stringify(data.items[i]);});
+      if(unchanged && document.querySelector('#center-feed .fc-card')) return;
       _homeFeedData = data.items;
+      _homeFeedLastRenderedFilter=filter;
       // The shared post is merged at its chronological position only when
       // rendering. Never move an old post ahead of newer feed updates.
       _homeFeedNextCursor = data.next_cursor || null;
