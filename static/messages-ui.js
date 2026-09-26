@@ -69,7 +69,11 @@ function install(){
     var offset=Math.max(0,window.innerHeight-vv.height-vv.offsetTop);
     document.documentElement.style.setProperty('--oa-kb-offset',offset+'px');
     var area=document.getElementById('msgs-area');
-    if(area){requestAnimationFrame(function(){area.scrollTop=area.scrollHeight;});}
+    if(area && area.scrollHeight-area.scrollTop-area.clientHeight<100){
+      requestAnimationFrame(function(){
+        if(area.scrollHeight-area.scrollTop-area.clientHeight<100)area.scrollTop=area.scrollHeight;
+      });
+    }
   }
 
   ta.addEventListener('focus',function(){setTyping(true);});
@@ -137,7 +141,9 @@ var mo=new MutationObserver(function(){
 function start(){
   run();
   var main=document.querySelector('.msgs-main');
-  if(main)mo.observe(main,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style']});
+  if(main)mo.observe(main,{attributes:true,attributeFilter:['class']});
+  var area=document.getElementById('msgs-area');
+  if(area)mo.observe(area,{childList:true,subtree:true});
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
@@ -203,10 +209,12 @@ var mo=new MutationObserver(function(){if(pending)return;pending=true;requestAni
 function start(){
   sync();
   var main=document.querySelector('.msgs-main');
-  if(main)mo.observe(main,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style']});
+  // Only the thread-open class changes navigation mode. Never watch our own
+  // inline style writes: that caused a perpetual repaint on mobile.
+  if(main)mo.observe(main,{attributes:true,attributeFilter:['class']});
   window.addEventListener('pageshow',sync);
-  window.addEventListener('resize',sync);
-  if(window.visualViewport){window.visualViewport.addEventListener('resize',sync);}
+  // CSS 100dvh responds to viewport/keyboard resize without rewriting all
+  // fixed-position styles on each animation frame.
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();

@@ -28,7 +28,7 @@ def install(dashboard_module):
             if 'messages-thread.css' not in body and '</head>' in body:
                 body = body.replace('</head>', '<link rel="stylesheet" href="/static/messages-thread.css?v=1">\n</head>', 1)
             if 'messages-ui.js' not in body and '</body>' in body:
-                body = body.replace('</body>', '<script src="/static/messages-ui.js?v=1" defer></script>\n</body>', 1)
+                body = body.replace('</body>', '<script src="/static/messages-ui.js?v=2" defer></script>\n</body>', 1)
             response.set_data(body)
             response.content_length = len(response.get_data())
         except Exception as exc:
