@@ -501,5 +501,7 @@ def install(d):
     )
 
     d._ensure_evm_gas = ensure_gas
+    # The ordinary signed approve+swap, for sponsored_gas.py's fallback.
+    d._execute_evm_swap_signed = original_execute
     d._execute_evm_swap = execute
     d._charge_evm_txn_fee = charge_fee

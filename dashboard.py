@@ -8399,8 +8399,14 @@ def _te_evm_swap_executor(enc_blob: str, wallet: str, evm_address: str):
             # The PURCHASE, not the ceiling. This single argument is the
             # difference between the engine and every legacy endpoint.
             gross_swap_usd = plan.purchase_usd + plan.fee_usd
-            ok, err, tx_hash = _execute_evm_swap(
-                wallet, pk, 'buy', plan.token_address, str(gross_swap_usd), plan.chain)
+            # The gas share of the ceiling stays in the wallet; if the sponsor
+            # has to front gas (sponsored_gas.py), it is repaid from this.
+            _EVM_GAS_RESERVE.usd = plan.gas_usd
+            try:
+                ok, err, tx_hash = _execute_evm_swap(
+                    wallet, pk, 'buy', plan.token_address, str(gross_swap_usd), plan.chain)
+            finally:
+                _EVM_GAS_RESERVE.usd = 0
 
         if ok:
             return te_execute.SwapOutcome(submitted=True, confirmed=True, tx_hash=tx_hash)
@@ -9174,6 +9180,7 @@ GAS_SPONSOR_MAX_LIFETIME  = 25    # per user, per chain -- generous for a real t
 GAS_SPONSOR_MIN_USDC      = 1.0   # the anti-farming gate: only wallets already holding real trading capital on that chain
 
 _gas_sponsor_lock = threading.Lock()  # serializes sponsor-wallet sends so concurrent grants can't collide on the same nonce
+_EVM_GAS_RESERVE = threading.local()  # .usd: gas the trade engine reserved for the swap in progress (sponsored_gas.py)
 
 def _gas_sponsor_address() -> str:
     """The platform sponsor wallet's own EVM address (same address on every

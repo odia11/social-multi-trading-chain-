@@ -35,9 +35,12 @@ check('Solana USDC BUYs have a zero-SOL gasless rail',
       and 'Solana USDC BUYs use Jupiter gasless' in env_example
       and ('zero SOL' in solana_test or 'zero/low SOL' in env_example))
 
-check('legacy sponsor keys are documented as unused under the no-subsidy policy',
-      'Legacy platform sponsor keys are intentionally unused under this policy.' in env_example
-      and 'GAS_SPONSOR_PRIVATE_KEY=' in env_example
+check('the EVM sponsor key is documented as float repaid in the same trade, never a subsidy',
+      'Sponsored gas, repaid in the same trade' in env_example
+      and 'Float, not a subsidy.' in env_example
+      and 'GAS_SPONSOR_PRIVATE_KEY=' in env_example)
+check('the Solana sponsor key stays unused under the no-subsidy policy',
+      'The Solana sponsor key is intentionally unused under this policy' in env_example
       and 'SOL_GAS_SPONSOR_PRIVATE_KEY=' in env_example)
 
 raise SystemExit(0 if all(checks) else 1)
