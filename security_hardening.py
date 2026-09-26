@@ -46,11 +46,21 @@ def _csp(nonce: str) -> str:
     ])
 
 
-def _origin_host(value: str) -> str:
+def _origin(value: str):
+    """Parse a serialized browser origin, including its scheme and port."""
     try:
-        return (urlsplit(value).hostname or '').lower().rstrip('.')
-    except Exception:
-        return ''
+        if not value or any(ch.isspace() or ord(ch) < 32 for ch in value):
+            return None
+        parts = urlsplit(value)
+        if (parts.scheme not in {'http', 'https'} or not parts.hostname
+                or parts.username is not None or parts.password is not None
+                or parts.path or parts.query or parts.fragment
+                or any(ch in value for ch in ('\\', '?', '#'))):
+            return None
+        return (parts.scheme, parts.hostname.lower(),
+                parts.port if parts.port is not None else (443 if parts.scheme == 'https' else 80))
+    except ValueError:
+        return None
 
 
 def _request_host() -> str:
@@ -101,12 +111,14 @@ def install(dashboard_module):
 
         origin = (request.headers.get('Origin') or '').strip()
         if origin:
-            origin_host = _origin_host(origin)
-            host = _request_host()
-            allowed = set(_ALLOWED_HOSTS)
-            if host:
-                allowed.add(host)
-            if not origin_host or origin_host not in allowed:
+            origin_value = _origin(origin)
+            allowed = {('https', host, 443) for host in _ALLOWED_HOSTS}
+            # Loopback smoke tests may use HTTP/nonstandard ports. Never
+            # extend the public allowlist using an arbitrary Host header.
+            local_origin = _origin(request.host_url.rstrip('/'))
+            if local_origin and local_origin[1] in {'localhost', '127.0.0.1', '::1'}:
+                allowed.add(local_origin)
+            if origin_value is None or origin_value not in allowed:
                 return jsonify({'error': 'Cross-site request blocked'}), 403
 
         if request.path.startswith('/api/') and request.content_length:
