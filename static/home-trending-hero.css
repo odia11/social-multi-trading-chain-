@@ -87,3 +87,56 @@
 @media(max-width:380px){.oa-th-embed{padding:12px}.oa-th-id strong{font-size:16px}.oa-th-px strong{font-size:15px}
   .oa-th-logo{width:40px;height:40px}.oa-th-social{gap:14px}.oa-th-act span{display:none}}
 @media(prefers-reduced-motion:reduce){.oa-th-post,.oa-th-bar i{transition:none}.oa-th-live i{animation:none}}
+
+/* Vote or like with the icon/label; tap its separate count to view the people.
+   Keep the compact feed action styling and 36px counter touch target. */
+.oa-th-reaction-group{display:inline-flex;align-items:center;gap:2px;min-width:0;flex:0 0 auto}
+.oa-th-reaction-group .oa-th-act{flex:0 0 auto}
+.oa-th-people-count{display:inline-flex;align-items:center;justify-content:center;min-width:23px;min-height:36px;
+  border:0;border-radius:7px;background:transparent;color:#abb4c1;font:750 13px/1 'JetBrains Mono',monospace;
+  cursor:pointer;font-variant-numeric:tabular-nums;padding:7px 2px;
+  text-decoration:underline;text-decoration-style:dotted;text-decoration-color:rgba(170,185,205,.60);text-underline-offset:4px;-webkit-tap-highlight-color:transparent}
+.oa-th-people-count:hover,.oa-th-people-count:focus-visible{background:rgba(255,255,255,.08);text-decoration:underline}
+.oa-th-vote.bull.on+.oa-th-people-count.bull{color:#5fd39b}
+.oa-th-vote.bear.on+.oa-th-people-count.bear{color:#f07178}
+.oa-th-like.on+.oa-th-people-count.like{color:#f7b955}
+.oa-th-social{gap:15px}
+@media(max-width:480px){
+  .oa-th-social{gap:10px}
+  .oa-th-reaction-group{gap:0}
+  .oa-th-act{gap:4px}
+  .oa-th-people-count{min-width:22px;padding:7px 1px}
+}
+@media(max-width:380px){.oa-th-social{gap:7px}}
+
+/* The public reaction list uses a separate overlay from the feed's normal
+   Liked-by modal, so live-feed polling cannot close or repaint it. */
+.oa-th-people-overlay[hidden]{display:none!important}
+.oa-th-people-overlay{position:fixed;inset:0;z-index:1500;background:rgba(6,9,14,.80);
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  display:flex;align-items:center;justify-content:center;padding:16px;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px))}
+.oa-th-people-panel{position:relative;display:flex;flex-direction:column;width:100%;max-width:420px;
+  max-height:min(75dvh,680px);min-height:165px;padding:23px 17px 16px;border:1px solid rgba(247,185,85,.28);
+  border-radius:18px;background:#14191f;box-shadow:0 25px 70px rgba(0,0,0,.60);color:#eff2f6}
+.oa-th-people-panel h2{margin:0;padding-right:32px;font:750 20px/1.2 Geist,system-ui,sans-serif}
+.oa-th-people-sub{color:#96a0ad;font-size:13px;margin:6px 0 14px}
+.oa-th-people-close{position:absolute;right:13px;top:12px;border:0;background:rgba(255,255,255,.07);color:#cbd2db;
+  border-radius:50%;width:36px;height:36px;font:25px/1 Geist,system-ui,sans-serif;cursor:pointer}
+.oa-th-people-list{overflow:auto;overscroll-behavior:contain;min-height:0;max-height:100%;padding:0 2px}
+.oa-th-person{display:flex;align-items:center;gap:11px;min-height:60px;padding:9px 4px;border-bottom:1px solid rgba(255,255,255,.06);
+  text-decoration:none;color:#eff2f6;border-radius:8px}
+.oa-th-person:hover,.oa-th-person:focus-visible{background:rgba(255,255,255,.055)}
+.oa-th-person-avatar{width:41px;height:41px;min-width:41px;position:relative;display:flex;align-items:center;justify-content:center;
+  border:1px solid rgba(247,185,85,.40);border-radius:50%;background:#242b34;color:#f7b955;font:750 16px Geist,system-ui,sans-serif;overflow:hidden}
+.oa-th-person-avatar img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%}
+.oa-th-person-copy{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px}
+.oa-th-person-copy strong,.oa-th-person-copy small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.oa-th-person-copy strong{font:700 14px Geist,system-ui,sans-serif}
+.oa-th-person-copy small{color:#99a3b0;font:500 12px Geist,system-ui,sans-serif}
+.oa-th-people-verified{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;
+  margin-left:5px;background:#f7b955;color:#14191f;font:900 10px/1 Geist,system-ui,sans-serif;border-radius:50%;vertical-align:1px}
+.oa-th-person-arrow{color:#8793a1;font-size:23px}
+.oa-th-people-empty{padding:25px 8px;text-align:center;color:#9ba5b1;font-size:14px}
+.oa-th-people-more{display:block;align-self:center;border:1px solid rgba(247,185,85,.35);border-radius:10px;
+  margin-top:12px;padding:10px 18px;background:rgba(247,185,85,.09);color:#f7b955;font-weight:700;cursor:pointer}
+.oa-th-people-more[hidden]{display:none}
