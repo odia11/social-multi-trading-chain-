@@ -34,7 +34,8 @@ function tuneImage(img){
   if(!img||img.dataset.oaImgTuned==='1')return;
   img.dataset.oaImgTuned='1';
   if(!img.hasAttribute('decoding'))img.decoding='async';
-  var aboveFold=!!img.closest('.pt-nb-topbar,.oa-m-hero,.pf-hero,.pt-sheet');
+  var avatar=!!img.closest('.fc-avatar,.feed-composer-avatar,.fc-ri-avatar');
+  var aboveFold=avatar||!!img.closest('.pt-nb-topbar,.oa-m-hero,.pf-hero,.pt-sheet');
   if(!img.hasAttribute('loading')&&!aboveFold)img.loading='lazy';
   if(!aboveFold&&!img.hasAttribute('fetchpriority')){try{img.fetchPriority='low'}catch(_){ }}
 }

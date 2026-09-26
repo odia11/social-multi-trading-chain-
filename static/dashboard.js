@@ -9384,7 +9384,7 @@ function _observeFeedVideos(root){
     _feedVideoObserver.observe(v);
   });
 }
-function _renderFeedCard(e){
+function _renderFeedCard(e, cardIndex){
   var repostBanner = '';
   if(e.type === 'repost'){
     if(!e.original) return ''; // original was deleted since the repost was made
@@ -9416,7 +9416,12 @@ function _renderFeedCard(e){
   /* ── avatar ── */
   var bg = (typeof _lbAvatarColor==='function') ? _lbAvatarColor(e.username||e.wallet||'?') : '#21252c';
   var ini = (e.username||e.wallet||'?')[0].toUpperCase();
-  var imgHtml = e.avatar_url ? '<img src="'+esc(e.avatar_url)+'" alt="" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.style.display=\'none\'">' : '';
+  // Photos are never lazy in the first visible cards; eager/high-priority
+  // fetch starts as soon as the feed DOM is inserted. A gold-on-dark initial
+  // stays visible behind the image, so there is no empty circle while loading.
+  var firstAvatar = typeof cardIndex === 'number' && cardIndex < 8;
+  var avatarPriority = firstAvatar ? ' loading="eager" fetchpriority="high"' : ' loading="lazy"';
+  var imgHtml = e.avatar_url ? '<img src="'+esc(e.avatar_url)+'" alt=""'+avatarPriority+' decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%;z-index:2" onerror="this.style.display=\'none\'">' : '';
   var verifiedBadge = e.verified ? '<span style="position:absolute;bottom:-1px;right:-1px;width:14px;height:14px;background:#f7b955;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px;color:#0a0b0e;border:1.5px solid #0a0b0e;font-weight:700">✓</span>' : '';
 
   /* ── header ── */
@@ -9596,7 +9601,7 @@ function _renderFeedCard(e){
       +'onclick="_fcCardClick(event,\''+esc(safePostId)+'\')" style="cursor:pointer">'
     +menuHtml
     +(e.avatar_url
-      ? '<div class="fc-avatar" style="background:'+bg+';width:44px;height:44px;position:relative;flex-shrink:0;cursor:pointer" onclick="event.stopPropagation();_showAvatarLightbox('+esc(JSON.stringify(e.avatar_url))+')">'+imgHtml+'</div>'
+      ? '<div class="fc-avatar" style="background:'+bg+';width:44px;height:44px;position:relative;flex-shrink:0;cursor:pointer" onclick="event.stopPropagation();_showAvatarLightbox('+esc(JSON.stringify(e.avatar_url))+')"><span class="fc-avatar-ini" aria-hidden="true">'+esc(ini)+'</span>'+imgHtml+'</div>'
       : _aProf+'<div class="fc-avatar" style="background:'+bg+';width:44px;height:44px;position:relative;flex-shrink:0"><span class="fc-avatar-ini">'+ini+'</span></div></a>')
     +'<div class="fc-body">'
     +'<div class="fc-header">'

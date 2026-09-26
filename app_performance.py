@@ -65,7 +65,7 @@ def install(appmod) -> None:
                 tags.append('<script src="/static/page-transition-direction.js?v=1"></script>')
 
             style('app-ux.css', '/static/app-ux.css?v=7', ' id="oa-app-ux-css"')
-            script('app-ux.js', '/static/app-ux.js?v=4', ' id="oa-app-ux-js"')
+            script('app-ux.js', '/static/app-ux.js?v=5', ' id="oa-app-ux-js"')
             style('shared-trade-card-v2.css', '/static/shared-trade-card-v2.css?v=1', ' id="oa-shared-trade-card-css"')
             script('shared-trade-card-v2.js', '/static/shared-trade-card-v2.js?v=1', ' id="oa-shared-trade-card-js"')
             style('feed-action-icons.css', '/static/feed-action-icons.css?v=2')

@@ -19138,6 +19138,58 @@ def save_username():
         conn.close()
     return jsonify({'ok': True, 'username': username})
 
+# ── CACHEABLE PUBLIC AVATAR PHOTOS ──
+# The avatar stored in SQLite is a data URI. Sending that URI inline with every
+# feed row caused the same 50-120 KB image to be repeated for each post, then
+# base64-decoded on the main thread before its first paint. The browser could
+# not reuse that image across page loads. Feed responses now carry a small,
+# versioned photo URL instead; only actually displayed avatars fetch bytes.
+def _feed_avatar_photo_url(avatar_url, wallet, memo):
+    if not avatar_url or not wallet or not avatar_url.startswith('data:image/'):
+        return avatar_url or ''
+    key = (wallet, avatar_url)
+    if key not in memo:
+        version = hashlib.sha256(avatar_url.encode('utf-8')).hexdigest()[:16]
+        memo[key] = '/avatar/photo/' + urllib.parse.quote(wallet, safe='') + '?v=' + version
+    return memo[key]
+
+
+@app.route('/avatar/photo/<wallet>', methods=['GET'])
+def public_avatar_photo(wallet):
+    # Users' profile photos are public content, but the database data URI is
+    # not a cacheable URL. Expose bytes only, never the base64 text or DB row.
+    if not wallet or len(wallet) > 128 or not re.fullmatch(r'[A-Za-z0-9_-]+', wallet):
+        return ('', 404)
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        row = conn.execute('SELECT avatar_url FROM users WHERE wallet_address=?', (wallet,)).fetchone()
+    finally:
+        conn.close()
+    avatar = str(row[0] or '') if row else ''
+    if not avatar.startswith('data:image/') or ',' not in avatar:
+        return ('', 404)
+    header, encoded = avatar.split(',', 1)
+    mime = header.removeprefix('data:').split(';', 1)[0].lower()
+    if mime == 'image/jpg':
+        mime = 'image/jpeg'
+    if mime not in {'image/jpeg', 'image/png', 'image/webp', 'image/gif'}:
+        return ('', 404)
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        return ('', 404)
+    if not raw or not _verify_image_magic(raw):
+        return ('', 404)
+    actual_version = hashlib.sha256(avatar.encode('utf-8')).hexdigest()[:16]
+    resp = make_response(raw)
+    resp.headers['Content-Type'] = mime
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['Cache-Control'] = ('public, max-age=31536000, immutable'
+                                    if request.args.get('v') == actual_version
+                                    else 'public, max-age=60')
+    return resp
+
+
 # ── DEFAULT USER AVATAR ──
 @app.route('/avatar/default/<wallet>', methods=['GET'])
 def default_user_avatar(wallet):
@@ -20474,6 +20526,16 @@ def social_feed():
                 _vconn.close()
         except Exception as _ve:
             print(f'[feed] video attach skipped: {_ve}', flush=True)
+    # Do this AFTER enrichment so both regular posts and repost originals use
+    # cacheable photos. Unchanged defaults/external URLs remain untouched.
+    avatar_memo = {}
+    for item in feed:
+        item['avatar_url'] = _feed_avatar_photo_url(
+            item.get('avatar_url'), item.get('wallet_full'), avatar_memo)
+        original = item.get('original')
+        if original:
+            original['avatar_url'] = _feed_avatar_photo_url(
+                original.get('avatar_url'), original.get('wallet_full'), avatar_memo)
     next_cursor = None
     if feed:
         last_created = feed[-1]['created_at']
