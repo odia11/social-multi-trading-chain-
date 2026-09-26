@@ -101,5 +101,5 @@ check('editing has readable Cancel / Save', 'msg-edit-cancel' in HTML and 'msg-e
 
 page = A.get('/messages', headers=H, base_url=BASE).get_data(as_text=True)
 check('/messages loads the chat stylesheet last',
-      'messages-thread.css?v=1' in page and page.index('messages-ui.css') < page.index('messages-thread.css'))
+      'messages-thread.css?v=2' in page and page.index('messages-ui.css') < page.index('messages-thread.css'))
 raise SystemExit(0 if all(checks) else 1)

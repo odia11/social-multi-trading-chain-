@@ -59,20 +59,24 @@ function install(){
 
   function setTyping(on){
     document.body.classList.toggle('oa-msgs-typing',on);
-    if(!on)document.documentElement.style.removeProperty('--oa-kb-offset');
+    if(!on){
+      document.documentElement.style.removeProperty('--oa-kb-offset');
+      document.documentElement.style.removeProperty('--oa-dm-viewport-h');
+      document.documentElement.style.removeProperty('--oa-dm-viewport-top');
+    }
     updateViewport();
   }
   function updateViewport(){
     if(!document.body.classList.contains('oa-msgs-typing'))return;
     var vv=window.visualViewport;
-    if(!vv){document.documentElement.style.setProperty('--oa-kb-offset','0px');return;}
-    var offset=Math.max(0,window.innerHeight-vv.height-vv.offsetTop);
-    document.documentElement.style.setProperty('--oa-kb-offset',offset+'px');
+    if(!vv)return;
+    // Resize the ENTIRE chat to the actual visible viewport when iOS's
+    // keyboard opens, rather than lifting the composer over the messages.
+    document.documentElement.style.setProperty('--oa-dm-viewport-h',Math.round(vv.height)+'px');
+    document.documentElement.style.setProperty('--oa-dm-viewport-top',Math.round(vv.offsetTop)+'px');
     var area=document.getElementById('msgs-area');
     if(area && area.scrollHeight-area.scrollTop-area.clientHeight<100){
-      requestAnimationFrame(function(){
-        if(area.scrollHeight-area.scrollTop-area.clientHeight<100)area.scrollTop=area.scrollHeight;
-      });
+      requestAnimationFrame(function(){area.scrollTop=area.scrollHeight;});
     }
   }
 
@@ -189,8 +193,8 @@ function sync(){
     [app,main,right].forEach(function(el){
       if(!el)return;
       setImportant(el,'position','fixed');
-      setImportant(el,'top','0px');setImportant(el,'right','0px');setImportant(el,'bottom','0px');setImportant(el,'left','0px');
-      setImportant(el,'width','100vw');setImportant(el,'height','100dvh');setImportant(el,'max-height','100dvh');
+      setImportant(el,'top','var(--oa-dm-viewport-top,0px)');setImportant(el,'right','0px');setImportant(el,'bottom','0px');setImportant(el,'left','0px');
+      setImportant(el,'width','100vw');setImportant(el,'height','var(--oa-dm-viewport-h,100dvh)');setImportant(el,'max-height','var(--oa-dm-viewport-h,100dvh)');
       setImportant(el,'margin','0px');setImportant(el,'padding','0px');setImportant(el,'overflow','hidden');
     });
     if(thread){

@@ -49,3 +49,48 @@ body.oa-thread-open{overflow-x:hidden!important}
 #msgs-area .msg-wrap.theirs .msg-bubble.msg-tip{border-color:rgba(53,214,162,.35)!important}
 #msgs-area .msg-wrap.theirs .msg-tip-head{color:#35d6a2}
 #msgs-area .msg-wrap.theirs .msg-tip-note{color:#e8ebf0}
+
+/* Messages viewport/composer overlap fix (iOS, Android, and PWA).
+   The composer is the last flex child of the fullscreen chat, NOT an
+   absolute/fixed overlay on the message scroller. Previous v6 rules placed
+   it above the last bubble and its Seen/time label, even after scrollToBottom.
+   Flex layout measures the actual composer height, including safe area and
+   textarea growth, so every message can scroll fully above it. */
+@media(max-width:767px){
+  html body.oa-thread-open #app,
+  html body.oa-thread-open .msgs-main,
+  html body.oa-thread-open .msgs-right{
+    top:var(--oa-dm-viewport-top,0px)!important;
+    height:var(--oa-dm-viewport-h,100dvh)!important;
+    min-height:0!important;
+    max-height:var(--oa-dm-viewport-h,100dvh)!important;
+  }
+  html body.oa-thread-open .msgs-thread{
+    display:flex!important;
+    flex-direction:column!important;
+    height:100%!important;
+    min-height:0!important;
+  }
+  html body.oa-thread-open .msgs-area,
+  html body.oa-thread-open.oa-msgs-typing .msgs-area{
+    flex:1 1 0%!important;
+    min-height:0!important;
+    height:auto!important;
+    padding:14px 14px 18px!important;
+    overflow-y:auto!important;
+    overscroll-behavior-y:contain!important;
+  }
+  html body.oa-thread-open .msgs-input-bar.oa-composer-v4,
+  html body.oa-thread-open.oa-msgs-typing .msgs-input-bar.oa-composer-v4{
+    position:relative!important;
+    inset:auto!important;
+    top:auto!important;
+    bottom:auto!important;
+    left:auto!important;
+    right:auto!important;
+    flex:0 0 auto!important;
+    width:100%!important;
+    transform:none!important;
+    z-index:80!important;
+  }
+}
