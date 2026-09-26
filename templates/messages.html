@@ -270,14 +270,21 @@ html,body{background:#0a0b0e;color:#eef1f5;font-family:'Geist',system-ui,sans-se
       <div class="msgs-left-hdr">
         <div class="msgs-left-title-row">
           <a href="/" class="msgs-home-back" title="Back to home">←</a>
-          <div class="msgs-left-title">Messages</div>
-          <button class="msgs-new-btn" title="New message" aria-label="New message" onclick="document.getElementById('newMsgBar').style.display='block';document.getElementById('searchUser').focus()">
+          <div class="oa-inbox-titles">
+            <div class="msgs-left-title">Messages</div>
+            <div class="oa-inbox-sub" id="oa-inbox-sub" aria-live="polite"></div>
+          </div>
+          <button class="msgs-new-btn" title="New message" aria-label="New message" onclick="_openNewMessage()">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>
           </button>
         </div>
         <div class="msgs-search-wrap">
           <svg class="msgs-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input class="msgs-search" id="msgs-search" placeholder="Search conversations…" oninput="_filterConvs(this.value)">
+          <input class="msgs-search" id="msgs-search" placeholder="Search chats…" oninput="_filterConvs(this.value)" autocomplete="off">
+        </div>
+        <div class="oa-inbox-filters" id="oa-inbox-filters" role="tablist" aria-label="Filter chats">
+          <button type="button" class="oa-inbox-chip on" data-filter="all" role="tab" aria-selected="true" onclick="_setConvFilter('all')">All</button>
+          <button type="button" class="oa-inbox-chip" data-filter="unread" role="tab" aria-selected="false" onclick="_setConvFilter('unread')">Unread <b id="oa-unread-count"></b></button>
         </div>
       </div>
 
@@ -286,6 +293,8 @@ html,body{background:#0a0b0e;color:#eef1f5;font-family:'Geist',system-ui,sans-se
         <input id="searchUser" class="new-msg-input" placeholder="Search username or address…" oninput="searchUsers(this.value)" onkeydown="if(event.key==='Escape'){document.getElementById('newMsgBar').style.display='none'}">
         <div id="searchResults" style="margin-top:8px"></div>
       </div>
+
+      <div class="oa-active-strip" id="oa-active-strip" hidden></div>
 
       <div class="conv-list" id="conv-list">
         <div class="msgs-left-empty">Loading…</div>
@@ -505,6 +514,80 @@ document.addEventListener('keydown', function(e){
   if (e.key === 'Escape') _closeImgLightbox();
 });
 
+/* ── INBOX: preview line, header count, filters, "Active now" ── */
+var _convFilter = 'all';
+var _TIP_RE = /^Tipped\s+([\d.,]+)\s+([A-Za-z]{2,6})\s*(?:[—–-]\s*([\s\S]*))?$/;
+function _convPreviewHtml(c) {
+  var you = c.last_is_mine ? '<span class="oa-you">You:</span> ' : '';
+  if (c.last_type === 'image') return you + '<span class="oa-kind">📷 Photo</span>';
+  if (c.last_type === 'trade') return you + '<span class="oa-kind">📊 Shared a trade</span>';
+  var raw = String(c.last_msg || '');
+  var tip = _TIP_RE.exec(raw.trim());
+  if (tip) {
+    var amt = tip[1] + ' ' + tip[2].toUpperCase();
+    return '<span class="oa-tip-chip '+(c.last_is_mine ? 'sent' : 'got')+'">'
+      + (c.last_is_mine ? 'You tipped ' : 'Tipped you ') + '<b>' + _esc(amt) + '</b></span>'
+      + (tip[3] ? ' <span class="oa-tip-note">' + _esc(tip[3].slice(0, 60)) + '</span>' : '');
+  }
+  return you + _esc(raw.slice(0, 80));
+}
+function _renderInboxChrome() {
+  var unreadChats = 0, unreadMsgs = 0;
+  _conversations.forEach(function(c){ if (c.unread > 0) { unreadChats++; unreadMsgs += c.unread; } });
+  var sub = document.getElementById('oa-inbox-sub');
+  if (sub) {
+    sub.classList.toggle('has-unread', unreadMsgs > 0);
+    sub.textContent = !_conversations.length ? 'Chat, trade and tip together'
+      : unreadMsgs ? (unreadMsgs + ' unread message' + (unreadMsgs === 1 ? '' : 's'))
+      : 'You\'re all caught up';
+  }
+  var cnt = document.getElementById('oa-unread-count');
+  if (cnt) cnt.textContent = unreadChats ? String(unreadChats) : '';
+  var filters = document.getElementById('oa-inbox-filters');
+  if (filters) filters.hidden = !_conversations.length;
+  var strip = document.getElementById('oa-active-strip');
+  if (strip) {
+    var online = _conversations.filter(function(c){ return c.peer_online; }).slice(0, 12);
+    strip.hidden = !online.length;
+    strip.innerHTML = online.length
+      ? '<div class="oa-active-title">Active now</div><div class="oa-active-row">'
+        + online.map(function(c){
+            var name = c.peer_username || _short(c.peer_wallet || '');
+            return '<button type="button" class="oa-active-peer" data-peer-id="'+c.peer_id+'" aria-label="Message '+_esc(name)+'">'
+              + '<span class="oa-active-av" style="--oa-av:'+_avatarColor(c.peer_wallet || String(c.peer_id))+'">'
+              +   _esc((name[0] || '?').toUpperCase())
+              +   (c.peer_avatar ? '<img src="'+_esc(c.peer_avatar)+'" alt="" loading="lazy" onerror="this.style.display=\'none\'">' : '')
+              +   '<i></i></span>'
+              + '<span class="oa-active-name">'+_esc(name)+'</span></button>';
+          }).join('') + '</div>'
+      : '';
+    strip.querySelectorAll('.oa-active-peer').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var id = parseInt(btn.dataset.peerId, 10);
+        var c = _conversations.find(function(x){ return x.peer_id === id; });
+        if (c) _openThread(id, c.peer_username || '', c.peer_wallet || '');
+      });
+    });
+  }
+}
+function _setConvFilter(f) {
+  _convFilter = f === 'unread' ? 'unread' : 'all';
+  document.querySelectorAll('#oa-inbox-filters .oa-inbox-chip').forEach(function(b){
+    var on = b.dataset.filter === _convFilter;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  var search = document.getElementById('msgs-search');
+  if (search && search.value) search.value = '';
+  _renderConvList();
+}
+function _openNewMessage() {
+  var bar = document.getElementById('newMsgBar');
+  var open = bar.style.display !== 'block';
+  bar.style.display = open ? 'block' : 'none';
+  if (open) document.getElementById('searchUser').focus();
+}
+
 function _renderConvList() {
   // Skip a rebuild while the user is mid-interaction with the list -- a full
   // innerHTML replace would silently snap a swiped-open row shut, orphan an
@@ -516,46 +599,65 @@ function _renderConvList() {
   var searchEl = document.getElementById('msgs-search');
   if (searchEl && searchEl.value.trim()) return;
   var el = document.getElementById('conv-list');
+  _renderInboxChrome();
   if (!_conversations.length) {
-    el.innerHTML = '<div class="msgs-left-empty">No conversations yet.<br>Press <strong style="color:#f7b955">+ New</strong> to start one.</div>';
+    el.innerHTML = '<div class="msgs-left-empty oa-inbox-empty">'
+      + '<div class="oa-inbox-empty-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>'
+      + '<strong>No messages yet</strong>'
+      + '<span>Say gm to a trader you follow, share a trade or send a tip.</span>'
+      + '<button type="button" class="oa-inbox-empty-cta" onclick="_openNewMessage()">Start a chat</button>'
+      + '</div>';
     return;
   }
-  el.innerHTML = _conversations.map(function(c) {
+  var list = _convFilter === 'unread'
+    ? _conversations.filter(function(c){ return c.unread > 0; })
+    : _conversations;
+  if (!list.length) {
+    el.innerHTML = '<div class="msgs-left-empty oa-inbox-empty">'
+      + '<div class="oa-inbox-empty-ico">✨</div>'
+      + '<strong>You\'re all caught up</strong>'
+      + '<span>No unread messages.</span>'
+      + '<button type="button" class="oa-inbox-empty-cta ghost" onclick="_setConvFilter(\'all\')">Show all chats</button>'
+      + '</div>';
+    return;
+  }
+  el.innerHTML = list.map(function(c) {
     var name   = c.peer_username || _short(c.peer_wallet || '');
     var color  = _avatarColor(c.peer_wallet || String(c.peer_id));
     var ini    = (name[0] || '?').toUpperCase();
     var active = c.peer_id === _activePeerId ? ' active' : '';
     var unread = c.unread > 0;
-    var badge  = unread ? '<span class="conv-badge">'+c.unread+'</span>' : '';
+    var badge  = unread ? '<span class="conv-badge" aria-label="'+c.unread+' unread">'+(c.unread > 99 ? '99+' : c.unread)+'</span>' : '';
     var avatarImg = c.peer_avatar
-      ? '<img src="'+_esc(c.peer_avatar)+'" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.style.display=\'none\'">'
+      ? '<img src="'+_esc(c.peer_avatar)+'" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
       : '';
-    var previewRaw = c.last_type === 'image' ? '📷 Photo'
-      : c.last_type === 'trade' ? '📊 Shared a trade'
-      : (c.last_msg || '');
-    var preview = (c.last_is_mine ? 'you: ' : '') + previewRaw.slice(0, 60);
-    return '<div class="conv-row-wrap" data-peer-id="'+c.peer_id+'">'
+    return '<div class="conv-row-wrap'+(unread ? ' is-unread' : '')+'" data-peer-id="'+c.peer_id+'">'
       // Swipe-reveal action sits BEFORE .conv-row in DOM order so the row's
       // own background paints on top of it at rest (hidden underneath) -- a
       // later sibling would otherwise always win the paint order and show
       // through as a permanent bar, which is exactly what happened here.
-      + '<button class="conv-delete-btn">Delete</button>'
+      + '<button class="conv-delete-btn" aria-label="Delete conversation">'
+      +   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>'
+      +   '<span>Delete</span>'
+      + '</button>'
       + '<div class="conv-row'+active+'">'
       +   '<div class="conv-avatar-wrap">'
-      +     '<div class="conv-avatar" style="background:'+color+';overflow:hidden'+(c.peer_avatar?';cursor:pointer':'')+'"'+(c.peer_avatar?' onclick="event.stopPropagation();_showAvatarLightbox('+_esc(JSON.stringify(c.peer_avatar))+')"':'')+'>'+_esc(ini)+avatarImg+'</div>'
+      +     '<div class="conv-avatar" style="--oa-av:'+color+(c.peer_avatar?';cursor:pointer':'')+'"'+(c.peer_avatar?' onclick="event.stopPropagation();_showAvatarLightbox('+_esc(JSON.stringify(c.peer_avatar))+')"':'')+'>'+_esc(ini)+avatarImg+'</div>'
       // Dot lives OUTSIDE .conv-avatar (a sibling, not a child) -- that div has
       // overflow:hidden to clip the <img> to a circle, which would also clip a
       // corner-positioned badge sitting right at its bounding-box edge (a square
       // corner falls outside the inscribed circle), making it invisible.
-      +     (c.peer_online ? '<span class="msgs-online-dot avatar-badge"></span>' : '')
+      +     (c.peer_online ? '<span class="msgs-online-dot avatar-badge" title="Online"></span>' : '')
       +   '</div>'
       +   '<div class="conv-info">'
-      +     '<div class="conv-name">'+_esc(name)+(c.peer_verified ? ' <svg width="14" height="14" viewBox="0 0 24 24" style="vertical-align:-2px;margin-left:2px"><circle cx="12" cy="12" r="12" fill="#f7b955"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#0a0b0e" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '')+'</div>'
-      +     '<div class="conv-preview'+(unread?' unread':'')+'">'+_esc(preview)+'</div>'
-      +   '</div>'
-      +   '<div class="conv-meta">'
-      +     '<span class="conv-time">'+_esc(_timeAgo(c.last_ts))+'</span>'
-      +     badge
+      +     '<div class="conv-top">'
+      +       '<div class="conv-name">'+_esc(name)+(c.peer_verified ? '<svg class="conv-verified" viewBox="0 0 24 24" aria-label="Verified"><circle cx="12" cy="12" r="12" fill="#f7b955"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#0a0b0e" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '')+'</div>'
+      +       '<span class="conv-time">'+_esc(_timeAgo(c.last_ts))+'</span>'
+      +     '</div>'
+      +     '<div class="conv-bottom">'
+      +       '<div class="conv-preview'+(unread?' unread':'')+'">'+_convPreviewHtml(c)+'</div>'
+      +       badge
+      +     '</div>'
       +   '</div>'
       // Desktop-only (see the hover:hover media query): small trash icon,
       // invisible until the row is hovered. Reserves its layout space at
@@ -653,6 +755,12 @@ function _attachSwipeToDelete(wrapEl, contentEl, deleteBtnEl, opts) {
   function setTranslate(x, animate) {
     contentEl.style.transition = animate ? 'transform .2s ease' : 'none';
     contentEl.style.transform = 'translateX(' + x + 'px)';
+    // The red action is only painted while the row is moved off it, so it
+    // can never show through the card's rounded edge at rest.
+    clearTimeout(wrapEl._oaSwipeT);
+    if (x < 0) wrapEl.classList.add('oa-swiping');
+    else if (animate) wrapEl._oaSwipeT = setTimeout(function(){ wrapEl.classList.remove('oa-swiping'); }, 220);
+    else wrapEl.classList.remove('oa-swiping');
   }
   function closeRow(animate) {
     setTranslate(0, animate !== false);
