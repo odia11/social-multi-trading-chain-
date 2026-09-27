@@ -1554,6 +1554,21 @@ def send_sol_fee(from_privkey: str, to_wallet_str: str, amount_sol: float) -> st
         raise Exception('Fee TX: ' + str(res['error']))
     return res.get('result', str(res))
 
+# ── OPTIONAL, SELF-DECLARED PROFILE FLAG ──
+# ISO 3166-1 country/territory names and flags are checked in as static data.
+# No third-party API call and no country inferred from user IP or wallet.
+with open(os.path.join(os.path.dirname(__file__), 'static', 'profile-countries.json'),
+          encoding='utf-8') as _country_file:
+    _PROFILE_COUNTRY_OPTIONS = json.load(_country_file)
+_PROFILE_COUNTRIES = {item['code']: item for item in _PROFILE_COUNTRY_OPTIONS}
+
+
+def _public_profile_country(code, visible):
+    if not visible:
+        return None
+    return _PROFILE_COUNTRIES.get(code or '')
+
+
 # ── INPUT VALIDATION ──
 _SOLANA_ADDR_RE = re.compile(r'^[1-9A-HJ-NP-Za-km-z]{32,44}$')
 _SOLANA_KEY_RE  = re.compile(r'^[1-9A-HJ-NP-Za-km-z]{44,88}$')
@@ -2887,6 +2902,10 @@ def run_migrations():
         "ALTER TABLE users ADD COLUMN last_active TIMESTAMP DEFAULT NULL",
         "ALTER TABLE users ADD COLUMN is_verified INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN banner_url TEXT DEFAULT NULL",
+        # Optional self-declared country of origin. Neither value is inferred
+        # from IP/wallet; even an existing country remains private by default.
+        "ALTER TABLE users ADD COLUMN profile_country_code TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE users ADD COLUMN profile_country_visible INTEGER NOT NULL DEFAULT 0",
         # ── BSC (multi-chain) support ──
         # Mirrors the existing Solana encrypted_private_key column, but for a
         # separate, server-managed EVM (secp256k1) trading wallet -- Solana's
@@ -12623,7 +12642,8 @@ def profile_view(wallet_address: str):
     try:
         col = 'wallet_address' if is_wallet else 'username'
         user = conn.execute(
-            f'SELECT id, username, avatar_url, banner_url, bio, created_at, wallet_address, is_verified FROM users WHERE {col}=?',
+            f'SELECT id, username, avatar_url, banner_url, bio, created_at, wallet_address, is_verified, '
+            f'profile_country_code, profile_country_visible FROM users WHERE {col}=?',
             (wallet_address,)
         ).fetchone()
         if not user:
@@ -12698,8 +12718,11 @@ def profile_view(wallet_address: str):
             can_view_sensitive = is_own or viewer_role in ('admin', 'moderator', 'analyst')
         else:
             can_view_sensitive = True
+        public_country = _public_profile_country(
+            user['profile_country_code'], user['profile_country_visible'])
         return _render_no_cache(
             'profile.html',
+            profile_country=public_country,
             wallet=wallet_address,
             wallet_short=wallet_short,
             user_id=user_id,
@@ -22876,6 +22899,48 @@ def api_me():
     })
 
 
+@app.route('/api/profile/country', methods=['GET', 'POST'])
+@rate_limit(30, 60)
+def profile_country_settings():
+    """Country/flag is optional and private until the user explicitly opts in.
+
+    This deliberately does NOT depend on the bot's trading settings. A user
+    can choose a country, leave visibility off, or clear the selection. No
+    account/wallet is created, and no changes are made outside this user's row.
+    POST is covered by the shared authenticated-CSRF protection.
+    """
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'msg': 'Connect a wallet first'}), 401
+    if request.method == 'POST':
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or not isinstance(body.get('country_code'), str) \
+                or not isinstance(body.get('show_country'), bool):
+            return jsonify({'ok': False, 'msg': 'Invalid country preference'}), 400
+        code = body['country_code']
+        visible = body['show_country']
+        if code and code not in _PROFILE_COUNTRIES:
+            return jsonify({'ok': False, 'msg': 'Choose a valid country'}), 400
+        if visible and not code:
+            return jsonify({'ok': False, 'msg': 'Choose a country before showing its flag'}), 400
+        with sqlite3.connect(DB_FILE) as conn:
+            result = conn.execute(
+                'UPDATE users SET profile_country_code=?,profile_country_visible=? '
+                'WHERE wallet_address=?', (code, int(visible), wallet))
+            if result.rowcount == 0:
+                return jsonify({'ok': False, 'msg': 'Profile not found'}), 404
+        return jsonify({'ok': True, 'country_code': code, 'show_country': visible})
+
+    with sqlite3.connect(DB_FILE) as conn:
+        row = conn.execute('SELECT profile_country_code,profile_country_visible '
+                           'FROM users WHERE wallet_address=?', (wallet,)).fetchone()
+    if not row:
+        return jsonify({'ok': False, 'msg': 'Profile not found'}), 404
+    return jsonify({'ok': True, 'country_code': row[0] or '',
+                    'show_country': bool(row[1]),
+                    'countries': _PROFILE_COUNTRY_OPTIONS})
+
+
 @app.route('/api/profile/me', methods=['GET'])
 @rate_limit(60, 60)
 def api_profile_me():
@@ -22927,7 +22992,7 @@ def get_profile(user_id: int):
                    AVG(CASE WHEN t.opened_at IS NOT NULL AND t.opened_at > 0
                             THEN CAST(strftime('%s', t.timestamp) AS REAL) - t.opened_at
                             ELSE NULL END) AS avg_hold_seconds,
-                   u.badges
+                   u.badges, u.profile_country_code, u.profile_country_visible
             FROM users u
             LEFT JOIN trades t ON t.user_id = u.id
             WHERE u.id = ?
@@ -22937,7 +23002,9 @@ def get_profile(user_id: int):
         if not row:
             return jsonify({'ok': False, 'msg': 'User not found'}), 404
 
-        uid, username, avatar_url, bio, wallet, created_at, trade_count, avg_hold, badges_str = row
+        (uid, username, avatar_url, bio, wallet, created_at, trade_count,
+         avg_hold, badges_str, country_code, country_visible) = row
+        public_country = _public_profile_country(country_code, country_visible)
 
         c.execute('SELECT COUNT(*) FROM follows WHERE following_id = ?', (user_id,))
         follower_count = (c.fetchone() or [0])[0]
@@ -23000,6 +23067,8 @@ def get_profile(user_id: int):
         'username':        display_name,
         'avatar_url':      avatar_url or '',
         'bio':             bio or '',
+        'country_flag':    public_country['flag'] if public_country else '',
+        'country_name':    public_country['name'] if public_country else '',
         'wallet':          short_wallet,
         'wallet_address':  wallet or '',
         'joined_at':       created_at or '',

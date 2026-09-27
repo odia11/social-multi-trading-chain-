@@ -4588,6 +4588,71 @@ async function loadSettingsPage(){
   }
   _loadXCard();
   _loadSettingsTos();
+  _loadCountrySettings();
+}
+
+/* ── Optional self-declared flag — never geolocated or auto-published ── */
+var _countryOptionMap={};
+function _countrySelectionChanged(){
+  var el=document.getElementById('st-country-select');
+  var cb=document.getElementById('st-country-visible');
+  var preview=document.getElementById('st-country-preview');
+  if(!el||!cb||!preview)return;
+  var country=_countryOptionMap[el.value];
+  if(!country)cb.checked=false;
+  cb.disabled=!country;
+  preview.textContent=country?country.flag:'🌐';
+  preview.title=country?country.name:'No country selected';
+}
+async function _loadCountrySettings(){
+  var select=document.getElementById('st-country-select');
+  var cb=document.getElementById('st-country-visible');
+  var msg=document.getElementById('st-country-msg');
+  if(!select||!cb)return;
+  try{
+    var r=await fetch('/api/profile/country',{credentials:'include'});
+    var d=await r.json();
+    if(!r.ok||!d.ok)throw Error(d.msg||'Cannot load flag preference');
+    var fragment=document.createDocumentFragment();
+    var defaultOption=document.createElement('option');
+    defaultOption.value='';defaultOption.textContent='No country selected';
+    fragment.appendChild(defaultOption);
+    _countryOptionMap={};
+    (d.countries||[]).forEach(function(item){
+      _countryOptionMap[item.code]=item;
+      var opt=document.createElement('option');
+      opt.value=item.code;opt.textContent=item.flag+'  '+item.name;
+      fragment.appendChild(opt);
+    });
+    select.replaceChildren(fragment);
+    select.value=d.country_code||'';
+    cb.checked=!!d.show_country;
+    _countrySelectionChanged();
+    if(msg){msg.className='st-save-msg';msg.textContent='';}
+  }catch(e){
+    if(msg){msg.className='st-save-msg err';msg.textContent='Could not load flag preference';}
+  }
+}
+async function _saveCountrySetting(){
+  var select=document.getElementById('st-country-select');
+  var cb=document.getElementById('st-country-visible');
+  var btn=document.getElementById('st-country-save');
+  var msg=document.getElementById('st-country-msg');
+  if(!select||!cb||!btn)return;
+  btn.disabled=true;
+  if(msg){msg.className='st-save-msg';msg.textContent='Saving…';}
+  try{
+    var r=await fetch('/api/profile/country',{
+      method:'POST',credentials:'include',
+      headers:{'Content-Type':'application/json','X-CSRF-Token':_csrfToken},
+      body:JSON.stringify({country_code:select.value,show_country:!!cb.checked})
+    });
+    var d=await r.json();
+    if(!r.ok||!d.ok)throw Error(d.msg||'Could not save flag preference');
+    if(msg){msg.className='st-save-msg ok';msg.textContent='✓ Flag preference saved';}
+  }catch(e){
+    if(msg){msg.className='st-save-msg err';msg.textContent=e.message||'Network error';}
+  }finally{btn.disabled=false;}
 }
 
 /* ── X (Twitter) card (Card 4) ── */
