@@ -192,6 +192,79 @@ def test_allowlisted_mainnet_pilot():
     print('PASS unapproved users remain in draft-only mode, including when another wallet is approved')
     tmp.cleanup()
 
+def test_creator_pilot_wallet_budget():
+    tmp,app,d=setup();client=app.test_client()
+    wallet=str(Keypair().pubkey());other=str(Keypair().pubkey())
+    with client.session_transaction() as sess:
+        sess['wallet']=wallet;sess['csrf_token']='test-csrf'
+    headers={'X-CSRF-Token':'test-csrf'}
+    base={'name':'OrcAgent Pilot Test','symbol':'ORCAP','image_data':icon(),
+          'quote_asset':'USDC','reward_mode':'creator',
+          'client_nonce':'creator-pilot-100pc-0001'}
+    flags={'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED':'0',
+           'ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_ENABLED':'1',
+           'ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_WALLETS':wallet}
+    state={'before':50_000_000,'after':26_000_000,'fee':5000,'err':None}
+    with patch.dict(os.environ,flags):
+      conf=client.get('/api/token-launch/config').get_json()
+      assert conf['pilot_creator_only'] and conf['default_reward_mode']=='creator'
+      assert conf['pilot_max_sol_lamports']==30_000_000
+      assert conf['pilot_max_launch_sol_lamports']==25_000_000
+      assert conf['pilot_max_trade_usdc_micro']==2_000_000
+      html=client.get('/token-launch').get_data(as_text=True)
+      assert '100% Creator Rewards' in html
+      assert 'value="community" disabled' in html
+      assert 'value="creator" checked' in html
+      assert 'value="holder" disabled' in html
+      assert 'value="SOL" disabled' in html
+      assert client.post('/api/token-launch/draft',json={**base,
+          'reward_mode':'community','community_wallet':other,
+          'community_bps':1000},headers=headers).status_code==400
+      assert client.post('/api/token-launch/draft',json={**base,
+          'quote_asset':'SOL'},headers=headers).status_code==400
+      first=client.post('/api/token-launch/draft',json=base,headers=headers)
+      assert first.status_code==201,first.get_data(as_text=True)[:150]
+      draft_id=first.get_json()['draft']['id']
+      path='/api/token-launch/'+draft_id+'/prepare'
+      blockhash=str(Keypair().pubkey())
+      with patch('token_launch.requests.post') as rpc:
+        rpc.return_value.raise_for_status=lambda:None
+        def answer():
+            method=rpc.call_args.kwargs['json']['method']
+            if method=='getLatestBlockhash':
+                return {'result':{'value':{'blockhash':blockhash}}}
+            if method=='getBalance':
+                return {'result':{'value':state['before']}}
+            if method=='getFeeForMessage':
+                return {'result':{'value':state['fee']}}
+            if method=='simulateTransaction':
+                return {'result':{'value':{'err':state['err'],
+                    'accounts':[{'lamports':state['after']}]}}}
+            raise AssertionError('Unexpected RPC method '+method)
+        rpc.return_value.json=answer
+        blocked=client.post(path,json={},headers=headers)
+        assert blocked.status_code==200,blocked.get_data(as_text=True)[:160]
+        assert blocked.get_json()['pilot_estimated_max_sol_lamports']==24_005_000
+        reused=client.post(path,json={},headers=headers)
+        assert reused.status_code==200 and reused.get_json()['reused'] is True
+        state['after']=10_000_000
+        over=client.post(path,json={},headers=headers)
+        assert over.status_code==503 and 'SOL budget' in over.get_json()['msg']
+        state['after']=26_000_000
+        state['err']={'InstructionError':[0,'Custom']}
+        failed=client.post(path,json={},headers=headers)
+        assert failed.status_code==503 and 'simulation failed' in failed.get_json()['msg']
+        state['err']=None
+        next_draft=client.post('/api/token-launch/draft',json={**base,
+            'client_nonce':'creator-pilot-100pc-0002'},headers=headers)
+        assert next_draft.status_code==201
+        second=client.post('/api/token-launch/'+next_draft.get_json()['draft']['id']+'/prepare',
+               json={},headers=headers)
+        assert second.status_code==409 and 'one test token' in second.get_json()['msg']
+    print('PASS creator-only USDC pilot has 0.03 SOL cost gate and 2 USDC guidance')
+    print('PASS simulated network failure, excess SOL charges and second mint fail closed')
+    tmp.cleanup()
+
 def test_exact_onchain_transaction_verification():
     """Simulated RPC response uses cryptographically signed bytes, not a stubbed verdict."""
     from solders.transaction import Transaction as Tx
@@ -305,5 +378,6 @@ def test_prepared_recovery():
 if __name__=='__main__':
     test_all()
     test_allowlisted_mainnet_pilot()
+    test_creator_pilot_wallet_budget()
     test_exact_onchain_transaction_verification()
     test_prepared_recovery()

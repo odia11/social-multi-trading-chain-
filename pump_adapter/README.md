@@ -76,6 +76,31 @@ ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_ENABLED=1
 ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_WALLETS=<CREATOR_SOLANA_PUBLIC_ADDRESS>
 ```
 
+For a single-wallet funded pilot, use the root-only helper **after the
+budget-guarded commit has been deployed**. It validates the SDK, audited
+transitive dependencies and read-only mainnet configuration before changing
+any production environment variables, then restarts and health-checks OrcAgent:
+
+```sh
+sudo bash ~/orcagent/deploy/creator-pilot.sh YOUR_CREATOR_PUBLIC_SOLANA_WALLET
+```
+
+Disable access after the test (or before proceeding if Phantom quotes any cost
+above the agreed budget):
+
+```sh
+sudo bash ~/orcagent/deploy/creator-pilot.sh --disable
+```
+
+The script does NOT sign a transaction and its argument must be a PUBLIC wallet
+address, never a secret. The expected full-test budget is 0.03 SOL total and
+2 USDC for a **separate manual trade**. The creator launch simulator has a
+0.025 SOL pre-approval ceiling, conservatively leaving 0.005 SOL for later
+steps. The separate trade is not launched, simulated or debited by this helper:
+the user must check its own cost and the cumulative test expenditure before
+confirming in Phantom. Network/rent costs can fluctuate and any read-only RPC
+failure blocks the pilot rather than silently bypassing its checks.
+
 The existing deployment installer detects an explicitly configured pilot,
 installs the pinned SDK, runs the security audit and read-only Pump checks,
 and stops the deployment if one fails. Only the exact authenticated creator
@@ -92,3 +117,34 @@ Check the actual Pump account state and transaction signatures before
 reporting fees received. No transaction amount or network fee is silently
 charged to the platform, and estimated vault balances are never booked as
 realized revenue. Disable the pilot flag when the test is finished.
+
+### OrcAgent single-creator USDC test (0.03 SOL / 2 USDC)
+
+For an explicitly approved 100% Creator Rewards pilot, deploy the branch and
+then configure *one authenticated public Phantom wallet* with:
+
+```sh
+sudo bash ~/orcagent/deploy/update.sh
+sudo bash ~/orcagent/deploy/creator-pilot.sh PUBLIC_SOLANA_WALLET
+```
+
+The pilot script checks the exact deployed version, pinned SDK, npm audit and
+read-only Pump configuration before changing the protected service environment.
+It sets public launches OFF, private pilot ON, and permits only that creator's
+wallet. No community wallet or separate fee-sharing transaction is required.
+It never signs or submits a transaction and asks for no secret key. To stop:
+
+```sh
+sudo bash ~/orcagent/deploy/creator-pilot.sh --disable
+```
+
+Only USDC-quoted 100% Creator Rewards and ONE test token are allowed. The
+server rejects an estimated token-creation SOL cost above **0.025 SOL** to
+reserve **0.005 SOL** from the approved **0.03 SOL total** test envelope for
+follow-up fees. Each claimed creator-fee transaction has its own conservative
+0.005 SOL pre-approval limit. The owner must keep an eye on the *combined*
+costs across separately approved wallet actions: Token Launch does **not**
+control spending in Portfolio/other swap and trading routes. The intended
+**2 USDC test trade must be entered and approved separately**; merely
+launching a token never initiates that trade. A successful RPC simulation is
+not a promise that mainnet fees, rent or price will remain constant.

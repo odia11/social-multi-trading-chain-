@@ -139,6 +139,20 @@ def install(d):
         wallets={candidate.strip() for candidate in raw.split(',') if candidate.strip()}
         return bool(w and w in wallets and d.is_valid_solana_address(w))
 
+    def pilot_wallet(wallet=None):
+        w=wallet or identity()
+        return (os.getenv('ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED','0')!='1'
+            and os.getenv('ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_ENABLED','0')=='1'
+            and bool(w) and w in {x.strip() for x in
+                os.getenv('ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_WALLETS','').split(',') if x.strip()})
+
+    # Fixed pilot ceilings. The 2 USDC test trade is a SEPARATE wallet action;
+    # the token launch NEVER debits a wallet's USDC or buys a token by itself.
+    PILOT_MAX_SOL_LAMPORTS=30_000_000
+    PILOT_MAX_LAUNCH_SOL_LAMPORTS=25_000_000  # Keep >=0.005 SOL for the test trade/claim
+    PILOT_MAX_FOLLOWUP_SOL_LAMPORTS=5_000_000
+    PILOT_MAX_TRADE_USDC_MICRO=2_000_000
+
     def fail(message,status=400):
         return jsonify(ok=False,msg=str(message)[:220]),status
 
@@ -201,6 +215,49 @@ def install(d):
         if not built.get('transaction_b64') or built.get('transaction_bytes',0)>1232:
             raise RuntimeError('Invalid Solana transaction')
         return built
+
+    def pilot_sol_preflight(row,transaction_b64,max_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS):
+        """Read-only simulation; reject if real network/rent cost is unknown.
+
+        Simulated fee-payer balance delta plus getFeeForMessage (conservatively
+        counted even if the simulation has already debited the base fee) must
+        stay under this pilot's 0.03 SOL limit. This guard is NOT an automatic
+        authorization to trade 2 USDC or a guarantee of future network fees.
+        """
+        if not pilot_wallet(row['wallet']):return None
+        try:
+            raw=base64.b64decode(transaction_b64,validate=True)
+            prepared=SolanaTransaction.from_bytes(raw)
+            encoded=base64.b64encode(bytes(prepared.message)).decode('ascii')
+            wallet=row['wallet']
+            balance=rpc('getBalance',[wallet,{'commitment':'confirmed'}])
+            before=(balance or {}).get('value')
+            fee_result=rpc('getFeeForMessage',[encoded,{'commitment':'confirmed'}])
+            fee=(fee_result or {}).get('value')
+            simulated=rpc('simulateTransaction',[
+                transaction_b64,{'encoding':'base64','commitment':'confirmed',
+                'sigVerify':False,
+                'accounts':{'encoding':'base64','addresses':[wallet]}}])
+            if not isinstance(before,int) or not isinstance(fee,int) or fee<0:
+                raise RuntimeError('Pilot network fee/balance unavailable; no transaction prepared')
+            outcome=(simulated or {}).get('value') or {}
+            accounts=outcome.get('accounts') or []
+            if outcome.get('err') is not None:
+                raise RuntimeError('Pilot transaction simulation failed; no wallet approval is possible')
+            if len(accounts)!=1 or not isinstance(accounts[0],dict):
+                raise RuntimeError('Pilot fee-payer simulation unavailable; transaction blocked')
+            after=accounts[0].get('lamports')
+            if not isinstance(after,int) or after<0:
+                raise RuntimeError('Pilot simulated SOL balance unavailable; transaction blocked')
+            # Never treat apparent SOL gains as a reason to ignore the base fee.
+            cost=max(0,before-after)+fee
+            if cost<=0 or cost>max_lamports:
+                raise RuntimeError('Pilot transaction exceeds its SOL budget; no wallet transaction prepared')
+            if before<cost:
+                raise RuntimeError('Pilot wallet has insufficient SOL for simulated costs')
+            return cost
+        except (ValueError,base64.binascii.Error,IndexError,TypeError) as exc:
+            raise RuntimeError('Pilot transaction could not be simulated safely') from exc
 
     def blockhash_valid(transaction_b64):
         """Reject stale instructions using the actual Solana blockhash gate.
@@ -293,16 +350,22 @@ def install(d):
         if not wallet:return redirect('/?connect=1')
         return d._render_no_cache('token_launch.html',wallet=wallet,
             csrf_token=d._get_csrf_token(),launch_enabled=enabled(),
+            pilot_creator_only=pilot_wallet(wallet),
             navbar_html=d._navbar_html)
 
     @app.get('/api/token-launch/config')
     @d.rate_limit(30,60)
     def launch_config():
         if not identity():return fail('Connect your wallet',401)
+        pilot=pilot_wallet()
         return jsonify(ok=True,enabled=enabled(),default_quote='USDC',
-           default_reward_mode='community',sol_conversion='manual_only',
+           default_reward_mode='creator' if pilot else 'community',
+           sol_conversion='manual_only',pilot_creator_only=pilot,
+           pilot_max_sol_lamports=PILOT_MAX_SOL_LAMPORTS if pilot else None,
+           pilot_max_launch_sol_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS if pilot else None,
+           pilot_max_trade_usdc_micro=PILOT_MAX_TRADE_USDC_MICRO if pilot else None,
            fee_disclosure='Pump fees and Solana network/rent fees apply. OrcAgent does not charge an extra launch fee.',
-           capabilities={'creator':True,'community':True,'holder':True})
+           capabilities={'creator':True,'community':not pilot,'holder':not pilot})
 
     @app.post('/api/token-launch/draft')
     @d.rate_limit(6,60)
@@ -315,6 +378,8 @@ def install(d):
         body=request.get_json(silent=True)
         try:
             name,symbol,desc,mode,quote,community,bps=_validate_form(d,body,wallet)
+            if pilot_wallet(wallet) and (mode!='creator' or quote!='USDC'):
+                raise ValueError('Pilot allows USDC / 100% Creator Rewards only')
             nonce=body.get('client_nonce')
             if not isinstance(nonce,str) or not re.fullmatch('[a-zA-Z0-9_-]{16,80}',nonce):
                 raise ValueError('Invalid launch request identifier')
@@ -400,19 +465,33 @@ def install(d):
         if not enabled():return fail('Token Launch is in preflight; no mainnet transaction can be prepared',503)
         row=lookup(launch_id,wallet)
         if not row:return fail('Launch not found',404)
+        if pilot_wallet(wallet) and (row['reward_mode']!='creator' or row['quote_asset']!='USDC'):
+            return fail('Pilot allows USDC / 100% Creator Rewards only',409)
+        if pilot_wallet(wallet):
+            with closing(sqlite3.connect(d.DB_FILE)) as conn:
+                already=conn.execute('''SELECT id FROM token_launches
+                   WHERE wallet=? AND id!=? AND (mint IS NOT NULL
+                       OR status NOT IN ('draft','cancelled')) LIMIT 1''',
+                   (wallet,launch_id)).fetchone()
+            if already:return fail('Pilot permits one test token per creator wallet',409)
         if row['status']=='prepared' and not row['launch_signature']:
             # Phantom rejection/suspended mobile app must not permanently
             # strand the creator's unsent token. Return the identical signed
             # mint transaction while its blockhash might still be valid.
             if time.time()-row['prepared_at']<45:
+                try:pilot_cost=pilot_sol_preflight(row,row['prepare_tx_b64'])
+                except RuntimeError as exc:return fail(exc,503)
                 return jsonify(ok=True,mint=row['mint'],transaction_b64=row['prepare_tx_b64'],
                     quote_asset=row['quote_asset'],reward_mode=row['reward_mode'],
-                    needs_finalization=row['reward_mode']=='community',expires_in=60,reused=True)
+                    needs_finalization=row['reward_mode']=='community',
+                    pilot_estimated_max_sol_lamports=pilot_cost,expires_in=60,reused=True)
             try:
                 if blockhash_valid(row['prepare_tx_b64']):
+                    pilot_cost=pilot_sol_preflight(row,row['prepare_tx_b64'])
                     return jsonify(ok=True,mint=row['mint'],transaction_b64=row['prepare_tx_b64'],
                         quote_asset=row['quote_asset'],reward_mode=row['reward_mode'],
-                        needs_finalization=row['reward_mode']=='community',expires_in=45,reused=True)
+                        needs_finalization=row['reward_mode']=='community',
+                        pilot_estimated_max_sol_lamports=pilot_cost,expires_in=45,reused=True)
                 if mint_exists(row['mint']):
                     return fail('This token already exists on Pump. Recover its signature from Phantom before retrying.',409)
             except RuntimeError as exc:return fail(exc,503)
@@ -424,9 +503,20 @@ def install(d):
                 if cur.rowcount!=1:return fail('Launch changed during recovery; reload.',409)
             row=lookup(launch_id,wallet)
         if row['status']!='draft':return fail('This launch was already submitted; check its status before retrying',409)
-        try:built=build_tx(row,'create')
+        try:
+            built=build_tx(row,'create')
+            pilot_cost=pilot_sol_preflight(row,built['transaction_b64'])
         except RuntimeError as exc:return fail(exc,503)
         with sqlite3.connect(d.DB_FILE,timeout=8) as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            # An allowlisted wallet must not bypass the one-token pilot by
+            # preparing two different drafts concurrently in two browser tabs.
+            if pilot_wallet(wallet):
+                other=conn.execute('''SELECT id FROM token_launches
+                   WHERE wallet=? AND id!=? AND (mint IS NOT NULL
+                       OR status NOT IN ('draft','cancelled')) LIMIT 1''',
+                   (wallet,launch_id)).fetchone()
+                if other:return fail('Pilot permits one test token per creator wallet',409)
             cur=conn.execute('''UPDATE token_launches
                   SET mint=?, prepare_tx_b64=?, status='prepared', prepared_at=?
                   WHERE id=? AND wallet=? AND status='draft' ''',
@@ -435,7 +525,7 @@ def install(d):
         return jsonify(ok=True,mint=built['mint'],transaction_b64=built['transaction_b64'],
             quote_asset=row['quote_asset'],reward_mode=row['reward_mode'],
             needs_finalization=built.get('needs_fee_share_finalization',False),
-            expires_in=100)
+            pilot_estimated_max_sol_lamports=pilot_cost,expires_in=100)
 
     @app.post('/api/token-launch/<launch_id>/prepare-finalize')
     @d.rate_limit(5,60)
@@ -487,6 +577,11 @@ def install(d):
         if not row:return fail('Launch not found',404)
         if row['status']!='live' or row['reward_mode']=='holder':
             return fail('Only confirmed creator/community launches can claim creator fees',409)
+        if pilot_wallet(wallet):
+            with closing(sqlite3.connect(d.DB_FILE)) as conn:
+                claimed=conn.execute('''SELECT id FROM token_reward_claims
+                  WHERE wallet=? AND status='confirmed' LIMIT 1''',(wallet,)).fetchone()
+            if claimed:return fail('Private pilot permits only one confirmed reward claim',409)
         with closing(sqlite3.connect(d.DB_FILE)) as conn:
             conn.row_factory=sqlite3.Row
             pending=conn.execute('''SELECT * FROM token_reward_claims
@@ -500,9 +595,13 @@ def install(d):
                            or blockhash_valid(pending['transaction_b64']))
                 except RuntimeError as exc:return fail(exc,503)
                 if fresh:
+                    try:pilot_cost=pilot_sol_preflight(row,pending['transaction_b64'],
+                                         PILOT_MAX_FOLLOWUP_SOL_LAMPORTS)
+                    except RuntimeError as exc:return fail(exc,503)
                     return jsonify(ok=True,claim_id=pending['id'],reused=True,
                       transaction_b64=pending['transaction_b64'],
                       quote_asset=row['quote_asset'],accrued_raw=pending['accrued_raw'],
+                      pilot_estimated_max_sol_lamports=pilot_cost,
                       accrued_scope=pending['accrued_scope'])
                 # No signature was recorded and the old blockhash has expired;
                 # the earlier transaction can no longer settle. Never report
@@ -535,6 +634,11 @@ def install(d):
                 return fail('Reward builder returned inconsistent transaction',503)
             accrued=str(int(built.get('accrued_raw') or 0))
             if int(accrued)<=0:return fail('No creator fees have accrued yet',409)
+            # Reserve the non-launch part of the 0.03 SOL test envelope for
+            # ATA/rent + fee claims. Trades elsewhere need separate user
+            # approval and are never charged through this launch endpoint.
+            pilot_claim_cost=pilot_sol_preflight(row,built['transaction_b64'],
+                                                 PILOT_MAX_FOLLOWUP_SOL_LAMPORTS)
             claim_id=secrets.token_hex(16)
             with sqlite3.connect(d.DB_FILE) as conn:
                 conn.execute('''INSERT INTO token_reward_claims
@@ -547,6 +651,7 @@ def install(d):
             return fail('Reward claim builder unavailable; nothing has been spent.',503)
         return jsonify(ok=True,claim_id=claim_id,transaction_b64=built['transaction_b64'],
               quote_asset=row['quote_asset'],accrued_raw=accrued,
+              pilot_estimated_max_sol_lamports=pilot_claim_cost,
               accrued_scope=built.get('accrued_scope',''))
 
     @app.post('/api/token-launch/<launch_id>/claim/confirm')

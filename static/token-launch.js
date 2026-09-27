@@ -16,7 +16,7 @@ function renderPreview(){
  var name=$('tl-name').value.trim()||'Your token name';
  var symbol=($('tl-symbol').value.trim()||'TOKEN').toUpperCase();
  var asset=choice('tl-asset')||'USDC';
- var mode=choice('tl-mode')||'community';
+ var mode=choice('tl-mode')||(cfg.pilotCreatorOnly?'creator':'community');
  var bps=toBps($('tl-community-share').value);
  text('tl-preview-name',name);text('tl-preview-symbol',symbol+' / '+asset);
  text('tl-review-pair',asset);
@@ -91,7 +91,13 @@ async function launchStage(row,stage){
      text('tl-dialog-status','Building the Pump transaction…');
      var path='/api/token-launch/'+row.id+'/'+(create?'prepare':'prepare-finalize');
      var prepared=await call(path,{});
-     text('tl-dialog-status','Waiting for your wallet signature…');
+     if(cfg.pilotCreatorOnly){
+       var max=prepared.pilot_estimated_max_sol_lamports;
+       if(!Number.isSafeInteger(max)||max<=0||max>25000000)
+         throw Error('The 0.025 SOL launch reserve check failed. No transaction was sent.');
+       text('tl-dialog-status','Read-only Solana simulation: estimated maximum launch charge '+
+         (max/1e9).toFixed(6)+' SOL (includes a conservative fee allowance). Your separate test trade must be 2 USDC or less. Review this amount again in Phantom.');
+     }else text('tl-dialog-status','Waiting for your wallet signature…');
      var sig=await signWithWallet(prepared.transaction_b64);
      // Store transaction ID only for recovery if Safari suspends the web app.
      try{sessionStorage.setItem('orca-token-launch:'+row.id+':'+stage,sig)}catch(e){}
@@ -125,6 +131,13 @@ async function claimRewards(row){
        text('tl-dialog-status','Accrued in vault: '+n+' '+ready.quote_asset+'. '+
          (ready.accrued_scope==='creator_wallet_all_tokens'?'May include fees from OTHER tokens created by this wallet. ':'')+
          'Review the actual transaction in Phantom.');
+       if(cfg.pilotCreatorOnly){
+         var claimCost=ready.pilot_estimated_max_sol_lamports;
+         if(!Number.isSafeInteger(claimCost)||claimCost<=0||claimCost>5000000)
+           throw Error('Pilot creator-fee claim exceeds the 0.005 SOL follow-up reserve.');
+         text('tl-dialog-status','Creator fee claim simulation: up to '+
+           (claimCost/1e9).toFixed(6)+' SOL. Review the actual cost and quote asset in Phantom.');
+       }
        var sig=await signWithWallet(ready.transaction_b64);
        try{sessionStorage.setItem('orca-token-claim:'+ready.claim_id,sig)}catch(e){}
        text('tl-dialog-status','Verifying reward transaction on Solana…');
