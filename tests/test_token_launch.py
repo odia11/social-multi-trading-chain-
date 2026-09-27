@@ -109,6 +109,8 @@ def test_all():
         r=client.post(path+draft_id+'/prepare',json={},headers=h)
         assert r.status_code==200,r.get_data(as_text=True)[:300]
         built=r.get_json()
+        assert built['mint'].endswith('orc')
+        assert 'mint_secret' not in built
         assert built['needs_finalization'] is True
         assert built['quote_asset']=='USDC'
         tx=Transaction.from_bytes(base64.b64decode(built['transaction_b64']))

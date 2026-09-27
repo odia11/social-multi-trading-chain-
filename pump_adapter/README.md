@@ -170,3 +170,19 @@ back to PATH. Production uses the installed path without this override.
 production audit, SDK import and read-only preflight with this launcher. It
 reads only SOLANA_RPC_URL from the trusted environment file without printing
 its value. No paid transaction is signed or submitted by these checks.
+
+## OrcAgent mint addresses
+
+Every newly prepared mint ends in the case-sensitive Base58 suffix `orc`.
+The server generates a random ephemeral mint with solders, before fetching
+its recent blockhash, and checks the suffix in both Python and the SDK builder.
+The search runs in a lower-priority child process with a 45-second deadline
+and a per-service-user nonblocking lock. If it is busy or times out, preparation
+fails closed and the user can retry; there is no unbranded fallback.
+The temporary lock file contains no key data. Mint secrets travel only over
+local subprocess pipes, never API responses, logs, command arguments or storage.
+The generated mint signs only its local creation payload; the creator must
+still approve in Phantom. The generator never contacts or submits to Solana.
+Prepared transactions keep their original mint on retries. Existing tokens,
+community-share finalization and reward claims retain their existing addresses.
+No wallet address is changed. Uppercase O is not in the Solana Base58 alphabet.

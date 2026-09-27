@@ -11,7 +11,21 @@ const MAX_BYTES=1232;
 async function build(data){
   const wallet = new PublicKey(data.wallet);
   const quoteMint = data.quote_asset==='USDC' ? USDC : NATIVE_MINT;
-  const mint = Keypair.generate();
+  // Server-created ephemeral mint only; never a creator wallet key.
+  let secret=data.mint_secret;
+  if(!secret){
+    const path=require('node:path');
+    const child=require('node:child_process').spawnSync(
+      path.resolve(__dirname,'../venv/bin/python'),[path.join(__dirname,'grind-mint.py')],
+      {encoding:'utf8',timeout:50000,maxBuffer:4096});
+    if(child.error||child.status!==0)throw Error('Orc mint address not ready; retry shortly');
+    secret=child.stdout.trim();
+  }
+  const bytes=Buffer.from(secret,'base64');
+  if(bytes.length!==64)throw Error('Invalid ephemeral mint');
+  const mint=Keypair.fromSecretKey(Uint8Array.from(bytes));
+  bytes.fill(0);
+  if(!mint.publicKey.toBase58().endsWith('orc'))throw Error('Mint must end in orc');
   const holderReward = data.reward_mode==='holder';
   const create = await PUMP_SDK.createV2Instruction({
     mint: mint.publicKey,

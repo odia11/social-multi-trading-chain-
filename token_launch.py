@@ -14,6 +14,7 @@ import re
 import secrets
 import sqlite3
 import subprocess
+import sys
 import time
 from contextlib import closing
 from PIL import Image, ImageOps
@@ -191,6 +192,17 @@ def install(d):
             raise RuntimeError('Solana network response unavailable; retry later') from exc
 
     def build_tx(row,stage):
+        mint_secret=None
+        if stage=='create':
+            try:
+                found=subprocess.run([sys.executable,os.path.join(d.BASE,'pump_adapter','grind-mint.py')],
+                    text=True,capture_output=True,timeout=50,check=False)
+            except (OSError,subprocess.TimeoutExpired) as exc:
+                raise RuntimeError('Orc mint address generator unavailable; please retry') from exc
+            if found.returncode:
+                raise RuntimeError('An orc mint address is not ready. Please retry shortly; nothing was sent.')
+            mint_secret=found.stdout.strip()
+        # Fetch AFTER grinding, so address generation cannot age the blockhash.
         block=rpc('getLatestBlockhash',[{'commitment':'confirmed'}])
         blockhash=((block or {}).get('value') or {}).get('blockhash')
         if not blockhash:raise RuntimeError('No recent Solana blockhash')
@@ -198,6 +210,7 @@ def install(d):
                                   'quote_asset','community_wallet','community_bps')}
         data.update(stage=stage,blockhash=blockhash,mint=row['mint'],
                     uri='https://orcagent.fun/token-launch/metadata/'+row['id'])
+        if mint_secret:data['mint_secret']=mint_secret
         path=os.path.join(d.BASE,'pump_adapter','build-launch.cjs')
         try:
             r=subprocess.run(['/bin/bash',os.path.join(d.BASE,'pump_adapter','run-node.sh'),path],input=json.dumps(data),text=True,
@@ -208,6 +221,8 @@ def install(d):
         if r.returncode or not r.stdout:
             raise RuntimeError('Token builder rejected this configuration. No transaction was sent.')
         built=json.loads(r.stdout)
+        if stage=='create' and not str(built.get('mint','')).endswith('orc'):
+            raise RuntimeError('Token builder returned an invalid OrcAgent mint address')
         if built.get('quote_mint') != (USDC_MINT if row['quote_asset']=='USDC' else WSOL_MINT):
             raise RuntimeError('Token builder returned the wrong trading currency')
         if stage=='finalize' and built.get('mint')!=row['mint']:

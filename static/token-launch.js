@@ -88,7 +88,7 @@ async function launchStage(row,stage){
   : 'The token is already created. Its initial creator fee goes 100% to your wallet UNTIL this second transaction is confirmed. Final split: '+((10000-row.community_bps)/100).toFixed(2)+'% creator / '+(row.community_bps/100).toFixed(2)+'% '+row.community_wallet+'. This final allocation is irreversible.';
  try{
    var result=await dialog(title,details,async function(){
-     text('tl-dialog-status','Building the Pump transaction…');
+     text('tl-dialog-status',create?'Preparing your orc token address; this may take up to 45 seconds…':'Building the Pump transaction…');
      var path='/api/token-launch/'+row.id+'/'+(create?'prepare':'prepare-finalize');
      var prepared=await call(path,{});
      if(cfg.pilotCreatorOnly){

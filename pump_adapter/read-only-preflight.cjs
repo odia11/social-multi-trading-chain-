@@ -27,6 +27,7 @@ async function main(){
    uri:'https://orcagent.fun/token-launch/metadata/0123456789abcdef0123456789abcdef',
    quote_asset:asset,reward_mode:mode,blockhash};
   const built=await build(args);
+  assert(asset+'/'+mode+' OrcAgent mint suffix',built.mint.endsWith('orc')&&!('mint_secret' in built));
   const raw=Buffer.from(built.transaction_b64,'base64');
   const tx=Transaction.from(raw);
   assert(asset+'/'+mode+' unsigned wallet approval + signed ephemeral mint',
