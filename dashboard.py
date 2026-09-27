@@ -17647,6 +17647,7 @@ _NAVBAR_MORE_LINKS = [
     ('/groups', 'Groups', 'groups'),
     ('/promote', 'Promote', 'promote'),
     ('/token-launch', 'Token Launch', 'launch'),
+    ('/launches', 'Launches', 'launch'),
     ('/referrals', 'Referrals', 'referrals'),
     ('/history', 'History', 'history'),
     ('/bot', 'Bot', 'bot', 'pt-nb-feature'),

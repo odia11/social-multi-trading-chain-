@@ -178,18 +178,36 @@ def install(d):
                    'launch_signature','finalize_signature','created_at','error')}
 
     def rpc(method,params):
-        # Configured Solana RPC only. Never allow a URL from the browser.
+        # Use only the server-configured Solana RPC; no browser-chosen endpoint.
         endpoint=(getattr(d,'SOLANA_RPC_URL','') or d.SOLANA_RPC)
-        try:
-            resp=requests.post(endpoint,json={'jsonrpc':'2.0','id':1,
-                 'method':method,'params':params},timeout=9)
-            resp.raise_for_status()
-            result=resp.json()
-            if not isinstance(result,dict):raise RuntimeError('Solana RPC returned invalid response')
-            if result.get('error'):raise RuntimeError('Solana RPC rejected '+method)
-            return result.get('result')
-        except (requests.RequestException,ValueError,RuntimeError) as exc:
-            raise RuntimeError('Solana network response unavailable; retry later') from exc
+        # Public Solana RPC intermittently returns 429 while indexing a fresh
+        # Pump mint. Brief bounded retries protect verification without
+        # treating 'not available' as a confirmed blockchain transaction.
+        for attempt in range(3):
+            try:
+                resp=requests.post(endpoint,json={'jsonrpc':'2.0','id':1,
+                     'method':method,'params':params},timeout=9)
+                if resp.status_code==429:
+                    if attempt<2:
+                        time.sleep(0.35*(attempt+1))
+                        continue
+                    raise RuntimeError('Solana RPC is rate-limited (429). The token may already exist on Pump; retry verification later. Do not create a second token.')
+                resp.raise_for_status()
+                result=resp.json()
+                if not isinstance(result,dict):raise RuntimeError('Solana RPC returned invalid response')
+                error=result.get('error')
+                if error:
+                    if isinstance(error,dict) and error.get('code')==429:
+                        if attempt<2:
+                            time.sleep(0.35*(attempt+1))
+                            continue
+                        raise RuntimeError('Solana RPC is rate-limited (429). Retry Check transaction later; do not create a second token.')
+                    raise RuntimeError('Solana RPC rejected '+method)
+                return result.get('result')
+            except RuntimeError:
+                raise
+            except (requests.RequestException,ValueError) as exc:
+                raise RuntimeError('Solana RPC could not verify this action. Keep the existing token and retry Check transaction later.') from exc
 
     def build_tx(row,stage):
         mint_secret=None
@@ -482,6 +500,59 @@ def install(d):
             rows=conn.execute('SELECT * FROM token_launches WHERE wallet=? ORDER BY created_at DESC LIMIT 40',
                               (wallet,)).fetchall()
         return jsonify(ok=True,launches=[public_row(r) for r in rows])
+
+    @app.get('/launches')
+    @d.rate_limit(45,60)
+    def launch_dashboard():
+        # Public directory. Only verified/live OrcAgent token launches are
+        # listed; wallet drafts, signatures and fee-claim history stay private.
+        return d._render_no_cache('token_launches.html',
+                 navbar_html=d._navbar_html)
+
+    @app.get('/api/token-launches')
+    @d.rate_limit(30,60)
+    def launch_directory():
+        query=request.args.get('q','').strip()
+        asset=request.args.get('asset','all')
+        owner=request.args.get('owner','all')
+        page=request.args.get('page','1')
+        if len(query)>70 or asset not in ('all','USDC','SOL') or owner not in ('all','mine'):
+            return fail('Invalid directory search or filter')
+        if not page.isascii() or not page.isdecimal() or not 1<=int(page)<=1000:
+            return fail('Invalid directory page')
+        wallet=identity()
+        if owner=='mine' and not wallet:
+            return fail('Connect Phantom to filter your launches',401)
+        where=["status='live'", "mint IS NOT NULL", "launch_signature<>''"]
+        params=[]
+        if asset!='all':where.append('quote_asset=?');params.append(asset)
+        if owner=='mine':where.append('wallet=?');params.append(wallet)
+        if query:
+            term='%'+query.replace(chr(92),chr(92)*2).replace('%',chr(92)+'%').replace('_',chr(92)+'_')+'%'
+            where.append("(name LIKE ? ESCAPE char(92) OR symbol LIKE ? ESCAPE char(92) OR mint LIKE ? ESCAPE char(92) OR wallet LIKE ? ESCAPE char(92))")
+            params.extend([term]*4)
+        clause=' AND '.join(where)
+        with closing(sqlite3.connect(d.DB_FILE)) as conn:
+            conn.row_factory=sqlite3.Row
+            total=conn.execute('SELECT count(*) FROM token_launches WHERE '+clause,params).fetchone()[0]
+            # Counts are all confirmed launches, not Pump's market cap or live
+            # balances; those values must never be fabricated from drafts.
+            stats=conn.execute("SELECT quote_asset,count(*) FROM token_launches WHERE status='live' AND mint IS NOT NULL AND launch_signature<>'' GROUP BY quote_asset").fetchall()
+            rows=conn.execute('''SELECT id,name,symbol,description,quote_asset,
+                    reward_mode,community_wallet,community_bps,wallet,mint,created_at,finalized_at
+                    FROM token_launches WHERE '''+clause+
+                    ' ORDER BY finalized_at DESC,created_at DESC,id DESC LIMIT 20 OFFSET ?',
+                    [*params,(int(page)-1)*20]).fetchall()
+        entries=[]
+        for row in rows:
+            item=dict(row)
+            item['logo_url']='/token-launch/icon/'+item['id']
+            item['pump_url']='https://pump.fun/coin/'+item['mint']
+            entries.append(item)
+        response=jsonify(ok=True,launches=entries,total=total,page=int(page),
+             page_size=20,counts={r[0]:r[1] for r in stats})
+        response.headers['Cache-Control']='private, no-store'
+        return response
 
     @app.post('/api/token-launch/<launch_id>/prepare')
     @d.rate_limit(4,60)

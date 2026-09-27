@@ -170,20 +170,25 @@ async function showClaims(row){
  }catch(e){status(e.message||'Claim history unavailable',true)}
 }
 
-async function checkKnown(row,stage){
+async function checkKnown(row,stage,button,notice){
+ if(busy)return;
  var key='orca-token-launch:'+row.id+':'+stage;
  var sig=stage==='create'?row.launch_signature:row.finalize_signature;
  if(!sig){try{sig=sessionStorage.getItem(key)||''}catch(e){}}
- if(!sig){
-   sig=(window.prompt&&window.prompt('Paste the SOLANA transaction signature from your wallet history. Never paste your secret key.',''))||'';
- }
- if(!sig)return;
+ if(!sig){sig=(window.prompt&&window.prompt('Paste your Solana transaction signature from Phantom history. Never paste your secret key.',''))||''}
+ if(!sig){notice.textContent='No transaction signature saved. Check Phantom history and paste its transaction signature.';return}
+ busy=true;button.disabled=true;button.textContent='Checking Solana…';
  try{
-  status('Verifying on-chain transaction…');
+  notice.textContent='Verifying the exact transaction on Solana…';
   var result=await confirmStage(row.id,stage,sig.trim());
-  status(result.confirmed?'Transaction verified.':'Not confirmed yet. Check again shortly.');
+  notice.textContent=result.confirmed?'Confirmed on-chain. Updating launch…':'Transaction not yet available from Solana RPC. Do not launch the token again; retry later.';
+  status(notice.textContent);
   await loadMine();
- }catch(e){status(e.message||'Unable to verify',true)}
+ }catch(e){
+  notice.textContent=(e.message||'Unable to verify')+' The existing token was not changed. Do not create another token.';
+  status(notice.textContent,true);
+  button.disabled=false;button.textContent=stage==='create'?'Check transaction':'Check fee split';
+ }finally{busy=false}
 }
 function drawMine(){
  var wrap=$('tl-mine');wrap.replaceChildren();
@@ -198,7 +203,7 @@ function drawMine(){
     :row.reward_mode==='holder'?'Creator fees belong to holders':'Creator fees belong to creator'));
   if(row.mint)el.appendChild(dom('div','tl-mono',row.mint));
   var actions=dom('div','tl-actions');
-  function action(label,fn){var b=dom('button','',label);b.type='button';b.onclick=fn;actions.appendChild(b)}
+  function action(label,fn){var b=dom('button','',label);b.type='button';b.onclick=fn;actions.appendChild(b);return b}
   if(row.status==='draft')action(cfg.enabled?'Approve launch':'Awaiting preflight',function(){launchStage(row,'create')});
   if(row.status==='draft'&&!cfg.enabled){actions.lastElementChild.disabled=true}
   if(row.status==='draft')action('Delete draft',async function(){
@@ -208,12 +213,15 @@ function drawMine(){
   });
   if(row.status==='prepared')action(cfg.enabled?'Retry wallet approval':'Approval in preflight',function(){launchStage(row,'create')});
   if(row.status==='prepared'&&!cfg.enabled)actions.lastElementChild.disabled=true;
-  if(row.status==='prepared'||row.status==='submitted')action('Check transaction',function(){checkKnown(row,'create')});
+  var verification=dom('p','tl-helper');verification.setAttribute('role','status');
+  if(row.status==='prepared'||row.status==='submitted'){
+    var createCheck=action('Check transaction',function(){checkKnown(row,'create',createCheck,verification)});
+  }
   if(row.status==='pending_shares')action(cfg.enabled?'Finalize shares':'Finalize after preflight',function(){launchStage(row,'finalize')});
   if(row.status==='pending_shares'&&!cfg.enabled)actions.lastElementChild.disabled=true;
   if(row.status==='finalize_prepared')action(cfg.enabled?'Retry wallet approval':'Approval in preflight',function(){launchStage(row,'finalize')});
   if(row.status==='finalize_prepared'&&!cfg.enabled)actions.lastElementChild.disabled=true;
-  if(row.status==='finalize_prepared'||row.status==='finalize_submitted')action('Check fee split',function(){checkKnown(row,'finalize')});
+  if(row.status==='finalize_prepared'||row.status==='finalize_submitted')var splitCheck=action('Check fee split',function(){checkKnown(row,'finalize',splitCheck,verification)});
   if(row.status==='live'&&row.reward_mode!=='holder'){
     action(cfg.enabled?'Claim creator fees':'Claims in preflight',function(){claimRewards(row)});
     if(!cfg.enabled)actions.lastElementChild.disabled=true;
@@ -226,7 +234,12 @@ function drawMine(){
     var url='https://pump.fun/coin/'+encodeURIComponent(row.mint);
     var a=dom('a','','View on Pump ↗');a.href=url;a.target='_blank';a.rel='noopener noreferrer';actions.appendChild(a);
   }
-  el.appendChild(actions);wrap.appendChild(el)
+  if(row.launch_signature&&row.launch_signature.length>80){
+    var explorer=dom('a','','View transaction ↗');
+    explorer.href='https://solscan.io/tx/'+encodeURIComponent(row.launch_signature);
+    explorer.target='_blank';explorer.rel='noopener noreferrer';actions.appendChild(explorer);
+  }
+  el.appendChild(actions);el.appendChild(verification);wrap.appendChild(el)
  });
 }
 async function loadMine(){
