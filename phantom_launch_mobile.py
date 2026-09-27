@@ -1,7 +1,8 @@
 """Phantom mobile-browser token launch signing without an injected provider.
 
-Two-step Phantom connect (once per wallet) / signTransaction universal links.
-The creator alone signs; server broadcasts only the EXACT stored Pump message.
+Two-step Phantom connect (once per wallet) / signAndSendTransaction links.
+Phantom broadcasts new launches; server relays ONLY legacy already-signed
+transactions with the identical bytes after owner signature validation.
 Sessions and short-lived action keys are encrypted at rest with ENCRYPTION_KEY.
 """
 import base64
@@ -19,6 +20,7 @@ from flask import jsonify, request, render_template, make_response
 from nacl.public import Box, PrivateKey, PublicKey
 from solders.pubkey import Pubkey
 from solders.transaction import Transaction
+from solders.signature import Signature
 
 ALPHABET='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 MAP={c:i for i,c in enumerate(ALPHABET)}
@@ -101,8 +103,11 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
         row,raw=current(flow)
         if raw is None:raise ValueError('Launch approval expired or changed. Open the saved launch again.')
         transaction=b58enc(base64.b64decode(raw,validate=True))
-        nonce,payload=encode({'transaction':transaction,'session':session},sk,phantom_pk)
-        return 'https://phantom.app/ul/v1/signTransaction?'+urlencode({
+        # Phantom signs AND submits via its wallet RPC. The old sign-only path
+        # left users on a perpetual pending state when OrcAgent RPC timed out.
+        nonce,payload=encode({'transaction':transaction,'session':session,
+             'sendOptions':{'skipPreflight':False,'preflightCommitment':'confirmed','maxRetries':2}},sk,phantom_pk)
+        return 'https://phantom.app/ul/v1/signAndSendTransaction?'+urlencode({
             'dapp_encryption_public_key':b58enc(bytes(PrivateKey(sk).public_key)),
             'nonce':nonce,'redirect_link':redirect_link(flow,'sign'),
             'payload':payload})
@@ -217,22 +222,37 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
             if not record or record[0]!=sk:
                 return fail('Phantom session changed. Try the saved launch again.',409)
             decoded=decrypt(sk,record[1],data['nonce'],data['data'])
-            signed=b58dec(decoded.get('transaction'))
-            if not 1<=len(signed)<=1232:raise ValueError('Invalid transaction size')
-            tx=Transaction.from_bytes(signed)
             row,original_b64=current(flow)
             if original_b64 is None:return fail('Prepared launch changed. Check the saved token first.',409)
             original=Transaction.from_bytes(base64.b64decode(original_b64,validate=True))
-            # signTransaction does NOT send, so an expired blockhash cannot
-            # have spent funds. Reject before recording a pending signature.
-            if blockhash_valid is not None and not blockhash_valid(original_b64):
-                return fail('Phantom approval expired before submission. Reopen this SAME saved token and retry safely.',409)
-            if bytes(tx.message)!=bytes(original.message) or not all(tx.verify_with_results()):
-                return fail('Phantom signature did not match this exact token launch',409)
-            if len(tx.signatures)!=len(original.signatures) or tx.signatures[1:]!=original.signatures[1:]:
-                return fail('Ephemeral token signature changed',409)
-            signature=str(tx.signatures[0])
-            if not SIG.fullmatch(signature):return fail('Invalid Phantom transaction signature',400)
+            wallet=Pubkey.from_string(flow['wallet'])
+            if (str(original.message.account_keys[0])!=flow['wallet'] or
+                any(not sig.verify(original.message.account_keys[index],bytes(original.message))
+                    for index,sig in enumerate(original.signatures) if index>0)):
+                return fail('Stored token transaction signature is invalid',409)
+            # New Phantom signAndSendTransaction returns a signature, not a
+            # serialized transaction. Verify that it signed the EXACT saved
+            # message before accepting its chain submission as pending.
+            signed_by_wallet=isinstance(decoded.get('signature'),str)
+            if signed_by_wallet:
+                signature=decoded['signature']
+                if not SIG.fullmatch(signature) or not Signature.from_string(signature).verify(
+                        wallet,bytes(original.message)):
+                    return fail('Phantom signature does not match your token launch',409)
+            else:
+                # Backward-compatible callback for already-open signTransaction
+                # links issued before this deployment. Those need RPC relay.
+                signed=b58dec(decoded.get('transaction'))
+                if not 1<=len(signed)<=1232:raise ValueError('Invalid transaction size')
+                tx=Transaction.from_bytes(signed)
+                if blockhash_valid is not None and not blockhash_valid(original_b64):
+                    return fail('Phantom approval expired before submission. Reopen this SAME saved token and retry safely.',409)
+                if bytes(tx.message)!=bytes(original.message) or not all(tx.verify_with_results()):
+                    return fail('Phantom signature did not match this exact token launch',409)
+                if len(tx.signatures)!=len(original.signatures) or tx.signatures[1:]!=original.signatures[1:]:
+                    return fail('Ephemeral token signature changed',409)
+                signature=str(tx.signatures[0])
+                if not SIG.fullmatch(signature):return fail('Invalid Phantom transaction signature',400)
         except Exception:
             # Includes NaCl CryptoError and malformed solders transaction
             # input. Never log or return encrypted Phantom payloads.
@@ -253,21 +273,22 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
             if cur.rowcount!=1:
                 db.rollback()
                 return fail('Launch was submitted elsewhere. Check existing transaction.',409)
-        endpoint=getattr(d,'SOLANA_RPC_URL','') or getattr(d,'SOLANA_RPC','')
-        if not endpoint:
-            return jsonify(ok=True,submitted=True,signature=signature,
-                msg='Wallet signed. RPC unavailable; check transaction before retrying.')
-        try:
-            r=requests.post(endpoint,json={'jsonrpc':'2.0','id':1,
-                'method':'sendTransaction','params':[base64.b64encode(signed).decode(),
-                   {'encoding':'base64','skipPreflight':False,'maxRetries':2}]},timeout=14)
-            body=r.json()
-            if r.status_code!=200 or body.get('error') or body.get('result')!=signature:
+        # New mobile launches are broadcast directly BY Phantom, not via
+        # OrcAgent's throttled RPC. Never send the user's signed transaction
+        # twice or claim a token is live merely because Phantom returned a sig.
+        if not signed_by_wallet:
+            # Legacy in-flight signTransaction callbacks still need relay.
+            # Use only the identical signed bytes/signature, with failover on
+            # transport/rate-limit failures. Never skip preflight.
+            from launch_delivery import relay_identical_signed
+            delivery=relay_identical_signed(
+                signed,signature,[getattr(d,'SOLANA_RPC_URL','') or getattr(d,'SOLANA_RPC',''),
+                      'https://solana-rpc.publicnode.com',
+                      'https://api.mainnet-beta.solana.com'])
+            if not delivery:
                 return jsonify(ok=True,submitted=True,signature=signature,
-                    msg='Transaction status uncertain. Check your original signature; never launch a duplicate.')
-        except (requests.RequestException,ValueError,TypeError):
-            return jsonify(ok=True,submitted=True,signature=signature,
-                msg='RPC delivery uncertain. Check your original signature before any retry.')
+                    msg='RPC delivery uncertain. Keep your original signature; use Check transaction.')
+
         try:
             if check_signature(signature,row,flow['stage']) and (
                 mint_exists(row['mint']) if flow['stage']=='create'

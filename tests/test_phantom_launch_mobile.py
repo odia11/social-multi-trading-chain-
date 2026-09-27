@@ -95,13 +95,13 @@ def test_mobile_browser_handoff():
             'token':token,'step':'connect','phantom_encryption_public_key':pk,**correct})
         assert result.status_code==200,result.get_data(as_text=True)[:260]
         sign_url=result.get_json()['url']
-        assert '/ul/v1/signTransaction?' in sign_url
+        assert '/ul/v1/signAndSendTransaction?' in sign_url
         sign_query={k:v[0] for k,v in parse_qs(urlparse(sign_url).query).items()}
         signed=Transaction.populate(partial.message,
                                     [user.sign_message(bytes(partial.message)),partial.signatures[1]])
         assert all(signed.verify_with_results())
         approval=make_reply(phantom,params['dapp_encryption_public_key'],
-                            {'transaction':mobile.b58enc(bytes(signed))})
+                            {'signature':str(signed.signatures[0])})
         seen=[]
         class Reply:
             status_code=200
@@ -110,7 +110,7 @@ def test_mobile_browser_handoff():
             assert json['method']=='sendTransaction'
             seen.append(json['params'][0])
             return Reply()
-        with patch('phantom_launch_mobile.requests.post',side_effect=fake_rpc):
+        with patch('phantom_launch_mobile.requests.post',side_effect=AssertionError('Phantom broadcasts new launches, not OrcAgent')):
             final=guest.post('/api/phantom-launch/complete',json={
                 'token':token,'step':'sign',**approval})
             assert final.status_code==200,final.get_data(as_text=True)[:260]
@@ -118,7 +118,7 @@ def test_mobile_browser_handoff():
             assert final.get_json()['signature']==str(signed.signatures[0])
             repeated=guest.post('/api/phantom-launch/complete',json={
                 'token':token,'step':'sign',**approval})
-            assert repeated.status_code==409 and len(seen)==1
+            assert repeated.status_code==409 and len(seen)==0
         with sqlite3.connect(d.DB_FILE) as db:
             row=db.execute('SELECT status,launch_signature,mint FROM token_launches WHERE id=?',
                            (ident,)).fetchone()
@@ -139,11 +139,13 @@ def test_mobile_browser_handoff():
                           json={'stage':'create'},headers=h)
         assert again.status_code==200
         assert again.get_json()['requires_connect'] is False
-        assert '/ul/v1/signTransaction?' in again.get_json()['url']
+        assert '/ul/v1/signAndSendTransaction?' in again.get_json()['url']
         next_query={k:v[0] for k,v in parse_qs(urlparse(again.get_json()['url']).query).items()}
         next_token=parse_qs(urlparse(next_query['redirect_link']).query)['token'][0]
         signed2=Transaction.populate(part2.message,
             [user.sign_message(bytes(part2.message)),part2.signatures[1]])
+        # Simulate a callback issued by the older signTransaction method
+        # before deployment. It must continue to reject an expired blockhash.
         next_reply=make_reply(phantom,next_query['dapp_encryption_public_key'],
             {'transaction':mobile.b58enc(bytes(signed2))})
         blockhash_ok[0]=False
@@ -165,6 +167,7 @@ def test_mobile_browser_handoff():
         retry=client.post('/api/token-launch/'+third+'/phantom/start',
                           json={'stage':'create'},headers=h)
         assert retry.status_code==200 and retry.get_json()['requires_connect'] is True
+        print('PASS mobile Phantom sign-and-send, no server RPC relay for new launches')
         print('PASS mobile Phantom connect once, then direct approval in original browser')
         print('PASS exact mint co-signature, replay guard, cross-browser callback, no double broadcast')
         tmp.cleanup()

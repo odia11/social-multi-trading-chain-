@@ -1018,6 +1018,52 @@ def install(d):
         return jsonify(ok=True,mint=row['mint'],transaction_b64=built['transaction_b64'],
             pilot_estimated_max_sol_lamports=followup_cost,expires_in=100)
 
+    @app.post('/api/token-launch/<launch_id>/recover-submitted')
+    @d.rate_limit(3,60)
+    def recover_expired_phantom_launch(launch_id):
+        """Recover an unlanded signature, NEVER broadcast/create another mint.
+
+        Wallet owner explicitly requests recovery of the SAME saved draft.
+        Independently verify historical signature, finalized blockhash and
+        both mint + Pump curve on two mainnet RPCs before clearing the old mint.
+        """
+        wallet=identity()
+        if not wallet:return fail('Connect your wallet',401)
+        if not csrf():return fail('CSRF validation failed',403)
+        row=lookup(launch_id,wallet)
+        if not row:return fail('Launch not found',404)
+        if row['status']!='submitted' or not row['launch_signature']:
+            return fail('Only an unconfirmed submitted token can be recovered',409)
+        try:
+            from launch_recovery import prove_expired_unlanded
+            allowed,reason=prove_expired_unlanded(row,primary=(
+                os.getenv('ORCA_LAUNCH_RPC') or getattr(d,'SOLANA_RPC_URL','')
+                or getattr(d,'SOLANA_RPC','')))
+        except (ValueError,KeyError,TypeError,IndexError):
+            return fail('Could not validate the saved transaction safely. Nothing changed.',503)
+        if not allowed:return fail(reason,409)
+        with sqlite3.connect(d.DB_FILE,timeout=8) as db:
+            db.execute('BEGIN IMMEDIATE')
+            db.execute("""CREATE TABLE IF NOT EXISTS token_launch_recovery_audit(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,launch_id TEXT NOT NULL,
+                old_mint TEXT NOT NULL,old_signature TEXT NOT NULL,
+                recovered_at INTEGER NOT NULL)""")
+            update=db.execute("""UPDATE token_launches SET status='draft',
+               mint=NULL,prepare_tx_b64='',launch_signature='',prepared_at=0,
+               error='Previous signed launch expired unconfirmed; new Phantom approval required'
+               WHERE id=? AND wallet=? AND status='submitted'
+                 AND launch_signature=? AND mint=?""",
+               (launch_id,wallet,row['launch_signature'],row['mint']))
+            if update.rowcount!=1:
+                db.rollback()
+                return fail('Token status changed. Check the existing transaction.',409)
+            db.execute("""INSERT INTO token_launch_recovery_audit
+                  (launch_id,old_mint,old_signature,recovered_at)
+                  VALUES (?,?,?,?)""",
+                  (launch_id,row['mint'],row['launch_signature'],int(time.time())))
+        return jsonify(ok=True,recovered=True,
+            msg='The old transaction expired without a confirmed token. Your original draft is ready for a NEW Phantom approval. No transaction was sent by recovery.')
+
     @app.get('/api/token-launch/<launch_id>/creator-fees')
     @d.rate_limit(10,60)
     def creator_usdc_fee_status(launch_id):

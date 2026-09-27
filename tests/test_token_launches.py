@@ -336,7 +336,7 @@ def test_all_launch_rpcs_429_leave_original_draft_unsent():
     seen=[]
     def overloaded(url,*,json,timeout):
         seen.append(json['method'])
-        assert json['method']=='getLatestBlockhash'
+        assert json['method'] in ('getBalance','getLatestBlockhash')
         return Throttled()
     with patch.dict(os.environ,{'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED':'1','ORCA_LAUNCH_RPC':''}), \
          patch('token_launch.requests.post',side_effect=overloaded), \

@@ -351,6 +351,20 @@ function drawMine(){
   if(row.status==='prepared'||row.status==='submitted'){
     var createCheck=action('Check transaction',function(){checkKnown(row,'create',createCheck,verification)});
   }
+  if(row.status==='submitted'){
+    el.appendChild(dom('p','tl-helper','Pending? Phantom may have signed the token without reaching Solana. Do not create a new token. Recovery checks the original signature, expired blockhash and mint on two RPCs before reusing this draft.'));
+    action('Recover expired launch',async function(){
+      if(busy)return;busy=true;
+      try{
+        verification.textContent='Checking the original token and signature on two Solana RPCs…';
+        var result=await call('/api/token-launch/'+row.id+'/recover-submitted',{});
+        verification.textContent=result.msg;
+        status(result.msg);
+        await loadMine();
+      }catch(e){verification.textContent=e.message||'Recovery unavailable';status(verification.textContent,true)}
+      finally{busy=false}
+    });
+  }
   if(row.status==='pending_shares')action(cfg.enabled?'Finalize shares':'Finalize after preflight',function(){launchStage(row,'finalize')});
   if(row.status==='pending_shares'&&!cfg.enabled)actions.lastElementChild.disabled=true;
   if(row.status==='finalize_prepared')action(cfg.enabled?'Retry wallet approval':'Approval in preflight',function(){launchStage(row,'finalize')});
@@ -375,7 +389,7 @@ function drawMine(){
   if(row.status==='live'&&row.reward_mode==='holder'){
     el.appendChild(dom('p','tl-helper','Pump distributes Holder Rewards; there is no separate creator claim for this mode.'));
   }
-  if(row.mint){
+  if(row.mint&&(row.status==='live'||row.status==='pending_shares')){
     var url='https://pump.fun/coin/'+encodeURIComponent(row.mint);
     var a=dom('a','','View on Pump ↗');a.href=url;a.target='_blank';a.rel='noopener noreferrer';actions.appendChild(a);
   }
