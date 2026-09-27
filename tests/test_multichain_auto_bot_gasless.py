@@ -12,6 +12,9 @@ import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 
 import types
+import sqlite3
+import tempfile
+from pathlib import Path
 from flask import Flask, jsonify
 
 import multichain_auto_bot as patch
@@ -29,6 +32,13 @@ def make_dashboard(chain):
         return False
 
     d = types.SimpleNamespace()
+    d._test_db_dir = tempfile.TemporaryDirectory(prefix='bot-bridge-')
+    d.DB_FILE = str(Path(d._test_db_dir.name) / 'bot.sqlite')
+    with sqlite3.connect(d.DB_FILE) as conn:
+        conn.execute('''CREATE TABLE bridge_transactions (
+           id INTEGER PRIMARY KEY, wallet TEXT NOT NULL,
+           dest_chain TEXT NOT NULL, auto_buy_status TEXT NOT NULL,
+           status TEXT NOT NULL DEFAULT 'bridge_pending')''')
     d._bot_scan_evm_entry = old_scanner
     class _KeyCtx:
         def __enter__(self): return '0x' + '1' * 64
@@ -122,10 +132,12 @@ def test_pending_funding_does_not_queue_duplicate_buys():
     class Pending:
         def get_json(self, silent=True):
             return {'pending': True, 'ok': False}
-    def buy(*args, **kwargs):
+    def pending_buy(*args, **kwargs):
         buys.append(args)
+        with sqlite3.connect(d.DB_FILE) as conn:
+            conn.execute("INSERT INTO bridge_transactions (wallet,dest_chain,auto_buy_status) VALUES ('wallet','base','pending')")
         return Pending()
-    d._evm_buy_flow = buy
+    d._evm_buy_flow = pending_buy
     patch.install(d)
     for _ in range(3):
         d._bot_scan_evm_entry(7, 'wallet', {}, 'base', 'encrypted',

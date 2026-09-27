@@ -3124,6 +3124,12 @@ def run_migrations():
             con.commit()
         except Exception:
             pass
+    # The autonomous bot checks wallet+destination bridge state every scan.
+    # This index is safe to create only AFTER legacy auto_buy_status migration
+    # above. No uniqueness: historical pending rows must not block startup.
+    con.execute('''CREATE INDEX IF NOT EXISTS idx_bot_active_bridge_wallet_chain
+        ON bridge_transactions(wallet,dest_chain,auto_buy_status)''')
+    con.commit()
     # one-time cleanup: old message notifications stored the raw image path
     # instead of a friendly "📷 Photo" label — fix any that still do
     try:
@@ -4075,8 +4081,9 @@ def _bridge_status_loop():
                     "SELECT id, user_id, wallet, source_tx_hash, source_chain, quote_id, poll_attempts, "
                     "       polling_started_at, dest_chain, auto_buy_token_address, "
                     "       auto_buy_requested_usdc, auto_buy_status FROM bridge_transactions "
-                    "WHERE provider='0x' AND status NOT IN "
+                    "WHERE provider='0x' AND (status NOT IN "
                     "      ('bridge_filled','bridge_failed','origin_tx_reverted','timed_out') "
+                    "      OR (status='bridge_filled' AND auto_buy_status='pending')) "
                     "      AND source_tx_hash != ''"
                 ).fetchall()
             finally:

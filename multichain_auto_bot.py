@@ -15,6 +15,7 @@ fees, position tracking and copy-trade hooks as a Live Market BUY.
 """
 
 import threading
+import sqlite3
 
 
 def install(d):
@@ -45,7 +46,49 @@ def install(d):
             return {}
 
     pending_auto_buys = {}  # wallet + chain + mint -> wall-clock expiry
+    pending_bridge_orders = set()  # bridge-backed reservations, not 60s trade cooldowns
     pending_lock = threading.Lock()  # atomically reserve before network I/O
+    bridge_error_logged_at = {}  # throttle transient SQLite failures per wallet/chain
+
+    def _bridge_in_flight(wallet, chain):
+        """Durable, wallet-owned bridge check; never equate RPC/DB failure with idle.
+
+        A bridge can outlive the in-memory 30-minute TTL and survive gunicorn
+        restarts. Any unresolved auto-buy for this wallet and destination chain
+        blocks new autonomous orders, even for a different token. Ignore
+        initiated_by because gas-bootstrap and funding bridges use different
+        origins but the same pending/processing buy contract. A filled bridge
+        still processing its attached buy MUST block new orders.
+        """
+        try:
+            with sqlite3.connect(d.DB_FILE, timeout=3) as conn:
+                return conn.execute('''SELECT EXISTS(
+                    SELECT 1 FROM bridge_transactions
+                    WHERE wallet=? AND dest_chain=?
+                    AND auto_buy_status IN ('pending','processing'))''',
+                    (wallet, chain)).fetchone()[0] == 1
+        except (sqlite3.Error, AttributeError, TypeError, ValueError) as exc:
+            # Never authorize a new order because the state is unavailable.
+            key=(wallet,chain)
+            now=d.time.time()
+            with pending_lock:
+                if now - bridge_error_logged_at.get(key, 0) >= 60:
+                    bridge_error_logged_at[key]=now
+                    print('[bot-'+chain+'] cannot verify outstanding bridge: '+
+                          type(exc).__name__, flush=True)
+            return True
+
+    def _clear_settled_bridge_reservations(wallet, chain):
+        """Release only bridge-backed memory blocks AFTER database resolution.
+
+        Keep 60-second completed-trade cooldowns intact; do not hold a user
+        idle for 30 minutes after the bridge+buy actually finished or failed.
+        """
+        with pending_lock:
+            for key in list(pending_bridge_orders):
+                if key[0] == wallet and key[1] == chain:
+                    pending_auto_buys.pop(key, None)
+                    pending_bridge_orders.discard(key)
 
     def _gasless_entry(user_id, wallet, positions, chain, enc_blob_evm,
                        evm_address, min_trade_usdc, blacklisted,
@@ -150,6 +193,8 @@ def install(d):
                 if any(w == wallet and c == chain and expiry > now
                        for (w, c, _), expiry in pending_auto_buys.items()):
                     return False
+                if _bridge_in_flight(wallet, chain):
+                    return False
                 pending_auto_buys[order_key] = now + 1800
             d.add_user_log(wallet, f'[bot-{chain}] Best: {symbol} — BUYING with USDC')
             try:
@@ -179,29 +224,38 @@ def install(d):
             except Exception as exc:
                 with pending_lock:
                     pending_auto_buys.pop(order_key, None)
+                    pending_bridge_orders.discard(order_key)
                 d.add_user_log(wallet, f'[bot-{chain}] BUY failed — {symbol}: {type(exc).__name__}')
                 continue
 
-            if body.get('ok'):
-                with pending_lock:
-                    pending_auto_buys[order_key] = d.time.time() + 60
-                return True
-            # A bridge/gasless preparation may intentionally return pending.
-            # That is not a failed strategy signal; the existing completion
-            # worker will execute the requested BUY once funding settles.
+            # _evm_buy_flow returns BOTH ok:true AND pending:true for an
+            # in-flight bridge. Pending wins: it is not a completed token BUY.
             if body.get('pending'):
                 with pending_lock:
                     pending_auto_buys[order_key] = d.time.time() + 1800
+                    pending_bridge_orders.add(order_key)
                 d.add_user_log(wallet, f'[bot-{chain}] {symbol} — funding/bridge pending; suppress duplicate BUY attempts')
+                return True
+            if body.get('ok'):
+                with pending_lock:
+                    pending_auto_buys[order_key] = d.time.time() + 60
+                    pending_bridge_orders.discard(order_key)
                 return True
             with pending_lock:
                 pending_auto_buys.pop(order_key, None)
+                pending_bridge_orders.discard(order_key)
             d.add_user_log(wallet, f'[bot-{chain}] BUY failed — {symbol}: {body.get("msg") or body.get("error") or "execution refused"}')
         return False
 
     def scan(user_id, wallet, positions, chain, enc_blob_evm,
              min_trade_usdc, blacklisted, m5_min, m5_max,
              pref_scam_filter, short):
+        # First check durable settlement state, including after a deployment,
+        # across DIFFERENT candidate tokens and both EVM entry paths. Never
+        # allow a timed-out memory reservation to reauthorize an active bridge.
+        if _bridge_in_flight(wallet, chain):
+            return False
+        _clear_settled_bridge_reservations(wallet, chain)
         # Native gas must never be a prerequisite for reaching OrcAgent's
         # gasless execution layer. If it exists, keep using the mature legacy
         # scanner. If it does not, run the equivalent scan and hand the BUY to
@@ -228,6 +282,8 @@ def install(d):
                 now = d.time.time()
                 if any(w == wallet and c == chain and expiry > now
                        for (w, c, _), expiry in pending_auto_buys.items()):
+                    return False
+                if _bridge_in_flight(wallet, chain):
                     return False
                 pending_auto_buys[order_key] = now + 1800
             try:
