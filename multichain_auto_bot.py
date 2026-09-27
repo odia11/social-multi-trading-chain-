@@ -65,7 +65,7 @@ def install(d):
                 return conn.execute('''SELECT EXISTS(
                     SELECT 1 FROM bridge_transactions
                     WHERE wallet=? AND dest_chain=?
-                    AND auto_buy_status IN ('pending','processing'))''',
+                    AND auto_buy_status IN ('pending','processing','reconciling'))''',
                     (wallet, chain)).fetchone()[0] == 1
         except (sqlite3.Error, AttributeError, TypeError, ValueError) as exc:
             # Never authorize a new order because the state is unavailable.

@@ -2320,7 +2320,7 @@ function confirmBuy(idx){
 // in-flight buy, rather than re-enabling and inviting a duplicate click.
 function _pollAutoBuyBridge(bridgeId, idx, t, amt, msgEl, input){
   var attempts = 0;
-  var maxAttempts = 150; // ~150 * 8s = 20 minutes outer ceiling, generous over the bridge's own 30-min timeout
+  var maxAttempts = 225; // ~30 minutes; backend keeps uncertain bridging locked and reconciles it
   var btn = document.querySelector('#pt-buy-panel-'+idx+' .pt-buy-confirm');
   function tick(){
     attempts++;
@@ -2337,6 +2337,11 @@ function _pollAutoBuyBridge(bridgeId, idx, t, amt, msgEl, input){
           _showTxReceipt(idx, t, res);
           setTimeout(function(){ closeBuyPanel(idx); },
                      document.getElementById('pt-txline') ? 7000 : 2200);
+          return;
+        }
+        if(d.auto_buy_status === 'reconciling'){
+          showMsg(msgEl, 'Bridge confirmation is delayed. Funds may still be moving. Do not retry this buy; check Wallet for the final result.', false);
+          // Never turn an unknown on-chain result into a second Buy button.
           return;
         }
         if(d.auto_buy_status === 'failed'){
@@ -2358,9 +2363,8 @@ function _pollAutoBuyBridge(bridgeId, idx, t, amt, msgEl, input){
   }
   function scheduleNext(){
     if(attempts >= maxAttempts){
-      showMsg(msgEl, 'Still buying… check your Wallet page shortly', true);
-      if(btn){ btn.disabled=false; }
-    _restoreSlide();
+      showMsg(msgEl, 'Bridge confirmation is taking longer than expected. Do not retry this buy; check Wallet for its final status.', false);
+      // Keep this request visibly unresolved until the backend confirms it.
       return;
     }
     setTimeout(tick, 8000);

@@ -49,6 +49,9 @@ def test_pending_true_ok_true_is_not_completed_and_releases_on_settlement():
     change_bridge(d,1,'processing')
     assert scan(d) is False and scan(d2) is False
     print('PASS processing bridge+buy remains blocked on same destination chain')
+    change_bridge(d,1,'reconciling')
+    assert scan(d) is False and scan(d2) is False
+    print('PASS delayed bridge remains blocked while original funds may still arrive')
     change_bridge(d,1,'done')
     clock[0]=1800000010.  # original 30-minute memory cooldown is STILL active
     d._evm_buy_flow=lambda *a,**k:(buys.append(a) or {'ok':True})

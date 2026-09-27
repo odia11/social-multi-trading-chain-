@@ -3962,11 +3962,10 @@ def _fast_poll_loop():
 _BRIDGE_STATUS_INTERVAL = 15
 # Spec-mandated cutoff -- 0x's own docs describe bridge delivery as "seconds
 # to minutes depending on the bridge", so this is a generous multiple of the
-# slow end, not a realistic expected duration. A row that hits this without
-# reaching a terminal state stops being auto-polled (see 'timed_out' below)
-# rather than polling forever -- it still shows on the user's bridge history
-# with everything known so far (quote id, origin tx hash), so nothing about
-# the transaction itself is lost, just the automatic tracking of it.
+# slow end, not a realistic expected duration. Ordinary standalone bridges
+# retain the historical timeout. An already-broadcast AUTO-BUY bridge remains
+# under read-only reconciliation after the cutoff: a missing status receipt
+# must never be mistaken for proof that funds cannot still arrive.
 _BRIDGE_MAX_POLL_SECONDS = 1800
 # 0x Cross-Chain API's own status vocabulary -- verified against 0x's own
 # example code (github.com/0xProject/0x-examples, schemas.ts's
@@ -4071,8 +4070,9 @@ def _bridge_status_loop():
     done -- 'origin_tx_confirmed' and 'bridge_pending' both keep polling;
     only bridge_filled/bridge_failed/origin_tx_reverted stop it (spec's
     terminal-state list). A row that exceeds _BRIDGE_MAX_POLL_SECONDS
-    without reaching one of those is marked 'timed_out' (not deleted, not
-    silently abandoned) so the row still tells a full story on refresh."""
+    without reaching one of those is marked 'timed_out'. For an attached
+    buy, its funding remains 'reconciling': never submit another order or buy
+    a stale token if the original funds arrive after the cutoff."""
     while True:
         try:
             conn = sqlite3.connect(DB_FILE)
@@ -4083,7 +4083,8 @@ def _bridge_status_loop():
                     "       auto_buy_requested_usdc, auto_buy_status FROM bridge_transactions "
                     "WHERE provider='0x' AND (status NOT IN "
                     "      ('bridge_filled','bridge_failed','origin_tx_reverted','timed_out') "
-                    "      OR (status='bridge_filled' AND auto_buy_status='pending')) "
+                    "      OR (status='bridge_filled' AND auto_buy_status='pending') "
+                    "      OR (status='timed_out' AND auto_buy_status='reconciling')) "
                     "      AND source_tx_hash != ''"
                 ).fetchall()
             finally:
@@ -4102,25 +4103,51 @@ def _bridge_status_loop():
                     # time out).
                     if polling_started_at:
                         started = datetime.datetime.fromisoformat(polling_started_at)
-                        if (datetime.datetime.utcnow() - started).total_seconds() > _BRIDGE_MAX_POLL_SECONDS:
+                        if (auto_buy_status != 'reconciling' and
+                                (datetime.datetime.utcnow() - started).total_seconds() > _BRIDGE_MAX_POLL_SECONDS):
                             conn_to = sqlite3.connect(DB_FILE)
                             try:
+                                # No final receipt after 30 min is UNKNOWN,
+                                # not proof the bridge failed. Keep the bot
+                                # locked and continue status reads on the
+                                # original origin tx; never rebroadcast it.
+                                # A late fill must NOT buy a stale token.
+                                _uncertain = auto_buy_status == 'pending'
                                 conn_to.execute(
                                     "UPDATE bridge_transactions SET status='timed_out', "
-                                    "auto_buy_status=CASE WHEN auto_buy_status IN ('pending','processing') "
-                                    "THEN 'failed' ELSE auto_buy_status END, "
-                                    "auto_buy_result=CASE WHEN auto_buy_status IN ('pending','processing') "
+                                    "auto_buy_status=CASE WHEN auto_buy_status='pending' "
+                                    "THEN 'reconciling' ELSE auto_buy_status END, "
+                                    "auto_buy_result=CASE WHEN auto_buy_status='pending' "
                                     "THEN ? ELSE auto_buy_result END, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                                     (json.dumps({
-                                        'error': 'Funding bridge timed out before purchase',
+                                        'error': 'Bridge settlement remains unconfirmed; no new buy will be sent',
                                         'bridge_status': 'timed_out',
                                         'chain': dest_chain,
+                                        'reconciling': True,
                                     }), row_id))
                                 conn_to.commit()
                             finally:
                                 conn_to.close()
                             print(f'[bridge-status] row {row_id} exceeded {_BRIDGE_MAX_POLL_SECONDS}s poll window, '
-                                  f'marked timed_out (quote_id={quote_id})', flush=True)
+                                  f'marked timed_out; unresolved_auto_buy={_uncertain} (quote_id={quote_id})', flush=True)
+                            if _uncertain:
+                                # One user-facing warning at the transition,
+                                # not every later read-only reconciliation.
+                                warning = ('Bridge confirmation is delayed. Funds may still arrive. '
+                                           'Your automatic buy is paused; do not retry it. '
+                                           'Check Wallet for the final result.')
+                                try:
+                                    with sqlite3.connect(DB_FILE) as nconn:
+                                        nconn.execute(
+                                            'INSERT INTO notifications '
+                                            '(user_id,type,content,link,actor_wallet) '
+                                            'VALUES (?,?,?,?,?)',
+                                            (user_id,'bridge',warning,'/wallet',None))
+                                    _send_push_notification(
+                                        user_id,'Bridge needs confirmation',warning,'/wallet')
+                                except Exception as notify_err:
+                                    print('[bridge-status] delayed confirmation notification failed: '
+                                          +type(notify_err).__name__,flush=True)
                             continue
                     else:
                         conn_ts = sqlite3.connect(DB_FILE)
@@ -4150,6 +4177,13 @@ def _bridge_status_loop():
                         continue
 
                     new_status = result['status']
+                    # Preserve the visible uncertain state while 0x still
+                    # reports a nonterminal result; a late terminal answer
+                    # is the only event that can resolve this reservation.
+                    persisted_status = (
+                        'timed_out' if auto_buy_status == 'reconciling'
+                        and new_status not in _BRIDGE_TERMINAL_STATUSES
+                        else new_status)
                     conn2 = sqlite3.connect(DB_FILE)
                     try:
                         conn2.execute(
@@ -4157,7 +4191,7 @@ def _bridge_status_loop():
                             "actual_amount_out=COALESCE(?, actual_amount_out), "
                             "error_msg=COALESCE(?, error_msg), "
                             "recovery_info=COALESCE(?, recovery_info), updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                            (new_status, result.get('dest_tx_hash'), result.get('actual_amount_out'),
+                            (persisted_status, result.get('dest_tx_hash'), result.get('actual_amount_out'),
                              result.get('error_reason'),
                              json.dumps(result['recovery_info']) if result.get('recovery_info') else None,
                              row_id))
@@ -4177,13 +4211,13 @@ def _bridge_status_loop():
                     auto_buy_notif = None
 
                     if (new_status in ('bridge_failed', 'origin_tx_reverted', 'timed_out')
-                            and auto_buy_status in ('pending', 'processing')):
+                            and auto_buy_status in ('pending', 'processing', 'reconciling')):
                         conn_af = sqlite3.connect(DB_FILE)
                         try:
                             conn_af.execute(
                                 "UPDATE bridge_transactions SET auto_buy_status='failed', "
                                 "auto_buy_result=?, updated_at=CURRENT_TIMESTAMP "
-                                "WHERE id=? AND auto_buy_status IN ('pending','processing')",
+                                "WHERE id=? AND auto_buy_status IN ('pending','processing','reconciling')",
                                 (json.dumps({
                                     'error': 'Funding bridge did not complete',
                                     'bridge_status': new_status,
@@ -4195,6 +4229,25 @@ def _bridge_status_loop():
                         auto_buy_notif = (
                             'Automatic purchase cancelled because funding did not complete — '
                             'no token buy was submitted.')
+
+                    if new_status == 'bridge_filled' and auto_buy_status == 'reconciling':
+                        # The original money arrived AFTER the quote/strategy
+                        # window. Cancel the stale buy without signing a new
+                        # transaction; release bot lock only once settled.
+                        with sqlite3.connect(DB_FILE) as conn_late:
+                            conn_late.execute(
+                                "UPDATE bridge_transactions SET auto_buy_status='failed', "
+                                "auto_buy_result=?, updated_at=CURRENT_TIMESTAMP "
+                                "WHERE id=? AND auto_buy_status='reconciling'",
+                                (json.dumps({
+                                    'error': 'Funds arrived after the buy window; no automatic token purchase was made',
+                                    'bridge_status': 'bridge_filled',
+                                    'chain': dest_chain,
+                                    'funds_arrived': True,
+                                }), row_id))
+                        auto_buy_notif = (
+                            'Funding arrived after the buy window. No token purchase '
+                            'was made; your funds remain on the destination chain.')
 
                     if new_status == 'bridge_filled' and auto_buy_status == 'pending':
                         conn_ab = sqlite3.connect(DB_FILE)
@@ -7402,8 +7455,8 @@ def _active_auto_buy_bridge(user_id: int, dest_chain: str, token_address: str):
             "SELECT id, source_chain, status, auto_buy_status "
             "FROM bridge_transactions WHERE user_id=? AND dest_chain=? "
             "AND lower(auto_buy_token_address)=lower(?) AND initiated_by='auto_buy' "
-            "AND auto_buy_status IN ('pending','processing') "
-            "AND status NOT IN ('bridge_failed','origin_tx_reverted','timed_out') "
+            "AND auto_buy_status IN ('pending','processing','reconciling') "
+            "AND status NOT IN ('bridge_failed','origin_tx_reverted') "
             "ORDER BY id DESC LIMIT 1",
             (user_id, dest_chain, token_address)
         ).fetchone()
@@ -14299,7 +14352,8 @@ def _bridge_row_to_dict(row: sqlite3.Row) -> dict:
     shape -- one place for this so /status and /transaction can't drift."""
     d = dict(row)
     d['status_label'] = BRIDGE_STATUS_LABELS.get(d['status'], d['status'])
-    d['is_terminal'] = d['status'] in (_BRIDGE_TERMINAL_STATUSES | {'timed_out'})
+    d['is_terminal'] = (d['status'] in (_BRIDGE_TERMINAL_STATUSES | {'timed_out'})
+                        and d.get('auto_buy_status') != 'reconciling')
     # Funds may already have left the origin wallet well before the bridge
     # itself is done -- surfaced explicitly (spec #3) rather than left for
     # the frontend to infer from status strings alone.
