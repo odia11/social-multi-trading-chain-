@@ -289,6 +289,10 @@ def test_creator_pilot_wallet_budget():
         assert '0.000890880 SOL' in low.get_json()['msg']
         assert 'Full transaction cost is not yet known' in low.get_json()['msg']
         assert 'transaction_b64' not in low.get_json()
+        state['logs']=['Program log: Transfer: insufficient lamports 880880, need 1838960']
+        prefixed=client.post(path,json={},headers=headers)
+        assert prefixed.status_code==503 and 'Insufficient SOL' in prefixed.get_json()['msg']
+        assert 'Fund launch with USDC' in prefixed.get_json()['msg']
         state['logs']=None
         generic=client.post(path,json={},headers=headers)
         assert generic.status_code==503 and 'simulation failed' in generic.get_json()['msg']

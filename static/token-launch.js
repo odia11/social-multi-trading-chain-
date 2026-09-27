@@ -58,13 +58,13 @@ async function signWithWallet(tx_b64){
  if(typeof sig!=='string'||sig.length<85)throw Error('Wallet did not return a valid transaction signature. Check Phantom history.');
  return sig;
 }
-function dialog(title,details,onApprove){
+function dialog(title,details,onApprove,options){
  return new Promise(function(resolve){
   var root=$('tl-dialog');
   text('tl-dialog-title',title);text('tl-dialog-details',details);
   text('tl-dialog-status','');root.classList.add('open');
   var okay=$('tl-dialog-confirm'),cancel=$('tl-dialog-cancel');
-  okay.disabled=false;cancel.disabled=false;
+  okay.disabled=false;cancel.disabled=false;cancel.textContent='Cancel';
   okay.textContent='Approve in Phantom';
   function cleanup(){root.classList.remove('open');okay.onclick=null;cancel.onclick=null}
   cancel.onclick=function(){cleanup();resolve(false)};
@@ -72,7 +72,23 @@ function dialog(title,details,onApprove){
     okay.disabled=true;cancel.disabled=true;
     text('tl-dialog-status','Preparing wallet approval…');
     try{var result=await onApprove();cleanup();resolve(result)}
-    catch(e){text('tl-dialog-status',e.message||'Wallet approval failed');okay.disabled=false;cancel.disabled=false}
+    catch(e){
+      var message=e.message||'Wallet approval failed';
+      text('tl-dialog-status',message);
+      var needsFunding=/Insufficient SOL/i.test(message);
+      var blocked=needsFunding||/SOL budget|transaction simulation failed/i.test(message);
+      okay.disabled=blocked;
+      okay.textContent=blocked?'Approval unavailable':'Approve in Phantom';
+      cancel.disabled=false;
+      if(needsFunding&&options&&options.fundId){
+        cancel.textContent='See funding options';
+        cancel.onclick=function(){
+          cleanup();resolve(false);
+          var section=$('tl-fund-'+options.fundId);
+          if(section)section.scrollIntoView({behavior:'smooth',block:'center'});
+        };
+      }
+    }
   };
  });
 }
@@ -185,7 +201,7 @@ async function launchStage(row,stage){
      text('tl-dialog-status','Verifying the transaction on Solana…');
      var confirmed=await confirmStage(row.id,stage,sig);
      return {sig:sig,result:confirmed};
-   });
+   },{fundId:row.id});
    if(!result||result.handoff)return;
    if(result.result.confirmed){
      status(create&&row.reward_mode==='community'
@@ -307,7 +323,7 @@ function drawMine(){
   var actions=dom('div','tl-actions');
   function action(label,fn){var b=dom('button','',label);b.type='button';b.onclick=fn;actions.appendChild(b);return b}
   if(cfg.enabled&&(row.status==='draft'||row.status==='prepared')){
-    var fund=dom('div','tl-funding');
+    var fund=dom('div','tl-funding');fund.id='tl-fund-'+row.id;
     fund.appendChild(dom('p','tl-helper','Only have USDC in your connected Phantom wallet? OrcAgent estimates the SOL reserve from a live Jupiter quote and uses no more than your maximum USDC budget. Approve the gasless swap, then separately approve your token launch. No OrcAgent launch fee.'));
     var fundLabel=dom('label','tl-label','Maximum USDC budget');
     var fundAmount=dom('input','tl-input');fundAmount.type='number';fundAmount.min='5';fundAmount.max='250';fundAmount.step='0.01';fundAmount.value='25';fundAmount.setAttribute('aria-label','Maximum USDC to convert for launch SOL reserve');

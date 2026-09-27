@@ -348,9 +348,9 @@ def install(d):
             accounts=outcome.get('accounts') or []
             if outcome.get('err') is not None:
                 logs=outcome.get('logs')
-                insufficient=(outcome.get('err')=='InsufficientFundsForFee' or
+                insufficient=(outcome.get('err') in ('InsufficientFundsForFee','AccountNotFound') or
                     (isinstance(logs,list) and any(isinstance(line,str) and
-                     re.fullmatch(r'Transfer: insufficient lamports [0-9]+, need [0-9]+',line)
+                     re.search(r'(?:Transfer:\s*)?insufficient\s+(?:lamports|funds|balance)\b',line,re.IGNORECASE)
                      for line in logs)))
                 if insufficient:
                     # Do not quote a partial instruction's shortage as the full
@@ -359,10 +359,11 @@ def install(d):
                         raise RuntimeError('Insufficient SOL for the creator USDC receiving account rent and claim fees '
                             f'(Phantom balance: {before/1_000_000_000:.9f} SOL). '
                             'Add SOL to this wallet, then retry. No transaction was sent.')
-                    raise RuntimeError('Insufficient SOL in your connected Phantom wallet '
+                    raise RuntimeError('Insufficient SOL in Phantom '
                         f'(balance: {before/1_000_000_000:.9f} SOL). '
-                        'USDC cannot pay Solana account rent and network fees. '
-                        'Full transaction cost is not yet known. No transaction was sent.')
+                        'Add SOL or use Fund launch with USDC on this saved draft '
+                        '(if Jupiter offers gasless). Full transaction cost is not yet known. '
+                        'No transaction was sent.')
                 raise RuntimeError('Pilot transaction simulation failed; no wallet approval is possible')
             if len(accounts)!=1 or not isinstance(accounts[0],dict):
                 raise RuntimeError('Pilot fee-payer simulation unavailable; transaction blocked')
@@ -927,7 +928,20 @@ def install(d):
                 if cur.rowcount!=1:return fail('Launch changed during recovery; reload.',409)
             row=lookup(launch_id,wallet)
         if row['status']!='draft':return fail('This launch was already submitted; check its status before retrying',409)
+        # A real mainnet dry run needs ~0.007 SOL for SOL-paired creation and
+        # ~0.009 SOL for USDC-paired creation (rent varies). Reject clearly
+        # before grinding an ephemeral mint when the fee payer cannot cover a
+        # modest 0.01 SOL starting reserve. No user funds move here.
         try:
+            starting=rpc('getBalance',[wallet,{'commitment':'confirmed'}],launch_read=True)
+            available=(starting or {}).get('value')
+            if type(available) is not int or available<0:
+                raise RuntimeError('Could not verify your SOL balance. Keep this saved draft and retry later.')
+            if available<10_000_000:
+                return fail('Insufficient SOL: Phantom has '
+                    f'{available/1_000_000_000:.6f} SOL. Keep at least 0.01 SOL '
+                    'for creation/rent. Add SOL or use Fund launch with USDC '
+                    'on this draft (gasless quote required). No token was created.',409)
             built=build_tx(row,'create')
             pilot_cost=pilot_sol_preflight(row,built['transaction_b64'],
                 max_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS if pilot_wallet(wallet)
