@@ -17,7 +17,7 @@ say "Installing system packages"
 apt-get update -qq
 # ffmpeg: video posts are re-encoded (H.264, metadata stripped, <=720p) and
 # length-checked server-side before they can be published (video_uploads.py).
-apt-get install -y -qq python3 python3-venv python3-pip nginx sqlite3 curl ca-certificates rsync openssl ffmpeg
+apt-get install -y -qq python3 python3-venv python3-pip nginx sqlite3 curl ca-certificates rsync openssl ffmpeg nodejs npm
 
 say "Creating the service user (no login shell — it only runs the app)"
 id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin "$APP_USER"
@@ -25,7 +25,7 @@ id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --create-home --shell /usr
 say "Installing the application into $APP_DIR"
 if command -v rsync >/dev/null 2>&1; then
   rsync -a --delete --exclude '.git' --exclude '__pycache__' --exclude '*.db' \
-        --exclude 'venv' --exclude '.secret_key' --exclude '/models' "$REPO_DIR"/ "$APP_DIR"/
+        --exclude 'venv' --exclude '**/node_modules' --exclude '.secret_key' --exclude '/models' "$REPO_DIR"/ "$APP_DIR"/
   if [ -e "$REPO_DIR/.git" ]; then
     git -C "$REPO_DIR" rev-parse --short HEAD > "$APP_DIR/VERSION" 2>/dev/null || true
   fi
@@ -99,6 +99,25 @@ fi
 chown -R "$APP_USER:$APP_USER" "$APP_DIR/models"
 echo "  explicit-content filter model ready"
 chown -R "$APP_USER:$APP_USER" "$APP_DIR/venv"
+
+# Pump SDK is isolated from the Python/Jupiter/0x execution path. npm ci
+# installs only pinned, lockfile-verified production dependencies. The browser
+# bundle is built in the clone, committed, and doesn't need build tools here.
+if [ -f "$APP_DIR/pump_adapter/package-lock.json" ] \
+   && [ -f "$ENV_FILE" ] \
+   && grep -Eq '^[[:space:]]*ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED=1[[:space:]]*$' "$ENV_FILE"; then
+  say "Installing isolated Pump SDK for explicitly enabled Token Launch"
+  if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+    (cd "$APP_DIR/pump_adapter" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund --quiet) \
+      || die "Pump SDK install failed. The old app is still running."
+    chown -R "$APP_USER:$APP_USER" "$APP_DIR/pump_adapter/node_modules"
+    echo "  SDK installed; no on-chain launch is triggered by deployment"
+  else
+    die "node/npm unavailable; cannot install the pinned Pump SDK. The old app is still running."
+  fi
+else
+  echo "  Token Launch is in safe preflight; Pump SDK dependencies not installed in production"
+fi
 
 if ! VENV_ERR="$(cd "$APP_DIR" && sudo -u "$APP_USER" "$APP_DIR/venv/bin/gunicorn" --version 2>&1)"; then
   printf '\n\033[1;31m✗ The service user cannot run %s\033[0m\n' "$APP_DIR/venv/bin/gunicorn"

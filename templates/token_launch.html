@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0b0e">
+<title>Token Launch · OrcAgent</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=2">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{--bg:#0a0b0e;--panel:#101317;--panel2:#181d23;--gold:#f7b955;--text:#f0f2f6;--muted:#959da9;--border:#252a32;--green:#3ad29b;--red:#f76b62}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:Geist,system-ui,sans-serif}
+a{color:var(--gold);text-decoration:none}
+a:hover{text-decoration:underline}
+button,input,textarea,select{font:inherit}
+button{cursor:pointer}
+button:disabled{cursor:not-allowed;opacity:.55}
+.tl-wrap{width:min(1020px,100%);margin:0 auto;padding:28px 20px 110px}
+.tl-eyebrow{color:var(--gold);font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;margin-bottom:8px}
+h1{font-size:clamp(28px,5vw,42px);line-height:1.1;margin:0 0 12px;letter-spacing:-.045em}
+.tl-lead{max-width:600px;color:var(--muted);font-size:14px;line-height:1.65;margin:0 0 22px}
+.tl-grid{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(280px,.85fr);gap:16px;align-items:start}
+.tl-card{background:var(--panel);border:1px solid var(--border);border-radius:17px;padding:23px;margin-bottom:16px;min-width:0}
+.tl-card h2{font-size:16px;margin:0 0 17px;letter-spacing:-.02em}
+.tl-label{display:block;font-size:12px;font-weight:650;margin:13px 0 7px}
+.tl-input,.tl-textarea,.tl-select{width:100%;background:var(--bg);color:var(--text);border:1px solid #303740;border-radius:10px;padding:12px 13px;outline:0;font-size:15px;min-height:45px}
+.tl-input:focus,.tl-textarea:focus,.tl-select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(247,185,85,.1)}
+.tl-textarea{resize:vertical;min-height:75px}
+.tl-hint{font-size:11px;color:var(--muted);line-height:1.55;margin:6px 0 0}
+.tl-columns{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tl-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.tl-option{display:block;position:relative}
+.tl-option input{position:absolute;opacity:0;inset:0;width:100%;height:100%;cursor:pointer}
+.tl-option .tl-choice{display:flex;align-items:center;gap:8px;background:#15191f;border:1px solid #2a3038;border-radius:11px;padding:13px 12px;min-height:53px;font-size:13px;font-weight:700}
+.tl-option input:checked+.tl-choice{border-color:var(--gold);background:rgba(247,185,85,.085);color:var(--gold)}
+.tl-option input:focus-visible+.tl-choice{outline:2px solid var(--gold);outline-offset:2px}
+.tl-mode{margin:8px 0}
+.tl-mode .tl-choice{display:block;min-height:75px}
+.tl-mode small{display:block;color:var(--muted);font-size:11px;font-weight:400;line-height:1.5;margin-top:5px}
+.tl-note{font-size:12px;line-height:1.6;color:var(--muted);background:#171c23;border:1px solid #292f37;border-radius:10px;padding:12px 13px;margin:14px 0}
+.tl-note strong{color:var(--text)}
+.tl-gold-note{border-color:rgba(247,185,85,.28);background:rgba(247,185,85,.055)}
+.tl-btn{border:0;border-radius:11px;min-height:46px;padding:12px 18px;font-size:13px;font-weight:750;background:var(--gold);color:#101216;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.tl-btn.secondary{background:#222831;border:1px solid #353d49;color:var(--text)}
+.tl-btn.block{width:100%}
+.tl-btn:focus-visible{outline:2px solid #fff;outline-offset:3px}
+.tl-status{padding:12px 14px;border:1px solid #353d49;border-radius:10px;min-height:44px;color:var(--muted);font-size:12px;line-height:1.5;margin:13px 0;overflow-wrap:anywhere}
+.tl-status.ok{color:var(--green);border-color:rgba(58,210,155,.4)}
+.tl-status.err{color:var(--red);border-color:rgba(247,107,98,.4)}
+.tl-status:empty{display:none}
+.tl-preview{background:linear-gradient(140deg,#1d222a,#101317);border-radius:12px;padding:18px;margin:12px 0}
+.tl-token{display:flex;align-items:center;gap:12px;min-width:0}
+.tl-token-icon{width:52px;height:52px;border-radius:12px;background:#262c34;border:1px solid #353a43;display:flex;align-items:center;justify-content:center;color:var(--gold);font-size:22px;font-weight:800;overflow:hidden;flex-shrink:0}
+.tl-token-icon img{width:100%;height:100%;object-fit:cover}
+.tl-symbol{font:700 15px 'JetBrains Mono',monospace;color:var(--gold)}
+.tl-name{font-size:12px;color:var(--muted);margin-top:4px}
+.tl-line{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 0;border-bottom:1px solid #252b34;font-size:12px}
+.tl-line:last-child{border-bottom:0}
+.tl-line span:first-child{color:var(--muted)}
+.tl-mono{font-family:'JetBrains Mono',monospace;font-size:11px;overflow-wrap:anywhere}
+.tl-flag{font-size:11px;font-weight:700;color:var(--gold);background:rgba(247,185,85,.12);border:1px solid rgba(247,185,85,.2);border-radius:999px;padding:4px 9px;display:inline-block}
+.tl-list{display:flex;flex-direction:column;gap:9px}
+.tl-item{border:1px solid var(--border);border-radius:10px;padding:13px;background:#14181e;min-width:0}
+.tl-item-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.tl-item strong{font-size:13px}
+.tl-item .tl-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px}
+.tl-item .tl-actions button,.tl-item .tl-actions a{border:1px solid #343c47;background:#222831;padding:8px 10px;border-radius:8px;color:var(--text);font-weight:700;font-size:12px}
+.tl-item .tl-actions button:disabled{opacity:.45}
+.tl-helper{color:var(--muted);font-size:12px;line-height:1.55}
+.tl-alert{padding:13px 14px;margin-bottom:16px;border:1px solid rgba(247,185,85,.35);background:#241d13;border-radius:11px;font-size:13px;line-height:1.5}
+.tl-upload{border:1px dashed #464d58;border-radius:10px;background:#151a20;padding:12px;color:var(--muted);width:100%;font-size:13px}
+.tl-overlay{display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.75);align-items:center;justify-content:center;padding:20px}
+.tl-overlay.open{display:flex}
+.tl-dialog{width:min(450px,100%);background:#101317;border:1px solid rgba(247,185,85,.4);border-radius:17px;padding:24px}
+.tl-dialog h3{margin:0 0 10px}
+.tl-dialog p{font-size:13px;color:var(--muted);line-height:1.6}
+.tl-dialog code{font-size:11px;overflow-wrap:anywhere}
+.tl-dialog .tl-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:18px}
+@media(max-width:740px){.tl-wrap{padding:17px 12px 90px}.tl-grid{grid-template-columns:1fr;gap:0}.tl-card{padding:17px;margin-bottom:12px}.tl-columns{grid-template-columns:1fr}.tl-option .tl-choice{padding:11px}.tl-dialog{padding:18px}}
+</style>
+</head>
+<body>
+{{ navbar_html('token-launch') }}
+<main class="tl-wrap">
+<div class="tl-eyebrow">OrcAgent · Solana</div>
+<h1>Launch your token<span style="color:var(--gold)">.</span></h1>
+<p class="tl-lead">Create a Solana token with USDC trading by default. Choose who earns creator fees before you approve the transaction in your wallet.</p>
+{% if not launch_enabled %}
+<div class="tl-alert" role="status"><b>Preflight mode.</b> You can configure and save a token draft. Mainnet signing remains disabled until the Pump SDK and on-chain fee sharing complete final validation. No SOL or USDC will be spent from this page while preflight is on.</div>
+{% endif %}
+<div class="tl-grid">
+<section>
+  <div class="tl-card">
+    <h2>01 · Your token</h2>
+    <div class="tl-columns">
+      <div><label class="tl-label" for="tl-name">Token name</label><input class="tl-input" id="tl-name" maxlength="32" placeholder="Your token" autocomplete="off" required></div>
+      <div><label class="tl-label" for="tl-symbol">Ticker</label><input class="tl-input" id="tl-symbol" maxlength="10" placeholder="ORCA" autocomplete="off" required></div>
+    </div>
+    <label class="tl-label" for="tl-description">Description <span style="color:var(--muted);font-weight:400">(optional)</span></label>
+    <textarea class="tl-textarea" id="tl-description" maxlength="280" placeholder="Tell the community about your token"></textarea>
+    <label class="tl-label" for="tl-image">Token logo</label>
+    <input id="tl-image" class="tl-upload" type="file" accept="image/png,image/jpeg,image/webp" required>
+    <p class="tl-hint">PNG, JPG or WebP, up to 1 MB. Metadata stays available on OrcAgent for your token.</p>
+  </div>
+  <div class="tl-card">
+    <h2>02 · Trading currency</h2>
+    <div class="tl-options" role="group" aria-label="Trading currency">
+      <label class="tl-option"><input type="radio" name="tl-asset" value="USDC" checked><span class="tl-choice">💵 USDC <span class="tl-flag">DEFAULT</span></span></label>
+      <label class="tl-option"><input type="radio" name="tl-asset" value="SOL"><span class="tl-choice">◎ SOL</span></label>
+    </div>
+    <p class="tl-hint">USDC-paired launches earn eligible creator fees in USDC. SOL-paired tokens accrue eligible fees in SOL. Solana network and account-rent costs still require SOL.</p>
+  </div>
+  <div class="tl-card">
+    <h2>03 · Who earns the fees?</h2>
+    <div role="group" aria-label="Creator rewards mode">
+      <label class="tl-option tl-mode"><input type="radio" name="tl-mode" value="community" checked><span class="tl-choice">Creator + Community Rewards <span class="tl-flag">DEFAULT</span><small>Set your creator share and a second wallet's share. Requires a second wallet approval to lock the final split on-chain.</small></span></label>
+      <label class="tl-option tl-mode"><input type="radio" name="tl-mode" value="creator"><span class="tl-choice">Creator Rewards<small>Your creator wallet receives the Pump creator fees for the token.</small></span></label>
+      <label class="tl-option tl-mode"><input type="radio" name="tl-mode" value="holder"><span class="tl-choice">Holder Rewards<small>Pump directs creator fees to holders, not to the token creator. This selection is permanent.</small></span></label>
+    </div>
+    <div id="tl-community-fields">
+      <label class="tl-label" for="tl-community-wallet">Community wallet · Solana address</label>
+      <input id="tl-community-wallet" class="tl-input tl-mono" maxlength="44" placeholder="Community wallet address" autocomplete="off" spellcheck="false">
+      <label class="tl-label" for="tl-community-share">Community share of creator fees (%)</label>
+      <input id="tl-community-share" class="tl-input" type="number" min="0.01" max="99.99" step="0.01" value="10" inputmode="decimal">
+      <p class="tl-hint">Your wallet receives the remainder. Shares become immutable once you confirm the second on-chain step. OrcAgent takes no separate token-creation fee or automatic creator share.</p>
+    </div>
+    <div class="tl-note tl-gold-note"><strong>Important:</strong> Pump creator fees are not guaranteed income. Graduation is not a one-time payout. On SOL-paired tokens, converting rewards to USDC requires a separate swap and the wallet owner's authorization.</div>
+  </div>
+  <div class="tl-card">
+    <h2>04 · Review &amp; save draft</h2>
+    <p class="tl-helper">Logged in as <span class="tl-mono">{{ wallet[:6] }}…{{ wallet[-6:] }}</span>. Only this authenticated Solana wallet can prepare or confirm your launch.</p>
+    <label class="tl-label"><input id="tl-ack" type="checkbox" style="accent-color:var(--gold);margin-right:9px">I understand the displayed rewards and potential SOL/network costs.</label>
+    <div class="tl-status" id="tl-status" role="status" aria-live="polite"></div>
+    <button id="tl-save" class="tl-btn block" type="button">Save launch draft</button>
+    <p class="tl-hint">Saving a draft does not create a token or move funds. Launch approval is a separate wallet action.</p>
+  </div>
+</section>
+<aside>
+  <div class="tl-card">
+    <h2>Preview</h2>
+    <div class="tl-preview">
+      <div class="tl-token"><div class="tl-token-icon" id="tl-preview-logo">◎</div><div><div class="tl-symbol" id="tl-preview-symbol">TOKEN / USDC</div><div class="tl-name" id="tl-preview-name">Your token name</div></div></div>
+    </div>
+    <div class="tl-line"><span>Pair</span><strong id="tl-review-pair">USDC</strong></div>
+    <div class="tl-line"><span>Rewards</span><strong id="tl-review-mode">Creator + Community</strong></div>
+    <div class="tl-line"><span>Creator share</span><strong id="tl-review-creator">90.00%</strong></div>
+    <div class="tl-line"><span>Community share</span><strong id="tl-review-community">10.00%</strong></div>
+    <div class="tl-line"><span>OrcAgent launch fee</span><strong>0</strong></div>
+    <div class="tl-line"><span>Network + Pump fees</span><strong>Shown by wallet / on-chain</strong></div>
+    <p class="tl-hint">No reward balance is estimated from volume. Real deposits and allocations must be verified on-chain.</p>
+  </div>
+  <div class="tl-card">
+    <h2>Your launches</h2>
+    <div id="tl-mine" class="tl-list"><p class="tl-helper">Loading your launch history…</p></div>
+  </div>
+  <div class="tl-card">
+    <h2>Prefer rewards in USDC?</h2>
+    <p class="tl-helper">Choose USDC above to receive eligible Pump creator fees in USDC directly. For existing SOL rewards, a conversion is a separate wallet swap, not an invisible fee or automatic deduction.</p>
+    <a class="tl-btn secondary block" href="/wallet">Open Portfolio · SOL ↔ USDC</a>
+    <p class="tl-hint">Unattended conversions are not enabled: Pump creator fees normally pay the creator's own Phantom wallet; OrcAgent may not spend those funds without delegated approval.</p>
+  </div>
+</aside>
+</div>
+</main>
+<div class="tl-overlay" id="tl-dialog" role="dialog" aria-modal="true" aria-labelledby="tl-dialog-title">
+  <div class="tl-dialog">
+    <h3 id="tl-dialog-title">Review your launch</h3>
+    <p id="tl-dialog-details"></p>
+    <div class="tl-status" id="tl-dialog-status" role="status" aria-live="polite"></div>
+    <div class="tl-actions"><button type="button" class="tl-btn secondary" id="tl-dialog-cancel">Cancel</button><button type="button" class="tl-btn" id="tl-dialog-confirm">Approve in Phantom</button></div>
+  </div>
+</div>
+<script>window.ORC_TOKEN_LAUNCH={wallet:{{ wallet|tojson }},csrf:{{ csrf_token|tojson }},enabled:{{ launch_enabled|tojson }}};</script>
+<script src="/static/token-launch-web3.js?v={{ app_version|default('1') }}" defer></script>
+<script src="/static/token-launch.js?v={{ app_version|default('1') }}" defer></script>
+</body>
+</html>

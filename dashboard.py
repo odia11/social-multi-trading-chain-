@@ -17585,6 +17585,8 @@ _NAV_ICONS = {
     'groups':      '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'
                    '<circle cx="8.5" cy="11.5" r="1"/><circle cx="12" cy="11.5" r="1"/>'
                    '<circle cx="15.5" cy="11.5" r="1"/>',
+    'launch':      '<path d="M4 20l5-5M9 15l6-6M7 9l8-5 5 5-5 8-8-8z"/>'
+                   '<path d="M4 16l-2 6 6-2M15 4l5 5"/>',
     'promote':     '<path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1z"/>'
                    '<path d="M16 9a4 4 0 0 1 0 6"/>',
     'referrals':   '<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/>'
@@ -17644,6 +17646,7 @@ _NAVBAR_MORE_LINKS = [
     ('/traders', 'Traders', 'traders'),
     ('/groups', 'Groups', 'groups'),
     ('/promote', 'Promote', 'promote'),
+    ('/token-launch', 'Token Launch', 'launch'),
     ('/referrals', 'Referrals', 'referrals'),
     ('/history', 'History', 'history'),
     ('/bot', 'Bot', 'bot', 'pt-nb-feature'),
