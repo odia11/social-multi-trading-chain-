@@ -1,4 +1,5 @@
 'use strict';
+require('./runtime-check.cjs');
 /** Mainnet preflight only: NO wallet key, network transaction, token creation or fee claim.
  * Run from pump_adapter with node read-only-preflight.cjs. Public RPC is the
  * fallback; the operator may supply ORCA_LAUNCH_RPC from the trusted host env.

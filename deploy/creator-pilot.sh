@@ -32,25 +32,10 @@ PY
   [ "$DEPLOYED" = "$SOURCE" ] || { echo 'Deploy the latest repository code before configuring the pilot. No settings changed.' >&2; exit 1; }
   grep -q 'PILOT_MAX_LAUNCH_SOL_LAMPORTS' "$APP_DIR/token_launch.py" || { echo 'Budget-guarded pilot not deployed. No settings changed.' >&2; exit 1; }
   grep -q 'pilot_creator_only' "$APP_DIR/templates/token_launch.html" || { echo 'Creator pilot page not deployed. No settings changed.' >&2; exit 1; }
-  command -v npm >/dev/null && command -v node >/dev/null || { echo 'Node/npm missing. No settings changed.' >&2; exit 1; }
-  echo 'Installing and validating pinned Pump adapter (no transactions sent)...'
-  (cd "$APP_DIR/pump_adapter" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund --quiet && node test-security.cjs && npm audit --omit=dev --audit-level=high)
+  echo 'Installing and validating pinned Pump runtime and adapter (no transactions sent)...'
+  bash "$REPO_DIR/deploy/install-pump-runtime.sh"
+  bash "$REPO_DIR/deploy/verify-pump.sh" "$APP_DIR/pump_adapter" "$ENV_FILE"
   chown -R orcagent:orcagent "$APP_DIR/pump_adapter/node_modules"
-  # Use only the configured server RPC, never a user-provided URL. Do not
-  # print API-key-bearing endpoints or secrets to stdout/stderr.
-  TRUSTED_RPC="$("$APP_DIR/venv/bin/python" - "$ENV_FILE" <<'PY'
-import sys
-for line in open(sys.argv[1],encoding='utf-8'):
-    if line.lstrip().startswith('SOLANA_RPC_URL='):
-        print(line.split('=',1)[1].strip().strip('"').strip("'"))
-        break
-PY
-)"
-  if [ -n "$TRUSTED_RPC" ]; then
-    (cd "$APP_DIR/pump_adapter" && ORCA_LAUNCH_RPC="$TRUSTED_RPC" node read-only-preflight.cjs)
-  else
-    (cd "$APP_DIR/pump_adapter" && node read-only-preflight.cjs)
-  fi
 fi
 BACKUP="$(mktemp /etc/orcagent.env.pilot-backup.XXXXXX)"
 chmod 600 "$BACKUP"
@@ -98,6 +83,24 @@ PY
 systemctl restart orcagent
 sleep 3
 curl -fsS --max-time 9 http://127.0.0.1:8080/health >/dev/null
+systemctl is-active --quiet orcagent
+# Verify what the running service actually inherited, not just the file written.
+SERVICE_PID="$(systemctl show orcagent --property=MainPID --value)"
+"$APP_DIR/venv/bin/python" - "$SERVICE_PID" "$TEST_FLAG" "$WALLET" <<'VERIFY'
+import sys
+from pathlib import Path
+pid,enabled,wallet=sys.argv[1:]
+if not pid.isdigit() or int(pid)<=0:
+    sys.exit('Pilot verification failed: service PID unavailable')
+items=Path('/proc/'+pid+'/environ').read_bytes().split(b'\0')
+env=dict(item.decode().split('=',1) for item in items if b'=' in item)
+expected={'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED':'0',
+          'ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_ENABLED':enabled,
+          'ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_WALLETS':wallet}
+if any(env.get(key)!=value for key,value in expected.items()):
+    sys.exit('Pilot verification failed: running service settings differ')
+print('PASS running service: public launches OFF; exact private pilot settings verified')
+VERIFY
 if [ "$1" = '--disable' ]; then
   echo 'Pilot disabled; app healthy. No on-chain action was taken.'
 else

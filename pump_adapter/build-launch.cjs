@@ -1,4 +1,5 @@
 'use strict';
+require('./runtime-check.cjs');
 // Pump's published ESM 2.0.0 pulls an incompatible named-export from its
 // agent-payments dependency in Node 22. The official CommonJS export loads.
 // No user private keys ever enter this process; only an ephemeral new mint key.

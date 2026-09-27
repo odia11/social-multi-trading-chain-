@@ -1,4 +1,5 @@
 'use strict';
+require('./runtime-check.cjs');
 // Verification only. Reads a supplied chain account; no private keys, signing
 // or RPC URLs are accepted from the browser.
 const {PUMP_SDK,feeSharingConfigPda,PUMP_FEE_PROGRAM_ID}=require('@pump-fun/pump-sdk');

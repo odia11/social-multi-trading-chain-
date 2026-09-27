@@ -200,7 +200,7 @@ def install(d):
                     uri='https://orcagent.fun/token-launch/metadata/'+row['id'])
         path=os.path.join(d.BASE,'pump_adapter','build-launch.cjs')
         try:
-            r=subprocess.run(['node',path],input=json.dumps(data),text=True,
+            r=subprocess.run(['/bin/bash',os.path.join(d.BASE,'pump_adapter','run-node.sh'),path],input=json.dumps(data),text=True,
                 capture_output=True,timeout=14,cwd=os.path.join(d.BASE,'pump_adapter'),
                 check=False)
         except (OSError,subprocess.TimeoutExpired) as exc:
@@ -280,7 +280,7 @@ def install(d):
         helper=os.path.join(d.BASE,'pump_adapter','check-sharing.cjs')
         def run(data):
             try:
-                p=subprocess.run(['node',helper],input=json.dumps(data),text=True,
+                p=subprocess.run(['/bin/bash',os.path.join(d.BASE,'pump_adapter','run-node.sh'),helper],input=json.dumps(data),text=True,
                     capture_output=True,timeout=7,cwd=os.path.dirname(helper))
                 if p.returncode:raise RuntimeError('Share configuration could not be verified')
                 return json.loads(p.stdout)
@@ -622,7 +622,7 @@ def install(d):
                 'reward_mode':row['reward_mode'],'blockhash':blockhash}
         endpoint=getattr(d,'SOLANA_RPC_URL','') or d.SOLANA_RPC
         try:
-            r=subprocess.run(['node',path],input=json.dumps(params),text=True,
+            r=subprocess.run(['/bin/bash',os.path.join(d.BASE,'pump_adapter','run-node.sh'),path],input=json.dumps(params),text=True,
                 capture_output=True,timeout=14,cwd=os.path.dirname(path),
                 env=dict(os.environ,ORCA_LAUNCH_RPC=endpoint))
             if r.returncode or not r.stdout:

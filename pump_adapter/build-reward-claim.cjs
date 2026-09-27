@@ -1,4 +1,5 @@
 'use strict';
+require('./runtime-check.cjs');
 // Permissionless creator-fee distribution or an owner's regular creator claim.
 // Builds unsigned transactions only; this process never signs for any user.
 const {OnlinePumpSdk,feeSharingConfigPda}=require('@pump-fun/pump-sdk');

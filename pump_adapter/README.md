@@ -27,10 +27,10 @@ security guarantee or proof of real transaction execution.
 Run from `pump_adapter`:
 
 ```sh
-npm ci --omit=dev --ignore-scripts --no-audit --no-fund
-node test-security.cjs
-npm audit --omit=dev --audit-level=high
-node read-only-preflight.cjs
+bash run-node.sh npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+bash run-node.sh test-security.cjs
+bash run-node.sh npm audit --omit=dev --audit-level=high
+bash run-node.sh read-only-preflight.cjs
 ```
 
 The last command checks the current Pump mainnet configuration and builds
@@ -148,3 +148,25 @@ control spending in Portfolio/other swap and trading routes. The intended
 **2 USDC test trade must be entered and approved separately**; merely
 launching a token never initiates that trade. A successful RPC simulation is
 not a promise that mainnet fees, rent or price will remain constant.
+
+## Pinned server runtime
+
+Node 18 cannot load the ESM UUID dependency required by rpc-websockets.
+All Python builders, installation, audits and preflight now use `run-node.sh`.
+The exact Node 22.23.2 release is installed by `deploy/install-pump-runtime.sh`
+under `/opt/orcagent-runtime/node-v22.23.2`, owned by root. The official archive
+is verified against the committed SHA-256 before extraction. No global Node
+replacement, nvm initialization or service sandbox relaxation is required.
+The runtime stays outside the app rsync tree and outside ProtectHome.
+
+`.node-version`, package engines and runtime checks enforce the same version.
+Direct invocations of every SDK entrypoint reject incompatible runtimes before
+loading dependencies. NODE_OPTIONS and NODE_PATH are cleared by the launcher.
+For non-production tests, ORCAGENT_PUMP_NODE may identify an absolute path to
+the exact same Node release. Missing/wrong runtimes fail closed, never falling
+back to PATH. Production uses the installed path without this override.
+
+`deploy/verify-pump.sh ADAPTER [ENV_FILE]` runs the existing bigint checks,
+production audit, SDK import and read-only preflight with this launcher. It
+reads only SOLANA_RPC_URL from the trusted environment file without printing
+its value. No paid transaction is signed or submitted by these checks.

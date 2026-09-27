@@ -17,7 +17,10 @@ say "Installing system packages"
 apt-get update -qq
 # ffmpeg: video posts are re-encoded (H.264, metadata stripped, <=720p) and
 # length-checked server-side before they can be published (video_uploads.py).
-apt-get install -y -qq python3 python3-venv python3-pip nginx sqlite3 curl ca-certificates rsync openssl ffmpeg nodejs npm
+apt-get install -y -qq python3 python3-venv python3-pip nginx sqlite3 curl ca-certificates rsync openssl ffmpeg xz-utils nodejs npm
+
+# Pin Pump runtime even while launches are disabled, ready for the private pilot.
+bash "$REPO_DIR/deploy/install-pump-runtime.sh"
 
 say "Creating the service user (no login shell — it only runs the app)"
 id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin "$APP_USER"
@@ -109,18 +112,10 @@ if [ -f "$APP_DIR/pump_adapter/package-lock.json" ] \
    || { grep -Eq '^[[:space:]]*ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_ENABLED=1[[:space:]]*$' "$ENV_FILE" \
    && grep -Eq '^[[:space:]]*ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_WALLETS=[1-9A-HJ-NP-Za-km-z]{32,44}([[:space:]]*,[[:space:]]*[1-9A-HJ-NP-Za-km-z]{32,44})*[[:space:]]*$' "$ENV_FILE"; }; }; then
   say "Installing isolated Pump SDK for explicitly enabled Token Launch"
-  if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
-    (cd "$APP_DIR/pump_adapter" \
-      && npm ci --omit=dev --ignore-scripts --no-audit --no-fund --quiet \
-      && node test-security.cjs \
-      && npm audit --omit=dev --audit-level=high \
-      && node read-only-preflight.cjs) \
-      || die "Pump SDK security/mainnet read-only preflight failed. No app restart."
-    chown -R "$APP_USER:$APP_USER" "$APP_DIR/pump_adapter/node_modules"
-    echo "  SDK and mainnet read-only preflight passed; no tokens/fees were sent"
-  else
-    die "node/npm unavailable; cannot install the pinned Pump SDK. The old app is still running."
-  fi
+  bash "$REPO_DIR/deploy/verify-pump.sh" "$APP_DIR/pump_adapter" "$ENV_FILE" \
+    || die "Pump SDK security/mainnet read-only preflight failed. No app restart."
+  chown -R "$APP_USER:$APP_USER" "$APP_DIR/pump_adapter/node_modules"
+  echo "  SDK and mainnet read-only preflight passed; no tokens/fees were sent"
 else
   echo "  Token Launch is in safe preflight; Pump SDK dependencies not installed in production"
 fi
