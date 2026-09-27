@@ -243,6 +243,18 @@ def install(d):
             outcome=(simulated or {}).get('value') or {}
             accounts=outcome.get('accounts') or []
             if outcome.get('err') is not None:
+                logs=outcome.get('logs')
+                insufficient=(outcome.get('err')=='InsufficientFundsForFee' or
+                    (isinstance(logs,list) and any(isinstance(line,str) and
+                     re.fullmatch(r'Transfer: insufficient lamports [0-9]+, need [0-9]+',line)
+                     for line in logs)))
+                if insufficient:
+                    # Do not quote a partial instruction's shortage as the full
+                    # launch price. Never expose arbitrary RPC logs to the UI.
+                    raise RuntimeError('Insufficient SOL in your connected Phantom wallet '
+                        f'(balance: {before/1_000_000_000:.9f} SOL). '
+                        'USDC cannot pay Solana account rent and network fees. '
+                        'Full transaction cost is not yet known. No transaction was sent.')
                 raise RuntimeError('Pilot transaction simulation failed; no wallet approval is possible')
             if len(accounts)!=1 or not isinstance(accounts[0],dict):
                 raise RuntimeError('Pilot fee-payer simulation unavailable; transaction blocked')

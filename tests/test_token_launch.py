@@ -239,6 +239,7 @@ def test_creator_pilot_wallet_budget():
                 return {'result':{'value':state['fee']}}
             if method=='simulateTransaction':
                 return {'result':{'value':{'err':state['err'],
+                    'logs':state.get('logs'),
                     'accounts':[{'lamports':state['after']}]}}}
             raise AssertionError('Unexpected RPC method '+method)
         rpc.return_value.json=answer
@@ -254,6 +255,22 @@ def test_creator_pilot_wallet_budget():
         state['err']={'InstructionError':[0,'Custom']}
         failed=client.post(path,json={},headers=headers)
         assert failed.status_code==503 and 'simulation failed' in failed.get_json()['msg']
+        state['before']=890_880
+        state['err']={'InstructionError':[0,{'Custom':1}]}
+        state['logs']=['Transfer: insufficient lamports 880880, need 1838960']
+        low=client.post(path,json={},headers=headers)
+        assert low.status_code==503 and 'Insufficient SOL' in low.get_json()['msg']
+        assert '0.000890880 SOL' in low.get_json()['msg']
+        assert 'Full transaction cost is not yet known' in low.get_json()['msg']
+        assert 'transaction_b64' not in low.get_json()
+        state['logs']=None
+        generic=client.post(path,json={},headers=headers)
+        assert generic.status_code==503 and 'simulation failed' in generic.get_json()['msg']
+        state['err']='InsufficientFundsForFee'
+        fee_low=client.post(path,json={},headers=headers)
+        assert fee_low.status_code==503 and 'Insufficient SOL' in fee_low.get_json()['msg']
+        assert 'transaction_b64' not in fee_low.get_json()
+        state['before']=50_000_000
         state['err']=None
         next_draft=client.post('/api/token-launch/draft',json={**base,
             'client_nonce':'creator-pilot-100pc-0002'},headers=headers)
@@ -263,6 +280,7 @@ def test_creator_pilot_wallet_budget():
         assert second.status_code==409 and 'one test token' in second.get_json()['msg']
     print('PASS creator-only USDC pilot has 0.03 SOL cost gate and 2 USDC guidance')
     print('PASS simulated network failure, excess SOL charges and second mint fail closed')
+    print('PASS insufficient SOL/rent/fee failures are actionable; unknown errors stay generic; no transaction returned')
     tmp.cleanup()
 
 def test_exact_onchain_transaction_verification():
