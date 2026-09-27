@@ -140,6 +140,12 @@ _install_video_uploads(_dashboard)
 # token while it is trending, with bull/bear votes and likes.
 _install_trending_hero(_dashboard)
 _install_token_launch(_dashboard)
+# Wallet-independent recovery of already-signed submissions after RPC 429,
+# a deployment, or iOS browser suspension. No transaction is signed or sent.
+import threading as _orca_reconcile_threading
+_orca_reconcile_threading.Thread(
+    target=_dashboard.app._orca_reconcile_submitted_launches,
+    name='orca-pump-confirmation-recovery',daemon=True).start()
 # ...and a share link for it: /trending/<chain>/<token> unfurls on X as that
 # card (/api/trending-card/<chain>/<token>.png) and opens it in the app.
 _install_trending_share(_dashboard)

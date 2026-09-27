@@ -206,8 +206,75 @@ def test_creator_vault_is_readonly_wallet_scoped():
     print('PASS read-only balance handles RPC fallback and never exposes unfinished launches')
     tmp.cleanup()
 
+def test_startup_reconcile_exact_signed_creator_launch():
+    import base64
+    from solders.transaction import Transaction
+    import token_launch
+    tmp,app,d=setup();client=app.test_client();owner=Keypair();wallet=str(owner.pubkey())
+    with client.session_transaction() as sess:
+        sess['wallet']=wallet;sess['csrf_token']='test-csrf'
+    h={'X-CSRF-Token':'test-csrf'}
+    payload={'name':'Original test','symbol':'ORCAGENT','description':'test token',
+        'client_nonce':'startup-reconcile-test-v1','image_data':icon(),
+        'reward_mode':'creator','quote_asset':'USDC'}
+    draft=client.post('/api/token-launch/draft',json=payload,headers=h).get_json()['draft']
+    ident=draft['id']; blockhash=str(Keypair().pubkey())
+    class Reply:
+        def __init__(self,code,payload):self.status_code=code;self.payload=payload
+        def raise_for_status(self):pass
+        def json(self):return self.payload
+    with patch.dict(os.environ,{'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED':'1'}):
+      with patch('token_launch.requests.post') as api:
+        api.return_value.status_code=200
+        api.return_value.raise_for_status=lambda:None
+        api.return_value.json=lambda:{'result':{'value':{'blockhash':blockhash}}}
+        prepared=client.post('/api/token-launch/'+ident+'/prepare',json={},headers=h)
+        assert prepared.status_code==200,prepared.get_data(as_text=True)[:200]
+    part=Transaction.from_bytes(base64.b64decode(prepared.get_json()['transaction_b64']))
+    signed=Transaction.populate(part.message,[owner.sign_message(bytes(part.message)),part.signatures[1]])
+    assert all(signed.verify_with_results())
+    sig=str(signed.signatures[0]); b64=base64.b64encode(bytes(signed)).decode()
+    with sqlite3.connect(d.DB_FILE) as conn:
+        conn.execute("UPDATE token_launches SET status='submitted',launch_signature=? WHERE id=?",(sig,ident))
+        # Another claimed launch with an INVALID prepared tx can never appear.
+        conn.execute('''INSERT INTO token_launches
+          (id,wallet,client_nonce,name,symbol,icon_webp,reward_mode,quote_asset,
+           mint,status,launch_signature,prepare_tx_b64,created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+           ('d'*32,wallet,'fake-launch','Fake','FAKE',b'x','creator','USDC',
+            str(Keypair().pubkey()),'submitted','x'*88,'invalid base64',int(time.time())))
+    requests_seen=[]
+    def rpc_response(url,*,json,timeout):
+        requests_seen.append((url,json['method']))
+        if url==d.SOLANA_RPC:return Reply(429,{'error':{'code':429}})
+        if json['method']=='getTransaction':
+            return Reply(200,{'result':{'transaction':[b64,'base64'],'meta':{'err':None}}})
+        if json['method']=='getAccountInfo':
+            return Reply(200,{'result':{'value':{'owner':token_launch.PUMP_PROGRAM}}})
+        raise AssertionError('Read-only reconciliation tried a mutating RPC')
+    # No authenticated wallet session: bootstrap must work independently of
+    # which wallet the user has open on an iPhone, or even if browser closed.
+    with client.session_transaction() as sess:sess.clear()
+    with patch('token_launch.requests.post',side_effect=rpc_response),patch('token_launch.time.sleep'):
+        recovered=app._orca_reconcile_submitted_launches()
+    assert recovered=={'checked':2,'recovered':1,'still_pending':1},recovered
+    with sqlite3.connect(d.DB_FILE) as conn:
+        assert conn.execute('SELECT status FROM token_launches WHERE id=?',(ident,)).fetchone()[0]=='live'
+        assert conn.execute("SELECT status FROM token_launches WHERE id=?",('d'*32,)).fetchone()[0]=='submitted'
+        assert conn.execute('SELECT COUNT(*) FROM token_reward_claims').fetchone()[0]==0
+    assert client.get('/api/token-launches').get_json()['total']==1
+    assert all(method in ('getTransaction','getAccountInfo') for _,method in requests_seen)
+    with patch('token_launch.requests.post') as post:
+        assert app._orca_reconcile_submitted_launches()['recovered']==0
+        # Only forged row is retried. It has an invalid signature stored and
+        # the server never fabricates success to move it live.
+    print('PASS restart independently reconciles the precise saved Phantom-signed mint without logged-in wallet')
+    print('PASS forged submissions remain pending and already-live token is not duplicated')
+    tmp.cleanup()
+
 if __name__=='__main__':
     test_public_launch_directory()
     test_rpc_rate_limit_preserves_submitted()
     test_signed_launch_reconciles_via_readonly_fallback()
     test_creator_vault_is_readonly_wallet_scoped()
+    test_startup_reconcile_exact_signed_creator_launch()

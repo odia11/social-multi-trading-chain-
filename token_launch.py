@@ -411,6 +411,61 @@ def install(d):
             raise ValueError('Unrecognized on-chain transaction') from exc
         return True
 
+    def reconcile_submitted_launches():
+        """Recover already signed and recorded Phantom transactions on restart.
+
+        This changes ONLY the database status after exact on-chain verification;
+        it never prepares, signs or sends a transaction, nor requires the
+        current browser to have the original wallet selected.
+        """
+        with closing(sqlite3.connect(d.DB_FILE)) as conn:
+            conn.row_factory=sqlite3.Row
+            rows=conn.execute('''SELECT * FROM token_launches
+                       WHERE (status='submitted' AND launch_signature<>''
+                                  AND prepare_tx_b64<>'')
+                          OR (status='finalize_submitted' AND finalize_signature<>''
+                                  AND finalize_tx_b64<>'')
+                       ORDER BY created_at ASC LIMIT 50''').fetchall()
+        scanned=recovered=unavailable=0
+        for raw in rows:
+            row=dict(raw)
+            stage='create' if row['status']=='submitted' else 'finalize'
+            sig=row['launch_signature'] if stage=='create' else row['finalize_signature']
+            scanned+=1
+            try:
+                if not check_signature(sig,row,stage):
+                    unavailable+=1
+                    continue
+                if stage=='create' and not mint_exists(row['mint']):
+                    unavailable+=1
+                    continue
+                if stage=='finalize' and not sharing_check(row['mint'],row['wallet'],
+                                            row['community_wallet'],row['community_bps']):
+                    unavailable+=1
+                    continue
+            except (RuntimeError,ValueError,KeyError,TypeError):
+                # Preserve status. Do not log RPC data or user-controlled text.
+                unavailable+=1
+                continue
+            target=('pending_shares' if row['reward_mode']=='community' else 'live') if stage=='create' else 'live'
+            previous='submitted' if stage=='create' else 'finalize_submitted'
+            sig_col='launch_signature' if stage=='create' else 'finalize_signature'
+            with sqlite3.connect(d.DB_FILE,timeout=8) as conn:
+                change=conn.execute(f'''UPDATE token_launches
+                      SET status=?, finalized_at=CASE WHEN ?='live'
+                          THEN ? ELSE finalized_at END
+                      WHERE id=? AND wallet=? AND mint=? AND status=?
+                            AND {sig_col}=?''',
+                      (target,target,int(time.time()),row['id'],row['wallet'],
+                           row['mint'],previous,sig))
+                recovered+=change.rowcount
+        print(f'[pump-launch] chain reconciliation checked={scanned} '
+              f'recovered={recovered} still_pending={unavailable}',flush=True)
+        return {'checked':scanned,'recovered':recovered,'still_pending':unavailable}
+
+    # Internal callable only, not an HTTP endpoint.
+    app._orca_reconcile_submitted_launches=reconcile_submitted_launches
+
     @app.get('/token-launch')
     def token_launch_page():
         wallet=identity()
