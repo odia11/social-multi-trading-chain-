@@ -700,6 +700,12 @@ def install(d):
     # Internal callable only, not an HTTP endpoint.
     app._orca_reconcile_submitted_launches=reconcile_submitted_launches
 
+    def launch_assets_version():
+        # Bust browser caches for BOTH refreshed pages after deployment.
+        names=('token-launch.js','token-launches.js','token-launch-redesign.css')
+        return str(max(int(os.stat(os.path.join(d.BASE,'static',name)).st_mtime)
+                       for name in names))
+
     @app.get('/token-launch')
     def token_launch_page():
         wallet=identity()
@@ -708,6 +714,7 @@ def install(d):
             csrf_token=d._get_csrf_token(),launch_enabled=enabled(),
             pilot_creator_only=pilot_wallet(wallet),
             funding_available=bool(os.getenv('JUPITER_API_KEY','').strip()),
+            app_version=launch_assets_version(),
             navbar_html=d._navbar_html)
 
     @app.get('/api/token-launch/config')
@@ -821,6 +828,7 @@ def install(d):
         # Public directory. Only verified/live OrcAgent token launches are
         # listed; wallet drafts, signatures and fee-claim history stay private.
         return d._render_no_cache('token_launches.html',
+                 app_version=launch_assets_version(),
                  navbar_html=d._navbar_html)
 
     @app.get('/api/token-launches')

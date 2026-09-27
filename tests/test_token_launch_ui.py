@@ -1,0 +1,66 @@
+"""Visual and workflow contracts for the compact OrcAgent Token Launch UI.
+
+Isolated Flask test client; no RPC, Phantom approval, mint or spend.
+"""
+import os
+import re
+import sys
+from pathlib import Path
+from unittest.mock import patch
+from solders.keypair import Keypair
+ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'tests'))
+from test_token_launch import setup
+
+def test_token_launch_ui():
+    tmp,app,d=setup()
+    client=app.test_client()
+    assert client.get('/token-launch').status_code==302
+    with client.session_transaction() as sess:
+        sess['wallet']=str(Keypair().pubkey())
+        sess['csrf_token']='test-csrf'
+    for flags in ({'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED':'0'},
+                  {'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED':'1'}):
+        with patch.dict(os.environ,flags):
+            result=client.get('/token-launch')
+            assert result.status_code==200
+            html=result.get_data(as_text=True)
+            for token in ('id="tl-form"','id="tl-name"','id="tl-symbol"',
+                'id="tl-description"','id="tl-image"','id="tl-ack"',
+                'id="tl-save"','id="tl-mine"','id="tl-dialog"',
+                'id="stat-all"','id="stat-usdc"','id="stat-sol"',
+                'id="all-tab"','id="mine-tab"','id="cards"','id="search"',
+                'id="pair"','id="tl-community-fields"','Creator + Community Rewards'):
+                assert token in html,token
+            assert re.search(r'name="tl-mode" value="creator" checked',html)
+            assert re.search(r'id="tl-image"[^>]*required',html)
+            assert 'Network + Pump fees' in html and 'OrcAgent launch fee' in html
+            assert 'https://phantom.app/ul/v1/signAndSendTransaction' not in html
+            assert re.search(r'token-launch-redesign\.css\?v=\d{10}',html)
+            assert re.search(r'token-launch(?:es)?\.js\?v=\d{10}',html)
+            if flags['ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED']=='1':
+                assert 'Continue to approve' in html
+                assert 'Preflight mode' not in html
+            else:
+                assert 'Preflight mode' in html and 'Save launch draft' in html
+    directory=client.get('/launches')
+    assert directory.status_code==200
+    markup=directory.get_data(as_text=True)
+    for token in ('Launch your','id="stat-all"','id="stat-usdc"',
+        'id="stat-sol"','id="all-tab"','id="mine-tab"',
+        'id="search"','id="pair"','/token-launch#tl-form'):
+        assert token in markup,token
+    assert re.search(r'token-launch-redesign\.css\?v=\d{10}',markup)
+    js=(ROOT/'static/token-launch.js').read_text()
+    assert "readyToApprove=data.draft" in js
+    assert "await launchStage(readyToApprove,'create')" in js
+    assert "var result=await dialog(title,details" in js
+    assert "quote_asset:choice('tl-asset')" in js
+    assert "reward_mode:mode" in js
+    assert "var draftNonce=''" in js
+    print('PASS quick-launch hero, live stats, responsive form, real reward choices, wallet approval')
+    print('PASS saved drafts, verified directory and versioned assets preserve API compatibility')
+    tmp.cleanup()
+
+if __name__=='__main__':
+    test_token_launch_ui()

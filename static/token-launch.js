@@ -6,6 +6,7 @@ var mine=[];
 var readerData='';
 var busy=false;
 var autoVerified=Object.create(null);
+var draftNonce='';
 function $(id){return document.getElementById(id)}
 function text(id,value){var e=$(id);if(e)e.textContent=value}
 function status(msg,err){var e=$('tl-status');if(!e)return;e.textContent=msg;e.className='tl-status '+(err?'err':'ok')}
@@ -17,14 +18,14 @@ function renderPreview(){
  var name=$('tl-name').value.trim()||'Your token name';
  var symbol=($('tl-symbol').value.trim()||'TOKEN').toUpperCase();
  var asset=choice('tl-asset')||'USDC';
- var mode=choice('tl-mode')||(cfg.pilotCreatorOnly?'creator':'community');
+ var mode=choice('tl-mode')||'creator';
  var bps=toBps($('tl-community-share').value);
  text('tl-preview-name',name);text('tl-preview-symbol',symbol+' / '+asset);
  text('tl-review-pair',asset);
  text('tl-review-mode',{creator:'Creator',community:'Creator + Community',holder:'Holder'}[mode]);
  text('tl-review-creator',mode==='holder'?'Holder rewards':mode==='creator'?'100.00%':money((10000-bps)/100));
  text('tl-review-community',mode==='community'?money(bps/100):'—');
- $('tl-community-fields').style.display=mode==='community'?'block':'none';
+ $('tl-community-fields').hidden=mode!=='community';
 }
 async function call(path,body){
  var opt={credentials:'include'};
@@ -397,15 +398,18 @@ function loadImage(file){
 }
 async function saveDraft(){
  if(busy)return;
- var ack=$('tl-ack');if(!ack.checked){status('Confirm you understand the trading costs and rewards.',true);return}
+ var ack=$('tl-ack');if(!ack.checked){status('Confirm that you understand the network costs and creator rewards.',true);return}
  var bps=toBps($('tl-community-share').value),mode=choice('tl-mode');
  if(mode==='community'&&!bps){status('Choose a community share between 0.01% and 99.99%.',true);return}
  busy=true;$('tl-save').disabled=true;
+ var readyToApprove=null,savedDraft=null;
  try{
   var icon=readerData||await loadImage($('tl-image').files[0]);
-  var nonce='';
-  if(window.crypto&&crypto.randomUUID)nonce=crypto.randomUUID().replaceAll('-','');
-  else throw Error('Secure browser randomness unavailable');
+  if(!draftNonce){
+    if(window.crypto&&crypto.randomUUID)draftNonce=crypto.randomUUID().replaceAll('-','');
+    else throw Error('Secure browser randomness unavailable');
+  }
+  var nonce=draftNonce;
   var req={client_nonce:nonce,
    name:$('tl-name').value.trim(),symbol:$('tl-symbol').value.trim(),
    description:$('tl-description').value.trim(),image_data:icon,
@@ -413,20 +417,29 @@ async function saveDraft(){
    community_wallet:mode==='community'?$('tl-community-wallet').value.trim():'',
    community_bps:mode==='community'?bps:0};
   var data=await call('/api/token-launch/draft',req);
-  status('Draft saved. '+(cfg.enabled?'Review it in Your launches and approve with Phantom.':'Mainnet signing is disabled during preflight.'));
+  savedDraft=data.draft;draftNonce='';
+  status('Draft saved. '+(cfg.enabled?'Preparing your Phantom approval…':'Mainnet signing is disabled during preflight.'));
   await loadMine();
-  $('tl-mine').scrollIntoView({behavior:'smooth',block:'nearest'});
+  if(cfg.enabled){readyToApprove=data.draft}
+  else $('tl-mine').scrollIntoView({behavior:'smooth',block:'nearest'});
  }catch(e){status(e.message||'Draft could not be saved',true)}
- finally{busy=false;$('tl-save').disabled=false}
+ finally{busy=false;$('tl-save').disabled=!!savedDraft}
+ // One obvious action on the form: save the immutable draft first,
+ // then offer explicit Phantom approval. No automatic signing/spending.
+ if(readyToApprove){
+   $('saved-launches').scrollIntoView({behavior:'smooth',block:'nearest'});
+   await launchStage(readyToApprove,'create');
+ }
 }
-['tl-name','tl-symbol','tl-community-share','tl-community-wallet'].forEach(function(id){$(id).addEventListener('input',renderPreview)});
-document.querySelectorAll('input[name="tl-asset"],input[name="tl-mode"]').forEach(function(i){i.addEventListener('change',renderPreview)});
+['tl-name','tl-symbol','tl-description','tl-community-share','tl-community-wallet'].forEach(function(id){$(id).addEventListener('input',function(){renderPreview();$('tl-save').disabled=false})});
+document.querySelectorAll('input[name="tl-asset"],input[name="tl-mode"]').forEach(function(i){i.addEventListener('change',function(){renderPreview();$('tl-save').disabled=false})});
 $('tl-image').addEventListener('change',async function(){
  try{
-  readerData=await loadImage(this.files[0]);
+  readerData=await loadImage(this.files[0]);$('tl-save').disabled=false;
   var root=$('tl-preview-logo');root.replaceChildren();
   var img=document.createElement('img');img.src=readerData;img.alt='Token icon preview';root.appendChild(img);
- }catch(e){readerData='';status(e.message,true)}
+  text('tl-upload-label',this.files[0].name.length>28?this.files[0].name.slice(0,25)+'…':this.files[0].name);
+ }catch(e){readerData='';text('tl-upload-label','Upload logo');status(e.message,true)}
 });
 $('tl-save').addEventListener('click',saveDraft);
 renderPreview();loadMine();
