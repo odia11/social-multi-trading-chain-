@@ -68,7 +68,11 @@ h1{font-size:clamp(28px,5vw,42px);line-height:1.1;margin:0 0 12px;letter-spacing
 .tl-item strong{font-size:13px}
 .tl-item .tl-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px}
 .tl-item .tl-actions button,.tl-item .tl-actions a{border:1px solid #343c47;background:#222831;padding:8px 10px;border-radius:8px;color:var(--text);font-weight:700;font-size:12px}
-.tl-item .tl-actions button:disabled{opacity:.45}
+ .tl-item .tl-actions button:disabled{opacity:.45}
+.tl-funding{border:1px solid rgba(247,185,85,.28);border-radius:11px;padding:12px;margin:14px 0;background:rgba(247,185,85,.04)}
+.tl-funding .tl-label{display:block;max-width:170px;margin:8px 0}
+.tl-funding .tl-btn{margin:4px 7px 4px 0;padding:9px 12px;font-size:12px}
+.tl-funding .tl-helper{margin:8px 0;overflow-wrap:anywhere}
 .tl-helper{color:var(--muted);font-size:12px;line-height:1.55}
 .tl-alert{padding:13px 14px;margin-bottom:16px;border:1px solid rgba(247,185,85,.35);background:#241d13;border-radius:11px;font-size:13px;line-height:1.5}
 .tl-upload{border:1px dashed #464d58;border-radius:10px;background:#151a20;padding:12px;color:var(--muted);width:100%;font-size:13px}
@@ -88,7 +92,7 @@ h1{font-size:clamp(28px,5vw,42px);line-height:1.1;margin:0 0 12px;letter-spacing
 <nav class="tl-breadcrumbs" aria-label="Token Launch navigation"><a id="orca-launch-back" class="tl-back" href="/launches">← Back</a><a class="tl-back-secondary" href="/launches">All launches</a><a class="tl-back-secondary" href="/">Home</a></nav>
 <div class="tl-eyebrow">OrcAgent · Solana</div>
 <h1>Launch your token<span style="color:var(--gold)">.</span></h1>
-<p class="tl-lead">Create a Solana token with USDC trading by default. Choose who earns creator fees before you approve the transaction in your wallet.</p>
+<p class="tl-lead">Create a Solana token with USDC trading by default. Choose who earns creator fees before you approve the transaction in your wallet. If you only hold USDC, fund your launch with a separately approved gasless USDC → SOL swap first.</p>
 {% if pilot_creator_only %}
 <div class="tl-alert" role="status"><b>Private OrcAgent mainnet pilot · USDC + 100% Creator Rewards.</b> The test is limited to your signed-in Phantom wallet. Your approved budgets: at most 0.03 SOL for the full test and a separate USDC test trade of at most 2 USDC. OrcAgent reserves at least 0.005 SOL of this test budget for follow-up costs by limiting estimated launch costs to 0.025 SOL. Your separate 2 USDC trade is a manual action; verify its full network cost and amount in Phantom. No token creation automatically buys a token.</div>
 {% endif %}
@@ -180,7 +184,7 @@ h1{font-size:clamp(28px,5vw,42px);line-height:1.1;margin:0 0 12px;letter-spacing
     <div class="tl-actions"><button type="button" class="tl-btn secondary" id="tl-dialog-cancel">Cancel</button><button type="button" class="tl-btn" id="tl-dialog-confirm">Approve in Phantom</button></div>
   </div>
 </div>
-<script>window.ORC_TOKEN_LAUNCH={wallet:{{ wallet|tojson }},csrf:{{ csrf_token|tojson }},enabled:{{ launch_enabled|tojson }},pilotCreatorOnly:{{ pilot_creator_only|tojson }}};</script>
+<script>window.ORC_TOKEN_LAUNCH={wallet:{{ wallet|tojson }},csrf:{{ csrf_token|tojson }},enabled:{{ launch_enabled|tojson }},pilotCreatorOnly:{{ pilot_creator_only|tojson }},fundingAvailable:{{ funding_available|tojson }}};</script>
 {% if launch_enabled %}<script src="/static/token-launch-web3.js?v={{ app_version|default('1') }}" defer></script>{% endif %}
 <script src="/static/launch-back.js?v={{ app_version|default('1') }}" defer></script>
 <script src="/static/token-launch.js?v={{ app_version|default('1') }}" defer></script>

@@ -78,6 +78,64 @@ function dialog(title,details,onApprove){
 function confirmStage(id,stage,sig){
  return call('/api/token-launch/'+id+'/confirm',{stage:stage,signature:sig});
 }
+async function signGaslessSwap(tx_b64){
+ var provider=selectedWallet();
+ if(!provider.publicKey&&typeof provider.connect==='function')await provider.connect();
+ if(!provider.publicKey||provider.publicKey.toString()!==cfg.wallet)
+   throw Error('Phantom wallet does not match your OrcAgent account.');
+ if(typeof provider.signTransaction!=='function')
+   throw Error('Your Phantom version cannot sign a gasless Jupiter swap. Update Phantom first.');
+ if(!window.OrcAgentSolana||!window.OrcAgentSolana.VersionedTransaction)
+   throw Error('Solana gasless swap library unavailable. Reload OrcAgent.');
+ var bytes=Uint8Array.from(atob(tx_b64),function(c){return c.charCodeAt(0)});
+ var tx=window.OrcAgentSolana.VersionedTransaction.deserialize(bytes);
+ // Do NOT signAndSend: Jupiter co-signs and lands the gasless order via /execute.
+ var signed=await provider.signTransaction(tx);
+ if(!signed||typeof signed.serialize!=='function')
+   throw Error('Phantom did not return the signed USDC swap. No swap was sent.');
+ var out=signed.serialize(),chars='';
+ for(var i=0;i<out.length;i++)chars+=String.fromCharCode(out[i]);
+ return btoa(chars);
+}
+async function fundLaunchWithUsdc(row,amount,notice){
+ if(busy)return;
+ busy=true;
+ try{
+   notice.textContent='Finding a gasless USDC → SOL quote…';
+   var quote=await call('/api/token-launch/'+row.id+'/fund/quote',{max_usdc:amount});
+   var disclosure='Swap up to '+quote.amount_usdc+' USDC for approximately '+quote.expected_sol+' SOL in YOUR Phantom wallet. This is a separate Jupiter gasless swap. Your launch reserve target is '+quote.target_sol+' SOL. Jupiter swap fees and price movement affect your received SOL. After this confirmation you must separately approve the token launch. No token is created by this swap.';
+   var result=await dialog('Fund token launch with USDC',disclosure,async function(){
+     text('tl-dialog-status','Sign the gasless USDC → SOL swap in Phantom…');
+     var signed=await signGaslessSwap(quote.transaction_b64);
+     text('tl-dialog-status','Sending the approved swap to Jupiter; do not approve a second swap…');
+     return call('/api/token-launch/'+row.id+'/fund/execute',
+          {quote_id:quote.quote_id,signed_transaction_b64:signed});
+   });
+   if(!result){notice.textContent='Funding quote saved. No USDC swap was submitted.';return}
+   notice.textContent=result.message||'Swap submitted. Check your SOL balance before launching.';
+   var statusResult=await call('/api/token-launch/'+row.id+'/fund/status');
+   notice.textContent+=(statusResult.ready
+       ?' Your wallet now has the SOL reserve. You may approve the SAME token launch.'
+       :' SOL reserve not yet confirmed. Use Check funding and do not approve another USDC swap.');
+   status(notice.textContent,!statusResult.ready);
+ }catch(e){notice.textContent=e.message||'USDC funding unavailable';status(notice.textContent,true)}
+ finally{busy=false}
+}
+async function checkFunding(row,notice){
+ if(busy)return;
+ busy=true;
+ try{
+   var found=await call('/api/token-launch/'+row.id+'/fund/status');
+   notice.textContent=found.ready
+      ?'Ready: '+found.balance_sol+' SOL in your Phantom wallet. Approve this saved token launch.'
+      :'SOL balance '+found.balance_sol+' / '+found.target_sol+' reserve. '+
+       (found.funding&&found.funding.status==='submitted'
+       ?'Earlier swap confirmation is uncertain; inspect Phantom/Jupiter history before swapping again.'
+       :'Fund with USDC or add SOL to this wallet.');
+   status(notice.textContent,!found.ready);
+ }catch(e){notice.textContent=e.message||'Unable to check SOL balance';status(notice.textContent,true)}
+ finally{busy=false}
+}
 async function launchStage(row,stage){
  if(!cfg.enabled){status('Live token launches remain disabled during mainnet preflight.',true);return}
  if(busy)return;
@@ -232,6 +290,22 @@ function drawMine(){
   if(row.mint)el.appendChild(dom('div','tl-mono',row.mint));
   var actions=dom('div','tl-actions');
   function action(label,fn){var b=dom('button','',label);b.type='button';b.onclick=fn;actions.appendChild(b);return b}
+  if(cfg.enabled&&(row.status==='draft'||row.status==='prepared')){
+    var fund=dom('div','tl-funding');
+    fund.appendChild(dom('p','tl-helper','Only have USDC in your connected Phantom wallet? OrcAgent estimates the SOL reserve from a live Jupiter quote and uses no more than your maximum USDC budget. Approve the gasless swap, then separately approve your token launch. No OrcAgent launch fee.'));
+    var fundLabel=dom('label','tl-label','Maximum USDC budget');
+    var fundAmount=dom('input','tl-input');fundAmount.type='number';fundAmount.min='5';fundAmount.max='250';fundAmount.step='0.01';fundAmount.value='25';fundAmount.setAttribute('aria-label','Maximum USDC to convert for launch SOL reserve');
+    fundLabel.appendChild(fundAmount);fund.appendChild(fundLabel);
+    var fundNotice=dom('p','tl-helper');fundNotice.setAttribute('role','status');
+    var fundButton=dom('button','tl-btn secondary','Fund launch with USDC');fundButton.type='button';
+    fundButton.disabled=!cfg.fundingAvailable;
+    if(!cfg.fundingAvailable)fundNotice.textContent='USDC launch funding is not configured on the server yet.';
+    fundButton.onclick=function(){fundLaunchWithUsdc(row,fundAmount.value,fundNotice)};
+    var checkButton=dom('button','tl-btn secondary','Check funding');checkButton.type='button';
+    checkButton.onclick=function(){checkFunding(row,fundNotice)};
+    fund.appendChild(fundButton);fund.appendChild(checkButton);fund.appendChild(fundNotice);
+    el.appendChild(fund);
+  }
   if(row.status==='draft')action(cfg.enabled?'Approve launch':'Awaiting preflight',function(){launchStage(row,'create')});
   if(row.status==='draft'&&!cfg.enabled){actions.lastElementChild.disabled=true}
   if(row.status==='draft')action('Delete draft',async function(){

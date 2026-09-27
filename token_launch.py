@@ -707,6 +707,7 @@ def install(d):
         return d._render_no_cache('token_launch.html',wallet=wallet,
             csrf_token=d._get_csrf_token(),launch_enabled=enabled(),
             pilot_creator_only=pilot_wallet(wallet),
+            funding_available=bool(os.getenv('JUPITER_API_KEY','').strip()),
             navbar_html=d._navbar_html)
 
     @app.get('/api/token-launch/config')
@@ -716,11 +717,12 @@ def install(d):
         pilot=pilot_wallet()
         return jsonify(ok=True,enabled=enabled(),default_quote='USDC',
            default_reward_mode='creator' if pilot else 'community',
-           sol_conversion='manual_only',pilot_creator_only=pilot,
+           sol_conversion='separate_wallet_approved_gasless_usdc_swap',pilot_creator_only=pilot,
            public_max_launch_sol_lamports=PUBLIC_MAX_LAUNCH_SOL_LAMPORTS,
            pilot_max_sol_lamports=PILOT_MAX_SOL_LAMPORTS if pilot else None,
            pilot_max_launch_sol_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS if pilot else None,
            pilot_max_trade_usdc_micro=PILOT_MAX_TRADE_USDC_MICRO if pilot else None,
+           usdc_launch_funding_available=bool(os.getenv('JUPITER_API_KEY','').strip()),
            fee_disclosure='Pump fees and Solana network/rent fees apply. OrcAgent does not charge an extra launch fee.',
            capabilities={'creator':True,'community':not pilot,'holder':not pilot})
 
@@ -1257,3 +1259,8 @@ def install(d):
                        (signature,status,status,int(time.time()),launch_id,wallet,*good_status,signature))
             if cur.rowcount!=1:return fail('Launch status changed. Reload and check.',409)
         return jsonify(ok=True,confirmed=confirmed,draft=public_row(lookup(launch_id,wallet))), (200 if confirmed else 202)
+
+    # USDC funding is a separate, user-approved Jupiter gasless swap into
+    # the creator's OWN Phantom wallet, never an OrcAgent-controlled debit.
+    from token_launch_usdc_funding import install as install_usdc_launch_funding
+    install_usdc_launch_funding(d)
