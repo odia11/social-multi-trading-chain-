@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer"><title>Phantom approval · OrcAgent</title>
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#0d1014;color:#f4f5f8;
+font:16px system-ui,sans-serif;display:grid;place-items:center;padding:22px}
+main{max-width:450px;width:100%;padding:28px 22px;border:1px solid #625039;border-radius:18px;background:#151a20}
+h1{font-size:24px;margin:0 0 20px}p{line-height:1.55;color:#bcc4cf}
+a,button{display:inline-block;border:0;background:#f4ba57;color:#181818;text-decoration:none;
+font:700 15px system-ui,sans-serif;border-radius:12px;padding:15px;margin:8px 0}
+small{color:#9ca6b4;display:block;overflow-wrap:anywhere}
+</style></head><body><main>
+<h1>OrcAgent · Token Launch</h1>
+<p id="status" role="status" aria-live="polite">Waiting for Phantom approval…</p>
+<a id="continue" href="/token-launch" style="display:none">Return to Token Launch</a>
+<small id="help"></small>
+</main><script>
+(function(){
+ var p=new URLSearchParams(location.search);
+ var status=document.getElementById('status'),btn=document.getElementById('continue');
+ var help=document.getElementById('help');
+ // Remove all encrypted return payloads from browser history immediately.
+ history.replaceState(null,'','/phantom-launch-callback');
+ function done(message){status.textContent=message;btn.style.display='inline-block';
+   help.textContent='If Phantom returned to a different browser, return to your original OrcAgent tab. Your saved launch remains there.';}
+ if(p.get('errorCode')){
+   done('Phantom cancelled the approval. Your saved token is unchanged.');return;
+ }
+ if(!p.get('token')||!p.get('step')||!p.get('nonce')||!p.get('data')){
+   done('Incomplete Phantom response. Return to the original saved launch.');return;
+ }
+ fetch('/api/phantom-launch/complete',{method:'POST',credentials:'include',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({token:p.get('token'),step:p.get('step'),
+     nonce:p.get('nonce'),data:p.get('data'),
+     phantom_encryption_public_key:p.get('phantom_encryption_public_key')})})
+ .then(function(r){return r.json()})
+ .then(function(r){
+   if(!r||!r.ok){done(r&&r.msg||'Could not verify Phantom response. Check the saved launch.');return;}
+   if(r.url&&r.step==='sign'){
+     status.textContent='Connected. Opening Phantom to approve your token launch…';
+     btn.href=r.url;btn.textContent='Continue in Phantom';btn.style.display='inline-block';
+     // iOS can suppress a second automatic Universal Link; manual button stays.
+     setTimeout(function(){location.href=r.url},120);
+     return;
+   }
+   done(r.msg||'Phantom transaction submitted. Check your token status.');
+   if(r.signature)help.textContent='Transaction: '+r.signature+
+     '. Return to OrcAgent and use Check transaction if confirmation is pending.';
+ })
+ .catch(function(){done('Could not reach OrcAgent. Check your saved token before retrying.');});
+})();
+</script></body></html>

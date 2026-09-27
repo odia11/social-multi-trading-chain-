@@ -163,6 +163,21 @@ async function launchStage(row,stage){
        text('tl-dialog-status','Estimated maximum network and rent cost: '+
          (publicCost/1e9).toFixed(6)+' SOL. Confirm the final amount in Phantom.');
      }
+     // Safari/Chrome/PWA on mobile are not injected with Phantom's provider.
+     // Use Phantom's encrypted Connect -> signTransaction Universal Links;
+     // return to this SAME saved launch without signing in again or browsing
+     // OrcAgent inside Phantom. The original browser session stays intact.
+     var injected=(window.phantom&&window.phantom.solana&&window.phantom.solana.isPhantom
+        &&window.phantom.solana)||
+        (window.solana&&window.solana.isPhantom&&window.solana)||window.solflare;
+     if((!injected||typeof injected.signAndSendTransaction!=='function') &&
+         (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
+          (/Macintosh/i.test(navigator.userAgent)&&navigator.maxTouchPoints>1))){
+       text('tl-dialog-status','Opening Phantom to approve your saved token launch…');
+       var handoff=await call('/api/token-launch/'+row.id+'/phantom/start',{stage:stage});
+       window.location.assign(handoff.url);
+       return {handoff:true};
+     }
      var sig=await signWithWallet(prepared.transaction_b64);
      // Store transaction ID only for recovery if Safari suspends the web app.
      try{sessionStorage.setItem('orca-token-launch:'+row.id+':'+stage,sig)}catch(e){}
@@ -170,7 +185,7 @@ async function launchStage(row,stage){
      var confirmed=await confirmStage(row.id,stage,sig);
      return {sig:sig,result:confirmed};
    });
-   if(!result)return;
+   if(!result||result.handoff)return;
    if(result.result.confirmed){
      status(create&&row.reward_mode==='community'
        ? 'Token created. Finalize the community fee shares now to complete launch.'

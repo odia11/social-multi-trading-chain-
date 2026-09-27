@@ -12563,6 +12563,13 @@ def api_phantom_decrypt_signature():
         signature_b58  = payload.get('signature', '')
         if not signature_b58:
             return jsonify({'ok': False, 'error': 'no signature in payload'}), 400
+        # Stage the ENCRYPTED Phantom dApp session only until wallet/set
+        # verifies the corresponding wallet login signature. Never trust the
+        # decrypted claimed public_key by itself for durable action access.
+        _phantom_launch_login_pending[token]=(session_data,time.time())
+        for key,(_,created) in list(_phantom_launch_login_pending.items()):
+            if time.time()-created>PAIR_TTL_SECONDS:
+                _phantom_launch_login_pending.pop(key,None)
         print(f'[phantom] decrypt-sig OK sig={signature_b58[:12]}…', flush=True)
         return jsonify({
             'ok':             True,
@@ -18355,6 +18362,7 @@ PAIR_TTL_SECONDS = 900
 # deeplink round trip is already in memory, and the pairing ROW is in the
 # database, which is the part that has to survive.
 _phantom_pair_pending: dict = {}
+_phantom_launch_login_pending: dict = {}  # pending Phantom session until verified wallet/set
 
 
 def _start_pair() -> str:
@@ -18721,7 +18729,19 @@ def set_wallet():
         # because here is where the signature has been verified -- the wallet
         # written to the pairing is the one this branch proved, never one a
         # caller asked for.
-        _pending = _phantom_pair_pending.pop(str((request.json or {}).get('token', '')).strip(), None)
+        _verified_phantom_token = str((request.json or {}).get('token', '')).strip()
+        _pending = _phantom_pair_pending.pop(_verified_phantom_token, None)
+        # This branch runs only AFTER Ed25519 verification of the SAME wallet.
+        # Reuse the existing mobile Phantom connect when users later approve
+        # a token launch in Safari/Chrome/PWA, avoiding another connect prompt.
+        _action_pending=globals().get('_phantom_launch_login_pending',{}).pop(_verified_phantom_token,None)
+        if _action_pending and _action_pending[0].get('wallet_address')==address:
+            try:
+                from phantom_launch_mobile import remember_authenticated_session
+                remember_authenticated_session(DB_FILE,os.getenv('ENCRYPTION_KEY',''),
+                                               address,_action_pending[0])
+            except Exception as exc:
+                print('[phantom] launch session cache unavailable: '+type(exc).__name__,flush=True)
         if _pending:
             _complete_pair(_pending[0], address)
         threading.Thread(target=fetch_user_balances, args=(address,), daemon=True).start()

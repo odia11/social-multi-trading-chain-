@@ -1264,3 +1264,8 @@ def install(d):
     # the creator's OWN Phantom wallet, never an OrcAgent-controlled debit.
     from token_launch_usdc_funding import install as install_usdc_launch_funding
     install_usdc_launch_funding(d)
+    # Mobile links are separate from login: only the creator approves
+    # the exact owner-bound Pump transaction, never an OrcAgent key.
+    if os.getenv('ENCRYPTION_KEY'):
+        from phantom_launch_mobile import install as install_phantom_launch_mobile
+        install_phantom_launch_mobile(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid)
