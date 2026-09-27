@@ -189,21 +189,30 @@ def install(d):
                    'quote_asset','community_wallet','community_bps','status','mint',
                    'launch_signature','finalize_signature','created_at','error')}
 
-    # A fixed public RPC fallback covers narrow, READ-ONLY verification and
-    # creator-USDC claim preflight methods. It is never used to sign, send or
+    # A fixed public RPC fallback covers narrow, READ-ONLY verification,
+    # launch simulation and creator-USDC claim preflight methods. It is never used to sign, send or
     # authorize any action, nor to bypass the pilot's simulated cost ceiling.
     # Signed transactions must match the stored message and every signature.
     _VERIFY_RPC='https://solana-rpc.publicnode.com'
+    # A 429 is a provider quota, not a reason to hammer the same endpoint
+    # three more times for every launch simulation method in one request.
+    rpc_throttled_until={}
 
-    def rpc(method,params,*,verification=False,claim_read=False):
-        primary=(getattr(d,'SOLANA_RPC_URL','') or d.SOLANA_RPC)
+    def rpc(method,params,*,verification=False,claim_read=False,launch_read=False):
+        # All launch preflight calls are read-only. A dedicated RPC can be
+        # configured without changing the RPC used by the rest of OrcAgent.
+        primary=(os.getenv('ORCA_LAUNCH_RPC','') if launch_read else '') or (getattr(d,'SOLANA_RPC_URL','') or d.SOLANA_RPC)
         if verification and method not in ('getTransaction','getAccountInfo','getSignaturesForAddress'):
             raise RuntimeError('This RPC method is not permitted on the verification fallback')
-        if claim_read and (verification or method not in (
+        if claim_read and (verification or launch_read or method not in (
                 'getLatestBlockhash','getBalance','getFeeForMessage',
                 'simulateTransaction','isBlockhashValid')):
             raise RuntimeError('This RPC method is not permitted in claim preflight')
-        can_fallback=verification or claim_read
+        if launch_read and (verification or method not in (
+                'getLatestBlockhash','getBalance','getFeeForMessage',
+                'simulateTransaction','isBlockhashValid')):
+            raise RuntimeError('This RPC method is not permitted in launch preflight')
+        can_fallback=verification or claim_read or launch_read
         # The history lookup required for a pending creator claim is
         # especially likely to be blocked by the primary free/indexed RPC.
         # Prefer the independently verified fixed public endpoint first.
@@ -212,17 +221,26 @@ def install(d):
             else [primary])
         if can_fallback and _VERIFY_RPC not in endpoints:
             endpoints.append(_VERIFY_RPC)
+        # If both the configured endpoint and PublicNode are throttled, the
+        # official public endpoint is a final read-only launch preflight option.
+        # Never route signing/broadcast through a fallback.
+        if launch_read and 'https://api.mainnet-beta.solana.com' not in endpoints:
+            endpoints.append('https://api.mainnet-beta.solana.com')
         last_error=None
         for number,endpoint in enumerate(endpoints):
+            if rpc_throttled_until.get(endpoint,0)>time.monotonic():
+                last_error='Solana RPC is rate-limited (429). Your saved launch is preserved. Check Phantom history before approving again.'
+                continue
             for attempt in range(3 if number==0 else 2):
                 try:
                     response=requests.post(endpoint,json={'jsonrpc':'2.0','id':1,
                          'method':method,'params':params},timeout=9)
                     if response.status_code==429:
-                        last_error='Solana RPC is rate-limited (429). Retry Check transaction later; never create a duplicate token.'
+                        last_error='Solana RPC is rate-limited (429). Your saved launch is preserved. Check Phantom history before approving again.'
                         if attempt < (2 if number==0 else 1):
                             time.sleep(0.35*(attempt+1))
                             continue
+                        rpc_throttled_until[endpoint]=time.monotonic()+12
                         break
                     response.raise_for_status()
                     decoded=response.json()
@@ -231,10 +249,11 @@ def install(d):
                     error=decoded.get('error')
                     if error:
                         if isinstance(error,dict) and error.get('code')==429:
-                            last_error='Solana RPC is rate-limited (429). Retry Check transaction later; never create a duplicate token.'
+                            last_error='Solana RPC is rate-limited (429). Your saved launch is preserved. Check Phantom history before approving again.'
                             if attempt < (2 if number==0 else 1):
                                 time.sleep(0.35*(attempt+1))
                                 continue
+                            rpc_throttled_until[endpoint]=time.monotonic()+12
                             break
                         raise RuntimeError('Solana RPC rejected '+method)
                     result=decoded.get('result')
@@ -245,12 +264,16 @@ def install(d):
                     return result
                 except (requests.RequestException,ValueError) as exc:
                     last_error='Solana RPC could not verify this action. Keep the existing token and retry later.'
-                    if number==0 and can_fallback:
+                    if can_fallback and number<len(endpoints)-1:
                         break
                     raise RuntimeError(last_error) from exc
         raise RuntimeError(last_error or 'Solana RPC verification unavailable. Never create a duplicate token.')
 
     def build_tx(row,stage):
+        # Fail fast when all RPCs are throttled, before potentially spending
+        # 90 seconds grinding an Orc mint. Fetch a NEW blockhash after grinding.
+        if stage=='create':
+            rpc('getLatestBlockhash',[{'commitment':'confirmed'}],launch_read=True)
         mint_secret=None
         if stage=='create':
             try:
@@ -269,7 +292,7 @@ def install(d):
                 raise RuntimeError('An orc mint address is not ready. Please retry shortly; nothing was sent.')
             mint_secret=found.stdout.strip()
         # Fetch AFTER grinding, so address generation cannot age the blockhash.
-        block=rpc('getLatestBlockhash',[{'commitment':'confirmed'}])
+        block=rpc('getLatestBlockhash',[{'commitment':'confirmed'}],launch_read=True)
         blockhash=((block or {}).get('value') or {}).get('blockhash')
         if not blockhash:raise RuntimeError('No recent Solana blockhash')
         data={k:row[k] for k in ('wallet','name','symbol','reward_mode',
@@ -311,14 +334,14 @@ def install(d):
             prepared=SolanaTransaction.from_bytes(raw)
             encoded=base64.b64encode(bytes(prepared.message)).decode('ascii')
             wallet=row['wallet']
-            balance=rpc('getBalance',[wallet,{'commitment':'confirmed'}],claim_read=claim_read)
+            balance=rpc('getBalance',[wallet,{'commitment':'confirmed'}],claim_read=claim_read,launch_read=not claim_read)
             before=(balance or {}).get('value')
-            fee_result=rpc('getFeeForMessage',[encoded,{'commitment':'confirmed'}],claim_read=claim_read)
+            fee_result=rpc('getFeeForMessage',[encoded,{'commitment':'confirmed'}],claim_read=claim_read,launch_read=not claim_read)
             fee=(fee_result or {}).get('value')
             simulated=rpc('simulateTransaction',[
                 transaction_b64,{'encoding':'base64','commitment':'confirmed',
                 'sigVerify':False,
-                'accounts':{'encoding':'base64','addresses':[wallet]}}],claim_read=claim_read)
+                'accounts':{'encoding':'base64','addresses':[wallet]}}],claim_read=claim_read,launch_read=not claim_read)
             if not isinstance(before,int) or not isinstance(fee,int) or fee<0:
                 raise RuntimeError('Pilot network fee/balance unavailable; no transaction prepared')
             outcome=(simulated or {}).get('value') or {}
@@ -368,7 +391,7 @@ def install(d):
             blockhash=str(SolanaTransaction.from_bytes(raw).message.recent_blockhash)
         except (ValueError,base64.binascii.Error) as exc:
             raise RuntimeError('Stored transaction could not be verified') from exc
-        answer=rpc('isBlockhashValid',[blockhash,{'commitment':'confirmed'}],claim_read=claim_read)
+        answer=rpc('isBlockhashValid',[blockhash,{'commitment':'confirmed'}],claim_read=claim_read,launch_read=not claim_read)
         if not isinstance(answer,dict) or not isinstance(answer.get('value'),bool):
             raise RuntimeError('Solana blockhash validity unavailable')
         return answer['value']

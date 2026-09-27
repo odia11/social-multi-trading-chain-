@@ -272,9 +272,94 @@ def test_startup_reconcile_exact_signed_creator_launch():
     print('PASS forged submissions remain pending and already-live token is not duplicated')
     tmp.cleanup()
 
+def test_launch_preflight_429_fallback_is_readonly_and_idempotent():
+    """Primary RPC throttling must not prevent an already-saved, capped launch."""
+    import token_launch
+    tmp,app,d=setup();client=app.test_client()
+    owner=str(Keypair().pubkey())
+    with client.session_transaction() as sess:
+        sess['wallet']=owner;sess['csrf_token']='test-csrf'
+    headers={'X-CSRF-Token':'test-csrf'}
+    body={'name':'Throttle Test','symbol':'ORCX','description':'no broadcast',
+          'client_nonce':'throttle-fallback-0001','image_data':icon(),
+          'reward_mode':'creator','quote_asset':'USDC'}
+    draft=client.post('/api/token-launch/draft',json=body,headers=headers).get_json()['draft']
+    path='/api/token-launch/'+draft['id']+'/prepare'
+    blockhash=str(Keypair().pubkey());observed=[]
+    class Reply:
+        def __init__(self,code,payload):
+            self.status_code=code;self.payload=payload
+        def raise_for_status(self):pass
+        def json(self):return self.payload
+    def provider(url,*,json,timeout):
+        method=json['method'];observed.append((url,method))
+        assert method in ('getLatestBlockhash','getBalance','getFeeForMessage','simulateTransaction')
+        if url==d.SOLANA_RPC:return Reply(429,{'error':{'code':429}})
+        assert url=='https://solana-rpc.publicnode.com'
+        return Reply(200,public_simulated_reply(method,blockhash))
+    with patch.dict(os.environ,{'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED':'1','ORCA_LAUNCH_RPC':''}), \
+         patch('token_launch.requests.post',side_effect=provider), \
+         patch('token_launch.time.sleep'):
+        response=client.post(path,json={},headers=headers)
+        assert response.status_code==200,response.get_data(as_text=True)[:250]
+        result=response.get_json()
+        assert result['mint'].endswith('orc')
+        assert result['pilot_estimated_max_sol_lamports']==12_005_000
+        assert result['transaction_b64']
+        repeated=client.post(path,json={},headers=headers)
+        assert repeated.status_code==200 and repeated.get_json()['reused']
+        assert repeated.get_json()['mint']==result['mint']
+    # Vanity mint grinding may take longer than the 12-second RPC cooldown.
+    assert 3<=sum(url==d.SOLANA_RPC for url,_ in observed)<=6
+    assert sum(url=='https://solana-rpc.publicnode.com' for url,_ in observed)>=8
+    with sqlite3.connect(d.DB_FILE) as conn:
+        state=conn.execute('SELECT status,mint,launch_signature FROM token_launches WHERE id=?',
+                           (draft['id'],)).fetchone()
+    assert state==('prepared',result['mint'],'')
+    print('PASS primary 429 falls back for every read-only launch preflight method, same mint reused')
+    print('PASS no signing, broadcasting, fee bypass or fabricated live launch')
+    tmp.cleanup()
+
+
+def test_all_launch_rpcs_429_leave_original_draft_unsent():
+    import token_launch
+    tmp,app,d=setup();client=app.test_client()
+    owner=str(Keypair().pubkey())
+    with client.session_transaction() as sess:
+        sess['wallet']=owner;sess['csrf_token']='test-csrf'
+    headers={'X-CSRF-Token':'test-csrf'}
+    body={'name':'Offline RPC','symbol':'ORCX','client_nonce':'all-rpc-busy-0001',
+          'image_data':icon(),'reward_mode':'creator','quote_asset':'USDC'}
+    draft=client.post('/api/token-launch/draft',json=body,headers=headers).get_json()['draft']
+    class Throttled:
+        status_code=429
+    seen=[]
+    def overloaded(url,*,json,timeout):
+        seen.append(json['method'])
+        assert json['method']=='getLatestBlockhash'
+        return Throttled()
+    with patch.dict(os.environ,{'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED':'1','ORCA_LAUNCH_RPC':''}), \
+         patch('token_launch.requests.post',side_effect=overloaded), \
+         patch('token_launch.subprocess.run') as builder, \
+         patch('token_launch.time.sleep'):
+        resp=client.post('/api/token-launch/'+draft['id']+'/prepare',
+                         json={},headers=headers)
+        assert resp.status_code==503 and 'rate-limited (429)' in resp.get_json()['msg']
+        builder.assert_not_called()
+    with sqlite3.connect(d.DB_FILE) as conn:
+        state=conn.execute('SELECT status,mint,prepare_tx_b64,launch_signature FROM token_launches WHERE id=?',
+                          (draft['id'],)).fetchone()
+    assert state==('draft',None,'','')
+    assert len(seen)==7
+    print('PASS all RPCs 429 returns controlled error before grinding, preserves unsent draft')
+    tmp.cleanup()
+
+
 if __name__=='__main__':
     test_public_launch_directory()
     test_rpc_rate_limit_preserves_submitted()
     test_signed_launch_reconciles_via_readonly_fallback()
     test_creator_vault_is_readonly_wallet_scoped()
     test_startup_reconcile_exact_signed_creator_launch()
+    test_launch_preflight_429_fallback_is_readonly_and_idempotent()
+    test_all_launch_rpcs_429_leave_original_draft_unsent()
