@@ -248,3 +248,29 @@ it must never be shown as a payout. An unavailable/malformed receipt fails
 closed and can be rechecked from private Claim history. Token Launch remains
 restricted to the allowlisted pilot wallet until an owner-approved mainnet
 claim is actually signed, broadcast, and independently confirmed.
+
+### A wallet-approved claim can be paid even if the old UI rejects its signature
+
+Phantom's September 2026 iOS `signAndSendTransaction` inserted two standard
+ComputeBudget instructions ahead of the intact OrcAgent creator claim and a
+bounded pair of wallet-envelope (`L2TEx…`) instructions after it. The old
+whole-message equality comparison therefore rejected **already executed**
+creator USDC claims. The claim path now checks each ORIGINAL program ID,
+ordered account public key and instruction data exactly, all wallet signatures,
+matching fee payer and an actual payer SOL debit no greater than 0.005 SOL.
+Only the two known compute-budget instructions and the exact two-account
+Phantom wrapper are permitted. Unknown instructions are still rejected, and
+no tolerance was added to token creation or irreversible fee sharing.
+
+On production startup, a bounded read-only reconciliation examines each recent
+pending, submitted or mistakenly expired claim against that WALLET's own
+confirmed Solana signatures within the time window of the stored prepared
+claim. The exact matching original Pump instructions and verified recipient
+USDC token-balance delta are required before the existing record becomes
+`confirmed`; an otherwise successful repeated claim with zero received USDC
+is instead `confirmed_no_payout` and never presented as a second reward.
+Do not ask the wallet to sign again to fix a status mismatch. A claim attempt
+with unresolved recent history blocks a second Phantom approval. No raw user
+transactions, secrets or external account content are logged by reconciliation.
+`tests/test_claim_phantom_wrapper.py` reproduces the wallet envelope and
+recovery without mainnet transfers or production DB access.

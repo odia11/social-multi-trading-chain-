@@ -26,6 +26,8 @@ from flask import abort, jsonify, request, make_response, redirect
 USDC_MINT='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 SPL_TOKEN_PROGRAM='TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
 ASSOCIATED_TOKEN_PROGRAM='ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'
+COMPUTE_BUDGET_PROGRAM='ComputeBudget111111111111111111111111111111'
+PHANTOM_CLAIM_WRAPPER='L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95'
 WSOL_MINT='So11111111111111111111111111111111111111112'
 PUMP_PROGRAM='6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'
 _MODES={'creator','community','holder'}
@@ -194,15 +196,20 @@ def install(d):
 
     def rpc(method,params,*,verification=False,claim_read=False):
         primary=(getattr(d,'SOLANA_RPC_URL','') or d.SOLANA_RPC)
-        if verification and method not in ('getTransaction','getAccountInfo'):
+        if verification and method not in ('getTransaction','getAccountInfo','getSignaturesForAddress'):
             raise RuntimeError('This RPC method is not permitted on the verification fallback')
         if claim_read and (verification or method not in (
                 'getLatestBlockhash','getBalance','getFeeForMessage',
                 'simulateTransaction','isBlockhashValid')):
             raise RuntimeError('This RPC method is not permitted in claim preflight')
         can_fallback=verification or claim_read
-        endpoints=[primary]
-        if can_fallback and primary.rstrip('/')!=_VERIFY_RPC:
+        # The history lookup required for a pending creator claim is
+        # especially likely to be blocked by the primary free/indexed RPC.
+        # Prefer the independently verified fixed public endpoint first.
+        endpoints=([_VERIFY_RPC,primary] if verification and
+            method=='getSignaturesForAddress' and primary.rstrip('/')!=_VERIFY_RPC
+            else [primary])
+        if can_fallback and _VERIFY_RPC not in endpoints:
             endpoints.append(_VERIFY_RPC)
         last_error=None
         for number,endpoint in enumerate(endpoints):
@@ -387,6 +394,54 @@ def install(d):
         info=rpc('getAccountInfo',[str(pda),{'encoding':'base64','commitment':'confirmed'}],verification=True)
         return bool((info or {}).get('value') and info['value'].get('owner')==PUMP_PROGRAM)
 
+    def _claim_instructions_match(signed_msg,prepared_msg,wallet):
+        """Allow ONLY the wallet wrapper observed around this precise claim.
+
+        Phantom may insert two standard compute-budget instructions and two
+        L2TEx wallet-envelope instructions. Pump's original claim instructions
+        must remain IDENTICAL in program ID, ordered account PUBKEYS and data.
+        Unknown inserted instructions, changed fee payer or altered account
+        lists are rejected. Never use this exception for creating tokens or
+        changing irreversible community sharing configuration.
+        """
+        def instructions(msg):
+            keys=msg.account_keys
+            return [(str(keys[ix.program_id_index]),
+                     tuple(str(keys[index]) for index in ix.accounts),
+                     bytes(ix.data)) for ix in msg.instructions]
+        expected=instructions(prepared_msg)
+        actual=instructions(signed_msg)
+        if actual==expected:return True
+        if str(signed_msg.account_keys[0])!=wallet:return False
+        i=0
+        while i<len(actual) and actual[i][0]==COMPUTE_BUDGET_PROGRAM and i<2:
+            program,accounts,data=actual[i]
+            if accounts or not ((len(data)==5 and data[:1]==b'\x02')
+                 or (len(data)==9 and data[:1]==b'\x03')):
+                return False
+            # Reject arbitrary compute limits and prices. The final wallet
+            # charge is also bounded using actual confirmed payer balances.
+            if data[0]==2 and not 1<=int.from_bytes(data[1:],'little')<=1_400_000:
+                return False
+            if data[0]==3 and int.from_bytes(data[1:],'little')>100_000_000:
+                return False
+            i+=1
+        if actual[i:i+len(expected)]!=expected:return False
+        tail=actual[i+len(expected):]
+        if not tail:return True
+        if len(tail)!=2 or any(item[0]!=PHANTOM_CLAIM_WRAPPER for item in tail):
+            return False
+        owner=Pubkey.from_string(wallet)
+        ata,_=Pubkey.find_program_address([
+            bytes(owner),bytes(Pubkey.from_string(SPL_TOKEN_PROGRAM)),
+            bytes(Pubkey.from_string(USDC_MINT))],
+            Pubkey.from_string(ASSOCIATED_TOKEN_PROGRAM))
+        return (tail[0][1]==(wallet,) and tail[1][1]==(str(ata),)
+                and all(0<len(item[2])<=64 for item in tail))
+
+    # Internal offline/on-chain regression hook, never an HTTP route.
+    app._orca_claim_message_match=_claim_instructions_match
+
     def check_signature(signature,row,stage):
         """Check the *exact* prepared transaction, not merely any Pump trade.
 
@@ -410,7 +465,16 @@ def install(d):
             signed=SolanaTransaction.from_bytes(base64.b64decode(raw,validate=True))
             prepared=SolanaTransaction.from_bytes(base64.b64decode(stored,validate=True))
             if bytes(signed.message)!=bytes(prepared.message):
-                raise ValueError('Signed transaction does not match this launch')
+                if stage!='claim' or not _claim_instructions_match(
+                         signed.message,prepared.message,row['wallet']):
+                    raise ValueError('Signed transaction does not match this launch')
+                # Verify the TOTAL actual SOL debit, not a quoted estimate.
+                payer_before=(result.get('meta') or {}).get('preBalances') or []
+                payer_after=(result.get('meta') or {}).get('postBalances') or []
+                if not (payer_before and payer_after and
+                        type(payer_before[0]) is int and type(payer_after[0]) is int and
+                        0<payer_before[0]-payer_after[0]<=PILOT_MAX_FOLLOWUP_SOL_LAMPORTS):
+                    raise ValueError('Modified claim exceeded the permitted SOL debit')
             if str(signed.signatures[0])!=signature or not all(signed.verify_with_results()):
                 raise ValueError('Missing or invalid creator wallet signature')
             keys=[str(key) for key in signed.message.account_keys]
@@ -427,7 +491,7 @@ def install(d):
             raise ValueError('Unrecognized on-chain transaction') from exc
         return True
 
-    def verified_creator_usdc_receipt(signature,wallet):
+    def verified_creator_usdc_receipt(signature,wallet,*,allow_zero=False):
         """Actual received USDC in the creator's canonical ATA in this TX.
 
         Compare pre/post balances of the exact recipient token account in the
@@ -469,10 +533,83 @@ def install(d):
                         or lamports[idx]!=0):
                     raise ValueError('New recipient account was not verifiable')
             received=after-(before or 0)
-            if received<=0:raise ValueError('No verified USDC was received')
+            if received<0 or (received==0 and not allow_zero):
+                raise ValueError('No verified USDC was received')
             return str(received)
         except (KeyError,ValueError,IndexError,TypeError,AttributeError) as exc:
             raise RuntimeError('Confirmed USDC recipient delta unavailable; retry claim confirmation') from exc
+
+    def reconcile_reward_claims():
+        '''Recover on-chain creator rewards when Phantom changed tx wrappers.
+
+        A wallet may return a signature but the client can be suspended before
+        OrcAgent saves it, or strict legacy message comparison can reject it.
+        Search only the originating wallet's already-confirmed transactions
+        near each locally prepared claim, verify the exact original Pump core,
+        every signer, actual SOL costs and actual USDC recipient delta.
+        No signing, sending, new claim creation or arbitrary wallet credit.
+        '''
+        with closing(sqlite3.connect(d.DB_FILE)) as conn:
+            conn.row_factory=sqlite3.Row
+            rows=conn.execute('''SELECT * FROM token_reward_claims
+                WHERE status IN ('prepared','submitted','expired_unverified') AND reward_mode='creator'
+                AND quote_asset='USDC' AND created_at>?
+                ORDER BY created_at ASC LIMIT 30''',
+                (int(time.time())-7*86400,)).fetchall()
+        if not rows:return {'checked':0,'recovered':0,'no_payout':0,'unavailable':0}
+        wallet_history={};recovered=no_payout=unavailable=0
+        for source in rows:
+            claim=dict(source);wallet=claim['wallet']
+            if wallet not in wallet_history:
+                try:
+                    found=rpc('getSignaturesForAddress',
+                        [wallet,{'limit':100}],verification=True)
+                    wallet_history[wallet]=found if isinstance(found,list) else []
+                except RuntimeError:
+                    unavailable+=1
+                    wallet_history[wallet]=[]
+            # The oldest transaction at/after the local quote belongs to the
+            # earliest pending record. No newer claim can adopt an earlier tx.
+            candidates=sorted(wallet_history[wallet],
+                 key=lambda x:x.get('blockTime') or 0)
+            for tx in candidates:
+                timestamp=tx.get('blockTime');signature=tx.get('signature')
+                if (not isinstance(timestamp,int) or tx.get('err') is not None
+                    or not isinstance(signature,str) or not _SIG.fullmatch(signature)
+                    or not claim['created_at']-5<=timestamp<=claim['created_at']+180):
+                    continue
+                with closing(sqlite3.connect(d.DB_FILE)) as conn:
+                    already=conn.execute('''SELECT id FROM token_reward_claims
+                        WHERE wallet=? AND signature=? AND id<>? LIMIT 1''',
+                        (wallet,signature,claim['id'])).fetchone()
+                if already:continue
+                exact={'prepare_tx_b64':claim['transaction_b64'],
+                       'wallet':wallet,'mint':claim['mint']}
+                try:
+                    if not check_signature(signature,exact,'claim'):continue
+                    received_raw=verified_creator_usdc_receipt(
+                                      signature,wallet,allow_zero=True)
+                except (RuntimeError,ValueError,KeyError,TypeError):
+                    continue
+                status='confirmed' if int(received_raw)>0 else 'confirmed_no_payout'
+                with sqlite3.connect(d.DB_FILE,timeout=8) as conn:
+                    updated=conn.execute('''UPDATE token_reward_claims
+                        SET signature=?, status=?, received_raw=?, confirmed_at=?
+                        WHERE id=? AND wallet=? AND status IN ('prepared','submitted','expired_unverified')
+                        AND (signature='' OR signature=?)''',
+                        (signature,status,received_raw,timestamp,claim['id'],wallet,
+                         signature))
+                    if updated.rowcount:
+                        recovered+=int(received_raw)>0
+                        no_payout+=int(received_raw)==0
+                break
+        print('[pump-claim] chain reconciliation checked='+str(len(rows))+
+              ' received='+str(recovered)+' no_payout='+str(no_payout)+
+              ' unavailable='+str(unavailable),flush=True)
+        return {'checked':len(rows),'recovered':recovered,'no_payout':no_payout,
+                'unavailable':unavailable}
+
+    app._orca_reconcile_reward_claims=reconcile_reward_claims
 
     def reconcile_submitted_launches():
         """Recover already signed and recorded Phantom transactions on restart.
@@ -522,6 +659,9 @@ def install(d):
                       (target,target,int(time.time()),row['id'],row['wallet'],
                            row['mint'],previous,sig))
                 recovered+=change.rowcount
+        # Once signed launches are restored, also reconcile already-broadcast
+        # claims. Do not require the owner to reopen Phantom or press Claim.
+        reconcile_reward_claims()
         print(f'[pump-launch] chain reconciliation checked={scanned} '
               f'recovered={recovered} still_pending={unavailable}',flush=True)
         return {'checked':scanned,'recovered':recovered,'still_pending':unavailable}
@@ -856,6 +996,18 @@ def install(d):
         if not row:return fail('Launch not found',404)
         if row['status']!='live' or row['reward_mode']=='holder':
             return fail('Only confirmed creator/community launches can claim creator fees',409)
+        # An on-chain Phantom approval can settle before the client successfully
+        # posts its signature. Reconcile BEFORE offering any fresh payable tx.
+        if row['reward_mode']=='creator' and row['quote_asset']=='USDC':
+            with closing(sqlite3.connect(d.DB_FILE)) as conn:
+                unresolved=conn.execute('''SELECT id FROM token_reward_claims
+                    WHERE wallet=? AND quote_asset='USDC'
+                    AND status IN ('prepared','submitted') LIMIT 1''',
+                    (wallet,)).fetchone()
+            if unresolved:
+                result=reconcile_reward_claims()
+                if result['unavailable']:
+                    return fail('Existing creator claim cannot be checked on Solana right now. Do not approve a second payment.',503)
         if pilot_wallet(wallet):
             with closing(sqlite3.connect(d.DB_FILE)) as conn:
                 claimed=conn.execute('''SELECT id FROM token_reward_claims
@@ -867,6 +1019,10 @@ def install(d):
                   WHERE wallet=? AND quote_asset=? AND status IN ('prepared','submitted')
                   ORDER BY created_at DESC LIMIT 1''',(wallet,row['quote_asset'])).fetchone()
         if pending:
+            if (pending['launch_id']==launch_id and pending['status']=='prepared'
+                    and not pending['signature'] and
+                    time.time()-pending['created_at']<120):
+                return fail('A recent creator claim may already have been approved in Phantom. Wait two minutes and check Claim history before preparing another transaction.',409)
             if (pending['launch_id']==launch_id and pending['status']=='prepared'
                     and not pending['signature']):
                 try:
@@ -960,7 +1116,10 @@ def install(d):
         if not claim:return fail('Claim not found',404)
         if claim['signature'] and claim['signature']!=sig:
             return fail('Claim already recorded with another transaction',409)
-        if claim['status']=='confirmed':return jsonify(ok=True,confirmed=True,signature=sig,received_raw=claim['received_raw'])
+        if claim['status'] in ('confirmed','confirmed_no_payout'):
+            if claim['signature']!=sig:return fail('Claim signature does not match',409)
+            return jsonify(ok=True,confirmed=True,signature=sig,status=claim['status'],
+                           received_raw=claim['received_raw'])
         if claim['status'] not in ('prepared','submitted'):
             return fail('Claim is not pending',409)
         try:
@@ -970,9 +1129,9 @@ def install(d):
         except RuntimeError as exc:return fail(exc,503)
         received_raw=''
         if confirmed and row['reward_mode']=='creator' and row['quote_asset']=='USDC':
-            try:received_raw=verified_creator_usdc_receipt(sig,wallet)
+            try:received_raw=verified_creator_usdc_receipt(sig,wallet,allow_zero=True)
             except RuntimeError as exc:return fail(exc,503)
-        status='confirmed' if confirmed else 'submitted'
+        status=('confirmed' if int(received_raw)>0 else 'confirmed_no_payout') if confirmed and row['reward_mode']=='creator' and row['quote_asset']=='USDC' else ('confirmed' if confirmed else 'submitted')
         with sqlite3.connect(d.DB_FILE) as conn:
             cur=conn.execute('''UPDATE token_reward_claims
                  SET signature=?,status=?,confirmed_at=?,received_raw=?

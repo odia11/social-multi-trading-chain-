@@ -61,6 +61,7 @@ def test_claim_preflight_handles_429_and_wallet_rent_safely():
         method=json['method'];calls.append((url,method))
         if url=='https://rpc.test.invalid':return Reply(code=429,error={'code':429})
         assert url=='https://solana-rpc.publicnode.com'
+        if method=='getSignaturesForAddress':return Reply([])
         if method=='getLatestBlockhash':return Reply({'value':{'blockhash':str(Hash.default())}})
         if method=='getBalance':return Reply({'value':state['before']})
         if method=='getFeeForMessage':return Reply({'value':5000})
@@ -97,7 +98,8 @@ def test_claim_preflight_handles_429_and_wallet_rent_safely():
         assert not all(Transaction.from_bytes(base64.b64decode(j['transaction_b64'])).verify_with_results())
         with sqlite3.connect(d.DB_FILE) as c:
             assert c.execute('SELECT COUNT(*) FROM token_reward_claims').fetchone()[0]==1
-        assert client.post(route+'/claim/prepare',json={},headers=headers).get_json()['reused']
+        duplicate=client.post(route+'/claim/prepare',json={},headers=headers)
+        assert duplicate.status_code==409 and 'already' in duplicate.get_json()['msg']
     assert not any(m in ('sendTransaction','sendRawTransaction','requestAirdrop') for _,m in calls)
     assert ('https://solana-rpc.publicnode.com','simulateTransaction') in calls
     print('PASS HTTP 429 claim preflight falls back to fixed read-only RPC, never sends any transaction')

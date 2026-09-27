@@ -152,7 +152,8 @@ async function claimRewards(row){
          (BigInt(result.received_raw)%1000000n).toString().padStart(6,'0')+' USDC'
        :'');
      status(result.confirmed
-       ?(actual?'Creator-fee claim confirmed. Actual USDC received in your wallet: '+actual+' (wallet-wide creator rewards).':'Creator-fee claim confirmed on-chain.')
+       ?(result.status==='confirmed_no_payout'?'Transaction confirmed, but no new USDC was received. Network costs may still have been charged.':
+         actual?'Creator-fee claim confirmed. Actual USDC received in your wallet: '+actual+' (wallet-wide creator rewards).':'Creator-fee claim confirmed on-chain.')
        :'Claim submitted; check your wallet and claim history before retrying.');
      await loadMine();
    }
@@ -169,7 +170,8 @@ async function showClaims(row){
       ?' · received '+((BigInt(c.received_raw)/1000000n).toString()+'.'+
            (BigInt(c.received_raw)%1000000n).toString().padStart(6,'0'))+' USDC'
       :'');
-    return c.status+' · '+c.quote_asset+received+' · '+(c.signature?c.signature.slice(0,10)+'…':'awaiting wallet signature')+' · '+new Date(c.created_at*1000).toLocaleDateString();
+    var label=c.status==='confirmed_no_payout'?'confirmed · no USDC payout (network fee only)':c.status;
+    return label+' · '+c.quote_asset+received+' · '+(c.signature?c.signature.slice(0,10)+'…':'awaiting wallet signature')+' · '+new Date(c.created_at*1000).toLocaleDateString();
   });
   status(lines.join(' | '));
   var pending=r.claims.find(function(c){return c.status==='submitted'||c.status==='prepared'});
