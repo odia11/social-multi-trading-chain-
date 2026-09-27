@@ -5,6 +5,7 @@ var cfg=window.ORC_TOKEN_LAUNCH||{};
 var mine=[];
 var readerData='';
 var busy=false;
+var autoVerified=Object.create(null);
 function $(id){return document.getElementById(id)}
 function text(id,value){var e=$(id);if(e)e.textContent=value}
 function status(msg,err){var e=$('tl-status');if(!e)return;e.textContent=msg;e.className='tl-status '+(err?'err':'ok')}
@@ -223,6 +224,17 @@ function drawMine(){
   if(row.status==='finalize_prepared'&&!cfg.enabled)actions.lastElementChild.disabled=true;
   if(row.status==='finalize_prepared'||row.status==='finalize_submitted')var splitCheck=action('Check fee split',function(){checkKnown(row,'finalize',splitCheck,verification)});
   if(row.status==='live'&&row.reward_mode!=='holder'){
+    if(row.reward_mode==='creator'&&row.quote_asset==='USDC'){
+      action('Check USDC fees',async function(){
+        try{
+          verification.textContent='Reading Pump creator USDC vault…';
+          var fees=await call('/api/token-launch/'+row.id+'/creator-fees');
+          var n=BigInt(fees.pump_vault_raw);
+          var value=(n/1000000n).toLocaleString('en-US')+'.'+(n%1000000n).toString().padStart(6,'0');
+          verification.textContent='Unclaimed Pump USDC creator vault: '+value+' USDC (wallet-wide, across all your creator tokens; PumpSwap vault excluded). This is not a received payout. Claiming requires a separate Phantom approval.';
+        }catch(e){verification.textContent=e.message||'Creator vault unavailable';status(verification.textContent,true)}
+      });
+    }
     action(cfg.enabled?'Claim creator fees':'Claims in preflight',function(){claimRewards(row)});
     if(!cfg.enabled)actions.lastElementChild.disabled=true;
     action('Claim history',function(){showClaims(row)});
@@ -243,8 +255,21 @@ function drawMine(){
  });
 }
 async function loadMine(){
- try{var r=await call('/api/token-launch/mine');mine=r.launches||[];drawMine()}
- catch(e){text('tl-mine','Could not load your launch history.')}
+ try{
+  var r=await call('/api/token-launch/mine');mine=r.launches||[];drawMine();
+  // A creator may return from Phantom after a browser suspension. If their
+  // signature is already durably recorded, retry chain verification ONCE
+  // per page view without signing, spending, or creating another mint.
+  var pending=mine.find(function(x){return x.status==='submitted'&&x.launch_signature&&!autoVerified[x.id]});
+  if(pending){
+   autoVerified[pending.id]=true;
+   status('Checking your previously submitted token on Solana…');
+   confirmStage(pending.id,'create',pending.launch_signature).then(function(result){
+    if(result.confirmed){status('Token verified on Solana. Your launch is now live.');loadMine()}
+    else status('Transaction not confirmed by Solana RPC yet. You can use Check transaction later.');
+   }).catch(function(error){status((error.message||'Verification unavailable')+' Your submitted token is preserved; do not launch it again.',true)});
+  }
+ }catch(e){text('tl-mine','Could not load your launch history.')}
 }
 function loadImage(file){
  return new Promise(function(resolve,reject){

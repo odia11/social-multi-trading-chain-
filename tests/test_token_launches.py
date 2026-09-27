@@ -82,12 +82,132 @@ def test_rpc_rate_limit_preserves_submitted():
         post.return_value.status_code=429
         response=client.post('/api/token-launch/'+draft_id+'/confirm',json={'stage':'create','signature':sig},headers={'X-CSRF-Token':'test-csrf'})
     assert response.status_code==503 and 'rate-limited (429)' in response.get_json()['msg']
-    assert post.call_count==3
+    assert post.call_count==5
+    assert post.call_args.args[0]=='https://solana-rpc.publicnode.com'
     with sqlite3.connect(d.DB_FILE) as conn:
         assert conn.execute('SELECT status FROM token_launches WHERE id=?',(draft_id,)).fetchone()[0]=='submitted'
     print('PASS bounded 429 retry gives actionable error; submitted mint is never duplicated or fabricated live')
     tmp.cleanup()
 
+def test_signed_launch_reconciles_via_readonly_fallback():
+    # Simulate a real wallet signature against an actual SDK-generated mint.
+    # The primary RPC remains 429, but a fixed second endpoint can verify
+    # the EXACT prepared message, signatures, creator and Pump curve.
+    import base64
+    from solders.transaction import Transaction
+    tmp,app,d=setup();client=app.test_client()
+    owner=Keypair();wallet=str(owner.pubkey())
+    with client.session_transaction() as sess:
+        sess['wallet']=wallet;sess['csrf_token']='test-csrf'
+    headers={'X-CSRF-Token':'test-csrf'}
+    payload={'name':'Fallback Test','symbol':'FBACK','description':'read-only',
+        'client_nonce':'rpc-fallback-test-000001','image_data':icon(),
+        'reward_mode':'creator','quote_asset':'USDC'}
+    draft=client.post('/api/token-launch/draft',json=payload,headers=headers).get_json()['draft']
+    ident=draft['id'];blockhash=str(Keypair().pubkey())
+    with patch.dict(os.environ,{'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED':'1'}):
+        with patch('token_launch.requests.post') as api:
+            api.return_value.raise_for_status=lambda:None
+            api.return_value.status_code=200
+            api.return_value.json=lambda:{'result':{'value':{'blockhash':blockhash}}}
+            prepared=client.post('/api/token-launch/'+ident+'/prepare',json={},headers=headers)
+            assert prepared.status_code==200,prepared.get_data(as_text=True)[:200]
+        partial=Transaction.from_bytes(base64.b64decode(prepared.get_json()['transaction_b64']))
+        fully=Transaction.populate(partial.message,[owner.sign_message(bytes(partial.message)),partial.signatures[1]])
+        assert fully.verify_with_results()==[True,True]
+        sig=str(fully.signatures[0]);raw=base64.b64encode(bytes(fully)).decode()
+        urls=[]
+        def response():
+            url=api.call_args.args[0];method=api.call_args.kwargs['json']['method']
+            urls.append((url,method))
+            if url==d.SOLANA_RPC:
+                api.return_value.status_code=429
+                return {'error':{'code':429}}
+            api.return_value.status_code=200
+            if method=='getTransaction':
+                return {'result':{'transaction':[raw,'base64'],'meta':{'err':None}}}
+            if method=='getAccountInfo':
+                return {'result':{'value':{'owner':token_launch.PUMP_PROGRAM}}}
+            raise AssertionError('Fallback attempted non-read-only RPC '+method)
+        import token_launch
+        with patch('token_launch.requests.post') as api,patch('token_launch.time.sleep'):
+            api.return_value.raise_for_status=lambda:None
+            # Dynamic status_code needs to update on every request before
+            # rpc() inspects it; side_effect controls the response directly.
+            class Reply:
+                def __init__(self,code,data):self.status_code=code;self.data=data
+                def raise_for_status(self):return None
+                def json(self):return self.data
+            def reply(url,*,json,timeout):
+                urls.append((url,json['method']))
+                if url==d.SOLANA_RPC:return Reply(429,{'error':{'code':429}})
+                if json['method']=='getTransaction':
+                    return Reply(200,{'result':{'transaction':[raw,'base64'],'meta':{'err':None}}})
+                if json['method']=='getAccountInfo':
+                    return Reply(200,{'result':{'value':{'owner':token_launch.PUMP_PROGRAM}}})
+                raise AssertionError('Fallback used to build an unsigned transaction')
+            api.side_effect=reply
+            result=client.post('/api/token-launch/'+ident+'/confirm',
+                    json={'stage':'create','signature':sig},headers=headers)
+            assert result.status_code==200,result.get_data(as_text=True)[:250]
+            assert result.get_json()['confirmed'] and result.get_json()['draft']['status']=='live'
+            assert [x for x in urls if x[0]=='https://solana-rpc.publicnode.com']==[
+                ('https://solana-rpc.publicnode.com','getTransaction'),
+                ('https://solana-rpc.publicnode.com','getAccountInfo')]
+    assert client.get('/api/token-launches').get_json()['total']==1
+    print('PASS signed Pump mint moves submitted->live via verification-only fallback after primary RPC 429')
+    print('PASS no wallet signature, transaction builder or funds transferred by the fallback')
+    tmp.cleanup()
+
+def test_creator_vault_is_readonly_wallet_scoped():
+    from solders.pubkey import Pubkey
+    import base64
+    import token_launch
+    tmp,app,d=setup();client=app.test_client();owner=str(Keypair().pubkey())
+    other=str(Keypair().pubkey());mint=str(Keypair().pubkey());ident='c'*32
+    with sqlite3.connect(d.DB_FILE) as conn:
+        conn.execute('''INSERT INTO token_launches
+           (id,wallet,client_nonce,name,symbol,icon_webp,reward_mode,
+            quote_asset,mint,status,launch_signature,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
+            (ident,owner,'vault-test','Vault Test','VAULT',b'image',
+             'creator','USDC',mint,'live','x'*88,int(time.time())))
+    route='/api/token-launch/'+ident+'/creator-fees'
+    assert client.get(route).status_code==401
+    with client.session_transaction() as sess:sess['wallet']=other
+    assert client.get(route).status_code==404
+    with client.session_transaction() as sess:sess['wallet']=owner
+    vault,_=Pubkey.find_program_address([b'creator-vault',bytes(Pubkey.from_string(owner))],
+            Pubkey.from_string(token_launch.PUMP_PROGRAM))
+    raw=3_962_289
+    data=(bytes(Pubkey.from_string(token_launch.USDC_MINT))+
+          bytes(vault)+raw.to_bytes(8,'little')+bytes(100))
+    class Reply:
+        def __init__(self,code,payload):self.status_code=code;self.payload=payload
+        def raise_for_status(self):pass
+        def json(self):return self.payload
+    def provider(url,*,json,timeout):
+        assert json['method']=='getAccountInfo'
+        if url==d.SOLANA_RPC:return Reply(429,{'error':{'code':429}})
+        return Reply(200,{'result':{'value':{'owner':token_launch.SPL_TOKEN_PROGRAM,
+                'data':[base64.b64encode(data).decode(),'base64']}}})
+    with patch('token_launch.requests.post',side_effect=provider),patch('token_launch.time.sleep'):
+        result=client.get(route)
+    assert result.status_code==200,result.get_data(as_text=True)[:200]
+    assert result.get_json()['pump_vault_raw']==str(raw)
+    assert result.get_json()['scope']=='creator_wallet_all_tokens_pump_bonding_curve'
+    assert result.headers['Cache-Control']=='private, no-store'
+    assert 'signature' not in result.get_data(as_text=True)
+    with sqlite3.connect(d.DB_FILE) as conn:
+        assert conn.execute('select count(*) from token_reward_claims').fetchone()[0]==0
+        conn.execute("UPDATE token_launches SET status='submitted' WHERE id=?",(ident,))
+    assert client.get(route).status_code==409
+    print('PASS wallet-private unclaimed Pump USDC balance is wallet-wide, never treated as a payout')
+    print('PASS read-only balance handles RPC fallback and never exposes unfinished launches')
+    tmp.cleanup()
+
 if __name__=='__main__':
     test_public_launch_directory()
     test_rpc_rate_limit_preserves_submitted()
+    test_signed_launch_reconciles_via_readonly_fallback()
+    test_creator_vault_is_readonly_wallet_scoped()

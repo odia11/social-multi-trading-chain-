@@ -186,3 +186,29 @@ still approve in Phantom. The generator never contacts or submits to Solana.
 Prepared transactions keep their original mint on retries. Existing tokens,
 community-share finalization and reward claims retain their existing addresses.
 No wallet address is changed. Uppercase O is not in the Solana Base58 alphabet.
+
+## Recovery of an already submitted launch (no additional transaction)
+
+`Check transaction` and the creator's launch-history page re-verify an existing,
+recorded signature. A rate-limited or lagging primary Solana RPC may return 429
+or null even after Pump has indexed the mint. Only `getTransaction` and
+`getAccountInfo` verification requests may fall back to a fixed mainnet public
+RPC. The returned transaction must match the locally stored prepared message
+byte-for-byte, verify **every** signature, include the creator fee payer,
+matching mint and Pump program, and have no on-chain error. The Pump bonding
+curve is checked separately before advancing the status to `live`. The
+fallback never creates a mint or supplies an unsigned trading/claim transaction
+or blockhash for a paid action. If neither node can verify, the existing
+`submitted` record is preserved and another launch must not be attempted.
+
+A confirmed USDC Creator Rewards launch has a wallet-private **Check USDC fees**
+read-only button. The displayed Pump creator-vault amount belongs to the
+creator wallet **across all its tokens** and is not this token's attributable
+revenue or a paid-out balance; separate PumpSwap fees are not included. This
+request cannot claim, sign, approve, send, or change the claim ledger. A claim
+requires another explicit Phantom approval and its own verified transaction.
+
+The public `/launches` directory lists only confirmed OrcAgent launch records.
+Private drafts and unconfirmed signatures never appear there. The global
+public launch switch remains OFF until the creator-fee claim route has been
+separately tested with explicit user-approved wallet transactions.

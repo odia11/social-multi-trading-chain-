@@ -24,6 +24,8 @@ import requests
 from flask import abort, jsonify, request, make_response, redirect
 
 USDC_MINT='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+SPL_TOKEN_PROGRAM='TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
+ASSOCIATED_TOKEN_PROGRAM='ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'
 WSOL_MINT='So11111111111111111111111111111111111111112'
 PUMP_PROGRAM='6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'
 _MODES={'creator','community','holder'}
@@ -177,37 +179,57 @@ def install(d):
                    'quote_asset','community_wallet','community_bps','status','mint',
                    'launch_signature','finalize_signature','created_at','error')}
 
-    def rpc(method,params):
-        # Use only the server-configured Solana RPC; no browser-chosen endpoint.
-        endpoint=(getattr(d,'SOLANA_RPC_URL','') or d.SOLANA_RPC)
-        # Public Solana RPC intermittently returns 429 while indexing a fresh
-        # Pump mint. Brief bounded retries protect verification without
-        # treating 'not available' as a confirmed blockchain transaction.
-        for attempt in range(3):
-            try:
-                resp=requests.post(endpoint,json={'jsonrpc':'2.0','id':1,
-                     'method':method,'params':params},timeout=9)
-                if resp.status_code==429:
-                    if attempt<2:
-                        time.sleep(0.35*(attempt+1))
-                        continue
-                    raise RuntimeError('Solana RPC is rate-limited (429). The token may already exist on Pump; retry verification later. Do not create a second token.')
-                resp.raise_for_status()
-                result=resp.json()
-                if not isinstance(result,dict):raise RuntimeError('Solana RPC returned invalid response')
-                error=result.get('error')
-                if error:
-                    if isinstance(error,dict) and error.get('code')==429:
-                        if attempt<2:
+    # A verification-only public RPC fallback prevents OrcAgent from trapping
+    # a wallet's ALREADY BROADCAST mint behind 429s from the default endpoint.
+    # Never use the fallback to fetch blockhashes, prepare/mutate transactions,
+    # estimate launch fees or build unsigned claims. Signed transactions still
+    # must match the exact locally stored message and every Ed25519 signature.
+    _VERIFY_RPC='https://solana-rpc.publicnode.com'
+
+    def rpc(method,params,*,verification=False):
+        primary=(getattr(d,'SOLANA_RPC_URL','') or d.SOLANA_RPC)
+        if verification and method not in ('getTransaction','getAccountInfo'):
+            raise RuntimeError('This RPC method is not permitted on the verification fallback')
+        endpoints=[primary]
+        if verification and primary.rstrip('/')!=_VERIFY_RPC:
+            endpoints.append(_VERIFY_RPC)
+        last_error=None
+        for number,endpoint in enumerate(endpoints):
+            for attempt in range(3 if number==0 else 2):
+                try:
+                    response=requests.post(endpoint,json={'jsonrpc':'2.0','id':1,
+                         'method':method,'params':params},timeout=9)
+                    if response.status_code==429:
+                        last_error='Solana RPC is rate-limited (429). Retry Check transaction later; never create a duplicate token.'
+                        if attempt < (2 if number==0 else 1):
                             time.sleep(0.35*(attempt+1))
                             continue
-                        raise RuntimeError('Solana RPC is rate-limited (429). Retry Check transaction later; do not create a second token.')
-                    raise RuntimeError('Solana RPC rejected '+method)
-                return result.get('result')
-            except RuntimeError:
-                raise
-            except (requests.RequestException,ValueError) as exc:
-                raise RuntimeError('Solana RPC could not verify this action. Keep the existing token and retry Check transaction later.') from exc
+                        break
+                    response.raise_for_status()
+                    decoded=response.json()
+                    if not isinstance(decoded,dict):
+                        raise ValueError('Invalid RPC reply')
+                    error=decoded.get('error')
+                    if error:
+                        if isinstance(error,dict) and error.get('code')==429:
+                            last_error='Solana RPC is rate-limited (429). Retry Check transaction later; never create a duplicate token.'
+                            if attempt < (2 if number==0 else 1):
+                                time.sleep(0.35*(attempt+1))
+                                continue
+                            break
+                        raise RuntimeError('Solana RPC rejected '+method)
+                    result=decoded.get('result')
+                    # A lagging RPC node often returns null for a confirmed
+                    # transaction while Pump and other nodes already index it.
+                    if result is None and verification and number==0 and len(endpoints)>1:
+                        break
+                    return result
+                except (requests.RequestException,ValueError) as exc:
+                    last_error='Solana RPC could not verify this action. Keep the existing token and retry later.'
+                    if number==0 and verification:
+                        break
+                    raise RuntimeError(last_error) from exc
+        raise RuntimeError(last_error or 'Solana RPC verification unavailable. Never create a duplicate token.')
 
     def build_tx(row,stage):
         mint_secret=None
@@ -332,7 +354,7 @@ def install(d):
             except (OSError,subprocess.TimeoutExpired,ValueError) as exc:
                 raise RuntimeError('Share configuration could not be verified') from exc
         info=run({'action':'address','mint':mint})
-        account=rpc('getAccountInfo',[info['address'],{'encoding':'base64','commitment':'confirmed'}])
+        account=rpc('getAccountInfo',[info['address'],{'encoding':'base64','commitment':'confirmed'}],verification=True)
         state=(account or {}).get('value')
         if not state or state.get('owner')!=info['program']:
             raise RuntimeError('Fee-sharing account has not been confirmed')
@@ -347,7 +369,7 @@ def install(d):
         program=Pubkey.from_string(PUMP_PROGRAM)
         minted=Pubkey.from_string(mint)
         pda,_=Pubkey.find_program_address([b'bonding-curve',bytes(minted)],program)
-        info=rpc('getAccountInfo',[str(pda),{'encoding':'base64','commitment':'confirmed'}])
+        info=rpc('getAccountInfo',[str(pda),{'encoding':'base64','commitment':'confirmed'}],verification=True)
         return bool((info or {}).get('value') and info['value'].get('owner')==PUMP_PROGRAM)
 
     def check_signature(signature,row,stage):
@@ -363,7 +385,7 @@ def install(d):
         stored=row['prepare_tx_b64'] if stage=='create' else row['finalize_tx_b64']
         if not stored:raise ValueError('No prepared transaction for this action')
         result=rpc('getTransaction',[signature,{'encoding':'base64',
-                         'commitment':'confirmed','maxSupportedTransactionVersion':0}])
+                         'commitment':'confirmed','maxSupportedTransactionVersion':0}],verification=True)
         if not result:return False
         if (result.get('meta') or {}).get('err') is not None:
             raise ValueError('The Solana transaction failed')
@@ -663,6 +685,47 @@ def install(d):
                  (built['transaction_b64'],int(time.time()),launch_id,wallet))
             if cur.rowcount!=1:return fail('Another finalize request is in progress',409)
         return jsonify(ok=True,mint=row['mint'],transaction_b64=built['transaction_b64'],expires_in=100)
+
+    @app.get('/api/token-launch/<launch_id>/creator-fees')
+    @d.rate_limit(10,60)
+    def creator_usdc_fee_status(launch_id):
+        wallet=identity()
+        if not wallet:return fail('Connect your wallet',401)
+        row=lookup(launch_id,wallet)
+        if not row:return fail('Launch not found',404)
+        if row['status']!='live' or row['reward_mode']!='creator' or row['quote_asset']!='USDC':
+            return fail('Confirm your USDC Creator Rewards launch first',409)
+        # Pump's creator vault belongs to the WALLET, not to an individual
+        # mint; never present its balance as this token's revenue. The PumpSwap
+        # AMM vault is separate and is not included in this number.
+        creator=Pubkey.from_string(wallet)
+        vault,_=Pubkey.find_program_address([b'creator-vault',bytes(creator)],
+                      Pubkey.from_string(PUMP_PROGRAM))
+        ata,_=Pubkey.find_program_address([
+                    bytes(vault),bytes(Pubkey.from_string(SPL_TOKEN_PROGRAM)),
+                    bytes(Pubkey.from_string(USDC_MINT))],
+                    Pubkey.from_string(ASSOCIATED_TOKEN_PROGRAM))
+        try:
+            state=rpc('getAccountInfo',[str(ata),{'encoding':'base64',
+                     'commitment':'confirmed'}],verification=True)
+            account=(state or {}).get('value')
+            raw=0
+            if account is not None:
+                if account.get('owner')!=SPL_TOKEN_PROGRAM:
+                    raise RuntimeError('Creator vault returned an unexpected token program')
+                data=base64.b64decode(account['data'][0],validate=True)
+                if (len(data)<72 or data[:32]!=bytes(Pubkey.from_string(USDC_MINT))
+                        or data[32:64]!=bytes(vault)):
+                    raise RuntimeError('Creator vault did not match the expected USDC owner')
+                raw=int.from_bytes(data[64:72],'little')
+        except (KeyError,IndexError,TypeError,ValueError) as exc:
+            return fail('USDC creator vault could not be verified safely; retry later',503)
+        except RuntimeError as exc:return fail(exc,503)
+        response=jsonify(ok=True,quote_asset='USDC',pump_vault_raw=str(raw),
+               scope='creator_wallet_all_tokens_pump_bonding_curve',
+               note='Wallet-wide unclaimed Pump bonding-curve USDC fees, not token-specific, not yet received, PumpSwap fees excluded.')
+        response.headers['Cache-Control']='private, no-store'
+        return response
 
     @app.post('/api/token-launch/<launch_id>/claim/prepare')
     @d.rate_limit(3,60)
