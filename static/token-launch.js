@@ -89,7 +89,7 @@ async function launchStage(row,stage){
   : 'The token is already created. Its initial creator fee goes 100% to your wallet UNTIL this second transaction is confirmed. Final split: '+((10000-row.community_bps)/100).toFixed(2)+'% creator / '+(row.community_bps/100).toFixed(2)+'% '+row.community_wallet+'. This final allocation is irreversible.';
  try{
    var result=await dialog(title,details,async function(){
-     text('tl-dialog-status',create?'Preparing your orc token address; this may take up to 45 seconds…':'Building the Pump transaction…');
+     text('tl-dialog-status',create?'Preparing your orc token address; this can take up to 90 seconds…':'Building the Pump transaction…');
      var path='/api/token-launch/'+row.id+'/'+(create?'prepare':'prepare-finalize');
      var prepared=await call(path,{});
      if(cfg.pilotCreatorOnly){
@@ -98,7 +98,13 @@ async function launchStage(row,stage){
          throw Error('The 0.025 SOL launch reserve check failed. No transaction was sent.');
        text('tl-dialog-status','Read-only Solana simulation: estimated maximum launch charge '+
          (max/1e9).toFixed(6)+' SOL (includes a conservative fee allowance). Your separate test trade must be 2 USDC or less. Review this amount again in Phantom.');
-     }else text('tl-dialog-status','Waiting for your wallet signature…');
+     }else{
+       var publicCost=prepared.pilot_estimated_max_sol_lamports;
+       if(!Number.isSafeInteger(publicCost)||publicCost<=0||publicCost>50000000)
+         throw Error('The public 0.05 SOL launch safety check failed. Nothing was sent.');
+       text('tl-dialog-status','Estimated maximum network and rent cost: '+
+         (publicCost/1e9).toFixed(6)+' SOL. Confirm the final amount in Phantom.');
+     }
      var sig=await signWithWallet(prepared.transaction_b64);
      // Store transaction ID only for recovery if Safari suspends the web app.
      try{sessionStorage.setItem('orca-token-launch:'+row.id+':'+stage,sig)}catch(e){}

@@ -92,6 +92,9 @@ h1{font-size:clamp(28px,5vw,42px);line-height:1.1;margin:0 0 12px;letter-spacing
 {% if pilot_creator_only %}
 <div class="tl-alert" role="status"><b>Private OrcAgent mainnet pilot · USDC + 100% Creator Rewards.</b> The test is limited to your signed-in Phantom wallet. Your approved budgets: at most 0.03 SOL for the full test and a separate USDC test trade of at most 2 USDC. OrcAgent reserves at least 0.005 SOL of this test budget for follow-up costs by limiting estimated launch costs to 0.025 SOL. Your separate 2 USDC trade is a manual action; verify its full network cost and amount in Phantom. No token creation automatically buys a token.</div>
 {% endif %}
+{% if launch_enabled and not pilot_creator_only %}
+<div class="tl-alert" role="status"><b>Public Token Launch · wallet approval required.</b> OrcAgent checks each launch transaction with a read-only Solana simulation and refuses preparations estimated above 0.05 SOL for network and rent. Creator + Community Rewards require a second, separately approved fee-sharing transaction with its own 0.05 SOL preparation ceiling. These are limits, not quoted charges: verify the actual SOL cost in Phantom before approving. Creating a token does not automatically buy it.</div>
+{% endif %}
 {% if not launch_enabled %}
 <div class="tl-alert" role="status"><b>Preflight mode.</b> You can configure and save a token draft. Mainnet signing remains disabled until the Pump SDK and on-chain fee sharing complete final validation. No SOL or USDC will be spent from this page while preflight is on.</div>
 {% endif %}

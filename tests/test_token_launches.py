@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'tests'))
-from test_token_launch import setup,icon
+from test_token_launch import setup,icon,public_simulated_reply
 from solders.keypair import Keypair
 
 
@@ -109,7 +109,7 @@ def test_signed_launch_reconciles_via_readonly_fallback():
         with patch('token_launch.requests.post') as api:
             api.return_value.raise_for_status=lambda:None
             api.return_value.status_code=200
-            api.return_value.json=lambda:{'result':{'value':{'blockhash':blockhash}}}
+            api.return_value.json=lambda:public_simulated_reply(api.call_args.kwargs['json']['method'],blockhash)
             prepared=client.post('/api/token-launch/'+ident+'/prepare',json={},headers=headers)
             assert prepared.status_code==200,prepared.get_data(as_text=True)[:200]
         partial=Transaction.from_bytes(base64.b64decode(prepared.get_json()['transaction_b64']))
@@ -227,7 +227,7 @@ def test_startup_reconcile_exact_signed_creator_launch():
       with patch('token_launch.requests.post') as api:
         api.return_value.status_code=200
         api.return_value.raise_for_status=lambda:None
-        api.return_value.json=lambda:{'result':{'value':{'blockhash':blockhash}}}
+        api.return_value.json=lambda:public_simulated_reply(api.call_args.kwargs['json']['method'],blockhash)
         prepared=client.post('/api/token-launch/'+ident+'/prepare',json={},headers=h)
         assert prepared.status_code==200,prepared.get_data(as_text=True)[:200]
     part=Transaction.from_bytes(base64.b64decode(prepared.get_json()['transaction_b64']))

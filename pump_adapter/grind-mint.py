@@ -1,6 +1,7 @@
 """Generate an ephemeral ORC-branded mint; stdout is PRIVATE subprocess IPC only."""
 import base64
 import fcntl
+import secrets
 import os
 import stat
 import sys
@@ -15,18 +16,34 @@ for char in SUFFIX:
     TARGET=TARGET*58+ALPHABET.index(char)
 MODULUS=58**len(SUFFIX)
 
-def generate(timeout=45):
-    path=os.path.join(tempfile.gettempdir(),'orcagent-mint-'+str(os.getuid())+'.lock')
-    fd=os.open(path,os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
-    try:
-        info=os.fstat(fd)
+def generate(timeout=85):
+    """Bounded vanity search with TWO worker slots for concurrent creators.
+
+    Each slot is a per-UID OS file lock (no mint secrets on disk). Requests
+    above the cap fail fast, rather than blocking all Flask workers. Unlike a
+    fixed 45-second cutoff, 85 seconds covers long-tail 3-char vanity searches
+    while leaving room for the SDK builder and gunicorn's request timeout.
+    """
+    fd=None
+    start=secrets.randbelow(2)
+    for slot in (start,1-start):
+        path=os.path.join(tempfile.gettempdir(),
+                          'orcagent-mint-'+str(os.getuid())+'-'+str(slot)+'.lock')
+        candidate=os.open(path,os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
+        info=os.fstat(candidate)
         if info.st_uid!=os.getuid() or not stat.S_ISREG(info.st_mode):
+            os.close(candidate)
             raise RuntimeError('Mint generator lock unavailable')
         try:
-            fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            fcntl.flock(candidate,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:
-            raise RuntimeError('An orc address is being prepared. Please retry shortly.') from None
-        os.nice(10)
+            os.close(candidate)
+            continue
+        fd=candidate
+        break
+    if fd is None:
+        raise RuntimeError('Two orc addresses are being prepared. Please retry shortly.')
+    try:
         deadline=time.monotonic()+timeout
         while time.monotonic()<deadline:
             for _ in range(256):

@@ -164,6 +164,7 @@ def install(d):
     PILOT_MAX_LAUNCH_SOL_LAMPORTS=25_000_000  # Keep >=0.005 SOL for the test trade/claim
     PILOT_MAX_FOLLOWUP_SOL_LAMPORTS=5_000_000
     PILOT_MAX_TRADE_USDC_MICRO=2_000_000
+    PUBLIC_MAX_LAUNCH_SOL_LAMPORTS=50_000_000  # 0.05 SOL hard cap for one launch transaction
 
     def fail(message,status=400):
         return jsonify(ok=False,msg=str(message)[:220]),status
@@ -254,10 +255,17 @@ def install(d):
         if stage=='create':
             try:
                 found=subprocess.run([sys.executable,os.path.join(d.BASE,'pump_adapter','grind-mint.py')],
-                    text=True,capture_output=True,timeout=50,check=False)
+                    text=True,capture_output=True,timeout=96,check=False)
             except (OSError,subprocess.TimeoutExpired) as exc:
                 raise RuntimeError('Orc mint address generator unavailable; please retry') from exc
             if found.returncode:
+                # Only two fixed, known generator messages are safe to show.
+                # Never expose stderr that could contain an ephemeral mint key.
+                detail=found.stderr.strip()
+                if detail.startswith('Two orc addresses are being prepared.'):
+                    raise RuntimeError('Two tokens are already being prepared. Wait a moment and retry; no transaction was sent.')
+                if detail.startswith('Finding an orc address took too long.'):
+                    raise RuntimeError('The orc address search took too long. Retry this same draft; no token was created.')
                 raise RuntimeError('An orc mint address is not ready. Please retry shortly; nothing was sent.')
             mint_secret=found.stdout.strip()
         # Fetch AFTER grinding, so address generation cannot age the blockhash.
@@ -289,7 +297,7 @@ def install(d):
             raise RuntimeError('Invalid Solana transaction')
         return built
 
-    def pilot_sol_preflight(row,transaction_b64,max_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS,*,claim_read=False):
+    def pilot_sol_preflight(row,transaction_b64,max_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS,*,claim_read=False,enforce_public=False):
         """Read-only simulation; reject if real network/rent cost is unknown.
 
         Simulated fee-payer balance delta plus getFeeForMessage (conservatively
@@ -297,7 +305,7 @@ def install(d):
         stay under this pilot's 0.03 SOL limit. This guard is NOT an automatic
         authorization to trade 2 USDC or a guarantee of future network fees.
         """
-        if not pilot_wallet(row['wallet']):return None
+        if not pilot_wallet(row['wallet']) and not enforce_public:return None
         try:
             raw=base64.b64decode(transaction_b64,validate=True)
             prepared=SolanaTransaction.from_bytes(raw)
@@ -686,6 +694,7 @@ def install(d):
         return jsonify(ok=True,enabled=enabled(),default_quote='USDC',
            default_reward_mode='creator' if pilot else 'community',
            sol_conversion='manual_only',pilot_creator_only=pilot,
+           public_max_launch_sol_lamports=PUBLIC_MAX_LAUNCH_SOL_LAMPORTS,
            pilot_max_sol_lamports=PILOT_MAX_SOL_LAMPORTS if pilot else None,
            pilot_max_launch_sol_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS if pilot else None,
            pilot_max_trade_usdc_micro=PILOT_MAX_TRADE_USDC_MICRO if pilot else None,
@@ -857,7 +866,9 @@ def install(d):
             # strand the creator's unsent token. Return the identical signed
             # mint transaction while its blockhash might still be valid.
             if time.time()-row['prepared_at']<45:
-                try:pilot_cost=pilot_sol_preflight(row,row['prepare_tx_b64'])
+                try:pilot_cost=pilot_sol_preflight(row,row['prepare_tx_b64'],
+                    max_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS if pilot_wallet(wallet)
+                        else PUBLIC_MAX_LAUNCH_SOL_LAMPORTS,enforce_public=True)
                 except RuntimeError as exc:return fail(exc,503)
                 return jsonify(ok=True,mint=row['mint'],transaction_b64=row['prepare_tx_b64'],
                     quote_asset=row['quote_asset'],reward_mode=row['reward_mode'],
@@ -865,7 +876,9 @@ def install(d):
                     pilot_estimated_max_sol_lamports=pilot_cost,expires_in=60,reused=True)
             try:
                 if blockhash_valid(row['prepare_tx_b64']):
-                    pilot_cost=pilot_sol_preflight(row,row['prepare_tx_b64'])
+                    pilot_cost=pilot_sol_preflight(row,row['prepare_tx_b64'],
+                    max_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS if pilot_wallet(wallet)
+                        else PUBLIC_MAX_LAUNCH_SOL_LAMPORTS,enforce_public=True)
                     return jsonify(ok=True,mint=row['mint'],transaction_b64=row['prepare_tx_b64'],
                         quote_asset=row['quote_asset'],reward_mode=row['reward_mode'],
                         needs_finalization=row['reward_mode']=='community',
@@ -883,7 +896,9 @@ def install(d):
         if row['status']!='draft':return fail('This launch was already submitted; check its status before retrying',409)
         try:
             built=build_tx(row,'create')
-            pilot_cost=pilot_sol_preflight(row,built['transaction_b64'])
+            pilot_cost=pilot_sol_preflight(row,built['transaction_b64'],
+                max_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS if pilot_wallet(wallet)
+                    else PUBLIC_MAX_LAUNCH_SOL_LAMPORTS,enforce_public=True)
         except RuntimeError as exc:return fail(exc,503)
         with sqlite3.connect(d.DB_FILE,timeout=8) as conn:
             conn.execute('BEGIN IMMEDIATE')
@@ -916,11 +931,19 @@ def install(d):
         if not row:return fail('Launch not found',404)
         if row['status']=='finalize_prepared' and not row['finalize_signature']:
             if time.time()-row['prepared_at']<45:
+                try:followup_cost=pilot_sol_preflight(row,row['finalize_tx_b64'],
+                    PUBLIC_MAX_LAUNCH_SOL_LAMPORTS,enforce_public=True)
+                except RuntimeError as exc:return fail(exc,503)
                 return jsonify(ok=True,mint=row['mint'],
-                    transaction_b64=row['finalize_tx_b64'],expires_in=60,reused=True)
+                    transaction_b64=row['finalize_tx_b64'],
+                    pilot_estimated_max_sol_lamports=followup_cost,
+                    expires_in=60,reused=True)
             try:
                 if blockhash_valid(row['finalize_tx_b64']):
+                    followup_cost=pilot_sol_preflight(row,row['finalize_tx_b64'],
+                        PUBLIC_MAX_LAUNCH_SOL_LAMPORTS,enforce_public=True)
                     return jsonify(ok=True,mint=row['mint'],transaction_b64=row['finalize_tx_b64'],
+                        pilot_estimated_max_sol_lamports=followup_cost,
                         expires_in=45,reused=True)
                 if sharing_check(row['mint'],wallet,row['community_wallet'],row['community_bps']):
                     return fail('Fee sharing is already final on-chain. Recover the transaction signature from Phantom.',409)
@@ -934,7 +957,10 @@ def install(d):
             row=lookup(launch_id,wallet)
         if row['reward_mode']!='community' or row['status']!='pending_shares':
             return fail('Launch must be confirmed before finalizing fee shares',409)
-        try:built=build_tx(row,'finalize')
+        try:
+            built=build_tx(row,'finalize')
+            followup_cost=pilot_sol_preflight(row,built['transaction_b64'],
+                PUBLIC_MAX_LAUNCH_SOL_LAMPORTS,enforce_public=True)
         except RuntimeError as exc:return fail(exc,503)
         with sqlite3.connect(d.DB_FILE) as conn:
             cur=conn.execute('''UPDATE token_launches SET finalize_tx_b64=?,
@@ -942,7 +968,8 @@ def install(d):
                  AND status='pending_shares' ''',
                  (built['transaction_b64'],int(time.time()),launch_id,wallet))
             if cur.rowcount!=1:return fail('Another finalize request is in progress',409)
-        return jsonify(ok=True,mint=row['mint'],transaction_b64=built['transaction_b64'],expires_in=100)
+        return jsonify(ok=True,mint=row['mint'],transaction_b64=built['transaction_b64'],
+            pilot_estimated_max_sol_lamports=followup_cost,expires_in=100)
 
     @app.get('/api/token-launch/<launch_id>/creator-fees')
     @d.rate_limit(10,60)

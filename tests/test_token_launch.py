@@ -44,6 +44,18 @@ def setup():
     token_launch.install(d)
     return tmp,app,d
 
+def public_simulated_reply(method,blockhash):
+    """Read-only mocked RPC for capped PUBLIC launch preparations, no broadcast."""
+    if method=='getLatestBlockhash':
+        return {'result':{'value':{'blockhash':blockhash}}}
+    if method=='getBalance':
+        return {'result':{'value':100_000_000}}
+    if method=='getFeeForMessage':
+        return {'result':{'value':5000}}
+    if method=='simulateTransaction':
+        return {'result':{'value':{'err':None,'accounts':[{'lamports':88_000_000}]}}}
+    return None
+
 def icon():
     img=Image.new('RGB',(40,40),(10,20,30));out=io.BytesIO()
     img.save(out,format='PNG')
@@ -105,7 +117,7 @@ def test_all():
     with patch.dict(os.environ,{'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED':'1'}):
       with patch('token_launch.requests.post') as post:
         post.return_value.raise_for_status=lambda:None
-        post.return_value.json=lambda:{'result':{'value':{'blockhash':blockhash}}}
+        post.return_value.json=lambda:public_simulated_reply(post.call_args.kwargs['json']['method'],blockhash)
         r=client.post(path+draft_id+'/prepare',json={},headers=h)
         assert r.status_code==200,r.get_data(as_text=True)[:300]
         built=r.get_json()
@@ -140,9 +152,20 @@ def test_all():
     with patch.dict(os.environ,{'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED':'1'}):
       with patch('token_launch.requests.post') as post:
         post.return_value.raise_for_status=lambda:None
-        post.return_value.json=lambda:{'result':{'value':{'blockhash':blockhash}}}
+        after={'lamports':40_000_000}
+        def final_rpc():
+            method=post.call_args.kwargs['json']['method']
+            if method=='simulateTransaction':
+                return {'result':{'value':{'err':None,'accounts':[{'lamports':after['lamports']}]}}}
+            return public_simulated_reply(method,blockhash)
+        post.return_value.json=final_rpc
+        too_expensive=client.post(path+draft_id+'/prepare-finalize',json={},headers=h)
+        assert too_expensive.status_code==503 and 'SOL budget' in too_expensive.get_json()['msg']
+        assert 'transaction_b64' not in too_expensive.get_json()
+        after['lamports']=88_000_000
         result=client.post(path+draft_id+'/prepare-finalize',json={},headers=h)
         assert result.status_code==200,result.get_data(as_text=True)[:220]
+        assert result.get_json()['pilot_estimated_max_sol_lamports']==12_005_000
         raw=base64.b64decode(result.get_json()['transaction_b64'])
         assert len(raw)<1232
         final=Transaction.from_bytes(raw)
@@ -153,6 +176,7 @@ def test_all():
         assert second.get_json()['transaction_b64']==result.get_json()['transaction_b64']
     print('PASS retry after Phantom rejection reuses identical signed mint and share transactions')
     print('PASS USDC fee-sharing finalization fits transaction size and needs only creator signature')
+    print('PASS public fee-sharing approval refuses simulated charges above 0.05 SOL')
     # Gated creator claim endpoint must reject holder mode and never debit
     # without a confirmed Pump transaction. Claims are isolated from trading.
     with sqlite3.connect(d.DB_FILE) as conn:
@@ -305,8 +329,8 @@ def test_exact_onchain_transaction_verification():
         rpc.return_value.raise_for_status=lambda:None
         def reply():
             method=rpc.call_args.kwargs['json']['method']
-            if method=='getLatestBlockhash':
-                return {'result':{'value':{'blockhash':blockhash}}}
+            simulated=public_simulated_reply(method,blockhash)
+            if simulated is not None:return simulated
             if method=='getTransaction':return {'result':state['result']}
             if method=='getAccountInfo':
                 return {'result':{'value':{'owner':token_launch.PUMP_PROGRAM}
@@ -360,8 +384,8 @@ def test_prepared_recovery():
         rpc.return_value.raise_for_status=lambda:None
         def reply():
             method=rpc.call_args.kwargs['json']['method']
-            if method=='getLatestBlockhash':
-                return {'result':{'value':{'blockhash':blockhash}}}
+            simulated=public_simulated_reply(method,blockhash)
+            if simulated is not None:return simulated
             if method=='isBlockhashValid':
                 return {'result':{'value':state['blockhash_valid']}}
             if method=='getAccountInfo':
@@ -395,9 +419,64 @@ def test_prepared_recovery():
     print('PASS an existing on-chain token cannot be regenerated as a duplicate')
     tmp.cleanup()
 
+def test_public_creators_share_safe_launch_path():
+    """Two unrelated logged-in users can prepare, but never without cost preflight."""
+    tmp,app,d=setup();client=app.test_client()
+    owners=[str(Keypair().pubkey()),str(Keypair().pubkey())]
+    flags={'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED':'1',
+           'ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_ENABLED':'0',
+           'ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_WALLETS':''}
+    header={'X-CSRF-Token':'test-csrf'}
+    blockhash=str(Keypair().pubkey())
+    state={'before':100_000_000,'after':40_000_000}
+    with patch.dict(os.environ,flags):
+      for index,wallet in enumerate(owners):
+        with client.session_transaction() as sess:
+            sess['wallet']=wallet;sess['csrf_token']='test-csrf'
+        conf=client.get('/api/token-launch/config').get_json()
+        assert conf['enabled'] and not conf['pilot_creator_only']
+        assert conf['capabilities']=={'creator':True,'community':True,'holder':True}
+        assert 'Preflight mode' not in client.get('/token-launch').get_data(as_text=True)
+        body={'client_nonce':f'public-creator-{index}-nonce-0001',
+             'name':'Public Creator','symbol':f'PUB{index}',
+             'reward_mode':'creator','quote_asset':'USDC','image_data':icon()}
+        created=client.post('/api/token-launch/draft',json=body,headers=header)
+        assert created.status_code==201,created.get_data(as_text=True)[:160]
+        ident=created.get_json()['draft']['id']
+        with patch('token_launch.requests.post') as rpc:
+          rpc.return_value.status_code=200
+          rpc.return_value.raise_for_status=lambda:None
+          def respond():
+            method=rpc.call_args.kwargs['json']['method']
+            if method=='getBalance':return {'result':{'value':state['before']}}
+            if method=='simulateTransaction':return {'result':{'value':{
+                'err':None,'accounts':[{'lamports':state['after']}]}}}
+            return public_simulated_reply(method,blockhash)
+          rpc.return_value.json=respond
+          endpoint='/api/token-launch/'+ident+'/prepare'
+          if index==0:
+            refused=client.post(endpoint,json={},headers=header)
+            assert refused.status_code==503 and 'SOL budget' in refused.get_json()['msg']
+            assert 'transaction_b64' not in refused.get_json()
+            with sqlite3.connect(d.DB_FILE) as conn:
+              assert conn.execute('SELECT status FROM token_launches WHERE id=?',(ident,)).fetchone()[0]=='draft'
+            state['after']=88_000_000
+          prepared=client.post(endpoint,json={},headers=header)
+          assert prepared.status_code==200,prepared.get_data(as_text=True)[:180]
+          data=prepared.get_json()
+          assert data['mint'].endswith('orc')
+          assert data['pilot_estimated_max_sol_lamports']==12_005_000
+          assert 'mint_secret' not in data
+          assert str(Transaction.from_bytes(base64.b64decode(data['transaction_b64'])).message.account_keys[0])==wallet
+    print('PASS two independent authenticated public creators can prepare own ORC mints')
+    print('PASS public launch cost >0.05 SOL fails closed before wallet approval')
+    print('PASS successful capped public launch returns owner-bound partially signed transaction only')
+    tmp.cleanup()
+
 if __name__=='__main__':
     test_all()
     test_allowlisted_mainnet_pilot()
     test_creator_pilot_wallet_budget()
     test_exact_onchain_transaction_verification()
     test_prepared_recovery()
+    test_public_creators_share_safe_launch_path()

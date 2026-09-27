@@ -17,7 +17,7 @@ async function build(data){
     const path=require('node:path');
     const child=require('node:child_process').spawnSync(
       path.resolve(__dirname,'../venv/bin/python'),[path.join(__dirname,'grind-mint.py')],
-      {encoding:'utf8',timeout:50000,maxBuffer:4096});
+      {encoding:'utf8',timeout:96000,maxBuffer:4096});
     if(child.error||child.status!==0)throw Error('Orc mint address not ready; retry shortly');
     secret=child.stdout.trim();
   }
