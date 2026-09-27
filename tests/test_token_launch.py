@@ -67,6 +67,8 @@ def test_all():
     assert client.post(path+'draft',json={**payload,'reward_mode':'holder','community_wallet':'x'},headers={'X-CSRF-Token':'wrong'}).status_code==403
     h={'X-CSRF-Token':'test-csrf'}
     assert client.post(path+'draft',json={**payload,'quote_asset':'BTC'},headers=h).status_code==400
+    assert client.post(path+'draft',json={**payload,'quote_asset':[]},headers=h).status_code==400
+    assert client.post(path+'draft',json={**payload,'reward_mode':{}},headers=h).status_code==400
     assert client.post(path+'draft',json={**payload,'community_wallet':wallet},headers=h).status_code==400
     assert client.post(path+'draft',json={**payload,'community_bps':10000},headers=h).status_code==400
     assert client.post(path+'draft',json={**payload,'image_data':'data:image/svg+xml;base64,AAAA'},headers=h).status_code==400
@@ -78,6 +80,10 @@ def test_all():
     repeated=client.post(path+'draft',json=payload,headers=h)
     assert repeated.status_code==200 and repeated.get_json()['draft']['id']==draft_id
     assert len(client.get(path+'mine').get_json()['launches'])==1
+    # Nobody else can edit, prepare, view claims or delete this user's draft.
+    assert client.get(path+draft_id+'/claims').status_code==200
+    assert client.get(path+draft_id+'/claims').get_json()['claims']==[]
+    assert client.post(path+draft_id+'/claim/prepare',json={},headers=h).status_code==503
     m=client.get('/token-launch/metadata/'+draft_id)
     assert m.status_code==200 and m.get_json()['symbol']=='EXMP'
     assert m.get_json()['image'].endswith(draft_id)
@@ -86,6 +92,8 @@ def test_all():
     with client.session_transaction() as s:s['wallet']=str(Keypair().pubkey())
     assert client.get(path+'mine').get_json()['launches']==[]
     assert client.post(path+draft_id+'/prepare',json={},headers=h).status_code==503
+    assert client.post(path+draft_id+'/delete-draft',json={},headers=h).status_code==409
+    assert client.get(path+draft_id+'/claims').status_code==404
     with client.session_transaction() as s:s['wallet']=wallet
     assert client.post(path+draft_id+'/prepare',json={},headers=h).status_code==503
     print('PASS private per-wallet drafts, idempotency, CSRF and public durable metadata/icon')
@@ -108,6 +116,7 @@ def test_all():
         assert tx.verify_with_results().count(False)==1
         assert str(tx.message.account_keys[0])==wallet
         assert client.post(path+draft_id+'/prepare',json={},headers=h).status_code==409
+        assert client.post(path+draft_id+'/delete-draft',json={},headers=h).status_code==409
         # A made-up signature cannot complete launch. An unconfirmed signature
         # can only enter submitted state, never live.
         assert client.post(path+draft_id+'/confirm',json={'stage':'create','signature':'x'},headers=h).status_code==400
@@ -120,6 +129,31 @@ def test_all():
         assert client.post(path+draft_id+'/prepare-finalize',json={},headers=h).status_code==409
     print('PASS official Pump SDK USDC create+initial sharing instruction under 1232 bytes')
     print('PASS creator wallet cannot be signed server-side; unconfirmed/mismatched transaction cannot become live')
+    # Finalization is its own USDC-quote transaction, separate from create.
+    # The first fee share allocation is 100% creator until this confirmation.
+    with sqlite3.connect(d.DB_FILE) as conn:
+        conn.execute("UPDATE token_launches SET status='pending_shares' WHERE id=?",(draft_id,))
+    with patch.dict(os.environ,{'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED':'1'}):
+      with patch('token_launch.requests.post') as post:
+        post.return_value.raise_for_status=lambda:None
+        post.return_value.json=lambda:{'result':{'value':{'blockhash':blockhash}}}
+        result=client.post(path+draft_id+'/prepare-finalize',json={},headers=h)
+        assert result.status_code==200,result.get_data(as_text=True)[:220]
+        raw=base64.b64decode(result.get_json()['transaction_b64'])
+        assert len(raw)<1232
+        final=Transaction.from_bytes(raw)
+        assert final.verify_with_results()==[False]
+        assert str(final.message.account_keys[0])==wallet
+        assert client.post(path+draft_id+'/prepare-finalize',json={},headers=h).status_code==409
+    print('PASS USDC fee-sharing finalization fits transaction size and needs only creator signature')
+    # Gated creator claim endpoint must reject holder mode and never debit
+    # without a confirmed Pump transaction. Claims are isolated from trading.
+    with sqlite3.connect(d.DB_FILE) as conn:
+        conn.execute("UPDATE token_launches SET status='live' WHERE id=?",(draft_id,))
+    assert client.post(path+draft_id+'/claim/prepare',json={},headers=h).status_code==503
+    assert client.post(path+draft_id+'/claim/confirm',json={},headers=h).status_code==400
+    assert client.get(path+draft_id+'/claims').get_json()['claims']==[]
+    print('PASS gated claims and private reward history never fabricate earnings')
     tmp.cleanup()
 
 if __name__=='__main__':test_all()

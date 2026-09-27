@@ -173,7 +173,7 @@ h1{font-size:clamp(28px,5vw,42px);line-height:1.1;margin:0 0 12px;letter-spacing
   </div>
 </div>
 <script>window.ORC_TOKEN_LAUNCH={wallet:{{ wallet|tojson }},csrf:{{ csrf_token|tojson }},enabled:{{ launch_enabled|tojson }}};</script>
-<script src="/static/token-launch-web3.js?v={{ app_version|default('1') }}" defer></script>
+{% if launch_enabled %}<script src="/static/token-launch-web3.js?v={{ app_version|default('1') }}" defer></script>{% endif %}
 <script src="/static/token-launch.js?v={{ app_version|default('1') }}" defer></script>
 </body>
 </html>
