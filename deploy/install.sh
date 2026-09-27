@@ -108,10 +108,14 @@ if [ -f "$APP_DIR/pump_adapter/package-lock.json" ] \
    && grep -Eq '^[[:space:]]*ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED=1[[:space:]]*$' "$ENV_FILE"; then
   say "Installing isolated Pump SDK for explicitly enabled Token Launch"
   if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
-    (cd "$APP_DIR/pump_adapter" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund --quiet) \
-      || die "Pump SDK install failed. The old app is still running."
+    (cd "$APP_DIR/pump_adapter" \
+      && npm ci --omit=dev --ignore-scripts --no-audit --no-fund --quiet \
+      && node test-security.cjs \
+      && npm audit --omit=dev --audit-level=high \
+      && node read-only-preflight.cjs) \
+      || die "Pump SDK security/mainnet read-only preflight failed. No app restart."
     chown -R "$APP_USER:$APP_USER" "$APP_DIR/pump_adapter/node_modules"
-    echo "  SDK installed; no on-chain launch is triggered by deployment"
+    echo "  SDK and mainnet read-only preflight passed; no tokens/fees were sent"
   else
     die "node/npm unavailable; cannot install the pinned Pump SDK. The old app is still running."
   fi

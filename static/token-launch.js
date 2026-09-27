@@ -193,9 +193,13 @@ function drawMine(){
     try{await call('/api/token-launch/'+row.id+'/delete-draft',{});status('Draft deleted.');await loadMine()}
     catch(e){status(e.message,true)}
   });
+  if(row.status==='prepared')action(cfg.enabled?'Retry wallet approval':'Approval in preflight',function(){launchStage(row,'create')});
+  if(row.status==='prepared'&&!cfg.enabled)actions.lastElementChild.disabled=true;
   if(row.status==='prepared'||row.status==='submitted')action('Check transaction',function(){checkKnown(row,'create')});
   if(row.status==='pending_shares')action(cfg.enabled?'Finalize shares':'Finalize after preflight',function(){launchStage(row,'finalize')});
   if(row.status==='pending_shares'&&!cfg.enabled)actions.lastElementChild.disabled=true;
+  if(row.status==='finalize_prepared')action(cfg.enabled?'Retry wallet approval':'Approval in preflight',function(){launchStage(row,'finalize')});
+  if(row.status==='finalize_prepared'&&!cfg.enabled)actions.lastElementChild.disabled=true;
   if(row.status==='finalize_prepared'||row.status==='finalize_submitted')action('Check fee split',function(){checkKnown(row,'finalize')});
   if(row.status==='live'&&row.reward_mode!=='holder'){
     action(cfg.enabled?'Claim creator fees':'Claims in preflight',function(){claimRewards(row)});

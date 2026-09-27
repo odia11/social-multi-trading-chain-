@@ -191,6 +191,23 @@ def install(d):
             raise RuntimeError('Invalid Solana transaction')
         return built
 
+    def blockhash_valid(transaction_b64):
+        """Reject stale instructions using the actual Solana blockhash gate.
+
+        We only re-prepare an unsigned action if its original blockhash has
+        expired AND the on-chain action was not executed. Never guess based
+        only on the wall-clock, as blockhash lifetime is chain-dependent.
+        """
+        try:
+            raw=base64.b64decode(transaction_b64,validate=True)
+            blockhash=str(SolanaTransaction.from_bytes(raw).message.recent_blockhash)
+        except (ValueError,base64.binascii.Error) as exc:
+            raise RuntimeError('Stored transaction could not be verified') from exc
+        answer=rpc('isBlockhashValid',[blockhash,{'commitment':'confirmed'}])
+        if not isinstance(answer,dict) or not isinstance(answer.get('value'),bool):
+            raise RuntimeError('Solana blockhash validity unavailable')
+        return answer['value']
+
     def sharing_check(mint,wallet,community,bps):
         helper=os.path.join(d.BASE,'pump_adapter','check-sharing.cjs')
         def run(data):
@@ -372,7 +389,30 @@ def install(d):
         if not enabled():return fail('Token Launch is in preflight; no mainnet transaction can be prepared',503)
         row=lookup(launch_id,wallet)
         if not row:return fail('Launch not found',404)
-        if row['status']!='draft':return fail('This launch was already prepared; check its status before retrying',409)
+        if row['status']=='prepared' and not row['launch_signature']:
+            # Phantom rejection/suspended mobile app must not permanently
+            # strand the creator's unsent token. Return the identical signed
+            # mint transaction while its blockhash might still be valid.
+            if time.time()-row['prepared_at']<45:
+                return jsonify(ok=True,mint=row['mint'],transaction_b64=row['prepare_tx_b64'],
+                    quote_asset=row['quote_asset'],reward_mode=row['reward_mode'],
+                    needs_finalization=row['reward_mode']=='community',expires_in=60,reused=True)
+            try:
+                if blockhash_valid(row['prepare_tx_b64']):
+                    return jsonify(ok=True,mint=row['mint'],transaction_b64=row['prepare_tx_b64'],
+                        quote_asset=row['quote_asset'],reward_mode=row['reward_mode'],
+                        needs_finalization=row['reward_mode']=='community',expires_in=45,reused=True)
+                if mint_exists(row['mint']):
+                    return fail('This token already exists on Pump. Recover its signature from Phantom before retrying.',409)
+            except RuntimeError as exc:return fail(exc,503)
+            with sqlite3.connect(d.DB_FILE,timeout=8) as conn:
+                cur=conn.execute('''UPDATE token_launches SET status='draft',mint=NULL,
+                      prepare_tx_b64='',prepared_at=0
+                      WHERE id=? AND wallet=? AND status='prepared' AND mint=?
+                      AND launch_signature='' ''',(launch_id,wallet,row['mint']))
+                if cur.rowcount!=1:return fail('Launch changed during recovery; reload.',409)
+            row=lookup(launch_id,wallet)
+        if row['status']!='draft':return fail('This launch was already submitted; check its status before retrying',409)
         try:built=build_tx(row,'create')
         except RuntimeError as exc:return fail(exc,503)
         with sqlite3.connect(d.DB_FILE,timeout=8) as conn:
@@ -395,6 +435,24 @@ def install(d):
         if not enabled():return fail('Token Launch is in preflight',503)
         row=lookup(launch_id,wallet)
         if not row:return fail('Launch not found',404)
+        if row['status']=='finalize_prepared' and not row['finalize_signature']:
+            if time.time()-row['prepared_at']<45:
+                return jsonify(ok=True,mint=row['mint'],
+                    transaction_b64=row['finalize_tx_b64'],expires_in=60,reused=True)
+            try:
+                if blockhash_valid(row['finalize_tx_b64']):
+                    return jsonify(ok=True,mint=row['mint'],transaction_b64=row['finalize_tx_b64'],
+                        expires_in=45,reused=True)
+                if sharing_check(row['mint'],wallet,row['community_wallet'],row['community_bps']):
+                    return fail('Fee sharing is already final on-chain. Recover the transaction signature from Phantom.',409)
+            except RuntimeError as exc:return fail(exc,503)
+            with sqlite3.connect(d.DB_FILE,timeout=8) as conn:
+                cur=conn.execute('''UPDATE token_launches SET status='pending_shares',
+                     finalize_tx_b64='',prepared_at=0
+                     WHERE id=? AND wallet=? AND status='finalize_prepared'
+                     AND finalize_signature='' ''',(launch_id,wallet))
+                if cur.rowcount!=1:return fail('Fee-sharing request changed; reload.',409)
+            row=lookup(launch_id,wallet)
         if row['reward_mode']!='community' or row['status']!='pending_shares':
             return fail('Launch must be confirmed before finalizing fee shares',409)
         try:built=build_tx(row,'finalize')
@@ -418,11 +476,34 @@ def install(d):
         if not row:return fail('Launch not found',404)
         if row['status']!='live' or row['reward_mode']=='holder':
             return fail('Only confirmed creator/community launches can claim creator fees',409)
-        with sqlite3.connect(d.DB_FILE) as conn:
-            pending=conn.execute('''SELECT id FROM token_reward_claims
+        with closing(sqlite3.connect(d.DB_FILE)) as conn:
+            conn.row_factory=sqlite3.Row
+            pending=conn.execute('''SELECT * FROM token_reward_claims
                   WHERE wallet=? AND quote_asset=? AND status IN ('prepared','submitted')
                   ORDER BY created_at DESC LIMIT 1''',(wallet,row['quote_asset'])).fetchone()
-        if pending:return fail('An earlier claim for this quote asset is awaiting confirmation. Check claim history first.',409)
+        if pending:
+            if (pending['launch_id']==launch_id and pending['status']=='prepared'
+                    and not pending['signature']):
+                try:
+                    fresh=(time.time()-pending['created_at']<45
+                           or blockhash_valid(pending['transaction_b64']))
+                except RuntimeError as exc:return fail(exc,503)
+                if fresh:
+                    return jsonify(ok=True,claim_id=pending['id'],reused=True,
+                      transaction_b64=pending['transaction_b64'],
+                      quote_asset=row['quote_asset'],accrued_raw=pending['accrued_raw'],
+                      accrued_scope=pending['accrued_scope'])
+                # No signature was recorded and the old blockhash has expired;
+                # the earlier transaction can no longer settle. Never report
+                # it as a successful claim or invent a received amount.
+                with sqlite3.connect(d.DB_FILE) as conn:
+                    cur=conn.execute('''UPDATE token_reward_claims
+                        SET status='expired_unverified' WHERE id=? AND wallet=?
+                        AND status='prepared' AND signature='' ''',
+                        (pending['id'],wallet))
+                    if cur.rowcount!=1:return fail('Claim status changed; reload history.',409)
+            else:
+                return fail('An earlier claim for this quote asset is awaiting confirmation. Check claim history first.',409)
         block=rpc('getLatestBlockhash',[{'commitment':'confirmed'}])
         blockhash=((block or {}).get('value') or {}).get('blockhash')
         if not blockhash:return fail('No recent Solana blockhash',503)

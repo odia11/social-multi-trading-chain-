@@ -115,7 +115,9 @@ def test_all():
         assert len(base64.b64decode(built['transaction_b64']))<=1232
         assert tx.verify_with_results().count(False)==1
         assert str(tx.message.account_keys[0])==wallet
-        assert client.post(path+draft_id+'/prepare',json={},headers=h).status_code==409
+        reused=client.post(path+draft_id+'/prepare',json={},headers=h)
+        assert reused.status_code==200 and reused.get_json()['reused'] is True
+        assert reused.get_json()['transaction_b64']==built['transaction_b64']
         assert client.post(path+draft_id+'/delete-draft',json={},headers=h).status_code==409
         # A made-up signature cannot complete launch. An unconfirmed signature
         # can only enter submitted state, never live.
@@ -144,7 +146,10 @@ def test_all():
         final=Transaction.from_bytes(raw)
         assert final.verify_with_results()==[False]
         assert str(final.message.account_keys[0])==wallet
-        assert client.post(path+draft_id+'/prepare-finalize',json={},headers=h).status_code==409
+        second=client.post(path+draft_id+'/prepare-finalize',json={},headers=h)
+        assert second.status_code==200 and second.get_json()['reused'] is True
+        assert second.get_json()['transaction_b64']==result.get_json()['transaction_b64']
+    print('PASS retry after Phantom rejection reuses identical signed mint and share transactions')
     print('PASS USDC fee-sharing finalization fits transaction size and needs only creator signature')
     # Gated creator claim endpoint must reject holder mode and never debit
     # without a confirmed Pump transaction. Claims are isolated from trading.
@@ -156,4 +161,65 @@ def test_all():
     print('PASS gated claims and private reward history never fabricate earnings')
     tmp.cleanup()
 
-if __name__=='__main__':test_all()
+def test_prepared_recovery():
+    # A Phantom cancel must allow re-approval, not strand a noncustodial mint.
+    # Once the actual blockhash is invalid, a *different* mint may only be
+    # built after a read-only proof the original Pump curve does not exist.
+    tmp,app,d=setup()
+    client=app.test_client()
+    wallet=str(Keypair().pubkey())
+    community=str(Keypair().pubkey())
+    blockhash=str(Keypair().pubkey())
+    with client.session_transaction() as sess:
+        sess['wallet']=wallet;sess['csrf_token']='test-csrf'
+    headers={'X-CSRF-Token':'test-csrf'}
+    draft=client.post('/api/token-launch/draft',json={
+        'client_nonce':'recovery-test-nonce-0001','name':'Recovery Test',
+        'symbol':'RECOV','image_data':icon(),'reward_mode':'community',
+        'quote_asset':'USDC','community_wallet':community,'community_bps':1000
+    },headers=headers).get_json()['draft']
+    path='/api/token-launch/'+draft['id']+'/prepare'
+    state={'blockhash_valid':True,'curve_exists':False}
+    with patch.dict(os.environ,{'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED':'1'}):
+      with patch('token_launch.requests.post') as rpc:
+        rpc.return_value.raise_for_status=lambda:None
+        def reply():
+            method=rpc.call_args.kwargs['json']['method']
+            if method=='getLatestBlockhash':
+                return {'result':{'value':{'blockhash':blockhash}}}
+            if method=='isBlockhashValid':
+                return {'result':{'value':state['blockhash_valid']}}
+            if method=='getAccountInfo':
+                return {'result':{'value':{'owner':token_launch.PUMP_PROGRAM}
+                        if state['curve_exists'] else None}}
+            raise AssertionError('Unexpected Solana RPC method '+method)
+        rpc.return_value.json=reply
+        first=client.post(path,json={},headers=headers)
+        assert first.status_code==200,first.get_data(as_text=True)[:200]
+        mint=first.get_json()['mint'];raw=first.get_json()['transaction_b64']
+        second=client.post(path,json={},headers=headers)
+        assert second.status_code==200 and second.get_json()['transaction_b64']==raw
+        with sqlite3.connect(d.DB_FILE) as conn:
+            conn.execute('UPDATE token_launches SET prepared_at=prepared_at-500 WHERE id=?',(draft['id'],))
+        still_valid=client.post(path,json={},headers=headers)
+        assert still_valid.status_code==200 and still_valid.get_json()['mint']==mint
+        state['blockhash_valid']=False;state['curve_exists']=True
+        already_created=client.post(path,json={},headers=headers)
+        assert already_created.status_code==409
+        assert 'already exists' in already_created.get_json()['msg']
+        state['curve_exists']=False
+        regenerated=client.post(path,json={},headers=headers)
+        assert regenerated.status_code==200,regenerated.get_data(as_text=True)[:220]
+        assert regenerated.get_json()['mint']!=mint
+        assert regenerated.get_json()['transaction_b64']!=raw
+        with sqlite3.connect(d.DB_FILE) as conn:
+            status=conn.execute('SELECT status FROM token_launches WHERE id=?',(draft['id'],)).fetchone()[0]
+        assert status=='prepared'
+    print('PASS Phantom cancel retries the same partially signed transaction')
+    print('PASS expired blockhash + verified missing Pump curve permit safe mint regeneration')
+    print('PASS an existing on-chain token cannot be regenerated as a duplicate')
+    tmp.cleanup()
+
+if __name__=='__main__':
+    test_all()
+    test_prepared_recovery()
