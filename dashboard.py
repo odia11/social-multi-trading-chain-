@@ -4630,11 +4630,92 @@ def add_user_log(wallet: str, msg: str):
     if len(us['log_lines']) > 100:
         us['log_lines'].pop()
 
+# Trading-loop-only Solana reads. A USDC spending balance is the canonical
+# associated token account: Jupiter's trading wallet spends from that ATA.
+# getTokenAccountsByOwner is indexed and public nodes frequently reject it;
+# getAccountInfo on the exact ATA and getBalance are cheap, unindexed reads.
+# Do not use these short-lived snapshots to authorize an actual transaction:
+# the trade executor re-reads its own canonical balances and quotes.
+_bot_sol_balance_cache = {}
+_bot_sol_balance_lock = threading.Lock()
+_BOT_SOL_BALANCE_TTL = 3.0
+_BOT_SOL_READ_RPC = 'https://solana-rpc.publicnode.com'
+
+
+def _get_bot_solana_balances(wallet: str) -> tuple:
+    """(SOL, spendable USDC) at confirmed commitment, or raise on RPC failure.
+
+    A truly absent associated USDC account is spendable-zero. Transport/429,
+    unexpected mint/owner or malformed account bytes are NOT zero.
+    """
+    from solders.pubkey import Pubkey
+    address = str(Pubkey.from_string(wallet))
+    now = time.monotonic()
+    with _bot_sol_balance_lock:
+        hit = _bot_sol_balance_cache.get(address)
+        if hit and now - hit[0] < _BOT_SOL_BALANCE_TTL:
+            return hit[1]
+    owner = Pubkey.from_string(address)
+    token_program = Pubkey.from_string(TOKEN_PROGRAM_ID)
+    usdc = Pubkey.from_string(USDC_MINT)
+    ata_program = Pubkey.from_string('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+    ata, _ = Pubkey.find_program_address(
+        [bytes(owner), bytes(token_program), bytes(usdc)], ata_program)
+    endpoints = [_BOT_SOL_READ_RPC]
+    for endpoint in (SOLANA_RPC_URL, HELIUS_RPC, SOLANA_RPC):
+        if endpoint and endpoint not in endpoints:
+            endpoints.append(endpoint)
+    for endpoint in endpoints:
+        try:
+            payload = [
+                ('getBalance', [address, {'commitment':'confirmed'}]),
+                ('getAccountInfo', [str(ata), {'encoding':'base64', 'commitment':'confirmed'}]),
+            ]
+            values = []
+            for method, params in payload:
+                response = requests.post(endpoint, json={
+                    'jsonrpc':'2.0', 'id':1, 'method':method, 'params':params,
+                }, timeout=5)
+                if response.status_code != 200:
+                    raise RuntimeError('HTTP '+str(response.status_code))
+                body = response.json()
+                if not isinstance(body, dict) or body.get('error') or not isinstance(body.get('result'), dict):
+                    raise RuntimeError('RPC refused balance read')
+                values.append(body['result'])
+            lamports = values[0].get('value')
+            if type(lamports) is not int or lamports < 0:
+                raise RuntimeError('Invalid SOL balance')
+            account = values[1].get('value')
+            raw_usdc = 0
+            if account is not None:
+                if account.get('owner') != TOKEN_PROGRAM_ID:
+                    raise RuntimeError('USDC ATA has unexpected program owner')
+                raw = base64.b64decode(account['data'][0], validate=True)
+                if (len(raw) != 165 or raw[:32] != bytes(usdc)
+                        or raw[32:64] != bytes(owner) or raw[108] != 1):
+                    raise RuntimeError('USDC ATA is not a valid initialized spending account')
+                raw_usdc = int.from_bytes(raw[64:72], 'little')
+            result = (lamports / 1e9, raw_usdc / 1e6)
+            with _bot_sol_balance_lock:
+                _bot_sol_balance_cache[address] = (time.monotonic(), result)
+                if len(_bot_sol_balance_cache) > 2000:
+                    cutoff = time.monotonic() - _BOT_SOL_BALANCE_TTL
+                    for key, entry in list(_bot_sol_balance_cache.items()):
+                        if entry[0] < cutoff:
+                            _bot_sol_balance_cache.pop(key, None)
+            return result
+        except (requests.RequestException, ValueError, TypeError, KeyError, IndexError,
+                RuntimeError, binascii.Error):
+            continue
+    raise RuntimeError('Solana bot balances unavailable from verified RPC; skipping entries')
+
+
 def _get_user_sol(wallet: str) -> float:
     """Read native SOL with provider failover; never confuse RPC failure with zero."""
     last_error = None
     seen = set()
-    for rpc in list(CLAIM_SOL_RPCS) + [SOLANA_RPC] + list(_PROXY_RPCS):
+    for rpc in ([_BOT_SOL_READ_RPC, SOLANA_RPC_URL, HELIUS_RPC]
+                + list(CLAIM_SOL_RPCS) + [SOLANA_RPC] + list(_PROXY_RPCS)):
         if not rpc or rpc in seen:
             continue
         seen.add(rpc)
@@ -10859,14 +10940,14 @@ def user_trader_loop(stop_event, config, wallet: str):
                         _c = p.get('chain', 'solana')
                         open_pos_by_chain[_c] = open_pos_by_chain.get(_c, 0) + 1
                 open_pos = open_pos_by_chain.get('solana', 0)
-                us_sol  = _get_user_sol(_trading_wallet)
+                us_sol, _bot_usdc_avail = _get_bot_solana_balances(_trading_wallet)
                 # Solana's own network fees are always paid in native SOL no matter
                 # what currency the TRADE itself is in, so us_sol/_GAS_MIN below stay
                 # a SOL check unconditionally. us_solana_avail is the separate
                 # TRADING-capital balance Pass 2 actually sizes/gates a new entry
                 # against -- SOL itself in SOL mode (no extra call), or this
                 # wallet's own Solana USDC balance in USDC mode.
-                us_solana_avail = us_sol if _solana_base == 'SOL' else _get_solana_usdc_balance(_trading_wallet)
+                us_solana_avail = us_sol if _solana_base == 'SOL' else _bot_usdc_avail
                 total_live = len(live)
                 print(f'[bot] {short} running=True tokens={total_live} pos={open_pos}/5 sol={round(us_sol,4)} '
                       f'{_solana_base.lower()}_avail={round(us_solana_avail,4)} scanning...', flush=True)
@@ -11579,6 +11660,13 @@ def user_trader_loop(stop_event, config, wallet: str):
             except Exception as e:
                 print(f'[bot] {short} LOOP ERROR: {e}', flush=True)
                 add_user_log(wallet, '[' + short + '] Trader error: ' + str(e))
+                if 'Solana bot balances unavailable from verified RPC' in str(e):
+                    # An outage is not a reason to retry every 2s for each
+                    # wallet; keep the bot running, without opening entries.
+                    # Do not add a long delay when there are positions with
+                    # stop-loss/take-profit exit checks waiting for fresh data.
+                    if not any(p.get('amount', 0) > 0 for p in positions.values()):
+                        stop_event.wait(12)
             # Adaptive interval: any currently-held position within 5% of its SL/crash-exit
             # trigger drops the wait to 2s instead of the normal scan interval, so a fast
             # crash gets caught within ~2s instead of up to `interval` seconds. Read from
@@ -24742,6 +24830,20 @@ def _get_solana_usdc_balance(address: str) -> float:
             }, timeout=8)
             if r.status_code != 200:
                 last_error = f'HTTP {r.status_code}'
+                if r.status_code == 429:
+                    # Indexed token-account lookups may be rate-limited even
+                    # when a confirmed direct ATA read is available. Return
+                    # only a verified positive canonical spending amount;
+                    # never invent a wallet-wide zero if another non-ATA
+                    # account could hold USDC.
+                    try:
+                        _, spendable = _get_bot_solana_balances(key)
+                        if spendable > 0:
+                            with _sol_usdc_balance_lock:
+                                _sol_usdc_balance_cache[key] = (time.time(), spendable)
+                            return spendable
+                    except RuntimeError:
+                        pass
                 continue
             body = r.json()
             if body.get('error'):
