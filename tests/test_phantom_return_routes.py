@@ -7,6 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 JS = (ROOT / 'static' / 'dashboard.js').read_text()
+ONBOARD = (ROOT / 'static' / 'wallet-onboarding.js').read_text()
 CALLBACK = (ROOT / 'templates' / 'phantom_callback.html').read_text()
 
 checks = []
@@ -14,14 +15,34 @@ def check(name, condition):
     checks.append((name, bool(condition)))
     print(('PASS ' if condition else 'FAIL ') + name)
 
-check('new mobile Phantom users are opened inside Phantom browser instead of the legacy two-hop callback',
-      'window.location.href=_phantomBrowseConnectUrl(); return;' in JS)
-check('Phantom browse link includes encoded ref origin required by the mobile in-app browser',
-      "'?ref=' + encodeURIComponent(window.location.origin)" in JS)
-check('Phantom in-app browser auto-runs the normal signed provider login',
+check('mobile browser uses signed Phantom connect instead of opening its embedded dApp browser',
+      '_phantomMobileV1Connect(afterLoginUrl); return;' in JS
+      and "window.location.href='https://phantom.app/ul/v1/connect?'" in JS
+      and 'phantom.app/ul/browse/' not in JS)
+check('wallet setup on standalone pages hands off to signed browser login preserving current route',
+      '/?wallet_connect=phantom&return_to=' in ONBOARD
+      and 'location.pathname+location.search+location.hash' in ONBOARD
+      and 'phantom_connect=1' not in ONBOARD)
+check('standalone-page browser handoff consumes once and restores original same-origin path',
+      "url.searchParams.get('wallet_connect') !== 'phantom'" in JS
+      and "url.searchParams.delete('wallet_connect')" in JS
+      and "_safeWalletReturnRoute(url.searchParams.get('return_to') || '/')" in JS
+      and "_phantomMobileV1Connect(returnTo)" in JS)
+check('legacy Phantom dApp browse links remain compatible without issuing new browse links',
       "u.searchParams.get('phantom_connect') !== '1'" in JS
-      and "window.solana && window.solana.isPhantom" in JS
-      and "connectWalletOnboard('phantom')" in JS)
+      and "connectWalletOnboard('phantom', returnTo)" in JS)
+check('mobile browsers and installed PWAs both pair across callback/default-browser boundaries',
+      "var _pairPromise = fetch('/api/pair/start'" in JS
+      and '_storePairToken(d.pair)' in JS
+      and '_storePairReturnRoute(_returnRoute)' in JS
+      and "if(!_pair){" in JS)
+check('return recovery prioritizes newly signed pairing even when prior account is still logged in',
+      'if(_pairToken()){' in JS and 'if(newlyPaired) wallet = newlyPaired;' in JS)
+check('deliberate Disconnect clears pending pair and saved return destination',
+      "_clearPairToken();" in JS[JS.index('function disconnectWallet()'):JS.index('function _obSkipKey()')]
+      and "localStorage.removeItem('orca_pair_return')" in JS[JS.index('function disconnectWallet()'):JS.index('function _obSkipKey()')])
+check('iPadOS desktop-class user agent is still treated as mobile for Phantom approval',
+      'navigator.maxTouchPoints > 1' in JS)
 check('mobile connect records whether login started in the installed app',
       "source:isStandalonePWA?'pwa':'browser'" in JS)
 check('mobile connect sends the original same-app route through Phantom',

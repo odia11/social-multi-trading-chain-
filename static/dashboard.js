@@ -173,16 +173,12 @@ function _storeDeviceToken(t){
 function _clearDeviceToken(){
   try{ localStorage.removeItem('orca_device_token'); }catch(e){}
 }
-/* ── PAIRING: signing in FROM the home-screen app ───────────────────────────
-   The app on the home screen cannot finish a wallet connection on its own.
-   It opens Phantom's deeplink, Phantom hands back to Safari, and the session
-   is created over there -- inside a storage container this app cannot see.
-   It starts the login and never hears how it ended, so it asked you to go and
-   do it in the browser instead, which is where this whole complaint started.
-
-   So it starts the login carrying a pairing token, and afterwards asks the
-   server who signed. The signature is still checked in exactly the same
-   place; this only carries the answer back to the side that asked. */
+/* ── PAIRING: keep login in the browser that started it ───────────────────
+   Phantom may hand an iOS universal-link callback to the default browser,
+   not the Chrome tab or home-screen app that started Connect. Each original
+   context asks for the SIGNATURE-VERIFIED outcome using its own short-lived
+   pairing token. The server stores only its hash; neither address nor pair
+   token is trusted as evidence of wallet ownership. */
 function _pairToken(){
   try{ return localStorage.getItem('orca_pair') || ''; }catch(e){ return ''; }
 }
@@ -307,16 +303,8 @@ async function _resumeFromDeviceToken(){
 }
 
 /* Mobile deep-link constants — used by wallet detection below */
-const isMobile=/iPhone|iPad|Android/i.test(navigator.userAgent);
-function _phantomBrowseConnectUrl(){
-  var returnRoute = _currentWalletReturnRoute();
-  var target = new URL(returnRoute || '/', 'https://orcagent.fun');
-  target.searchParams.set('phantom_connect', '1');
-  target.searchParams.set('return_to', returnRoute || '/');
-  return 'https://phantom.app/ul/browse/' + encodeURIComponent(target.toString())
-    + '?ref=' + encodeURIComponent(window.location.origin);
-}
-const phantomDeepLink='https://phantom.app/ul/browse/'+encodeURIComponent('https://orcagent.fun');
+const isMobile=/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+  || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 const solflareDeepLink='https://solflare.com/ul/v1/browse/'+encodeURIComponent('https://orcagent.fun');
 /* Installed PWA (standalone display-mode): Phantom's connect deep link
    redirects back to the browser, not to the home-screen app icon, so the
@@ -413,32 +401,32 @@ async function _connectWalletSignedInner(provider, address){
   return r;
 }
 
-function _phantomMobileV1Connect(){
+function _phantomMobileV1Connect(returnRoute){
   try{ localStorage.removeItem('orca_manual_disconnect'); }catch(e){}
-  var _returnRoute = _currentWalletReturnRoute();
-  if(isStandalonePWA) _storePairReturnRoute(_returnRoute);
+  var _returnRoute = _safeWalletReturnRoute(returnRoute || _currentWalletReturnRoute());
+  // Pair EVERY mobile browser, not only home-screen PWAs. iOS may send
+  // Phantom's callback to the *default* browser even if login started in
+  // Chrome; the original tab can then claim the verified wallet and keep
+  // its own durable session on return instead of being stranded as guest.
+  _storePairReturnRoute(_returnRoute);
   var msgEl=document.getElementById('wallet-install-msg');
   var noteEl=document.getElementById('ob-phantom-note');
   function _setNote(txt,col){
     if(noteEl){noteEl.textContent=txt;if(col)noteEl.style.color=col;}
     if(msgEl&&msgEl!==noteEl){msgEl.textContent=txt;msgEl.style.display='block';}
   }
-  // The home-screen app used to stop here and tell you to go and do it in
-  // Safari, because Phantom hands back to the browser and this app would
-  // never learn the outcome. It can now: it starts the login with a pairing
-  // token and asks the server afterwards who signed. So the only difference
-  // is that it takes a token with it.
+  // A pairing tells the original browser tab (or isolated PWA) who
+  // signed, even when Phantom's callback opens a different browser. The
+  // server completes a pair ONLY after verifying the Phantom signature.
   _setNote('Initialising connection…','var(--muted)');
-  var _pairPromise = isStandalonePWA
-    ? fetch('/api/pair/start',{method:'POST',credentials:'include',
-        headers:{'Content-Type':'application/json'},body:'{}'})
-        .then(function(r){ return r.json(); })
-        .then(function(d){ if(d&&d.ok&&d.pair){ _storePairToken(d.pair); return d.pair; } return ''; })
-        .catch(function(){ return ''; })
-    : Promise.resolve('');
+  var _pairPromise = fetch('/api/pair/start',{method:'POST',credentials:'include',
+      headers:{'Content-Type':'application/json'},body:'{}'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if(d&&d.ok&&d.pair){ _storePairToken(d.pair); return d.pair; } return ''; })
+    .catch(function(){ return ''; });
   _pairPromise.then(function(_pair){
-  if(isStandalonePWA && !_pair){
-    _setNote('Could not prepare app sign-in — please try again.','var(--red)');
+  if(!_pair){
+    _setNote('Could not prepare browser sign-in — please try again.','var(--red)');
     return;
   }
   // Server generates the NaCl keypair — no browser storage needed
@@ -467,7 +455,10 @@ function _phantomMobileV1Connect(){
       // It leaves the app to do this, and iOS gives no signal when it comes
       // back with the job done -- so say what to do, rather than leaving a
       // blank screen behind.
-      _setNote('Approve in Phantom, then come back to this app.','var(--muted)');
+      _setNote(isStandalonePWA
+        ? 'Approve in Phantom, then come back to the OrcAgent app.'
+        : 'Approve in Phantom, then return to your OrcAgent browser tab.',
+        'var(--muted)');
     }
     window.location.href='https://phantom.app/ul/v1/connect?'+params.toString();
   })
@@ -689,8 +680,10 @@ async function connectWalletOnboard(type, afterLoginUrl){
   const check=!!provider;
 
   if(!check){
-    /* On mobile without the extension, use deep link */
-    if(isMobile){ if(isPhantom){ window.location.href=_phantomBrowseConnectUrl(); return; } window.location.href=solflareDeepLink; return; }
+    /* In normal Safari/Chrome use Phantom's signature-only connect and
+       return to THIS browser's OrcAgent session. Never move OrcAgent into
+       Phantom's embedded dApp browser via /ul/browse/. */
+    if(isMobile){ if(isPhantom){ _phantomMobileV1Connect(afterLoginUrl); return; } window.location.href=solflareDeepLink; return; }
     _walletConnectNotice(name+' wallet not detected — install the '+name+' browser extension and reload this page.');
     return;
   }
@@ -766,12 +759,34 @@ async function connectWalletOnboard(type, afterLoginUrl){
           .catch(function(e){ console.error('[phantom-browser-connect]', e); });
       }else if(attempts >= 20){
         clearInterval(timer);
-        _walletConnectNotice(isMobile
-          ? 'Open this page inside Phantom and tap Connect again.'
-          : 'Phantom wallet not detected — install the Phantom browser extension and reload this page.');
+        if(isMobile) _phantomMobileV1Connect(returnTo);
+        else _walletConnectNotice('Phantom wallet not detected — install the Phantom browser extension and reload this page.');
       }
     }, 250);
   }catch(e){ console.error('[phantom-browser-connect:init]', e); }
+})();
+
+// Wallet onboarding is available on standalone pages without dashboard.js.
+// Those pages hand off to /?wallet_connect=phantom&return_to=...; this is a
+// one-time instruction to start a wallet SIGNATURE, not a Phantom dApp browse
+// link. Remove the instruction before leaving for Phantom, so returning via
+// Safari/Chrome never starts the sign-in again.
+(function _startBrowserPhantomConnectHandoff(){
+  try{
+    var url = new URL(window.location.href);
+    if(url.searchParams.get('wallet_connect') !== 'phantom') return;
+    var returnTo = _safeWalletReturnRoute(url.searchParams.get('return_to') || '/');
+    url.searchParams.delete('wallet_connect');
+    url.searchParams.delete('return_to');
+    history.replaceState(null, '', url.pathname + url.search + url.hash);
+    // Give Phantom's in-app browser a short chance to inject the provider.
+    // Normal mobile browsers have none and use /ul/v1/connect instead.
+    setTimeout(function(){
+      if(_phantomProvider()) connectWalletOnboard('phantom', returnTo);
+      else if(isMobile) _phantomMobileV1Connect(returnTo);
+      else _walletConnectNotice('Install the Phantom browser extension to connect this wallet.');
+    }, 500);
+  }catch(e){ console.error('[phantom-browser-handoff]',e); }
 })();
 
 function resetWallet(){
@@ -839,6 +854,10 @@ function disconnectWallet(){
       // Disconnect has to mean disconnected. Leaving the token behind would
       // let the very next page load sign this browser straight back in.
       _clearDeviceToken();
+      // A previously started, unfinished mobile pairing must never be able
+      // to silently restore another session after deliberate Disconnect.
+      _clearPairToken();
+      try{localStorage.removeItem('orca_pair_return');}catch(e){}
       localStorage.setItem('orca_manual_disconnect','1');
       window.location.reload();
     });
@@ -3351,10 +3370,14 @@ function _recoverSessionOnReturn(){
     if(!me) return; // A network/server error is not a logout.
     var wallet = me.authenticated && me.wallet;
     if(wallet && me.csrf_token) _csrfToken = me.csrf_token;
-    if(!wallet){
-      wallet = await _claimPairing();
-      if(!wallet) wallet = await _resumeFromDeviceToken();
+    // Prioritize an explicitly started Phantom pairing even when a previous
+    // wallet session remains in this browser: reconnecting wallet B must not
+    // silently leave the user on wallet A if Phantom returns via Safari.
+    if(_pairToken()){
+      var newlyPaired = await _claimPairing();
+      if(newlyPaired) wallet = newlyPaired;
     }
+    if(!wallet) wallet = await _resumeFromDeviceToken();
     if(!wallet) return;
     _applySessionWallet(wallet);
     var onboard = document.getElementById('onboard');

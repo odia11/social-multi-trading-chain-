@@ -27,8 +27,9 @@ the app polls and must not be able to tell them apart.
 import ast
 import re
 import sys
+from pathlib import Path
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = str(Path(__file__).resolve().parents[1])
 SRC = open(REPO + '/dashboard.py').read()
 JS = open(REPO + '/static/dashboard.js').read()
 CB = open(REPO + '/templates/phantom_callback.html').read()
