@@ -161,6 +161,88 @@ def test_all():
     print('PASS gated claims and private reward history never fabricate earnings')
     tmp.cleanup()
 
+def test_allowlisted_mainnet_pilot():
+    # Never open real-value signing to all users while preflighting one wallet.
+    tmp,app,d=setup()
+    client=app.test_client()
+    owner=str(Keypair().pubkey());outsider=str(Keypair().pubkey())
+    with client.session_transaction() as sess:
+        sess['wallet']=owner;sess['csrf_token']='test-csrf'
+    flags={'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED':'0',
+      'ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_ENABLED':'0',
+      'ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_WALLETS':owner}
+    with patch.dict(os.environ,flags):
+      assert client.get('/api/token-launch/config').get_json()['enabled'] is False
+      assert 'Preflight mode' in client.get('/token-launch').get_data(as_text=True)
+    flags['ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_ENABLED']='1'
+    with patch.dict(os.environ,flags):
+      assert client.get('/api/token-launch/config').get_json()['enabled'] is True
+      assert 'Preflight mode' not in client.get('/token-launch').get_data(as_text=True)
+      with client.session_transaction() as sess:sess['wallet']=outsider
+      assert client.get('/api/token-launch/config').get_json()['enabled'] is False
+      assert 'Preflight mode' in client.get('/token-launch').get_data(as_text=True)
+      # Invalid, empty and a lookalike wallet do not bypass equality.
+      flags['ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_WALLETS']='not_a_wallet'
+      with patch.dict(os.environ,flags):
+        assert client.get('/api/token-launch/config').get_json()['enabled'] is False
+      flags['ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_WALLETS']=owner+','+outsider
+      with patch.dict(os.environ,flags):
+        assert client.get('/api/token-launch/config').get_json()['enabled'] is True
+    print('PASS mainnet pilot requires BOTH switch and exact authenticated wallet allowlist')
+    print('PASS unapproved users remain in draft-only mode, including when another wallet is approved')
+    tmp.cleanup()
+
+def test_exact_onchain_transaction_verification():
+    """Simulated RPC response uses cryptographically signed bytes, not a stubbed verdict."""
+    from solders.transaction import Transaction as Tx
+    tmp,app,d=setup()
+    client=app.test_client();owner=Keypair();wallet=str(owner.pubkey())
+    with client.session_transaction() as sess:
+        sess['wallet']=wallet;sess['csrf_token']='test-csrf'
+    headers={'X-CSRF-Token':'test-csrf'}
+    draft=client.post('/api/token-launch/draft',json={
+        'client_nonce':'exact-signature-test-0001','name':'Exact Test',
+        'symbol':'EXACT','image_data':icon(),'reward_mode':'creator',
+        'quote_asset':'USDC'},headers=headers).get_json()['draft']
+    draft_id=draft['id'];path='/api/token-launch/'+draft_id
+    blockhash=str(Keypair().pubkey())
+    state={'result':None,'curve_exists':True}
+    with patch.dict(os.environ,{'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED':'1'}):
+      with patch('token_launch.requests.post') as rpc:
+        rpc.return_value.raise_for_status=lambda:None
+        def reply():
+            method=rpc.call_args.kwargs['json']['method']
+            if method=='getLatestBlockhash':
+                return {'result':{'value':{'blockhash':blockhash}}}
+            if method=='getTransaction':return {'result':state['result']}
+            if method=='getAccountInfo':
+                return {'result':{'value':{'owner':token_launch.PUMP_PROGRAM}
+                        if state['curve_exists'] else None}}
+            raise AssertionError('Unexpected RPC method '+method)
+        rpc.return_value.json=reply
+        prepared=client.post(path+'/prepare',json={},headers=headers)
+        assert prepared.status_code==200,prepared.get_data(as_text=True)[:160]
+        part=Tx.from_bytes(base64.b64decode(prepared.get_json()['transaction_b64']))
+        signed=Tx.populate(part.message,[owner.sign_message(bytes(part.message)),part.signatures[1]])
+        assert signed.verify_with_results()==[True,True]
+        sig=str(signed.signatures[0]);raw=base64.b64encode(bytes(signed)).decode()
+        state['result']={'transaction':[raw,'base64'],'meta':{'err':None}}
+        incorrect=client.post(path+'/confirm',json={'stage':'create','signature':str(Keypair().sign_message(b'unrelated'))},headers=headers)
+        assert incorrect.status_code==400,incorrect.get_data(as_text=True)[:180]
+        state['curve_exists']=False
+        not_verified=client.post(path+'/confirm',json={'stage':'create','signature':sig},headers=headers)
+        assert not_verified.status_code==503
+        state['curve_exists']=True
+        verified=client.post(path+'/confirm',json={'stage':'create','signature':sig},headers=headers)
+        assert verified.status_code==200,verified.get_data(as_text=True)[:180]
+        assert verified.get_json()['confirmed'] is True
+        assert verified.get_json()['draft']['status']=='live'
+        again=client.post(path+'/confirm',json={'stage':'create','signature':sig},headers=headers)
+        assert again.status_code==200 and again.get_json()['confirmed'] is True
+    print('PASS exact Pump message and both Ed25519 signatures verified against signed RPC bytes')
+    print('PASS forged signatures and absent on-chain mint cannot mark a launch as live')
+    tmp.cleanup()
+
 def test_prepared_recovery():
     # A Phantom cancel must allow re-approval, not strand a noncustodial mint.
     # Once the actual blockhash is invalid, a *different* mint may only be
@@ -222,4 +304,6 @@ def test_prepared_recovery():
 
 if __name__=='__main__':
     test_all()
+    test_allowlisted_mainnet_pilot()
+    test_exact_onchain_transaction_verification()
     test_prepared_recovery()

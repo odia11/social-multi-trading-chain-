@@ -105,7 +105,9 @@ chown -R "$APP_USER:$APP_USER" "$APP_DIR/venv"
 # bundle is built in the clone, committed, and doesn't need build tools here.
 if [ -f "$APP_DIR/pump_adapter/package-lock.json" ] \
    && [ -f "$ENV_FILE" ] \
-   && grep -Eq '^[[:space:]]*ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED=1[[:space:]]*$' "$ENV_FILE"; then
+   && { grep -Eq '^[[:space:]]*ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED=1[[:space:]]*$' "$ENV_FILE" \
+   || { grep -Eq '^[[:space:]]*ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_ENABLED=1[[:space:]]*$' "$ENV_FILE" \
+   && grep -Eq '^[[:space:]]*ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_WALLETS=[1-9A-HJ-NP-Za-km-z]{32,44}([[:space:]]*,[[:space:]]*[1-9A-HJ-NP-Za-km-z]{32,44})*[[:space:]]*$' "$ENV_FILE"; }; }; then
   say "Installing isolated Pump SDK for explicitly enabled Token Launch"
   if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
     (cd "$APP_DIR/pump_adapter" \

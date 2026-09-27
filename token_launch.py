@@ -126,7 +126,18 @@ def install(d):
         )''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_token_reward_claims_wallet ON token_reward_claims(wallet,created_at)')
 
-    def enabled():return os.getenv('ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED','0')=='1'
+    def enabled(wallet=None):
+        # Normal users always remain in safe draft-only mode during a pilot.
+        # A pilot requires BOTH an explicit switch and an exact, authenticated
+        # wallet allowlist. No user-supplied wallet/body/header can override it.
+        if os.getenv('ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED','0')=='1':
+            return True
+        if os.getenv('ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_ENABLED','0')!='1':
+            return False
+        w=wallet or identity()
+        raw=os.getenv('ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_WALLETS','')
+        wallets={candidate.strip() for candidate in raw.split(',') if candidate.strip()}
+        return bool(w and w in wallets and d.is_valid_solana_address(w))
 
     def fail(message,status=400):
         return jsonify(ok=False,msg=str(message)[:220]),status

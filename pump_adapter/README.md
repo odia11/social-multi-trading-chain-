@@ -59,3 +59,36 @@ OrcAgent charges no extra Token Launch fee in this release. Actual Pump
 creator fees do not equal OrcAgent's existing trade fee, and a reward claim is
 not itself a second revenue event. Holder Rewards are handled by Pump, not by
 an OrcAgent creator claim.
+
+## Pilot rollout without enabling public signing
+
+The safe default is `ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED=0`. For the paid
+mainnet test, the operator must first obtain the creator's **public** Solana
+wallet address, an independently chosen community **public** wallet address,
+an exact fee-share split, and a maximum SOL and USDC test budget. No secret
+keys, seed phrases, or wallet session tokens are required by OrcAgent.
+
+Only after these parameters are approved, `/etc/orcagent.env` may be configured:
+
+```sh
+ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED=0
+ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_ENABLED=1
+ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_WALLETS=<CREATOR_SOLANA_PUBLIC_ADDRESS>
+```
+
+The existing deployment installer detects an explicitly configured pilot,
+installs the pinned SDK, runs the security audit and read-only Pump checks,
+and stops the deployment if one fails. Only the exact authenticated creator
+wallet can prepare paid transactions; all other users can still save drafts.
+The pilot wallet must open the app in a compatible Phantom environment and
+approve each transaction. The second transaction for community sharing
+allocates the irreversible final split. Do NOT turn on the public global
+switch to perform this single-wallet test.
+
+Before a real claim test, eligible on-chain trades must generate creator fees;
+creating a coin alone does **not** create an earned-fee balance. Any test buy,
+sell, claim or separate SOL-to-USDC swap requires an explicit wallet approval.
+Check the actual Pump account state and transaction signatures before
+reporting fees received. No transaction amount or network fee is silently
+charged to the platform, and estimated vault balances are never booked as
+realized revenue. Disable the pilot flag when the test is finished.
