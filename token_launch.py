@@ -125,8 +125,15 @@ def install(d):
             signature TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'prepared',
             created_at INTEGER NOT NULL, confirmed_at INTEGER NOT NULL DEFAULT 0,
+            received_raw TEXT NOT NULL DEFAULT '',
             FOREIGN KEY(launch_id) REFERENCES token_launches(id)
         )''')
+        # Older production DBs predate real received-amount tracking. Empty
+        # means unverified, not zero and never the pre-claim snapshot.
+        if 'received_raw' not in {r[1] for r in conn.execute('PRAGMA table_info(token_reward_claims)')}:
+            try:conn.execute("ALTER TABLE token_reward_claims ADD COLUMN received_raw TEXT NOT NULL DEFAULT ''")
+            except sqlite3.OperationalError as exc:
+                if 'duplicate column name' not in str(exc).lower():raise
         conn.execute('CREATE INDEX IF NOT EXISTS idx_token_reward_claims_wallet ON token_reward_claims(wallet,created_at)')
 
     def enabled(wallet=None):
@@ -179,19 +186,23 @@ def install(d):
                    'quote_asset','community_wallet','community_bps','status','mint',
                    'launch_signature','finalize_signature','created_at','error')}
 
-    # A verification-only public RPC fallback prevents OrcAgent from trapping
-    # a wallet's ALREADY BROADCAST mint behind 429s from the default endpoint.
-    # Never use the fallback to fetch blockhashes, prepare/mutate transactions,
-    # estimate launch fees or build unsigned claims. Signed transactions still
-    # must match the exact locally stored message and every Ed25519 signature.
+    # A fixed public RPC fallback covers narrow, READ-ONLY verification and
+    # creator-USDC claim preflight methods. It is never used to sign, send or
+    # authorize any action, nor to bypass the pilot's simulated cost ceiling.
+    # Signed transactions must match the stored message and every signature.
     _VERIFY_RPC='https://solana-rpc.publicnode.com'
 
-    def rpc(method,params,*,verification=False):
+    def rpc(method,params,*,verification=False,claim_read=False):
         primary=(getattr(d,'SOLANA_RPC_URL','') or d.SOLANA_RPC)
         if verification and method not in ('getTransaction','getAccountInfo'):
             raise RuntimeError('This RPC method is not permitted on the verification fallback')
+        if claim_read and (verification or method not in (
+                'getLatestBlockhash','getBalance','getFeeForMessage',
+                'simulateTransaction','isBlockhashValid')):
+            raise RuntimeError('This RPC method is not permitted in claim preflight')
+        can_fallback=verification or claim_read
         endpoints=[primary]
-        if verification and primary.rstrip('/')!=_VERIFY_RPC:
+        if can_fallback and primary.rstrip('/')!=_VERIFY_RPC:
             endpoints.append(_VERIFY_RPC)
         last_error=None
         for number,endpoint in enumerate(endpoints):
@@ -226,7 +237,7 @@ def install(d):
                     return result
                 except (requests.RequestException,ValueError) as exc:
                     last_error='Solana RPC could not verify this action. Keep the existing token and retry later.'
-                    if number==0 and verification:
+                    if number==0 and can_fallback:
                         break
                     raise RuntimeError(last_error) from exc
         raise RuntimeError(last_error or 'Solana RPC verification unavailable. Never create a duplicate token.')
@@ -271,7 +282,7 @@ def install(d):
             raise RuntimeError('Invalid Solana transaction')
         return built
 
-    def pilot_sol_preflight(row,transaction_b64,max_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS):
+    def pilot_sol_preflight(row,transaction_b64,max_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS,*,claim_read=False):
         """Read-only simulation; reject if real network/rent cost is unknown.
 
         Simulated fee-payer balance delta plus getFeeForMessage (conservatively
@@ -285,14 +296,14 @@ def install(d):
             prepared=SolanaTransaction.from_bytes(raw)
             encoded=base64.b64encode(bytes(prepared.message)).decode('ascii')
             wallet=row['wallet']
-            balance=rpc('getBalance',[wallet,{'commitment':'confirmed'}])
+            balance=rpc('getBalance',[wallet,{'commitment':'confirmed'}],claim_read=claim_read)
             before=(balance or {}).get('value')
-            fee_result=rpc('getFeeForMessage',[encoded,{'commitment':'confirmed'}])
+            fee_result=rpc('getFeeForMessage',[encoded,{'commitment':'confirmed'}],claim_read=claim_read)
             fee=(fee_result or {}).get('value')
             simulated=rpc('simulateTransaction',[
                 transaction_b64,{'encoding':'base64','commitment':'confirmed',
                 'sigVerify':False,
-                'accounts':{'encoding':'base64','addresses':[wallet]}}])
+                'accounts':{'encoding':'base64','addresses':[wallet]}}],claim_read=claim_read)
             if not isinstance(before,int) or not isinstance(fee,int) or fee<0:
                 raise RuntimeError('Pilot network fee/balance unavailable; no transaction prepared')
             outcome=(simulated or {}).get('value') or {}
@@ -306,6 +317,10 @@ def install(d):
                 if insufficient:
                     # Do not quote a partial instruction's shortage as the full
                     # launch price. Never expose arbitrary RPC logs to the UI.
+                    if claim_read:
+                        raise RuntimeError('Insufficient SOL for the creator USDC receiving account rent and claim fees '
+                            f'(Phantom balance: {before/1_000_000_000:.9f} SOL). '
+                            'Add SOL to this wallet, then retry. No transaction was sent.')
                     raise RuntimeError('Insufficient SOL in your connected Phantom wallet '
                         f'(balance: {before/1_000_000_000:.9f} SOL). '
                         'USDC cannot pay Solana account rent and network fees. '
@@ -326,7 +341,7 @@ def install(d):
         except (ValueError,base64.binascii.Error,IndexError,TypeError) as exc:
             raise RuntimeError('Pilot transaction could not be simulated safely') from exc
 
-    def blockhash_valid(transaction_b64):
+    def blockhash_valid(transaction_b64,*,claim_read=False):
         """Reject stale instructions using the actual Solana blockhash gate.
 
         We only re-prepare an unsigned action if its original blockhash has
@@ -338,7 +353,7 @@ def install(d):
             blockhash=str(SolanaTransaction.from_bytes(raw).message.recent_blockhash)
         except (ValueError,base64.binascii.Error) as exc:
             raise RuntimeError('Stored transaction could not be verified') from exc
-        answer=rpc('isBlockhashValid',[blockhash,{'commitment':'confirmed'}])
+        answer=rpc('isBlockhashValid',[blockhash,{'commitment':'confirmed'}],claim_read=claim_read)
         if not isinstance(answer,dict) or not isinstance(answer.get('value'),bool):
             raise RuntimeError('Solana blockhash validity unavailable')
         return answer['value']
@@ -382,7 +397,8 @@ def install(d):
         """
         if not isinstance(signature,str) or not _SIG.fullmatch(signature):
             raise ValueError('Invalid transaction signature')
-        stored=row['prepare_tx_b64'] if stage=='create' else row['finalize_tx_b64']
+        stored=(row['prepare_tx_b64'] if stage in ('create','claim')
+                else row['finalize_tx_b64'])
         if not stored:raise ValueError('No prepared transaction for this action')
         result=rpc('getTransaction',[signature,{'encoding':'base64',
                          'commitment':'confirmed','maxSupportedTransactionVersion':0}],verification=True)
@@ -410,6 +426,53 @@ def install(d):
         except (IndexError,KeyError,TypeError,base64.binascii.Error) as exc:
             raise ValueError('Unrecognized on-chain transaction') from exc
         return True
+
+    def verified_creator_usdc_receipt(signature,wallet):
+        """Actual received USDC in the creator's canonical ATA in this TX.
+
+        Compare pre/post balances of the exact recipient token account in the
+        confirmed transaction, never the fee vault snapshot or a wallet-wide
+        balance observed at another time. No broadcast and no secret access.
+        """
+        owner=Pubkey.from_string(wallet)
+        ata,_=Pubkey.find_program_address([
+            bytes(owner),bytes(Pubkey.from_string(SPL_TOKEN_PROGRAM)),
+            bytes(Pubkey.from_string(USDC_MINT))],
+            Pubkey.from_string(ASSOCIATED_TOKEN_PROGRAM))
+        result=rpc('getTransaction',[signature,{'encoding':'json',
+                      'commitment':'confirmed','maxSupportedTransactionVersion':0}],verification=True)
+        if not result or (result.get('meta') or {}).get('err') is not None:
+            raise RuntimeError('Creator USDC claim receipt is not yet verifiable')
+        try:
+            keys=result['transaction']['message']['accountKeys']
+            idx=keys.index(str(ata))
+            meta=result['meta']
+            def amount(which):
+                for entry in meta[which]:
+                    if entry.get('accountIndex')!=idx:continue
+                    if (entry.get('mint')!=USDC_MINT or entry.get('owner')!=wallet
+                            or entry.get('uiTokenAmount',{}).get('decimals')!=6):
+                        raise ValueError('Unverifiable USDC recipient account')
+                    number=entry['uiTokenAmount']['amount']
+                    if not isinstance(number,str) or not number.isdecimal():raise ValueError
+                    return int(number)
+                return None
+            before=amount('preTokenBalances')
+            after=amount('postTokenBalances')
+            if after is None or (before is not None and after<before):raise ValueError
+            if before is None:
+                # No preTokenBalance can mean the ATA was created by this
+                # claim, but must not mean missing metadata for an EXISTING
+                # wallet balance; that would falsely credit the full balance.
+                lamports=meta.get('preBalances')
+                if (not isinstance(lamports,list) or idx>=len(lamports)
+                        or lamports[idx]!=0):
+                    raise ValueError('New recipient account was not verifiable')
+            received=after-(before or 0)
+            if received<=0:raise ValueError('No verified USDC was received')
+            return str(received)
+        except (KeyError,ValueError,IndexError,TypeError,AttributeError) as exc:
+            raise RuntimeError('Confirmed USDC recipient delta unavailable; retry claim confirmation') from exc
 
     def reconcile_submitted_launches():
         """Recover already signed and recorded Phantom transactions on restart.
@@ -808,11 +871,11 @@ def install(d):
                     and not pending['signature']):
                 try:
                     fresh=(time.time()-pending['created_at']<45
-                           or blockhash_valid(pending['transaction_b64']))
+                           or blockhash_valid(pending['transaction_b64'],claim_read=(row['reward_mode']=='creator' and row['quote_asset']=='USDC')))
                 except RuntimeError as exc:return fail(exc,503)
                 if fresh:
                     try:pilot_cost=pilot_sol_preflight(row,pending['transaction_b64'],
-                                         PILOT_MAX_FOLLOWUP_SOL_LAMPORTS)
+                                         PILOT_MAX_FOLLOWUP_SOL_LAMPORTS,claim_read=(row['reward_mode']=='creator' and row['quote_asset']=='USDC'))
                     except RuntimeError as exc:return fail(exc,503)
                     return jsonify(ok=True,claim_id=pending['id'],reused=True,
                       transaction_b64=pending['transaction_b64'],
@@ -830,13 +893,16 @@ def install(d):
                     if cur.rowcount!=1:return fail('Claim status changed; reload history.',409)
             else:
                 return fail('An earlier claim for this quote asset is awaiting confirmation. Check claim history first.',409)
-        block=rpc('getLatestBlockhash',[{'commitment':'confirmed'}])
+        try:
+            block=rpc('getLatestBlockhash',[{'commitment':'confirmed'}],claim_read=(row['reward_mode']=='creator' and row['quote_asset']=='USDC'))
+        except RuntimeError as exc:return fail(exc,503)
         blockhash=((block or {}).get('value') or {}).get('blockhash')
         if not blockhash:return fail('No recent Solana blockhash',503)
         path=os.path.join(d.BASE,'pump_adapter','build-reward-claim.cjs')
         params={'wallet':wallet,'mint':row['mint'],'quote_asset':row['quote_asset'],
                 'reward_mode':row['reward_mode'],'blockhash':blockhash}
-        endpoint=getattr(d,'SOLANA_RPC_URL','') or d.SOLANA_RPC
+        endpoint=(_VERIFY_RPC if row['reward_mode']=='creator' and row['quote_asset']=='USDC'
+                  else (getattr(d,'SOLANA_RPC_URL','') or d.SOLANA_RPC))
         try:
             r=subprocess.run(['/bin/bash',os.path.join(d.BASE,'pump_adapter','run-node.sh'),path],input=json.dumps(params),text=True,
                 capture_output=True,timeout=14,cwd=os.path.dirname(path),
@@ -854,7 +920,7 @@ def install(d):
             # ATA/rent + fee claims. Trades elsewhere need separate user
             # approval and are never charged through this launch endpoint.
             pilot_claim_cost=pilot_sol_preflight(row,built['transaction_b64'],
-                                                 PILOT_MAX_FOLLOWUP_SOL_LAMPORTS)
+                                                 PILOT_MAX_FOLLOWUP_SOL_LAMPORTS,claim_read=(row['reward_mode']=='creator' and row['quote_asset']=='USDC'))
             claim_id=secrets.token_hex(16)
             with sqlite3.connect(d.DB_FILE) as conn:
                 conn.execute('''INSERT INTO token_reward_claims
@@ -863,6 +929,10 @@ def install(d):
                   (claim_id,launch_id,wallet,row['mint'],row['quote_asset'],
                    row['reward_mode'],accrued,built.get('accrued_scope',''),
                    built['transaction_b64'],int(time.time())))
+        except RuntimeError as exc:
+            # A rejected simulation (including insufficient ATA rent) is a
+            # controlled preflight refusal, not a production HTTP 500.
+            return fail(exc,503)
         except (OSError,subprocess.TimeoutExpired,ValueError) as exc:
             return fail('Reward claim builder unavailable; nothing has been spent.',503)
         return jsonify(ok=True,claim_id=claim_id,transaction_b64=built['transaction_b64'],
@@ -890,7 +960,7 @@ def install(d):
         if not claim:return fail('Claim not found',404)
         if claim['signature'] and claim['signature']!=sig:
             return fail('Claim already recorded with another transaction',409)
-        if claim['status']=='confirmed':return jsonify(ok=True,confirmed=True,signature=sig)
+        if claim['status']=='confirmed':return jsonify(ok=True,confirmed=True,signature=sig,received_raw=claim['received_raw'])
         if claim['status'] not in ('prepared','submitted'):
             return fail('Claim is not pending',409)
         try:
@@ -898,15 +968,19 @@ def install(d):
             confirmed=check_signature(sig,exact,'claim')
         except ValueError as exc:return fail(exc)
         except RuntimeError as exc:return fail(exc,503)
+        received_raw=''
+        if confirmed and row['reward_mode']=='creator' and row['quote_asset']=='USDC':
+            try:received_raw=verified_creator_usdc_receipt(sig,wallet)
+            except RuntimeError as exc:return fail(exc,503)
         status='confirmed' if confirmed else 'submitted'
         with sqlite3.connect(d.DB_FILE) as conn:
             cur=conn.execute('''UPDATE token_reward_claims
-                 SET signature=?,status=?,confirmed_at=?
+                 SET signature=?,status=?,confirmed_at=?,received_raw=?
                  WHERE id=? AND wallet=? AND status IN ('prepared','submitted')
                  AND (signature='' OR signature=?)''',
-                 (sig,status,int(time.time()) if confirmed else 0,claim_id,wallet,sig))
+                 (sig,status,int(time.time()) if confirmed else 0,received_raw,claim_id,wallet,sig))
             if cur.rowcount!=1:return fail('Claim changed during verification',409)
-        return jsonify(ok=True,confirmed=confirmed,signature=sig,status=status), (200 if confirmed else 202)
+        return jsonify(ok=True,confirmed=confirmed,signature=sig,status=status,received_raw=received_raw), (200 if confirmed else 202)
 
     @app.get('/api/token-launch/<launch_id>/claims')
     @d.rate_limit(25,60)
@@ -917,11 +991,11 @@ def install(d):
         if not row:return fail('Launch not found',404)
         with closing(sqlite3.connect(d.DB_FILE)) as conn:
             claims=conn.execute('''SELECT id,quote_asset,accrued_raw,accrued_scope,
-                             signature,status,created_at,confirmed_at
+                             signature,status,created_at,confirmed_at,received_raw
                     FROM token_reward_claims WHERE launch_id=? AND wallet=?
                     ORDER BY created_at DESC LIMIT 30''',(launch_id,wallet)).fetchall()
         return jsonify(ok=True,claims=[dict(zip(('id','quote_asset','accrued_raw',
-                     'accrued_scope','signature','status','created_at','confirmed_at'),v)) for v in claims])
+                     'accrued_scope','signature','status','created_at','confirmed_at','received_raw'),v)) for v in claims])
 
     @app.post('/api/token-launch/<launch_id>/confirm')
     @d.rate_limit(15,60)

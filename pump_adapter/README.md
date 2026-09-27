@@ -212,3 +212,39 @@ The public `/launches` directory lists only confirmed OrcAgent launch records.
 Private drafts and unconfirmed signatures never appear there. The global
 public launch switch remains OFF until the creator-fee claim route has been
 separately tested with explicit user-approved wallet transactions.
+
+## Creator-USDC fee claim pilot — verified read-only preflight
+
+The 100%-Creator / USDC pilot uses `build-reward-claim.cjs`. Its creator wallet
+has a **wallet-wide** Pump bonding-curve USDC vault; PumpSwap's separate
+creator USDC ATA may also hold fees. The builder checks both exact, derived
+accounts via individual `getAccountInfo` calls rather than the Pump SDK's
+large supported-quote/indexed `getMultipleAccountsInfo` scans (which some
+public RPCs reject with 403). The official Pump SDK still constructs the
+claim instruction. A narrowed two-address read shim supplies only the exact
+AMM creator vault ATA and recipient ATA the SDK asks for; unexpected keys
+fail closed. Nothing in the builder signs or broadcasts.
+
+A fixed public RPC is permitted for **read-only** creator-USDC claim blockhash,
+balance, fee, blockhash-validity and simulation requests when the primary RPC
+is rate-limited. No launch/signing/sending logic uses this failover. The pilot
+still requires a successful simulation and rejects a follow-up estimated SOL
+cost greater than 0.005 SOL. Failed preflight stores no claim transaction.
+
+The creator's Phantom wallet must have enough native SOL for its USDC
+associated token account rent **if that recipient account does not exist**,
+plus Solana transaction fees. OrcAgent cannot pay ATA rent from unclaimed USDC
+and never tops up the wallet. In the September 27, 2026 read-only mainnet
+check, the creator had 0.000890880 SOL and its canonical USDC ATA was missing:
+`simulateTransaction` failed on an account-rent transfer needing 1488440
+lamports. These dated amounts are observations, not perpetual balances or a
+promise of the next simulation's costs.
+
+The payout ledger has a backward-compatible `received_raw` field. Only after
+checking the exact stored Phantom-signed transaction and confirmed on-chain
+recipient USDC token balance **delta** does the UI show an actual amount
+received. `accrued_raw` remains the earlier, wallet-wide vault observation;
+it must never be shown as a payout. An unavailable/malformed receipt fails
+closed and can be rechecked from private Claim history. Token Launch remains
+restricted to the allowlisted pilot wallet until an owner-approved mainnet
+claim is actually signed, broadcast, and independently confirmed.

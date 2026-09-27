@@ -2,9 +2,10 @@
 require('./runtime-check.cjs');
 // Permissionless creator-fee distribution or an owner's regular creator claim.
 // Builds unsigned transactions only; this process never signs for any user.
-const {OnlinePumpSdk,feeSharingConfigPda}=require('@pump-fun/pump-sdk');
+const {OnlinePumpSdk,feeSharingConfigPda,creatorVaultPda}=require('@pump-fun/pump-sdk');
+const {coinCreatorVaultAuthorityPda,coinCreatorVaultAtaPda}=require('@pump-fun/pump-swap-sdk');
 const {PublicKey,Connection,Transaction}=require('@solana/web3.js');
-const {TOKEN_PROGRAM_ID,NATIVE_MINT,getAssociatedTokenAddressSync,
+const {TOKEN_PROGRAM_ID,NATIVE_MINT,getAssociatedTokenAddressSync,unpackAccount,
        createAssociatedTokenAccountIdempotentInstruction}=require('@solana/spl-token');
 const USDC=new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 async function run(){
@@ -18,10 +19,49 @@ async function run(){
  const feeOwner=sharing?feeSharingConfigPda(mint):wallet;
  const rpc=process.env.ORCA_LAUNCH_RPC;
  if(!rpc || !/^https?:\/\//.test(rpc))throw Error('Configured Solana RPC unavailable');
- const sdk=new OnlinePumpSdk(new Connection(rpc,'confirmed'));
- const vaults=await sdk.getCreatorVaultQuoteBalances(feeOwner);
- const current=vaults.find(x=>x.mint.equals(quote));
- const total=current?BigInt(current.total.toString()):0n;
+ const connection=new Connection(rpc,'confirmed');
+ const sdk=new OnlinePumpSdk(connection);
+ let total;
+ if(!sharing && data.quote_asset==='USDC'){
+  // Some public Solana RPC providers reject getMultipleAccountsInfo and the
+  // SDK's very broad getCreatorVaultQuoteBalances index scan with HTTP 403.
+  // The claim is only for canonical USDC: read its two derived creator vault
+  // ATAs directly instead. No account-enumeration or token-balance index.
+  const creatorVault=creatorVaultPda(wallet);
+  const ammAuthority=coinCreatorVaultAuthorityPda(wallet);
+  const vault=getAssociatedTokenAddressSync(USDC,creatorVault,true);
+  const ammVault=coinCreatorVaultAtaPda(
+       ammAuthority,USDC,TOKEN_PROGRAM_ID);
+  function validatedAmount(address,expectedOwner,info){
+   if(!info)return 0n;
+   if(!info.owner.equals(TOKEN_PROGRAM_ID))throw Error('Creator USDC vault program mismatch');
+   const account=unpackAccount(address,info,TOKEN_PROGRAM_ID);
+   if(!account.mint.equals(USDC)||!account.owner.equals(expectedOwner))
+     throw Error('Creator USDC vault mint/authority mismatch');
+   if(account.isFrozen)throw Error('Creator USDC vault is frozen');
+   return BigInt(account.amount.toString());
+  }
+  const pumpInfo=await connection.getAccountInfo(vault,'confirmed');
+  const ammInfo=await connection.getAccountInfo(ammVault,'confirmed');
+  total=validatedAmount(vault,creatorVault,pumpInfo)+
+        validatedAmount(ammVault,ammAuthority,ammInfo);
+  // collectCoinCreatorFeeV2Instructions uses getMultipleAccountsInfo for two
+  // precisely derived accounts. Replace ONLY this SDK connection's batch
+  // reader with separate confirmed account reads, never fake missing data.
+  connection.getMultipleAccountsInfo=async (keys)=>{
+    if(!Array.isArray(keys)||keys.length!==2||
+       !keys[0].equals(ammVault)||
+       !keys[1].equals(getAssociatedTokenAddressSync(USDC,wallet,true)))
+      throw Error('Unexpected claim account request');
+    const answer=[];
+    for(const key of keys)answer.push(await connection.getAccountInfo(key,'confirmed'));
+    return answer;
+  };
+ }else{
+  const vaults=await sdk.getCreatorVaultQuoteBalances(feeOwner);
+  const current=vaults.find(x=>x.mint.equals(quote));
+  total=current?BigInt(current.total.toString()):0n;
+ }
  if(total<=0n)throw Error('No confirmed creator fees available for this quote asset');
  const ixs=[];
  if(sharing){

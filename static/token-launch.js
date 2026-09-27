@@ -146,7 +146,16 @@ async function claimRewards(row){
                     {claim_id:ready.claim_id,signature:sig});
        return confirmed;
      });
-   if(result){status(result.confirmed?'Creator-fee claim confirmed on-chain.':'Claim submitted; check your wallet and claim history before retrying.');await loadMine()}
+   if(result){
+     var actual=(result.received_raw!==undefined&&result.received_raw!==''
+       ?(BigInt(result.received_raw)/1000000n).toString()+'.'+
+         (BigInt(result.received_raw)%1000000n).toString().padStart(6,'0')+' USDC'
+       :'');
+     status(result.confirmed
+       ?(actual?'Creator-fee claim confirmed. Actual USDC received in your wallet: '+actual+' (wallet-wide creator rewards).':'Creator-fee claim confirmed on-chain.')
+       :'Claim submitted; check your wallet and claim history before retrying.');
+     await loadMine();
+   }
  }catch(e){status(e.message||'Claim could not be prepared',true)}
  finally{busy=false}
 }
@@ -156,7 +165,11 @@ async function showClaims(row){
   var r=await call('/api/token-launch/'+row.id+'/claims');
   if(!r.claims.length){status('No creator-fee claims submitted for this token.');return}
   var lines=r.claims.slice(0,6).map(function(c){
-    return c.status+' · '+c.quote_asset+' · '+(c.signature?c.signature.slice(0,10)+'…':'awaiting wallet signature')+' · '+new Date(c.created_at*1000).toLocaleDateString();
+    var received=(c.status==='confirmed'&&c.received_raw!==undefined&&c.received_raw!==''
+      ?' · received '+((BigInt(c.received_raw)/1000000n).toString()+'.'+
+           (BigInt(c.received_raw)%1000000n).toString().padStart(6,'0'))+' USDC'
+      :'');
+    return c.status+' · '+c.quote_asset+received+' · '+(c.signature?c.signature.slice(0,10)+'…':'awaiting wallet signature')+' · '+new Date(c.created_at*1000).toLocaleDateString();
   });
   status(lines.join(' | '));
   var pending=r.claims.find(function(c){return c.status==='submitted'||c.status==='prepared'});
@@ -166,7 +179,13 @@ async function showClaims(row){
     if(!sig)return;
     var confirmed=await call('/api/token-launch/'+row.id+'/claim/confirm',
        {claim_id:pending.id,signature:sig});
-    if(confirmed.confirmed)status('Creator-fee claim confirmed on-chain.');
+    if(confirmed.confirmed){
+      var paid=confirmed.received_raw;
+      status(paid!==undefined&&paid!==''
+        ?'Creator-fee claim confirmed. Received '+((BigInt(paid)/1000000n).toString()+'.'+
+          (BigInt(paid)%1000000n).toString().padStart(6,'0'))+' USDC in your wallet.'
+        :'Creator-fee claim confirmed on-chain.');
+    }
   }
  }catch(e){status(e.message||'Claim history unavailable',true)}
 }
