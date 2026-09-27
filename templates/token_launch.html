@@ -18,6 +18,7 @@ button,input,textarea,select{font:inherit}
 button{cursor:pointer}
 button:disabled{cursor:not-allowed;opacity:.55}
 .tl-wrap{width:min(1020px,100%);margin:0 auto;padding:28px 20px 110px}
+.tl-breadcrumbs{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 20px}.tl-back{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:9px 13px;border:1px solid #343c47;background:#181d23;color:#f0f2f6;border-radius:10px;font-size:12px;font-weight:750}.tl-back:hover{border-color:var(--gold);color:var(--gold);text-decoration:none}.tl-back-secondary{color:var(--muted);font-size:12px;padding:10px}.tl-back:focus-visible,.tl-back-secondary:focus-visible{outline:2px solid var(--gold);outline-offset:3px}
 .tl-eyebrow{color:var(--gold);font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;margin-bottom:8px}
 h1{font-size:clamp(28px,5vw,42px);line-height:1.1;margin:0 0 12px;letter-spacing:-.045em}
 .tl-lead{max-width:600px;color:var(--muted);font-size:14px;line-height:1.65;margin:0 0 22px}
@@ -84,6 +85,7 @@ h1{font-size:clamp(28px,5vw,42px);line-height:1.1;margin:0 0 12px;letter-spacing
 <body>
 {{ navbar_html('token-launch') }}
 <main class="tl-wrap">
+<nav class="tl-breadcrumbs" aria-label="Token Launch navigation"><a id="orca-launch-back" class="tl-back" href="/launches">← Back</a><a class="tl-back-secondary" href="/launches">All launches</a><a class="tl-back-secondary" href="/">Home</a></nav>
 <div class="tl-eyebrow">OrcAgent · Solana</div>
 <h1>Launch your token<span style="color:var(--gold)">.</span></h1>
 <p class="tl-lead">Create a Solana token with USDC trading by default. Choose who earns creator fees before you approve the transaction in your wallet.</p>
@@ -177,6 +179,7 @@ h1{font-size:clamp(28px,5vw,42px);line-height:1.1;margin:0 0 12px;letter-spacing
 </div>
 <script>window.ORC_TOKEN_LAUNCH={wallet:{{ wallet|tojson }},csrf:{{ csrf_token|tojson }},enabled:{{ launch_enabled|tojson }},pilotCreatorOnly:{{ pilot_creator_only|tojson }}};</script>
 {% if launch_enabled %}<script src="/static/token-launch-web3.js?v={{ app_version|default('1') }}" defer></script>{% endif %}
+<script src="/static/launch-back.js?v={{ app_version|default('1') }}" defer></script>
 <script src="/static/token-launch.js?v={{ app_version|default('1') }}" defer></script>
 </body>
 </html>
