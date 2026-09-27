@@ -7417,9 +7417,14 @@ def _find_bridge_source_chain(wallet: str, evm_address: str, dest_chain: str, ne
     candidates = []
     try:
         solana_wallet = _get_trading_wallet_address(wallet) or wallet
-        solana_balance = _get_solana_usdc_balance(solana_wallet)
-        if solana_balance >= needed_with_buffer:
-            candidates.append(('solana', USDC_MINT, solana_balance))
+        # A bridge spends the canonical USDC ATA, NOT the wallet's aggregate
+        # token-account display balance. Indexed getTokenAccountsByOwner can
+        # return HTTP 429 even while that exact ATA is readable. Reuse the
+        # verified direct read used by the bot (confirmed account, mint,
+        # owner, initialized state); unknown RPC failures still fail closed.
+        _, solana_spendable = _get_bot_solana_balances(solana_wallet)
+        if solana_spendable >= needed_with_buffer:
+            candidates.append(('solana', USDC_MINT, solana_spendable))
     except Exception as e:
         print(f'[auto-bridge] solana balance check failed: {e}', flush=True)
     if evm_address:
