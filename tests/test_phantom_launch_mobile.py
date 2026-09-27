@@ -54,8 +54,10 @@ def test_mobile_browser_handoff():
         with patch.dict(os.environ,{'ENCRYPTION_KEY':''}):
             tmp,app,d=setup()
         d.csrf_exempt=lambda fn:fn
+        blockhash_ok=[True]
         mobile.install(d,lambda ident,wallet: lookup(d,ident,wallet),
-            lambda *args:True,lambda *args:True,lambda *args:True)
+            lambda *args:True,lambda *args:True,lambda *args:True,
+            lambda _:blockhash_ok[0])
         user=Keypair();mint=Keypair()
         ident,partial=prepared_row(d,user,mint,'a')
         client=app.test_client()
@@ -138,6 +140,20 @@ def test_mobile_browser_handoff():
         assert again.status_code==200
         assert again.get_json()['requires_connect'] is False
         assert '/ul/v1/signTransaction?' in again.get_json()['url']
+        next_query={k:v[0] for k,v in parse_qs(urlparse(again.get_json()['url']).query).items()}
+        next_token=parse_qs(urlparse(next_query['redirect_link']).query)['token'][0]
+        signed2=Transaction.populate(part2.message,
+            [user.sign_message(bytes(part2.message)),part2.signatures[1]])
+        next_reply=make_reply(phantom,next_query['dapp_encryption_public_key'],
+            {'transaction':mobile.b58enc(bytes(signed2))})
+        blockhash_ok[0]=False
+        expired_hash=guest.post('/api/phantom-launch/complete',json={
+            'token':next_token,'step':'sign',**next_reply})
+        assert expired_hash.status_code==409 and 'expired' in expired_hash.get_json()['msg']
+        with sqlite3.connect(d.DB_FILE) as db:
+            assert db.execute('SELECT status,launch_signature FROM token_launches WHERE id=?',
+                              (second,)).fetchone()==('prepared','')
+        blockhash_ok[0]=True
         # If Phantom revoked/expired that cached action session, the saved
         # token must recover on the next tap rather than looping forever.
         sign_params={k:v[0] for k,v in parse_qs(urlparse(again.get_json()['url']).query).items()}
