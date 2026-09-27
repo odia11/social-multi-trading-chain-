@@ -136,6 +136,14 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
 
 /* cell types */
 .cell-user{display:flex;align-items:center;gap:9px;min-width:0}
+/* The identity is a profile link, independent of the sensitive admin actions. */
+.cell-user-link{display:flex;align-items:center;gap:9px;width:100%;min-width:0;min-height:44px;
+  text-decoration:none;color:var(--text);border-radius:8px;-webkit-tap-highlight-color:transparent}
+.cell-user-link .u-identity{display:flex;flex-direction:column;gap:3px;min-width:0;overflow:hidden}
+.cell-user-link .u-name{color:var(--text)}
+.cell-user-link:hover .u-name,.cell-user-link:focus-visible .u-name{color:var(--accent)}
+.cell-user-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.cell-user-link .u-addr{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .u-av{width:30px;height:30px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;color:var(--bg)}
 .u-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .u-addr{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted)}
@@ -1418,7 +1426,8 @@ function renderUsers() {
   var q = (document.getElementById('usr-search')?.value || '').toLowerCase();
   var f = document.getElementById('usr-filter')?.value || 'all';
   var filtered = _allUsers.filter(u => {
-    var wm = (u.wallet_full||u.wallet||'').toLowerCase().includes(q);
+    var wm = (u.wallet_full||u.wallet||'').toLowerCase().includes(q)
+      || (u.username||'').toLowerCase().includes(q);
     if (!wm) return false;
     if (f === 'key' && !u.has_key) return false;
     if (f === 'nokey' && u.has_key) return false;
@@ -1431,12 +1440,20 @@ function renderUsers() {
     return;
   }
   document.getElementById('usr-body').innerHTML = filtered.map((u, i) => {
-    var wf = u.wallet_full || u.wallet || '';
-    var ini = wf.slice(0,2).toUpperCase();
+    var wf = u.wallet_full || '';
+    // A truncated wallet is only a display label, never a profile identity.
+    var ini = (u.username || wf).slice(0,2).toUpperCase();
+    var profileUrl = wf ? '/profile/' + encodeURIComponent(wf) : '';
+    var label = u.username || _short(wf);
     var pnlCls = u.pnl_today >= 0 ? 'pos' : 'neg';
+    var verifiedBadge = u.is_verified ? ' <svg width="14" height="14" viewBox="0 0 24 24" style="vertical-align:-2px;margin-left:2px" aria-label="Verified"><circle cx="12" cy="12" r="12" fill="#f7b955"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#0a0b0e" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '';
+    var identity = '<div class="u-av" style="background:' + _av(wf) + '">' + _escHtml(ini) + '</div>' +
+      '<div class="u-identity"><div class="u-name">' + _escHtml(label) + verifiedBadge + '</div>' +
+      (u.username ? '<div class="u-addr">' + _escHtml(_short(wf)) + '</div>' : '') + '</div>';
     return '<div class="tbl-row col-users" id="usr-row-' + i + '">' +
-      '<div class="cell-user"><div class="u-av" style="background:' + _av(wf) + '">' + ini + '</div>' +
-      '<div><div class="u-name">' + _short(wf) + (u.is_verified ? ' <svg width="14" height="14" viewBox="0 0 24 24" style="vertical-align:-2px;margin-left:2px"><circle cx="12" cy="12" r="12" fill="#f7b955"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#0a0b0e" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '') + '</div></div></div>' +
+      '<div class="cell-user">' + (profileUrl
+        ? '<a class="cell-user-link" href="' + _escHtml(profileUrl) + '" title="View user profile: ' + _escHtml(wf) + '" aria-label="View profile of ' + _escHtml(u.username || wf) + '">' + identity + '</a>'
+        : identity) + '</div>' +
       '<div>' + (u.has_key ? '<span class="tag tag-green">✓ key</span>' : '<span class="tag tag-muted">no key</span>') + '</div>' +
       '<div>' + (u.trading ? '<span class="tag tag-green">live</span>' : '<span class="tag tag-muted">idle</span>') + '</div>' +
       '<div class="mono">' + (u.positions ?? 0) + '</div>' +

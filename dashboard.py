@@ -12617,7 +12617,7 @@ def profile():
 def profile_view(wallet_address: str):
     """Public profile page for any wallet address."""
     session_wallet = _current_wallet()
-    is_wallet = is_valid_solana_address(wallet_address)
+    is_wallet = is_valid_solana_address(wallet_address) or is_valid_evm_address(wallet_address)
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     try:
@@ -12663,13 +12663,16 @@ def profile_view(wallet_address: str):
         sw = session_wallet or ''
         sw_short = (sw[:4] + '...' + sw[-4:]) if len(sw) >= 8 else sw
         sol_balance = None
-        try:
-            r = requests.post(SOLANA_RPC, json={
-                'jsonrpc': '2.0', 'id': 1, 'method': 'getBalance', 'params': [wallet_address]
-            }, timeout=5)
-            sol_balance = round(r.json()['result']['value'] / 1e9, 4)
-        except Exception:
-            pass
+        # Only a Solana wallet can be looked up through a Solana RPC; attempting
+        # this for an EVM user needlessly delays their profile by up to 5s.
+        if is_valid_solana_address(wallet_address):
+            try:
+                r = requests.post(SOLANA_RPC, json={
+                    'jsonrpc': '2.0', 'id': 1, 'method': 'getBalance', 'params': [wallet_address]
+                }, timeout=5)
+                sol_balance = round(r.json()['result']['value'] / 1e9, 4)
+            except Exception:
+                pass
         total_pnl_usd = _sol_usd(total_pnl)
         sol_balance_usd = _sol_usd(sol_balance)
         is_own = bool(session_wallet and session_wallet == user["wallet_address"])
@@ -29894,10 +29897,10 @@ def admin_users():
         today = datetime.datetime.utcnow().strftime('%Y-%m-%d')
         conn = sqlite3.connect(DB_FILE)
         c    = conn.cursor()
-        c.execute('SELECT id, wallet_address, encrypted_private_key, created_at, is_verified FROM users ORDER BY created_at DESC')
+        c.execute('SELECT id, wallet_address, username, encrypted_private_key, created_at, is_verified FROM users ORDER BY created_at DESC')
         rows = c.fetchall()
         users = []
-        for uid, w, enc_key, created, is_verified in rows:
+        for uid, w, username, enc_key, created, is_verified in rows:
             w = w or ''
             us  = user_states.get(w, {})
             pos = sum(1 for p in us.get('positions', {}).values() if p.get('amount', 0) > 0)
@@ -29911,6 +29914,7 @@ def admin_users():
             users.append({
                 'wallet_full': w,
                 'wallet':      w[:4] + '...' + w[-4:] if len(w) >= 8 else w,
+                'username':    username or '',
                 'has_key':     bool(enc_key),
                 'trading':     us.get('trader_running', False),
                 'positions':   pos,
