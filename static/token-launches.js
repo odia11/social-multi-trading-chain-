@@ -20,7 +20,7 @@
   details.appendChild(line('Mint',short(data.mint),true));
   var time=data.finalized_at||data.created_at;
   if(time)details.appendChild(line('Launched',new Date(time*1000).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})));
-  card.appendChild(details);var actions=dom('div','actions');action(actions,'Trade on OrcAgent →','/token/'+encodeURIComponent(data.mint),false);
+  card.appendChild(details);var actions=dom('div','actions');action(actions,'Trade on OrcAgent →','/live-market?mint='+encodeURIComponent(data.mint),false);
   var copy=dom('button','','Copy mint');copy.type='button';copy.onclick=async function(){
     try{await navigator.clipboard.writeText(data.mint);copy.textContent='Copied ✓'}
     catch(e){copy.textContent='Copy unavailable'}

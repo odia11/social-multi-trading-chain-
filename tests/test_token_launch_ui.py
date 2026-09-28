@@ -61,6 +61,8 @@ def test_token_launch_ui():
     assert 'Trade on OrcAgent' in js and 'View on Pump' not in js
     directory_js=(ROOT/'static/token-launches.js').read_text()
     assert 'Trade on OrcAgent' in directory_js and 'Trade on Pump' not in directory_js
+    assert "'/live-market?mint='+encodeURIComponent(data.mint)" in directory_js
+    assert "'/live-market?mint='+encodeURIComponent(row.mint)" in js
     print('PASS quick-launch hero, live stats, responsive form, real reward choices, wallet approval')
     print('PASS saved drafts, verified directory and versioned assets preserve API compatibility')
     tmp.cleanup()

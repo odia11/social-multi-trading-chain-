@@ -391,7 +391,7 @@ function drawMine(){
   }
   if(row.mint&&(row.status==='live'||row.status==='pending_shares')){
     var a=dom('a','','Trade on OrcAgent →');
-    a.href='/token/'+encodeURIComponent(row.mint);actions.appendChild(a);
+    a.href='/live-market?mint='+encodeURIComponent(row.mint);actions.appendChild(a);
   }
   if(row.launch_signature&&row.launch_signature.length>80){
     var explorer=dom('a','','View transaction ↗');
