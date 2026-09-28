@@ -870,7 +870,7 @@ def install(d):
         for row in rows:
             item=dict(row)
             item['logo_url']='/token-launch/icon/'+item['id']
-            item['pump_url']='https://pump.fun/coin/'+item['mint']
+            item['trade_url']='/token/'+item['mint']
             entries.append(item)
         response=jsonify(ok=True,launches=entries,total=total,page=int(page),
              page_size=20,counts={r[0]:r[1] for r in stats})

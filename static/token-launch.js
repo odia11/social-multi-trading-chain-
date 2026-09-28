@@ -390,8 +390,8 @@ function drawMine(){
     el.appendChild(dom('p','tl-helper','Pump distributes Holder Rewards; there is no separate creator claim for this mode.'));
   }
   if(row.mint&&(row.status==='live'||row.status==='pending_shares')){
-    var url='https://pump.fun/coin/'+encodeURIComponent(row.mint);
-    var a=dom('a','','View on Pump ↗');a.href=url;a.target='_blank';a.rel='noopener noreferrer';actions.appendChild(a);
+    var a=dom('a','','Trade on OrcAgent →');
+    a.href='/token/'+encodeURIComponent(row.mint);actions.appendChild(a);
   }
   if(row.launch_signature&&row.launch_signature.length>80){
     var explorer=dom('a','','View transaction ↗');

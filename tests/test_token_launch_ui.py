@@ -58,6 +58,9 @@ def test_token_launch_ui():
     assert "quote_asset:choice('tl-asset')" in js
     assert "reward_mode:mode" in js
     assert "var draftNonce=''" in js
+    assert 'Trade on OrcAgent' in js and 'View on Pump' not in js
+    directory_js=(ROOT/'static/token-launches.js').read_text()
+    assert 'Trade on OrcAgent' in directory_js and 'Trade on Pump' not in directory_js
     print('PASS quick-launch hero, live stats, responsive form, real reward choices, wallet approval')
     print('PASS saved drafts, verified directory and versioned assets preserve API compatibility')
     tmp.cleanup()

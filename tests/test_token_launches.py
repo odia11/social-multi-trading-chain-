@@ -47,7 +47,7 @@ def test_public_launch_directory():
     result=response.get_json()
     assert result['total']==23 and len(result['launches'])==20
     assert result['counts']=={'USDC':12,'SOL':11}
-    assert all(x['mint'] and x['pump_url'].endswith(x['mint']) for x in result['launches'])
+    assert all(x['mint'] and x['trade_url']=='/token/'+x['mint'] and 'pump_url' not in x for x in result['launches'])
     assert all(x['logo_url'].startswith('/token-launch/icon/') for x in result['launches'])
     assert all('signature' not in x and 'tx_b64' not in x for x in result['launches'])
     assert 'private-unverified-description' not in str(result)
