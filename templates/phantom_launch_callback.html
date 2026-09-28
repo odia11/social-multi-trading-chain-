@@ -27,7 +27,7 @@ small{color:#9ca6b4;display:block;overflow-wrap:anywhere}
  history.replaceState(null,'','/phantom-launch-callback');
  function done(message){status.textContent=message;btn.style.display=pwa?'none':'inline-block';
    help.textContent=pwa
-     ?'Your installed OrcAgent app is still open. Return to it using the iPhone app switcher; Your launches will refresh automatically. Do not create another token while this transaction is pending.'
+     ?'Your installed OrcAgent app is still open. Swipe up to open the iPhone app switcher and select OrcAgent. Your saved launch will refresh there. Do not create another token while its transaction is pending.'
      :'Return to your original OrcAgent tab. Your saved launch remains there.';}
  if(p.get('errorCode')){
    done(p.get('errorCode')==='4001'

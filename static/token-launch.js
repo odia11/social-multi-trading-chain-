@@ -193,7 +193,8 @@ async function launchStage(row,stage){
           (/Macintosh/i.test(navigator.userAgent)&&navigator.maxTouchPoints>1))){
        text('tl-dialog-status','Opening Phantom to approve your saved token launch…');
        var handoff=await call('/api/token-launch/'+row.id+'/phantom/start',{stage:stage,
-         return_to_pwa:window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches});
+         return_to_pwa:!!(navigator.standalone===true ||
+           (window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches))});
        window.location.assign(handoff.url);
        return {handoff:true};
      }
@@ -538,7 +539,10 @@ renderPreview();loadMine();
 var lastResumeCheck=0;
 function refreshAfterPhantom(){
  if(document.hidden||Date.now()-lastResumeCheck<1200)return;
- lastResumeCheck=Date.now();loadMine();
+ lastResumeCheck=Date.now();
+ // The PWA can remain alive for hours while Phantom and Safari handle the
+ // callback. A prior pending check must not suppress the fresh chain check.
+ autoVerified=Object.create(null);loadMine();
 }
 document.addEventListener('visibilitychange',refreshAfterPhantom);
 window.addEventListener('pageshow',refreshAfterPhantom);
