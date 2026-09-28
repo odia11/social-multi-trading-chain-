@@ -2802,7 +2802,7 @@ function scrollToCard(idx){
 }
 
 function prependSearchedToken(mint, sym, pairAddr){
-  fetch('/api/token/info/'+encodeURIComponent(mint)).then(function(r){ return r.json(); }).then(function(info){
+  return fetch('/api/token/info/'+encodeURIComponent(mint)).then(function(r){ return r.json(); }).then(function(info){
     var tok;
     if(info && info.ok){
       var pc = info.price_change || {};
@@ -2945,7 +2945,33 @@ document.addEventListener('DOMContentLoaded', function(){
 
   _prefetchBalances();
   renderSortList();
-  loadWatchlistSet().then(function(){ loadFeed(); });
+  // Deep links must paint the requested token before the full scanner feed.
+  // The feed is only a background numbers refresh once that profile exists.
+  var _qMint = new URLSearchParams(location.search).get('mint');
+  if(_qMint){
+    _focusedMint = _qMint;
+    if(new URLSearchParams(location.search).get('profile')==='1') _profileMint=_qMint;
+    // Warm real chart history in parallel with token details, with the server
+    // resolving the active pool. A first visit does not wait for the scanner.
+    fetchChart(_qMint,'5m','','solana').then(function(r){
+      if(!r || !r.candles || !r.candles.length || !r.pair_address) return;
+      var idx=ST.tokens.findIndex(function(t){return t.mint===_qMint;});
+      var tok=ST.tokens[idx];
+      if(tok && tok.pair_address && tok.pair_address!==r.pair_address) return;
+      candleCachePut(_qMint,r.pair_address,'5m',r.candles,r.current_price);
+      var st=_chartTimers[idx];
+      if(st && !st.destroyed && _candlesMatchPrice(r.candles,_cardRefPrice(st,idx))){
+        st.candles=r.candles;st.price=r.current_price;
+        renderChartSvg(idx,st.candles,st.price);
+      }
+    });
+    prependSearchedToken(_qMint,'','').finally(function(){
+      if(!ST.tokens.some(function(t){return t.mint===_qMint;})) _pendingDeepLinkMint=_qMint;
+      loadWatchlistSet().then(function(){ loadFeed(true); });
+    });
+  } else {
+    loadWatchlistSet().then(function(){ loadFeed(); });
+  }
   loadSurges();
   loadTape();
   loadTraders();
@@ -2959,18 +2985,8 @@ document.addEventListener('DOMContentLoaded', function(){
   // wallet, the calls page and a surge push notification -- all plain
   // full-page navigations, since none of those have this feed to inject into.
   //
-  // It has to be injected AFTER the first scanner load, which replaces
-  // ST.tokens wholesale and would wipe it. That used to be a 900ms guess:
-  // fine on a fast connection, and on a slow one the token silently vanished
-  // -- worst of all on a notification tap, which is the one moment it has to
-  // work. It is now queued and injected when that first load actually
-  // finishes, however long it takes.
-  var _qMint = new URLSearchParams(location.search).get('mint');
-  if(_qMint){
-    _pendingDeepLinkMint = _qMint;
-    _focusedMint = _qMint;
-    if(new URLSearchParams(location.search).get('profile')==='1') _profileMint=_qMint;
-  }
+  // A deep link opens directly above. The scanner can refresh its numbers
+  // later without replacing the focused card.
   window.addEventListener('popstate',function(){
     var q=new URLSearchParams(location.search);
     _profileMint=q.get('profile')==='1'?q.get('mint'):null;
