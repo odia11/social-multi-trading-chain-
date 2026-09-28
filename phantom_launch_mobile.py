@@ -1,8 +1,8 @@
 """Phantom mobile-browser token launch signing without an injected provider.
 
-Two-step Phantom connect (once per wallet) / signAndSendTransaction links.
-Phantom broadcasts new launches; server relays ONLY legacy already-signed
-transactions with the identical bytes after owner signature validation.
+Two-step Phantom connect (once per wallet) / signTransaction links.
+The server relays ONLY already-signed transactions with identical bytes
+after owner signature validation. No server wallet signs.
 Sessions and short-lived action keys are encrypted at rest with ENCRYPTION_KEY.
 """
 import base64
@@ -103,11 +103,11 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
         row,raw=current(flow)
         if raw is None:raise ValueError('Launch approval expired or changed. Open the saved launch again.')
         transaction=b58enc(base64.b64decode(raw,validate=True))
-        # Phantom signs AND submits via its wallet RPC. The old sign-only path
-        # left users on a perpetual pending state when OrcAgent RPC timed out.
-        nonce,payload=encode({'transaction':transaction,'session':session,
-             'sendOptions':{'skipPreflight':False,'preflightCommitment':'confirmed','maxRetries':2}},sk,phantom_pk)
-        return 'https://phantom.app/ul/v1/signAndSendTransaction?'+urlencode({
+        # Phantom mobile rejects signAndSendTransaction with -32601 on iOS.
+        # Sign only; the callback verifies the exact transaction and relays its
+        # identical signed bytes with preflight and RPC failover.
+        nonce,payload=encode({'transaction':transaction,'session':session},sk,phantom_pk)
+        return 'https://phantom.app/ul/v1/signTransaction?'+urlencode({
             'dapp_encryption_public_key':b58enc(bytes(PrivateKey(sk).public_key)),
             'nonce':nonce,'redirect_link':redirect_link(flow,'sign'),
             'payload':payload})
@@ -240,8 +240,8 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
                         wallet,bytes(original.message)):
                     return fail('Phantom signature does not match your token launch',409)
             else:
-                # Backward-compatible callback for already-open signTransaction
-                # links issued before this deployment. Those need RPC relay.
+                # Phantom returns the signed transaction; validate the exact
+                # saved message and both signatures before any RPC relay.
                 signed=b58dec(decoded.get('transaction'))
                 if not 1<=len(signed)<=1232:raise ValueError('Invalid transaction size')
                 tx=Transaction.from_bytes(signed)
@@ -273,13 +273,9 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
             if cur.rowcount!=1:
                 db.rollback()
                 return fail('Launch was submitted elsewhere. Check existing transaction.',409)
-        # New mobile launches are broadcast directly BY Phantom, not via
-        # OrcAgent's throttled RPC. Never send the user's signed transaction
-        # twice or claim a token is live merely because Phantom returned a sig.
+        # Sign-only links need relay. Identical bytes keep the same signature
+        # even if failover sends them to more than one RPC. Never skip preflight.
         if not signed_by_wallet:
-            # Legacy in-flight signTransaction callbacks still need relay.
-            # Use only the identical signed bytes/signature, with failover on
-            # transport/rate-limit failures. Never skip preflight.
             from launch_delivery import relay_identical_signed
             delivery=relay_identical_signed(
                 signed,signature,[getattr(d,'SOLANA_RPC_URL','') or getattr(d,'SOLANA_RPC',''),

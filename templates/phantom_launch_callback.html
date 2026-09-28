@@ -24,7 +24,9 @@ small{color:#9ca6b4;display:block;overflow-wrap:anywhere}
  function done(message){status.textContent=message;btn.style.display='inline-block';
    help.textContent='If Phantom returned to a different browser, return to your original OrcAgent tab. Your saved launch remains there.';}
  if(p.get('errorCode')){
-   done('Phantom cancelled the approval. Your saved token is unchanged.');return;
+   done(p.get('errorCode')==='4001'
+     ? 'Phantom approval was cancelled. Your saved token is unchanged.'
+     : 'Phantom could not complete this approval. Return to your saved token and try again.');return;
  }
  if(!p.get('token')||!p.get('step')||!p.get('nonce')||!p.get('data')){
    done('Incomplete Phantom response. Return to the original saved launch.');return;
