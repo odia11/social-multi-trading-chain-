@@ -12929,7 +12929,7 @@ def token_detail(mint_address):
     """Redirect old token-card bookmarks to the active Live Market trade UI."""
     if not _MINT_RE.match(mint_address or ''):
         return redirect('/live-market')
-    return redirect('/live-market?mint=' + urllib.parse.quote(mint_address, safe=''))
+    return redirect('/live-market?mint=' + urllib.parse.quote(mint_address, safe='') + '&profile=1')
 
 
 @app.route('/api/token/<mint>/candles')

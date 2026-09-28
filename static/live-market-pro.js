@@ -200,6 +200,8 @@ function renderChartSvg(idx, candles, currentPrice){
   if(!candles || !candles.length){
     var oldPill0 = wrap.querySelector('.pt-price-pill');
     if(oldPill0) oldPill0.remove();
+    var oldWait=wrap.querySelector('.pt-chart-waiting');
+    if(oldWait) oldWait.remove();
     svg.innerHTML = '';
     if(!wrap.querySelector('.pt-chart-empty')){
       var emptyEl = document.createElement('div');
@@ -285,6 +287,11 @@ function renderChartSvg(idx, candles, currentPrice){
   chartHtml+='<circle id="pt-live-halo-'+idx+'" cx="'+lastPt.x.toFixed(2)+'" cy="'+priceY.toFixed(2)+'" r="7" fill="#f7b955" opacity=".18"></circle>';
   chartHtml+='<circle id="pt-live-dot-'+idx+'" cx="'+lastPt.x.toFixed(2)+'" cy="'+priceY.toFixed(2)+'" r="3.2" fill="#f7b955"></circle>';
   svg.innerHTML=chartHtml;
+  var waiting=wrap.querySelector('.pt-chart-waiting');
+  if(n<2){
+    if(!waiting){waiting=document.createElement('div');waiting.className='pt-chart-waiting';wrap.appendChild(waiting);}
+    waiting.textContent='Live price available · waiting for a second price observation';
+  }else if(waiting) waiting.remove();
 
   // Reused across renders (not removed+recreated) so the CSS `top`
   // transition on .pt-price-pill actually animates between positions
@@ -833,11 +840,14 @@ function mountChart(idx, mint, pairAddr, chain, seedPrice){
   var st=primeChart(idx,mint,pairAddr,chain,seedPrice);
   if(st.timer) return;
   chartTick(idx);
-  // 15s, not 5s: the server caches candles for 30 seconds, so polling every
-  // five asked the same question six times for one answer. Movement comes
-  // from the live price tick above instead, which costs one request for the
-  // whole page.
-  st.timer = setInterval(function(){ chartTick(idx); }, 300000);
+  // A one-point chart needs provider history as soon as the cache refreshes;
+  // established charts can wait. Server caches chart responses for 30s.
+  st.timer = setInterval(function(){
+    if(!document.hidden && (st.candles||[]).length<2) chartTick(idx);
+  }, 30000);
+  st.slowTimer=setInterval(function(){
+    if(!document.hidden && (st.candles||[]).length>=2) chartTick(idx);
+  }, 300000);
   attachChartSvgScrub(idx);
 }
 function unmountChart(idx){
@@ -845,6 +855,7 @@ function unmountChart(idx){
   if(!st) return;
   st.destroyed = true;
   if(st.timer) clearInterval(st.timer);
+  if(st.slowTimer) clearInterval(st.slowTimer);
   if(st.liveRaf) cancelAnimationFrame(st.liveRaf);
   if(st.scrubTeardown) st.scrubTeardown();
   delete _chartTimers[idx];
@@ -1100,6 +1111,7 @@ function cardHtml(t, idx){
     +   '</div></div>'
     +   '<div class="pt-card-hd-right">'
     +     '<span id="pt-safety-'+idx+'"></span>'
+    +     '<button class="pt-profile-btn" type="button" data-action="token-profile" data-mint="'+esc(t.mint)+'" aria-label="Open token profile" title="Open token profile">Profile</button>'
     +     '<button class="pt-watch-btn'+(isWatched?' active':'')+'" data-action="watch" data-mint="'+esc(t.mint)+'" data-sym="'+esc(t.symbol)+'">'+(isWatched?'★':'☆')+'</button>'
     +   '</div>'
     + '</div>'
@@ -1130,6 +1142,7 @@ function cardHtml(t, idx){
     +   '<div class="pt-friends" id="pt-friends-'+idx+'"></div>'
     +   '<div class="pt-card-ft-right mono" id="pt-ft-stats-'+idx+'">'+(t.buys_24h+t.sells_24h)+' txns · '+ratioStr(t.buys_24h,t.sells_24h)+'</div>'
     + '</div>'
+    + '<section class="pt-profile-about" aria-label="Token profile details"></section>'
     + '</div>';
 }
 
@@ -1261,6 +1274,7 @@ function renderFeedList(){
   }
   el.innerHTML = ST.tokens.map(function(t,i){ return cardHtml(t,i); }).join('');
   observeCards();
+  syncTokenProfile();
 }
 
 // Applies fresh per-token numbers (by mint) onto the SAME token objects
@@ -1320,6 +1334,56 @@ function patchFeedList(){
 // Set from ?mint= at startup; consumed by the first loadFeed() that finishes.
 var _pendingDeepLinkMint = null;
 var _focusedMint = null;
+var _profileMint = null;
+function syncTokenProfile(){
+  var idx=ST.tokens.findIndex(function(t){return t.mint===_profileMint;});
+  var active=!!(_profileMint && idx>=0);
+  document.body.classList.toggle('pt-profile-mode',active);
+  document.querySelectorAll('.pt-card').forEach(function(card){
+    var chosen=active && card.dataset.mint===_profileMint;
+    card.classList.toggle('pt-profile-open',chosen);
+    var button=card.querySelector('.pt-profile-btn');
+    if(button){button.textContent=chosen?'Close':'Profile';button.setAttribute('aria-label',chosen?'Close token profile':'Open token profile');}
+  });
+  if(active){
+    var card=document.getElementById('pt-card-'+idx);
+    if(card){card.scrollIntoView({block:'start'});loadTokenProfileDetails(card,_profileMint);}
+    if(_chartTimers[idx] && _chartTimers[idx].candles)
+      requestAnimationFrame(function(){renderChartSvg(idx,_chartTimers[idx].candles,_cardRefPrice(_chartTimers[idx],idx));});
+  }
+}
+function loadTokenProfileDetails(card,mint){
+  var box=card.querySelector('.pt-profile-about');
+  if(!box || box.dataset.loading) return;
+  box.dataset.loading='1';
+  box.textContent='Loading token details…';
+  fetch('/api/token/info/'+encodeURIComponent(mint)).then(function(r){return r.json();}).then(function(info){
+    if(!card.isConnected || card.dataset.mint!==mint) return;
+    if(!info || !info.ok){box.textContent='Token details are temporarily unavailable.';return;}
+    box.replaceChildren();
+    var title=document.createElement('h2');title.textContent='About '+(info.name||info.symbol||'this token');box.appendChild(title);
+    var desc=document.createElement('p');desc.textContent=info.description||'The creator has not added a description yet.';box.appendChild(desc);
+    var address=document.createElement('p');address.className='pt-profile-address';
+    address.textContent='Token address: '+mint;box.appendChild(address);
+    var links=document.createElement('div');links.className='pt-profile-links';
+    function link(url,label){
+      if(!isSafeUrl(url)) return;
+      var a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.textContent=label;links.appendChild(a);
+    }
+    link(info.website_url,'Website ↗');link(info.twitter_url,'X ↗');
+    if((info.chain||'solana')==='solana') link('https://solscan.io/token/'+encodeURIComponent(mint),'Solscan ↗');
+    box.appendChild(links);
+  }).catch(function(){ if(card.isConnected) box.textContent='Token details are temporarily unavailable.'; });
+}
+function setTokenProfile(mint){
+  _profileMint=_profileMint===mint?null:mint;
+  _focusedMint=_profileMint||_focusedMint;
+  var url=new URL(location.href);
+  if(_profileMint){url.searchParams.set('mint',_profileMint);url.searchParams.set('profile','1');}
+  else url.searchParams.delete('profile');
+  history.pushState(null,'',url.pathname+url.search);
+  syncTokenProfile();
+}
 
 function loadFeed(isPoll){
   if(_feedInFlight) return;
@@ -2759,13 +2823,14 @@ function prependSearchedToken(mint, sym, pairAddr){
     renderStoryRail();
     renderFeedList();
     updateHeaderCounts();
-    setTimeout(function(){ scrollToCard(0); }, 60);
+    setTimeout(function(){ if(_profileMint===tok.mint) syncTokenProfile(); else scrollToCard(0); }, 60);
   }).catch(function(){});
 }
 
 /* ── event wiring ── */
 document.addEventListener('click', function(e){
   var el;
+  if((el = e.target.closest('[data-action="token-profile"]'))){ setTokenProfile(el.dataset.mint); return; }
   if((el = e.target.closest('[data-action="story"]'))){ scrollToCard(el.dataset.idx); return; }
   if((el = e.target.closest('[data-action="watch"]'))){ toggleWatch(el.dataset.mint, el.dataset.sym, el); return; }
   if((el = e.target.closest('[data-action="buy-open"]'))){ openBuyPanel(el.dataset.idx); return; }
@@ -2904,7 +2969,13 @@ document.addEventListener('DOMContentLoaded', function(){
   if(_qMint){
     _pendingDeepLinkMint = _qMint;
     _focusedMint = _qMint;
+    if(new URLSearchParams(location.search).get('profile')==='1') _profileMint=_qMint;
   }
+  window.addEventListener('popstate',function(){
+    var q=new URLSearchParams(location.search);
+    _profileMint=q.get('profile')==='1'?q.get('mint'):null;
+    syncTokenProfile();
+  });
 
   // Background tabs do zero market polling. Mobile browsers otherwise keep
   // old pages alive long enough to burn through rate limits for data nobody
