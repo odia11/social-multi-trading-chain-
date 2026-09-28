@@ -1,6 +1,9 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="referrer" content="no-referrer"><title>Phantom approval · OrcAgent</title>
+<meta name="referrer" content="no-referrer"><title>OrcAgent · Token Launch</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<meta property="og:title" content="OrcAgent · Token Launch"><meta property="og:site_name" content="OrcAgent">
+<meta property="og:url" content="https://orcagent.fun/phantom-launch-callback">
 <style>
 *{box-sizing:border-box}body{margin:0;min-height:100vh;background:#0d1014;color:#f4f5f8;
 font:16px system-ui,sans-serif;display:grid;place-items:center;padding:22px}
@@ -19,10 +22,13 @@ small{color:#9ca6b4;display:block;overflow-wrap:anywhere}
  var p=new URLSearchParams(location.search);
  var status=document.getElementById('status'),btn=document.getElementById('continue');
  var help=document.getElementById('help');
+ var pwa=p.get('pwa')==='1';
  // Remove all encrypted return payloads from browser history immediately.
  history.replaceState(null,'','/phantom-launch-callback');
- function done(message){status.textContent=message;btn.style.display='inline-block';
-   help.textContent='If Phantom returned to a different browser, return to your original OrcAgent tab. Your saved launch remains there.';}
+ function done(message){status.textContent=message;btn.style.display=pwa?'none':'inline-block';
+   help.textContent=pwa
+     ?'Your installed OrcAgent app is still open. Return to it using the iPhone app switcher; Your launches will refresh automatically. Do not create another token while this transaction is pending.'
+     :'Return to your original OrcAgent tab. Your saved launch remains there.';}
  if(p.get('errorCode')){
    done(p.get('errorCode')==='4001'
      ? 'Phantom approval was cancelled. Your saved token is unchanged.'
@@ -48,7 +54,7 @@ small{color:#9ca6b4;display:block;overflow-wrap:anywhere}
    }
    done(r.msg||'Phantom transaction submitted. Check your token status.');
    if(r.signature)help.textContent='Transaction: '+r.signature+
-     '. Return to OrcAgent and use Check transaction if confirmation is pending.';
+     (pwa?'. Switch back to the installed OrcAgent app; its saved launch refreshes automatically.':'. Return to your original OrcAgent tab and use Check transaction if pending.');
  })
  .catch(function(){done('Could not reach OrcAgent. Check your saved token before retrying.');});
 })();

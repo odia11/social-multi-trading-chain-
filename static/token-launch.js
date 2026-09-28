@@ -192,7 +192,8 @@ async function launchStage(row,stage){
          (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
           (/Macintosh/i.test(navigator.userAgent)&&navigator.maxTouchPoints>1))){
        text('tl-dialog-status','Opening Phantom to approve your saved token launch…');
-       var handoff=await call('/api/token-launch/'+row.id+'/phantom/start',{stage:stage});
+       var handoff=await call('/api/token-launch/'+row.id+'/phantom/start',{stage:stage,
+         return_to_pwa:window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches});
        window.location.assign(handoff.url);
        return {handoff:true};
      }
@@ -299,6 +300,17 @@ async function checkKnown(row,stage,button,notice){
  busy=true;button.disabled=true;button.textContent='Checking Solana…';
  try{
   notice.textContent='Verifying the exact transaction on Solana…';
+  if(row.status==='submitted'||row.status==='finalize_submitted'){
+    try{
+      var relay=await call('/api/token-launch/'+row.id+'/phantom/retry-delivery',{});
+      notice.textContent=relay.confirmed?'Confirmed on Solana.':
+        relay.delivered?'Original signed transaction delivered. Checking confirmation…':relay.msg;
+    }catch(e){
+      // A pre-existing submission may have no saved signed bytes. Confirmation
+      // still checks its recorded signature without preparing another launch.
+      notice.textContent='Checking the original signature…';
+    }
+  }
   var result=await confirmStage(row.id,stage,sig.trim());
   notice.textContent=result.confirmed?'Confirmed on-chain. Updating launch…':'Transaction not yet available from Solana RPC. Do not launch the token again; retry later.';
   status(notice.textContent);
@@ -521,4 +533,14 @@ $('tl-image').addEventListener('change',async function(){
 });
 $('tl-save').addEventListener('click',saveDraft);
 renderPreview();loadMine();
+// Phantom returns through the system browser on iOS. The original installed
+// web app remains the source of truth and refreshes as soon as it is resumed.
+var lastResumeCheck=0;
+function refreshAfterPhantom(){
+ if(document.hidden||Date.now()-lastResumeCheck<1200)return;
+ lastResumeCheck=Date.now();loadMine();
+}
+document.addEventListener('visibilitychange',refreshAfterPhantom);
+window.addEventListener('pageshow',refreshAfterPhantom);
+window.addEventListener('focus',refreshAfterPhantom);
 })();

@@ -53,6 +53,11 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
           stage TEXT NOT NULL, digest TEXT NOT NULL, secret BLOB NOT NULL,
           created_at INTEGER NOT NULL, status TEXT NOT NULL,
           signature TEXT NOT NULL DEFAULT '')""")
+        columns={r[1] for r in db.execute('PRAGMA table_info(phantom_launch_links)')}
+        if 'return_to_pwa' not in columns:
+            db.execute('ALTER TABLE phantom_launch_links ADD COLUMN return_to_pwa INTEGER NOT NULL DEFAULT 0')
+        if 'signed_tx' not in columns:
+            db.execute('ALTER TABLE phantom_launch_links ADD COLUMN signed_tx BLOB')
         db.execute("""CREATE TABLE IF NOT EXISTS phantom_launch_sessions(
           wallet TEXT PRIMARY KEY, secret BLOB NOT NULL, saved_at INTEGER NOT NULL)""")
 
@@ -90,7 +95,8 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
 
     def redirect_link(flow,step):
         return BASE+'/phantom-launch-callback?'+urlencode({
-            'token':flow['token'],'step':step})
+            'token':flow['token'],'step':step,
+            'pwa':'1' if flow.get('return_to_pwa') else '0'})
 
     def connect_url(flow):
         sk=fernet.decrypt(flow['secret'])
@@ -147,13 +153,14 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
         flow={'token':nonce,'launch_id':launch_id,'wallet':wallet,'stage':stage,
               'digest':hashlib.sha256(row[field].encode()).hexdigest(),
               'secret':fernet.encrypt(sk),'created_at':int(time.time()),
-              'status':'sign' if cached else 'connect'}
+              'status':'sign' if cached else 'connect',
+              'return_to_pwa':int(body.get('return_to_pwa') is True)}
         with sqlite3.connect(d.DB_FILE,timeout=8) as db:
             db.execute('DELETE FROM phantom_launch_links WHERE created_at<?',
                        (int(time.time())-TTL,))
             db.execute("""INSERT INTO phantom_launch_links
-              (token,launch_id,wallet,stage,digest,secret,created_at,status)
-              VALUES (:token,:launch_id,:wallet,:stage,:digest,:secret,:created_at,:status)""",
+              (token,launch_id,wallet,stage,digest,secret,created_at,status,return_to_pwa)
+              VALUES (:token,:launch_id,:wallet,:stage,:digest,:secret,:created_at,:status,:return_to_pwa)""",
               flow)
         if cached:
             try:url=sign_url(flow,sk,pk,session)
@@ -161,6 +168,62 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
                 return fail('Prepared launch expired. Use the saved launch to try again.',409)
         else:url=connect_url(flow)
         return jsonify(ok=True,url=url,requires_connect=not bool(cached))
+
+    @app.post('/api/token-launch/<launch_id>/phantom/retry-delivery')
+    @d.rate_limit(4,60)
+    def phantom_retry_delivery(launch_id):
+        wallet=d._authenticated_wallet()
+        if not wallet:return fail('Connect your wallet',401)
+        if not d._validate_csrf(request.headers.get('X-CSRF-Token','')):
+            return fail('CSRF validation failed',403)
+        row=lookup(launch_id,wallet)
+        if not row:return fail('Launch not found',404)
+        with sqlite3.connect(d.DB_FILE) as db:
+            db.row_factory=sqlite3.Row
+            link=db.execute("""SELECT * FROM phantom_launch_links
+                WHERE launch_id=? AND wallet=? AND status='submitted'
+                AND signed_tx IS NOT NULL ORDER BY created_at DESC LIMIT 1""",
+                (launch_id,wallet)).fetchone()
+        if not link:return fail('No signed transaction is saved for delivery. Check the original transaction first.',409)
+        stage=link['stage']
+        field='launch_signature' if stage=='create' else 'finalize_signature'
+        prepared='prepare_tx_b64' if stage=='create' else 'finalize_tx_b64'
+        expected='submitted' if stage=='create' else 'finalize_submitted'
+        if row['status']!=expected or row[field]!=link['signature']:
+            return fail('Launch status changed. Check the original transaction.',409)
+        try:
+            raw=fernet.decrypt(link['signed_tx'])
+            signed=Transaction.from_bytes(raw)
+            original=Transaction.from_bytes(base64.b64decode(row[prepared],validate=True))
+            if (str(signed.signatures[0])!=link['signature'] or
+                    bytes(signed.message)!=bytes(original.message) or
+                    not all(signed.verify_with_results())):
+                return fail('Saved signature does not match this launch',409)
+            try:
+                confirmed=check_signature(link['signature'],row,stage)
+            except ValueError:
+                return fail('The original transaction failed on Solana. Check its signature before taking any new action.',409)
+            except RuntimeError:
+                confirmed=False
+            if confirmed:
+                return jsonify(ok=True,confirmed=True,signature=link['signature'])
+            if blockhash_valid is not None and not blockhash_valid(row[prepared]):
+                return fail('Original blockhash expired. Use Recover expired launch on the saved token; do not create a second token.',409)
+            from launch_delivery import relay_identical_signed
+            reasons=[]
+            sent=relay_identical_signed(raw,link['signature'],[
+                os.getenv('ORCA_LAUNCH_RPC',''),
+                getattr(d,'SOLANA_RPC_URL','') or getattr(d,'SOLANA_RPC',''),
+                'https://solana-rpc.publicnode.com',
+                'https://api.mainnet-beta.solana.com'],reasons=reasons)
+            reason=next((x for x in reasons if x not in
+                ('RPC temporarily unavailable','RPC rejected the transaction')),
+                'RPC delivery could not be verified')
+            return jsonify(ok=True,submitted=True,delivered=bool(sent),
+                signature=link['signature'],
+                msg='Original signed transaction resent.' if sent else reason)
+        except (RuntimeError,ValueError,TypeError,KeyError):
+            return fail('Saved transaction cannot be checked. Do not create another token.',503)
 
     @app.get('/phantom-launch-callback')
     def phantom_launch_callback():
@@ -264,8 +327,9 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
         pending='submitted' if flow['stage']=='create' else 'finalize_submitted'
         with sqlite3.connect(d.DB_FILE,timeout=8) as db:
             db.execute('BEGIN IMMEDIATE')
-            cur=db.execute("""UPDATE phantom_launch_links SET status='submitted',signature=?
-                              WHERE token=? AND status='sign'""",(signature,flow['token']))
+            protected_tx=fernet.encrypt(signed) if not signed_by_wallet else None
+            cur=db.execute("""UPDATE phantom_launch_links SET status='submitted',signature=?,signed_tx=?
+                              WHERE token=? AND status='sign'""",(signature,protected_tx,flow['token']))
             if cur.rowcount!=1:return fail('This Phantom approval was already processed',409)
             cur=db.execute(f"""UPDATE token_launches SET status=?,{sig_field}=?
                 WHERE id=? AND wallet=? AND status=? AND {sig_field}='' """,
@@ -277,13 +341,18 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
         # even if failover sends them to more than one RPC. Never skip preflight.
         if not signed_by_wallet:
             from launch_delivery import relay_identical_signed
+            delivery_reasons=[]
             delivery=relay_identical_signed(
-                signed,signature,[getattr(d,'SOLANA_RPC_URL','') or getattr(d,'SOLANA_RPC',''),
+                signed,signature,[os.getenv('ORCA_LAUNCH_RPC',''),
+                      getattr(d,'SOLANA_RPC_URL','') or getattr(d,'SOLANA_RPC',''),
                       'https://solana-rpc.publicnode.com',
-                      'https://api.mainnet-beta.solana.com'])
+                      'https://api.mainnet-beta.solana.com'],reasons=delivery_reasons)
             if not delivery:
+                reason=next((x for x in delivery_reasons if x not in
+                    ('RPC temporarily unavailable','RPC rejected the transaction')),
+                    'RPC delivery could not be verified')
                 return jsonify(ok=True,submitted=True,signature=signature,
-                    msg='RPC delivery uncertain. Keep your original signature; use Check transaction.')
+                    msg=reason+'. Your signed launch remains saved. Use Check transaction; do not create another token.')
 
         try:
             if check_signature(signature,row,flow['stage']) and (

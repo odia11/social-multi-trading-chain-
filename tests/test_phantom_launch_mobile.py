@@ -54,9 +54,9 @@ def test_mobile_browser_handoff():
         with patch.dict(os.environ,{'ENCRYPTION_KEY':''}):
             tmp,app,d=setup()
         d.csrf_exempt=lambda fn:fn
-        blockhash_ok=[True]
+        blockhash_ok=[True];confirmed=[True]
         mobile.install(d,lambda ident,wallet: lookup(d,ident,wallet),
-            lambda *args:True,lambda *args:True,lambda *args:True,
+            lambda *args:confirmed[0],lambda *args:True,lambda *args:True,
             lambda _:blockhash_ok[0])
         user=Keypair();mint=Keypair()
         ident,partial=prepared_row(d,user,mint,'a')
@@ -96,6 +96,7 @@ def test_mobile_browser_handoff():
         assert result.status_code==200,result.get_data(as_text=True)[:260]
         sign_url=result.get_json()['url']
         assert '/ul/v1/signTransaction?' in sign_url
+        assert 'pwa=0' in parse_qs(urlparse(sign_url).query)['redirect_link'][0]
         sign_query={k:v[0] for k,v in parse_qs(urlparse(sign_url).query).items()}
         signed=Transaction.populate(partial.message,
                                     [user.sign_message(bytes(partial.message)),partial.signatures[1]])
@@ -103,7 +104,7 @@ def test_mobile_browser_handoff():
         approval=make_reply(phantom,params['dapp_encryption_public_key'],
                             {'transaction':mobile.b58enc(bytes(signed))})
         seen=[]
-        def fake_relay(raw,signature,endpoints):
+        def fake_relay(raw,signature,endpoints,**kwargs):
             assert raw==bytes(signed)
             assert signature==str(signed.signatures[0])
             assert endpoints
@@ -165,6 +166,36 @@ def test_mobile_browser_handoff():
         retry=client.post('/api/token-launch/'+third+'/phantom/start',
                           json={'stage':'create'},headers=h)
         assert retry.status_code==200 and retry.get_json()['requires_connect'] is True
+        # A failed first RPC delivery stores the exact signed bytes, then a
+        # user's Check transaction may relay only that same signature again.
+        assert mobile.remember_authenticated_session(d.DB_FILE,
+            os.environ['ENCRYPTION_KEY'],str(user.pubkey()),good)
+        fourth,part4=prepared_row(d,user,Keypair(),'d')
+        handoff=client.post('/api/token-launch/'+fourth+'/phantom/start',
+            json={'stage':'create','return_to_pwa':True},headers=h).get_json()
+        assert handoff['requires_connect'] is False
+        q={k:v[0] for k,v in parse_qs(urlparse(handoff['url']).query).items()}
+        assert 'pwa=1' in q['redirect_link']
+        action=parse_qs(urlparse(q['redirect_link']).query)['token'][0]
+        signed4=Transaction.populate(part4.message,
+            [user.sign_message(bytes(part4.message)),part4.signatures[1]])
+        reply4=make_reply(phantom,q['dapp_encryption_public_key'],
+            {'transaction':mobile.b58enc(bytes(signed4))})
+        confirmed[0]=False
+        with patch('launch_delivery.relay_identical_signed',return_value=False):
+            pending=guest.post('/api/phantom-launch/complete',json={
+                'token':action,'step':'sign',**reply4})
+        assert pending.status_code==200 and pending.get_json()['submitted']
+        with sqlite3.connect(d.DB_FILE) as db:
+            saved=db.execute('SELECT status,signature,signed_tx FROM phantom_launch_links WHERE token=?',(action,)).fetchone()
+        assert saved[0]=='submitted' and saved[1]==str(signed4.signatures[0]) and saved[2]
+        def retry_same(raw,signature,endpoints,**kwargs):
+            assert raw==bytes(signed4) and signature==str(signed4.signatures[0])
+            return True
+        with patch('launch_delivery.relay_identical_signed',side_effect=retry_same):
+            delivered=client.post('/api/token-launch/'+fourth+'/phantom/retry-delivery',headers=h)
+        assert delivered.status_code==200 and delivered.get_json()['delivered']
+        print('PASS exact signed transaction survives RPC uncertainty and reuses its original signature')
         print('PASS mobile Phantom signTransaction, exact signed-byte RPC relay')
         print('PASS mobile Phantom connect once, then direct approval in original browser')
         print('PASS exact mint co-signature, replay guard, cross-browser callback, no double broadcast')
