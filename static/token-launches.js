@@ -18,6 +18,17 @@
   var share=data.reward_mode==='community'?(100-data.community_bps/100).toFixed(2)+'% creator / '+(data.community_bps/100).toFixed(2)+'% community':data.reward_mode==='holder'?'Holder Rewards':'100% creator';
   details.appendChild(line('Rewards',share));details.appendChild(line('Creator',short(data.wallet),true));
   details.appendChild(line('Mint',short(data.mint),true));
+  var cap=line('Market cap','Loading…');details.appendChild(cap);
+  var capValue=cap.querySelector('b');
+  if('IntersectionObserver' in window){
+   var observer=new IntersectionObserver(function(entries){
+    if(!entries.some(function(e){return e.isIntersecting}))return;
+    observer.disconnect();
+    fetch('/api/token/info/'+encodeURIComponent(data.mint)).then(function(r){return r.json()}).then(function(info){
+     capValue.textContent=info&&info.ok&&info.market_cap!=null?'$'+Number(info.market_cap).toLocaleString(undefined,{maximumFractionDigits:0}):'—';
+    }).catch(function(){capValue.textContent='—'});
+   },{rootMargin:'100px'});observer.observe(card);
+  }else capValue.textContent='—';
   var time=data.finalized_at||data.created_at;
   if(time)details.appendChild(line('Launched',new Date(time*1000).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})));
   card.appendChild(details);var actions=dom('div','actions');action(actions,'Trade on OrcAgent →','/live-market?mint='+encodeURIComponent(data.mint),false);

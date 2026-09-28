@@ -60,13 +60,14 @@ function fmtAmount(n){
   return n.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
 }
 function fmtPrice(n){
+  if(n==null || n==='') return '—';
   n = Number(n);
-  if(n==null || isNaN(n)) return '—';
+  if(isNaN(n)) return '—';
   if(n===0) return '$0.00';
   if(n>=1) return '$'+n.toFixed(2);
   if(n>=0.01) return '$'+n.toFixed(4);
   if(n>=0.0001) return '$'+n.toFixed(6);
-  return '$'+n.toFixed(8);
+  return '$'+n.toFixed(n<0.00000001?12:8);
 }
 // Chart axis: three significant digits, so a $0.0000876 token reads
 // "0.0000876" rather than eight padded decimals.
@@ -398,7 +399,7 @@ function _restoreLiveHeader(idx, st){
   if(el){ el.textContent=fmtPrice(t.price_usd); el.classList.remove('pt-scrubbing'); }
   if((el=document.getElementById('pt-chg-'+idx))){
     var down=(t.price_change_24h||0)<0;
-    el.textContent=fmtPct(t.price_change_24h)+' · 24h';
+    el.textContent=t.price_change_24h==null?'—':fmtPct(t.price_change_24h)+' · 24h';
     el.classList.toggle('down',down); el.classList.toggle('up',!down);
   }
 }
@@ -715,7 +716,7 @@ function _syncCardPrice(st, idx, px){
   if(el){ el.textContent=fmtPrice(px); if(old>0) _flashTick(el, px>old); }
   if((el=document.getElementById('pt-chg-'+idx))){
     var down=(t.price_change_24h||0)<0;
-    el.textContent=fmtPct(t.price_change_24h)+' · 24h';
+    el.textContent=t.price_change_24h==null?'—':fmtPct(t.price_change_24h)+' · 24h';
     el.classList.toggle('down',down); el.classList.toggle('up',!down);
   }
   if((el=document.getElementById('pt-mcap-'+idx))) el.textContent=fmtUsd(t.market_cap);
@@ -1078,7 +1079,7 @@ function storyHtml(t, idx){
     +   logoTile(t.image_url, t.symbol, 'pt-story-img', 'pt-story-img-ph')
     + '</div></div>'
     + '<div class="pt-story-name">$'+esc(t.symbol||'?')+'</div>'
-    + '<div class="pt-story-chg mono '+(down?'down':'up')+'">'+fmtPct(t.price_change_24h)+'</div>'
+    + '<div class="pt-story-chg mono '+(down?'down':'up')+'">'+(t.price_change_24h==null?'—':fmtPct(t.price_change_24h))+'</div>'
     + '</div>';
 }
 
@@ -1089,7 +1090,7 @@ function cardHtml(t, idx){
     + '<div class="pt-card-hd">'
     +   logoTile(t.image_url, t.symbol, 'pt-tok-logo', 'pt-tok-logo-ph')
     +   '<div class="pt-tok-id"><div class="pt-tok-sym">$'+esc(t.symbol)+' '+starsHtml(t.score)+chainBadgeHtml(t.chain)+'</div>'
-    +   '<div class="pt-tok-meta">'+esc(t.name||t.symbol)+' · '+fmtAge(t.pair_created_at)+' old</div>'
+    +   '<div class="pt-tok-meta">'+esc(t.name||t.symbol)+' · '+fmtAge(t.pair_created_at)+' old'+(t.source==='solana_bonding_curve'?' · onchain':'')+'</div>'
     +   '<div class="pt-tok-ca-row">'
     +     '<div class="pt-tok-ca" data-action="copy-ca" data-mint="'+esc(t.mint)+'" title="'+esc(t.mint)+'">'
     +       '<span class="pt-tok-ca-text mono">'+esc(shortAddr(t.mint))+'</span>'
@@ -1105,7 +1106,7 @@ function cardHtml(t, idx){
     + '<div class="pt-card-body">'
     +   '<div class="pt-card-stats">'
     +     '<div class="pt-price mono" id="pt-price-'+idx+'">'+fmtPrice(t.price_usd)+'</div>'
-    +     '<div class="pt-chg mono '+(down?'down':'up')+'" id="pt-chg-'+idx+'">'+fmtPct(t.price_change_24h)+' · 24h</div>'
+    +     '<div class="pt-chg mono '+(down?'down':'up')+'" id="pt-chg-'+idx+'">'+(t.price_change_24h==null?'—':fmtPct(t.price_change_24h)+' · 24h')+'</div>'
     +     statRow('Liquidity', fmtUsd(t.liquidity_usd), 'pt-liq-'+idx)
     +     statRow('Market cap', fmtUsd(t.market_cap), 'pt-mcap-'+idx)
     +     statRow('Volume 24h', fmtUsd(t.volume_24h), 'pt-vol-'+idx)
@@ -1292,7 +1293,7 @@ function patchFeedList(){
     if(!scrubbing && (el = document.getElementById('pt-price-'+idx))) el.textContent = fmtPrice(t.price_usd);
     if(!scrubbing && (el = document.getElementById('pt-chg-'+idx))){
       var down = (t.price_change_24h||0) < 0;
-      el.textContent = fmtPct(t.price_change_24h)+' · 24h';
+      el.textContent = t.price_change_24h==null?'—':fmtPct(t.price_change_24h)+' · 24h';
       el.classList.toggle('down', down);
       el.classList.toggle('up', !down);
     }
@@ -1318,6 +1319,7 @@ function patchFeedList(){
 // full, freshly-ordered rebuild, since that's exactly what was asked for.
 // Set from ?mint= at startup; consumed by the first loadFeed() that finishes.
 var _pendingDeepLinkMint = null;
+var _focusedMint = null;
 
 function loadFeed(isPoll){
   if(_feedInFlight) return;
@@ -2743,10 +2745,10 @@ function prependSearchedToken(mint, sym, pairAddr){
       tok = {
         mint: info.address||mint, symbol: info.symbol||sym, name: info.name||sym,
         chain: info.chain||'solana', pair_address: info.pair_address||pairAddr,
-        image_url: info.image_url||'', price_usd: Number(info.price_usd||info.price||0),
-        market_cap: Number(info.market_cap||info.mcap||0), liquidity_usd: Number(info.liquidity_usd||info.liquidity||0),
-        volume_24h: Number(info.volume_24h||0), buys_24h: Number(info.buyers_24h||0), sells_24h: Number(info.sellers_24h||0),
-        price_change_24h: Number(pc.h24||0), pair_created_at: null, verified_socials:false, score:3
+        image_url: info.image_url||'', price_usd: info.price_usd==null?null:Number(info.price_usd),
+        market_cap: info.market_cap==null?null:Number(info.market_cap), liquidity_usd: info.liquidity_usd==null?null:Number(info.liquidity_usd),
+        volume_24h: info.volume_24h==null?null:Number(info.volume_24h), buys_24h: info.buyers_24h==null?null:Number(info.buyers_24h), sells_24h: info.sellers_24h==null?null:Number(info.sellers_24h),
+        price_change_24h: info.price_change_24h==null?(info.source?null:Number(pc.h24||0)):Number(info.price_change_24h), pair_created_at: info.pair_created_at||null, verified_socials:false, score:3, source:info.source||'', quote_asset:info.quote_asset||''
       };
     } else {
       tok = {mint:mint, symbol:sym, name:sym, chain:'solana', pair_address:pairAddr, image_url:'',
@@ -2900,14 +2902,27 @@ document.addEventListener('DOMContentLoaded', function(){
   // finishes, however long it takes.
   var _qMint = new URLSearchParams(location.search).get('mint');
   if(_qMint){
-    history.replaceState(null, '', location.pathname);
     _pendingDeepLinkMint = _qMint;
+    _focusedMint = _qMint;
   }
 
   // Background tabs do zero market polling. Mobile browsers otherwise keep
   // old pages alive long enough to burn through rate limits for data nobody
   // can see, then return to the foreground already throttled.
   setInterval(function(){ if(!document.hidden) loadFeed(true); }, 15000);
+  setInterval(function(){
+    if(!_focusedMint || document.hidden) return;
+    fetch('/api/token/info/'+encodeURIComponent(_focusedMint)).then(function(r){return r.json();}).then(function(info){
+      if(!info || !info.ok) return;
+      var idx=ST.tokens.findIndex(function(t){return t.mint===_focusedMint;});
+      if(idx<0) return;
+      var t=ST.tokens[idx];
+      if(info.price_usd!=null) t.price_usd=Number(info.price_usd);
+      if(info.market_cap!=null) t.market_cap=Number(info.market_cap);
+      t.source=info.source||t.source;
+      patchFeedList();
+    }).catch(function(){});
+  }, 15000);
   setInterval(function(){ if(!document.hidden) loadSurges(); }, 12000);
   setInterval(function(){ if(!document.hidden) loadTape(); }, 8000);
   setInterval(function(){ if(!document.hidden) loadTraders(); }, 30000);

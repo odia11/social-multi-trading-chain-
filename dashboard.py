@@ -24275,11 +24275,19 @@ def api_token_info(mint_address):
         return jsonify({'ok': False, 'msg': 'Invalid address'}), 400
     try:
         url = 'https://api.dexscreener.com/latest/dex/tokens/' + requests.utils.quote(mint, safe='')
-        r = _dex_get(url, timeout=8)
-        if not r or r.status_code != 200:
-            return jsonify({'ok': False, 'msg': 'Token not found'}), 404
-        pairs = r.json().get('pairs') or []
+        try:
+            r = _dex_get(url, timeout=8)
+            pairs = (r.json().get('pairs') or []) if r and r.status_code == 200 else []
+        except (requests.RequestException, ValueError):
+            pairs = []
         if not pairs:
+            if not is_evm:
+                from launched_token_market import lookup as _launch_market_lookup
+                launch = _launch_market_lookup(DB_FILE, BASE, mint, _sol_price_usd)
+                if launch:
+                    response = jsonify(launch)
+                    response.headers['Cache-Control'] = 'no-store'
+                    return response
             return jsonify({'ok': False, 'msg': 'Token not found'}), 404
         # Only ever pick a pair on a chain this app actually supports trading
         # on -- an EVM address could theoretically also exist (independently
