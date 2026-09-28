@@ -24274,6 +24274,14 @@ def api_token_info(mint_address):
     if not mint or not (is_evm or is_valid_solana_address(mint)):
         return jsonify({'ok': False, 'msg': 'Invalid address'}), 400
     try:
+        launch = None
+        if not is_evm:
+            from launched_token_market import lookup as _launch_market_lookup
+            launch = _launch_market_lookup(DB_FILE, BASE, mint, _sol_price_usd)
+            if launch and not launch.get('curve_complete'):
+                response = jsonify(launch)
+                response.headers['Cache-Control'] = 'no-store'
+                return response
         url = 'https://api.dexscreener.com/latest/dex/tokens/' + requests.utils.quote(mint, safe='')
         try:
             r = _dex_get(url, timeout=8)
@@ -24281,13 +24289,10 @@ def api_token_info(mint_address):
         except (requests.RequestException, ValueError):
             pairs = []
         if not pairs:
-            if not is_evm:
-                from launched_token_market import lookup as _launch_market_lookup
-                launch = _launch_market_lookup(DB_FILE, BASE, mint, _sol_price_usd)
-                if launch:
-                    response = jsonify(launch)
-                    response.headers['Cache-Control'] = 'no-store'
-                    return response
+            if launch:
+                response = jsonify(launch)
+                response.headers['Cache-Control'] = 'no-store'
+                return response
             return jsonify({'ok': False, 'msg': 'Token not found'}), 404
         # Only ever pick a pair on a chain this app actually supports trading
         # on -- an EVM address could theoretically also exist (independently

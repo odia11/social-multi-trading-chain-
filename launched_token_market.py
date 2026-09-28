@@ -32,6 +32,9 @@ def lookup(db_file, base, mint, sol_usd=0):
         snapshot=json.loads(proc.stdout)
         if snapshot['quote_asset']!=row['quote_asset']:
             return result
+        if snapshot['complete']:
+            result['curve_complete']=True
+            return result
         result.update(price_quote=snapshot['price_quote'],
             market_cap_quote=snapshot['market_cap_quote'],
             curve_complete=snapshot['complete'],source='solana_bonding_curve')

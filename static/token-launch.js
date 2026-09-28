@@ -26,6 +26,7 @@ function renderPreview(){
  text('tl-review-creator',mode==='holder'?'Holder rewards':mode==='creator'?'100.00%':money((10000-bps)/100));
  text('tl-review-community',mode==='community'?money(bps/100):'—');
  $('tl-community-fields').hidden=mode!=='community';
+ text('tl-reward-summary',mode==='holder'?'Rewards: token holders':mode==='community'?'Rewards: creator + community':'Rewards: 100% creator');
 }
 async function call(path,body){
  var opt={credentials:'include'};
@@ -308,18 +309,41 @@ async function checkKnown(row,stage,button,notice){
   button.disabled=false;button.textContent=stage==='create'?'Check transaction':'Check fee split';
  }finally{busy=false}
 }
+function renderRecent(){
+ var panel=$('tl-recent-status'),target=$('tl-recent-items');if(!panel||!target)return;
+ target.replaceChildren();var recent=mine.slice(0,4);panel.hidden=!recent.length;
+ recent.forEach(function(row){
+  var state=row.status==='live'?'confirmed':row.status==='draft'?'draft':
+    row.status==='submitted'||row.status==='pending_shares'||row.status==='finalize_submitted'?'pending':
+    row.status==='prepared'||row.status==='finalize_prepared'?'approval':'pending';
+  var item=dom('div','tl-recent-item is-'+state);
+  item.appendChild(dom('strong','',state));
+  var age=Math.max(0,Math.floor(Date.now()/1000-Number(row.finalized_at||row.created_at||0)));
+  item.appendChild(dom('small','',age<3600?Math.max(1,Math.floor(age/60))+'m ago':age<86400?Math.floor(age/3600)+'h ago':Math.floor(age/86400)+'d ago'));
+  target.appendChild(item);
+ });
+}
 function drawMine(){
  var wrap=$('tl-mine');wrap.replaceChildren();
  if(!mine.length){wrap.appendChild(dom('p','tl-helper','No saved tokens yet. Your first launch starts here.'));return}
  mine.forEach(function(row){
-  var el=dom('div','tl-item');var top=dom('div','tl-item-top');
-  top.appendChild(dom('strong','',row.symbol+' / '+row.quote_asset));
-  top.appendChild(dom('span','tl-flag',row.status.replaceAll('_',' ')));
+  var el=dom('article','tl-item');var top=dom('div','tl-item-top');
+  var icon=dom('img','tl-item-icon');icon.src='/token-launch/icon/'+encodeURIComponent(row.id);icon.alt=row.name+' logo';icon.loading='lazy';top.appendChild(icon);
+  var identity=dom('div','tl-item-identity');identity.appendChild(dom('strong','',row.symbol+' / '+row.quote_asset));
+  identity.appendChild(dom('small','',row.name||''));
+  var chips=dom('div','tl-item-chips');chips.appendChild(dom('span','tl-pair-chip',row.quote_asset+' Pair'));
+  identity.appendChild(chips);top.appendChild(identity);
+  top.appendChild(dom('span','tl-flag'+(row.status==='live'?' is-live':''),row.status.replaceAll('_',' ')));
   el.appendChild(top);
   el.appendChild(dom('p','tl-helper',row.reward_mode==='community'
     ? 'Community '+(row.community_bps/100).toFixed(2)+'% · Creator '+((10000-row.community_bps)/100).toFixed(2)+'%'
     :row.reward_mode==='holder'?'Creator fees belong to holders':'Creator fees belong to creator'));
-  if(row.mint)el.appendChild(dom('div','tl-mono',row.mint));
+  if(row.status==='live'&&row.mint){
+    var live=dom('div','tl-live-note');live.appendChild(dom('span','tl-live-dot'));
+    live.appendChild(dom('span','','Your token is live. Open Live Market to buy or sell.'));el.appendChild(live);
+    var trade=dom('a','tl-buy-sell','Buy / Sell');trade.href='/live-market?mint='+encodeURIComponent(row.mint);el.appendChild(trade);
+  }
+  if(row.mint&&row.status!=='live')el.appendChild(dom('div','tl-mono',row.mint));
   var actions=dom('div','tl-actions');
   function action(label,fn){var b=dom('button','',label);b.type='button';b.onclick=fn;actions.appendChild(b);return b}
   if(cfg.enabled&&(row.status==='draft'||row.status==='prepared')){
@@ -389,7 +413,7 @@ function drawMine(){
   if(row.status==='live'&&row.reward_mode==='holder'){
     el.appendChild(dom('p','tl-helper','Pump distributes Holder Rewards; there is no separate creator claim for this mode.'));
   }
-  if(row.mint&&(row.status==='live'||row.status==='pending_shares')){
+  if(row.mint&&row.status==='pending_shares'){
     var a=dom('a','','Trade on OrcAgent →');
     a.href='/live-market?mint='+encodeURIComponent(row.mint);actions.appendChild(a);
   }
@@ -398,12 +422,36 @@ function drawMine(){
     explorer.href='https://solscan.io/tx/'+encodeURIComponent(row.launch_signature);
     explorer.target='_blank';explorer.rel='noopener noreferrer';actions.appendChild(explorer);
   }
-  el.appendChild(actions);el.appendChild(verification);wrap.appendChild(el)
+  if(row.status==='live'){
+    var details=dom('details','tl-item-details');var summary=dom('summary','');
+    summary.appendChild(dom('span','tl-detail-icon','▥'));var heading=dom('span','tl-detail-heading');
+    heading.appendChild(dom('strong','','Token details'));heading.appendChild(dom('small','','View contract, pair and links.'));
+    summary.appendChild(heading);summary.appendChild(dom('span','tl-detail-chevron','⌄'));details.appendChild(summary);
+    var body=dom('div','tl-detail-body');body.appendChild(dom('div','tl-mono',row.mint||''));
+    body.appendChild(dom('p','tl-helper','Trading pair: '+row.quote_asset+' · '+(row.description||row.name)));
+    if(row.mint){var chain=dom('a','','View contract on Solscan ↗');chain.href='https://solscan.io/token/'+encodeURIComponent(row.mint);chain.target='_blank';chain.rel='noopener noreferrer';body.appendChild(chain)}
+    details.appendChild(body);el.appendChild(details);
+    if(row.reward_mode!=='holder'){
+      var fees=dom('details','tl-item-details tl-claim-details');fees.open=true;
+      var feesSummary=dom('summary','');feesSummary.appendChild(dom('span','tl-detail-icon','▤'));
+      var feesHeading=dom('span','tl-detail-heading');feesHeading.appendChild(dom('strong','','Manage creator fees'));
+      feesSummary.appendChild(feesHeading);feesSummary.appendChild(dom('span','tl-detail-chevron','⌄'));fees.appendChild(feesSummary);
+      var feeBody=dom('div','tl-detail-body');feeBody.appendChild(dom('p','tl-helper','Your token is live. Claiming trading fees is optional and requires a separate wallet approval.'));
+      var feeActions=dom('div','tl-actions');
+      ['Claim creator fees','Claims in preflight','Claim history','Check USDC fees'].forEach(function(label){
+        Array.from(actions.children).forEach(function(button){
+          if(button.textContent===label)feeActions.appendChild(button)
+        });
+      });feeBody.appendChild(feeActions);fees.appendChild(feeBody);el.appendChild(fees);
+    }
+  }
+  if(actions.children.length)el.appendChild(actions);
+  el.appendChild(verification);wrap.appendChild(el)
  });
 }
 async function loadMine(){
  try{
-  var r=await call('/api/token-launch/mine');mine=r.launches||[];drawMine();
+  var r=await call('/api/token-launch/mine');mine=r.launches||[];drawMine();renderRecent();
   // A creator may return from Phantom after a browser suspension. If their
   // signature is already durably recorded, retry chain verification ONCE
   // per page view without signing, spending, or creating another mint.
