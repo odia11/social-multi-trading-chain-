@@ -46,10 +46,8 @@ small{color:#9ca6b4;display:block;overflow-wrap:anywhere}
  .then(function(r){
    if(!r||!r.ok){done(r&&r.msg||'Could not verify Phantom response. Check the saved launch.');return;}
    if(r.url&&r.step==='sign'){
-     status.textContent='Connected. Opening Phantom to approve your token launch…';
+     status.textContent='Connected. Tap Continue in Phantom to approve your token launch.';
      btn.href=r.url;btn.textContent='Continue in Phantom';btn.style.display='inline-block';
-     // iOS can suppress a second automatic Universal Link; manual button stays.
-     setTimeout(function(){location.href=r.url},120);
      return;
    }
    done(r.msg||'Phantom transaction submitted. Check your token status.');
