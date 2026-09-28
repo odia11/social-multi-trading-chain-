@@ -12588,6 +12588,7 @@ def phantom_callback():
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     resp.headers['Pragma']        = 'no-cache'
     resp.headers['Expires']       = '0'
+    resp.headers['Referrer-Policy'] = 'no-referrer'
     return resp
 
 @app.route('/api/test-auth')

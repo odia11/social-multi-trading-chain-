@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1.0,user-scalable=no">
 <title>Connecting wallet… — OrcAgent</title>
+<meta name="referrer" content="no-referrer">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0a0b0e;color:#eef1f5;font-family:'Geist',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:14px;padding:20px;text-align:center}
@@ -14,12 +15,14 @@ body{background:#0a0b0e;color:#eef1f5;font-family:'Geist',system-ui,sans-serif;d
 .msg.ok{color:#eef1f5;font-size:17px;font-weight:650}
 .err{color:#f76b62}
 .pwa-note{display:none;max-width:340px;padding:14px 16px;border:1px solid rgba(255,189,89,.3);border-radius:14px;background:rgba(255,189,89,.08);color:#d7b97d;font-size:13px;line-height:1.5}
+.next{display:none;background:#ffbd59;color:#141414;text-decoration:none;border-radius:12px;padding:14px 20px;font-size:15px;font-weight:700}
 .brand{font-size:11px;color:#565d68;margin-top:20px;letter-spacing:.08em;text-transform:uppercase}
 </style>
 </head>
 <body>
 <div class="spin">◌</div>
 <div class="msg" id="msg">Completing wallet connection…</div>
+<a class="next" id="continue-phantom" href="#">Continue in Phantom</a>
 <div class="pwa-note" id="pwa-note">You can close this browser page and return to the OrcAgent app. Your secure session will be picked up automatically.</div>
 <div class="brand">OrcAgent</div>
 
@@ -42,6 +45,8 @@ var _b58enc=(function(){
   var msg = document.getElementById('msg');
   var spin = document.querySelector('.spin');
   var p = new URLSearchParams(window.location.search);
+  // Keep encrypted Phantom callback payloads out of browser history.
+  history.replaceState(null, '', '/phantom-callback');
   var fromInstalledApp = p.get('source') === 'pwa';
 
   function safeReturnRoute(raw){
@@ -114,13 +119,11 @@ var _b58enc=(function(){
       redirect_link: _cbUrl,
       payload: sr.payload
     });
-    window.location.href = 'https://phantom.app/ul/v1/signMessage?'+signParams.toString();
+    var next = document.getElementById('continue-phantom');
+    next.href = 'https://phantom.app/ul/v1/signMessage?'+signParams.toString();
+    next.style.display = 'inline-block';
+    msg.textContent = 'Connected. Tap Continue in Phantom to confirm wallet ownership.';
   }
-
-  console.log('[phantom-cb] URL:', window.location.href);
-  p.forEach(function(v,k){
-    console.log('[phantom-cb]', k, '=', (k==='data'||k==='nonce') ? v.slice(0,20)+'…' : v);
-  });
 
   var errCode = p.get('errorCode');
   if(errCode){
@@ -216,7 +219,6 @@ var _b58enc=(function(){
     body: JSON.stringify({token:token, phantom_pk:phantomPk, nonce:nonce, data:data})
   }).then(function(r){ return r.json(); }).catch(function(){ return null; });
 
-  console.log('[phantom-cb] decrypt response:', dr);
   if(!dr || !dr.ok || !dr.wallet_address){
     fail('Decrypt failed: '+((dr && dr.error) || 'unknown error'));
     return;
