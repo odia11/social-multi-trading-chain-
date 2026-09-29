@@ -43,7 +43,7 @@ def install(appmod) -> None:
             # order, despite installing after it -- Flask runs after_request
             # hooks in reverse install() order (see app_entry.py).
             if 'bfcache-guard.js' not in html:
-                tags.append('<script src="/static/bfcache-guard.js?v=1"></script>')
+                tags.append('<script src="/static/bfcache-guard.js?v=2"></script>')
 
             # Tells app-ux.css's mobile view-transition rules which direction
             # to slide: forward (default, no attribute) or back.
@@ -77,8 +77,8 @@ def install(appmod) -> None:
             for href, kind in (
                 (f'/static/navbar.css?v={version}', 'style'),
                 (f'/static/navbar.js?v={version}', 'script'),
-                ('/static/mobile-bottom-nav.css?v=5', 'style'),
-                ('/static/mobile-bottom-nav.js?v=5', 'script'),
+                ('/static/mobile-bottom-nav.css?v=6', 'style'),
+                ('/static/mobile-bottom-nav.js?v=6', 'script'),
                 (f'/static/header-stable-balance.js?v={version}', 'script'),
             ):
                 marker = f'rel="preload" href="{href}"'

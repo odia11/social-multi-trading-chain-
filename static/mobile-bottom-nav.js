@@ -62,18 +62,46 @@ function ensureHomeComposerStyles(){
    bottom is different from visualViewport's bottom and leaves a gap. Correct
    only a measured gap, never change the document scroll owner. */
 var _dockFrame=0;
+function _editingText(){
+  var a=document.activeElement;
+  return !!(a && (a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.isContentEditable));
+}
 function _dockBottomNav(){
   var nav=document.getElementById('oa-bottom-nav'),vv=window.visualViewport;
   if(!nav||!vv||!window.matchMedia('(max-width:767px)').matches)return;
   if(nav.getClientRects().length===0)return;
+
+  var rect=nav.getBoundingClientRect();
   var visibleBottom=vv.offsetTop+vv.height;
-  var gap=visibleBottom-nav.getBoundingClientRect().bottom;
-  if(Math.abs(gap)<1.5)return;
-  var old=Number(nav.dataset.oaDockShift||0),next=old+gap;
-  // An on-screen keyboard is not a footer gap: don't move the nav over input.
-  if(!Number.isFinite(next)||Math.abs(next)>120)return;
+  var old=Number(nav.dataset.oaDockShift||0);
+  var correction=visibleBottom-rect.bottom;
+  if(Math.abs(correction)<1.5){
+    var lift=Math.max(0,-old);
+    document.documentElement.style.setProperty('--oa-nav-lift',lift.toFixed(1)+'px');
+    return;
+  }
+
+  // A real soft keyboard can shrink the visual viewport by hundreds of pixels.
+  // In that case the footer must NOT jump above the keyboard while someone is
+  // typing. Browser chrome (Safari's bottom URL/tab bar) may also consume more
+  // than the old hard-coded 120px ceiling, so only an actively focused text
+  // control is treated as a keyboard condition.
+  var layoutH=Math.max(window.innerHeight||0,document.documentElement.clientHeight||0);
+  var keyboardLikely=_editingText() && layoutH>0 && vv.height < layoutH*0.72;
+  if(keyboardLikely)return;
+
+  var next=old+correction;
+  if(!Number.isFinite(next))return;
+  // Allow large Safari browser-chrome corrections, but reject absurd geometry.
+  next=Math.max(-360,Math.min(180,next));
   nav.dataset.oaDockShift=String(next);
   nav.style.setProperty('transform','translate3d(0,'+next+'px,0)','important');
+
+  // When Safari lifts the fixed nav above its layout viewport bottom, reserve
+  // the same extra space in the document so feed/composer content never sits
+  // underneath the visible navigation.
+  var lift=Math.max(0,-next);
+  document.documentElement.style.setProperty('--oa-nav-lift',lift.toFixed(1)+'px');
 }
 function _scheduleBottomDock(){
   if(_dockFrame)return;
@@ -86,10 +114,13 @@ function _observeBottomDock(){
   window.addEventListener('resize',_scheduleBottomDock,{passive:true});
   window.addEventListener('orientationchange',_scheduleBottomDock,{passive:true});
   window.addEventListener('pageshow',_scheduleBottomDock,{passive:true});
+  document.addEventListener('visibilitychange',function(){if(!document.hidden)_scheduleBottomDock()},{passive:true});
+  document.addEventListener('orca:bfcache-restored',_scheduleBottomDock);
   var sheet=document.querySelector('link[href*="mobile-bottom-nav.css"]');
   if(sheet)sheet.addEventListener('load',_scheduleBottomDock,{once:true});
   _scheduleBottomDock();
-  setTimeout(_scheduleBottomDock,250);
+  setTimeout(_scheduleBottomDock,120);
+  setTimeout(_scheduleBottomDock,500);
 }
 function build(){if(document.getElementById('oa-bottom-nav'))return;ensureHomeComposerStyles();var nav=document.createElement('nav');nav.id='oa-bottom-nav';nav.className='oa-bottom-nav';nav.setAttribute('aria-label','Mobile navigation');var p=here(),wallet=p==='/wallet';nav.innerHTML='<a href="/" class="'+(p==='/'?'active':'')+'">'+icon('home')+'<span class="oa-nav-label">Home</span></a>'+
 '<a href="/live-market" class="'+(p==='/live-market'?'active':'')+'">'+icon('market')+'<span class="oa-nav-label">Live Market</span></a>'+centerHtml(p)+

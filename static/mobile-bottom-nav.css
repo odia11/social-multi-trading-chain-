@@ -1,7 +1,7 @@
 /* Shared OrcAgent mobile bottom navigation */
 @media(max-width:768px){
-  body{padding-bottom:calc(118px + env(safe-area-inset-bottom,0px))!important}
-  #mobile-nav{display:none!important}
+  body{padding-bottom:calc(118px + env(safe-area-inset-bottom,0px) + var(--oa-nav-lift,0px))!important}
+  #mobile-nav,#mob-bottom-nav{display:none!important}
   .pt-nb-menu-btn{display:none!important}
   /* One physical footer box, including the iPhone home-indicator safe area.
      content-box used to add the inset outside the height and make the footer

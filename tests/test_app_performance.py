@@ -93,7 +93,7 @@ check('service worker caches only same-origin public static GETs',
       and "req.method!=='GET'" in SW)
 check('mobile app shell assets are preloaded from head',
       'data-oa-shell-preload' in PERF
-      and 'mobile-bottom-nav.css?v=5' in PERF
-      and 'mobile-bottom-nav.js?v=5' in PERF)
+      and 'mobile-bottom-nav.css?v=6' in PERF
+      and 'mobile-bottom-nav.js?v=6' in PERF)
 
 print('\n24/24 checks passed')
