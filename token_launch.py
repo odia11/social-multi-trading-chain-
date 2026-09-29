@@ -224,20 +224,20 @@ def install(d):
         # If both the configured endpoint and PublicNode are throttled, the
         # official public endpoint is a final read-only launch preflight option.
         # Never route signing/broadcast through a fallback.
-        if launch_read and 'https://api.mainnet-beta.solana.com' not in endpoints:
+        if (launch_read or claim_read) and 'https://api.mainnet-beta.solana.com' not in endpoints:
             endpoints.append('https://api.mainnet-beta.solana.com')
         last_error=None
         for number,endpoint in enumerate(endpoints):
             if rpc_throttled_until.get(endpoint,0)>time.monotonic():
                 last_error='Solana RPC is rate-limited (429). Your saved launch is preserved. Check Phantom history before approving again.'
                 continue
-            for attempt in range(3 if number==0 else 2):
+            for attempt in range(1 if claim_read else (3 if number==0 else 2)):
                 try:
                     response=requests.post(endpoint,json={'jsonrpc':'2.0','id':1,
                          'method':method,'params':params},timeout=9)
                     if response.status_code==429:
                         last_error='Solana RPC is rate-limited (429). Your saved launch is preserved. Check Phantom history before approving again.'
-                        if attempt < (2 if number==0 else 1):
+                        if attempt < (0 if claim_read else (2 if number==0 else 1)):
                             time.sleep(0.35*(attempt+1))
                             continue
                         rpc_throttled_until[endpoint]=time.monotonic()+12
@@ -250,7 +250,7 @@ def install(d):
                     if error:
                         if isinstance(error,dict) and error.get('code')==429:
                             last_error='Solana RPC is rate-limited (429). Your saved launch is preserved. Check Phantom history before approving again.'
-                            if attempt < (2 if number==0 else 1):
+                            if attempt < (0 if claim_read else (2 if number==0 else 1)):
                                 time.sleep(0.35*(attempt+1))
                                 continue
                             rpc_throttled_until[endpoint]=time.monotonic()+12
@@ -1177,15 +1177,31 @@ def install(d):
         path=os.path.join(d.BASE,'pump_adapter','build-reward-claim.cjs')
         params={'wallet':wallet,'mint':row['mint'],'quote_asset':row['quote_asset'],
                 'reward_mode':row['reward_mode'],'blockhash':blockhash}
-        endpoint=(_VERIFY_RPC if row['reward_mode']=='creator' and row['quote_asset']=='USDC'
-                  else (getattr(d,'SOLANA_RPC_URL','') or d.SOLANA_RPC))
+        primary=getattr(d,'SOLANA_RPC_URL','') or d.SOLANA_RPC
+        endpoints=([_VERIFY_RPC,primary,'https://api.mainnet-beta.solana.com']
+                   if row['reward_mode']=='creator' and row['quote_asset']=='USDC'
+                   else [primary])
         try:
-            r=subprocess.run(['/bin/bash',os.path.join(d.BASE,'pump_adapter','run-node.sh'),path],input=json.dumps(params),text=True,
-                capture_output=True,timeout=14,cwd=os.path.dirname(path),
-                env=dict(os.environ,ORCA_LAUNCH_RPC=endpoint))
-            if r.returncode or not r.stdout:
-                return fail('Creator fees could not be quoted or claim is not ready. No transaction was sent.',503)
-            built=json.loads(r.stdout)
+            built=None
+            for endpoint in dict.fromkeys(endpoints):
+                if rpc_throttled_until.get(endpoint,0)>time.monotonic():
+                    continue
+                r=subprocess.run(['/bin/bash',os.path.join(d.BASE,'pump_adapter','run-node.sh'),path],input=json.dumps(params),text=True,
+                    capture_output=True,timeout=14,cwd=os.path.dirname(path),
+                    env=dict(os.environ,ORCA_LAUNCH_RPC=endpoint))
+                if r.returncode==0 and r.stdout:
+                    built=json.loads(r.stdout)
+                    break
+                # These are read-only account lookups; rotate only for provider
+                # rate limits and outages. Validation/protocol failures are not
+                # fixed by another RPC and must never be hidden.
+                stderr=(r.stderr or '').lower()
+                if not any(marker in stderr for marker in ('429','too many requests','rate limit','fetch failed','etimedout','econnreset')):
+                    return fail('Creator fees could not be quoted or claim is not ready. No transaction was sent.',503)
+                if '429' in stderr or 'rate limit' in stderr or 'too many requests' in stderr:
+                    rpc_throttled_until[endpoint]=time.monotonic()+12
+            if built is None:
+                return fail('Solana RPC is busy. No claim transaction was prepared; retry shortly.',503)
             if (built.get('mint')!=row['mint'] or
                     built.get('quote_mint') != (USDC_MINT if row['quote_asset']=='USDC' else WSOL_MINT)
                     or not built.get('transaction_b64') or built.get('transaction_bytes',0)>1232):
