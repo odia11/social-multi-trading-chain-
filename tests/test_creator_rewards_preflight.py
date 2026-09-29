@@ -226,7 +226,35 @@ def test_creator_earnings_are_wallet_private_and_verified_only():
     print('PASS only verified received_raw is counted as claimed; accrued vault snapshots are not')
     tmp.cleanup()
 
+
+def test_wallet_wide_available_creator_fees_do_not_require_live_launch():
+    tmp,app,d,client,owner,ident,raw,built=fixture()
+    wallet=str(owner.pubkey());requested=[]
+    # Deliberately make the only saved launch non-live. Available creator fees
+    # are a wallet vault read and must not be hidden just because a card is not live.
+    with sqlite3.connect(d.DB_FILE) as c:
+        c.execute("UPDATE token_launches SET status='submitted' WHERE id=?",(ident,))
+    def rpc(url,*,json,timeout):
+        assert json['method']=='getAccountInfo'
+        requested.append(json['params'][0])
+        return Reply({'value':None})
+    with patch('token_launch.requests.post',side_effect=rpc):
+        result=client.get('/api/token-launch/creator-fees')
+        assert result.status_code==200,result.get_data(as_text=True)
+        assert result.get_json()['pump_vault_raw']=='0'
+        assert result.headers['Cache-Control']=='private, no-store'
+        # The old token-specific route stays strict: reading is wallet-wide,
+        # claiming through a launch still requires an eligible live launch.
+        assert client.get('/api/token-launch/'+ident+'/creator-fees').status_code==409
+    assert len(requested)==1
+    with client.session_transaction() as sess:sess.pop('wallet',None)
+    assert client.get('/api/token-launch/creator-fees').status_code==401
+    print('PASS wallet-wide available creator fee read works without a live card and remains private')
+    print('PASS token-specific claim gate still requires the creator own an eligible live launch')
+    tmp.cleanup()
+
 if __name__=='__main__':
  test_claim_preflight_handles_429_and_wallet_rent_safely()
  test_received_usdc_is_exact_confirmed_wallet_delta_not_fee_snapshot()
  test_creator_earnings_are_wallet_private_and_verified_only()
+ test_wallet_wide_available_creator_fees_do_not_require_live_launch()

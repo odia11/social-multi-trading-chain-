@@ -66,8 +66,12 @@ def test_token_launch_ui():
     assert "'/live-market?mint='+encodeURIComponent(data.mint)" in directory_js
     assert "'/live-market?mint='+encodeURIComponent(row.mint)" in js
     assert "'/api/token-launch/creator-earnings'" in js
+    assert "'/api/token-launch/creator-fees'" in js
+    assert 'No live USDC Creator Rewards token yet.' not in js
     assert 'tl-token-fee-overview' in js and 'tl-claim-history-' in js
     assert 'Solscan ↗' in js and 'Refresh available' in js
+    css=(ROOT/'static/token-launch-redesign.css').read_text()
+    assert '.tl-saved>.tl-section-head{display:none}' in css
     print('PASS quick-launch hero, live stats, responsive form, real reward choices, wallet approval')
     print('PASS saved drafts, verified directory and versioned assets preserve API compatibility')
     tmp.cleanup()

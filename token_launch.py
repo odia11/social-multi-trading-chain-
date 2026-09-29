@@ -1119,6 +1119,51 @@ def install(d):
         return jsonify(ok=True,recovered=True,
             msg='The old transaction expired without a confirmed token. Your original draft is ready for a NEW Phantom approval. No transaction was sent by recovery.')
 
+    def creator_usdc_vault_raw(wallet):
+        # Pump's creator vault belongs to the authenticated WALLET, not to an
+        # individual mint. Reading it does not require a live launch; claiming
+        # still does, and remains owner-bound below.
+        creator=Pubkey.from_string(wallet)
+        vault,_=Pubkey.find_program_address([b'creator-vault',bytes(creator)],
+                      Pubkey.from_string(PUMP_PROGRAM))
+        ata,_=Pubkey.find_program_address([
+                    bytes(vault),bytes(Pubkey.from_string(SPL_TOKEN_PROGRAM)),
+                    bytes(Pubkey.from_string(USDC_MINT))],
+                    Pubkey.from_string(ASSOCIATED_TOKEN_PROGRAM))
+        state=rpc('getAccountInfo',[str(ata),{'encoding':'base64',
+                 'commitment':'confirmed'}],verification=True)
+        account=(state or {}).get('value')
+        raw=0
+        if account is not None:
+            if account.get('owner')!=SPL_TOKEN_PROGRAM:
+                raise RuntimeError('Creator vault returned an unexpected token program')
+            try:data=base64.b64decode(account['data'][0],validate=True)
+            except (KeyError,IndexError,TypeError,ValueError) as exc:
+                raise RuntimeError('USDC creator vault could not be verified safely; retry later') from exc
+            if (len(data)<72 or data[:32]!=bytes(Pubkey.from_string(USDC_MINT))
+                    or data[32:64]!=bytes(vault)):
+                raise RuntimeError('Creator vault did not match the expected USDC owner')
+            raw=int.from_bytes(data[64:72],'little')
+        return raw
+
+    def creator_fee_response(wallet):
+        try:raw=creator_usdc_vault_raw(wallet)
+        except (KeyError,IndexError,TypeError,ValueError):
+            return fail('USDC creator vault could not be verified safely; retry later',503)
+        except RuntimeError as exc:return fail(exc,503)
+        response=jsonify(ok=True,quote_asset='USDC',pump_vault_raw=str(raw),
+               scope='creator_wallet_all_tokens_pump_bonding_curve',
+               note='Wallet-wide unclaimed bonding-curve USDC creator fees. Not token-specific, not yet received, PumpSwap fees excluded.')
+        response.headers['Cache-Control']='private, no-store'
+        return response
+
+    @app.get('/api/token-launch/creator-fees')
+    @d.rate_limit(10,60)
+    def creator_wallet_usdc_fee_status():
+        wallet=identity()
+        if not wallet:return fail('Connect your wallet',401)
+        return creator_fee_response(wallet)
+
     @app.get('/api/token-launch/<launch_id>/creator-fees')
     @d.rate_limit(10,60)
     def creator_usdc_fee_status(launch_id):
@@ -1128,37 +1173,7 @@ def install(d):
         if not row:return fail('Launch not found',404)
         if row['status']!='live' or row['reward_mode']!='creator' or row['quote_asset']!='USDC':
             return fail('Confirm your USDC Creator Rewards launch first',409)
-        # Pump's creator vault belongs to the WALLET, not to an individual
-        # mint; never present its balance as this token's revenue. The PumpSwap
-        # AMM vault is separate and is not included in this number.
-        creator=Pubkey.from_string(wallet)
-        vault,_=Pubkey.find_program_address([b'creator-vault',bytes(creator)],
-                      Pubkey.from_string(PUMP_PROGRAM))
-        ata,_=Pubkey.find_program_address([
-                    bytes(vault),bytes(Pubkey.from_string(SPL_TOKEN_PROGRAM)),
-                    bytes(Pubkey.from_string(USDC_MINT))],
-                    Pubkey.from_string(ASSOCIATED_TOKEN_PROGRAM))
-        try:
-            state=rpc('getAccountInfo',[str(ata),{'encoding':'base64',
-                     'commitment':'confirmed'}],verification=True)
-            account=(state or {}).get('value')
-            raw=0
-            if account is not None:
-                if account.get('owner')!=SPL_TOKEN_PROGRAM:
-                    raise RuntimeError('Creator vault returned an unexpected token program')
-                data=base64.b64decode(account['data'][0],validate=True)
-                if (len(data)<72 or data[:32]!=bytes(Pubkey.from_string(USDC_MINT))
-                        or data[32:64]!=bytes(vault)):
-                    raise RuntimeError('Creator vault did not match the expected USDC owner')
-                raw=int.from_bytes(data[64:72],'little')
-        except (KeyError,IndexError,TypeError,ValueError) as exc:
-            return fail('USDC creator vault could not be verified safely; retry later',503)
-        except RuntimeError as exc:return fail(exc,503)
-        response=jsonify(ok=True,quote_asset='USDC',pump_vault_raw=str(raw),
-               scope='creator_wallet_all_tokens_pump_bonding_curve',
-               note='Wallet-wide unclaimed Pump bonding-curve USDC fees, not token-specific, not yet received, PumpSwap fees excluded.')
-        response.headers['Cache-Control']='private, no-store'
-        return response
+        return creator_fee_response(wallet)
 
     @app.post('/api/token-launch/<launch_id>/claim/prepare')
     @d.rate_limit(3,60)

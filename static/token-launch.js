@@ -26,7 +26,7 @@ function rawAmount(raw,asset){
 function claimLabel(value){
  return {confirmed:'Claimed',confirmed_no_payout:'No payout',prepared:'Awaiting approval',submitted:'Pending confirmation',expired_unverified:'Needs review'}[value]||String(value||'Unknown').replaceAll('_',' ');
 }
-function claimDate(value){return value?new Date(Number(value)*1000).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}):'—'}
+function claimDate(value){return value?new Date(Number(value)*1000).toLocaleString([], {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—'}
 function renderClaimRows(target,claims,showToken){
  if(!target)return;target.replaceChildren();
  if(!claims||!claims.length){target.appendChild(dom('p','tl-helper','No creator-fee claims yet.'));return}
@@ -39,9 +39,9 @@ function renderClaimRows(target,claims,showToken){
   row.appendChild(main);
   var side=dom('div','tl-claim-side');
   var paid=c.status==='confirmed'&&c.received_raw!==''?rawAmount(c.received_raw,c.quote_asset):c.status==='confirmed_no_payout'?'0 '+c.quote_asset:'—';
-  side.appendChild(dom('strong','',paid));
+  if(paid!=='—')side.appendChild(dom('strong','',paid));
   if(c.signature){var link=dom('a','','Solscan ↗');link.href='https://solscan.io/tx/'+encodeURIComponent(c.signature);link.target='_blank';link.rel='noopener noreferrer';side.appendChild(link)}
-  row.appendChild(side);target.appendChild(row);
+  if(side.children.length)row.appendChild(side);target.appendChild(row);
  });
 }
 function renderCreatorEarnings(){
@@ -49,16 +49,16 @@ function renderCreatorEarnings(){
  panel.hidden=!mine.length;if(!mine.length)return;
  var data=creatorEarnings||{verified_claimed_raw:{USDC:'0'},confirmed_claims:0,pending_claims:0,history:[]};
  text('tl-claimed-usdc',rawAmount((data.verified_claimed_raw||{}).USDC||'0','USDC'));
- text('tl-claim-count',String(Number(data.confirmed_claims||0)+Number(data.pending_claims||0)));
- text('tl-claim-count-note',data.pending_claims?data.pending_claims+' pending · '+data.confirmed_claims+' confirmed':data.confirmed_claims?data.confirmed_claims+' confirmed claims':'No claims yet');
+ var history=data.history||[],review=history.filter(function(c){return c.status==='expired_unverified'}).length;
+ text('tl-claim-count',String(history.length));
+ var parts=[];if(data.pending_claims)parts.push(data.pending_claims+' pending');if(data.confirmed_claims)parts.push(data.confirmed_claims+' confirmed');if(review)parts.push(review+' review');
+ text('tl-claim-count-note',parts.length?parts.join(' · '):'No claims yet');
  renderClaimRows($('tl-global-claim-history'),data.history||[],true);
 }
 async function refreshAvailableFees(showNotice){
- var eligible=mine.find(function(row){return row.status==='live'&&row.reward_mode==='creator'&&row.quote_asset==='USDC'});
- if(!eligible){creatorAvailableRaw='';text('tl-available-usdc','—');text('tl-available-note','No live USDC Creator Rewards token yet.');return}
  var button=$('tl-refresh-earnings');if(button)button.disabled=true;
  try{
-  var fees=await call('/api/token-launch/'+eligible.id+'/creator-fees');creatorAvailableRaw=fees.pump_vault_raw;
+  var fees=await call('/api/token-launch/creator-fees');creatorAvailableRaw=fees.pump_vault_raw;
   text('tl-available-usdc',rawAmount(creatorAvailableRaw,'USDC'));
   text('tl-available-note','Wallet-wide unclaimed bonding-curve fees. PumpSwap fees excluded.');
   if(showNotice)status('Creator fee balance refreshed.');
@@ -474,7 +474,7 @@ function drawMine(){
       action('Refresh available',async function(){
         try{
           verification.textContent='Checking your creator fee balance…';
-          var fees=await call('/api/token-launch/'+row.id+'/creator-fees');
+          var fees=await call('/api/token-launch/creator-fees');
           creatorAvailableRaw=fees.pump_vault_raw;
           text('tl-available-usdc',rawAmount(creatorAvailableRaw,'USDC'));
           text('tl-available-note','Wallet-wide unclaimed bonding-curve fees. PumpSwap fees excluded.');
@@ -611,7 +611,7 @@ $('tl-image').addEventListener('change',async function(){
 });
 $('tl-save').addEventListener('click',saveDraft);
 $('tl-refresh-earnings').addEventListener('click',function(){refreshAvailableFees(true)});
-$('tl-toggle-history').addEventListener('click',function(){var box=$('tl-global-claim-history');box.hidden=!box.hidden;this.textContent=box.hidden?'View claim history':'Hide claim history'});
+$('tl-toggle-history').addEventListener('click',function(){var box=$('tl-global-claim-history');box.hidden=!box.hidden;this.textContent=box.hidden?'Claim history':'Hide history'});
 renderPreview();loadMine();
 // Phantom returns through the system browser on iOS. The original installed
 // web app remains the source of truth and refreshes as soon as it is resumed.
