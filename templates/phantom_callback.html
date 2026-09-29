@@ -14,7 +14,6 @@ body{background:#0a0b0e;color:#eef1f5;font-family:'Geist',system-ui,sans-serif;d
 .msg{font-size:14px;color:#9ca6b4;max-width:340px;line-height:1.55}
 .msg.ok{color:#eef1f5;font-size:17px;font-weight:650}
 .err{color:#f76b62}
-.pwa-note{display:none;max-width:370px;padding:18px;border:1px solid rgba(255,189,89,.3);border-radius:14px;background:rgba(255,189,89,.08);color:#e5c589;font-size:15px;line-height:1.6;text-align:left}.pwa-note strong{display:block;color:#ffbd59;margin-bottom:8px}.pwa-note ol{padding-left:22px}.pwa-note small{display:block;margin-top:12px;color:#aeb7c3;font-size:13px}
 .next{display:none;background:#ffbd59;color:#141414;text-decoration:none;border-radius:12px;padding:14px 20px;font-size:15px;font-weight:700}
 .brand{font-size:11px;color:#565d68;margin-top:20px;letter-spacing:.08em;text-transform:uppercase}
 </style>
@@ -23,7 +22,7 @@ body{background:#0a0b0e;color:#eef1f5;font-family:'Geist',system-ui,sans-serif;d
 <div class="spin">◌</div>
 <div class="msg" id="msg">Completing wallet connection…</div>
 <a class="next" id="continue-phantom" href="#">Continue in Phantom</a>
-<div class="pwa-note" id="pwa-note" role="status"><strong>Verder in de OrcAgent-app</strong><ol><li>Open de appkiezer van je iPhone door vanaf de onderkant omhoog te vegen en even vast te houden.</li><li>Tik op de OrcAgent-app die je op je beginscherm hebt geïnstalleerd.</li></ol><small>Je verbinding en de pagina waar je begon worden daar automatisch hersteld. Deze browserpagina kun je daarna sluiten.</small></div>
+
 <div class="brand">OrcAgent</div>
 
 <script>
@@ -62,13 +61,7 @@ var _b58enc=(function(){
   function fail(txt){
     msg.className = 'msg err';
     msg.textContent = txt;
-    if(fromInstalledApp){
-      var note = document.getElementById('pwa-note');
-      if(note){
-        note.textContent = 'Open via de iPhone-appkiezer je geïnstalleerde OrcAgent-app en probeer daar opnieuw te verbinden.';
-        note.style.display = 'block';
-      }
-    }else{
+    if(!fromInstalledApp){
       setTimeout(function(){ window.location.replace(returnTo); }, 5000);
     }
   }
@@ -187,9 +180,7 @@ var _b58enc=(function(){
       if(fromInstalledApp){
         if(spin){ spin.classList.add('done'); spin.textContent = '✓'; }
         msg.className = 'msg ok';
-        msg.textContent = 'Wallet verbonden. Ga terug naar de OrcAgent-app';
-        var note = document.getElementById('pwa-note');
-        if(note) note.style.display = 'block';
+        msg.textContent = 'Verbonden met OrcAgent';
         document.title = 'Connected · OrcAgent';
       }else{
         msg.textContent = 'Connected! Redirecting…';
