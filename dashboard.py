@@ -17883,7 +17883,7 @@ def _navbar_html(active_nav: str = '') -> Markup:
 ''' % {'home': bottom_home, 'market': bottom_market, 'wallet': bottom_wallet}
     return Markup('''
 <link rel="stylesheet" href="/static/navbar.css?v=%(v)s">
-<link rel="stylesheet" href="/static/mobile-bottom-nav.css?v=8">
+<link rel="stylesheet" href="/static/mobile-bottom-nav.css?v=9">
 <header class="pt-nb-topbar">
   <a class="pt-nb-logo" href="/"><div class="pt-nb-logo-mark"></div><div class="pt-nb-wordmark">OrcAgent</div></a>
   <button class="pt-nb-menu-btn" id="pt-nb-menu-btn" aria-label="Menu">

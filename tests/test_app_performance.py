@@ -34,7 +34,7 @@ check('the app no longer observes class/style mutations on every DOM node',
 check('hidden pages pause decorative CSS animation work',
       'oa-page-hidden' in UX and 'animation-play-state:paused' in CSS)
 check('ordinary mobile bottom space is tightened from the old 132px reserve',
-      'padding-bottom:calc(108px + env(safe-area-inset-bottom,0px))' in CSS
+      'padding-bottom:calc(94px + env(safe-area-inset-bottom,0px))' in CSS
       and 'calc(132px + env' not in CSS)
 check('portfolio gets a compact but safe fixed-nav reserve',
       'body.oa-shared-ux.oa-portfolio .wlt-center' in CSS)
@@ -93,7 +93,7 @@ check('service worker caches only same-origin public static GETs',
       and "req.method!=='GET'" in SW)
 check('mobile app shell assets are preloaded from head',
       'data-oa-shell-preload' in PERF
-      and 'mobile-bottom-nav.css?v=8' in PERF
+      and 'mobile-bottom-nav.css?v=9' in PERF
       and 'mobile-bottom-nav.js?v=8' in PERF)
 
 print('\n24/24 checks passed')

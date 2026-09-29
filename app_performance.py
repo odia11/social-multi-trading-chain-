@@ -77,7 +77,7 @@ def install(appmod) -> None:
             for href, kind in (
                 (f'/static/navbar.css?v={version}', 'style'),
                 (f'/static/navbar.js?v={version}', 'script'),
-                ('/static/mobile-bottom-nav.css?v=8', 'style'),
+                ('/static/mobile-bottom-nav.css?v=9', 'style'),
                 ('/static/mobile-bottom-nav.js?v=8', 'script'),
                 (f'/static/header-stable-balance.js?v={version}', 'script'),
             ):

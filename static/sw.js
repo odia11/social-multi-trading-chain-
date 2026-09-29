@@ -1,11 +1,11 @@
 // OrcAgent service worker — public app-shell cache + Web Push.
 // SECURITY INVARIANT: only /static/ GETs are cached. Authenticated HTML,
 // API responses, balances, feeds and wallet data are always network-only.
-var OA_STATIC_CACHE = 'orcagent-static-v4';
+var OA_STATIC_CACHE = 'orcagent-static-v5';
 var OA_STATIC_BOOT = [
   '/static/app-ux.css?v=8',
   '/static/app-ux.js?v=6',
-  '/static/mobile-bottom-nav.css?v=8',
+  '/static/mobile-bottom-nav.css?v=9',
   '/static/mobile-bottom-nav.js?v=8'
 ];
 self.addEventListener('install', function(event) {

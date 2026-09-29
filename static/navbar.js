@@ -64,7 +64,7 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
 /* Shared premium mobile bottom nav across OrcAgent. */
 (function(){
   if(!window.matchMedia('(max-width:768px)').matches)return;
-  ensureStyle('/static/mobile-bottom-nav.css?v=8','mobile-bottom-nav.css');
+  ensureStyle('/static/mobile-bottom-nav.css?v=9','mobile-bottom-nav.css');
   ensureScript('/static/mobile-bottom-nav.js?v=8','mobile-bottom-nav.js');
 })();
 

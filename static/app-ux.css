@@ -23,8 +23,8 @@ body{max-width:100%;overflow-x:hidden;overflow-x:clip;background:#080d12!importa
   /* The shared bottom nav itself occupies about 98px including its inner
      padding. Older rules reserved 118-132px, leaving a visible dead strip at
      the bottom of many pages. Keep only the space the fixed control needs. */
-  html body.oa-shared-ux{padding-bottom:calc(102px + env(safe-area-inset-bottom,0px))!important}
-  html body.oa-shared-ux.oa-portfolio .wlt-center{padding-bottom:calc(108px + env(safe-area-inset-bottom,0px))!important}
+  html body.oa-shared-ux{padding-bottom:calc(86px + env(safe-area-inset-bottom,0px))!important}
+  html body.oa-shared-ux.oa-portfolio .wlt-center{padding-bottom:calc(94px + env(safe-area-inset-bottom,0px))!important}
 
   /* iOS zooms the viewport when a focused form control is below 16px. That
      creates the apparent page jump seen in in-app browsers, so text controls
@@ -58,7 +58,7 @@ body{max-width:100%;overflow-x:hidden;overflow-x:clip;background:#080d12!importa
   body:not(.oa-home-mobile):not(.oa-portfolio):not(.oa-live-v2) .page-wrap,
   body:not(.oa-home-mobile):not(.oa-portfolio):not(.oa-live-v2) .pr-wrap,
   body:not(.oa-home-mobile):not(.oa-portfolio):not(.oa-live-v2) .content{
-    padding-bottom:calc(108px + env(safe-area-inset-bottom,0px))!important
+    padding-bottom:calc(94px + env(safe-area-inset-bottom,0px))!important
   }
 
   /* Messages is a fullscreen workspace. Once a thread is open its composer
@@ -138,7 +138,7 @@ body{max-width:100%;overflow-x:hidden;overflow-x:clip;background:#080d12!importa
 /* Native-app route placeholder. It is created after 120ms only when a native
    cross-document navigation has not completed yet. The top bar/bottom nav stay
    visually stable, so iOS/Android never flash a white/unstyled document. */
-.oa-route-shell{position:fixed;z-index:900;inset:76px 0 92px;background:#080d12;opacity:0;pointer-events:none;transition:opacity .08s linear;overflow:hidden}
+.oa-route-shell{position:fixed;z-index:900;inset:76px 0 72px;background:#080d12;opacity:0;pointer-events:none;transition:opacity .08s linear;overflow:hidden}
 .oa-route-shell.show{opacity:1}
 .oa-route-shell-inner{padding:18px 18px 28px;max-width:820px;margin:0 auto}
 .oa-route-shell-title{font:800 28px/1.1 Geist,system-ui,sans-serif;color:#f2f4f7;margin:2px 0 22px}

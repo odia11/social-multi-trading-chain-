@@ -1,28 +1,28 @@
 /* Shared OrcAgent mobile bottom navigation */
 @media(max-width:768px){
-  body{padding-bottom:calc(118px + env(safe-area-inset-bottom,0px))!important}
+  body{padding-bottom:calc(90px + env(safe-area-inset-bottom,0px))!important}
   #mobile-nav,#mob-bottom-nav{display:none!important}
   .pt-nb-menu-btn{display:none!important}
   /* One physical footer box, including the iPhone home-indicator safe area.
      content-box used to add the inset outside the height and make the footer
      appear detached / clipped on certain iOS and Android viewport sizes. */
-  .oa-bottom-nav{position:fixed!important;left:0!important;right:0!important;bottom:0!important;width:100%!important;margin:0!important;z-index:1200;transform:none!important;visibility:visible!important;opacity:1!important;height:calc(92px + env(safe-area-inset-bottom,0px))!important;min-height:calc(92px + env(safe-area-inset-bottom,0px))!important;padding:8px 14px calc(8px + env(safe-area-inset-bottom,0px))!important;background:#080d12;border-top:1px solid #17202a;display:grid;grid-template-columns:1fr 1fr 82px 1fr 1fr;align-items:start;gap:6px;box-sizing:border-box!important;overflow:visible}
-  .oa-bottom-nav a,.oa-bottom-nav button{appearance:none;-webkit-appearance:none;border:0;background:none;color:#8b95a3;text-decoration:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-width:0;height:62px;font:600 11px/1.1 Geist,system-ui,sans-serif;letter-spacing:-.01em;padding:0;cursor:pointer}
-  .oa-bottom-nav svg{width:27px;height:27px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  .oa-bottom-nav{position:fixed!important;left:0!important;right:0!important;bottom:0!important;width:100%!important;margin:0!important;z-index:1200;transform:none!important;visibility:visible!important;opacity:1!important;height:calc(72px + env(safe-area-inset-bottom,0px))!important;min-height:calc(72px + env(safe-area-inset-bottom,0px))!important;padding:5px 12px calc(5px + env(safe-area-inset-bottom,0px))!important;background:#080d12;border-top:1px solid #17202a;display:grid;grid-template-columns:1fr 1fr 70px 1fr 1fr;align-items:start;gap:4px;box-sizing:border-box!important;overflow:visible}
+  .oa-bottom-nav a,.oa-bottom-nav button{appearance:none;-webkit-appearance:none;border:0;background:none;color:#8b95a3;text-decoration:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:0;height:54px;font:600 10px/1.1 Geist,system-ui,sans-serif;letter-spacing:-.01em;padding:0;cursor:pointer}
+  .oa-bottom-nav svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
   .oa-bottom-nav .active{color:#f7b955}
-  .oa-bottom-nav .oa-trade-main{position:relative;align-self:start;width:76px;height:76px;margin-top:-26px;border-radius:50%;background:#f7b955;color:#11161b;border:4px solid #080d12;box-shadow:0 0 0 1px rgba(247,185,85,.14),0 10px 26px rgba(0,0,0,.36);display:flex;align-items:center;justify-content:center;padding:0}
-  .oa-bottom-nav .oa-trade-main svg{width:35px;height:35px;stroke-width:1.8}
-  .oa-bottom-nav .oa-trade-main span{position:absolute;top:69px;color:#8b95a3;font-size:11px;font-weight:600;white-space:nowrap}
+  .oa-bottom-nav .oa-trade-main{position:relative;align-self:start;width:62px;height:62px;margin-top:-18px;border-radius:50%;background:#f7b955;color:#11161b;border:3px solid #080d12;box-shadow:0 0 0 1px rgba(247,185,85,.14),0 10px 26px rgba(0,0,0,.36);display:flex;align-items:center;justify-content:center;padding:0}
+  .oa-bottom-nav .oa-trade-main svg{width:29px;height:29px;stroke-width:1.8}
+  .oa-bottom-nav .oa-trade-main span{position:absolute;top:57px;color:#8b95a3;font-size:10px;font-weight:600;white-space:nowrap}
   .oa-bottom-nav .oa-trade-main.active span{color:#f7b955}
   .oa-bottom-nav .oa-wallet-main{background:#f7b955;color:#11161b}
   .oa-bottom-nav .oa-nav-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
-  .oa-bottom-nav .oa-menu-btn{font:600 11px/1.1 Geist,system-ui,sans-serif}
+  .oa-bottom-nav .oa-menu-btn{font:600 10px/1.1 Geist,system-ui,sans-serif}
 
   /* A trade is a focused full-screen flow: keep app navigation out of its way. */
   body.oa-live-v2 .pt-sheet{padding-bottom:env(safe-area-inset-bottom,0px)!important;z-index:1300!important}
   body.oa-trade-sheet-open .oa-bottom-nav{display:none!important}
   body.oa-trade-sheet-open{padding-bottom:0!important;overflow:hidden!important}
-  body.oa-portfolio .wlt-center{padding-bottom:calc(132px + env(safe-area-inset-bottom,0px))!important}
+  body.oa-portfolio .wlt-center{padding-bottom:calc(104px + env(safe-area-inset-bottom,0px))!important}
 
   /* Portfolio-specific action sheet opened by the large center button. */
   .oa-wallet-actions{position:fixed;inset:0;z-index:1400;pointer-events:none;visibility:hidden}

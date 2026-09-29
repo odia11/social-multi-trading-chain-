@@ -1,7 +1,7 @@
 /* Final mobile Home polish — loaded after home-mobile.css. */
 @media(max-width:767px){
 body.oa-home-mobile .feed-bot-card,body.oa-home-mobile .botbar,body.oa-home-mobile .feed-tabs{display:none!important}
-body.oa-home-mobile .wrap{padding:10px 12px calc(112px + env(safe-area-inset-bottom,0px))!important}
+body.oa-home-mobile .wrap{padding:10px 12px calc(92px + env(safe-area-inset-bottom,0px))!important}
 body.oa-home-mobile .pt-nb-topbar{padding:8px 12px!important;gap:7px!important;border-bottom:1px solid rgba(255,255,255,.055)!important}
 body.oa-home-mobile .pt-nb-logo-mark{width:40px!important;height:40px!important;border-radius:12px!important}
 body.oa-home-mobile .pt-nb-wordmark{font-size:20px!important}
