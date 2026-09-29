@@ -44,7 +44,7 @@ def b58dec(value):
     zeros=len(value)-len(value.lstrip('1'))
     return b'\0'*zeros+number.to_bytes((number.bit_length()+7)//8,'big')
 
-def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=None):
+def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=None,claim_wrapper_ok=None):
     app=d.app
     fernet=Fernet(os.environ['ENCRYPTION_KEY'].encode())
     with sqlite3.connect(d.DB_FILE) as db:
@@ -263,7 +263,10 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
             raw=fernet.decrypt(link['signed_tx'])
             signed=Transaction.from_bytes(raw)
             original=Transaction.from_bytes(base64.b64decode(claim['transaction_b64'],validate=True))
-            if (bytes(signed.message)!=bytes(original.message)
+            same=bytes(signed.message)==bytes(original.message)
+            wrapped=(not same and claim_wrapper_ok is not None
+                     and claim_wrapper_ok(signed.message,original.message,wallet))
+            if (not (same or wrapped)
                     or str(signed.signatures[0])!=claim['signature']
                     or not all(signed.verify_with_results())):
                 return fail('Saved claim signature does not match',409)
@@ -425,7 +428,14 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
                     still_valid(original_b64,(claim_for(flow) or {'created_at':0})['created_at'],claim_read=True)
                     if flow['stage']=='claim' else blockhash_valid(original_b64)):
                     return fail('Phantom approval expired before submission. Reopen this SAME saved token and retry safely.',409)
-                if bytes(tx.message)!=bytes(original.message) or not all(tx.verify_with_results()):
+                # Phantom may add its standard wrapper to a CLAIM (compute
+                # budget + Lighthouse guard). The Pump claim itself must stay
+                # identical; launches must still match byte-for-byte.
+                same=bytes(tx.message)==bytes(original.message)
+                wrapped=(not same and flow['stage']=='claim' and claim_wrapper_ok is not None
+                         and len(original.signatures)==1 and len(tx.signatures)==1
+                         and claim_wrapper_ok(tx.message,original.message,flow['wallet']))
+                if not (same or wrapped) or not all(tx.verify_with_results()):
                     return fail('Phantom signature did not match this exact token launch',409)
                 if len(tx.signatures)!=len(original.signatures) or tx.signatures[1:]!=original.signatures[1:]:
                     return fail('Ephemeral token signature changed',409)
