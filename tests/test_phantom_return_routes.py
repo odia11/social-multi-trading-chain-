@@ -62,8 +62,8 @@ check('the signMessage callback preserves source context and return route',
 check('ordinary browsers return automatically to their original OrcAgent route',
       'window.location.replace(returnTo)' in CALLBACK)
 check('installed-app login shows return-to-app guidance instead of redirecting Safari',
-      'Connected to OrcAgent' in CALLBACK
-      and 'return to the OrcAgent app' in CALLBACK)
+      'Wallet verbonden. Ga terug naar de OrcAgent-app' in CALLBACK and 'Open de appkiezer van je iPhone' in CALLBACK
+      and 'Open de appkiezer van je iPhone' in CALLBACK)
 check('callback rejects external and recursive callback redirects',
       "u.origin !== window.location.origin" in CALLBACK
       and "u.pathname === '/phantom-callback'" in CALLBACK)
