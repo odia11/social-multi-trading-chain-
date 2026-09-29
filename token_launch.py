@@ -1157,11 +1157,11 @@ def install(d):
                     and not pending['signature']):
                 try:
                     fresh=(time.time()-pending['created_at']<45
-                           or blockhash_valid(pending['transaction_b64'],claim_read=(row['reward_mode']=='creator' and row['quote_asset']=='USDC')))
+                           or blockhash_valid(pending['transaction_b64'],claim_read=True))
                 except RuntimeError as exc:return fail(exc,503)
                 if fresh:
                     try:pilot_cost=pilot_sol_preflight(row,pending['transaction_b64'],
-                                         PILOT_MAX_FOLLOWUP_SOL_LAMPORTS,claim_read=(row['reward_mode']=='creator' and row['quote_asset']=='USDC'))
+                                         PILOT_MAX_FOLLOWUP_SOL_LAMPORTS,claim_read=True)
                     except RuntimeError as exc:return fail(exc,503)
                     return jsonify(ok=True,claim_id=pending['id'],reused=True,
                       transaction_b64=pending['transaction_b64'],
@@ -1180,7 +1180,7 @@ def install(d):
             else:
                 return fail('An earlier claim for this quote asset is awaiting confirmation. Check claim history first.',409)
         try:
-            block=rpc('getLatestBlockhash',[{'commitment':'confirmed'}],claim_read=(row['reward_mode']=='creator' and row['quote_asset']=='USDC'))
+            block=rpc('getLatestBlockhash',[{'commitment':'confirmed'}],claim_read=True)
         except RuntimeError as exc:return fail(exc,503)
         blockhash=((block or {}).get('value') or {}).get('blockhash')
         if not blockhash:return fail('No recent Solana blockhash',503)
@@ -1188,10 +1188,17 @@ def install(d):
         params={'wallet':wallet,'mint':row['mint'],'quote_asset':row['quote_asset'],
                 'reward_mode':row['reward_mode'],'blockhash':blockhash}
         primary=getattr(d,'SOLANA_RPC_URL','') or d.SOLANA_RPC
-        endpoints=([*list(getattr(d,'CLAIM_SOL_RPCS',[]) or []),primary,_VERIFY_RPC,
-                    'https://api.mainnet-beta.solana.com']
-                   if row['reward_mode']=='creator' and row['quote_asset']=='USDC'
-                   else [primary])
+        claim_rpcs=list(getattr(d,'CLAIM_SOL_RPCS',[]) or [])
+        public_mainnet='https://api.mainnet-beta.solana.com'
+        # SOL/community quotes use indexed creator-vault reads. PublicNode blocks
+        # that method (403) while the official public RPC currently supports it,
+        # so try the working read-only endpoint first and retain configured
+        # providers as fallbacks. USDC uses narrow derived-account reads and can
+        # keep configured providers first.
+        broad_creator_read=(row['quote_asset']=='SOL' or row['reward_mode']=='community')
+        endpoints=(list(dict.fromkeys([public_mainnet,*claim_rpcs,primary,_VERIFY_RPC]))
+                   if broad_creator_read else
+                   list(dict.fromkeys([*claim_rpcs,primary,_VERIFY_RPC,public_mainnet])))
         try:
             built=None
             for endpoint in dict.fromkeys(endpoints):
@@ -1226,7 +1233,7 @@ def install(d):
             # ATA/rent + fee claims. Trades elsewhere need separate user
             # approval and are never charged through this launch endpoint.
             pilot_claim_cost=pilot_sol_preflight(row,built['transaction_b64'],
-                                                 PILOT_MAX_FOLLOWUP_SOL_LAMPORTS,claim_read=(row['reward_mode']=='creator' and row['quote_asset']=='USDC'))
+                                                 PILOT_MAX_FOLLOWUP_SOL_LAMPORTS,claim_read=True)
             claim_id=secrets.token_hex(16)
             with sqlite3.connect(d.DB_FILE) as conn:
                 conn.execute('''INSERT INTO token_reward_claims
