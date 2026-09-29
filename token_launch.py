@@ -653,6 +653,64 @@ def install(d):
 
     app._orca_reconcile_reward_claims=reconcile_reward_claims
 
+    STALE_CLAIM_SECONDS=120
+
+    def _pending_claim(wallet,quote_asset):
+        with closing(sqlite3.connect(d.DB_FILE)) as conn:
+            return conn.execute('''SELECT id FROM token_reward_claims WHERE wallet=? AND quote_asset=?
+                AND status IN ('prepared','submitted') LIMIT 1''',(wallet,quote_asset)).fetchone()
+
+    def expire_stale_claims(wallet):
+        '''Retire claims that were prepared but never approved in Phantom.
+
+        Such a claim keeps the Claim button on "Check pending" forever and
+        blocks a new claim, although it can no longer settle. It is retired
+        only when ALL of this holds: no signature was recorded, it is older
+        than two minutes, the chain was searched for it first (an approval
+        that settled but never reached OrcAgent is recovered instead), and
+        Solana itself says its blockhash has expired. Anything unverifiable
+        stays as it is. Retired claims are 'expired_unverified'; a late
+        confirmation of the exact transaction is still accepted.'''
+        with closing(sqlite3.connect(d.DB_FILE)) as conn:
+            rows=conn.execute('''SELECT id,transaction_b64,created_at,mint,quote_asset,reward_mode
+                FROM token_reward_claims
+                WHERE wallet=? AND status='prepared' AND signature='' AND created_at<?
+                ORDER BY created_at LIMIT 20''',(wallet,int(time.time())-STALE_CLAIM_SECONDS)).fetchall()
+        if not rows:return 0
+        try:
+            # Creator USDC claims: recovered here if they did settle.
+            if reconcile_reward_claims(wallet)['unavailable']:return 0
+            # Every other claim: look for the exact transaction ourselves.
+            history=rpc('getSignaturesForAddress',[wallet,{'limit':100}],verification=True)
+        except Exception:
+            return 0
+        history=history if isinstance(history,list) else []
+        expired=0
+        for claim_id,tx_b64,created_at,mint,quote_asset,reward_mode in rows:
+            try:
+                if blockhash_valid(tx_b64,claim_read=True):continue
+            except RuntimeError:
+                continue
+            if not (reward_mode=='creator' and quote_asset=='USDC'):
+                landed=None
+                for tx in history:
+                    sig,ts=tx.get('signature'),tx.get('blockTime')
+                    if (tx.get('err') is None and isinstance(sig,str) and _SIG.fullmatch(sig)
+                            and isinstance(ts,int) and created_at-5<=ts<=created_at+180):
+                        try:
+                            if check_signature(sig,{'prepare_tx_b64':tx_b64,'wallet':wallet,'mint':mint},'claim'):
+                                landed=sig;break
+                        except (RuntimeError,ValueError,KeyError,TypeError):
+                            landed='unknown';break
+                if landed:continue   # it settled (or we cannot tell): never call it expired
+            with sqlite3.connect(d.DB_FILE) as conn:
+                expired+=conn.execute('''UPDATE token_reward_claims SET status='expired_unverified'
+                    WHERE id=? AND wallet=? AND status='prepared' AND signature='' ''',
+                    (claim_id,wallet)).rowcount
+        if expired:
+            print(f'[pump-claim] retired {expired} never-approved claim(s) for {wallet[:8]}...',flush=True)
+        return expired
+
     def reconcile_submitted_launches():
         """Recover already signed and recorded Phantom transactions on restart.
 
@@ -838,6 +896,7 @@ def install(d):
     def creator_earnings():
         wallet=identity()
         if not wallet:return fail('Connect your wallet',401)
+        expire_stale_claims(wallet)
         with closing(sqlite3.connect(d.DB_FILE)) as conn:
             conn.row_factory=sqlite3.Row
             claims=conn.execute('''SELECT c.id,c.launch_id,c.quote_asset,c.accrued_raw,
@@ -847,7 +906,7 @@ def install(d):
                     JOIN token_launches l ON l.id=c.launch_id AND l.wallet=c.wallet
                     WHERE c.wallet=? AND l.wallet=?
                     ORDER BY c.created_at DESC LIMIT 100''',(wallet,wallet)).fetchall()
-        totals={'USDC':0,'SOL':0};by_launch={};confirmed=pending=0
+        totals={'USDC':0,'SOL':0};by_launch={};confirmed=pending=expired=0
         for claim in claims:
             launch_id=claim['launch_id']
             item=by_launch.setdefault(launch_id,dict(quote_asset=claim['quote_asset'],
@@ -861,6 +920,8 @@ def install(d):
                 confirmed+=1;item['confirmed_claims']+=1
             elif claim['status'] in ('prepared','submitted'):
                 pending+=1;item['pending_claims']+=1
+            elif claim['status']=='expired_unverified':
+                expired+=1
             if claim['status']=='confirmed' and claim['received_raw']!='':
                 try:received=max(0,int(claim['received_raw']))
                 except (TypeError,ValueError):received=0
@@ -872,7 +933,7 @@ def install(d):
                 created_at=c['created_at'],confirmed_at=c['confirmed_at'],received_raw=c['received_raw'],
                 accrued_raw=c['accrued_raw'],accrued_scope=c['accrued_scope']) for c in claims]
         response=jsonify(ok=True,verified_claimed_raw={k:str(v) for k,v in totals.items()},
-                 confirmed_claims=confirmed,pending_claims=pending,
+                 confirmed_claims=confirmed,pending_claims=pending,expired_claims=expired,
                  by_launch={k:{**v,'verified_received_raw':str(v['verified_received_raw'])}
                             for k,v in by_launch.items()},history=history)
         response.headers['Cache-Control']='private, no-store'
@@ -1237,6 +1298,10 @@ def install(d):
                         AND status='prepared' AND signature='' ''',
                         (pending['id'],wallet))
                     if cur.rowcount!=1:return fail('Claim status changed; reload history.',409)
+            elif (pending['status']=='prepared' and not pending['signature']
+                    and expire_stale_claims(wallet)
+                    and not _pending_claim(wallet,row['quote_asset'])):
+                pass   # it was never approved and can no longer settle
             else:
                 return fail('An earlier claim for this quote asset is awaiting confirmation. Check claim history first.',409)
         try:
@@ -1337,7 +1402,7 @@ def install(d):
             if claim['signature']!=sig:return fail('Claim signature does not match',409)
             return jsonify(ok=True,confirmed=True,signature=sig,status=claim['status'],
                            received_raw=claim['received_raw'])
-        if claim['status'] not in ('prepared','submitted'):
+        if claim['status'] not in ('prepared','submitted','expired_unverified'):
             return fail('Claim is not pending',409)
         try:
             exact={'prepare_tx_b64':claim['transaction_b64'],'wallet':wallet,'mint':row['mint']}
@@ -1352,7 +1417,7 @@ def install(d):
         with sqlite3.connect(d.DB_FILE) as conn:
             cur=conn.execute('''UPDATE token_reward_claims
                  SET signature=?,status=?,confirmed_at=?,received_raw=?
-                 WHERE id=? AND wallet=? AND status IN ('prepared','submitted')
+                 WHERE id=? AND wallet=? AND status IN ('prepared','submitted','expired_unverified')
                  AND (signature='' OR signature=?)''',
                  (sig,status,int(time.time()) if confirmed else 0,received_raw,claim_id,wallet,sig))
             if cur.rowcount!=1:return fail('Claim changed during verification',409)

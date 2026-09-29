@@ -239,3 +239,7 @@ html,body{background:var(--bg)}
 
 /* Put creation first; keep overview and recovery below the form. */
 @media(min-width:851px){.tl-hero{min-height:0;margin-bottom:18px}.tl-hero-coin{display:none}.tl-hero-actions{width:auto}.tl-lead{margin-bottom:14px}.tl-steps{display:none}}
+
+/* Never-approved claims that expired: one quiet line, not a list of rows. */
+.tl-claim-status.is-expired-unverified{background:#232a33;color:#8f9caf}
+.tl-claim-expired-note{margin:8px 2px 0;color:#8f9caf;font-size:11px;line-height:1.5}

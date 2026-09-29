@@ -13,7 +13,7 @@ checks={
  'overview metrics preserve verified data':
    all(x in HTML for x in ('id="tl-claimed-usdc"','id="tl-claim-count"','id="tl-creator-share"')),
  'recent activity uses actual claim history':
-   'id="tl-recent-earnings"' in HTML and "history.slice(0,3)" in JS and "renderClaimRows($('tl-recent-earnings')" in JS,
+   'id="tl-recent-earnings"' in HTML and ".slice(0,3)" in JS and "renderClaimRows($('tl-recent-earnings'),history.filter(" in JS,
  'global CTA reuses guarded existing claim flow':
    'creatorClaimLaunch()' in JS and 'claimRewards(launch)' in JS,
  'pending claim CTA opens history instead of preparing a duplicate':
