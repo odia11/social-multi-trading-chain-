@@ -37,8 +37,10 @@ _whole = {
         'id="tip-amount"' in PROFILE and 'name="to_address"' not in PROFILE,
     'the tip is sent with the CSRF token, like every other mutating call':
         "'X-CSRF-Token':_csrf" in PROFILE,
-    'a lost connection does not invite a second transfer':
-        'check your wallet before sending again' in PROFILE,
+    'a lost connection is reconciled before another transfer is enabled':
+        '_tipRecover(amount, startedAt, 0)' in PROFILE
+        and '/api/tips/mine?role=sent&limit=15' in PROFILE
+        and 'Checking tip status' in PROFILE,
 }
 for label, ok in _whole.items():
     print(('PASS' if ok else 'FAIL') + ' - ' + label)

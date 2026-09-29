@@ -1228,10 +1228,58 @@ function _tipSendNote(amount){
   }).catch(function(){ /* the money arrived; a missing note is not worth an alarm */ });
 }
 
+function _tipRecentMatch(tips, amount, startedAt){
+  return (tips||[]).find(function(t){
+    if(!t || t.direction!=='sent' || Number(t.recipient_user_id)!==Number(_tipPeerId)) return false;
+    if(Math.abs(Number(t.amount||0)-Number(amount))>0.0000005) return false;
+    var ts=Date.parse(String(t.created_at||'').replace(' ','T')+'Z');
+    return Number.isFinite(ts) && ts >= startedAt-5000;
+  }) || null;
+}
+
+function _tipRecover(amount, startedAt, attempt){
+  attempt=attempt||0;
+  return fetch('/api/tips/mine?role=sent&limit=15',{credentials:'same-origin',cache:'no-store'})
+    .then(function(r){return r.json().catch(function(){return {}})})
+    .then(function(d){
+      var match=d&&d.ok?_tipRecentMatch(d.tips,amount,startedAt):null;
+      if(match){
+        _tipSending=false;
+        if(typeof window.OrcAgentTipReceipt==='function'){
+          window.OrcAgentTipReceipt({
+            tip_id:match.id,amount_sent:match.amount,chain:match.chain,
+            status:match.status,explorer:match.explorer_url
+          },amount,function(){_tipSendNote(amount)});
+        }else{
+          _tipSay('Tip submitted — awaiting blockchain confirmation',true);
+        }
+        return true;
+      }
+      if(attempt<2){
+        return new Promise(function(resolve){setTimeout(resolve,900*(attempt+1))})
+          .then(function(){return _tipRecover(amount,startedAt,attempt+1)});
+      }
+      _tipSending=false;
+      _tipEl('tip-submit').disabled=false;
+      _tipSay('Tip was not submitted. Your funds were not deducted.',false);
+      return false;
+    }).catch(function(){
+      if(attempt<2){
+        return new Promise(function(resolve){setTimeout(resolve,900*(attempt+1))})
+          .then(function(){return _tipRecover(amount,startedAt,attempt+1)});
+      }
+      _tipSending=false;
+      _tipEl('tip-submit').disabled=false;
+      _tipSay('Tip status could not be verified. Wait a moment before trying again.',false);
+      return false;
+    });
+}
+
 function _sendTip(){
   var amount = _tipAmount();
   if(!(amount > 0) || _tipSending) return;
   _tipSending = true;
+  var startedAt = Date.now();
   _tipEl('tip-submit').disabled = true;
   _tipSay('Sending\u2026', true);
   fetch('/api/tip', {
@@ -1257,11 +1305,11 @@ function _sendTip(){
       _tipSay((d && (d.error || d.msg)) || 'The tip did not go through', false);
     })
     .catch(function(){
-      // A network error is NOT proof it did not send. Say so rather than
-      // inviting a second transfer.
-      _tipSending = false;
-      _tipEl('tip-submit').disabled = false;
-      _tipSay('Connection lost before an answer came back \u2014 check your wallet before sending again', false);
+      // A dropped HTTP response is ambiguous. Reconcile against the durable
+      // tip ledger before re-enabling Send, so a network hiccup cannot create
+      // an accidental double tip.
+      _tipSay('Checking tip status\u2026', true);
+      _tipRecover(amount, startedAt, 0);
     });
 }
 </script>
