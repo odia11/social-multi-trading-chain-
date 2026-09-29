@@ -43,7 +43,7 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/'||!window.matchMedia('(max-width:768px)').matches)return;
   document.documentElement.classList.add('oa-home-mobile-root');
-  ensureStyle('/static/home-mobile.css?v=11','home-mobile.css');
+  ensureStyle('/static/home-mobile.css?v=12','home-mobile.css');
   ensureScript('/static/home-mobile.js?v=10','home-mobile.js');
 })();
 
@@ -64,8 +64,8 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
 /* Shared premium mobile bottom nav across OrcAgent. */
 (function(){
   if(!window.matchMedia('(max-width:768px)').matches)return;
-  ensureStyle('/static/mobile-bottom-nav.css?v=7','mobile-bottom-nav.css');
-  ensureScript('/static/mobile-bottom-nav.js?v=7','mobile-bottom-nav.js');
+  ensureStyle('/static/mobile-bottom-nav.css?v=8','mobile-bottom-nav.css');
+  ensureScript('/static/mobile-bottom-nav.js?v=8','mobile-bottom-nav.js');
 })();
 
 /* Consistent reply/repost/like/bookmark SVGs wherever feed actions exist. */

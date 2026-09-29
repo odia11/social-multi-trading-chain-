@@ -23,7 +23,7 @@ checks={
   'fast navigation does not flash the placeholder':
       'setTimeout(function(){showRouteShell(path)},120)' in UX,
   'shared shell assets preload from head':
-      'data-oa-shell-preload' in PERF and 'mobile-bottom-nav.css?v=7' in PERF,
+      'data-oa-shell-preload' in PERF and 'mobile-bottom-nav.css?v=8' in PERF,
   'shared UX is cache-busted consistently':
       'app-ux.css?v=8' in PERF and 'app-ux.js?v=6' in PERF
       and 'app-ux.css?v=8' in LOADER and 'app-ux.js?v=6' in LOADER,

@@ -43,8 +43,8 @@ check('every HTML response gets the current shared performance assets early',
 check('route-critical redesign assets are applied before first paint',
       'portfolio-redesign.css?v=6' in PERF
       and 'live-market-redesign.css?v=8' in PERF
-      and 'home-mobile.css?v=11' in PERF
-      and 'home-mobile-polish.css?v=7' in PERF)
+      and 'home-mobile.css?v=12' in PERF
+      and 'home-mobile-polish.css?v=8' in PERF)
 check('production WSGI installs the performance adapter',
       'from app_performance import install as _install_app_performance' in ENTRY
       and '_install_app_performance(_dashboard)' in ENTRY)
@@ -93,7 +93,7 @@ check('service worker caches only same-origin public static GETs',
       and "req.method!=='GET'" in SW)
 check('mobile app shell assets are preloaded from head',
       'data-oa-shell-preload' in PERF
-      and 'mobile-bottom-nav.css?v=7' in PERF
-      and 'mobile-bottom-nav.js?v=7' in PERF)
+      and 'mobile-bottom-nav.css?v=8' in PERF
+      and 'mobile-bottom-nav.js?v=8' in PERF)
 
 print('\n24/24 checks passed')

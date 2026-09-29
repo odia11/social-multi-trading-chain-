@@ -17869,8 +17869,21 @@ def _navbar_html(active_nav: str = '') -> Markup:
     )
     more_items_desktop = _navbar_more_items_html()
     more_items_mobile = _navbar_more_items_html('pt-nb-mobile-only')
+    bottom_home = ' active' if active_nav == 'feed' else ''
+    bottom_market = ' active' if active_nav == 'live-market' else ''
+    bottom_wallet = ' active' if active_nav == 'wallet' else ''
+    bottom_nav = '''
+<nav id="oa-bottom-nav" class="oa-bottom-nav" aria-label="Mobile navigation">
+  <a href="/" class="%(home)s" aria-label="Home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7"/><path d="M5 9v11h14V9"/><path d="M9 20v-6h6v6"/></svg><span class="oa-nav-label">Home</span></a>
+  <a href="/live-market" class="%(market)s" aria-label="Live Market"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V11"/><path d="M10 19V6"/><path d="M16 19V9"/><path d="M22 19V3"/></svg><span class="oa-nav-label">Live Market</span></a>
+  <button type="button" class="oa-trade-main oa-post-main%(home)s" aria-label="Create post"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg><span>POST</span></button>
+  <a href="/wallet" class="%(wallet)s" aria-label="Portfolio"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="3"/><path d="M8 6V4h8v2"/><path d="M15 11h6v4h-6a2 2 0 0 1 0-4Z"/></svg><span class="oa-nav-label">Portfolio</span></a>
+  <button type="button" class="oa-menu-btn" aria-label="Open menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span class="oa-nav-label">Menu</span></button>
+</nav>
+''' % {'home': bottom_home, 'market': bottom_market, 'wallet': bottom_wallet}
     return Markup('''
 <link rel="stylesheet" href="/static/navbar.css?v=%(v)s">
+<link rel="stylesheet" href="/static/mobile-bottom-nav.css?v=8">
 <header class="pt-nb-topbar">
   <a class="pt-nb-logo" href="/"><div class="pt-nb-logo-mark"></div><div class="pt-nb-wordmark">OrcAgent</div></a>
   <button class="pt-nb-menu-btn" id="pt-nb-menu-btn" aria-label="Menu">
@@ -17903,8 +17916,10 @@ def _navbar_html(active_nav: str = '') -> Markup:
   </div>
 </header>
 <div class="pt-nb-scrim" id="pt-nb-scrim"></div>
+%(bottom_nav)s
 <script src="/static/navbar.js?v=%(v)s" defer></script>
-''' % {'v': _APP_VERSION, 'nav_links': nav_links, 'more_items_desktop': more_items_desktop, 'more_items_mobile': more_items_mobile})
+<script src="/static/mobile-bottom-nav.js?v=8" defer></script>
+''' % {'v': _APP_VERSION, 'nav_links': nav_links, 'more_items_desktop': more_items_desktop, 'more_items_mobile': more_items_mobile, 'bottom_nav': bottom_nav})
 
 @app.route('/api/version')
 @rate_limit(120, 60)

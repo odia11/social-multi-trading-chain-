@@ -82,12 +82,56 @@ function _observeBottomDock(){
     if(!document.hidden)_lockBottomNavGeometry();
   },{passive:true});
 }
-function build(){if(document.getElementById('oa-bottom-nav'))return;ensureHomeComposerStyles();var nav=document.createElement('nav');nav.id='oa-bottom-nav';nav.className='oa-bottom-nav';nav.setAttribute('aria-label','Mobile navigation');var p=here(),wallet=p==='/wallet';nav.innerHTML='<a href="/" class="'+(p==='/'?'active':'')+'">'+icon('home')+'<span class="oa-nav-label">Home</span></a>'+
-'<a href="/live-market" class="'+(p==='/live-market'?'active':'')+'">'+icon('market')+'<span class="oa-nav-label">Live Market</span></a>'+centerHtml(p)+
-'<a href="/wallet" class="'+(wallet?'active':'')+'">'+icon('portfolio')+'<span class="oa-nav-label">Portfolio</span></a>'+
-'<button type="button" class="oa-menu-btn" aria-label="Open menu">'+icon('menu')+'<span class="oa-nav-label">Menu</span></button>';
-document.body.appendChild(nav);var btn=nav.querySelector('.oa-menu-btn');if(btn)btn.addEventListener('click',openAppMenu);var postBtn=nav.querySelector('.oa-post-main');if(postBtn)postBtn.addEventListener('click',openSocialComposer);buildWalletSheet();buildAppMenu();_observeBottomDock();
-if(p==='/'&&((new URLSearchParams(location.search)).get('compose')==='1'||location.hash==='#feed-composer'))requestAnimationFrame(function(){requestAnimationFrame(function(){focusSocialComposer(0)})})
+function _healHomeNavState(){
+  if(here()!=='/')return;
+  // These classes belong to full-screen flows on other routes. A restored Home
+  // document must never inherit one and silently hide its primary navigation.
+  document.body.classList.remove('oa-trade-sheet-open','oa-msgs-typing','oa-thread-open');
+  document.documentElement.classList.remove('oa-thread-open');
 }
+function _hydrate(nav){
+  if(!nav||nav.dataset.oaHydrated==='1')return nav;
+  nav.dataset.oaHydrated='1';
+  var btn=nav.querySelector('.oa-menu-btn');
+  if(btn)btn.addEventListener('click',openAppMenu);
+  var postBtn=nav.querySelector('.oa-post-main');
+  if(postBtn)postBtn.addEventListener('click',openSocialComposer);
+  buildWalletSheet();buildAppMenu();_observeBottomDock();
+  return nav;
+}
+function _createBottomNav(){
+  var nav=document.createElement('nav');nav.id='oa-bottom-nav';nav.className='oa-bottom-nav';nav.setAttribute('aria-label','Mobile navigation');
+  var p=here(),wallet=p==='/wallet';
+  nav.innerHTML='<a href="/" class="'+(p==='/'?'active':'')+'">'+icon('home')+'<span class="oa-nav-label">Home</span></a>'+
+    '<a href="/live-market" class="'+(p==='/live-market'?'active':'')+'">'+icon('market')+'<span class="oa-nav-label">Live Market</span></a>'+centerHtml(p)+
+    '<a href="/wallet" class="'+(wallet?'active':'')+'">'+icon('portfolio')+'<span class="oa-nav-label">Portfolio</span></a>'+
+    '<button type="button" class="oa-menu-btn" aria-label="Open menu">'+icon('menu')+'<span class="oa-nav-label">Menu</span></button>';
+  document.body.appendChild(nav);
+  return nav;
+}
+function _ensureBottomNav(){
+  _healHomeNavState();
+  ensureHomeComposerStyles();
+  var nav=document.getElementById('oa-bottom-nav')||_createBottomNav();
+  // Server-rendered markup makes first paint deterministic. This fallback also
+  // repairs any DOM mutation/plugin that removed children after navigation.
+  if(nav.children.length<5){
+    nav.remove();
+    nav=_createBottomNav();
+  }
+  _hydrate(nav);
+  _lockBottomNavGeometry();
+  return nav;
+}
+function build(){
+  var p=here();
+  _ensureBottomNav();
+  if(p==='/'&&((new URLSearchParams(location.search)).get('compose')==='1'||location.hash==='#feed-composer')){
+    requestAnimationFrame(function(){requestAnimationFrame(function(){focusSocialComposer(0)})});
+  }
+}
+window.addEventListener('pageshow',function(){setTimeout(_ensureBottomNav,0)},{passive:true});
+document.addEventListener('orca:bfcache-restored',function(){setTimeout(_ensureBottomNav,0)});
+document.addEventListener('visibilitychange',function(){if(!document.hidden)setTimeout(_ensureBottomNav,0)},{passive:true});
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',build,{once:true});else build();
 })();
