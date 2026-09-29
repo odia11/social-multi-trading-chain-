@@ -24,7 +24,7 @@ function rawAmount(raw,asset){
  }catch(e){return '—'}
 }
 function claimLabel(value){
- return {confirmed:'Claimed',confirmed_no_payout:'No payout',prepared:'Awaiting approval',submitted:'Pending confirmation',expired_unverified:'Expired'}[value]||String(value||'Unknown').replaceAll('_',' ');
+ return {confirmed:'Claimed',confirmed_no_payout:'No payout',prepared:'Awaiting approval',submitted:'Pending confirmation',expired_unverified:'Needs review'}[value]||String(value||'Unknown').replaceAll('_',' ');
 }
 function claimDate(value){return value?new Date(Number(value)*1000).toLocaleString([], {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—'}
 function renderClaimRows(target,claims,showToken){
@@ -48,10 +48,10 @@ function renderCreatorEarnings(){
  var panel=$('tl-creator-earnings');if(!panel)return;
  panel.hidden=!mine.length;if(!mine.length)return;
  var data=creatorEarnings||{verified_claimed_raw:{USDC:'0'},confirmed_claims:0,pending_claims:0,history:[]};
- text('tl-claimed-usdc',rawAmount((data.verified_claimed_raw||{}).USDC||'0','USDC')+' · '+rawAmount((data.verified_claimed_raw||{}).SOL||'0','SOL'));
- var history=data.history||[],expired=history.filter(function(c){return c.status==='expired_unverified'}).length;
+ text('tl-claimed-usdc',rawAmount((data.verified_claimed_raw||{}).USDC||'0','USDC'));
+ var history=data.history||[],review=history.filter(function(c){return c.status==='expired_unverified'}).length;
  text('tl-claim-count',String(history.length));
- var parts=[];if(data.pending_claims)parts.push(data.pending_claims+' pending');if(data.confirmed_claims)parts.push(data.confirmed_claims+' confirmed');if(expired)parts.push(expired+' expired');
+ var parts=[];if(data.pending_claims)parts.push(data.pending_claims+' pending');if(data.confirmed_claims)parts.push(data.confirmed_claims+' confirmed');if(review)parts.push(review+' review');
  text('tl-claim-count-note',parts.length?parts.join(' · '):'No claims yet');
  renderClaimRows($('tl-global-claim-history'),data.history||[],true);
 }
@@ -60,7 +60,7 @@ async function refreshAvailableFees(showNotice){
  try{
   var fees=await call('/api/token-launch/creator-fees');creatorAvailableRaw=fees.pump_vault_raw;
   text('tl-available-usdc',rawAmount(creatorAvailableRaw,'USDC'));
-  text('tl-available-note','Wallet-wide unclaimed USDC creator fees. SOL fees are checked when you claim a SOL-pair token.');
+  text('tl-available-note','Wallet-wide unclaimed bonding-curve fees. PumpSwap fees excluded.');
   if(showNotice)status('Creator fee balance refreshed.');
  }catch(e){creatorAvailableRaw='';text('tl-available-usdc','Unavailable');text('tl-available-note','Could not verify the creator vault. Tap refresh to retry.');if(showNotice)status(e.message||'Creator vault unavailable',true)}
  finally{if(button)button.disabled=false}
@@ -274,7 +274,7 @@ async function claimRewards(row){
  busy=true;
  try{
    var result=await dialog('Review creator-fee claim',
-     'This is a real Solana transaction. You pay the network cost and receive only creator fees that are actually available on-chain. A wallet-wide creator vault can include eligible fees from other tokens created by this wallet. Community fee distribution sends its allocated shares to both wallets.',
+     'This is a real Solana transaction. You pay the network cost and receive only actual Pump fees. The regular creator vault can include fees from other tokens created by this wallet. Community fee distribution sends its allocated shares to both wallets.',
      async function(){
        text('tl-dialog-status','Checking on-chain reward vaults…');
        var ready=await call('/api/token-launch/'+row.id+'/claim/prepare',{});
@@ -477,7 +477,7 @@ function drawMine(){
           var fees=await call('/api/token-launch/creator-fees');
           creatorAvailableRaw=fees.pump_vault_raw;
           text('tl-available-usdc',rawAmount(creatorAvailableRaw,'USDC'));
-          text('tl-available-note','Wallet-wide unclaimed USDC creator fees. SOL fees are checked when you claim a SOL-pair token.');
+          text('tl-available-note','Wallet-wide unclaimed bonding-curve fees. PumpSwap fees excluded.');
           verification.textContent='Available to claim: '+rawAmount(creatorAvailableRaw,'USDC')+'. This creator vault belongs only to your connected wallet and can include eligible fees across your creator tokens.';
         }catch(e){verification.textContent=e.message||'Creator vault unavailable';status(verification.textContent,true)}
       });
@@ -487,7 +487,7 @@ function drawMine(){
     action('Claim history',function(){showClaims(row)});
   }
   if(row.status==='live'&&row.reward_mode==='holder'){
-    el.appendChild(dom('p','tl-helper','Holder Rewards are distributed to holders; there is no separate creator claim for this mode.'));
+    el.appendChild(dom('p','tl-helper','Pump distributes Holder Rewards; there is no separate creator claim for this mode.'));
   }
   if(row.mint&&row.status==='pending_shares'){
     var a=dom('a','','Trade on OrcAgent →');

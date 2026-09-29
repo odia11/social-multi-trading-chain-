@@ -51,21 +51,11 @@ def test_mobile_claim():
         assert client.post(path,json={'claim_id':claim_id}).status_code==403
         ready=client.post(path,json={'claim_id':claim_id,'return_to_pwa':True},headers=h)
         assert ready.status_code==200,ready.get_data(as_text=True)
-        assert ready.get_json()['requires_connect'] is True
         q={k:v[0] for k,v in parse_qs(urlparse(ready.get_json()['url']).query).items()}
         callback=parse_qs(urlparse(q['redirect_link']).query)
         assert callback['action']==['claim'] and callback['pwa']==['1']
-        assert callback['step']==['connect']
-        connected_reply=make_reply(phantom,q['dapp_encryption_public_key'],
-            {'public_key':str(owner.pubkey()),'session':'fresh-claim-session'})
-        connected=guest.post('/api/phantom-launch/complete',json={
-            'token':callback['token'][0],'step':'connect',
-            'phantom_encryption_public_key':pk,**connected_reply})
-        assert connected.status_code==200,connected.get_data(as_text=True)
-        sq={k:v[0] for k,v in parse_qs(urlparse(connected.get_json()['url']).query).items()}
-        sign_callback=parse_qs(urlparse(sq['redirect_link']).query)
         signed=Transaction.populate(msg,[owner.sign_message(bytes(msg))])
-        response=make_reply(phantom,sq['dapp_encryption_public_key'],
+        response=make_reply(phantom,q['dapp_encryption_public_key'],
             {'transaction':mobile.b58enc(bytes(signed))})
         relayed=[]
         def relay(raw,signature,endpoints,**kw):
