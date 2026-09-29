@@ -30,7 +30,9 @@ def test_token_launch_ui():
                 'id="tl-save"','id="tl-mine"','id="tl-dialog"',
                 'id="stat-all"','id="stat-usdc"','id="stat-sol"',
                 'id="all-tab"','id="mine-tab"','id="cards"','id="search"',
-                'id="pair"','id="tl-community-fields"','Creator + Community Rewards'):
+                'id="pair"','id="tl-community-fields"','Creator + Community Rewards',
+                'id="tl-creator-earnings"','id="tl-available-usdc"','id="tl-claimed-usdc"',
+                'id="tl-global-claim-history"','id="tl-refresh-earnings"'):
                 assert token in html,token
             assert re.search(r'name="tl-mode" value="creator" checked',html)
             assert re.search(r'id="tl-image"[^>]*required',html)
@@ -63,6 +65,9 @@ def test_token_launch_ui():
     assert 'Trade on OrcAgent' in directory_js and 'Trade on Pump' not in directory_js
     assert "'/live-market?mint='+encodeURIComponent(data.mint)" in directory_js
     assert "'/live-market?mint='+encodeURIComponent(row.mint)" in js
+    assert "'/api/token-launch/creator-earnings'" in js
+    assert 'tl-token-fee-overview' in js and 'tl-claim-history-' in js
+    assert 'Solscan ↗' in js and 'Refresh available' in js
     print('PASS quick-launch hero, live stats, responsive form, real reward choices, wallet approval')
     print('PASS saved drafts, verified directory and versioned assets preserve API compatibility')
     tmp.cleanup()

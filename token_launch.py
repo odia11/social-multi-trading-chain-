@@ -833,6 +833,51 @@ def install(d):
                               (wallet,)).fetchall()
         return jsonify(ok=True,launches=[public_row(r) for r in rows])
 
+    @app.get('/api/token-launch/creator-earnings')
+    @d.rate_limit(30,60)
+    def creator_earnings():
+        wallet=identity()
+        if not wallet:return fail('Connect your wallet',401)
+        with closing(sqlite3.connect(d.DB_FILE)) as conn:
+            conn.row_factory=sqlite3.Row
+            claims=conn.execute('''SELECT c.id,c.launch_id,c.quote_asset,c.accrued_raw,
+                    c.accrued_scope,c.signature,c.status,c.created_at,c.confirmed_at,
+                    c.received_raw,l.name,l.symbol
+                    FROM token_reward_claims c
+                    JOIN token_launches l ON l.id=c.launch_id AND l.wallet=c.wallet
+                    WHERE c.wallet=? AND l.wallet=?
+                    ORDER BY c.created_at DESC LIMIT 100''',(wallet,wallet)).fetchall()
+        totals={'USDC':0,'SOL':0};by_launch={};confirmed=pending=0
+        for claim in claims:
+            launch_id=claim['launch_id']
+            item=by_launch.setdefault(launch_id,dict(quote_asset=claim['quote_asset'],
+                verified_received_raw=0,claim_count=0,confirmed_claims=0,
+                pending_claims=0,last_claim=None))
+            item['claim_count']+=1
+            if item['last_claim'] is None:
+                item['last_claim']=dict(status=claim['status'],created_at=claim['created_at'],
+                    confirmed_at=claim['confirmed_at'],signature=claim['signature'])
+            if claim['status'] in ('confirmed','confirmed_no_payout'):
+                confirmed+=1;item['confirmed_claims']+=1
+            elif claim['status'] in ('prepared','submitted'):
+                pending+=1;item['pending_claims']+=1
+            if claim['status']=='confirmed' and claim['received_raw']!='':
+                try:received=max(0,int(claim['received_raw']))
+                except (TypeError,ValueError):received=0
+                totals.setdefault(claim['quote_asset'],0)
+                totals[claim['quote_asset']]+=received
+                item['verified_received_raw']+=received
+        history=[dict(id=c['id'],launch_id=c['launch_id'],name=c['name'],symbol=c['symbol'],
+                quote_asset=c['quote_asset'],signature=c['signature'],status=c['status'],
+                created_at=c['created_at'],confirmed_at=c['confirmed_at'],received_raw=c['received_raw'],
+                accrued_raw=c['accrued_raw'],accrued_scope=c['accrued_scope']) for c in claims]
+        response=jsonify(ok=True,verified_claimed_raw={k:str(v) for k,v in totals.items()},
+                 confirmed_claims=confirmed,pending_claims=pending,
+                 by_launch={k:{**v,'verified_received_raw':str(v['verified_received_raw'])}
+                            for k,v in by_launch.items()},history=history)
+        response.headers['Cache-Control']='private, no-store'
+        return response
+
     @app.get('/launches')
     @d.rate_limit(45,60)
     def launch_dashboard():

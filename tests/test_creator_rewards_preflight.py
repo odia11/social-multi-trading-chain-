@@ -186,6 +186,47 @@ def test_received_usdc_is_exact_confirmed_wallet_delta_not_fee_snapshot():
     print('PASS claim history private, confirmed receipt idempotent, unrelated wallets denied')
     tmp.cleanup()
 
+def test_creator_earnings_are_wallet_private_and_verified_only():
+    tmp,app,d,client,owner,ident,raw,built=fixture()
+    wallet=str(owner.pubkey());other=str(Keypair().pubkey());now=int(time.time())
+    other_launch='b'*32;other_claim='c'*32;own_claim='d'*32
+    with sqlite3.connect(d.DB_FILE) as c:
+        c.execute('''INSERT INTO token_launches
+          (id,wallet,client_nonce,name,symbol,icon_webp,reward_mode,quote_asset,
+           mint,status,launch_signature,created_at)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',
+          (other_launch,other,'other-creator','Other','OTHR',b'icon','creator','USDC',
+           str(Keypair().pubkey()),'live','y'*88,now))
+        c.execute('''INSERT INTO token_reward_claims
+          (id,launch_id,wallet,mint,quote_asset,reward_mode,accrued_raw,accrued_scope,
+           transaction_b64,signature,status,created_at,confirmed_at,received_raw)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+          (own_claim,ident,wallet,built['mint'],'USDC','creator','4000000',
+           'creator_wallet_all_tokens',raw,'s'*88,'confirmed',now,now,'1250000'))
+        c.execute('''INSERT INTO token_reward_claims
+          (id,launch_id,wallet,mint,quote_asset,reward_mode,accrued_raw,accrued_scope,
+           transaction_b64,signature,status,created_at,confirmed_at,received_raw)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+          (other_claim,other_launch,other,str(Keypair().pubkey()),'USDC','creator','9000000',
+           'creator_wallet_all_tokens',raw,'t'*88,'confirmed',now,now,'9000000'))
+    mine=client.get('/api/token-launch/creator-earnings')
+    assert mine.status_code==200
+    data=mine.get_json()
+    assert data['verified_claimed_raw']['USDC']=='1250000'
+    assert data['confirmed_claims']==1 and data['pending_claims']==0
+    assert set(data['by_launch'])=={ident}
+    assert [row['id'] for row in data['history']]==[own_claim]
+    assert other_claim not in mine.get_data(as_text=True)
+    with client.session_transaction() as sess:sess['wallet']=other
+    theirs=client.get('/api/token-launch/creator-earnings').get_json()
+    assert theirs['verified_claimed_raw']['USDC']=='9000000'
+    assert set(theirs['by_launch'])=={other_launch}
+    assert [row['id'] for row in theirs['history']]==[other_claim]
+    print('PASS creator earnings totals/history are isolated to the authenticated creator wallet')
+    print('PASS only verified received_raw is counted as claimed; accrued vault snapshots are not')
+    tmp.cleanup()
+
 if __name__=='__main__':
  test_claim_preflight_handles_429_and_wallet_rent_safely()
  test_received_usdc_is_exact_confirmed_wallet_delta_not_fee_snapshot()
+ test_creator_earnings_are_wallet_private_and_verified_only()

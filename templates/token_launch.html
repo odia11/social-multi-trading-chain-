@@ -110,6 +110,16 @@
   </section>
   <section class="tl-card tl-saved" id="saved-launches" aria-labelledby="tl-saved-title">
     <div class="tl-section-head"><span class="tl-section-tag">YOUR WORKSPACE</span><h2 id="tl-saved-title">Your launches</h2><p>Follow your launch here. Confirmation updates automatically after Phantom approval.</p></div>
+    <section class="tl-creator-earnings" id="tl-creator-earnings" aria-labelledby="tl-earnings-title" hidden>
+      <div class="tl-earnings-head"><div><span class="tl-section-tag">CREATOR EARNINGS</span><h3 id="tl-earnings-title">Your creator fees</h3><p>Private to your connected wallet. Claimed amounts only count verified on-chain receipts.</p></div><span class="tl-private-chip">Private</span></div>
+      <div class="tl-earnings-grid">
+        <div class="tl-earning"><small>Available now</small><strong id="tl-available-usdc">—</strong><span id="tl-available-note">Checking your creator vault…</span></div>
+        <div class="tl-earning"><small>Total claimed</small><strong id="tl-claimed-usdc">0 USDC</strong><span>Verified wallet receipts</span></div>
+        <div class="tl-earning"><small>Claims</small><strong id="tl-claim-count">0</strong><span id="tl-claim-count-note">No claims yet</span></div>
+      </div>
+      <div class="tl-earnings-actions"><button type="button" class="tl-btn tl-btn-secondary" id="tl-refresh-earnings">Refresh available</button><button type="button" class="tl-btn tl-btn-secondary" id="tl-toggle-history">View claim history</button></div>
+      <div class="tl-global-claim-history" id="tl-global-claim-history" hidden></div>
+    </section>
     <div id="tl-mine" class="tl-list"><p class="tl-helper">Loading your launches…</p></div>
   </section>
   <section id="launch-directory" class="tl-directory" aria-labelledby="tl-directory-title">

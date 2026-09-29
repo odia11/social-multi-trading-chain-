@@ -3,6 +3,8 @@
 'use strict';
 var cfg=window.ORC_TOKEN_LAUNCH||{};
 var mine=[];
+var creatorEarnings=null;
+var creatorAvailableRaw=null;
 var readerData='';
 var busy=false;
 var autoVerified=Object.create(null);
@@ -14,6 +16,55 @@ function dom(tag,cls,value){var el=document.createElement(tag);if(cls)el.classNa
 function choice(name){var el=document.querySelector('input[name="'+name+'"]:checked');return el?el.value:''}
 function money(n){return (Number(n)||0).toFixed(2)+'%'}
 function toBps(v){var n=Number(v);if(!Number.isFinite(n)||n<=0||n>=100)return 0;var bps=Math.round(n*100);return bps>0&&bps<10000&&Math.abs(bps/100-n)<.000001?bps:0}
+function rawAmount(raw,asset){
+ try{
+  var value=BigInt(raw||'0'),base=asset==='SOL'?1000000000n:1000000n;
+  var decimals=asset==='SOL'?9:6,whole=value/base,fraction=(value%base).toString().padStart(decimals,'0');
+  return whole.toLocaleString('en-US')+'.'+fraction+' '+asset;
+ }catch(e){return '—'}
+}
+function claimLabel(value){
+ return {confirmed:'Claimed',confirmed_no_payout:'No payout',prepared:'Awaiting approval',submitted:'Pending confirmation',expired_unverified:'Needs review'}[value]||String(value||'Unknown').replaceAll('_',' ');
+}
+function claimDate(value){return value?new Date(Number(value)*1000).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}):'—'}
+function renderClaimRows(target,claims,showToken){
+ if(!target)return;target.replaceChildren();
+ if(!claims||!claims.length){target.appendChild(dom('p','tl-helper','No creator-fee claims yet.'));return}
+ claims.slice(0,12).forEach(function(c){
+  var row=dom('div','tl-claim-row');
+  var main=dom('div','tl-claim-main');
+  if(showToken)main.appendChild(dom('strong','',c.symbol||c.name||'Token'));
+  main.appendChild(dom('span','tl-claim-status is-'+String(c.status||'').replaceAll('_','-'),claimLabel(c.status)));
+  main.appendChild(dom('small','',claimDate(c.confirmed_at||c.created_at)));
+  row.appendChild(main);
+  var side=dom('div','tl-claim-side');
+  var paid=c.status==='confirmed'&&c.received_raw!==''?rawAmount(c.received_raw,c.quote_asset):c.status==='confirmed_no_payout'?'0 '+c.quote_asset:'—';
+  side.appendChild(dom('strong','',paid));
+  if(c.signature){var link=dom('a','','Solscan ↗');link.href='https://solscan.io/tx/'+encodeURIComponent(c.signature);link.target='_blank';link.rel='noopener noreferrer';side.appendChild(link)}
+  row.appendChild(side);target.appendChild(row);
+ });
+}
+function renderCreatorEarnings(){
+ var panel=$('tl-creator-earnings');if(!panel)return;
+ panel.hidden=!mine.length;if(!mine.length)return;
+ var data=creatorEarnings||{verified_claimed_raw:{USDC:'0'},confirmed_claims:0,pending_claims:0,history:[]};
+ text('tl-claimed-usdc',rawAmount((data.verified_claimed_raw||{}).USDC||'0','USDC'));
+ text('tl-claim-count',String(Number(data.confirmed_claims||0)+Number(data.pending_claims||0)));
+ text('tl-claim-count-note',data.pending_claims?data.pending_claims+' pending · '+data.confirmed_claims+' confirmed':data.confirmed_claims?data.confirmed_claims+' confirmed claims':'No claims yet');
+ renderClaimRows($('tl-global-claim-history'),data.history||[],true);
+}
+async function refreshAvailableFees(showNotice){
+ var eligible=mine.find(function(row){return row.status==='live'&&row.reward_mode==='creator'&&row.quote_asset==='USDC'});
+ if(!eligible){creatorAvailableRaw='';text('tl-available-usdc','—');text('tl-available-note','No live USDC Creator Rewards token yet.');return}
+ var button=$('tl-refresh-earnings');if(button)button.disabled=true;
+ try{
+  var fees=await call('/api/token-launch/'+eligible.id+'/creator-fees');creatorAvailableRaw=fees.pump_vault_raw;
+  text('tl-available-usdc',rawAmount(creatorAvailableRaw,'USDC'));
+  text('tl-available-note','Wallet-wide unclaimed bonding-curve fees. PumpSwap fees excluded.');
+  if(showNotice)status('Creator fee balance refreshed.');
+ }catch(e){creatorAvailableRaw='';text('tl-available-usdc','Unavailable');text('tl-available-note','Could not verify the creator vault. Tap refresh to retry.');if(showNotice)status(e.message||'Creator vault unavailable',true)}
+ finally{if(button)button.disabled=false}
+}
 function renderPreview(){
  var name=$('tl-name').value.trim()||'Your token name';
  var symbol=($('tl-symbol').value.trim()||'TOKEN').toUpperCase();
@@ -267,45 +318,39 @@ async function claimRewards(row){
        ?(result.status==='confirmed_no_payout'?'Transaction confirmed, but no new USDC was received. Network costs may still have been charged.':
          actual?'Creator-fee claim confirmed. Actual USDC received in your wallet: '+actual+' (wallet-wide creator rewards).':'Creator-fee claim confirmed on-chain.')
        :'Claim submitted; check your wallet and claim history before retrying.');
-     await loadMine();
+     creatorAvailableRaw=null;await loadMine();
    }
  }catch(e){status(e.message||'Claim could not be prepared',true)}
  finally{busy=false}
 }
 
 async function showClaims(row){
+ var target=$('tl-claim-history-'+row.id);
+ if(target){target.hidden=false;target.replaceChildren(dom('p','tl-helper','Loading claim history…'))}
  try{
   var r=await call('/api/token-launch/'+row.id+'/claims');
-  if(!r.claims.length){status('No creator-fee claims submitted for this token.');return}
-  var lines=r.claims.slice(0,6).map(function(c){
-    var received=(c.status==='confirmed'&&c.received_raw!==undefined&&c.received_raw!==''
-      ?' · received '+((BigInt(c.received_raw)/1000000n).toString()+'.'+
-           (BigInt(c.received_raw)%1000000n).toString().padStart(6,'0'))+' USDC'
-      :'');
-    var label=c.status==='confirmed_no_payout'?'confirmed · no USDC payout (network fee only)':c.status;
-    return label+' · '+c.quote_asset+received+' · '+(c.signature?c.signature.slice(0,10)+'…':'awaiting wallet signature')+' · '+new Date(c.created_at*1000).toLocaleDateString();
-  });
-  status(lines.join(' | '));
-  var pending=r.claims.find(function(c){return c.status==='submitted'||c.status==='prepared'});
+  renderClaimRows(target,r.claims||[],false);
+  var pending=(r.claims||[]).find(function(c){return c.status==='submitted'||c.status==='prepared'});
   if(pending){
     var sig=pending.signature;
     if(!sig){try{sig=sessionStorage.getItem('orca-token-claim:'+pending.id)||''}catch(e){}}
     if(!sig)return;
     if(pending.status==='submitted'){
       try{await call('/api/token-launch/'+row.id+'/claim/phantom/retry-delivery',{claim_id:pending.id})}
-      catch(e){ /* Existing signature is still checked below; never create another claim. */ }
+      catch(e){ /* Keep the existing claim; never create a second payable transaction here. */ }
     }
     var confirmed=await call('/api/token-launch/'+row.id+'/claim/confirm',
        {claim_id:pending.id,signature:sig});
     if(confirmed.confirmed){
-      var paid=confirmed.received_raw;
-      status(paid!==undefined&&paid!==''
-        ?'Creator-fee claim confirmed. Received '+((BigInt(paid)/1000000n).toString()+'.'+
-          (BigInt(paid)%1000000n).toString().padStart(6,'0'))+' USDC in your wallet.'
+      status(confirmed.received_raw!==undefined&&confirmed.received_raw!==''
+        ?'Creator-fee claim confirmed. Received '+rawAmount(confirmed.received_raw,row.quote_asset)+' in your wallet.'
         :'Creator-fee claim confirmed on-chain.');
+      var refreshed=await call('/api/token-launch/'+row.id+'/claims');
+      renderClaimRows(target,refreshed.claims||[],false);
+      await loadMine();
     }
   }
- }catch(e){status(e.message||'Claim history unavailable',true)}
+ }catch(e){if(target){target.replaceChildren(dom('p','tl-helper','Claim history unavailable.'))}status(e.message||'Claim history unavailable',true)}
 }
 
 async function checkKnown(row,stage,button,notice){
@@ -426,13 +471,14 @@ function drawMine(){
   if(row.status==='finalize_prepared'||row.status==='finalize_submitted')var splitCheck=action('Check fee split',function(){checkKnown(row,'finalize',splitCheck,verification)});
   if(row.status==='live'&&row.reward_mode!=='holder'){
     if(row.reward_mode==='creator'&&row.quote_asset==='USDC'){
-      action('Check USDC fees',async function(){
+      action('Refresh available',async function(){
         try{
-          verification.textContent='Reading Pump creator USDC vault…';
+          verification.textContent='Checking your creator fee balance…';
           var fees=await call('/api/token-launch/'+row.id+'/creator-fees');
-          var n=BigInt(fees.pump_vault_raw);
-          var value=(n/1000000n).toLocaleString('en-US')+'.'+(n%1000000n).toString().padStart(6,'0');
-          verification.textContent='Unclaimed Pump USDC creator vault: '+value+' USDC (wallet-wide, across all your creator tokens; PumpSwap vault excluded). This is not a received payout. Claiming requires a separate Phantom approval.';
+          creatorAvailableRaw=fees.pump_vault_raw;
+          text('tl-available-usdc',rawAmount(creatorAvailableRaw,'USDC'));
+          text('tl-available-note','Wallet-wide unclaimed bonding-curve fees. PumpSwap fees excluded.');
+          verification.textContent='Available to claim: '+rawAmount(creatorAvailableRaw,'USDC')+'. This creator vault belongs only to your connected wallet and can include eligible fees across your creator tokens.';
         }catch(e){verification.textContent=e.message||'Creator vault unavailable';status(verification.textContent,true)}
       });
     }
@@ -466,13 +512,26 @@ function drawMine(){
       var feesSummary=dom('summary','');feesSummary.appendChild(dom('span','tl-detail-icon','▤'));
       var feesHeading=dom('span','tl-detail-heading');feesHeading.appendChild(dom('strong','','Manage creator fees'));
       feesSummary.appendChild(feesHeading);feesSummary.appendChild(dom('span','tl-detail-chevron','⌄'));fees.appendChild(feesSummary);
-      var feeBody=dom('div','tl-detail-body');feeBody.appendChild(dom('p','tl-helper','Your token is live. Claiming trading fees is optional and requires a separate wallet approval.'));
+      var feeBody=dom('div','tl-detail-body');feeBody.appendChild(dom('p','tl-helper','Your token is live. Claiming trading fees is optional and always requires your own wallet approval.'));
+      var feeStats=creatorEarnings&&creatorEarnings.by_launch&&creatorEarnings.by_launch[row.id];
+      var feeOverview=dom('div','tl-token-fee-overview');
+      var paidBox=dom('div','tl-token-fee-metric');paidBox.appendChild(dom('small','','Claimed via this launch'));
+      paidBox.appendChild(dom('strong','',feeStats&&row.quote_asset==='USDC'?rawAmount(feeStats.verified_received_raw,row.quote_asset):'—'));feeOverview.appendChild(paidBox);
+      var claimBox=dom('div','tl-token-fee-metric');claimBox.appendChild(dom('small','','Claims'));
+      claimBox.appendChild(dom('strong','',feeStats?String(feeStats.claim_count):'0'));feeOverview.appendChild(claimBox);
+      var lastBox=dom('div','tl-token-fee-metric');lastBox.appendChild(dom('small','','Last status'));
+      lastBox.appendChild(dom('strong','',feeStats&&feeStats.last_claim?claimLabel(feeStats.last_claim.status):'No claims'));feeOverview.appendChild(lastBox);
+      feeBody.appendChild(feeOverview);
+      if(row.reward_mode==='creator'&&row.quote_asset==='USDC')feeBody.appendChild(dom('p','tl-fee-scope','USDC creator vaults are wallet-wide. A payout claimed here can include eligible fees from other tokens created by this same wallet.'));
       var feeActions=dom('div','tl-actions');
-      ['Claim creator fees','Claims in preflight','Claim history','Check USDC fees'].forEach(function(label){
+      ['Claim creator fees','Claims in preflight','Claim history','Refresh available'].forEach(function(label){
         Array.from(actions.children).forEach(function(button){
           if(button.textContent===label)feeActions.appendChild(button)
         });
-      });feeBody.appendChild(feeActions);fees.appendChild(feeBody);el.appendChild(fees);
+      });
+      feeBody.appendChild(feeActions);
+      var claimHistory=dom('div','tl-token-claim-history');claimHistory.id='tl-claim-history-'+row.id;claimHistory.hidden=true;feeBody.appendChild(claimHistory);
+      fees.appendChild(feeBody);el.appendChild(fees);
     }
   }
   if(actions.children.length)el.appendChild(actions);
@@ -481,7 +540,9 @@ function drawMine(){
 }
 async function loadMine(){
  try{
-  var r=await call('/api/token-launch/mine');mine=r.launches||[];drawMine();renderRecent();
+  var loaded=await Promise.all([call('/api/token-launch/mine'),call('/api/token-launch/creator-earnings').catch(function(){return null})]);
+  mine=loaded[0].launches||[];creatorEarnings=loaded[1];drawMine();renderRecent();renderCreatorEarnings();
+  if(creatorAvailableRaw===null)refreshAvailableFees(false);
   // A creator may return from Phantom after a browser suspension. If their
   // signature is already durably recorded, retry chain verification ONCE
   // per page view without signing, spending, or creating another mint.
@@ -549,6 +610,8 @@ $('tl-image').addEventListener('change',async function(){
  }catch(e){readerData='';text('tl-upload-label','Upload logo');status(e.message,true)}
 });
 $('tl-save').addEventListener('click',saveDraft);
+$('tl-refresh-earnings').addEventListener('click',function(){refreshAvailableFees(true)});
+$('tl-toggle-history').addEventListener('click',function(){var box=$('tl-global-claim-history');box.hidden=!box.hidden;this.textContent=box.hidden?'View claim history':'Hide claim history'});
 renderPreview();loadMine();
 // Phantom returns through the system browser on iOS. The original installed
 // web app remains the source of truth and refreshes as soon as it is resumed.
@@ -558,7 +621,7 @@ function refreshAfterPhantom(){
  lastResumeCheck=Date.now();
  // The PWA can remain alive for hours while Phantom and Safari handle the
  // callback. A prior pending check must not suppress the fresh chain check.
- autoVerified=Object.create(null);loadMine();
+ autoVerified=Object.create(null);creatorAvailableRaw=null;loadMine();
 }
 document.addEventListener('visibilitychange',refreshAfterPhantom);
 window.addEventListener('pageshow',refreshAfterPhantom);
