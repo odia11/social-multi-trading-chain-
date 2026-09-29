@@ -18534,7 +18534,7 @@ def app_webmanifest():
         'scope': '/',
         'display': 'standalone',
         'background_color': '#0a0b0e',
-        'theme_color': '#f7b955',
+        'theme_color': '#0a0b0e',
         'icons': [
             {'src': '/static/favicon.svg?v=2', 'sizes': 'any', 'type': 'image/svg+xml'},
             {'src': '/static/icon-192.png?v=2', 'sizes': '192x192', 'type': 'image/png', 'purpose': 'any'},
