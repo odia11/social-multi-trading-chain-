@@ -56,7 +56,7 @@ function boot(){
     samples=[cached];
     spark();
     put('pf-performance','Last confirmed balance · refreshing…');
-    setTimeout(function(){if(window.__orcaPortfolioValue==null)put('pf-performance','Last confirmed balance · live update unavailable')},12000);
+    setTimeout(function(){if(window.__orcaPortfolioValue==null)put('pf-performance','Last confirmed balance · retrying live update…')},12000);
   }
   /* On a first-ever session there is no confirmed total to reuse. As soon as
      the fast pooled-USDC read lands, use it as an honest provisional floor

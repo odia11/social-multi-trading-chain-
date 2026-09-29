@@ -2784,6 +2784,43 @@ function _toggleTokTrade(i){
 var _portfolioSnapshotData=null
 var _portfolioSnapshotAt=0
 var _portfolioSnapshotPromise=null
+
+// Keep the COMPLETE last confirmed portfolio snapshot on-device, scoped to
+// this wallet. Page navigation can therefore paint total + USDC + SOL + token
+// rows synchronously, before the first RPC round-trip finishes.
+var _PORTFOLIO_CACHE_KEY='orcaPortfolioSnapshot:v2:'+String(_walletAddr||'').toLowerCase()
+var _PORTFOLIO_ASSETS_KEY='orcaPortfolioAssets:v2:'+String(_walletAddr||'').toLowerCase()
+var _PORTFOLIO_CACHE_MAX_AGE=86400000
+function _portfolioCacheRead(key){
+  try{
+    var item=JSON.parse(localStorage.getItem(key)||'null')
+    if(!item||!Number.isFinite(Number(item.at))||Date.now()-Number(item.at)>_PORTFOLIO_CACHE_MAX_AGE)return null
+    return item.data||null
+  }catch(e){return null}
+}
+function _portfolioCacheWrite(key,data){
+  try{localStorage.setItem(key,JSON.stringify({at:Date.now(),data:data}))}catch(e){}
+}
+function _rememberPortfolioSnapshot(snap){
+  if(!snap||!snap.ok||!Number.isFinite(Number(snap.total_usd)))return
+  var safe={
+    ok:true,total_usd:Number(snap.total_usd),
+    other_assets_value_usd:Number(snap.other_assets_value_usd||0),
+    stable:snap.stable||null,sol:snap.sol||null,
+    assets:Array.isArray(snap.assets)?snap.assets.slice(0,250):[],
+    generated_at:snap.generated_at||null,stale:!!snap.stale
+  }
+  _portfolioCacheWrite(_PORTFOLIO_CACHE_KEY,safe)
+  if(safe.assets.length)_portfolioCacheWrite(_PORTFOLIO_ASSETS_KEY,safe.assets)
+  try{
+    localStorage.setItem('orcaPortfolioLastConfirmedTotal',String(safe.total_usd))
+    localStorage.setItem('orcaPortfolioLastConfirmedTotalAt',String(Date.now()))
+  }catch(e){}
+}
+function _rememberPortfolioAssets(assets){
+  if(Array.isArray(assets))_portfolioCacheWrite(_PORTFOLIO_ASSETS_KEY,assets.slice(0,250))
+}
+
 function _getPortfolioSnapshot(forceFresh){
   var now=Date.now()
   if(!forceFresh && _portfolioSnapshotData && now-_portfolioSnapshotAt<3500){
@@ -2793,7 +2830,10 @@ function _getPortfolioSnapshot(forceFresh){
   var url='/api/portfolio/snapshot'+(forceFresh?'?bust=1':'')
   _portfolioSnapshotPromise=fetch(url,{credentials:'include',cache:'no-store'})
     .then(function(r){if(!r.ok)throw new Error('snapshot unavailable');return r.json()})
-    .then(function(d){if(!d||!d.ok)throw new Error((d&&d.msg)||'snapshot failed');_portfolioSnapshotData=d;_portfolioSnapshotAt=Date.now();return d})
+    .then(function(d){
+      if(!d||!d.ok)throw new Error((d&&d.msg)||'snapshot failed')
+      _portfolioSnapshotData=d;_portfolioSnapshotAt=Date.now();_rememberPortfolioSnapshot(d);return d
+    })
     .finally(function(){_portfolioSnapshotPromise=null})
   return _portfolioSnapshotPromise
 }
@@ -2912,6 +2952,53 @@ setInterval(function(){ if(!document.hidden) loadUsdcSummary() }, 8000)
 // ── hide small balances toggle ────────────────────────────
 var _hideSmall=false
 var _allSpl=[]
+
+function _paintPortfolioAssetsInstant(assets){
+  if(!Array.isArray(assets))return false
+  var solToken=assets.find(function(x){return String(x.symbol||'').toUpperCase()==='SOL'})
+  if(solToken){
+    var solUsd=Number(solToken.usd_value!=null?solToken.usd_value:solToken.value_usd)
+    if(Number.isFinite(solUsd))document.getElementById('pf-sol-asset').textContent='$'+solUsd.toFixed(2)
+    if(Number.isFinite(Number(solToken.price_usd)))document.getElementById('pf-sol-price').textContent='$'+Number(solToken.price_usd).toFixed(2)
+    window._wSolPrice=Number(solToken.price_usd||0)
+  }
+  var spl=assets.filter(function(x){return String(x.symbol||'').toUpperCase()!=='SOL'})
+  _allSpl=spl;window._wTokens=spl
+  _renderHoldings(_hideSmall?spl.filter(function(x){return parseFloat(x.usd_value||x.value_usd||0)>=1}):spl)
+  return true
+}
+function _paintPortfolioSnapshotInstant(snap){
+  if(!snap||!Number.isFinite(Number(snap.total_usd)))return false
+  var total=Number(snap.total_usd),stable=Number(snap.stable&&snap.stable.total_usdc)
+  var solValue=Number(snap.sol&&snap.sol.value_usd),solAmount=Number(snap.sol&&snap.sol.amount)
+  var totalEl=document.getElementById('pf-total');if(totalEl)totalEl.textContent='$'+total.toFixed(2)
+  var perf=document.getElementById('pf-performance');if(perf)perf.textContent='Last confirmed balance · refreshing…'
+  var avail=document.getElementById('avail');if(avail&&Number.isFinite(stable))avail.textContent='$'+stable.toFixed(2)
+  var usdcAsset=document.getElementById('pf-usdc-asset');if(usdcAsset&&Number.isFinite(stable))usdcAsset.textContent='$'+stable.toFixed(2)
+  var solAsset=document.getElementById('pf-sol-asset');if(solAsset&&Number.isFinite(solValue))solAsset.textContent='$'+solValue.toFixed(2)
+  if(Number.isFinite(solAmount)){
+    var solEl=document.getElementById('sol');if(solEl)solEl.textContent=solAmount.toFixed(4)
+    var fee=document.getElementById('fee-sol');if(fee)fee.textContent=solAmount.toFixed(4)+' SOL'
+    _solBalanceCache=solAmount
+  }
+  if(snap.sol&&Number.isFinite(Number(snap.sol.in_positions_sol))){
+    var ip=document.getElementById('inpos');if(ip)ip.textContent=Number(snap.sol.in_positions_sol).toFixed(4)+' SOL'
+  }
+  window.__orcaPortfolioValue=total
+  _paintPortfolioAssetsInstant(snap.assets||[])
+  var top=document.getElementById('pt-nb-sol-balance');if(top)top.textContent='$'+total.toFixed(2)
+  return true
+}
+
+// Millisecond first paint: complete snapshot when available; otherwise at
+// least restore the last token rows while the authoritative total refreshes.
+var _instantPortfolio=_portfolioCacheRead(_PORTFOLIO_CACHE_KEY)
+if(_instantPortfolio)_paintPortfolioSnapshotInstant(_instantPortfolio)
+else {
+  var _instantAssets=_portfolioCacheRead(_PORTFOLIO_ASSETS_KEY)
+  if(_instantAssets)_paintPortfolioAssetsInstant(_instantAssets)
+}
+
 function _toggleHideSmall(){
   _hideSmall=!_hideSmall
   var btn=document.getElementById('hide-small-btn')
@@ -2923,13 +3010,27 @@ function _toggleHideSmall(){
 function loadTokens(bust){
   var wrap=document.getElementById('tokens')
   if(!_allSpl.length) wrap.innerHTML='<div class="state-msg">Loading…</div>'
-  _getPortfolioSnapshot(!!bust).catch(function(){
-    // A single chain RPC can make the aggregate snapshot unavailable. Its
-    // independent token endpoint can still show real assets meanwhile.
-    return fetch('/api/wallet/tokens',{credentials:'include',cache:'no-store'})
+
+  // On a cold page load do not make token rows wait for every chain's RPC.
+  // Start the independent holdings read in parallel and use the first valid
+  // result. A slow/down Polygon RPC can no longer hold the Assets list hostage.
+  var aggregate=_getPortfolioSnapshot(!!bust)
+  var tokenOnly=(!_allSpl.length||bust)
+    ?fetch('/api/wallet/tokens'+(bust?'?bust=1':''),{credentials:'include',cache:'no-store'})
       .then(function(r){if(!r.ok)throw new Error('tokens unavailable');return r.json()})
-      .then(function(d){if(!d||!d.ok||!Array.isArray(d.tokens))throw new Error('tokens unavailable');return {assets:d.tokens}})
-  }).then(function(snap){
+      .then(function(d){
+        if(!d||!d.ok||!Array.isArray(d.tokens))throw new Error('tokens unavailable')
+        _rememberPortfolioAssets(d.tokens);return {assets:d.tokens}
+      })
+    :null
+  var source=tokenOnly?new Promise(function(resolve,reject){
+    var failed=0,last
+    ;[aggregate,tokenOnly].forEach(function(p){
+      p.then(resolve).catch(function(e){last=e;if(++failed===2)reject(last)})
+    })
+  }):aggregate
+
+  source.then(function(snap){
     var tokens=snap.assets||[]
 
     // SOL entry for USD total
@@ -2953,6 +3054,7 @@ function loadTokens(bust){
     })
 
     _allSpl=spl
+    _rememberPortfolioAssets(tokens)
     _renderHoldings(_hideSmall?spl.filter(function(x){return parseFloat(x.usd_value||x.value_usd||0)>=1}):spl)
 
   }).catch(function(err){
