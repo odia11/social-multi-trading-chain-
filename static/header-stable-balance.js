@@ -1,43 +1,92 @@
-/* Live TOTAL multi-chain portfolio value in the shared top bar.
-   On /wallet the Portfolio controller is authoritative; other pages poll a
-   lightweight snapshot at a calm cadence so navigation stays responsive. */
+/* Instant shared portfolio balance in the OrcAgent top bar.
+   Paint the last confirmed value synchronously from localStorage so page
+   navigation never flashes $0.00, then reconcile from the authoritative
+   multi-chain portfolio snapshot in the background. */
 (function(){
 'use strict';
 var timer=null,inFlight=false,last='',lastAt=0;
 var here=location.pathname.replace(/\/+$/,'')||'/';
-var ON_PORTFOLIO=here==='/wallet',POLL_MS=15000,MIN_GAP_MS=2500;
+var ON_PORTFOLIO=here==='/wallet',POLL_MS=5000,MIN_GAP_MS=1200;
+var STORAGE_KEY='orcaPortfolioLastConfirmedTotal';
+var STORAGE_AT_KEY='orcaPortfolioLastConfirmedTotalAt';
+var MAX_CACHE_AGE=86400000;
+
 function el(){return document.getElementById('pt-nb-sol-balance')}
-function n(v){v=Number(v||0);return isFinite(v)&&v>0?v:0}
-function money(v){return '$'+n(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
-function render(value){var node=el();if(!node)return;node.textContent=value||'$0.00';node.setAttribute('aria-label','Total portfolio value '+(value||'$0.00'));var pill=node.closest('.pt-nb-balance,.pt-nb-sol,.pt-nb-wallet-balance')||node.parentElement;if(pill)pill.title='Live total portfolio value across OrcAgent chains'}
-function json(url){var sep=url.indexOf('?')>=0?'&':'?';return fetch(url+sep+'t='+Date.now(),{credentials:'include',cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('portfolio value unavailable');return r.json()})}
-function calc(summary,tokBody,bal){summary=summary||{};tokBody=tokBody||{};bal=bal||{};var stable=n(summary.total_usdc!=null?summary.total_usdc:summary.total),tokens=Array.isArray(tokBody.tokens)?tokBody.tokens:[];var other=tokens.reduce(function(sum,x){var sym=String(x.symbol||x.ticker||'').toUpperCase();if(sym==='USDC'||sym==='USDT'||sym==='USDG'||sym==='SOL')return sum;var v=x.usd_value;if(v==null)v=x.value_usd;if(v==null)v=n(x.balance!=null?x.balance:x.amount)*n(x.price_usd!=null?x.price_usd:x.price);return sum+n(v)},0);var solPrice=n(bal.sol_price||summary.sol_price||window._wSolPrice||0);return stable+n(bal.sol)*solPrice+other}
+function n(v){v=Number(v);return Number.isFinite(v)&&v>=0?v:null}
+function money(v){var x=n(v);return x===null?'—':'$'+x.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
+function render(value){
+  var node=el();if(!node)return;
+  node.textContent=value||'—';
+  node.setAttribute('aria-label','Total portfolio value '+(value||'unavailable'));
+  var pill=node.closest('.pt-nb-balance,.pt-nb-sol,.pt-nb-wallet-balance')||node.parentElement;
+  if(pill)pill.title='Live total portfolio value across OrcAgent chains';
+}
+function remember(total){
+  var value=n(total);if(value===null)return;
+  try{
+    localStorage.setItem(STORAGE_KEY,String(value));
+    localStorage.setItem(STORAGE_AT_KEY,String(Date.now()));
+  }catch(e){}
+}
+function recalled(){
+  try{
+    var raw=localStorage.getItem(STORAGE_KEY),at=Number(localStorage.getItem(STORAGE_AT_KEY));
+    if(raw===null)return null;
+    var value=n(raw);
+    if(value===null||!Number.isFinite(at)||at<=0||Date.now()-at>MAX_CACHE_AGE)return null;
+    return value;
+  }catch(e){return null}
+}
+function json(url){
+  var sep=url.indexOf('?')>=0?'&':'?';
+  return fetch(url+sep+'t='+Date.now(),{credentials:'include',cache:'no-store'})
+    .then(function(r){if(!r.ok)throw new Error('portfolio unavailable');return r.json()});
+}
+function accept(total){
+  var value=n(total);if(value===null)return false;
+  last=money(value);render(last);remember(value);return true;
+}
 function refresh(force){
-  if(ON_PORTFOLIO){if(window.__orcaPortfolioValue!=null)render(money(window.__orcaPortfolioValue));return Promise.resolve()}
-  if(inFlight||!el()||document.hidden)return Promise.resolve();
-  var now=Date.now();if(!force&&now-lastAt<MIN_GAP_MS)return Promise.resolve();lastAt=now;inFlight=true;
-  return Promise.allSettled([json('/api/wallet/usdc-summary'),json('/api/wallet/tokens?bust=1'),json('/api/wallet/balance')]).then(function(res){var s=res[0].status==='fulfilled'?res[0].value:{},t=res[1].status==='fulfilled'?res[1].value:{},b=res[2].status==='fulfilled'?res[2].value:{};if(res.every(function(x){return x.status==='rejected'}))throw new Error('all portfolio reads failed');var text=money(calc(s,t,b));last=text;render(text)}).catch(function(){if(last)render(last)}).finally(function(){inFlight=false})
+  if(!el()||document.hidden)return Promise.resolve(false);
+  if(ON_PORTFOLIO){
+    if(window.__orcaPortfolioValue!=null)accept(window.__orcaPortfolioValue);
+    return Promise.resolve(true);
+  }
+  if(inFlight)return Promise.resolve(false);
+  var now=Date.now();if(!force&&now-lastAt<MIN_GAP_MS)return Promise.resolve(false);
+  lastAt=now;inFlight=true;
+  return json('/api/portfolio/snapshot').then(function(s){
+    if(!s||!s.ok||!accept(s.total_usd))throw new Error('bad portfolio snapshot');
+    window.__orcaPortfolioValue=Number(s.total_usd);
+    return true;
+  }).catch(function(){
+    if(last)render(last);
+    return false;
+  }).finally(function(){inFlight=false});
 }
 function start(){
   if(!el())return;
+  var cached=recalled();
+  if(cached!==null){last=money(cached);render(last)}
+  else if((el().textContent||'').trim()==='$0.00')render('—');
+
   if(ON_PORTFOLIO){
-    if(window.__orcaPortfolioValue!=null){render(money(window.__orcaPortfolioValue));return}
-    try{
-      var raw=localStorage.getItem('orcaPortfolioLastConfirmedTotal');
-      var at=Number(localStorage.getItem('orcaPortfolioLastConfirmedTotalAt'));
-      if(raw!==null&&Number.isFinite(Number(raw))&&at>0&&Date.now()-at<86400000){
-        render(money(Number(raw)));return;
-      }
-    }catch(e){}
-    render('—');return;
+    if(window.__orcaPortfolioValue!=null)accept(window.__orcaPortfolioValue);
+    return;
   }
-  refresh(true);if(timer)clearInterval(timer);timer=setInterval(function(){refresh(false)},POLL_MS)
+  refresh(true);
+  if(timer)clearInterval(timer);
+  timer=setInterval(function(){refresh(false)},POLL_MS);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
-document.addEventListener('orca:portfolio-value',function(e){var total=e&&e.detail&&e.detail.total;if(total!=null){last=money(total);render(last)}});
-window.addEventListener('pageshow',function(){refresh(true)});
-window.addEventListener('focus',function(){refresh(false)});
-document.addEventListener('visibilitychange',function(){if(!document.hidden)refresh(false)});
+
+document.addEventListener('orca:portfolio-value',function(e){
+  var total=e&&e.detail&&e.detail.total;
+  if(total!=null)accept(total);
+});
+window.addEventListener('pageshow',function(){start();refresh(true)});
+window.addEventListener('focus',function(){refresh(true)});
+document.addEventListener('visibilitychange',function(){if(!document.hidden)refresh(true)});
 window.OrcAgentRefreshStableBalance=function(){return refresh(true)};
-window.OrcAgentRefreshPortfolioValue=function(){return refresh(true)};
+if(!ON_PORTFOLIO)window.OrcAgentRefreshPortfolioValue=function(){return refresh(true)};
 })();

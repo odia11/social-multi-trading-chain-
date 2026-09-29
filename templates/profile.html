@@ -444,7 +444,7 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
     </section>
 
     {% if can_view_sensitive|default(false) %}
-    <section class="oa-profile-balance" id="oa-profile-balance" data-user-id="{{ user_id }}" aria-label="User portfolio balance in USDC" aria-live="polite">
+    <section class="oa-profile-balance" id="oa-profile-balance" data-user-id="{{ user_id }}" data-own="{{ '1' if is_own_profile else '0' }}" aria-label="User portfolio balance in USDC" aria-live="polite">
       <div class="oa-profile-balance-head">
         <span class="oa-profile-balance-symbol" aria-hidden="true">$</span>
         <span class="oa-profile-balance-label">Portfolio balance</span>
