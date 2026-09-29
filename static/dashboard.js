@@ -675,7 +675,7 @@ function _walletConnectNotice(msg){
 async function connectWalletOnboard(type, afterLoginUrl){
   try{ localStorage.removeItem('orca_manual_disconnect'); }catch(e){}
   const isPhantom=type==='phantom';
-  const provider=isPhantom?_phantomProvider():window.solflare;
+  const provider=window.OrcAgentWalletAdapter?window.OrcAgentWalletAdapter.provider(type):(isPhantom?_phantomProvider():window.solflare);
   const name=isPhantom?'Phantom':'Solflare';
   const check=!!provider;
 
@@ -846,7 +846,7 @@ function _clearPerUserBadgesAndCaches(){
 }
 
 function disconnectWallet(){
-  var _wp=walletType==='Phantom'?window.solana:(walletType==='Solflare'?window.solflare:(window.solana||window.solflare));
+  var _wp=walletType==='Phantom'?_phantomProvider():(walletType==='Solflare'?window.solflare:(_phantomProvider()||window.solflare));
   _clearPerUserBadgesAndCaches();
   var _doLogout=function(){
     fetch('/api/logout',{method:'POST',credentials:'include'}).finally(function(){

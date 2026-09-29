@@ -37,7 +37,8 @@ async function call(path,body){
  return d;
 }
 function selectedWallet(){
- var provider=(window.phantom&&window.phantom.solana)||window.solana||window.solflare;
+ var adapter=window.OrcAgentWalletAdapter;
+ var provider=adapter?adapter.connected(cfg.wallet):((window.phantom&&window.phantom.solana&&window.phantom.solana.isPhantom)?window.phantom.solana:((window.solana&&window.solana.isPhantom)?window.solana:window.solflare));
  if(!provider||typeof provider.signAndSendTransaction!=='function')throw Error('Open OrcAgent in Phantom or connect a compatible Solana wallet first.');
  return provider;
 }

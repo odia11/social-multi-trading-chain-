@@ -126,6 +126,7 @@
 <script>window.ORC_TOKEN_LAUNCH={wallet:{{ wallet|tojson }},csrf:{{ csrf_token|tojson }},enabled:{{ launch_enabled|tojson }},pilotCreatorOnly:{{ pilot_creator_only|tojson }},fundingAvailable:{{ funding_available|tojson }}};</script>
 {% if launch_enabled %}<script src="/static/token-launch-web3.js?v={{ app_version|default('1') }}" defer></script>{% endif %}
 <script src="/static/launch-back.js?v={{ app_version|default('1') }}" defer></script>
+<script src="/static/orc-wallet-adapter.js?v={{ app_version|default('1') }}" defer></script>
 <script src="/static/token-launch.js?v={{ app_version|default('1') }}" defer></script>
 <script src="/static/token-launches.js?v={{ app_version|default('1') }}" defer></script>
 </body>
