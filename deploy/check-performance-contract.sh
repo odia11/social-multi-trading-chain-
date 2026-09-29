@@ -11,7 +11,8 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 for test_file in \
   tests/test_instant_navigation.py \
   tests/test_app_performance.py \
-  tests/test_instant_navigation_contract.py
+  tests/test_instant_navigation_contract.py \
+  tests/test_home_balance_consistency.py
 do
   python3 "$REPO_DIR/$test_file"
 done
