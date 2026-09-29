@@ -227,16 +227,18 @@ def install(d):
         if (launch_read or claim_read) and 'https://api.mainnet-beta.solana.com' not in endpoints:
             endpoints.append('https://api.mainnet-beta.solana.com')
         last_error=None
+        throttled_message=('Solana RPC is busy (429). No claim transaction was sent. Retry shortly.'
+                           if claim_read else 'Solana RPC is rate-limited (429). Your saved launch is preserved. Check Phantom history before approving again.')
         for number,endpoint in enumerate(endpoints):
             if rpc_throttled_until.get(endpoint,0)>time.monotonic():
-                last_error='Solana RPC is rate-limited (429). Your saved launch is preserved. Check Phantom history before approving again.'
+                last_error=throttled_message
                 continue
             for attempt in range(1 if claim_read else (3 if number==0 else 2)):
                 try:
                     response=requests.post(endpoint,json={'jsonrpc':'2.0','id':1,
                          'method':method,'params':params},timeout=9)
                     if response.status_code==429:
-                        last_error='Solana RPC is rate-limited (429). Your saved launch is preserved. Check Phantom history before approving again.'
+                        last_error=throttled_message
                         if attempt < (0 if claim_read else (2 if number==0 else 1)):
                             time.sleep(0.35*(attempt+1))
                             continue
@@ -249,7 +251,7 @@ def install(d):
                     error=decoded.get('error')
                     if error:
                         if isinstance(error,dict) and error.get('code')==429:
-                            last_error='Solana RPC is rate-limited (429). Your saved launch is preserved. Check Phantom history before approving again.'
+                            last_error=throttled_message
                             if attempt < (0 if claim_read else (2 if number==0 else 1)):
                                 time.sleep(0.35*(attempt+1))
                                 continue
