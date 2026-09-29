@@ -327,6 +327,33 @@ def install(d):
             raise RuntimeError('Invalid Solana transaction')
         return built
 
+    PUBLIC_CLAIM_MAX_LAMPORTS=20_000_000
+
+    def claim_preflight(row,transaction_b64):
+        '''Simulate a creator-fee claim before Phantom ever sees it.
+
+        Only pilot wallets were simulated. Everyone else's claim went straight
+        to Phantom, and when it could not succeed there -- typically too little
+        SOL in the wallet for the creator's USDC receiving account rent and the
+        fee -- Phantom only answered "Unexpected error" (-32603). A definite
+        failure is now refused here with a clear reason; an RPC that cannot
+        answer does not block the claim (Phantom simulates it again anyway).
+        Pilot wallets keep their strict budget check.'''
+        if pilot_wallet(row['wallet']):
+            return pilot_sol_preflight(row,transaction_b64,PILOT_MAX_FOLLOWUP_SOL_LAMPORTS,claim_read=True)
+        try:
+            pilot_sol_preflight(row,transaction_b64,PUBLIC_CLAIM_MAX_LAMPORTS,
+                                claim_read=True,enforce_public=True)
+        except RuntimeError as exc:
+            message=str(exc)
+            if message.startswith('Insufficient SOL'):
+                raise
+            if 'simulation failed' in message:
+                raise RuntimeError('This claim would fail on Solana right now, so Phantom was not opened. '
+                                   'No transaction was sent. Try again in a minute.') from exc
+            print(f'[pump-claim] preflight unavailable, leaving it to Phantom: {message[:120]}',flush=True)
+        return None
+
     def pilot_sol_preflight(row,transaction_b64,max_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS,*,claim_read=False,enforce_public=False):
         """Read-only simulation; reject if real network/rent cost is unknown.
 
@@ -345,10 +372,14 @@ def install(d):
             before=(balance or {}).get('value')
             fee_result=rpc('getFeeForMessage',[encoded,{'commitment':'confirmed'}],claim_read=claim_read,launch_read=not claim_read)
             fee=(fee_result or {}).get('value')
-            simulated=rpc('simulateTransaction',[
-                transaction_b64,{'encoding':'base64','commitment':'confirmed',
-                'sigVerify':False,
-                'accounts':{'encoding':'base64','addresses':[wallet]}}],claim_read=claim_read,launch_read=not claim_read)
+            options={'encoding':'base64','commitment':'confirmed','sigVerify':False,
+                'accounts':{'encoding':'base64','addresses':[wallet]}}
+            if claim_read:
+                # A claim is simulated seconds after its blockhash was fetched;
+                # a node that has not seen it yet must not fail the claim.
+                options['replaceRecentBlockhash']=True
+            simulated=rpc('simulateTransaction',[transaction_b64,options],
+                          claim_read=claim_read,launch_read=not claim_read)
             if not isinstance(before,int) or not isinstance(fee,int) or fee<0:
                 raise RuntimeError('Pilot network fee/balance unavailable; no transaction prepared')
             outcome=(simulated or {}).get('value') or {}
@@ -1281,8 +1312,7 @@ def install(d):
                            or blockhash_valid(pending['transaction_b64'],claim_read=True))
                 except RuntimeError as exc:return fail(exc,503)
                 if fresh:
-                    try:pilot_cost=pilot_sol_preflight(row,pending['transaction_b64'],
-                                         PILOT_MAX_FOLLOWUP_SOL_LAMPORTS,claim_read=True)
+                    try:pilot_cost=claim_preflight(row,pending['transaction_b64'])
                     except RuntimeError as exc:return fail(exc,503)
                     return jsonify(ok=True,claim_id=pending['id'],reused=True,
                       transaction_b64=pending['transaction_b64'],
@@ -1357,8 +1387,7 @@ def install(d):
             # Reserve the non-launch part of the 0.03 SOL test envelope for
             # ATA/rent + fee claims. Trades elsewhere need separate user
             # approval and are never charged through this launch endpoint.
-            pilot_claim_cost=pilot_sol_preflight(row,built['transaction_b64'],
-                                                 PILOT_MAX_FOLLOWUP_SOL_LAMPORTS,claim_read=True)
+            pilot_claim_cost=claim_preflight(row,built['transaction_b64'])
             claim_id=secrets.token_hex(16)
             with sqlite3.connect(d.DB_FILE) as conn:
                 conn.execute('''INSERT INTO token_reward_claims

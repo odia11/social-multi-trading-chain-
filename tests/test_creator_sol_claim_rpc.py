@@ -58,6 +58,14 @@ def test_sol_creator_claim_uses_claim_rpc_pool():
             return Reply(code=429,error={'code':429})
         if url==public and json['method']=='getLatestBlockhash':
             return Reply({'value':{'blockhash':str(Hash.default())}})
+        # Every claim is simulated before Phantom sees it (claim_preflight).
+        if url==public and json['method']=='getBalance':
+            return Reply({'value':50_000_000})
+        if url==public and json['method']=='getFeeForMessage':
+            return Reply({'value':5000})
+        if url==public and json['method']=='simulateTransaction':
+            assert json['params'][1]['replaceRecentBlockhash'] is True
+            return Reply({'value':{'err':None,'accounts':[{'lamports':49_995_000}]}})
         raise AssertionError((url,json['method']))
 
     def builder(args,**kwargs):
@@ -81,6 +89,7 @@ def test_sol_creator_claim_uses_claim_rpc_pool():
     assert builder_endpoints==[public],builder_endpoints
     assert ('https://claim-a.invalid','getLatestBlockhash') in rpc_calls
     assert (public,'getLatestBlockhash') in rpc_calls
+    assert (public,'simulateTransaction') in rpc_calls   # simulated before Phantom
     with sqlite3.connect(d.DB_FILE) as c:
         row=c.execute("SELECT status,quote_asset,accrued_raw FROM token_reward_claims").fetchone()
     assert row==('prepared','SOL','14732520'),row
