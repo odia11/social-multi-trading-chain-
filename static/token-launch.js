@@ -239,6 +239,17 @@ async function claimRewards(row){
          text('tl-dialog-status','Creator fee claim simulation: up to '+
            (claimCost/1e9).toFixed(6)+' SOL. Review the actual cost and quote asset in Phantom.');
        }
+       var injected=window.OrcAgentWalletAdapter&&window.OrcAgentWalletAdapter.connected(cfg.wallet);
+       var mobile=/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)||
+         (/Macintosh/i.test(navigator.userAgent)&&navigator.maxTouchPoints>1);
+       if(!injected&&mobile){
+         text('tl-dialog-status','Opening Phantom for this exact creator-fee claim…');
+         var handoff=await call('/api/token-launch/'+row.id+'/claim/phantom/start',{
+           claim_id:ready.claim_id,return_to_pwa:!!(navigator.standalone===true||
+             (window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches))});
+         window.location.assign(handoff.url);
+         return {handoff:true};
+       }
        var sig=await signWithWallet(ready.transaction_b64);
        try{sessionStorage.setItem('orca-token-claim:'+ready.claim_id,sig)}catch(e){}
        text('tl-dialog-status','Verifying reward transaction on Solana…');
@@ -246,6 +257,7 @@ async function claimRewards(row){
                     {claim_id:ready.claim_id,signature:sig});
        return confirmed;
      });
+   if(result&&result.handoff)return;
    if(result){
      var actual=(result.received_raw!==undefined&&result.received_raw!==''
        ?(BigInt(result.received_raw)/1000000n).toString()+'.'+
@@ -279,6 +291,10 @@ async function showClaims(row){
     var sig=pending.signature;
     if(!sig){try{sig=sessionStorage.getItem('orca-token-claim:'+pending.id)||''}catch(e){}}
     if(!sig)return;
+    if(pending.status==='submitted'){
+      try{await call('/api/token-launch/'+row.id+'/claim/phantom/retry-delivery',{claim_id:pending.id})}
+      catch(e){ /* Existing signature is still checked below; never create another claim. */ }
+    }
     var confirmed=await call('/api/token-launch/'+row.id+'/claim/confirm',
        {claim_id:pending.id,signature:sig});
     if(confirmed.confirmed){
