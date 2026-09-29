@@ -119,6 +119,26 @@ def test_recover_original_paid_and_repeated_zero_payout():
     tmp.cleanup()
 
 
+def test_reconcile_only_requested_wallet():
+    tmp,app,d,client,owner,ident,raw,built=fixture()
+    another=Keypair()
+    with sqlite3.connect(d.DB_FILE) as c:
+        c.execute('''INSERT INTO token_reward_claims
+            (id,launch_id,wallet,mint,quote_asset,reward_mode,accrued_raw,
+             accrued_scope,transaction_b64,created_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?)''',
+             ('a'*32,ident,str(another.pubkey()),str(Keypair().pubkey()),'USDC',
+              'creator','100','creator_wallet_all_tokens',raw,int(time.time())))
+    def rpc(url,*,json,timeout):
+        assert json['params'][0]!=str(another.pubkey()),'unrelated claim blocked this wallet'
+        return Reply([])
+    with patch('token_launch.requests.post',side_effect=rpc):
+        outcome=app._orca_reconcile_reward_claims(str(owner.pubkey()))
+    assert outcome=={'checked':0,'recovered':0,'no_payout':0,'unavailable':0}
+    print('PASS another wallet’s unresolved claim cannot block this creator')
+    tmp.cleanup()
+
+
 def test_reject_modified_claim_cores_and_overspending():
     tmp,app,d,client,owner,ident,_,_=fixture()
     original,legit,ata=build_claim(owner)
@@ -152,3 +172,4 @@ def test_reject_modified_claim_cores_and_overspending():
 if __name__=='__main__':
  test_recover_original_paid_and_repeated_zero_payout()
  test_reject_modified_claim_cores_and_overspending()
+ test_reconcile_only_requested_wallet()

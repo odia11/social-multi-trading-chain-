@@ -216,9 +216,14 @@ def install(d):
         # The history lookup required for a pending creator claim is
         # especially likely to be blocked by the primary free/indexed RPC.
         # Prefer the independently verified fixed public endpoint first.
-        endpoints=([_VERIFY_RPC,primary] if verification and
-            method=='getSignaturesForAddress' and primary.rstrip('/')!=_VERIFY_RPC
-            else [primary])
+        claim_endpoints=list(getattr(d,'CLAIM_SOL_RPCS',[]) or [])
+        if claim_read:
+            endpoints=list(dict.fromkeys([*claim_endpoints,primary,_VERIFY_RPC]))
+        elif verification and method=='getSignaturesForAddress':
+            # Indexed account history may be unavailable from public nodes.
+            endpoints=list(dict.fromkeys([*claim_endpoints,_VERIFY_RPC,primary]))
+        else:
+            endpoints=[primary]
         if can_fallback and _VERIFY_RPC not in endpoints:
             endpoints.append(_VERIFY_RPC)
         # If both the configured endpoint and PublicNode are throttled, the
@@ -573,7 +578,7 @@ def install(d):
         except (KeyError,ValueError,IndexError,TypeError,AttributeError) as exc:
             raise RuntimeError('Confirmed USDC recipient delta unavailable; retry claim confirmation') from exc
 
-    def reconcile_reward_claims():
+    def reconcile_reward_claims(wallet_filter=None):
         '''Recover on-chain creator rewards when Phantom changed tx wrappers.
 
         A wallet may return a signature but the client can be suspended before
@@ -585,11 +590,14 @@ def install(d):
         '''
         with closing(sqlite3.connect(d.DB_FILE)) as conn:
             conn.row_factory=sqlite3.Row
-            rows=conn.execute('''SELECT * FROM token_reward_claims
+            query='''SELECT * FROM token_reward_claims
                 WHERE status IN ('prepared','submitted','expired_unverified') AND reward_mode='creator'
-                AND quote_asset='USDC' AND created_at>?
-                ORDER BY created_at ASC LIMIT 30''',
-                (int(time.time())-7*86400,)).fetchall()
+                AND quote_asset='USDC' AND created_at>?'''
+            params=[int(time.time())-7*86400]
+            if wallet_filter:
+                query+=' AND wallet=?'
+                params.append(wallet_filter)
+            rows=conn.execute(query+' ORDER BY created_at ASC LIMIT 30',params).fetchall()
         if not rows:return {'checked':0,'recovered':0,'no_payout':0,'unavailable':0}
         wallet_history={};recovered=no_payout=unavailable=0
         for source in rows:
@@ -1127,7 +1135,7 @@ def install(d):
                     AND status IN ('prepared','submitted') LIMIT 1''',
                     (wallet,)).fetchone()
             if unresolved:
-                result=reconcile_reward_claims()
+                result=reconcile_reward_claims(wallet)
                 if result['unavailable']:
                     return fail('Existing creator claim cannot be checked on Solana right now. Do not approve a second payment.',503)
         if pilot_wallet(wallet):
@@ -1180,7 +1188,8 @@ def install(d):
         params={'wallet':wallet,'mint':row['mint'],'quote_asset':row['quote_asset'],
                 'reward_mode':row['reward_mode'],'blockhash':blockhash}
         primary=getattr(d,'SOLANA_RPC_URL','') or d.SOLANA_RPC
-        endpoints=([_VERIFY_RPC,primary,'https://api.mainnet-beta.solana.com']
+        endpoints=([*list(getattr(d,'CLAIM_SOL_RPCS',[]) or []),primary,_VERIFY_RPC,
+                    'https://api.mainnet-beta.solana.com']
                    if row['reward_mode']=='creator' and row['quote_asset']=='USDC'
                    else [primary])
         try:
@@ -1198,7 +1207,10 @@ def install(d):
                 # rate limits and outages. Validation/protocol failures are not
                 # fixed by another RPC and must never be hidden.
                 stderr=(r.stderr or '').lower()
-                if not any(marker in stderr for marker in ('429','too many requests','rate limit','fetch failed','etimedout','econnreset')):
+                if not any(marker in stderr for marker in (
+                    '429','too many requests','rate limit','fetch failed',
+                    'etimedout','econnreset','403','forbidden','unauthorized',
+                    '502 bad gateway','503 service unavailable')):
                     return fail('Creator fees could not be quoted or claim is not ready. No transaction was sent.',503)
                 if '429' in stderr or 'rate limit' in stderr or 'too many requests' in stderr:
                     rpc_throttled_until[endpoint]=time.monotonic()+12
