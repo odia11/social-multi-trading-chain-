@@ -7,7 +7,7 @@ if(path!=='/' || !window.matchMedia('(max-width:768px)').matches) return;
    WebViews either do not support it or can evaluate it too late, leaving the
    dashboard's base html{overflow:hidden} rule active for the whole page. */
 document.documentElement.classList.add('oa-home-mobile-root');
-var polish=document.createElement('link');polish.rel='stylesheet';polish.href='/static/home-mobile-polish.css?v=7';document.head.appendChild(polish);
+var polish=document.createElement('link');polish.rel='stylesheet';polish.href='/static/home-mobile-polish.css?v=8';document.head.appendChild(polish);
 function money(v){var n=Number(v||0);if(!isFinite(n))n=0;return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:n>=1000?0:2,maximumFractionDigits:n>=1000?0:2}).format(n)}
 function num(v){var n=Number(v||0);return isFinite(n)?n:0}
 function ready(fn){if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fn);else fn()}
@@ -17,36 +17,50 @@ function buildHero(wrap){var old=document.getElementById('oa-m-hero');if(old)old
 function buildBot(wrap,afterEl){var old=document.getElementById('oa-m-bot');if(old)old.remove();var el=document.createElement('section');el.className='oa-m-bot';el.id='oa-m-bot';el.innerHTML='<div class="oa-m-bot-avatar"><img src="/static/ai-bot-icon.svg?v=1" alt="AI Bot"></div><div class="oa-m-bot-main"><div class="oa-m-bot-title"><span class="oa-m-bot-dot" id="oa-m-bot-dot"></span> AI Bot</div><div class="oa-m-bot-status">Status: <b id="oa-m-bot-state">checking…</b></div><div class="oa-m-bot-meta"><span id="oa-m-bot-ready">$0.00 capital</span><span>•</span><span id="oa-m-bot-open">0/5 open trades</span><span>•</span><span id="oa-m-bot-win">— win rate</span></div></div><a class="oa-m-bot-settings" href="/settings" aria-label="Bot settings">⚙</a><a class="oa-m-bot-btn" href="/auto-trading-bot">Open AI Bot <span>→</span></a>';afterEl.insertAdjacentElement('afterend',el);refreshBot();return el}
 function refreshBot(){return Promise.allSettled([fetch('/api/bot/status',{credentials:'include'}).then(function(r){return r.json()}).then(function(d){var running=!!(d&&(d.running||d.status==='running')),state=document.getElementById('oa-m-bot-state'),dot=document.getElementById('oa-m-bot-dot');if(state){state.textContent=running?'Running':'Idle';state.classList.toggle('running',running)}if(dot)dot.classList.toggle('running',running);var open=d&&(d.open_positions!=null?d.open_positions:d.positions_open);if(open!=null)document.getElementById('oa-m-bot-open').textContent=open+'/5 open trades';var wr=d&&(d.win_rate!=null?d.win_rate:d.winrate);if(wr!=null)document.getElementById('oa-m-bot-win').textContent=Number(wr).toFixed(0)+'% win rate'}).catch(function(){var s=document.getElementById('oa-m-bot-state');if(s)s.textContent='Idle'}),fetch('/api/wallet/usdc-summary',{credentials:'include'}).then(function(r){return r.json()}).then(function(d){if(d&&d.ok){var x=document.getElementById('oa-m-bot-ready');if(x)x.textContent=money(d.total_usdc!=null?d.total_usdc:d.total)+' capital'}}).catch(function(){})])}
 var _oaPortfolioTimer=null,_oaPortfolioBusy=false;
+var _oaPortfolioCacheKey='orcaPortfolioLastConfirmedTotal';
+var _oaPortfolioCacheAtKey='orcaPortfolioLastConfirmedTotalAt';
+function _homeCachedPortfolio(){
+  try{
+    var raw=localStorage.getItem(_oaPortfolioCacheKey);
+    var at=Number(localStorage.getItem(_oaPortfolioCacheAtKey));
+    var n=Number(raw);
+    if(raw==null||!Number.isFinite(n)||n<0||!Number.isFinite(at)||Date.now()-at>86400000)return null;
+    return n;
+  }catch(_){return null}
+}
+function _paintHomePortfolio(total,live,persist){
+  total=Number(total);
+  if(!Number.isFinite(total)||total<0)return false;
+  var value=document.getElementById('oa-m-pf-value');
+  if(value)value.textContent=money(total);
+  var card=document.getElementById('oa-m-portfolio');
+  if(card)card.title=live?'Live portfolio value':'Last confirmed portfolio value · refreshing';
+  if(persist){
+    try{
+      localStorage.setItem(_oaPortfolioCacheKey,String(total));
+      localStorage.setItem(_oaPortfolioCacheAtKey,String(Date.now()));
+    }catch(_){}
+    window.__orcaPortfolioValue=total;
+    document.dispatchEvent(new CustomEvent('orca:portfolio-value',{detail:{total:total}}));
+  }
+  return true;
+}
 async function refreshHomePortfolio(){
   var value=document.getElementById('oa-m-pf-value');
   if(!value||document.hidden||_oaPortfolioBusy)return;
   _oaPortfolioBusy=true;
   try{
-    var urls=['/api/wallet/usdc-summary','/api/wallet/tokens','/api/wallet/balance'];
-    var data=await Promise.all(urls.map(async function(url){
-      var response=await fetch(url,{credentials:'include',cache:'no-store'});
-      if(!response.ok)throw Error('Balance request unavailable');
-      return response.json();
-    }));
-    var s=data[0]||{},t=data[1]||{},b=data[2]||{};
-    if(!s.ok||!t.ok||!b.ok)return;
-    var usdc=num(s.total_usdc!=null?s.total_usdc:s.total);
-    var solValue=num(b.sol)*num(b.sol_price||s.sol_price);
-    var tokens=Array.isArray(t.tokens)?t.tokens:[];
-    var other=tokens.reduce(function(sum,x){
-      var sym=String(x.symbol||x.ticker||'').toUpperCase();
-      if(sym==='USDC'||sym==='USDT'||sym==='SOL')return sum;
-      var v=x.usd_value;
-      if(v==null)v=x.value_usd;
-      if(v==null)v=num(x.balance||x.amount)*num(x.price_usd||x.price);
-      return sum+num(v);
-    },0);
-    value.textContent=money(usdc+solValue+other);
-    var card=document.getElementById('oa-m-portfolio');
-    if(card)card.title='Portfolio value refreshed from current wallet balances';
+    var response=await fetch('/api/portfolio/snapshot?t='+Date.now(),{
+      credentials:'include',cache:'no-store'
+    });
+    if(!response.ok)throw Error('Portfolio snapshot unavailable');
+    var d=await response.json();
+    if(!d||!d.ok||!_paintHomePortfolio(d.total_usd,!d.stale,true))throw Error('Invalid portfolio snapshot');
   }catch(e){
+    var cached=_homeCachedPortfolio();
+    if(cached!==null)_paintHomePortfolio(cached,false,false);
     var card=document.getElementById('oa-m-portfolio');
-    if(card)card.title='Portfolio update temporarily unavailable';
+    if(card&&cached===null)card.title='Portfolio update temporarily unavailable';
   }finally{_oaPortfolioBusy=false}
 }
 function buildPortfolio(afterEl){
@@ -55,6 +69,8 @@ function buildPortfolio(afterEl){
   var el=document.createElement('section');el.className='oa-m-portfolio';el.id='oa-m-portfolio';
   el.innerHTML='<div class="oa-m-pf-icon">▣</div><div class="oa-m-pf-main"><div class="oa-m-pf-label">Total Portfolio Value</div><div class="oa-m-pf-row"><strong id="oa-m-pf-value">—</strong><span>Live</span></div></div><div class="oa-m-pf-chart">'+spark()+'</div><a href="/wallet" class="oa-m-pf-btn">View Portfolio <span>→</span></a>';
   afterEl.insertAdjacentElement('afterend',el);
+  var cached=_homeCachedPortfolio();
+  if(cached!==null)_paintHomePortfolio(cached,false,false);
   refreshHomePortfolio();
   _oaPortfolioTimer=setInterval(refreshHomePortfolio,30000);
   return el;

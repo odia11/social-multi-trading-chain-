@@ -24,7 +24,6 @@
 'use strict';
 window.addEventListener('pageshow', function(e){
   if(!e.persisted) return;
-  e.stopImmediatePropagation();
   setTimeout(function(){
     document.dispatchEvent(new CustomEvent('orca:bfcache-restored'));
   }, 0);

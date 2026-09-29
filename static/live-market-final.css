@@ -4,7 +4,7 @@
 @media(max-width:767px){
   body.oa-live-v2{background:#06101a!important}
   body.oa-live-v2 .pt-main,body.oa-live-v2 .pt-center{padding-left:0!important;padding-right:0!important}
-  body.oa-live-v2 .pt-feed-list{padding:0 12px 112px!important}
+  body.oa-live-v2 .pt-feed-list{padding:0 12px 92px!important}
 
   body.oa-live-v2 .pt-card{
     display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;

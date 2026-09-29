@@ -329,6 +329,56 @@ def install(d):
             return jsonify({'ok': True, 'token': None})
         return jsonify({'ok': True, 'token': token, 'social': social(d, token['mint'], _uid(d))})
 
+    @app.get('/api/home/trending-hero/users')
+    @d.rate_limit(60, 60)
+    def trending_hero_users():
+        """Public profile list for Bullish, Bearish or Likes on this hero.
+
+        One latest vote per user is enforced by the existing (mint,user_id)
+        primary key. A switch from Bullish to Bearish moves that user between
+        lists automatically; likes are independent. No wallet secrets, private
+        balances, emails or encrypted trading keys leave this endpoint.
+        """
+        mint = request.args.get('mint', '')
+        kind = request.args.get('kind', '')
+        if kind not in ('bull', 'bear', 'like'):
+            return jsonify({'ok': False, 'msg': 'Unknown reaction'}), 400
+        if not _votable(mint):
+            return jsonify({'ok': False, 'msg': 'This token is no longer trending'}), 404
+        try:
+            offset = int(request.args.get('offset', '0'))
+        except (ValueError, TypeError):
+            return jsonify({'ok': False, 'msg': 'Invalid offset'}), 400
+        if not 0 <= offset <= 10000:
+            return jsonify({'ok': False, 'msg': 'Invalid offset'}), 400
+        table = 'trending_hero_likes' if kind == 'like' else 'trending_hero_votes'
+        vote_clause = '' if kind == 'like' else ' AND reaction.vote=?'
+        params = (mint,) if kind == 'like' else (mint, 1 if kind == 'bull' else -1)
+        with _db(d) as conn:
+            count = conn.execute(
+                'SELECT COUNT(*) FROM ' + table + ' AS reaction WHERE reaction.mint=?' + vote_clause,
+                params).fetchone()[0]
+            rows = conn.execute(
+                'SELECT u.wallet_address,u.username,u.avatar_url,u.is_verified '
+                'FROM ' + table + ' AS reaction '
+                'JOIN users u ON u.id=reaction.user_id '
+                'WHERE reaction.mint=?' + vote_clause + ' '
+                'ORDER BY reaction.created_at DESC,u.id DESC LIMIT 100 OFFSET ?',
+                params + (offset,)).fetchall()
+        avatar_memo = {}
+        avatar_url = getattr(d, '_feed_avatar_photo_url', None)
+        users = []
+        for row in rows:
+            wallet = row['wallet_address']
+            avatar = row['avatar_url'] or ''
+            if callable(avatar_url):
+                avatar = avatar_url(avatar, wallet, avatar_memo)
+            users.append({'wallet': wallet, 'username': row['username'] or '',
+                          'avatar_url': avatar, 'verified': bool(row['is_verified'])})
+        return jsonify({'ok': True, 'kind': kind, 'count': int(count),
+                        'users': users, 'next_offset': offset + len(users)
+                        if offset + len(users) < count and users else None})
+
     @app.post('/api/home/trending-hero/vote')
     @d.rate_limit(30, 60)
     def trending_hero_vote():

@@ -50,6 +50,26 @@ def test_wallet_ui_labels_trading_wallet_scope():
     assert 'Connected Phantom wallet is separate from this trading wallet.' not in html
 
 
+def test_native_sol_reader_never_swallows_rpc_failure_as_zero():
+    b=section('def _fetch_wallet_tokens', "@app.route('/api/wallet/tokens'")
+    assert '_get_user_sol(onchain_wallet)' in b
+    sol=b[b.index('# ── SOL balance ──'):b.index('# ── SOL price')]
+    assert "sol_balance = 0.0" not in sol
+    assert "raise RuntimeError('SOL balance unavailable from verified RPC')" in sol
+
+
+def test_wallet_balance_uses_same_resilient_sol_reader():
+    b=section('def api_wallet_balance', '_sol_usdc_balance_cache')
+    assert '_get_user_sol(balance_wallet)' in b
+    assert 'CLAIM_SOL_RPCS' not in b
+
+
+def test_indexer_outage_can_use_exact_canonical_usdc_account():
+    b=section('def _get_solana_usdc_balance', "@app.route('/api/wallet/usdc-summary'")
+    assert '_get_bot_solana_balances(key)' in b
+    assert 'Indexed token-account methods can all be throttled at once' in b
+
+
 if __name__=='__main__':
     for name in sorted(n for n in globals() if n.startswith('test_')):
         globals()[name]()

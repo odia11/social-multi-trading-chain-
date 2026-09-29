@@ -603,13 +603,17 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
 .fc-ri-delete{background:none;border:none;font-size:12px;color:var(--muted);cursor:pointer;padding:0;opacity:0;pointer-events:none;transition:color .15s,opacity .15s;font-family:inherit}
 .fc-reply-item:hover .fc-ri-delete{opacity:1;pointer-events:auto}
 .fc-ri-delete:hover{color:#f76b62}
-.fc-ri-like{background:none;border:none;cursor:pointer;padding:2px 0 0;display:flex;flex-direction:column;align-items:center;gap:2px;flex-shrink:0;font-family:inherit}
-.fc-ri-heart{font-size:13px;line-height:1;filter:grayscale(1) opacity(.6);transition:filter .15s,transform .1s}
-.fc-ri-like:hover .fc-ri-heart{filter:grayscale(.4) opacity(.85)}
-.fc-ri-like.liked .fc-ri-heart{filter:none;opacity:1}
-.fc-ri-like:active .fc-ri-heart{transform:scale(1.25)}
-.fc-ri-lc{font-size:10.5px;color:var(--muted);font-family:'JetBrains Mono',monospace}
-.fc-ri-like.liked .fc-ri-lc{color:#f76b62}
+/* A reply like is a readable horizontal heart + count, including zero.
+   Its filled heart and red pill stay visible after the request completes. */
+.fc-ri-like{background:transparent;border:1px solid transparent;cursor:pointer;display:inline-flex;flex-direction:row;align-items:center;justify-content:center;gap:5px;flex-shrink:0;min-width:48px;min-height:38px;padding:7px 3px;border-radius:8px;color:#c4ccd7;font-family:inherit;font-variant-numeric:tabular-nums;transition:background .15s,border-color .15s,color .15s}
+.fc-ri-heart{font-size:15px;line-height:1;filter:none;display:inline-flex;align-items:center;justify-content:center;min-width:16px;transition:transform .1s}
+.fc-ri-like:hover{background:rgba(255,96,117,.10);border-color:rgba(255,96,117,.22)}
+.fc-ri-like.liked{background:transparent;border-color:transparent;color:#ff778a}
+.fc-ri-like:active .fc-ri-heart{transform:scale(1.13)}
+.fc-ri-like:disabled{cursor:wait;opacity:1}
+.fc-ri-lc{display:inline-block;min-width:10px;font:750 14px/1 'Geist',system-ui,sans-serif;color:inherit;text-align:center}
+.fc-ri-like.liked .fc-ri-lc{color:#ff778a}
+@media(max-width:767px){.fc-ri-like{min-width:48px;min-height:40px;padding:7px 3px}.fc-ri-lc{font-size:14px}}
 
 /* New-reply badge on the Reply action of your own post -- lets a reply
    someone left on your post actually stand out while scrolling the feed,
@@ -3574,6 +3578,23 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
   .modal-btn{min-height:44px}
 }
 
+
+/* Optional self-declared flag: independent of bot and wallet settings. */
+.st-country-picker{display:flex;align-items:center;gap:12px;margin:12px 0 5px}
+.st-country-select{min-width:0;flex:1;max-width:100%;min-height:44px;background:#1a1d23;
+  border:1px solid #30353e;border-radius:9px;color:#eef1f5;padding:10px 12px;
+  font:500 16px/1.3 'Geist',system-ui,sans-serif;outline:none}
+.st-country-select:focus{border-color:#f7b955}
+.st-country-select option{background:#16191f;color:#eef1f5}
+.st-country-preview{display:flex;align-items:center;justify-content:center;min-width:44px;height:44px;
+  border:1px solid rgba(247,185,85,.30);background:#171c23;border-radius:10px;
+  font-family:'Apple Color Emoji','Segoe UI Emoji',system-ui,sans-serif;font-size:24px}
+.st-country-message{font-size:12px;color:#8a919c;line-height:1.5;margin:5px 0 13px}
+.st-country-message.ok{color:#3ad29b}
+.st-country-message.err{color:#f76b62}
+.st-country-card .st-tog-row{margin-top:5px}
+.st-country-card .st-toggle input:disabled+.st-track{opacity:.4;cursor:not-allowed}
+.st-country-card .st-save-row{padding-top:13px}
 </style>
 </head>
 <body>
@@ -4634,6 +4655,33 @@ __IMAGE_LIGHTBOX__
       </div>
 
 
+      <!-- ── OPTIONAL COUNTRY / PROFILE FLAG ── -->
+      <div class="st-card st-country-card" id="st-country-card">
+        <div class="st-card-hdr">🌍 Profile Flag <span style="font-weight:500;color:#8a919c;font-size:12px">· optional</span></div>
+        <div class="st-row-sub">Choose a country you identify with. OrcAgent never guesses your location.</div>
+        <div class="st-country-picker">
+          <select id="st-country-select" class="st-country-select" aria-label="Choose a country" onchange="_countrySelectionChanged()">
+            <option value="">No country selected</option>
+          </select>
+          <span class="st-country-preview" id="st-country-preview" aria-hidden="true">🌐</span>
+        </div>
+        <div class="st-tog-row">
+          <div>
+            <div class="st-tog-label">Show flag on my profile</div>
+            <div class="st-tog-sub">Off by default. Other users see nothing until you turn this on and save.</div>
+          </div>
+          <label class="st-toggle">
+            <input type="checkbox" id="st-country-visible" disabled onchange="_countrySelectionChanged()" aria-label="Show country flag publicly">
+            <span class="st-track"></span>
+          </label>
+        </div>
+        <div class="st-save-row">
+          <button type="button" class="st-save-btn" id="st-country-save" onclick="_saveCountrySetting()">Save flag preference</button>
+          <span id="st-country-msg" class="st-save-msg" role="status" aria-live="polite"></span>
+        </div>
+        <p class="st-country-message">You can hide your flag or choose “No country selected” at any time.</p>
+      </div>
+
       <!-- ── CARD 4: X (Twitter) ── -->
       <div class="st-card">
         <div class="st-card-hdr">𝕏 X (Twitter)</div>
@@ -4732,6 +4780,7 @@ if (window.__SESSION_WALLET) {
 <script src="/static/home-trending-hero.js?v=__ASSET_VER__" defer></script>
 <script src="/static/chart-scrub.js?v=__ASSET_VER__" defer></script>
 <script src="/static/pull-to-refresh.js?v=__ASSET_VER__" defer></script>
+<script src="/static/orc-wallet-adapter.js?v=__ASSET_VER__" defer></script>
 <script src="/static/dashboard.js?v=__ASSET_VER__" defer></script>
 
 <!-- ── TOKEN DETAIL PANEL ── -->

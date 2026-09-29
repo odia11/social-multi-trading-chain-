@@ -34,22 +34,22 @@ check('the app no longer observes class/style mutations on every DOM node',
 check('hidden pages pause decorative CSS animation work',
       'oa-page-hidden' in UX and 'animation-play-state:paused' in CSS)
 check('ordinary mobile bottom space is tightened from the old 132px reserve',
-      'padding-bottom:calc(108px + env(safe-area-inset-bottom,0px))' in CSS
+      'padding-bottom:calc(94px + env(safe-area-inset-bottom,0px))' in CSS
       and 'calc(132px + env' not in CSS)
 check('portfolio gets a compact but safe fixed-nav reserve',
       'body.oa-shared-ux.oa-portfolio .wlt-center' in CSS)
 check('every HTML response gets the current shared performance assets early',
-      'app-ux.css?v=7' in PERF and 'app-ux.js?v=4' in PERF)
+      'app-ux.css?v=8' in PERF and 'app-ux.js?v=6' in PERF)
 check('route-critical redesign assets are applied before first paint',
       'portfolio-redesign.css?v=6' in PERF
       and 'live-market-redesign.css?v=8' in PERF
-      and 'home-mobile.css?v=10' in PERF
-      and 'home-mobile-polish.css?v=7' in PERF)
+      and 'home-mobile.css?v=12' in PERF
+      and 'home-mobile-polish.css?v=8' in PERF)
 check('production WSGI installs the performance adapter',
       'from app_performance import install as _install_app_performance' in ENTRY
       and '_install_app_performance(_dashboard)' in ENTRY)
 check('fallback loader no longer duplicates document prefetching',
-      'app-ux.css?v=7' in LOADER and 'app-ux.js?v=4' in LOADER
+      'app-ux.css?v=8' in LOADER and 'app-ux.js?v=6' in LOADER
       and 'fetchDocument' not in LOADER and 'primeCore' not in LOADER)
 check('nginx compresses text assets while retaining live proxy streaming',
       'gzip on;' in NGINX and 'application/javascript' in NGINX
@@ -79,4 +79,21 @@ check('noncritical dashboard hydration is staggered through idle work',
 check('normal deploys repair nginx static compression on Certbot sites',
       'apply-nginx-performance.sh' in (ROOT/'deploy'/'install.sh').read_text(encoding='utf-8'))
 
-print('\n20/20 checks passed')
+SW=(ROOT/'static'/'sw.js').read_text(encoding='utf-8')
+check('core route chunks warm only public static assets after first paint',
+      'primeRouteAssets' in UX and 'CORE_ROUTES' in UX
+      and "var key='/static/'+asset" in UX
+      and "fetch('/api/" not in UX)
+check('slow mobile navigations get an immediate native-app shell without hijacking links',
+      'showRouteShell' in UX and 'setTimeout(function(){showRouteShell(path)},120)' in UX
+      and "e.preventDefault()" not in LOADER)
+check('service worker caches only same-origin public static GETs',
+      "url.pathname.indexOf('/static/')!==0" in SW
+      and "url.origin!==self.location.origin" in SW
+      and "req.method!=='GET'" in SW)
+check('mobile app shell assets are preloaded from head',
+      'data-oa-shell-preload' in PERF
+      and 'mobile-bottom-nav.css?v=9' in PERF
+      and 'mobile-bottom-nav.js?v=8' in PERF)
+
+print('\n24/24 checks passed')

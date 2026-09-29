@@ -33,6 +33,25 @@ function refreshProfileBalance(){
   if(!card||profileBalanceInFlight||document.hidden)return Promise.resolve();
   var userId=String(card.dataset.userId||'');
   if(!/^\d+$/.test(userId))return Promise.resolve();
+
+  // Own-profile balances paint from the last confirmed snapshot immediately,
+  // then reconcile on-chain in the background. The key is user-scoped so an
+  // account switch can never display another account's cached amounts.
+  if(!profileBalanceLastGood&&card.dataset.own==='1'){
+    try{
+      var cached=JSON.parse(localStorage.getItem('orcaProfileBalance:'+userId)||'null');
+      if(cached&&Number.isFinite(Number(cached.at))&&Date.now()-Number(cached.at)<86400000){
+        var cv=Number(cached.value),ca=Number(cached.available),co=Number(cached.other);
+        if(Number.isFinite(cv)&&cv>=0&&Number.isFinite(ca)&&ca>=0&&Number.isFinite(co)&&co>=0){
+          $('oa-profile-balance-value').textContent='≈ '+money(cv)+' USDC';
+          $('oa-profile-balance-available').textContent=money(ca)+' USDC';
+          $('oa-profile-balance-other').textContent='≈ '+money(co)+' USDC';
+          profileBalanceLastGood=true;
+          card.classList.add('is-stale');
+        }
+      }
+    }catch(e){}
+  }
   profileBalanceInFlight=true;
   var seq=++profileBalanceSeq;
   function sameProfile(){
@@ -56,6 +75,18 @@ function refreshProfileBalance(){
     $('oa-profile-balance-available').textContent=money(available)+' USDC';
     $('oa-profile-balance-other').textContent='≈ '+money(other)+' USDC';
     profileBalanceLastGood=true;
+    if(card.dataset.own==='1'){
+      try{
+        localStorage.setItem('orcaProfileBalance:'+userId,JSON.stringify({
+          at:Date.now(),value:value,available:available,other:other
+        }));
+        localStorage.setItem('orcaPortfolioLastConfirmedTotal',String(value));
+        localStorage.setItem('orcaPortfolioLastConfirmedTotalAt',String(Date.now()));
+      }catch(e){}
+      // Repaint the shared top-bar balance from the exact same authoritative
+      // profile snapshot instead of waiting for a separate RPC round-trip.
+      document.dispatchEvent(new CustomEvent('orca:portfolio-value',{detail:{total:value}}));
+    }
     // Refresh state stays internal; users only see the balance values.
     card.classList.toggle('is-stale',!!d.stale);
   }).catch(function(){

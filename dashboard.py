@@ -1356,16 +1356,29 @@ def _rpc_candidates(chain: str) -> list:
     primary via _get_web3(); only idempotent balance reads may fail over."""
     primary = EVM_CHAINS[chain]['rpc_url']
     urls = [primary]
+    # Read-only balance calls may fail over. Transaction/signing paths still
+    # use EVM_CHAINS[chain]['rpc_url'] via _get_web3(), so these fallbacks can
+    # never silently change where a signed transaction is broadcast.
+    env_key = chain.upper() + '_RPC_FALLBACK_URLS'
+    # Keep the explicit Base key visible for backwards compatibility and
+    # regression coverage; other chains follow the same naming convention.
+    extra = (os.environ.get('BASE_RPC_FALLBACK_URLS', '') if chain == 'base'
+             else os.environ.get(env_key, ''))
+    urls.extend([u.strip() for u in extra.split(',') if u.strip()])
     if chain == 'base':
-        # BASE_RPC_FALLBACK_URLS lets production override/extend this list.
-        # Public fallbacks are reads only; signing/broadcast paths still use
-        # the explicitly configured primary endpoint.
-        extra = os.environ.get('BASE_RPC_FALLBACK_URLS', '')
-        urls.extend([u.strip() for u in extra.split(',') if u.strip()])
         urls.extend([
+            'https://base-rpc.publicnode.com',
             'https://public.1rpc.io/base',
             'https://base.publicnode.com',
         ])
+    elif chain == 'bsc':
+        urls.append('https://bsc-rpc.publicnode.com')
+    elif chain == 'arbitrum':
+        urls.append('https://arbitrum-one-rpc.publicnode.com')
+    elif chain == 'polygon':
+        # The primary PublicNode endpoint has intermittently returned 529 from
+        # this production host. dRPC is an independent read fallback.
+        urls.append('https://polygon.drpc.org')
     out=[]; seen=set()
     for u in urls:
         if u and u not in seen:
@@ -1553,6 +1566,21 @@ def send_sol_fee(from_privkey: str, to_wallet_str: str, amount_sol: float) -> st
     if 'error' in res:
         raise Exception('Fee TX: ' + str(res['error']))
     return res.get('result', str(res))
+
+# ── OPTIONAL, SELF-DECLARED PROFILE FLAG ──
+# ISO 3166-1 country/territory names and flags are checked in as static data.
+# No third-party API call and no country inferred from user IP or wallet.
+with open(os.path.join(os.path.dirname(__file__), 'static', 'profile-countries.json'),
+          encoding='utf-8') as _country_file:
+    _PROFILE_COUNTRY_OPTIONS = json.load(_country_file)
+_PROFILE_COUNTRIES = {item['code']: item for item in _PROFILE_COUNTRY_OPTIONS}
+
+
+def _public_profile_country(code, visible):
+    if not visible:
+        return None
+    return _PROFILE_COUNTRIES.get(code or '')
+
 
 # ── INPUT VALIDATION ──
 _SOLANA_ADDR_RE = re.compile(r'^[1-9A-HJ-NP-Za-km-z]{32,44}$')
@@ -2887,6 +2915,10 @@ def run_migrations():
         "ALTER TABLE users ADD COLUMN last_active TIMESTAMP DEFAULT NULL",
         "ALTER TABLE users ADD COLUMN is_verified INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN banner_url TEXT DEFAULT NULL",
+        # Optional self-declared country of origin. Neither value is inferred
+        # from IP/wallet; even an existing country remains private by default.
+        "ALTER TABLE users ADD COLUMN profile_country_code TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE users ADD COLUMN profile_country_visible INTEGER NOT NULL DEFAULT 0",
         # ── BSC (multi-chain) support ──
         # Mirrors the existing Solana encrypted_private_key column, but for a
         # separate, server-managed EVM (secp256k1) trading wallet -- Solana's
@@ -3105,6 +3137,12 @@ def run_migrations():
             con.commit()
         except Exception:
             pass
+    # The autonomous bot checks wallet+destination bridge state every scan.
+    # This index is safe to create only AFTER legacy auto_buy_status migration
+    # above. No uniqueness: historical pending rows must not block startup.
+    con.execute('''CREATE INDEX IF NOT EXISTS idx_bot_active_bridge_wallet_chain
+        ON bridge_transactions(wallet,dest_chain,auto_buy_status)''')
+    con.commit()
     # one-time cleanup: old message notifications stored the raw image path
     # instead of a friendly "📷 Photo" label — fix any that still do
     try:
@@ -3937,11 +3975,10 @@ def _fast_poll_loop():
 _BRIDGE_STATUS_INTERVAL = 15
 # Spec-mandated cutoff -- 0x's own docs describe bridge delivery as "seconds
 # to minutes depending on the bridge", so this is a generous multiple of the
-# slow end, not a realistic expected duration. A row that hits this without
-# reaching a terminal state stops being auto-polled (see 'timed_out' below)
-# rather than polling forever -- it still shows on the user's bridge history
-# with everything known so far (quote id, origin tx hash), so nothing about
-# the transaction itself is lost, just the automatic tracking of it.
+# slow end, not a realistic expected duration. Ordinary standalone bridges
+# retain the historical timeout. An already-broadcast AUTO-BUY bridge remains
+# under read-only reconciliation after the cutoff: a missing status receipt
+# must never be mistaken for proof that funds cannot still arrive.
 _BRIDGE_MAX_POLL_SECONDS = 1800
 # 0x Cross-Chain API's own status vocabulary -- verified against 0x's own
 # example code (github.com/0xProject/0x-examples, schemas.ts's
@@ -4046,8 +4083,9 @@ def _bridge_status_loop():
     done -- 'origin_tx_confirmed' and 'bridge_pending' both keep polling;
     only bridge_filled/bridge_failed/origin_tx_reverted stop it (spec's
     terminal-state list). A row that exceeds _BRIDGE_MAX_POLL_SECONDS
-    without reaching one of those is marked 'timed_out' (not deleted, not
-    silently abandoned) so the row still tells a full story on refresh."""
+    without reaching one of those is marked 'timed_out'. For an attached
+    buy, its funding remains 'reconciling': never submit another order or buy
+    a stale token if the original funds arrive after the cutoff."""
     while True:
         try:
             conn = sqlite3.connect(DB_FILE)
@@ -4056,8 +4094,10 @@ def _bridge_status_loop():
                     "SELECT id, user_id, wallet, source_tx_hash, source_chain, quote_id, poll_attempts, "
                     "       polling_started_at, dest_chain, auto_buy_token_address, "
                     "       auto_buy_requested_usdc, auto_buy_status FROM bridge_transactions "
-                    "WHERE provider='0x' AND status NOT IN "
+                    "WHERE provider='0x' AND (status NOT IN "
                     "      ('bridge_filled','bridge_failed','origin_tx_reverted','timed_out') "
+                    "      OR (status='bridge_filled' AND auto_buy_status='pending') "
+                    "      OR (status='timed_out' AND auto_buy_status='reconciling')) "
                     "      AND source_tx_hash != ''"
                 ).fetchall()
             finally:
@@ -4076,25 +4116,51 @@ def _bridge_status_loop():
                     # time out).
                     if polling_started_at:
                         started = datetime.datetime.fromisoformat(polling_started_at)
-                        if (datetime.datetime.utcnow() - started).total_seconds() > _BRIDGE_MAX_POLL_SECONDS:
+                        if (auto_buy_status != 'reconciling' and
+                                (datetime.datetime.utcnow() - started).total_seconds() > _BRIDGE_MAX_POLL_SECONDS):
                             conn_to = sqlite3.connect(DB_FILE)
                             try:
+                                # No final receipt after 30 min is UNKNOWN,
+                                # not proof the bridge failed. Keep the bot
+                                # locked and continue status reads on the
+                                # original origin tx; never rebroadcast it.
+                                # A late fill must NOT buy a stale token.
+                                _uncertain = auto_buy_status == 'pending'
                                 conn_to.execute(
                                     "UPDATE bridge_transactions SET status='timed_out', "
-                                    "auto_buy_status=CASE WHEN auto_buy_status IN ('pending','processing') "
-                                    "THEN 'failed' ELSE auto_buy_status END, "
-                                    "auto_buy_result=CASE WHEN auto_buy_status IN ('pending','processing') "
+                                    "auto_buy_status=CASE WHEN auto_buy_status='pending' "
+                                    "THEN 'reconciling' ELSE auto_buy_status END, "
+                                    "auto_buy_result=CASE WHEN auto_buy_status='pending' "
                                     "THEN ? ELSE auto_buy_result END, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                                     (json.dumps({
-                                        'error': 'Funding bridge timed out before purchase',
+                                        'error': 'Bridge settlement remains unconfirmed; no new buy will be sent',
                                         'bridge_status': 'timed_out',
                                         'chain': dest_chain,
+                                        'reconciling': True,
                                     }), row_id))
                                 conn_to.commit()
                             finally:
                                 conn_to.close()
                             print(f'[bridge-status] row {row_id} exceeded {_BRIDGE_MAX_POLL_SECONDS}s poll window, '
-                                  f'marked timed_out (quote_id={quote_id})', flush=True)
+                                  f'marked timed_out; unresolved_auto_buy={_uncertain} (quote_id={quote_id})', flush=True)
+                            if _uncertain:
+                                # One user-facing warning at the transition,
+                                # not every later read-only reconciliation.
+                                warning = ('Bridge confirmation is delayed. Funds may still arrive. '
+                                           'Your automatic buy is paused; do not retry it. '
+                                           'Check Wallet for the final result.')
+                                try:
+                                    with sqlite3.connect(DB_FILE) as nconn:
+                                        nconn.execute(
+                                            'INSERT INTO notifications '
+                                            '(user_id,type,content,link,actor_wallet) '
+                                            'VALUES (?,?,?,?,?)',
+                                            (user_id,'bridge',warning,'/wallet',None))
+                                    _send_push_notification(
+                                        user_id,'Bridge needs confirmation',warning,'/wallet')
+                                except Exception as notify_err:
+                                    print('[bridge-status] delayed confirmation notification failed: '
+                                          +type(notify_err).__name__,flush=True)
                             continue
                     else:
                         conn_ts = sqlite3.connect(DB_FILE)
@@ -4124,6 +4190,13 @@ def _bridge_status_loop():
                         continue
 
                     new_status = result['status']
+                    # Preserve the visible uncertain state while 0x still
+                    # reports a nonterminal result; a late terminal answer
+                    # is the only event that can resolve this reservation.
+                    persisted_status = (
+                        'timed_out' if auto_buy_status == 'reconciling'
+                        and new_status not in _BRIDGE_TERMINAL_STATUSES
+                        else new_status)
                     conn2 = sqlite3.connect(DB_FILE)
                     try:
                         conn2.execute(
@@ -4131,7 +4204,7 @@ def _bridge_status_loop():
                             "actual_amount_out=COALESCE(?, actual_amount_out), "
                             "error_msg=COALESCE(?, error_msg), "
                             "recovery_info=COALESCE(?, recovery_info), updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                            (new_status, result.get('dest_tx_hash'), result.get('actual_amount_out'),
+                            (persisted_status, result.get('dest_tx_hash'), result.get('actual_amount_out'),
                              result.get('error_reason'),
                              json.dumps(result['recovery_info']) if result.get('recovery_info') else None,
                              row_id))
@@ -4151,13 +4224,13 @@ def _bridge_status_loop():
                     auto_buy_notif = None
 
                     if (new_status in ('bridge_failed', 'origin_tx_reverted', 'timed_out')
-                            and auto_buy_status in ('pending', 'processing')):
+                            and auto_buy_status in ('pending', 'processing', 'reconciling')):
                         conn_af = sqlite3.connect(DB_FILE)
                         try:
                             conn_af.execute(
                                 "UPDATE bridge_transactions SET auto_buy_status='failed', "
                                 "auto_buy_result=?, updated_at=CURRENT_TIMESTAMP "
-                                "WHERE id=? AND auto_buy_status IN ('pending','processing')",
+                                "WHERE id=? AND auto_buy_status IN ('pending','processing','reconciling')",
                                 (json.dumps({
                                     'error': 'Funding bridge did not complete',
                                     'bridge_status': new_status,
@@ -4169,6 +4242,25 @@ def _bridge_status_loop():
                         auto_buy_notif = (
                             'Automatic purchase cancelled because funding did not complete — '
                             'no token buy was submitted.')
+
+                    if new_status == 'bridge_filled' and auto_buy_status == 'reconciling':
+                        # The original money arrived AFTER the quote/strategy
+                        # window. Cancel the stale buy without signing a new
+                        # transaction; release bot lock only once settled.
+                        with sqlite3.connect(DB_FILE) as conn_late:
+                            conn_late.execute(
+                                "UPDATE bridge_transactions SET auto_buy_status='failed', "
+                                "auto_buy_result=?, updated_at=CURRENT_TIMESTAMP "
+                                "WHERE id=? AND auto_buy_status='reconciling'",
+                                (json.dumps({
+                                    'error': 'Funds arrived after the buy window; no automatic token purchase was made',
+                                    'bridge_status': 'bridge_filled',
+                                    'chain': dest_chain,
+                                    'funds_arrived': True,
+                                }), row_id))
+                        auto_buy_notif = (
+                            'Funding arrived after the buy window. No token purchase '
+                            'was made; your funds remain on the destination chain.')
 
                     if new_status == 'bridge_filled' and auto_buy_status == 'pending':
                         conn_ab = sqlite3.connect(DB_FILE)
@@ -4611,11 +4703,92 @@ def add_user_log(wallet: str, msg: str):
     if len(us['log_lines']) > 100:
         us['log_lines'].pop()
 
+# Trading-loop-only Solana reads. A USDC spending balance is the canonical
+# associated token account: Jupiter's trading wallet spends from that ATA.
+# getTokenAccountsByOwner is indexed and public nodes frequently reject it;
+# getAccountInfo on the exact ATA and getBalance are cheap, unindexed reads.
+# Do not use these short-lived snapshots to authorize an actual transaction:
+# the trade executor re-reads its own canonical balances and quotes.
+_bot_sol_balance_cache = {}
+_bot_sol_balance_lock = threading.Lock()
+_BOT_SOL_BALANCE_TTL = 3.0
+_BOT_SOL_READ_RPC = 'https://solana-rpc.publicnode.com'
+
+
+def _get_bot_solana_balances(wallet: str) -> tuple:
+    """(SOL, spendable USDC) at confirmed commitment, or raise on RPC failure.
+
+    A truly absent associated USDC account is spendable-zero. Transport/429,
+    unexpected mint/owner or malformed account bytes are NOT zero.
+    """
+    from solders.pubkey import Pubkey
+    address = str(Pubkey.from_string(wallet))
+    now = time.monotonic()
+    with _bot_sol_balance_lock:
+        hit = _bot_sol_balance_cache.get(address)
+        if hit and now - hit[0] < _BOT_SOL_BALANCE_TTL:
+            return hit[1]
+    owner = Pubkey.from_string(address)
+    token_program = Pubkey.from_string(TOKEN_PROGRAM_ID)
+    usdc = Pubkey.from_string(USDC_MINT)
+    ata_program = Pubkey.from_string('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+    ata, _ = Pubkey.find_program_address(
+        [bytes(owner), bytes(token_program), bytes(usdc)], ata_program)
+    endpoints = [_BOT_SOL_READ_RPC]
+    for endpoint in (SOLANA_RPC_URL, HELIUS_RPC, SOLANA_RPC):
+        if endpoint and endpoint not in endpoints:
+            endpoints.append(endpoint)
+    for endpoint in endpoints:
+        try:
+            payload = [
+                ('getBalance', [address, {'commitment':'confirmed'}]),
+                ('getAccountInfo', [str(ata), {'encoding':'base64', 'commitment':'confirmed'}]),
+            ]
+            values = []
+            for method, params in payload:
+                response = requests.post(endpoint, json={
+                    'jsonrpc':'2.0', 'id':1, 'method':method, 'params':params,
+                }, timeout=5)
+                if response.status_code != 200:
+                    raise RuntimeError('HTTP '+str(response.status_code))
+                body = response.json()
+                if not isinstance(body, dict) or body.get('error') or not isinstance(body.get('result'), dict):
+                    raise RuntimeError('RPC refused balance read')
+                values.append(body['result'])
+            lamports = values[0].get('value')
+            if type(lamports) is not int or lamports < 0:
+                raise RuntimeError('Invalid SOL balance')
+            account = values[1].get('value')
+            raw_usdc = 0
+            if account is not None:
+                if account.get('owner') != TOKEN_PROGRAM_ID:
+                    raise RuntimeError('USDC ATA has unexpected program owner')
+                raw = base64.b64decode(account['data'][0], validate=True)
+                if (len(raw) != 165 or raw[:32] != bytes(usdc)
+                        or raw[32:64] != bytes(owner) or raw[108] != 1):
+                    raise RuntimeError('USDC ATA is not a valid initialized spending account')
+                raw_usdc = int.from_bytes(raw[64:72], 'little')
+            result = (lamports / 1e9, raw_usdc / 1e6)
+            with _bot_sol_balance_lock:
+                _bot_sol_balance_cache[address] = (time.monotonic(), result)
+                if len(_bot_sol_balance_cache) > 2000:
+                    cutoff = time.monotonic() - _BOT_SOL_BALANCE_TTL
+                    for key, entry in list(_bot_sol_balance_cache.items()):
+                        if entry[0] < cutoff:
+                            _bot_sol_balance_cache.pop(key, None)
+            return result
+        except (requests.RequestException, ValueError, TypeError, KeyError, IndexError,
+                RuntimeError, binascii.Error):
+            continue
+    raise RuntimeError('Solana bot balances unavailable from verified RPC; skipping entries')
+
+
 def _get_user_sol(wallet: str) -> float:
     """Read native SOL with provider failover; never confuse RPC failure with zero."""
     last_error = None
     seen = set()
-    for rpc in list(CLAIM_SOL_RPCS) + [SOLANA_RPC] + list(_PROXY_RPCS):
+    for rpc in ([_BOT_SOL_READ_RPC, SOLANA_RPC_URL, HELIUS_RPC]
+                + list(CLAIM_SOL_RPCS) + [SOLANA_RPC] + list(_PROXY_RPCS)):
         if not rpc or rpc in seen:
             continue
         seen.add(rpc)
@@ -7295,8 +7468,8 @@ def _active_auto_buy_bridge(user_id: int, dest_chain: str, token_address: str):
             "SELECT id, source_chain, status, auto_buy_status "
             "FROM bridge_transactions WHERE user_id=? AND dest_chain=? "
             "AND lower(auto_buy_token_address)=lower(?) AND initiated_by='auto_buy' "
-            "AND auto_buy_status IN ('pending','processing') "
-            "AND status NOT IN ('bridge_failed','origin_tx_reverted','timed_out') "
+            "AND auto_buy_status IN ('pending','processing','reconciling') "
+            "AND status NOT IN ('bridge_failed','origin_tx_reverted') "
             "ORDER BY id DESC LIMIT 1",
             (user_id, dest_chain, token_address)
         ).fetchone()
@@ -7317,9 +7490,14 @@ def _find_bridge_source_chain(wallet: str, evm_address: str, dest_chain: str, ne
     candidates = []
     try:
         solana_wallet = _get_trading_wallet_address(wallet) or wallet
-        solana_balance = _get_solana_usdc_balance(solana_wallet)
-        if solana_balance >= needed_with_buffer:
-            candidates.append(('solana', USDC_MINT, solana_balance))
+        # A bridge spends the canonical USDC ATA, NOT the wallet's aggregate
+        # token-account display balance. Indexed getTokenAccountsByOwner can
+        # return HTTP 429 even while that exact ATA is readable. Reuse the
+        # verified direct read used by the bot (confirmed account, mint,
+        # owner, initialized state); unknown RPC failures still fail closed.
+        _, solana_spendable = _get_bot_solana_balances(solana_wallet)
+        if solana_spendable >= needed_with_buffer:
+            candidates.append(('solana', USDC_MINT, solana_spendable))
     except Exception as e:
         print(f'[auto-bridge] solana balance check failed: {e}', flush=True)
     if evm_address:
@@ -10840,14 +11018,14 @@ def user_trader_loop(stop_event, config, wallet: str):
                         _c = p.get('chain', 'solana')
                         open_pos_by_chain[_c] = open_pos_by_chain.get(_c, 0) + 1
                 open_pos = open_pos_by_chain.get('solana', 0)
-                us_sol  = _get_user_sol(_trading_wallet)
+                us_sol, _bot_usdc_avail = _get_bot_solana_balances(_trading_wallet)
                 # Solana's own network fees are always paid in native SOL no matter
                 # what currency the TRADE itself is in, so us_sol/_GAS_MIN below stay
                 # a SOL check unconditionally. us_solana_avail is the separate
                 # TRADING-capital balance Pass 2 actually sizes/gates a new entry
                 # against -- SOL itself in SOL mode (no extra call), or this
                 # wallet's own Solana USDC balance in USDC mode.
-                us_solana_avail = us_sol if _solana_base == 'SOL' else _get_solana_usdc_balance(_trading_wallet)
+                us_solana_avail = us_sol if _solana_base == 'SOL' else _bot_usdc_avail
                 total_live = len(live)
                 print(f'[bot] {short} running=True tokens={total_live} pos={open_pos}/5 sol={round(us_sol,4)} '
                       f'{_solana_base.lower()}_avail={round(us_solana_avail,4)} scanning...', flush=True)
@@ -11560,6 +11738,13 @@ def user_trader_loop(stop_event, config, wallet: str):
             except Exception as e:
                 print(f'[bot] {short} LOOP ERROR: {e}', flush=True)
                 add_user_log(wallet, '[' + short + '] Trader error: ' + str(e))
+                if 'Solana bot balances unavailable from verified RPC' in str(e):
+                    # An outage is not a reason to retry every 2s for each
+                    # wallet; keep the bot running, without opening entries.
+                    # Do not add a long delay when there are positions with
+                    # stop-loss/take-profit exit checks waiting for fresh data.
+                    if not any(p.get('amount', 0) > 0 for p in positions.values()):
+                        stop_event.wait(12)
             # Adaptive interval: any currently-held position within 5% of its SL/crash-exit
             # trigger drops the wait to 2s instead of the normal scan interval, so a fast
             # crash gets caught within ~2s instead of up to `interval` seconds. Read from
@@ -12391,6 +12576,13 @@ def api_phantom_decrypt_signature():
         signature_b58  = payload.get('signature', '')
         if not signature_b58:
             return jsonify({'ok': False, 'error': 'no signature in payload'}), 400
+        # Stage the ENCRYPTED Phantom dApp session only until wallet/set
+        # verifies the corresponding wallet login signature. Never trust the
+        # decrypted claimed public_key by itself for durable action access.
+        _phantom_launch_login_pending[token]=(session_data,time.time())
+        for key,(_,created) in list(_phantom_launch_login_pending.items()):
+            if time.time()-created>PAIR_TTL_SECONDS:
+                _phantom_launch_login_pending.pop(key,None)
         print(f'[phantom] decrypt-sig OK sig={signature_b58[:12]}…', flush=True)
         return jsonify({
             'ok':             True,
@@ -12409,6 +12601,7 @@ def phantom_callback():
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     resp.headers['Pragma']        = 'no-cache'
     resp.headers['Expires']       = '0'
+    resp.headers['Referrer-Policy'] = 'no-referrer'
     return resp
 
 @app.route('/api/test-auth')
@@ -12617,13 +12810,14 @@ def profile():
 def profile_view(wallet_address: str):
     """Public profile page for any wallet address."""
     session_wallet = _current_wallet()
-    is_wallet = is_valid_solana_address(wallet_address)
+    is_wallet = is_valid_solana_address(wallet_address) or is_valid_evm_address(wallet_address)
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     try:
         col = 'wallet_address' if is_wallet else 'username'
         user = conn.execute(
-            f'SELECT id, username, avatar_url, banner_url, bio, created_at, wallet_address, is_verified FROM users WHERE {col}=?',
+            f'SELECT id, username, avatar_url, banner_url, bio, created_at, wallet_address, is_verified, '
+            f'profile_country_code, profile_country_visible FROM users WHERE {col}=?',
             (wallet_address,)
         ).fetchone()
         if not user:
@@ -12663,13 +12857,16 @@ def profile_view(wallet_address: str):
         sw = session_wallet or ''
         sw_short = (sw[:4] + '...' + sw[-4:]) if len(sw) >= 8 else sw
         sol_balance = None
-        try:
-            r = requests.post(SOLANA_RPC, json={
-                'jsonrpc': '2.0', 'id': 1, 'method': 'getBalance', 'params': [wallet_address]
-            }, timeout=5)
-            sol_balance = round(r.json()['result']['value'] / 1e9, 4)
-        except Exception:
-            pass
+        # Only a Solana wallet can be looked up through a Solana RPC; attempting
+        # this for an EVM user needlessly delays their profile by up to 5s.
+        if is_valid_solana_address(wallet_address):
+            try:
+                r = requests.post(SOLANA_RPC, json={
+                    'jsonrpc': '2.0', 'id': 1, 'method': 'getBalance', 'params': [wallet_address]
+                }, timeout=5)
+                sol_balance = round(r.json()['result']['value'] / 1e9, 4)
+            except Exception:
+                pass
         total_pnl_usd = _sol_usd(total_pnl)
         sol_balance_usd = _sol_usd(sol_balance)
         is_own = bool(session_wallet and session_wallet == user["wallet_address"])
@@ -12695,8 +12892,11 @@ def profile_view(wallet_address: str):
             can_view_sensitive = is_own or viewer_role in ('admin', 'moderator', 'analyst')
         else:
             can_view_sensitive = True
+        public_country = _public_profile_country(
+            user['profile_country_code'], user['profile_country_visible'])
         return _render_no_cache(
             'profile.html',
+            profile_country=public_country,
             wallet=wallet_address,
             wallet_short=wallet_short,
             user_id=user_id,
@@ -12739,23 +12939,10 @@ _MINT_RE = re.compile(r'^[1-9A-HJ-NP-Za-km-z]{32,44}$')
 
 @app.route('/token/<mint_address>')
 def token_detail(mint_address):
-    """Every bot-trade link across the app points here. Renders a lean
-    standalone page that's just the shared token card (static/token-card.js,
-    also used as the modal on /live-market) -- no separate UI/styling to
-    maintain, no busy market table behind it."""
-    wallet = _current_wallet()
-    if not wallet:
-        return redirect('/')
+    """Redirect old token-card bookmarks to the active Live Market trade UI."""
     if not _MINT_RE.match(mint_address or ''):
-        return redirect('/history')
-    mint_short = mint_address[:4] + '…' + mint_address[-4:] if len(mint_address) >= 8 else mint_address
-    return render_template(
-        'token.html',
-        mint_address=mint_address,
-        mint_short=mint_short,
-        csrf_token=_get_csrf_token(),
-        client_secret=API_SHARED_SECRET,
-    )
+        return redirect('/live-market')
+    return redirect('/live-market?mint=' + urllib.parse.quote(mint_address, safe='') + '&profile=1')
 
 
 @app.route('/api/token/<mint>/candles')
@@ -14173,7 +14360,8 @@ def _bridge_row_to_dict(row: sqlite3.Row) -> dict:
     shape -- one place for this so /status and /transaction can't drift."""
     d = dict(row)
     d['status_label'] = BRIDGE_STATUS_LABELS.get(d['status'], d['status'])
-    d['is_terminal'] = d['status'] in (_BRIDGE_TERMINAL_STATUSES | {'timed_out'})
+    d['is_terminal'] = (d['status'] in (_BRIDGE_TERMINAL_STATUSES | {'timed_out'})
+                        and d.get('auto_buy_status') != 'reconciling')
     # Funds may already have left the origin wallet well before the bridge
     # itself is done -- surfaced explicitly (spec #3) rather than left for
     # the frontend to infer from status strings alone.
@@ -17226,6 +17414,7 @@ def service_worker_root():
     resp = make_response(send_from_directory(app.static_folder, 'sw.js'))
     resp.headers['Content-Type'] = 'application/javascript'
     resp.headers['Service-Worker-Allowed'] = '/'
+    resp.headers['Cache-Control'] = 'no-cache, max-age=0'
     return resp
 
 @app.route('/api/push/vapid-public-key')
@@ -17559,6 +17748,8 @@ _NAV_ICONS = {
     'groups':      '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'
                    '<circle cx="8.5" cy="11.5" r="1"/><circle cx="12" cy="11.5" r="1"/>'
                    '<circle cx="15.5" cy="11.5" r="1"/>',
+    'launch':      '<path d="M4 20l5-5M9 15l6-6M7 9l8-5 5 5-5 8-8-8z"/>'
+                   '<path d="M4 16l-2 6 6-2M15 4l5 5"/>',
     'promote':     '<path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1z"/>'
                    '<path d="M16 9a4 4 0 0 1 0 6"/>',
     'referrals':   '<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/>'
@@ -17618,6 +17809,8 @@ _NAVBAR_MORE_LINKS = [
     ('/traders', 'Traders', 'traders'),
     ('/groups', 'Groups', 'groups'),
     ('/promote', 'Promote', 'promote'),
+    ('/token-launch', 'Token Launch', 'launch'),
+    ('/launches', 'Launches', 'launch'),
     ('/referrals', 'Referrals', 'referrals'),
     ('/history', 'History', 'history'),
     ('/bot', 'Bot', 'bot', 'pt-nb-feature'),
@@ -17676,8 +17869,21 @@ def _navbar_html(active_nav: str = '') -> Markup:
     )
     more_items_desktop = _navbar_more_items_html()
     more_items_mobile = _navbar_more_items_html('pt-nb-mobile-only')
+    bottom_home = ' active' if active_nav == 'feed' else ''
+    bottom_market = ' active' if active_nav == 'live-market' else ''
+    bottom_wallet = ' active' if active_nav == 'wallet' else ''
+    bottom_nav = '''
+<nav id="oa-bottom-nav" class="oa-bottom-nav" aria-label="Mobile navigation">
+  <a href="/" class="%(home)s" aria-label="Home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7"/><path d="M5 9v11h14V9"/><path d="M9 20v-6h6v6"/></svg><span class="oa-nav-label">Home</span></a>
+  <a href="/live-market" class="%(market)s" aria-label="Live Market"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V11"/><path d="M10 19V6"/><path d="M16 19V9"/><path d="M22 19V3"/></svg><span class="oa-nav-label">Live Market</span></a>
+  <button type="button" class="oa-trade-main oa-post-main%(home)s" aria-label="Create post"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg><span>POST</span></button>
+  <a href="/wallet" class="%(wallet)s" aria-label="Portfolio"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="3"/><path d="M8 6V4h8v2"/><path d="M15 11h6v4h-6a2 2 0 0 1 0-4Z"/></svg><span class="oa-nav-label">Portfolio</span></a>
+  <button type="button" class="oa-menu-btn" aria-label="Open menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span class="oa-nav-label">Menu</span></button>
+</nav>
+''' % {'home': bottom_home, 'market': bottom_market, 'wallet': bottom_wallet}
     return Markup('''
 <link rel="stylesheet" href="/static/navbar.css?v=%(v)s">
+<link rel="stylesheet" href="/static/mobile-bottom-nav.css?v=9">
 <header class="pt-nb-topbar">
   <a class="pt-nb-logo" href="/"><div class="pt-nb-logo-mark"></div><div class="pt-nb-wordmark">OrcAgent</div></a>
   <button class="pt-nb-menu-btn" id="pt-nb-menu-btn" aria-label="Menu">
@@ -17710,8 +17916,10 @@ def _navbar_html(active_nav: str = '') -> Markup:
   </div>
 </header>
 <div class="pt-nb-scrim" id="pt-nb-scrim"></div>
+%(bottom_nav)s
 <script src="/static/navbar.js?v=%(v)s" defer></script>
-''' % {'v': _APP_VERSION, 'nav_links': nav_links, 'more_items_desktop': more_items_desktop, 'more_items_mobile': more_items_mobile})
+<script src="/static/mobile-bottom-nav.js?v=8" defer></script>
+''' % {'v': _APP_VERSION, 'nav_links': nav_links, 'more_items_desktop': more_items_desktop, 'more_items_mobile': more_items_mobile, 'bottom_nav': bottom_nav})
 
 @app.route('/api/version')
 @rate_limit(120, 60)
@@ -18171,6 +18379,7 @@ PAIR_TTL_SECONDS = 900
 # deeplink round trip is already in memory, and the pairing ROW is in the
 # database, which is the part that has to survive.
 _phantom_pair_pending: dict = {}
+_phantom_launch_login_pending: dict = {}  # pending Phantom session until verified wallet/set
 
 
 def _start_pair() -> str:
@@ -18354,7 +18563,7 @@ def app_webmanifest():
         'scope': '/',
         'display': 'standalone',
         'background_color': '#0a0b0e',
-        'theme_color': '#f7b955',
+        'theme_color': '#0a0b0e',
         'icons': [
             {'src': '/static/favicon.svg?v=2', 'sizes': 'any', 'type': 'image/svg+xml'},
             {'src': '/static/icon-192.png?v=2', 'sizes': '192x192', 'type': 'image/png', 'purpose': 'any'},
@@ -18537,7 +18746,19 @@ def set_wallet():
         # because here is where the signature has been verified -- the wallet
         # written to the pairing is the one this branch proved, never one a
         # caller asked for.
-        _pending = _phantom_pair_pending.pop(str((request.json or {}).get('token', '')).strip(), None)
+        _verified_phantom_token = str((request.json or {}).get('token', '')).strip()
+        _pending = _phantom_pair_pending.pop(_verified_phantom_token, None)
+        # This branch runs only AFTER Ed25519 verification of the SAME wallet.
+        # Reuse the existing mobile Phantom connect when users later approve
+        # a token launch in Safari/Chrome/PWA, avoiding another connect prompt.
+        _action_pending=globals().get('_phantom_launch_login_pending',{}).pop(_verified_phantom_token,None)
+        if _action_pending and _action_pending[0].get('wallet_address')==address:
+            try:
+                from phantom_launch_mobile import remember_authenticated_session
+                remember_authenticated_session(DB_FILE,os.getenv('ENCRYPTION_KEY',''),
+                                               address,_action_pending[0])
+            except Exception as exc:
+                print('[phantom] launch session cache unavailable: '+type(exc).__name__,flush=True)
         if _pending:
             _complete_pair(_pending[0], address)
         threading.Thread(target=fetch_user_balances, args=(address,), daemon=True).start()
@@ -19137,6 +19358,58 @@ def save_username():
     finally:
         conn.close()
     return jsonify({'ok': True, 'username': username})
+
+# ── CACHEABLE PUBLIC AVATAR PHOTOS ──
+# The avatar stored in SQLite is a data URI. Sending that URI inline with every
+# feed row caused the same 50-120 KB image to be repeated for each post, then
+# base64-decoded on the main thread before its first paint. The browser could
+# not reuse that image across page loads. Feed responses now carry a small,
+# versioned photo URL instead; only actually displayed avatars fetch bytes.
+def _feed_avatar_photo_url(avatar_url, wallet, memo):
+    if not avatar_url or not wallet or not avatar_url.startswith('data:image/'):
+        return avatar_url or ''
+    key = (wallet, avatar_url)
+    if key not in memo:
+        version = hashlib.sha256(avatar_url.encode('utf-8')).hexdigest()[:16]
+        memo[key] = '/avatar/photo/' + urllib.parse.quote(wallet, safe='') + '?v=' + version
+    return memo[key]
+
+
+@app.route('/avatar/photo/<wallet>', methods=['GET'])
+def public_avatar_photo(wallet):
+    # Users' profile photos are public content, but the database data URI is
+    # not a cacheable URL. Expose bytes only, never the base64 text or DB row.
+    if not wallet or len(wallet) > 128 or not re.fullmatch(r'[A-Za-z0-9_-]+', wallet):
+        return ('', 404)
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        row = conn.execute('SELECT avatar_url FROM users WHERE wallet_address=?', (wallet,)).fetchone()
+    finally:
+        conn.close()
+    avatar = str(row[0] or '') if row else ''
+    if not avatar.startswith('data:image/') or ',' not in avatar:
+        return ('', 404)
+    header, encoded = avatar.split(',', 1)
+    mime = header.removeprefix('data:').split(';', 1)[0].lower()
+    if mime == 'image/jpg':
+        mime = 'image/jpeg'
+    if mime not in {'image/jpeg', 'image/png', 'image/webp', 'image/gif'}:
+        return ('', 404)
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        return ('', 404)
+    if not raw or not _verify_image_magic(raw):
+        return ('', 404)
+    actual_version = hashlib.sha256(avatar.encode('utf-8')).hexdigest()[:16]
+    resp = make_response(raw)
+    resp.headers['Content-Type'] = mime
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['Cache-Control'] = ('public, max-age=31536000, immutable'
+                                    if request.args.get('v') == actual_version
+                                    else 'public, max-age=60')
+    return resp
+
 
 # ── DEFAULT USER AVATAR ──
 @app.route('/avatar/default/<wallet>', methods=['GET'])
@@ -20474,6 +20747,16 @@ def social_feed():
                 _vconn.close()
         except Exception as _ve:
             print(f'[feed] video attach skipped: {_ve}', flush=True)
+    # Do this AFTER enrichment so both regular posts and repost originals use
+    # cacheable photos. Unchanged defaults/external URLs remain untouched.
+    avatar_memo = {}
+    for item in feed:
+        item['avatar_url'] = _feed_avatar_photo_url(
+            item.get('avatar_url'), item.get('wallet_full'), avatar_memo)
+        original = item.get('original')
+        if original:
+            original['avatar_url'] = _feed_avatar_photo_url(
+                original.get('avatar_url'), original.get('wallet_full'), avatar_memo)
     next_cursor = None
     if feed:
         last_created = feed[-1]['created_at']
@@ -22811,6 +23094,48 @@ def api_me():
     })
 
 
+@app.route('/api/profile/country', methods=['GET', 'POST'])
+@rate_limit(30, 60)
+def profile_country_settings():
+    """Country/flag is optional and private until the user explicitly opts in.
+
+    This deliberately does NOT depend on the bot's trading settings. A user
+    can choose a country, leave visibility off, or clear the selection. No
+    account/wallet is created, and no changes are made outside this user's row.
+    POST is covered by the shared authenticated-CSRF protection.
+    """
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'msg': 'Connect a wallet first'}), 401
+    if request.method == 'POST':
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or not isinstance(body.get('country_code'), str) \
+                or not isinstance(body.get('show_country'), bool):
+            return jsonify({'ok': False, 'msg': 'Invalid country preference'}), 400
+        code = body['country_code']
+        visible = body['show_country']
+        if code and code not in _PROFILE_COUNTRIES:
+            return jsonify({'ok': False, 'msg': 'Choose a valid country'}), 400
+        if visible and not code:
+            return jsonify({'ok': False, 'msg': 'Choose a country before showing its flag'}), 400
+        with sqlite3.connect(DB_FILE) as conn:
+            result = conn.execute(
+                'UPDATE users SET profile_country_code=?,profile_country_visible=? '
+                'WHERE wallet_address=?', (code, int(visible), wallet))
+            if result.rowcount == 0:
+                return jsonify({'ok': False, 'msg': 'Profile not found'}), 404
+        return jsonify({'ok': True, 'country_code': code, 'show_country': visible})
+
+    with sqlite3.connect(DB_FILE) as conn:
+        row = conn.execute('SELECT profile_country_code,profile_country_visible '
+                           'FROM users WHERE wallet_address=?', (wallet,)).fetchone()
+    if not row:
+        return jsonify({'ok': False, 'msg': 'Profile not found'}), 404
+    return jsonify({'ok': True, 'country_code': row[0] or '',
+                    'show_country': bool(row[1]),
+                    'countries': _PROFILE_COUNTRY_OPTIONS})
+
+
 @app.route('/api/profile/me', methods=['GET'])
 @rate_limit(60, 60)
 def api_profile_me():
@@ -22862,7 +23187,7 @@ def get_profile(user_id: int):
                    AVG(CASE WHEN t.opened_at IS NOT NULL AND t.opened_at > 0
                             THEN CAST(strftime('%s', t.timestamp) AS REAL) - t.opened_at
                             ELSE NULL END) AS avg_hold_seconds,
-                   u.badges
+                   u.badges, u.profile_country_code, u.profile_country_visible
             FROM users u
             LEFT JOIN trades t ON t.user_id = u.id
             WHERE u.id = ?
@@ -22872,7 +23197,9 @@ def get_profile(user_id: int):
         if not row:
             return jsonify({'ok': False, 'msg': 'User not found'}), 404
 
-        uid, username, avatar_url, bio, wallet, created_at, trade_count, avg_hold, badges_str = row
+        (uid, username, avatar_url, bio, wallet, created_at, trade_count,
+         avg_hold, badges_str, country_code, country_visible) = row
+        public_country = _public_profile_country(country_code, country_visible)
 
         c.execute('SELECT COUNT(*) FROM follows WHERE following_id = ?', (user_id,))
         follower_count = (c.fetchone() or [0])[0]
@@ -22935,6 +23262,8 @@ def get_profile(user_id: int):
         'username':        display_name,
         'avatar_url':      avatar_url or '',
         'bio':             bio or '',
+        'country_flag':    public_country['flag'] if public_country else '',
+        'country_name':    public_country['name'] if public_country else '',
         'wallet':          short_wallet,
         'wallet_address':  wallet or '',
         'joined_at':       created_at or '',
@@ -23975,12 +24304,25 @@ def api_token_info(mint_address):
     if not mint or not (is_evm or is_valid_solana_address(mint)):
         return jsonify({'ok': False, 'msg': 'Invalid address'}), 400
     try:
+        launch = None
+        if not is_evm:
+            from launched_token_market import lookup as _launch_market_lookup
+            launch = _launch_market_lookup(DB_FILE, BASE, mint, _sol_price_usd)
+            if launch and not launch.get('curve_complete'):
+                response = jsonify(launch)
+                response.headers['Cache-Control'] = 'no-store'
+                return response
         url = 'https://api.dexscreener.com/latest/dex/tokens/' + requests.utils.quote(mint, safe='')
-        r = _dex_get(url, timeout=8)
-        if not r or r.status_code != 200:
-            return jsonify({'ok': False, 'msg': 'Token not found'}), 404
-        pairs = r.json().get('pairs') or []
+        try:
+            r = _dex_get(url, timeout=8)
+            pairs = (r.json().get('pairs') or []) if r and r.status_code == 200 else []
+        except (requests.RequestException, ValueError):
+            pairs = []
         if not pairs:
+            if launch:
+                response = jsonify(launch)
+                response.headers['Cache-Control'] = 'no-store'
+                return response
             return jsonify({'ok': False, 'msg': 'Token not found'}), 404
         # Only ever pick a pair on a chain this app actually supports trading
         # on -- an EVM address could theoretically also exist (independently
@@ -24254,14 +24596,15 @@ def _fetch_wallet_tokens(wallet: str, onchain_wallet: str = None) -> dict:
     sol_price_usd = 0.0
 
     # ── SOL balance ──
-    sol_balance = 0.0
+    # Never turn an RPC outage/rate-limit into a real-looking 0.00 balance.
+    # _get_user_sol uses the healthy unindexed PublicNode read first and then
+    # the configured Solana fallback pool. If every provider fails, fail this
+    # snapshot so the UI keeps its last confirmed value instead of overwriting
+    # it with zero.
     try:
-        r = requests.post(SOLANA_RPC, json={
-            'jsonrpc': '2.0', 'id': 1, 'method': 'getBalance', 'params': [onchain_wallet]
-        }, timeout=8)
-        sol_balance = round(r.json()['result']['value'] / 1e9, 6)
-    except Exception:
-        pass
+        sol_balance = round(float(_get_user_sol(onchain_wallet)), 9)
+    except Exception as exc:
+        raise RuntimeError('SOL balance unavailable from verified RPC') from exc
 
     # ── SOL price from DexScreener ──
     try:
@@ -24490,32 +24833,14 @@ def api_wallet_balance():
     # funds. Falls back to the session wallet only if no trading key is
     # saved yet, matching the previous behavior for that case.
     balance_wallet = _get_trading_wallet_address(wallet) or wallet
-    # Public Solana RPCs can rate-limit getBalance while token reads through
-    # another provider still work. Try the ordered fallback pool instead of
-    # making one provider hiccup a hard Portfolio failure.
-    sol = None
-    last_balance_error = None
-    seen_rpcs = set()
-    for rpc in CLAIM_SOL_RPCS:
-        if not rpc or rpc in seen_rpcs:
-            continue
-        seen_rpcs.add(rpc)
-        try:
-            r = requests.post(rpc, json={
-                'jsonrpc': '2.0', 'id': 1, 'method': 'getBalance',
-                'params': [balance_wallet]
-            }, timeout=4)
-            body = r.json()
-            value = (body.get('result') or {}).get('value')
-            if value is None:
-                raise ValueError((body.get('error') or {}).get('message') or 'RPC returned no balance')
-            sol = round(float(value) / 1e9, 6)
-            break
-        except Exception as e:
-            last_balance_error = str(e)
-    if sol is None:
+    # One authoritative native-SOL reader for the entire app. It prefers the
+    # healthy unindexed PublicNode endpoint and fails over across configured
+    # providers. Provider outages are never converted to a displayed zero.
+    try:
+        sol = round(float(_get_user_sol(balance_wallet)), 9)
+    except Exception as exc:
         return jsonify({'ok': False, 'msg': 'SOL balance temporarily unavailable',
-                        'detail': last_balance_error}), 503
+                        'detail': type(exc).__name__}), 503
     usd = round(sol * _sol_price_usd, 4) if _sol_price_usd else None
 
     # SOL currently committed to open positions -- the Wallet page's "In Open
@@ -24604,6 +24929,20 @@ def _get_solana_usdc_balance(address: str) -> float:
             }, timeout=8)
             if r.status_code != 200:
                 last_error = f'HTTP {r.status_code}'
+                if r.status_code == 429:
+                    # Indexed token-account lookups may be rate-limited even
+                    # when a confirmed direct ATA read is available. Return
+                    # only a verified positive canonical spending amount;
+                    # never invent a wallet-wide zero if another non-ATA
+                    # account could hold USDC.
+                    try:
+                        _, spendable = _get_bot_solana_balances(key)
+                        if spendable > 0:
+                            with _sol_usdc_balance_lock:
+                                _sol_usdc_balance_cache[key] = (time.time(), spendable)
+                            return spendable
+                    except RuntimeError:
+                        pass
                 continue
             body = r.json()
             if body.get('error'):
@@ -24670,6 +25009,20 @@ def _get_solana_usdc_balance(address: str) -> float:
         with _sol_usdc_balance_lock:
             _sol_usdc_balance_cache[key] = (time.time(), 0.0)
         return 0.0
+
+    # Indexed token-account methods can all be throttled at once even while
+    # ordinary account reads are healthy. OrcAgent trades canonical USDC from
+    # the wallet's deterministic associated token account, so an exact
+    # getAccountInfo read can still prove the spendable balance without an
+    # indexer. This is the same verified path used by the trading bot.
+    try:
+        _, spendable = _get_bot_solana_balances(key)
+        spendable = float(spendable)
+        with _sol_usdc_balance_lock:
+            _sol_usdc_balance_cache[key] = (time.time(), spendable)
+        return spendable
+    except Exception:
+        pass
 
     raise RuntimeError(
         'Solana USDC balance unavailable'
@@ -29832,10 +30185,10 @@ def admin_users():
         today = datetime.datetime.utcnow().strftime('%Y-%m-%d')
         conn = sqlite3.connect(DB_FILE)
         c    = conn.cursor()
-        c.execute('SELECT id, wallet_address, encrypted_private_key, created_at, is_verified FROM users ORDER BY created_at DESC')
+        c.execute('SELECT id, wallet_address, username, encrypted_private_key, created_at, is_verified FROM users ORDER BY created_at DESC')
         rows = c.fetchall()
         users = []
-        for uid, w, enc_key, created, is_verified in rows:
+        for uid, w, username, enc_key, created, is_verified in rows:
             w = w or ''
             us  = user_states.get(w, {})
             pos = sum(1 for p in us.get('positions', {}).values() if p.get('amount', 0) > 0)
@@ -29849,6 +30202,7 @@ def admin_users():
             users.append({
                 'wallet_full': w,
                 'wallet':      w[:4] + '...' + w[-4:] if len(w) >= 8 else w,
+                'username':    username or '',
                 'has_key':     bool(enc_key),
                 'trading':     us.get('trader_running', False),
                 'positions':   pos,

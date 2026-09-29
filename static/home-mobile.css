@@ -1,5 +1,8 @@
 /* OrcAgent mobile Home — screenshot-matched presentation. */
 @media(max-width:767px){
+html body.oa-shared-ux.oa-home-mobile{padding-bottom:0!important}
+body.oa-home-mobile #oa-bottom-nav{display:grid!important;transform:none!important;visibility:visible!important;opacity:1!important}
+body.oa-home-mobile #oa-bottom-nav>a,body.oa-home-mobile #oa-bottom-nav>button{display:flex!important;visibility:visible!important;opacity:1!important}
 /* ONE scroller on mobile Home: the root (html). body must stay
    overflow:visible -- with html already overflow:auto, any non-visible body
    overflow (even overflow-x:hidden alone, which turns overflow-y into auto)
@@ -9,9 +12,9 @@
    selector invalidates the entire comma-separated rule, including fallbacks. */
 html.oa-home-mobile-root{height:auto!important;min-height:100%!important;overflow-y:auto!important;overflow-x:hidden!important;-webkit-overflow-scrolling:touch!important;touch-action:pan-y!important}
 body.oa-home-mobile{--oa-gold:#f7b955;--oa-card:#0c131b;--oa-line:rgba(255,255,255,.075);background:#071019!important;color:#eef1f5;height:auto!important;min-height:100dvh!important;overflow:visible!important;position:static!important;touch-action:pan-y!important}
-body.oa-home-mobile #app{background:radial-gradient(circle at 50% -10%,#0d1b25 0,#071019 32%,#050b11 100%)!important;height:auto!important;min-height:100dvh!important;max-height:none!important;overflow:visible!important;position:static!important;padding-bottom:calc(92px + env(safe-area-inset-bottom,0px))}
+body.oa-home-mobile #app{background:radial-gradient(circle at 50% -10%,#0d1b25 0,#071019 32%,#050b11 100%)!important;height:auto!important;min-height:100dvh!important;max-height:none!important;overflow:visible!important;position:static!important;padding-bottom:0!important}
 body.oa-home-mobile .app-body{display:block!important;overflow:visible!important;height:auto!important;max-height:none!important;min-height:100dvh!important;position:static!important}
-body.oa-home-mobile .wrap{height:auto!important;max-height:none!important;overflow:visible!important;position:static!important;touch-action:pan-y!important;width:100%!important;max-width:100%!important;padding:8px 14px 34px!important;border:0!important;background:transparent!important}
+body.oa-home-mobile .wrap{height:auto!important;max-height:none!important;overflow:visible!important;position:static!important;touch-action:pan-y!important;width:100%!important;max-width:100%!important;padding:8px 14px calc(92px + env(safe-area-inset-bottom,0px))!important;border:0!important;background:transparent!important}
 body.oa-home-mobile #right-rail{display:none!important}
 body.oa-home-mobile .oa-m-legacy-hidden{display:none!important}
 
@@ -27,7 +30,7 @@ body.oa-home-mobile .pt-nb-nav{display:none!important}
 body.oa-home-mobile .pt-nb-right{grid-column:3;display:flex!important;gap:7px!important;margin:0!important}
 body.oa-home-mobile .pt-nb-icon-btn{width:36px!important;height:36px!important;border-radius:12px!important;background:#0d141c!important;border-color:#1d2833!important;color:#d9dee5!important}
 body.oa-home-mobile .pt-nb-sol-chip{height:36px!important;padding:0 11px!important;border-radius:12px!important;background:#0d141c!important;border-color:#1d2833!important;font-size:11px!important}
-body.oa-home-mobile .pt-nb-sol-chip{display:none!important}
+body.oa-home-mobile .pt-nb-sol-chip{display:flex!important;min-width:62px!important;justify-content:center!important}
 body.oa-home-mobile .pt-nb-avatar{width:36px!important;height:36px!important;border:2px solid rgba(247,185,85,.62)!important;box-shadow:0 0 0 3px rgba(247,185,85,.06)!important;object-fit:cover!important}
 body.oa-home-mobile .pt-nb-search-wrap{grid-column:2;grid-row:1;order:unset!important;flex-basis:auto!important;max-width:none!important;margin:0!important;width:38px!important;height:38px!important;justify-self:end;position:relative!important;z-index:1}
 body.oa-home-mobile .pt-nb-search-wrap .pt-nb-search{width:38px!important;height:38px!important;padding:0!important;border-radius:12px!important;background:#0d141c!important;border-color:#1d2833!important;font-size:16px!important;color:transparent!important;caret-color:transparent;cursor:pointer}
@@ -75,7 +78,7 @@ body.oa-home-mobile.oa-search-open{overflow:hidden!important}
 .oa-m-shortcuts{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin:0 0 10px}.oa-m-shortcuts a{min-width:0;min-height:72px;border-radius:14px;border:1px solid var(--oa-line);background:linear-gradient(145deg,#0d151e,#081018);text-decoration:none!important;color:#e8ebef!important;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-size:9.5px;font-weight:650;text-align:center;padding:6px 2px}.oa-m-shortcuts b{font-size:20px;color:#f7b955;font-weight:500;line-height:1}.oa-m-shortcuts a:active{transform:scale(.98);border-color:rgba(247,185,85,.38)}
 
 /* Existing functional composer */
-body.oa-home-mobile #feed-composer{border:1px solid var(--oa-line)!important;border-radius:15px!important;background:linear-gradient(145deg,#0d151e,#081018)!important;padding:10px 12px!important;margin:0 0 0!important;box-shadow:none!important}
+body.oa-home-mobile #feed-composer{width:100%!important;box-sizing:border-box!important;position:relative!important;inset:auto!important;transform:none!important;border:1px solid var(--oa-line)!important;border-radius:15px!important;background:linear-gradient(145deg,#0d151e,#081018)!important;padding:10px 12px!important;margin:0 0 0!important;box-shadow:none!important}
 body.oa-home-mobile .feed-composer-top{gap:10px!important;margin-bottom:7px!important;align-items:center!important}.oa-home-mobile .feed-composer-avatar{width:40px!important;height:40px!important;border-color:rgba(247,185,85,.5)!important}.oa-home-mobile .feed-composer-input{font-size:12px!important;min-height:38px!important;border:1px solid #1c2834!important;border-radius:10px!important;background:#0b1219!important;padding:9px 11px!important;color:#dce1e7!important}.oa-home-mobile .feed-composer-input::placeholder{color:#66717f!important}
 body.oa-home-mobile .feed-composer-actions{padding-left:48px!important;gap:12px!important}body.oa-home-mobile .feed-composer-actions button:last-child{margin-left:auto!important;background:linear-gradient(180deg,#ffd36a,#f7b955)!important;color:#111318!important;border-radius:10px!important;min-width:78px!important;font-weight:800!important}
 
@@ -95,3 +98,9 @@ body.oa-home-mobile #mobile-nav .active{color:#f7b955!important}
 @media(max-width:430px){
 .oa-m-hero{min-height:305px;grid-template-columns:minmax(0,1fr) 39%}.oa-m-hero-left{padding-left:15px}.oa-m-icon{width:64px;height:64px}.oa-m-hero-copy h1{font-size:22px}.oa-m-hero-copy p{font-size:10.5px;max-width:220px}.oa-m-values{width:calc(100% + 72px);gap:5px}.oa-m-values small{font-size:7px}.oa-m-art-orca{width:130px;height:130px;right:-6px}.oa-m-art-orca:before,.oa-m-art-orca:after{top:42px}.oa-m-bot{grid-template-columns:48px minmax(0,1fr) 34px auto;gap:7px}.oa-m-bot-avatar{width:46px;height:46px}.oa-m-bot-title{font-size:13px}.oa-m-bot-meta{font-size:8.5px}.oa-m-bot-btn{padding:0 10px;font-size:10px}.oa-m-bot-settings{width:32px;height:32px}.oa-m-portfolio{grid-template-columns:38px minmax(0,1fr) 86px auto;gap:7px}.oa-m-pf-row strong{font-size:18px}.oa-m-pf-btn{padding:8px;font-size:9.5px}.oa-m-market-strip{gap:5px}.oa-m-coin,.oa-m-view-market{min-height:88px;padding:7px}.oa-m-coin-name{left:34px}.oa-m-shortcuts{gap:5px}.oa-m-shortcuts a{min-height:67px;font-size:8.8px}.oa-m-shortcuts b{font-size:18px}}
 @media(max-width:375px){body.oa-home-mobile .pt-nb-wordmark{font-size:17px!important}.oa-m-hero{grid-template-columns:minmax(0,1fr) 36%}.oa-m-art-orca{right:-15px}.oa-m-values{width:calc(100% + 50px)}.oa-m-pf-chart{display:none}.oa-m-portfolio{grid-template-columns:36px minmax(0,1fr) auto}.oa-m-market-strip{grid-template-columns:repeat(3,1fr);}.oa-m-view-market{display:none}}
+
+@media(max-width:430px){
+body.oa-home-mobile .pt-nb-wordmark{display:none!important}
+body.oa-home-mobile .pt-nb-logo{gap:0!important}
+body.oa-home-mobile .pt-nb-sol-chip{padding:0 8px!important;min-width:60px!important}
+}

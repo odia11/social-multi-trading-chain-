@@ -24,7 +24,7 @@ def test_route_specific_mobile_assets_are_scoped():
     assert "if path == '/':" in MOBILE and "elif path == '/live-market':" in MOBILE
 
 def test_messages_use_two_bundles():
-    assert 'messages-ui.css?v=1' in MESSAGES and 'messages-ui.js?v=1' in MESSAGES
+    assert 'messages-ui.css?v=1' in MESSAGES and 'messages-ui.js?v=3' in MESSAGES
     assert 'messages-premium-v2.css' not in MESSAGES
 
 

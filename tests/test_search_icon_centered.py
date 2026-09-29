@@ -26,5 +26,5 @@ check('open search (home): icon centred too',
       'transform:translateY(-50%)' in home and 'transform:none' not in home)
 check('the placeholder leaves room after the icon', 'padding:0 16px 0 46px' in rule(NAV, '#pt-nb-search-portal .pt-nb-search'))
 nav_js = open(os.path.join(ROOT, 'static', 'navbar.js')).read()
-check('phones fetch the new home-mobile.css (version bumped)', "home-mobile.css?v=10" in nav_js)
+check('phones fetch the new home-mobile.css (version bumped)', "home-mobile.css?v=12" in nav_js)
 raise SystemExit(0 if all(checks) else 1)

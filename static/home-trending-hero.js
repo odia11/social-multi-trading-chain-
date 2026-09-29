@@ -120,15 +120,116 @@ function render(t,s){
 // The post's action row, in the feed's own style: icon + count.
 function renderSocial(s){
   var box=document.getElementById('oa-th-social');if(!box||!s)return;
+  // Reaction buttons cast/toggle the current user's vote or like. Their
+  // adjacent counters are independent buttons that open the real user list.
+  // No ambiguous long press, and viewing users never changes your vote.
   box.innerHTML=
-    '<button type="button" class="oa-th-act oa-th-vote bull'+(s.my_vote===1?' on':'')+'" data-vote="bull" aria-pressed="'+(s.my_vote===1)+'" aria-label="Bullish">'
-      +'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l6-6 4 4 7-8"/><path d="M15 7h6v6"/></svg><span>Bullish</span><b>'+fmtInt(s.bull)+'</b></button>'
-    +'<button type="button" class="oa-th-act oa-th-vote bear'+(s.my_vote===-1?' on':'')+'" data-vote="bear" aria-pressed="'+(s.my_vote===-1)+'" aria-label="Bearish">'
-      +'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7l6 6 4-4 7 8"/><path d="M15 17h6v-6"/></svg><span>Bearish</span><b>'+fmtInt(s.bear)+'</b></button>'
-    +'<button type="button" class="oa-th-act oa-th-like'+(s.liked?' on':'')+'" aria-pressed="'+(!!s.liked)+'" aria-label="Like">'
-      +'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-8-5.4-9.4-10A5 5 0 0 1 12 6a5 5 0 0 1 9.4 5C20 15.6 12 21 12 21Z"/></svg><b>'+fmtInt(s.likes)+'</b></button>'
+    '<div class="oa-th-reaction-group">'
+      +'<button type="button" class="oa-th-act oa-th-vote bull'+(s.my_vote===1?' on':'')+'" data-vote="bull" aria-pressed="'+(s.my_vote===1)+'" aria-label="Vote Bullish">'
+        +'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l6-6 4 4 7-8"/><path d="M15 7h6v6"/></svg><span>Bullish</span></button>'
+      +'<button type="button" class="oa-th-people-count bull" data-people="bull" aria-label="See who voted Bullish">'+fmtInt(s.bull)+'</button>'
+    +'</div>'
+    +'<div class="oa-th-reaction-group">'
+      +'<button type="button" class="oa-th-act oa-th-vote bear'+(s.my_vote===-1?' on':'')+'" data-vote="bear" aria-pressed="'+(s.my_vote===-1)+'" aria-label="Vote Bearish">'
+        +'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7l6 6 4-4 7 8"/><path d="M15 17h6v-6"/></svg><span>Bearish</span></button>'
+      +'<button type="button" class="oa-th-people-count bear" data-people="bear" aria-label="See who voted Bearish">'+fmtInt(s.bear)+'</button>'
+    +'</div>'
+    +'<div class="oa-th-reaction-group">'
+      +'<button type="button" class="oa-th-act oa-th-like'+(s.liked?' on':'')+'" aria-pressed="'+(!!s.liked)+'" aria-label="'+(s.liked?'Unlike':'Like')+'">'
+        +'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-8-5.4-9.4-10A5 5 0 0 1 12 6a5 5 0 0 1 9.4 5C20 15.6 12 21 12 21Z"/></svg></button>'
+      +'<button type="button" class="oa-th-people-count like" data-people="like" aria-label="See who liked">'+fmtInt(s.likes)+'</button>'
+    +'</div>'
     +'<button type="button" class="oa-th-act oa-th-share" aria-label="Share" aria-haspopup="menu">'
       +'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg><span>Share</span></button>';
+}
+
+// ── real accounts behind each Bullish / Bearish / Like total ─────────────
+var peopleModal=null,peopleSeq=0,peopleBusy=false,peopleNext=null;
+var peopleContext=null;
+function ensurePeopleModal(){
+  if(peopleModal&&document.body.contains(peopleModal))return peopleModal;
+  peopleModal=document.createElement('div');
+  peopleModal.className='oa-th-people-overlay';
+  peopleModal.hidden=true;
+  peopleModal.innerHTML='<section class="oa-th-people-panel" role="dialog" aria-modal="true" aria-labelledby="oa-th-people-title">'
+    +'<button type="button" class="oa-th-people-close" aria-label="Close user list">×</button>'
+    +'<h2 id="oa-th-people-title">Users</h2>'
+    +'<p class="oa-th-people-sub" id="oa-th-people-sub"></p>'
+    +'<div class="oa-th-people-list" id="oa-th-people-list" aria-live="polite"></div>'
+    +'<button type="button" class="oa-th-people-more" hidden>Load more</button>'
+    +'</section>';
+  document.body.appendChild(peopleModal);
+  peopleModal.addEventListener('click',function(e){
+    if(e.target===peopleModal||e.target.closest('.oa-th-people-close'))closePeople();
+    else if(e.target.closest('.oa-th-people-more'))fetchPeople();
+    else if(e.target.closest('.oa-th-person'))closePeople();
+  });
+  return peopleModal;
+}
+function closePeople(){
+  if(!peopleModal)return;
+  peopleModal.hidden=true;peopleSeq++;peopleContext=null;
+}
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'&&peopleModal&&!peopleModal.hidden)closePeople();
+});
+function peopleRow(u){
+  var wallet=String(u.wallet||''),name=String(u.username||wallet.slice(0,6)+'…'+wallet.slice(-4)||'User');
+  var initial=esc(name.slice(0,1).toUpperCase());
+  var image=String(u.avatar_url||'');
+  // Photos are public and cacheable; never let an API-provided URL insert JS.
+  var validImage=/^\/avatar\/(?:photo|default)\//.test(image)||/^https:\/\//.test(image);
+  var img=validImage?'<img src="'+esc(image)+'" alt="" loading="lazy" decoding="async" onerror="this.style.display=\'none\'">':'';
+  var badge=u.verified?'<span class="oa-th-people-verified" aria-label="Verified">✓</span>':'';
+  var handle=u.username?'@'+esc(u.username):esc(wallet.slice(0,6)+'…'+wallet.slice(-4));
+  return '<a class="oa-th-person" href="/profile/'+encodeURIComponent(wallet)+'">'
+    +'<span class="oa-th-person-avatar">'+initial+img+'</span>'
+    +'<span class="oa-th-person-copy"><strong>'+esc(name)+badge+'</strong><small>'+handle+'</small></span>'
+    +'<span class="oa-th-person-arrow" aria-hidden="true">›</span>'
+    +'</a>';
+}
+function openPeople(kind){
+  if(!current||!['bull','bear','like'].includes(kind))return;
+  var modal=ensurePeopleModal(),mint=current.mint;
+  peopleContext={mint:mint,kind:kind};peopleNext=0;
+  peopleSeq++;peopleBusy=false;
+  modal.hidden=false;
+  modal.querySelector('#oa-th-people-title').textContent={bull:'Bullish voters',bear:'Bearish voters',like:'Liked by'}[kind];
+  modal.querySelector('#oa-th-people-sub').textContent='Loading users…';
+  modal.querySelector('#oa-th-people-list').innerHTML='<p class="oa-th-people-empty">Loading…</p>';
+  modal.querySelector('.oa-th-people-more').hidden=true;
+  modal.querySelector('.oa-th-people-close').focus();
+  fetchPeople();
+}
+function fetchPeople(){
+  if(!peopleContext||peopleBusy||peopleNext===null)return;
+  var context=peopleContext, offset=peopleNext,seq=peopleSeq,modal=ensurePeopleModal();
+  peopleBusy=true;
+  modal.querySelector('.oa-th-people-more').disabled=true;
+  fetch('/api/home/trending-hero/users?mint='+encodeURIComponent(context.mint)
+    +'&kind='+encodeURIComponent(context.kind)+'&offset='+offset,{credentials:'same-origin'})
+    .then(function(r){if(!r.ok)throw new Error('users endpoint failed');return r.json()})
+    .then(function(d){
+      if(seq!==peopleSeq||modal.hidden||!d.ok)return;
+      var list=modal.querySelector('#oa-th-people-list');
+      if(offset===0)list.innerHTML='';
+      list.insertAdjacentHTML('beforeend',(d.users||[]).map(peopleRow).join(''));
+      if(!d.count)list.innerHTML='<p class="oa-th-people-empty">No users yet</p>';
+      modal.querySelector('#oa-th-people-sub').textContent=fmtInt(d.count)+' '+(d.count===1?'person':'people');
+      peopleNext=d.next_offset;
+      modal.querySelector('.oa-th-people-more').hidden=peopleNext===null;
+    })
+    .catch(function(){
+      if(seq!==peopleSeq||modal.hidden)return;
+      var list=modal.querySelector('#oa-th-people-list');
+      if(offset===0)list.innerHTML='<p class="oa-th-people-empty">Could not load users. Try again.</p>';
+      modal.querySelector('#oa-th-people-sub').textContent='Connection error';
+      modal.querySelector('.oa-th-people-more').hidden=false;
+    })
+    .then(function(){
+      if(seq!==peopleSeq)return;
+      peopleBusy=false;modal.querySelector('.oa-th-people-more').disabled=false;
+    });
 }
 
 // ── share: a public link that unfurls on X as this card ──────────────────
@@ -299,6 +400,8 @@ document.addEventListener('click',function(e){
   var b=e.target.closest&&e.target.closest('#oa-th-social button');
   if(!b||!current)return;
   e.preventDefault();
+  // Counters are separate from voting; guests can see the public user lists.
+  if(b.dataset.people){openPeople(b.dataset.people);return;}
   // Anyone may share, signed in or not.
   if(b.classList.contains('oa-th-share')){openShare(b);return;}
   if(b.closest('.oa-th-share-menu'))return;

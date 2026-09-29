@@ -1,10 +1,52 @@
-// OrcAgent service worker — receives Web Push events and shows notifications
-// even when the site itself is closed.
+// OrcAgent service worker — public app-shell cache + Web Push.
+// SECURITY INVARIANT: only /static/ GETs are cached. Authenticated HTML,
+// API responses, balances, feeds and wallet data are always network-only.
+var OA_STATIC_CACHE = 'orcagent-static-v5';
+var OA_STATIC_BOOT = [
+  '/static/app-ux.css?v=8',
+  '/static/app-ux.js?v=6',
+  '/static/mobile-bottom-nav.css?v=9',
+  '/static/mobile-bottom-nav.js?v=8'
+];
 self.addEventListener('install', function(event) {
-  self.skipWaiting();
+  event.waitUntil(
+    caches.open(OA_STATIC_CACHE).then(function(cache){
+      return Promise.all(OA_STATIC_BOOT.map(function(url){
+        return cache.add(url).catch(function(){ return null; });
+      }));
+    }).then(function(){ return self.skipWaiting(); })
+  );
 });
 self.addEventListener('activate', function(event) {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches.keys().then(function(keys){
+      return Promise.all(keys.filter(function(k){
+        return k.indexOf('orcagent-static-')===0 && k!==OA_STATIC_CACHE;
+      }).map(function(k){ return caches.delete(k); }));
+    }).then(function(){ return self.clients.claim(); })
+  );
+});
+self.addEventListener('fetch', function(event) {
+  var req=event.request;
+  if(req.method!=='GET') return;
+  var url;
+  try{ url=new URL(req.url); }catch(_){ return; }
+  if(url.origin!==self.location.origin || url.pathname.indexOf('/static/')!==0) return;
+  event.respondWith(
+    caches.open(OA_STATIC_CACHE).then(function(cache){
+      return cache.match(req).then(function(hit){
+        var network=fetch(req).then(function(resp){
+          if(resp && resp.ok) cache.put(req, resp.clone()).catch(function(){});
+          return resp;
+        });
+        if(hit){
+          event.waitUntil(network.catch(function(){}));
+          return hit;
+        }
+        return network;
+      });
+    })
+  );
 });
 self.addEventListener('push', function(event) {
   var data = {};

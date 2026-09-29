@@ -114,7 +114,7 @@ body{background:radial-gradient(circle at 50% -20%,rgba(247,185,85,.055),transpa
   body.oa-thread-open .msgs-right{height:100dvh!important;max-height:100dvh!important}
   body.oa-thread-open .msgs-thread{height:100%!important;min-height:0!important}
   body.oa-thread-open:has(.oa-bottom-nav) .oa-bottom-nav{display:flex!important}
-  body.oa-thread-open:has(.oa-bottom-nav) .msgs-right{height:calc(100dvh - 102px - env(safe-area-inset-bottom,0px))!important;max-height:calc(100dvh - 102px - env(safe-area-inset-bottom,0px))!important}
+  body.oa-thread-open:has(.oa-bottom-nav) .msgs-right{height:calc(100dvh - 86px - env(safe-area-inset-bottom,0px))!important;max-height:calc(100dvh - 86px - env(safe-area-inset-bottom,0px))!important}
 
   /* Complete thread header. */
   .msgs-thread-hdr{min-height:82px!important;padding:12px 14px 12px 10px!important;gap:10px!important;background:#080b10!important;border-bottom:1px solid #20262f!important}
@@ -160,8 +160,8 @@ body{background:radial-gradient(circle at 50% -20%,rgba(247,185,85,.055),transpa
 /* messages-composer-v4.css */
 /* OrcAgent Messages Composer v5 — approved compact premium composer */
 @media(max-width:767px){
-  body.oa-thread-open:not(.oa-msgs-typing){padding-bottom:calc(102px + env(safe-area-inset-bottom,0px))!important}
-  body.oa-thread-open:not(.oa-msgs-typing) .msgs-right{height:calc(100dvh - 102px - env(safe-area-inset-bottom,0px))!important;max-height:calc(100dvh - 102px - env(safe-area-inset-bottom,0px))!important}
+  body.oa-thread-open:not(.oa-msgs-typing){padding-bottom:calc(86px + env(safe-area-inset-bottom,0px))!important}
+  body.oa-thread-open:not(.oa-msgs-typing) .msgs-right{height:calc(100dvh - 86px - env(safe-area-inset-bottom,0px))!important;max-height:calc(100dvh - 86px - env(safe-area-inset-bottom,0px))!important}
   body.oa-thread-open:not(.oa-msgs-typing) .oa-bottom-nav{display:flex!important}
 
   .msgs-input-bar.oa-composer-v4{

@@ -18,3 +18,36 @@
  .fc-actions .fc-view-count{justify-self:end!important;margin-left:0!important;padding:7px 3px!important;font-size:10.5px!important;text-align:right!important;max-width:none!important;overflow:visible!important}
  .feed-card,.fc-card,.fc-inner{overflow:visible}
 }
+
+/* Like totals must not fade into the dark feed. The legacy heart emoji is
+   hidden by feed-action-icons.js; the SVG fill follows the same liked class. */
+.fc-actions .fc-action.oa-action-like{color:#c2cbd7!important;gap:8px!important;min-height:40px;border:1px solid transparent!important}
+.fc-actions .fc-action.oa-action-like .fc-like-count{font:750 16px/1 'Geist',system-ui,sans-serif!important;font-variant-numeric:tabular-nums;min-width:10px;color:inherit!important}
+.fc-actions .fc-action.oa-action-like .oa-feed-action-icon{width:19px;height:19px;flex-basis:19px}
+.fc-actions .fc-action.oa-action-like.liked{color:#ff778a!important;background:rgba(255,96,117,.15)!important;border-color:rgba(255,96,117,.28)!important}
+.fc-actions .fc-action.oa-action-like.liked .oa-feed-action-icon{fill:currentColor}
+@media(max-width:767px){
+  .fc-actions .fc-action.oa-action-like{gap:6px!important;min-height:42px;padding:7px 6px!important}
+  .fc-actions .fc-action.oa-action-like .fc-like-count{font-size:16px!important}
+}
+
+/* Compact likes: the large pink pill, not only the icon, was making the
+   control dominate the feed. Keep the 40px touch target without a large
+   painted background or border. Counts stay high contrast and adjacent. */
+.fc-actions .fc-action.oa-action-like,
+.fc-actions .fc-action.oa-action-like.liked,
+.fc-actions .fc-action.oa-action-like:hover{
+  min-height:40px!important;
+  min-width:48px!important;
+  padding:7px 3px!important;
+  gap:5px!important;
+  border:0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+  border-radius:8px!important;
+}
+.fc-actions .fc-action.oa-action-like .oa-feed-action-icon{
+  width:17px!important;height:17px!important;flex:0 0 17px!important;
+}
+.fc-actions .fc-action.oa-action-like .fc-like-count{font-size:14px!important}
+.fc-actions .fc-action.oa-action-like.liked{color:#ff778a!important}

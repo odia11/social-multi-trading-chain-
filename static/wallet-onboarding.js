@@ -41,17 +41,20 @@ async function securePost(url,payload){return post(url,await seal(payload));}
 // button, the only control left is the guest banner's link, and that link
 // just reopens this sheet: the click did nothing at all, Phantom was never
 // asked. connectWalletOnboard lives in dashboard.js, which only some pages
-// load; elsewhere hand off to the home page's existing phantom_connect
-// auto-start, which returns here once signed in.
+// load; elsewhere hand off to the home page's signed browser connect
+// auto-start, which returns here once signed in (NOT the Phantom dApp browser).
 function connectPhantom(){
   close();
-  if(typeof window.connectWalletOnboard==='function'){window.connectWalletOnboard('phantom');return;}
-  location.href='/?phantom_connect=1&return_to='+encodeURIComponent(location.pathname+location.search);
+  if(typeof window.connectWalletOnboard==='function'){
+    window.connectWalletOnboard('phantom',location.pathname+location.search+location.hash);
+    return;
+  }
+  location.href='/?wallet_connect=phantom&return_to='+encodeURIComponent(location.pathname+location.search+location.hash);
 }
 function modal(){
   var m=document.getElementById('oa-wallet-onboarding');if(m)return m;
   m=document.createElement('div');m.id='oa-wallet-onboarding';m.className='oa-ob-backdrop';
-  m.innerHTML='<div class="oa-ob-card" role="dialog" aria-modal="true" aria-label="Wallet setup"><div class="oa-ob-handle"></div><button class="oa-ob-close" aria-label="Close">×</button><div class="oa-ob-intro"><div class="oa-ob-brand">ORCAGENT</div><h2>Set up your wallet</h2><p class="oa-ob-sub">Choose how you want to continue.</p><div class="oa-ob-trust">'+ICON_TRUST+'<span>Self-custodial <b>•</b> Your keys, your funds</span></div></div><div class="oa-ob-actions"><button class="oa-ob-option oa-ob-option-featured" data-action="create"><span class="oa-ob-option-icon">'+ICON_WALLET_PLUS+'</span><span class="oa-ob-option-copy"><span class="oa-ob-option-title">Create new wallet <em>RECOMMENDED</em></span><span class="oa-ob-option-sub">Generate securely on this device.</span></span>'+ICON_CHEVRON+'</button><button class="oa-ob-option" data-action="import"><span class="oa-ob-option-icon">'+ICON_IMPORT+'</span><span class="oa-ob-option-copy"><span class="oa-ob-option-title">Import existing wallet</span><span class="oa-ob-option-sub">Use your Solana private key.</span></span>'+ICON_CHEVRON+'</button><button class="oa-ob-option" data-action="phantom"><span class="oa-ob-option-icon oa-ob-option-phantom">'+ICON_PHANTOM+'</span><span class="oa-ob-option-copy"><span class="oa-ob-option-title">Connect Phantom</span><span class="oa-ob-option-sub">Continue with your Phantom app.</span></span>'+ICON_CHEVRON+'</button></div><div class="oa-ob-chooser-foot">'+ICON_LOCK+'<span>Secure connection <b>•</b> Keys are never exposed</span></div><div class="oa-ob-stage" hidden></div></div>';
+  m.innerHTML='<div class="oa-ob-card" role="dialog" aria-modal="true" aria-label="Wallet setup"><div class="oa-ob-handle"></div><button class="oa-ob-close" aria-label="Close">×</button><div class="oa-ob-intro"><div class="oa-ob-brand">ORCAGENT</div><h2>Set up your wallet</h2><p class="oa-ob-sub">Choose how you want to continue.</p><div class="oa-ob-trust">'+ICON_TRUST+'<span>Self-custodial <b>•</b> Your keys, your funds</span></div></div><div class="oa-ob-actions"><button class="oa-ob-option oa-ob-option-featured" data-action="create"><span class="oa-ob-option-icon">'+ICON_WALLET_PLUS+'</span><span class="oa-ob-option-copy"><span class="oa-ob-option-title">Create new wallet <em>RECOMMENDED</em></span><span class="oa-ob-option-sub">Generate securely on this device.</span></span>'+ICON_CHEVRON+'</button><button class="oa-ob-option" data-action="import"><span class="oa-ob-option-icon">'+ICON_IMPORT+'</span><span class="oa-ob-option-copy"><span class="oa-ob-option-title">Import existing wallet</span><span class="oa-ob-option-sub">Use your Solana private key.</span></span>'+ICON_CHEVRON+'</button><button class="oa-ob-option" data-action="phantom"><span class="oa-ob-option-icon oa-ob-option-phantom">'+ICON_PHANTOM+'</span><span class="oa-ob-option-copy"><span class="oa-ob-option-title">Connect Phantom</span><span class="oa-ob-option-sub">Approve in Phantom, return to this browser.</span></span>'+ICON_CHEVRON+'</button></div><div class="oa-ob-chooser-foot">'+ICON_LOCK+'<span>Secure connection <b>•</b> Keys are never exposed</span></div><div class="oa-ob-stage" hidden></div></div>';
   document.body.appendChild(m);m.querySelector('.oa-ob-close').onclick=close;
   m.addEventListener('click',function(e){if(e.target===m)close();var b=e.target.closest('[data-action]');if(!b)return;if(b.dataset.action==='create')showCreate();if(b.dataset.action==='import')showImport();if(b.dataset.action==='phantom')connectPhantom();});
   return m;

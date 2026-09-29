@@ -13,6 +13,7 @@ import sqlite3
 import threading
 import time
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from flask import jsonify, request
@@ -62,7 +63,9 @@ def _rpc_urls(d):
     urls = []
     for url in (list(getattr(d, 'CLAIM_SOL_RPCS', []) or [])
                 + [getattr(d, 'SOLANA_RPC', None), getattr(d, 'SOLANA_RPC_URL', None)]
-                + list(getattr(d, '_PROXY_RPCS', []) or [])):
+                + list(getattr(d, '_PROXY_RPCS', []) or [])
+                + ['https://solana-rpc.publicnode.com',
+                   'https://api.mainnet-beta.solana.com']):
         url = str(url or '').strip()
         if url and url not in urls:
             urls.append(url)
@@ -175,6 +178,88 @@ def _rpc_call_any(d, method, params, require_nonempty=False, preferred_url=None)
     raise RuntimeError('No Solana RPC is configured')
 
 
+def _direct_classic_ata_source(d, owner_text, token_address):
+    """Return (entry_or_none, had_authoritative_read) for the classic SPL ATA.
+
+    Public Solana RPCs often reject indexed getTokenAccountsByOwner while still
+    serving exact getAccountInfo reads.  A USDC tip should not fail just because
+    the indexer is rate-limited when the exact canonical spending account is
+    known deterministically.
+    """
+    from solders.pubkey import Pubkey
+
+    try:
+        owner = Pubkey.from_string(owner_text)
+        mint = Pubkey.from_string(token_address)
+        token_program = Pubkey.from_string(
+            str(getattr(d, 'TOKEN_PROGRAM_ID',
+                        'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')))
+        ata_program = Pubkey.from_string(
+            'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+        ata, _ = Pubkey.find_program_address(
+            [bytes(owner), bytes(token_program), bytes(mint)], ata_program)
+    except Exception:
+        return None, False
+
+    # PublicNode is deliberately first only for this exact, read-only account
+    # lookup. Indexed methods there require a token, but getAccountInfo is fast
+    # and reliable from this production host.
+    urls = ['https://solana-rpc.publicnode.com'] + _rpc_urls(d)
+    seen = set()
+    for url in urls:
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        try:
+            result = _rpc_call(url, 'getAccountInfo', [
+                str(ata), {'encoding':'base64', 'commitment':'confirmed'}])
+            if not isinstance(result, dict) or 'value' not in result:
+                continue
+            value = result.get('value')
+            if value is None:
+                return None, True
+            if str(value.get('owner') or '') != str(token_program):
+                continue
+            raw = base64.b64decode(value['data'][0], validate=True)
+            if (len(raw) != 165 or raw[:32] != bytes(mint)
+                    or raw[32:64] != bytes(owner) or raw[108] != 1):
+                continue
+            amount_raw = int.from_bytes(raw[64:72], 'little')
+            if amount_raw <= 0:
+                return None, True
+            # Classic USDC is six decimals. For any future classic mint queried
+            # here, ask the parsed token balance for its actual decimals.
+            decimals = 6
+            try:
+                bal = _rpc_call(url, 'getTokenAccountBalance',
+                                [str(ata), {'commitment':'confirmed'}])
+                decimals = int(((bal or {}).get('value') or {}).get('decimals', 6))
+            except Exception:
+                if str(token_address) != str(getattr(d, 'USDC_MINT', '')):
+                    continue
+            entry = {
+                'pubkey': str(ata),
+                'account': {
+                    'owner': str(token_program),
+                    'data': {'parsed': {'info': {
+                        'mint': str(mint), 'owner': str(owner),
+                        'state': 'initialized',
+                        'tokenAmount': {
+                            'amount': str(amount_raw),
+                            'decimals': decimals,
+                            'uiAmount': amount_raw / (10 ** decimals),
+                            'uiAmountString': str(
+                                Decimal(amount_raw) / (Decimal(10) ** decimals)),
+                        },
+                    }}},
+                },
+            }
+            return entry, True
+        except Exception:
+            continue
+    return None, False
+
+
 def _solana_source_accounts(d, owner_text, token_address):
     """Find funded source accounts using the same fallback as balance reads.
 
@@ -200,8 +285,20 @@ def _solana_source_accounts(d, owner_text, token_address):
                 continue
         return found
 
+    # Fast unindexed path first. This is the normal OrcAgent USDC spending
+    # account and keeps tips working even when Helius/public indexers are 429.
+    direct, direct_valid = _direct_classic_ata_source(d, owner_text, token_address)
+    if direct is not None:
+        return [direct]
+    # OrcAgent's spendable canonical USDC is the associated token account
+    # (same invariant as dashboard._get_bot_solana_balances). If an exact,
+    # authoritative ATA read says it does not exist/has zero, do not turn a
+    # later indexed-provider 429 into a fake "network unavailable" error.
+    if direct_valid and str(token_address) == str(getattr(d, 'USDC_MINT', '')):
+        return []
+
     last_error = None
-    saw_response = False
+    saw_response = bool(direct_valid)
     for query in [{'mint': token_address}] + [{'programId': p} for p in programs]:
         for url in _rpc_urls(d):
             try:
@@ -537,23 +634,39 @@ def _tip_evm_candidates(d, sender_wallet, amount, recipient_evm):
     source = str(row[2] or '').strip() if row else ''
     if not source:
         return [], []
+
+    chains = [
+        (chain, cfg) for chain, cfg in getattr(d, 'EVM_CHAINS', {}).items()
+        if str(cfg.get('usdc_symbol') or 'USDC').upper() == 'USDC'
+    ]
+
+    def inspect(item):
+        chain, cfg = item
+        balance = Decimal(str(d.get_evm_usdc_balance(source, chain)))
+        if balance < amount:
+            return None
+        native = Decimal(str(d.get_evm_native_balance(source, chain)))
+        return ({
+            'chain':chain, 'balance':balance,
+            'token':str(cfg.get('usdc') or ''), 'source':source,
+        }, native > 0)
+
+    # Independent chains must never be checked serially: one throttled Polygon
+    # RPC used to hold the entire tip request open while BSC/Base were already
+    # known. The slowest provider now costs one timeout, not the sum of five.
     ready, needs_gas = [], []
-    for chain, cfg in getattr(d, 'EVM_CHAINS', {}).items():
-        # A USDC tip must arrive as USDC. Robinhood currently uses USDG as
-        # its trading stablecoin, so it is deliberately not a tip rail until
-        # native USDC is configured there.
-        if str(cfg.get('usdc_symbol') or 'USDC').upper() != 'USDC':
-            continue
-        try:
-            balance = Decimal(str(d.get_evm_usdc_balance(source, chain)))
-            if balance < amount:
+    with ThreadPoolExecutor(max_workers=max(1, len(chains))) as pool:
+        futures = {pool.submit(inspect, item): item[0] for item in chains}
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+            except Exception:
                 continue
-            native = Decimal(str(d.get_evm_native_balance(source, chain)))
-            item = {'chain':chain, 'balance':balance,
-                    'token':str(cfg.get('usdc') or ''), 'source':source}
-            (ready if native > 0 else needs_gas).append(item)
-        except Exception:
-            continue
+            if not result:
+                continue
+            item, has_native = result
+            (ready if has_native else needs_gas).append(item)
+
     ready.sort(key=lambda x: x['balance'], reverse=True)
     needs_gas.sort(key=lambda x: x['balance'], reverse=True)
     return ready, needs_gas
@@ -763,7 +876,9 @@ def install(d):
                     }), 400
                 return jsonify({
                     'ok':False,
-                    'error':'No funded USDC route is currently available for this tip.'
+                    'error':('No spendable USDC is available for this tip. '
+                             'Portfolio value can include SOL or other tokens; '
+                             'tips send actual USDC. Convert or deposit USDC first.')
                 }), 400
 
             with _RECENT_GUARD:

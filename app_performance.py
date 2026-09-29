@@ -22,7 +22,10 @@ def install(appmod) -> None:
             if '</head>' not in html:
                 return response
             path = appmod.request.path.rstrip('/') or '/'
+            version = str(getattr(appmod, '_APP_VERSION', '1'))
             tags = []
+            if 'name="oa-app-version"' not in html:
+                tags.append(f'<meta name="oa-app-version" content="{version}">')
 
             def style(asset, href, extra=''):
                 if asset not in html:
@@ -40,7 +43,7 @@ def install(appmod) -> None:
             # order, despite installing after it -- Flask runs after_request
             # hooks in reverse install() order (see app_entry.py).
             if 'bfcache-guard.js' not in html:
-                tags.append('<script src="/static/bfcache-guard.js?v=1"></script>')
+                tags.append('<script src="/static/bfcache-guard.js?v=2"></script>')
 
             # Tells app-ux.css's mobile view-transition rules which direction
             # to slide: forward (default, no attribute) or back.
@@ -64,11 +67,26 @@ def install(appmod) -> None:
             if 'page-transition-direction.js' not in html:
                 tags.append('<script src="/static/page-transition-direction.js?v=1"></script>')
 
-            style('app-ux.css', '/static/app-ux.css?v=7', ' id="oa-app-ux-css"')
-            script('app-ux.js', '/static/app-ux.js?v=4', ' id="oa-app-ux-js"')
+            style('app-ux.css', '/static/app-ux.css?v=8', ' id="oa-app-ux-css"')
+            script('app-ux.js', '/static/app-ux.js?v=6', ' id="oa-app-ux-js"')
+
+            # The navbar is rendered later in <body>, and its JS used to be the
+            # thing that only then discovered the fixed mobile bottom-nav
+            # bundle. Preload those public shell assets from <head> instead.
+            # Same URLs as the actual tags => one network transfer, reused.
+            for href, kind in (
+                (f'/static/navbar.css?v={version}', 'style'),
+                (f'/static/navbar.js?v={version}', 'script'),
+                ('/static/mobile-bottom-nav.css?v=9', 'style'),
+                ('/static/mobile-bottom-nav.js?v=8', 'script'),
+                (f'/static/header-stable-balance.js?v={version}', 'script'),
+            ):
+                marker = f'rel="preload" href="{href}"'
+                if marker not in html:
+                    tags.append(f'<link rel="preload" href="{href}" as="{kind}" data-oa-shell-preload="1">')
             style('shared-trade-card-v2.css', '/static/shared-trade-card-v2.css?v=1', ' id="oa-shared-trade-card-css"')
             script('shared-trade-card-v2.js', '/static/shared-trade-card-v2.js?v=1', ' id="oa-shared-trade-card-js"')
-            style('feed-action-icons.css', '/static/feed-action-icons.css?v=2')
+            style('feed-action-icons.css', '/static/feed-action-icons.css?v=5')
             script('feed-action-icons.js', '/static/feed-action-icons.js?v=3')
             script('swipe-back.js', '/static/swipe-back.js?v=1')
 
@@ -92,8 +110,8 @@ def install(appmod) -> None:
                 style('groups-redesign.css', '/static/groups-redesign.css?v=1')
                 script('groups-redesign.js', '/static/groups-redesign.js?v=1')
             elif path == '/':
-                style('home-mobile.css', '/static/home-mobile.css?v=10', ' media="(max-width:768px)"')
-                style('home-mobile-polish.css', '/static/home-mobile-polish.css?v=7', ' media="(max-width:768px)"')
+                style('home-mobile.css', '/static/home-mobile.css?v=12', ' media="(max-width:768px)"')
+                style('home-mobile-polish.css', '/static/home-mobile-polish.css?v=8', ' media="(max-width:768px)"')
                 style('home-composer-mobile.css', '/static/home-composer-mobile.css?v=5', ' media="(max-width:768px)"')
                 style('home-desktop.css', '/static/home-desktop.css?v=1', ' media="(min-width:1025px)"')
 

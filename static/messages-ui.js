@@ -59,17 +59,25 @@ function install(){
 
   function setTyping(on){
     document.body.classList.toggle('oa-msgs-typing',on);
-    if(!on)document.documentElement.style.removeProperty('--oa-kb-offset');
+    if(!on){
+      document.documentElement.style.removeProperty('--oa-kb-offset');
+      document.documentElement.style.removeProperty('--oa-dm-viewport-h');
+      document.documentElement.style.removeProperty('--oa-dm-viewport-top');
+    }
     updateViewport();
   }
   function updateViewport(){
     if(!document.body.classList.contains('oa-msgs-typing'))return;
     var vv=window.visualViewport;
-    if(!vv){document.documentElement.style.setProperty('--oa-kb-offset','0px');return;}
-    var offset=Math.max(0,window.innerHeight-vv.height-vv.offsetTop);
-    document.documentElement.style.setProperty('--oa-kb-offset',offset+'px');
+    if(!vv)return;
+    // Resize the ENTIRE chat to the actual visible viewport when iOS's
+    // keyboard opens, rather than lifting the composer over the messages.
+    document.documentElement.style.setProperty('--oa-dm-viewport-h',Math.round(vv.height)+'px');
+    document.documentElement.style.setProperty('--oa-dm-viewport-top',Math.round(vv.offsetTop)+'px');
     var area=document.getElementById('msgs-area');
-    if(area){requestAnimationFrame(function(){area.scrollTop=area.scrollHeight;});}
+    if(area && area.scrollHeight-area.scrollTop-area.clientHeight<100){
+      requestAnimationFrame(function(){area.scrollTop=area.scrollHeight;});
+    }
   }
 
   ta.addEventListener('focus',function(){setTyping(true);});
@@ -137,7 +145,9 @@ var mo=new MutationObserver(function(){
 function start(){
   run();
   var main=document.querySelector('.msgs-main');
-  if(main)mo.observe(main,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style']});
+  if(main)mo.observe(main,{attributes:true,attributeFilter:['class']});
+  var area=document.getElementById('msgs-area');
+  if(area)mo.observe(area,{childList:true,subtree:true});
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
@@ -183,8 +193,8 @@ function sync(){
     [app,main,right].forEach(function(el){
       if(!el)return;
       setImportant(el,'position','fixed');
-      setImportant(el,'top','0px');setImportant(el,'right','0px');setImportant(el,'bottom','0px');setImportant(el,'left','0px');
-      setImportant(el,'width','100vw');setImportant(el,'height','100dvh');setImportant(el,'max-height','100dvh');
+      setImportant(el,'top','var(--oa-dm-viewport-top,0px)');setImportant(el,'right','0px');setImportant(el,'bottom','0px');setImportant(el,'left','0px');
+      setImportant(el,'width','100vw');setImportant(el,'height','var(--oa-dm-viewport-h,100dvh)');setImportant(el,'max-height','var(--oa-dm-viewport-h,100dvh)');
       setImportant(el,'margin','0px');setImportant(el,'padding','0px');setImportant(el,'overflow','hidden');
     });
     if(thread){
@@ -203,10 +213,12 @@ var mo=new MutationObserver(function(){if(pending)return;pending=true;requestAni
 function start(){
   sync();
   var main=document.querySelector('.msgs-main');
-  if(main)mo.observe(main,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style']});
+  // Only the thread-open class changes navigation mode. Never watch our own
+  // inline style writes: that caused a perpetual repaint on mobile.
+  if(main)mo.observe(main,{attributes:true,attributeFilter:['class']});
   window.addEventListener('pageshow',sync);
-  window.addEventListener('resize',sync);
-  if(window.visualViewport){window.visualViewport.addEventListener('resize',sync);}
+  // CSS 100dvh responds to viewport/keyboard resize without rewriting all
+  // fixed-position styles on each animation frame.
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();

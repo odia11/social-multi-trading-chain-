@@ -173,16 +173,12 @@ function _storeDeviceToken(t){
 function _clearDeviceToken(){
   try{ localStorage.removeItem('orca_device_token'); }catch(e){}
 }
-/* ── PAIRING: signing in FROM the home-screen app ───────────────────────────
-   The app on the home screen cannot finish a wallet connection on its own.
-   It opens Phantom's deeplink, Phantom hands back to Safari, and the session
-   is created over there -- inside a storage container this app cannot see.
-   It starts the login and never hears how it ended, so it asked you to go and
-   do it in the browser instead, which is where this whole complaint started.
-
-   So it starts the login carrying a pairing token, and afterwards asks the
-   server who signed. The signature is still checked in exactly the same
-   place; this only carries the answer back to the side that asked. */
+/* ── PAIRING: keep login in the browser that started it ───────────────────
+   Phantom may hand an iOS universal-link callback to the default browser,
+   not the Chrome tab or home-screen app that started Connect. Each original
+   context asks for the SIGNATURE-VERIFIED outcome using its own short-lived
+   pairing token. The server stores only its hash; neither address nor pair
+   token is trusted as evidence of wallet ownership. */
 function _pairToken(){
   try{ return localStorage.getItem('orca_pair') || ''; }catch(e){ return ''; }
 }
@@ -307,16 +303,8 @@ async function _resumeFromDeviceToken(){
 }
 
 /* Mobile deep-link constants — used by wallet detection below */
-const isMobile=/iPhone|iPad|Android/i.test(navigator.userAgent);
-function _phantomBrowseConnectUrl(){
-  var returnRoute = _currentWalletReturnRoute();
-  var target = new URL(returnRoute || '/', 'https://orcagent.fun');
-  target.searchParams.set('phantom_connect', '1');
-  target.searchParams.set('return_to', returnRoute || '/');
-  return 'https://phantom.app/ul/browse/' + encodeURIComponent(target.toString())
-    + '?ref=' + encodeURIComponent(window.location.origin);
-}
-const phantomDeepLink='https://phantom.app/ul/browse/'+encodeURIComponent('https://orcagent.fun');
+const isMobile=/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+  || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 const solflareDeepLink='https://solflare.com/ul/v1/browse/'+encodeURIComponent('https://orcagent.fun');
 /* Installed PWA (standalone display-mode): Phantom's connect deep link
    redirects back to the browser, not to the home-screen app icon, so the
@@ -413,32 +401,32 @@ async function _connectWalletSignedInner(provider, address){
   return r;
 }
 
-function _phantomMobileV1Connect(){
+function _phantomMobileV1Connect(returnRoute){
   try{ localStorage.removeItem('orca_manual_disconnect'); }catch(e){}
-  var _returnRoute = _currentWalletReturnRoute();
-  if(isStandalonePWA) _storePairReturnRoute(_returnRoute);
+  var _returnRoute = _safeWalletReturnRoute(returnRoute || _currentWalletReturnRoute());
+  // Pair EVERY mobile browser, not only home-screen PWAs. iOS may send
+  // Phantom's callback to the *default* browser even if login started in
+  // Chrome; the original tab can then claim the verified wallet and keep
+  // its own durable session on return instead of being stranded as guest.
+  _storePairReturnRoute(_returnRoute);
   var msgEl=document.getElementById('wallet-install-msg');
   var noteEl=document.getElementById('ob-phantom-note');
   function _setNote(txt,col){
     if(noteEl){noteEl.textContent=txt;if(col)noteEl.style.color=col;}
     if(msgEl&&msgEl!==noteEl){msgEl.textContent=txt;msgEl.style.display='block';}
   }
-  // The home-screen app used to stop here and tell you to go and do it in
-  // Safari, because Phantom hands back to the browser and this app would
-  // never learn the outcome. It can now: it starts the login with a pairing
-  // token and asks the server afterwards who signed. So the only difference
-  // is that it takes a token with it.
+  // A pairing tells the original browser tab (or isolated PWA) who
+  // signed, even when Phantom's callback opens a different browser. The
+  // server completes a pair ONLY after verifying the Phantom signature.
   _setNote('Initialising connection…','var(--muted)');
-  var _pairPromise = isStandalonePWA
-    ? fetch('/api/pair/start',{method:'POST',credentials:'include',
-        headers:{'Content-Type':'application/json'},body:'{}'})
-        .then(function(r){ return r.json(); })
-        .then(function(d){ if(d&&d.ok&&d.pair){ _storePairToken(d.pair); return d.pair; } return ''; })
-        .catch(function(){ return ''; })
-    : Promise.resolve('');
+  var _pairPromise = fetch('/api/pair/start',{method:'POST',credentials:'include',
+      headers:{'Content-Type':'application/json'},body:'{}'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if(d&&d.ok&&d.pair){ _storePairToken(d.pair); return d.pair; } return ''; })
+    .catch(function(){ return ''; });
   _pairPromise.then(function(_pair){
-  if(isStandalonePWA && !_pair){
-    _setNote('Could not prepare app sign-in — please try again.','var(--red)');
+  if(!_pair){
+    _setNote('Could not prepare browser sign-in — please try again.','var(--red)');
     return;
   }
   // Server generates the NaCl keypair — no browser storage needed
@@ -467,7 +455,10 @@ function _phantomMobileV1Connect(){
       // It leaves the app to do this, and iOS gives no signal when it comes
       // back with the job done -- so say what to do, rather than leaving a
       // blank screen behind.
-      _setNote('Approve in Phantom, then come back to this app.','var(--muted)');
+      _setNote(isStandalonePWA
+        ? 'Approve in Phantom, then come back to the OrcAgent app.'
+        : 'Approve in Phantom, then return to your OrcAgent browser tab.',
+        'var(--muted)');
     }
     window.location.href='https://phantom.app/ul/v1/connect?'+params.toString();
   })
@@ -684,13 +675,15 @@ function _walletConnectNotice(msg){
 async function connectWalletOnboard(type, afterLoginUrl){
   try{ localStorage.removeItem('orca_manual_disconnect'); }catch(e){}
   const isPhantom=type==='phantom';
-  const provider=isPhantom?_phantomProvider():window.solflare;
+  const provider=window.OrcAgentWalletAdapter?window.OrcAgentWalletAdapter.provider(type):(isPhantom?_phantomProvider():window.solflare);
   const name=isPhantom?'Phantom':'Solflare';
   const check=!!provider;
 
   if(!check){
-    /* On mobile without the extension, use deep link */
-    if(isMobile){ if(isPhantom){ window.location.href=_phantomBrowseConnectUrl(); return; } window.location.href=solflareDeepLink; return; }
+    /* In normal Safari/Chrome use Phantom's signature-only connect and
+       return to THIS browser's OrcAgent session. Never move OrcAgent into
+       Phantom's embedded dApp browser via /ul/browse/. */
+    if(isMobile){ if(isPhantom){ _phantomMobileV1Connect(afterLoginUrl); return; } window.location.href=solflareDeepLink; return; }
     _walletConnectNotice(name+' wallet not detected — install the '+name+' browser extension and reload this page.');
     return;
   }
@@ -766,12 +759,34 @@ async function connectWalletOnboard(type, afterLoginUrl){
           .catch(function(e){ console.error('[phantom-browser-connect]', e); });
       }else if(attempts >= 20){
         clearInterval(timer);
-        _walletConnectNotice(isMobile
-          ? 'Open this page inside Phantom and tap Connect again.'
-          : 'Phantom wallet not detected — install the Phantom browser extension and reload this page.');
+        if(isMobile) _phantomMobileV1Connect(returnTo);
+        else _walletConnectNotice('Phantom wallet not detected — install the Phantom browser extension and reload this page.');
       }
     }, 250);
   }catch(e){ console.error('[phantom-browser-connect:init]', e); }
+})();
+
+// Wallet onboarding is available on standalone pages without dashboard.js.
+// Those pages hand off to /?wallet_connect=phantom&return_to=...; this is a
+// one-time instruction to start a wallet SIGNATURE, not a Phantom dApp browse
+// link. Remove the instruction before leaving for Phantom, so returning via
+// Safari/Chrome never starts the sign-in again.
+(function _startBrowserPhantomConnectHandoff(){
+  try{
+    var url = new URL(window.location.href);
+    if(url.searchParams.get('wallet_connect') !== 'phantom') return;
+    var returnTo = _safeWalletReturnRoute(url.searchParams.get('return_to') || '/');
+    url.searchParams.delete('wallet_connect');
+    url.searchParams.delete('return_to');
+    history.replaceState(null, '', url.pathname + url.search + url.hash);
+    // Give Phantom's in-app browser a short chance to inject the provider.
+    // Normal mobile browsers have none and use /ul/v1/connect instead.
+    setTimeout(function(){
+      if(_phantomProvider()) connectWalletOnboard('phantom', returnTo);
+      else if(isMobile) _phantomMobileV1Connect(returnTo);
+      else _walletConnectNotice('Install the Phantom browser extension to connect this wallet.');
+    }, 500);
+  }catch(e){ console.error('[phantom-browser-handoff]',e); }
 })();
 
 function resetWallet(){
@@ -831,7 +846,7 @@ function _clearPerUserBadgesAndCaches(){
 }
 
 function disconnectWallet(){
-  var _wp=walletType==='Phantom'?window.solana:(walletType==='Solflare'?window.solflare:(window.solana||window.solflare));
+  var _wp=walletType==='Phantom'?_phantomProvider():(walletType==='Solflare'?window.solflare:(_phantomProvider()||window.solflare));
   _clearPerUserBadgesAndCaches();
   var _doLogout=function(){
     fetch('/api/logout',{method:'POST',credentials:'include'}).finally(function(){
@@ -839,6 +854,10 @@ function disconnectWallet(){
       // Disconnect has to mean disconnected. Leaving the token behind would
       // let the very next page load sign this browser straight back in.
       _clearDeviceToken();
+      // A previously started, unfinished mobile pairing must never be able
+      // to silently restore another session after deliberate Disconnect.
+      _clearPairToken();
+      try{localStorage.removeItem('orca_pair_return');}catch(e){}
       localStorage.setItem('orca_manual_disconnect','1');
       window.location.reload();
     });
@@ -1458,8 +1477,13 @@ function checkForTrades(lines){
   lastLogCount=lines.length;
 }
 
+var _renderedLogSig=null;
 function renderLog(lines){
   const el=document.getElementById('log-body');
+  if(!el) return;
+  var logSig=JSON.stringify(lines);
+  if(logSig===_renderedLogSig) return;
+  _renderedLogSig=logSig;
   el.innerHTML=lines.map(l=>{
     let cls='c-info';const m=l.msg||'';
     if(m.startsWith('BUY ')&&!m.includes('FAILED'))cls='c-buy';
@@ -2632,11 +2656,13 @@ function renderPnlChart(curve){
   `;
 }
 
+var _renderedPositionIds=null;
 function renderPositions(detail){
   _openMints=new Set((detail||[]).map(p=>p.mint).filter(Boolean));
   const emptyEl=document.getElementById('top-pos-empty');
   const listEl=document.getElementById('top-pos-list');
   if(!detail||!detail.length){
+    _renderedPositionIds=null;
     if(emptyEl) emptyEl.style.display='block';
     if(listEl) listEl.style.display='none';
     return;
@@ -2647,6 +2673,36 @@ function renderPositions(detail){
   if(posCount) posCount.textContent=detail.length+'/5';
   if(!listEl) return; // #top-pos-list isn't in the current DOM -- nothing to render into,
                        // but the rest of fetchState() (live feed, SOL price) must still run
+  var ids=detail.map(function(p){return p.mint||''}).join('|');
+  if(_renderedPositionIds===ids && listEl.querySelectorAll('.pos-mini-card').length===detail.length){
+    // Preserve an open Confirm Sell sheet and every existing card. Change only
+    // the live figures, never the controls the user is currently touching.
+    detail.forEach(function(p){
+      var row=Array.prototype.find.call(listEl.querySelectorAll('.pos-mini-card'),
+        function(el){return el.dataset.mint===(p.mint||'')});
+      if(!row) return;
+      var pnl=row.querySelector('.pos-mini-pnl');
+      if(pnl){
+        var positive=p.pnl>=0;
+        var sign=positive?'+':'-';
+        var value=sign+fmtSolToUsdc(Math.abs(p.pnl||0));
+        var pct=sign+Math.abs(p.pnl_pct||0).toFixed(1)+'%';
+        var text=value+' '+pct;
+        if(pnl.dataset.lastValue!==text){
+          pnl.dataset.lastValue=text;
+          pnl.classList.toggle('td-pos',positive);
+          pnl.classList.toggle('td-neg',!positive);
+          pnl.innerHTML=value+' <span style="font-size:9px;opacity:.7">'+pct+'</span>';
+        }
+      }
+      var chart=row.querySelector('.pos-chart-btn');
+      if(chart)chart.dataset.current=p.current||0;
+    });
+    return;
+  }
+  // A position opening/closing must not erase a pending sale confirmation.
+  if(listEl.querySelector('.pos-sell-conf')) return;
+  _renderedPositionIds=ids;
   listEl.innerHTML=detail.map(p=>{
     const isPos=p.pnl>=0;
     const cls=isPos?'td-pos':'td-neg';
@@ -3314,10 +3370,14 @@ function _recoverSessionOnReturn(){
     if(!me) return; // A network/server error is not a logout.
     var wallet = me.authenticated && me.wallet;
     if(wallet && me.csrf_token) _csrfToken = me.csrf_token;
-    if(!wallet){
-      wallet = await _claimPairing();
-      if(!wallet) wallet = await _resumeFromDeviceToken();
+    // Prioritize an explicitly started Phantom pairing even when a previous
+    // wallet session remains in this browser: reconnecting wallet B must not
+    // silently leave the user on wallet A if Phantom returns via Safari.
+    if(_pairToken()){
+      var newlyPaired = await _claimPairing();
+      if(newlyPaired) wallet = newlyPaired;
     }
+    if(!wallet) wallet = await _resumeFromDeviceToken();
     if(!wallet) return;
     _applySessionWallet(wallet);
     var onboard = document.getElementById('onboard');
@@ -4551,6 +4611,71 @@ async function loadSettingsPage(){
   }
   _loadXCard();
   _loadSettingsTos();
+  _loadCountrySettings();
+}
+
+/* ── Optional self-declared flag — never geolocated or auto-published ── */
+var _countryOptionMap={};
+function _countrySelectionChanged(){
+  var el=document.getElementById('st-country-select');
+  var cb=document.getElementById('st-country-visible');
+  var preview=document.getElementById('st-country-preview');
+  if(!el||!cb||!preview)return;
+  var country=_countryOptionMap[el.value];
+  if(!country)cb.checked=false;
+  cb.disabled=!country;
+  preview.textContent=country?country.flag:'🌐';
+  preview.title=country?country.name:'No country selected';
+}
+async function _loadCountrySettings(){
+  var select=document.getElementById('st-country-select');
+  var cb=document.getElementById('st-country-visible');
+  var msg=document.getElementById('st-country-msg');
+  if(!select||!cb)return;
+  try{
+    var r=await fetch('/api/profile/country',{credentials:'include'});
+    var d=await r.json();
+    if(!r.ok||!d.ok)throw Error(d.msg||'Cannot load flag preference');
+    var fragment=document.createDocumentFragment();
+    var defaultOption=document.createElement('option');
+    defaultOption.value='';defaultOption.textContent='No country selected';
+    fragment.appendChild(defaultOption);
+    _countryOptionMap={};
+    (d.countries||[]).forEach(function(item){
+      _countryOptionMap[item.code]=item;
+      var opt=document.createElement('option');
+      opt.value=item.code;opt.textContent=item.flag+'  '+item.name;
+      fragment.appendChild(opt);
+    });
+    select.replaceChildren(fragment);
+    select.value=d.country_code||'';
+    cb.checked=!!d.show_country;
+    _countrySelectionChanged();
+    if(msg){msg.className='st-save-msg';msg.textContent='';}
+  }catch(e){
+    if(msg){msg.className='st-save-msg err';msg.textContent='Could not load flag preference';}
+  }
+}
+async function _saveCountrySetting(){
+  var select=document.getElementById('st-country-select');
+  var cb=document.getElementById('st-country-visible');
+  var btn=document.getElementById('st-country-save');
+  var msg=document.getElementById('st-country-msg');
+  if(!select||!cb||!btn)return;
+  btn.disabled=true;
+  if(msg){msg.className='st-save-msg';msg.textContent='Saving…';}
+  try{
+    var r=await fetch('/api/profile/country',{
+      method:'POST',credentials:'include',
+      headers:{'Content-Type':'application/json','X-CSRF-Token':_csrfToken},
+      body:JSON.stringify({country_code:select.value,show_country:!!cb.checked})
+    });
+    var d=await r.json();
+    if(!r.ok||!d.ok)throw Error(d.msg||'Could not save flag preference');
+    if(msg){msg.className='st-save-msg ok';msg.textContent='✓ Flag preference saved';}
+  }catch(e){
+    if(msg){msg.className='st-save-msg err';msg.textContent=e.message||'Network error';}
+  }finally{btn.disabled=false;}
 }
 
 /* ── X (Twitter) card (Card 4) ── */
@@ -8489,7 +8614,10 @@ document.addEventListener('keydown', function(e){
   if(e.key === 'Escape') _closeImgLightbox();
 });
 
+var _homeFeedRequestSeq=0;
+var _homeFeedLastRenderedFilter='';
 async function loadHomeFeed(){
+  var requestSeq=++_homeFeedRequestSeq;
   const filter = _homeFeedFilter === 'following' ? 'following' : 'all';
   const el = document.getElementById('center-feed');
   if(el && !_homeFeedData.length) el.innerHTML = '<div class="fc-loading">Loading…</div>';
@@ -8501,8 +8629,16 @@ async function loadHomeFeed(){
     console.log('[feed] status:', r.status);
     if(!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
+    if(requestSeq !== _homeFeedRequestSeq || filter !== (_homeFeedFilter === 'following' ? 'following' : 'all')) return;
     if(data && Array.isArray(data.items)){
+      // Keep the existing post nodes (including loaded images, media state,
+      // reply fields and scroll position) when a background poll is identical.
+      var currentTop=_homeFeedData.slice(0,data.items.length);
+      var unchanged=_homeFeedLastRenderedFilter===filter && currentTop.length===data.items.length
+        && currentTop.every(function(item,i){return JSON.stringify(item)===JSON.stringify(data.items[i]);});
+      if(unchanged && document.querySelector('#center-feed .fc-card')) return;
       _homeFeedData = data.items;
+      _homeFeedLastRenderedFilter=filter;
       // The shared post is merged at its chronological position only when
       // rendering. Never move an old post ahead of newer feed updates.
       _homeFeedNextCursor = data.next_cursor || null;
@@ -9336,7 +9472,7 @@ function _observeFeedVideos(root){
     _feedVideoObserver.observe(v);
   });
 }
-function _renderFeedCard(e){
+function _renderFeedCard(e, cardIndex){
   var repostBanner = '';
   if(e.type === 'repost'){
     if(!e.original) return ''; // original was deleted since the repost was made
@@ -9368,7 +9504,12 @@ function _renderFeedCard(e){
   /* ── avatar ── */
   var bg = (typeof _lbAvatarColor==='function') ? _lbAvatarColor(e.username||e.wallet||'?') : '#21252c';
   var ini = (e.username||e.wallet||'?')[0].toUpperCase();
-  var imgHtml = e.avatar_url ? '<img src="'+esc(e.avatar_url)+'" alt="" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.style.display=\'none\'">' : '';
+  // Photos are never lazy in the first visible cards; eager/high-priority
+  // fetch starts as soon as the feed DOM is inserted. A gold-on-dark initial
+  // stays visible behind the image, so there is no empty circle while loading.
+  var firstAvatar = typeof cardIndex === 'number' && cardIndex < 8;
+  var avatarPriority = firstAvatar ? ' loading="eager" fetchpriority="high"' : ' loading="lazy"';
+  var imgHtml = e.avatar_url ? '<img src="'+esc(e.avatar_url)+'" alt=""'+avatarPriority+' decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%;z-index:2" onerror="this.style.display=\'none\'">' : '';
   var verifiedBadge = e.verified ? '<span style="position:absolute;bottom:-1px;right:-1px;width:14px;height:14px;background:#f7b955;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px;color:#0a0b0e;border:1.5px solid #0a0b0e;font-weight:700">✓</span>' : '';
 
   /* ── header ── */
@@ -9548,7 +9689,7 @@ function _renderFeedCard(e){
       +'onclick="_fcCardClick(event,\''+esc(safePostId)+'\')" style="cursor:pointer">'
     +menuHtml
     +(e.avatar_url
-      ? '<div class="fc-avatar" style="background:'+bg+';width:44px;height:44px;position:relative;flex-shrink:0;cursor:pointer" onclick="event.stopPropagation();_showAvatarLightbox('+esc(JSON.stringify(e.avatar_url))+')">'+imgHtml+'</div>'
+      ? '<div class="fc-avatar" style="background:'+bg+';width:44px;height:44px;position:relative;flex-shrink:0;cursor:pointer" onclick="event.stopPropagation();_showAvatarLightbox('+esc(JSON.stringify(e.avatar_url))+')"><span class="fc-avatar-ini" aria-hidden="true">'+esc(ini)+'</span>'+imgHtml+'</div>'
       : _aProf+'<div class="fc-avatar" style="background:'+bg+';width:44px;height:44px;position:relative;flex-shrink:0"><span class="fc-avatar-ini">'+ini+'</span></div></a>')
     +'<div class="fc-body">'
     +'<div class="fc-header">'
@@ -9572,7 +9713,7 @@ function _renderFeedCard(e){
     +'<div class="fc-actions" onclick="event.stopPropagation()">'
     +'<button class="fc-action fc-reply-btn'+(hasNewReply?' has-new':'')+'" data-last-reply="'+esc(e.last_reply_at||'')+'" onclick="_feedToggleReply(this,\''+esc(safePostId)+'\')">'+_REPLY_ICON_SVG+'<span class="fc-reply-label">Reply</span><span class="fc-reply-count">'+esc(String(e.reply_count||0))+'</span>'+(hasNewReply?'<span class="fc-reply-new-dot"></span>':'')+'</button>'
     +'<button class="fc-action fc-repost-btn'+(e.reposted_by_me ? ' reposted' : '')+'" onclick="event.stopPropagation();_feedToggleRepost(this,\''+esc(safePostId)+'\')" title="'+(e.reposted_by_me?'Undo repost':'Repost')+'">'+_REPOST_ICON_SVG+'<span class="fc-repost-count">'+esc(String(e.repost_count||0))+'</span></button>'
-    +'<button class="fc-action fc-like-btn'+(e.liked_by_me ? ' liked' : '')+'" id="lkbtn-'+esc(safePostId)+'" '
+    +'<button type="button" class="fc-action fc-like-btn'+(e.liked_by_me ? ' liked' : '')+'" id="lkbtn-'+esc(safePostId)+'" aria-label="'+(e.liked_by_me?'Unlike post':'Like post')+'" aria-pressed="'+(e.liked_by_me?'true':'false')+'" '
       +'onclick="_feedToggleLike(this,\''+esc(safePostId)+'\')" '
       +'onmousedown="_fcLikePressStart(\''+esc(safePostId)+'\')" onmouseup="_fcLikePressEnd()" onmouseleave="_fcLikePressEnd()" '
       +'data-like-press="'+esc(safePostId)+'">'
@@ -9696,6 +9837,8 @@ function _feedToggleLike(btn, postId){
   var cur = parseInt(countEl ? countEl.textContent : '0', 10) || 0;
   function setState(isLiked, count){
     btn.classList.toggle('liked', isLiked);
+    btn.setAttribute('aria-pressed',isLiked?'true':'false');
+    btn.setAttribute('aria-label',isLiked?'Unlike post':'Like post');
     if(heartEl) heartEl.textContent = isLiked ? '❤️' : '♡';
     if(countEl) countEl.textContent = count;
   }
@@ -10144,7 +10287,7 @@ function _renderReplyRow(r, postId, depth){
     +delBtn
     +'</div>'
     +'</div>'
-    +'<button class="fc-ri-like'+likedCls+'" data-rid="'+r.id+'" onclick="_feedLikeReply('+r.id+',this)"><span class="fc-ri-heart">'+(r.liked_by_me?'❤️':'♡')+'</span>'+(likeCnt>0?'<span class="fc-ri-lc">'+likeCnt+'</span>':'')+'</button>'
+    +'<button type="button" class="fc-ri-like'+likedCls+'" data-rid="'+r.id+'" aria-label="'+(r.liked_by_me?'Unlike reply':'Like reply')+'" aria-pressed="'+(r.liked_by_me?'true':'false')+'" onclick="_feedLikeReply('+r.id+',this)"><span class="fc-ri-heart" aria-hidden="true">'+(r.liked_by_me?'❤️':'♡')+'</span><span class="fc-ri-lc">'+likeCnt+'</span></button>'
     +'</div>'
     +'<div class="fc-ri-nested-box" id="rnbox-'+r.id+'" style="display:none"></div>'
     +'</div>';
@@ -10258,15 +10401,30 @@ function _feedLoadReplies(postId){
 }
 
 function _feedLikeReply(replyId, btn){
+  if(!btn || btn.disabled) return;
+  var heart=btn.querySelector('.fc-ri-heart');
+  var countEl=btn.querySelector('.fc-ri-lc');
+  var previouslyLiked=btn.classList.contains('liked');
+  var previousCount=Math.max(0,parseInt(countEl ? countEl.textContent : '0',10)||0);
+  function setState(liked,count){
+    btn.classList.toggle('liked',!!liked);
+    btn.setAttribute('aria-pressed',liked?'true':'false');
+    btn.setAttribute('aria-label',liked?'Unlike reply':'Like reply');
+    if(heart)heart.textContent=liked?'❤️':'♡';
+    if(countEl)countEl.textContent=String(Math.max(0,Number(count)||0));
+  }
+  // The heart and number must change together; repeated taps cannot race
+  // each other and leave the UI disagreeing with the server.
+  btn.disabled=true;
+  setState(!previouslyLiked,previousCount+(previouslyLiked?-1:1));
   fetch('/api/feed/reply/like/'+replyId, {method:'POST', credentials:'include'})
-    .then(function(r){ return r.json(); })
+    .then(function(r){return r.json()})
     .then(function(d){
-      if(!d.ok) return;
-      btn.classList.toggle('liked', d.liked);
-      var lc = btn.querySelector('.fc-ri-lc');
-      if(lc) lc.textContent = d.like_count;
+      if(!d.ok){setState(previouslyLiked,previousCount);return;}
+      setState(d.liked,d.like_count);
     })
-    .catch(function(){});
+    .catch(function(){setState(previouslyLiked,previousCount)})
+    .finally(function(){btn.disabled=false});
 }
 
 function _feedDeleteReply(replyId, rowEl, postId){

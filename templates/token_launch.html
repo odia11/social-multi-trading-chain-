@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0d1014">
+<title>Launch your token · OrcAgent</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=2">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/static/token-launch-redesign.css?v={{ app_version|default('1') }}">
+</head>
+<body>
+{{ navbar_html('token-launch') }}
+<main class="tl-wrap">
+  <header class="tl-hero" aria-labelledby="tl-heading">
+    <div class="tl-hero-copy">
+      <div class="tl-eyebrow"><span class="tl-eyebrow-dot"></span> OrcAgent / Token creation</div>
+      <h1 id="tl-heading">Launch your <span>token</span></h1>
+      <p class="tl-lead">Create a Solana token in a few simple steps. Approve in Phantom and go live on OrcAgent.</p>
+      <div class="tl-hero-actions">
+        <a class="tl-btn tl-btn-primary" href="#tl-form">+ Launch a token <span aria-hidden="true">→</span></a>
+        <a class="tl-btn tl-btn-secondary" href="#launch-directory">Explore launches <span aria-hidden="true">↗</span></a>
+      </div>
+    </div>
+    <div class="tl-hero-coin" aria-hidden="true"><div class="tl-coin-face"><span>▲</span></div></div>
+  </header>
+  {% if pilot_creator_only %}
+  <div class="tl-alert" role="status"><strong>Private OrcAgent mainnet pilot · USDC + 100% Creator Rewards.</strong> This test is limited to your signed-in Phantom wallet. Launch preparation is capped at 0.025 SOL, reserving at least 0.005 SOL for follow-up costs within your 0.03 SOL test budget. The separate USDC test trade is manual and at most 2 USDC.</div>
+  {% endif %}
+  {% if not launch_enabled %}
+  <div class="tl-alert" role="status"><strong>Preflight mode.</strong> Save your token as a draft. Mainnet signing is disabled until final validation. Nothing is spent by saving a draft.</div>
+  {% endif %}
+  <section class="tl-builder tl-card" id="tl-form" aria-labelledby="tl-form-title">
+    <div class="tl-section-head tl-builder-heading"><span class="tl-section-tag">NEW TOKEN</span><h2 id="tl-form-title">Create a coin</h2><p>Name, ticker and logo. Review your launch, then approve in Phantom.</p></div>
+    <div class="tl-form-grid">
+      <div class="tl-fields">
+        <div class="tl-columns">
+          <div><label class="tl-label" for="tl-name">Token name</label><input class="tl-input" id="tl-name" maxlength="32" placeholder="e.g. Orc Agent" autocomplete="off" required></div>
+          <div><label class="tl-label" for="tl-symbol">Ticker (symbol)</label><input class="tl-input" id="tl-symbol" maxlength="10" placeholder="e.g. ORCA" autocomplete="off" spellcheck="false" required></div>
+        </div>
+        <label class="tl-label" for="tl-description">Description <span class="tl-optional">(optional)</span></label>
+        <textarea class="tl-textarea" id="tl-description" maxlength="280" placeholder="Tell people about your token…"></textarea>
+        <div class="tl-form-bottom">
+          <div>
+            <label class="tl-label" for="tl-image">Token logo <span class="tl-required">required</span></label>
+            <label class="tl-upload" for="tl-image"><span class="tl-upload-icon" aria-hidden="true">▧</span><strong id="tl-upload-label">Upload token logo</strong><small>PNG, JPG, WebP · max 1 MB</small>
+              <input id="tl-image" type="file" accept="image/png,image/jpeg,image/webp" required>
+            </label>
+          </div>
+          <div class="tl-configuration">
+            <fieldset class="tl-fieldset">
+              <legend class="tl-label">Pair <span class="tl-info" title="Currency users trade your token against" aria-label="Currency users trade your token against">i</span></legend>
+              <div class="tl-options" role="group" aria-label="Trading currency">
+                <label class="tl-option"><input type="radio" name="tl-asset" value="USDC" checked><span class="tl-choice"><span class="tl-asset-icon tl-usdc" aria-hidden="true">$</span> USDC Pair <span class="tl-radio-indicator" aria-hidden="true"></span></span></label>
+                <label class="tl-option"><input type="radio" name="tl-asset" value="SOL" {% if pilot_creator_only %}disabled{% endif %}><span class="tl-choice"><span class="tl-asset-icon tl-sol" aria-hidden="true"><i></i></span> SOL Pair <span class="tl-radio-indicator" aria-hidden="true"></span></span></label>
+              </div>
+            </fieldset>
+            <details class="tl-rewards"><summary><span class="tl-rewards-play" aria-hidden="true">▶</span><strong id="tl-reward-summary">Rewards: 100% creator</strong><span class="tl-chevron" aria-hidden="true">⌄</span></summary><fieldset class="tl-fieldset">
+              <legend class="tl-label">Reward mode <span class="tl-info" title="Who receives eligible creator fees" aria-label="Who receives eligible creator fees">i</span></legend>
+              <div class="tl-options" role="group" aria-label="Creator rewards mode">
+                <label class="tl-option"><input type="radio" name="tl-mode" value="creator" checked><span class="tl-choice"><span aria-hidden="true">♛</span> Creator</span></label>
+                <label class="tl-option"><input type="radio" name="tl-mode" value="community" {% if pilot_creator_only %}disabled{% endif %}><span class="tl-choice"><span aria-hidden="true">♙</span> Community</span></label>
+              </div>
+              <label class="tl-option tl-holder" id="tl-holder-option"><input type="radio" name="tl-mode" value="holder" {% if pilot_creator_only %}disabled{% endif %}><span class="tl-choice">Holder Rewards <small>Fees go to token holders</small></span></label>
+            </fieldset></details>
+          </div>
+        </div>
+        <div id="tl-community-fields" class="tl-community-box" hidden>
+          <strong>Creator + Community Rewards</strong>
+          <p>Set a permanent fee split with another Solana wallet. This requires a second Phantom approval after creating your token.</p>
+          <label class="tl-label" for="tl-community-wallet">Community Solana wallet</label>
+          <input id="tl-community-wallet" class="tl-input tl-mono" maxlength="44" placeholder="Enter community wallet address" autocomplete="off" spellcheck="false">
+          <label class="tl-label" for="tl-community-share">Community share of creator fees (%)</label>
+          <input id="tl-community-share" class="tl-input" type="number" min="0.01" max="99.99" step="0.01" value="10" inputmode="decimal">
+          <small>Creator receives the remainder. The split is locked on-chain.</small>
+        </div>
+        <div class="tl-fee-strip" aria-label="Token launch fee disclosure">
+          <div><span class="tl-fee-icon" aria-hidden="true">◎</span><div><small>OrcAgent launch fee</small><strong>0</strong></div></div>
+          <div><span class="tl-fee-icon" aria-hidden="true">▢</span><div><small>Network + protocol fees</small><strong>Shown in Phantom / on-chain</strong></div></div>
+        </div>
+        <label class="tl-ack"><input id="tl-ack" type="checkbox"> <span>I understand that network/rent fees apply and creator rewards are not guaranteed.</span></label>
+        <div class="tl-recent-status" id="tl-recent-status" hidden><strong>Recent launch status</strong><div id="tl-recent-items"></div></div>
+        <div class="tl-status" id="tl-status" role="status" aria-live="polite"></div>
+        <button id="tl-save" class="tl-btn tl-btn-primary tl-btn-block" type="button">{% if launch_enabled %}Continue to approve →{% else %}Save launch draft →{% endif %}</button>
+        <p class="tl-footnote">Your details are saved before wallet approval. Nothing is created or spent until you approve in Phantom. A community fee split needs one additional approval.</p>
+      </div>
+      <aside class="tl-preview-panel" aria-label="Live token preview">
+        <span class="tl-preview-heading">LIVE PREVIEW</span>
+        <div class="tl-preview-card">
+          <div class="tl-token"><div class="tl-token-icon" id="tl-preview-logo">▲</div><div><div class="tl-symbol" id="tl-preview-symbol">TOKEN / USDC</div><div class="tl-name" id="tl-preview-name">Your token name</div></div></div>
+          <div class="tl-line"><span>Pair</span><strong id="tl-review-pair">USDC</strong></div>
+          <div class="tl-line"><span>Rewards</span><strong id="tl-review-mode">Creator</strong></div>
+          <div class="tl-line"><span>Creator share</span><strong id="tl-review-creator">100.00%</strong></div>
+          <div class="tl-line"><span>Community share</span><strong id="tl-review-community">—</strong></div>
+        </div>
+        <p><strong>You're in control.</strong> No launch or swap is sent without your wallet approval. If your wallet needs SOL for network/rent, you can fund the saved draft with USDC where gasless funding is available.</p>
+      </aside>
+    </div>
+  </section>
+  <section class="tl-stats" aria-label="Verified OrcAgent token launch statistics">
+    <div class="tl-stat"><div class="tl-stat-icon tl-stat-rocket" aria-hidden="true">↗</div><div><span>Live</span><strong id="stat-all">—</strong></div></div>
+    <div class="tl-stat"><div class="tl-stat-icon tl-stat-usdc" aria-hidden="true">$</div><div><span>USDC</span><strong id="stat-usdc">—</strong></div></div>
+    <div class="tl-stat"><div class="tl-stat-icon tl-stat-sol" aria-hidden="true">◎</div><div><span>SOL</span><strong id="stat-sol">—</strong></div></div>
+  </section>
+  <section class="tl-steps" aria-label="How token launch works">
+    <div class="tl-step"><span class="tl-step-num">1</span><span class="tl-step-symbol" aria-hidden="true">▤</span><strong>Create</strong><small>Set up your token<br>details</small></div>
+    <div class="tl-step"><span class="tl-step-num">2</span><span class="tl-step-symbol" aria-hidden="true">▢</span><strong>Approve</strong><small>Confirm in your<br>Phantom wallet</small></div>
+    <div class="tl-step"><span class="tl-step-num">3</span><span class="tl-step-symbol" aria-hidden="true">↗</span><strong>Live</strong><small>Get listed on<br>OrcAgent</small></div>
+  </section>
+  <section class="tl-card tl-saved" id="saved-launches" aria-labelledby="tl-saved-title">
+    <div class="tl-section-head"><span class="tl-section-tag">YOUR WORKSPACE</span><h2 id="tl-saved-title">Your launches</h2><p>Follow your launch here. Confirmation updates automatically after Phantom approval.</p></div>
+    <section class="tl-creator-earnings tl-ce-v2" id="tl-creator-earnings" aria-labelledby="tl-earnings-title" hidden>
+      <div class="tl-ce-head">
+        <div class="tl-ce-title-wrap">
+          <span class="tl-ce-title-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+          <div><h3 id="tl-earnings-title">Creator Earnings</h3><p>Earnings from tokens you created on OrcAgent.</p></div>
+        </div>
+        <span class="tl-private-chip"><span aria-hidden="true">▣</span> Private</span>
+      </div>
+
+      <div class="tl-ce-available">
+        <div class="tl-ce-available-copy">
+          <small>Available to claim <span class="tl-info" title="Verified wallet-wide creator fees currently available to claim" aria-label="About available creator fees">i</span></small>
+          <strong id="tl-available-usdc">—</strong>
+          <span class="tl-ce-fiat" id="tl-available-fiat">Checking on-chain…</span>
+          <span class="tl-ce-scope" id="tl-available-note">Checking your creator rewards…</span>
+        </div>
+        <button type="button" class="tl-ce-claim-btn" id="tl-claim-now" disabled>Claim Now <span aria-hidden="true">›</span></button>
+      </div>
+
+      <div class="tl-ce-metrics">
+        <article class="tl-ce-metric">
+          <span class="tl-ce-metric-icon" aria-hidden="true">▣</span>
+          <div><small>Total claimed</small><strong id="tl-claimed-usdc">0 USDC</strong><span id="tl-claimed-fiat">≈ $0.00</span></div>
+        </article>
+        <article class="tl-ce-metric">
+          <span class="tl-ce-metric-icon" aria-hidden="true">▤</span>
+          <div><small>Total claims</small><strong id="tl-claim-count">0</strong><span id="tl-claim-count-note">No claims yet</span></div>
+        </article>
+        <article class="tl-ce-metric">
+          <span class="tl-ce-metric-icon" aria-hidden="true">%</span>
+          <div><small>Your share</small><strong id="tl-creator-share">—</strong><span id="tl-creator-share-note">Based on your live reward setup</span></div>
+        </article>
+      </div>
+
+      <div class="tl-ce-actions">
+        <button type="button" class="tl-ce-history-btn" id="tl-toggle-history"><span aria-hidden="true">↶</span> Claim history <span aria-hidden="true">›</span></button>
+        <button type="button" class="tl-ce-refresh-btn" id="tl-refresh-earnings" aria-label="Refresh creator earnings" title="Refresh creator earnings">↻</button>
+      </div>
+
+      <div class="tl-global-claim-history" id="tl-global-claim-history" hidden></div>
+
+      <div class="tl-ce-recent">
+        <div class="tl-ce-recent-head"><div><strong>Recent earnings</strong><span>Your latest creator-fee activity on OrcAgent.</span></div><button type="button" id="tl-view-all-claims">View all <span aria-hidden="true">›</span></button></div>
+        <div class="tl-ce-recent-list" id="tl-recent-earnings"><p class="tl-helper">No creator-fee activity yet.</p></div>
+      </div>
+    </section>
+    <div id="tl-mine" class="tl-list"><p class="tl-helper">Loading your launches…</p></div>
+  </section>
+  <section id="launch-directory" class="tl-directory" aria-labelledby="tl-directory-title">
+    <div class="tl-section-head"><span class="tl-section-tag">DISCOVER</span><h2 id="tl-directory-title">Launched on OrcAgent</h2><p>Only verified live tokens are shown here.</p></div>
+    <div class="toolbar"><div class="tabs" aria-label="Launch owner filter"><button type="button" id="all-tab" class="active" aria-pressed="true">All launches</button><button type="button" id="mine-tab" aria-pressed="false">My launches</button></div><div class="tl-directory-filters"><div class="search"><input id="search" type="search" maxlength="70" aria-label="Search launches" placeholder="Search token, ticker or mint…" autocomplete="off"></div><select id="pair" aria-label="Trading pair"><option value="all">All pairs</option><option value="USDC">USDC</option><option value="SOL">SOL</option></select></div></div>
+    <div id="summary" class="summary" aria-live="polite">Loading confirmed launches…</div><div id="notice" role="status" aria-live="polite"></div>
+    <div id="cards" class="cards" aria-label="Confirmed tokens"></div>
+    <nav class="pager" id="pager" aria-label="Launch pages" hidden><button id="prev" type="button">← Previous</button><span id="page-label"></span><button id="next" type="button">Next →</button></nav>
+  </section>
+</main>
+<div class="tl-overlay" id="tl-dialog" role="dialog" aria-modal="true" aria-labelledby="tl-dialog-title">
+  <div class="tl-dialog"><h3 id="tl-dialog-title">Review your launch</h3><p id="tl-dialog-details"></p><div class="tl-status" id="tl-dialog-status" role="status" aria-live="polite"></div><div class="tl-actions"><button type="button" class="tl-btn tl-btn-secondary" id="tl-dialog-cancel">Cancel</button><button type="button" class="tl-btn tl-btn-primary" id="tl-dialog-confirm">Approve in Phantom</button></div></div>
+</div>
+<script>window.ORC_TOKEN_LAUNCH={wallet:{{ wallet|tojson }},csrf:{{ csrf_token|tojson }},enabled:{{ launch_enabled|tojson }},pilotCreatorOnly:{{ pilot_creator_only|tojson }},fundingAvailable:{{ funding_available|tojson }}};</script>
+{% if launch_enabled %}<script src="/static/token-launch-web3.js?v={{ app_version|default('1') }}" defer></script>{% endif %}
+<script src="/static/launch-back.js?v={{ app_version|default('1') }}" defer></script>
+<script src="/static/orc-wallet-adapter.js?v={{ app_version|default('1') }}" defer></script>
+<script src="/static/token-launch.js?v={{ app_version|default('1') }}" defer></script>
+<script src="/static/token-launches.js?v={{ app_version|default('1') }}" defer></script>
+</body>
+</html>

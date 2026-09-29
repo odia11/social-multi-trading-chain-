@@ -1,0 +1,27 @@
+{
+  "name": "orcagent-pump-adapter",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Isolated Pump SDK transaction builder; never owns creator wallet keys",
+  "dependencies": {
+    "@pump-fun/pump-sdk": "2.0.0",
+    "@pump-fun/pump-swap-sdk": "1.20.0",
+    "@solana/spl-token": "0.4.15",
+    "@solana/web3.js": "1.99.0",
+    "bigint-buffer": "file:vendor/bigint-buffer-safe"
+  },
+  "overrides": {
+    "toml": "^4.2.0",
+    "stream-json": "^3.7.0",
+    "jayson": {
+      "uuid": "^11.1.1"
+    }
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  },
+  "engines": {
+    "node": "22.23.2"
+  }
+}

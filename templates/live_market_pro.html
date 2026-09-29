@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="theme-color" content="#0a0b0e">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
 <meta name="csrf-token" content="{{ csrf_token }}">
 <meta name="client-secret" content="{{ client_secret }}">
@@ -732,6 +733,37 @@ input{font-family:inherit}
 @media (max-width: 480px){
   .pt-story{width:58px}
   .pt-story-ring{width:54px;height:54px}
+}
+
+/* A token opens as a full OrcAgent profile, while its chart and trade controls
+   keep their existing event handlers and live data source. */
+.pt-profile-btn{border:1px solid #354350;background:#101b26;color:#f7b955;border-radius:9px;min-width:34px;min-height:34px;padding:4px 9px;font-weight:700;cursor:pointer}
+.pt-profile-btn:hover{background:#203040}
+.pt-profile-about{display:none;padding:18px 22px;border-top:1px solid #263441;color:#d2dbe5}
+.pt-profile-about h2{margin:0 0 9px;font-size:19px;color:#f7b955}
+.pt-profile-about p{margin:0 0 11px;line-height:1.55;overflow-wrap:anywhere}
+.pt-profile-address{font:12px/1.5 monospace;color:#91a3b8}
+.pt-profile-links{display:flex;gap:10px;flex-wrap:wrap}
+.pt-profile-links a{padding:9px 12px;border:1px solid #374654;border-radius:9px;color:#f7b955;text-decoration:none}
+.pt-chart-waiting{position:absolute;left:12px;bottom:26px;z-index:2;color:#9caaba;font-size:11px;background:#0a141dcc;border-radius:6px;padding:5px 8px;pointer-events:none}
+body.pt-profile-mode .pt-shell{max-width:1120px!important;min-width:0!important}
+body.pt-profile-mode .pt-panel{grid-template-columns:minmax(0,1fr)!important;overflow:visible!important}
+body.pt-profile-mode .pt-left,body.pt-profile-mode .pt-right,
+body.pt-profile-mode .pt-surge-wrap,body.pt-profile-mode .pt-story-rail,
+body.pt-profile-mode .pt-trader-rail-wrap,body.pt-profile-mode .pt-scanning-pill{display:none!important}
+body.pt-profile-mode .pt-center{max-height:none!important;overflow:visible!important}
+body.pt-profile-mode .pt-feed-list{padding:12px!important}
+body.pt-profile-mode .pt-card:not(.pt-profile-open){display:none!important}
+body.pt-profile-mode .pt-card.pt-profile-open{width:100%;margin:0!important}
+body.pt-profile-mode .pt-card.pt-profile-open .pt-profile-about{display:block!important;grid-column:1/-1;order:9}
+body.pt-profile-mode .pt-card.pt-profile-open .pt-chart-wrap{height:460px!important}
+body.pt-profile-mode .pt-card.pt-profile-open .pt-chart-svg{height:425px!important}
+body.pt-profile-mode .pt-card.pt-profile-open .pt-profile-btn{min-width:58px;color:#fff}
+@media(max-width:767px){
+ body.pt-profile-mode .pt-shell{padding:6px!important}
+ body.pt-profile-mode .pt-card.pt-profile-open .pt-chart-wrap{height:370px!important}
+ body.pt-profile-mode .pt-card.pt-profile-open .pt-chart-svg{height:334px!important}
+ body.pt-profile-mode .pt-chart-waiting{bottom:10px;font-size:10px}
 }
 </style>
 </head>

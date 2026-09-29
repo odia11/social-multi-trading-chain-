@@ -1048,12 +1048,32 @@ function _startPostsPoll(){
       if(!d.ok) return;
       var sig = d.posts.map(function(p){ return p.id; }).join(',');
       if(sig === _lastPostsSignature) return;
-      _lastPostsSignature = sig;
       var el = document.getElementById('gd-feed');
+      // Never wipe a post while the user is editing a reply or opening its
+      // reaction picker. The next five-second poll will retry.
+      if(el.querySelector('textarea:focus,input:focus,.gd-reaction-picker.open,.gd-ri-nested-box.open')) return;
       if(!d.posts.length){
+        _lastPostsSignature = sig;
         el.innerHTML = '<div class="gd-empty">No posts yet — be the first to share something.</div>';
         return;
       }
+      var oldIds=_lastPostsSignature ? _lastPostsSignature.split(',') : [];
+      var newIds=d.posts.map(function(p){return String(p.id)});
+      var added=newIds.length-oldIds.length;
+      // A normal new-post poll can append only the unseen leading posts,
+      // leaving every old post, image, reply form and scroll anchor untouched.
+      var prepend=added>0 && oldIds.length>0 &&
+        oldIds.every(function(id,i){return id===newIds[i+added]});
+      if(prepend && el.querySelectorAll('.gd-post').length===oldIds.length){
+        var before=el.getBoundingClientRect().height;
+        var y=window.scrollY||0;
+        el.insertAdjacentHTML('afterbegin',d.posts.slice(0,added).map(_postHtml).join(''));
+        _lastPostsSignature=sig;
+        if(y>80)window.scrollTo(0,y+el.getBoundingClientRect().height-before);
+        _loadReactions(d.posts.slice(0,added).map(function(p){return 'g'+p.id}));
+        return;
+      }
+      _lastPostsSignature = sig;
       el.innerHTML = d.posts.map(_postHtml).join('');
       _loadReactions(d.posts.map(function(p){ return 'g'+p.id; }));
     }).catch(function(){});

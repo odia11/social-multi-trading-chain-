@@ -62,7 +62,9 @@
   };
 
   function _scrolledIntoFeed(){
-    return (window.scrollY || document.documentElement.scrollTop || 0) > SCROLL_TOP_THRESHOLD;
+    var root=window.scrollY || document.documentElement.scrollTop || 0;
+    var feed=document.querySelector('.wrap, #center-feed, .app-body');
+    return root>SCROLL_TOP_THRESHOLD || !!(feed && feed.scrollTop>SCROLL_TOP_THRESHOLD);
   }
 
   setInterval(function(){

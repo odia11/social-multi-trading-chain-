@@ -349,6 +349,8 @@ var _myUserId      = null;
 var _activePeerId  = null;
 var _activePeer    = {};      /* {id, wallet, username} */
 var _pollTimer     = null;
+var _threadRequestSeq = 0;  // ignore responses for a previous thread or older poll
+var _renderedMessages = []; // preserve already-painted DOM across message polls
 var _conversations = [];
 var _listScrollY   = 0;       /* where the conversation list was when a thread opened */
 
@@ -467,15 +469,17 @@ async function loadConversations() {
         return c.peer_id+':'+c.unread+':'+c.last_ts+':'+c.last_msg+':'+(c.peer_online?1:0);
       }).join(',');
       if (sig !== _lastConvSig) {
-        _lastConvSig = sig;
-        _renderConvList();
+        // A swipe/delete/search interaction must not freeze future refreshes.
+        // Only mark the snapshot as displayed once the list actually rendered.
+        if (_renderConvList() !== false) _lastConvSig = sig;
       }
       _updateMsgBadge();
-    } else {
+    } else if (_lastConvSig === null) {
       document.getElementById('conv-list').innerHTML = '<div class="msgs-left-empty">Failed to load.</div>';
     }
   } catch(e) {
-    document.getElementById('conv-list').innerHTML = '<div class="msgs-left-empty">Could not connect.</div>';
+    // Preserve already-rendered conversations during a transient network issue.
+    if (_lastConvSig === null) document.getElementById('conv-list').innerHTML = '<div class="msgs-left-empty">Could not connect.</div>';
   }
 }
 
@@ -593,11 +597,15 @@ function _renderConvList() {
   // innerHTML replace would silently snap a swiped-open row shut, orphan an
   // open delete-confirm popover's target row, or reset the search filter.
   // The next periodic refresh resumes automatically once these clear.
-  if (_convSwipeOpenWrap && document.body.contains(_convSwipeOpenWrap)) return;
+  if (_convSwipeOpenWrap && document.body.contains(_convSwipeOpenWrap)) return false;
   if (document.getElementById('conv-del-popover') &&
-      document.getElementById('conv-del-popover').classList.contains('open')) return;
+      document.getElementById('conv-del-popover').classList.contains('open')) return false;
   var searchEl = document.getElementById('msgs-search');
-  if (searchEl && searchEl.value.trim()) return;
+  if (searchEl && searchEl.value.trim()) return false;
+  // The conversation list is hidden behind the fullscreen mobile thread.
+  // Keep polling the data, but don't rebuild invisible rows during a chat.
+  if (_activePeerId && window.innerWidth <= 767 &&
+      document.getElementById('msgs-main').classList.contains('thread-open')) return false;
   var el = document.getElementById('conv-list');
   _renderInboxChrome();
   if (!_conversations.length) {
@@ -607,7 +615,7 @@ function _renderConvList() {
       + '<span>Say gm to a trader you follow, share a trade or send a tip.</span>'
       + '<button type="button" class="oa-inbox-empty-cta" onclick="_openNewMessage()">Start a chat</button>'
       + '</div>';
-    return;
+    return true;
   }
   var list = _convFilter === 'unread'
     ? _conversations.filter(function(c){ return c.unread > 0; })
@@ -619,7 +627,7 @@ function _renderConvList() {
       + '<span>No unread messages.</span>'
       + '<button type="button" class="oa-inbox-empty-cta ghost" onclick="_setConvFilter(\'all\')">Show all chats</button>'
       + '</div>';
-    return;
+    return true;
   }
   el.innerHTML = list.map(function(c) {
     var name   = c.peer_username || _short(c.peer_wallet || '');
@@ -685,6 +693,7 @@ function _renderConvList() {
       _openDeletePopover(icon, peerId, wrap);
     });
   });
+  return true;
 }
 
 // ── DESKTOP DELETE: small hover icon + anchored confirm popover ────────────
@@ -886,6 +895,8 @@ function _closeThreadView() {
   var placeholder = document.getElementById('msgs-placeholder');
   if (placeholder) placeholder.style.display = '';
   _activePeerId = null;
+  _threadRequestSeq++;
+  _renderedMessages = [];
   if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
   _renderConvList();
   // Put the list back where it was before the thread covered it. Has to wait
@@ -968,6 +979,7 @@ async function _openThread(peerId, peerUsername, peerWallet) {
 
   document.getElementById('msgs-area').innerHTML = '<div class="msgs-area-empty">Loading…</div>';
   _lastMsgsSig = null;
+  _renderedMessages = [];
   await loadThread(peerId, true);
 
   if (_pollTimer) clearInterval(_pollTimer);
@@ -1000,9 +1012,11 @@ document.addEventListener('click', function(e) {
 });
 
 async function loadThread(peerId, forceScroll) {
+  var requestSeq = ++_threadRequestSeq;
   try {
     var r = await fetch('/api/messages/' + peerId);
     var d = await r.json();
+    if (requestSeq !== _threadRequestSeq || peerId !== _activePeerId) return;
     if (d.ok) _renderMessages(d.messages || [], !!forceScroll);
   } catch(e) {
     console.warn('[messages] thread load error', e);
@@ -1081,14 +1095,38 @@ function _renderMessages(msgs, forceScroll) {
   // regardless, which is what made the thread feel like it stutters.
   var sig = msgs.length + '|' + msgs.map(function(m){ return m.id+':'+(m.edited_at||'')+':'+(m.is_read?1:0); }).join(',');
   if (sig === _lastMsgsSig && !forceScroll) return;
+  // Do not destroy the input the user is currently editing on an async poll.
+  if (!forceScroll && area.querySelector('.msg-edit-input')) return;
+  var old = _renderedMessages;
+  var prefix = old.length <= msgs.length && old.every(function(m,i){
+    return msgs[i] && m.id === msgs[i].id && m.message === msgs[i].message
+      && m.message_type === msgs[i].message_type && m.edited_at === msgs[i].edited_at;
+  });
+  var incremental = prefix && old.length > 0 && !!area.querySelector('.msg-wrap');
   _lastMsgsSig = sig;
   var atBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 80;
   if (!msgs.length) {
-    area.innerHTML = '<div class="msgs-area-empty">No messages yet. Say hello!</div>';
+    if (old.length || !area.querySelector('.msgs-area-empty')) area.innerHTML = '<div class="msgs-area-empty">No messages yet. Say hello!</div>';
+    _renderedMessages = [];
     return;
   }
-  var lastDayKey = null;
-  area.innerHTML = msgs.map(function(m) {
+  // Existing message nodes keep their identity, image load state, context menus
+  // and scroll anchoring. An unread→seen update changes only the small label.
+  if (incremental) {
+    old.forEach(function(prev,i){
+      var next=msgs[i];
+      if (!!prev.is_read === !!next.is_read) return;
+      var row=area.querySelector('.msg-wrap[data-mid="'+next.id+'"]');
+      var time=row && row.querySelector('.msg-time');
+      if (!time || next.sender_id !== _myUserId) return;
+      var seen=time.querySelector('.msg-seen-tag');
+      if (next.is_read && !seen) time.insertAdjacentHTML('beforeend','<span class="msg-seen-tag"> · Seen</span>');
+      if (!next.is_read && seen) seen.remove();
+    });
+    if (msgs.length === old.length) { _renderedMessages=msgs.map(function(m){return Object.assign({},m)}); return; }
+  }
+  var lastDayKey = incremental ? _dayKey(old[old.length-1].created_at) : null;
+  var renderedHtml = (incremental ? msgs.slice(old.length) : msgs).map(function(m) {
     var dayKey = _dayKey(m.created_at);
     var divider = '';
     if (dayKey && dayKey !== lastDayKey) {
@@ -1128,6 +1166,9 @@ function _renderMessages(msgs, forceScroll) {
       + '<span class="msg-time">'+_esc(_timeAgo(m.created_at))+editedTag+seenTag+'</span>'
       + '</div>';
   }).join('');
+  if (incremental) area.insertAdjacentHTML('beforeend',renderedHtml);
+  else area.innerHTML=renderedHtml;
+  _renderedMessages=msgs.map(function(m){return Object.assign({},m)});
   _hydrateDmTradeCards(area);
   if (forceScroll || atBottom) _scrollToBottom();
   var conv = _conversations.find(function(c){ return c.peer_id === _activePeerId; });
@@ -1505,7 +1546,7 @@ initPullToRefresh({
   ignoreTarget: '.msgs-input-bar',
   onRefresh: function(){
     if (_msgsThreadOpen() && _activePeerId) {
-      _lastMsgsSig = null;   // force a redraw so the pull visibly did something
+      // Fetch new data in place; a gesture must never blink existing bubbles.
       return loadThread(_activePeerId);
     }
     _lastConvSig = null;

@@ -60,13 +60,14 @@ function fmtAmount(n){
   return n.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
 }
 function fmtPrice(n){
+  if(n==null || n==='') return '—';
   n = Number(n);
-  if(n==null || isNaN(n)) return '—';
+  if(isNaN(n)) return '—';
   if(n===0) return '$0.00';
   if(n>=1) return '$'+n.toFixed(2);
   if(n>=0.01) return '$'+n.toFixed(4);
   if(n>=0.0001) return '$'+n.toFixed(6);
-  return '$'+n.toFixed(8);
+  return '$'+n.toFixed(n<0.00000001?12:8);
 }
 // Chart axis: three significant digits, so a $0.0000876 token reads
 // "0.0000876" rather than eight padded decimals.
@@ -199,6 +200,8 @@ function renderChartSvg(idx, candles, currentPrice){
   if(!candles || !candles.length){
     var oldPill0 = wrap.querySelector('.pt-price-pill');
     if(oldPill0) oldPill0.remove();
+    var oldWait=wrap.querySelector('.pt-chart-waiting');
+    if(oldWait) oldWait.remove();
     svg.innerHTML = '';
     if(!wrap.querySelector('.pt-chart-empty')){
       var emptyEl = document.createElement('div');
@@ -284,6 +287,11 @@ function renderChartSvg(idx, candles, currentPrice){
   chartHtml+='<circle id="pt-live-halo-'+idx+'" cx="'+lastPt.x.toFixed(2)+'" cy="'+priceY.toFixed(2)+'" r="7" fill="#f7b955" opacity=".18"></circle>';
   chartHtml+='<circle id="pt-live-dot-'+idx+'" cx="'+lastPt.x.toFixed(2)+'" cy="'+priceY.toFixed(2)+'" r="3.2" fill="#f7b955"></circle>';
   svg.innerHTML=chartHtml;
+  var waiting=wrap.querySelector('.pt-chart-waiting');
+  if(n<2){
+    if(!waiting){waiting=document.createElement('div');waiting.className='pt-chart-waiting';wrap.appendChild(waiting);}
+    waiting.textContent='Live price available · waiting for a second price observation';
+  }else if(waiting) waiting.remove();
 
   // Reused across renders (not removed+recreated) so the CSS `top`
   // transition on .pt-price-pill actually animates between positions
@@ -398,7 +406,7 @@ function _restoreLiveHeader(idx, st){
   if(el){ el.textContent=fmtPrice(t.price_usd); el.classList.remove('pt-scrubbing'); }
   if((el=document.getElementById('pt-chg-'+idx))){
     var down=(t.price_change_24h||0)<0;
-    el.textContent=fmtPct(t.price_change_24h)+' · 24h';
+    el.textContent=t.price_change_24h==null?'—':fmtPct(t.price_change_24h)+' · 24h';
     el.classList.toggle('down',down); el.classList.toggle('up',!down);
   }
 }
@@ -715,7 +723,7 @@ function _syncCardPrice(st, idx, px){
   if(el){ el.textContent=fmtPrice(px); if(old>0) _flashTick(el, px>old); }
   if((el=document.getElementById('pt-chg-'+idx))){
     var down=(t.price_change_24h||0)<0;
-    el.textContent=fmtPct(t.price_change_24h)+' · 24h';
+    el.textContent=t.price_change_24h==null?'—':fmtPct(t.price_change_24h)+' · 24h';
     el.classList.toggle('down',down); el.classList.toggle('up',!down);
   }
   if((el=document.getElementById('pt-mcap-'+idx))) el.textContent=fmtUsd(t.market_cap);
@@ -832,11 +840,14 @@ function mountChart(idx, mint, pairAddr, chain, seedPrice){
   var st=primeChart(idx,mint,pairAddr,chain,seedPrice);
   if(st.timer) return;
   chartTick(idx);
-  // 15s, not 5s: the server caches candles for 30 seconds, so polling every
-  // five asked the same question six times for one answer. Movement comes
-  // from the live price tick above instead, which costs one request for the
-  // whole page.
-  st.timer = setInterval(function(){ chartTick(idx); }, 300000);
+  // A one-point chart needs provider history as soon as the cache refreshes;
+  // established charts can wait. Server caches chart responses for 30s.
+  st.timer = setInterval(function(){
+    if(!document.hidden && (st.candles||[]).length<2) chartTick(idx);
+  }, 30000);
+  st.slowTimer=setInterval(function(){
+    if(!document.hidden && (st.candles||[]).length>=2) chartTick(idx);
+  }, 300000);
   attachChartSvgScrub(idx);
 }
 function unmountChart(idx){
@@ -844,6 +855,7 @@ function unmountChart(idx){
   if(!st) return;
   st.destroyed = true;
   if(st.timer) clearInterval(st.timer);
+  if(st.slowTimer) clearInterval(st.slowTimer);
   if(st.liveRaf) cancelAnimationFrame(st.liveRaf);
   if(st.scrubTeardown) st.scrubTeardown();
   delete _chartTimers[idx];
@@ -1078,7 +1090,7 @@ function storyHtml(t, idx){
     +   logoTile(t.image_url, t.symbol, 'pt-story-img', 'pt-story-img-ph')
     + '</div></div>'
     + '<div class="pt-story-name">$'+esc(t.symbol||'?')+'</div>'
-    + '<div class="pt-story-chg mono '+(down?'down':'up')+'">'+fmtPct(t.price_change_24h)+'</div>'
+    + '<div class="pt-story-chg mono '+(down?'down':'up')+'">'+(t.price_change_24h==null?'—':fmtPct(t.price_change_24h))+'</div>'
     + '</div>';
 }
 
@@ -1089,7 +1101,7 @@ function cardHtml(t, idx){
     + '<div class="pt-card-hd">'
     +   logoTile(t.image_url, t.symbol, 'pt-tok-logo', 'pt-tok-logo-ph')
     +   '<div class="pt-tok-id"><div class="pt-tok-sym">$'+esc(t.symbol)+' '+starsHtml(t.score)+chainBadgeHtml(t.chain)+'</div>'
-    +   '<div class="pt-tok-meta">'+esc(t.name||t.symbol)+' · '+fmtAge(t.pair_created_at)+' old</div>'
+    +   '<div class="pt-tok-meta">'+esc(t.name||t.symbol)+' · '+fmtAge(t.pair_created_at)+' old'+(t.source==='solana_bonding_curve'?' · onchain':'')+'</div>'
     +   '<div class="pt-tok-ca-row">'
     +     '<div class="pt-tok-ca" data-action="copy-ca" data-mint="'+esc(t.mint)+'" title="'+esc(t.mint)+'">'
     +       '<span class="pt-tok-ca-text mono">'+esc(shortAddr(t.mint))+'</span>'
@@ -1099,13 +1111,14 @@ function cardHtml(t, idx){
     +   '</div></div>'
     +   '<div class="pt-card-hd-right">'
     +     '<span id="pt-safety-'+idx+'"></span>'
+    +     '<button class="pt-profile-btn" type="button" data-action="token-profile" data-mint="'+esc(t.mint)+'" aria-label="Open token profile" title="Open token profile">Profile</button>'
     +     '<button class="pt-watch-btn'+(isWatched?' active':'')+'" data-action="watch" data-mint="'+esc(t.mint)+'" data-sym="'+esc(t.symbol)+'">'+(isWatched?'★':'☆')+'</button>'
     +   '</div>'
     + '</div>'
     + '<div class="pt-card-body">'
     +   '<div class="pt-card-stats">'
     +     '<div class="pt-price mono" id="pt-price-'+idx+'">'+fmtPrice(t.price_usd)+'</div>'
-    +     '<div class="pt-chg mono '+(down?'down':'up')+'" id="pt-chg-'+idx+'">'+fmtPct(t.price_change_24h)+' · 24h</div>'
+    +     '<div class="pt-chg mono '+(down?'down':'up')+'" id="pt-chg-'+idx+'">'+(t.price_change_24h==null?'—':fmtPct(t.price_change_24h)+' · 24h')+'</div>'
     +     statRow('Liquidity', fmtUsd(t.liquidity_usd), 'pt-liq-'+idx)
     +     statRow('Market cap', fmtUsd(t.market_cap), 'pt-mcap-'+idx)
     +     statRow('Volume 24h', fmtUsd(t.volume_24h), 'pt-vol-'+idx)
@@ -1129,6 +1142,7 @@ function cardHtml(t, idx){
     +   '<div class="pt-friends" id="pt-friends-'+idx+'"></div>'
     +   '<div class="pt-card-ft-right mono" id="pt-ft-stats-'+idx+'">'+(t.buys_24h+t.sells_24h)+' txns · '+ratioStr(t.buys_24h,t.sells_24h)+'</div>'
     + '</div>'
+    + '<section class="pt-profile-about" aria-label="Token profile details"></section>'
     + '</div>';
 }
 
@@ -1260,6 +1274,7 @@ function renderFeedList(){
   }
   el.innerHTML = ST.tokens.map(function(t,i){ return cardHtml(t,i); }).join('');
   observeCards();
+  syncTokenProfile();
 }
 
 // Applies fresh per-token numbers (by mint) onto the SAME token objects
@@ -1292,7 +1307,7 @@ function patchFeedList(){
     if(!scrubbing && (el = document.getElementById('pt-price-'+idx))) el.textContent = fmtPrice(t.price_usd);
     if(!scrubbing && (el = document.getElementById('pt-chg-'+idx))){
       var down = (t.price_change_24h||0) < 0;
-      el.textContent = fmtPct(t.price_change_24h)+' · 24h';
+      el.textContent = t.price_change_24h==null?'—':fmtPct(t.price_change_24h)+' · 24h';
       el.classList.toggle('down', down);
       el.classList.toggle('up', !down);
     }
@@ -1318,6 +1333,57 @@ function patchFeedList(){
 // full, freshly-ordered rebuild, since that's exactly what was asked for.
 // Set from ?mint= at startup; consumed by the first loadFeed() that finishes.
 var _pendingDeepLinkMint = null;
+var _focusedMint = null;
+var _profileMint = null;
+function syncTokenProfile(){
+  var idx=ST.tokens.findIndex(function(t){return t.mint===_profileMint;});
+  var active=!!(_profileMint && idx>=0);
+  document.body.classList.toggle('pt-profile-mode',active);
+  document.querySelectorAll('.pt-card').forEach(function(card){
+    var chosen=active && card.dataset.mint===_profileMint;
+    card.classList.toggle('pt-profile-open',chosen);
+    var button=card.querySelector('.pt-profile-btn');
+    if(button){button.textContent=chosen?'Close':'Profile';button.setAttribute('aria-label',chosen?'Close token profile':'Open token profile');}
+  });
+  if(active){
+    var card=document.getElementById('pt-card-'+idx);
+    if(card){card.scrollIntoView({block:'start'});loadTokenProfileDetails(card,_profileMint);}
+    if(_chartTimers[idx] && _chartTimers[idx].candles)
+      requestAnimationFrame(function(){renderChartSvg(idx,_chartTimers[idx].candles,_cardRefPrice(_chartTimers[idx],idx));});
+  }
+}
+function loadTokenProfileDetails(card,mint){
+  var box=card.querySelector('.pt-profile-about');
+  if(!box || box.dataset.loading) return;
+  box.dataset.loading='1';
+  box.textContent='Loading token details…';
+  fetch('/api/token/info/'+encodeURIComponent(mint)).then(function(r){return r.json();}).then(function(info){
+    if(!card.isConnected || card.dataset.mint!==mint) return;
+    if(!info || !info.ok){box.textContent='Token details are temporarily unavailable.';return;}
+    box.replaceChildren();
+    var title=document.createElement('h2');title.textContent='About '+(info.name||info.symbol||'this token');box.appendChild(title);
+    var desc=document.createElement('p');desc.textContent=info.description||'The creator has not added a description yet.';box.appendChild(desc);
+    var address=document.createElement('p');address.className='pt-profile-address';
+    address.textContent='Token address: '+mint;box.appendChild(address);
+    var links=document.createElement('div');links.className='pt-profile-links';
+    function link(url,label){
+      if(!isSafeUrl(url)) return;
+      var a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.textContent=label;links.appendChild(a);
+    }
+    link(info.website_url,'Website ↗');link(info.twitter_url,'X ↗');
+    if((info.chain||'solana')==='solana') link('https://solscan.io/token/'+encodeURIComponent(mint),'Solscan ↗');
+    box.appendChild(links);
+  }).catch(function(){ if(card.isConnected) box.textContent='Token details are temporarily unavailable.'; });
+}
+function setTokenProfile(mint){
+  _profileMint=_profileMint===mint?null:mint;
+  _focusedMint=_profileMint||_focusedMint;
+  var url=new URL(location.href);
+  if(_profileMint){url.searchParams.set('mint',_profileMint);url.searchParams.set('profile','1');}
+  else url.searchParams.delete('profile');
+  history.pushState(null,'',url.pathname+url.search);
+  syncTokenProfile();
+}
 
 function loadFeed(isPoll){
   if(_feedInFlight) return;
@@ -2320,7 +2386,7 @@ function confirmBuy(idx){
 // in-flight buy, rather than re-enabling and inviting a duplicate click.
 function _pollAutoBuyBridge(bridgeId, idx, t, amt, msgEl, input){
   var attempts = 0;
-  var maxAttempts = 150; // ~150 * 8s = 20 minutes outer ceiling, generous over the bridge's own 30-min timeout
+  var maxAttempts = 225; // ~30 minutes; backend keeps uncertain bridging locked and reconciles it
   var btn = document.querySelector('#pt-buy-panel-'+idx+' .pt-buy-confirm');
   function tick(){
     attempts++;
@@ -2337,6 +2403,11 @@ function _pollAutoBuyBridge(bridgeId, idx, t, amt, msgEl, input){
           _showTxReceipt(idx, t, res);
           setTimeout(function(){ closeBuyPanel(idx); },
                      document.getElementById('pt-txline') ? 7000 : 2200);
+          return;
+        }
+        if(d.auto_buy_status === 'reconciling'){
+          showMsg(msgEl, 'Bridge confirmation is delayed. Funds may still be moving. Do not retry this buy; check Wallet for the final result.', false);
+          // Never turn an unknown on-chain result into a second Buy button.
           return;
         }
         if(d.auto_buy_status === 'failed'){
@@ -2358,9 +2429,8 @@ function _pollAutoBuyBridge(bridgeId, idx, t, amt, msgEl, input){
   }
   function scheduleNext(){
     if(attempts >= maxAttempts){
-      showMsg(msgEl, 'Still buying… check your Wallet page shortly', true);
-      if(btn){ btn.disabled=false; }
-    _restoreSlide();
+      showMsg(msgEl, 'Bridge confirmation is taking longer than expected. Do not retry this buy; check Wallet for its final status.', false);
+      // Keep this request visibly unresolved until the backend confirms it.
       return;
     }
     setTimeout(tick, 8000);
@@ -2568,6 +2638,7 @@ function surgeCardHtml(s){
   + '</div>';
 }
 
+var _surgeMarkup=null, _tapeIdentity=null, _traderIdentity=null;
 function loadSurges(){
   fetch('/api/market/surges', {credentials:'include'})
     .then(function(r){ return r.json(); })
@@ -2583,11 +2654,15 @@ function loadSurges(){
       var list = (d && d.surges) || [];
       // Hidden entirely when nothing is surging -- an empty "SURGING NOW"
       // strip would read as a broken feature rather than a quiet market.
-      if(!list.length){ wrap.style.display = 'none'; return; }
+      if(!list.length){ wrap.style.display = 'none'; _surgeMarkup=null; return; }
       wrap.style.display = '';
-      var keepScroll = rail.scrollLeft;
-      rail.innerHTML = list.map(surgeCardHtml).join('');
-      rail.scrollLeft = keepScroll;
+      var newMarkup=list.map(surgeCardHtml).join('');
+      if(newMarkup!==_surgeMarkup){
+        var keepScroll=rail.scrollLeft;
+        rail.innerHTML=newMarkup;
+        _surgeMarkup=newMarkup;
+        rail.scrollLeft=keepScroll;
+      }
       var sub = document.getElementById('pt-surge-sub');
       if(sub) sub.textContent = list.length + (list.length === 1 ? ' token' : ' tokens')
         + ' · vs their own 5m average';
@@ -2599,6 +2674,9 @@ function loadTape(){
   fetch('/api/market/tape').then(function(r){ return r.json(); }).then(function(d){
     var el = document.getElementById('pt-tape-list');
     var rows = (d && d.ok && d.trades) || [];
+    var identity=JSON.stringify(rows.slice(0,14).map(function(t){return [t.id,t.tx_hash,t.timestamp,t.side,t.symbol,t.sol_amount];}));
+    if(identity===_tapeIdentity) return;
+    _tapeIdentity=identity;
     if(!rows.length){ el.innerHTML = '<div class="pt-tape-empty">Waiting for trades…</div>'; return; }
     el.innerHTML = rows.slice(0,14).map(function(r){
       var side = String(r.side||'').toLowerCase()==='sell' ? 'sell' : 'buy';
@@ -2622,6 +2700,9 @@ function loadTape(){
 function loadTraders(){
   fetch('/api/leaderboard').then(function(r){ return r.json(); }).then(function(rows){
     rows = Array.isArray(rows) ? rows : [];
+    var identity=JSON.stringify([rows,_copyStatus.copying,_copyStatus.target]);
+    if(identity===_traderIdentity) return;
+    _traderIdentity=identity;
     renderTraderRail(rows);
     var el = document.getElementById('pt-traders-list');
     if(!el) return;
@@ -2721,17 +2802,17 @@ function scrollToCard(idx){
 }
 
 function prependSearchedToken(mint, sym, pairAddr){
-  fetch('/api/token/info/'+encodeURIComponent(mint)).then(function(r){ return r.json(); }).then(function(info){
+  return fetch('/api/token/info/'+encodeURIComponent(mint)).then(function(r){ return r.json(); }).then(function(info){
     var tok;
     if(info && info.ok){
       var pc = info.price_change || {};
       tok = {
         mint: info.address||mint, symbol: info.symbol||sym, name: info.name||sym,
         chain: info.chain||'solana', pair_address: info.pair_address||pairAddr,
-        image_url: info.image_url||'', price_usd: Number(info.price_usd||info.price||0),
-        market_cap: Number(info.market_cap||info.mcap||0), liquidity_usd: Number(info.liquidity_usd||info.liquidity||0),
-        volume_24h: Number(info.volume_24h||0), buys_24h: Number(info.buyers_24h||0), sells_24h: Number(info.sellers_24h||0),
-        price_change_24h: Number(pc.h24||0), pair_created_at: null, verified_socials:false, score:3
+        image_url: info.image_url||'', price_usd: info.price_usd==null?null:Number(info.price_usd),
+        market_cap: info.market_cap==null?null:Number(info.market_cap), liquidity_usd: info.liquidity_usd==null?null:Number(info.liquidity_usd),
+        volume_24h: info.volume_24h==null?null:Number(info.volume_24h), buys_24h: info.buyers_24h==null?null:Number(info.buyers_24h), sells_24h: info.sellers_24h==null?null:Number(info.sellers_24h),
+        price_change_24h: info.price_change_24h==null?(info.source?null:Number(pc.h24||0)):Number(info.price_change_24h), pair_created_at: info.pair_created_at||null, verified_socials:false, score:3, source:info.source||'', quote_asset:info.quote_asset||''
       };
     } else {
       tok = {mint:mint, symbol:sym, name:sym, chain:'solana', pair_address:pairAddr, image_url:'',
@@ -2742,13 +2823,14 @@ function prependSearchedToken(mint, sym, pairAddr){
     renderStoryRail();
     renderFeedList();
     updateHeaderCounts();
-    setTimeout(function(){ scrollToCard(0); }, 60);
+    setTimeout(function(){ if(_profileMint===tok.mint) syncTokenProfile(); else scrollToCard(0); }, 60);
   }).catch(function(){});
 }
 
 /* ── event wiring ── */
 document.addEventListener('click', function(e){
   var el;
+  if((el = e.target.closest('[data-action="token-profile"]'))){ setTokenProfile(el.dataset.mint); return; }
   if((el = e.target.closest('[data-action="story"]'))){ scrollToCard(el.dataset.idx); return; }
   if((el = e.target.closest('[data-action="watch"]'))){ toggleWatch(el.dataset.mint, el.dataset.sym, el); return; }
   if((el = e.target.closest('[data-action="buy-open"]'))){ openBuyPanel(el.dataset.idx); return; }
@@ -2863,7 +2945,33 @@ document.addEventListener('DOMContentLoaded', function(){
 
   _prefetchBalances();
   renderSortList();
-  loadWatchlistSet().then(function(){ loadFeed(); });
+  // Deep links must paint the requested token before the full scanner feed.
+  // The feed is only a background numbers refresh once that profile exists.
+  var _qMint = new URLSearchParams(location.search).get('mint');
+  if(_qMint){
+    _focusedMint = _qMint;
+    if(new URLSearchParams(location.search).get('profile')==='1') _profileMint=_qMint;
+    // Warm real chart history in parallel with token details, with the server
+    // resolving the active pool. A first visit does not wait for the scanner.
+    fetchChart(_qMint,'5m','','solana').then(function(r){
+      if(!r || !r.candles || !r.candles.length || !r.pair_address) return;
+      var idx=ST.tokens.findIndex(function(t){return t.mint===_qMint;});
+      var tok=ST.tokens[idx];
+      if(tok && tok.pair_address && tok.pair_address!==r.pair_address) return;
+      candleCachePut(_qMint,r.pair_address,'5m',r.candles,r.current_price);
+      var st=_chartTimers[idx];
+      if(st && !st.destroyed && _candlesMatchPrice(r.candles,_cardRefPrice(st,idx))){
+        st.candles=r.candles;st.price=r.current_price;
+        renderChartSvg(idx,st.candles,st.price);
+      }
+    });
+    prependSearchedToken(_qMint,'','').finally(function(){
+      if(!ST.tokens.some(function(t){return t.mint===_qMint;})) _pendingDeepLinkMint=_qMint;
+      loadWatchlistSet().then(function(){ loadFeed(true); });
+    });
+  } else {
+    loadWatchlistSet().then(function(){ loadFeed(); });
+  }
   loadSurges();
   loadTape();
   loadTraders();
@@ -2877,22 +2985,31 @@ document.addEventListener('DOMContentLoaded', function(){
   // wallet, the calls page and a surge push notification -- all plain
   // full-page navigations, since none of those have this feed to inject into.
   //
-  // It has to be injected AFTER the first scanner load, which replaces
-  // ST.tokens wholesale and would wipe it. That used to be a 900ms guess:
-  // fine on a fast connection, and on a slow one the token silently vanished
-  // -- worst of all on a notification tap, which is the one moment it has to
-  // work. It is now queued and injected when that first load actually
-  // finishes, however long it takes.
-  var _qMint = new URLSearchParams(location.search).get('mint');
-  if(_qMint){
-    history.replaceState(null, '', location.pathname);
-    _pendingDeepLinkMint = _qMint;
-  }
+  // A deep link opens directly above. The scanner can refresh its numbers
+  // later without replacing the focused card.
+  window.addEventListener('popstate',function(){
+    var q=new URLSearchParams(location.search);
+    _profileMint=q.get('profile')==='1'?q.get('mint'):null;
+    syncTokenProfile();
+  });
 
   // Background tabs do zero market polling. Mobile browsers otherwise keep
   // old pages alive long enough to burn through rate limits for data nobody
   // can see, then return to the foreground already throttled.
   setInterval(function(){ if(!document.hidden) loadFeed(true); }, 15000);
+  setInterval(function(){
+    if(!_focusedMint || document.hidden) return;
+    fetch('/api/token/info/'+encodeURIComponent(_focusedMint)).then(function(r){return r.json();}).then(function(info){
+      if(!info || !info.ok) return;
+      var idx=ST.tokens.findIndex(function(t){return t.mint===_focusedMint;});
+      if(idx<0) return;
+      var t=ST.tokens[idx];
+      if(info.price_usd!=null) t.price_usd=Number(info.price_usd);
+      if(info.market_cap!=null) t.market_cap=Number(info.market_cap);
+      t.source=info.source||t.source;
+      patchFeedList();
+    }).catch(function(){});
+  }, 15000);
   setInterval(function(){ if(!document.hidden) loadSurges(); }, 12000);
   setInterval(function(){ if(!document.hidden) loadTape(); }, 8000);
   setInterval(function(){ if(!document.hidden) loadTraders(); }, 30000);

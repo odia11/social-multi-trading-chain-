@@ -80,6 +80,7 @@ assert '_chartFetchQueue' in js
 # made the tenth card wait ~20s for history the server already had cached.
 assert 'var _CHART_FETCH_CONCURRENCY = 4;' in js
 assert '_GT_BUDGET_PER_MIN = 25' in SOURCE and 'def _gt_try_take(' in SOURCE
-assert 'setInterval(function(){ chartTick(idx); }, 300000)' in js
+assert "(st.candles||[]).length<2) chartTick(idx)" in js
+assert '}, 30000);' in js and '}, 300000);' in js
 
 print('market chart history tests passed')
