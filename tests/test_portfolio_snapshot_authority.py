@@ -78,7 +78,8 @@ def test_wallet_three_loaders_share_snapshot_request():
     toks=WALLET[WALLET.index('function loadTokens(bust)'):WALLET.index('\n\nloadTokens()',WALLET.index('function loadTokens(bust)'))]
     assert '_getPortfolioSnapshot(false)' in bal and '/api/wallet/balance' not in bal
     assert '_getPortfolioSnapshot(false)' in usdc and '/api/wallet/usdc-summary' not in usdc
-    assert '_getPortfolioSnapshot(!!bust)' in toks and '/api/wallet/tokens' not in toks
+    assert '_getPortfolioSnapshot(!!bust)' in toks
+    assert "fetch('/api/wallet/tokens'" in toks  # assets stay visible if one chain blocks the aggregate
 
 
 def test_total_controller_no_longer_fans_out_three_requests():

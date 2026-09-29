@@ -6,7 +6,7 @@ var samples=[];
 var STORAGE_KEY='orcaPortfolioLastConfirmedTotal';
 var STORAGE_AT_KEY='orcaPortfolioLastConfirmedTotalAt';
 function remember(total){try{localStorage.setItem(STORAGE_KEY,String(total));localStorage.setItem(STORAGE_AT_KEY,String(Date.now()))}catch(e){}}
-function recalled(){try{var n=Number(localStorage.getItem(STORAGE_KEY)),at=Number(localStorage.getItem(STORAGE_AT_KEY));if(!Number.isFinite(n)||n<0)return null;if(Number.isFinite(at)&&Date.now()-at>86400000)return null;return n}catch(e){return null}}
+function recalled(){try{var raw=localStorage.getItem(STORAGE_KEY),stamp=localStorage.getItem(STORAGE_AT_KEY);if(raw===null||stamp===null)return null;var n=Number(raw),at=Number(stamp);if(!Number.isFinite(n)||n<0||!Number.isFinite(at)||at<=0||Date.now()-at>86400000)return null;return n}catch(e){return null}}
 function money(n){
   n=Number(n);
   return Number.isFinite(n)?'$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
@@ -55,7 +55,8 @@ function boot(){
     put('pf-total',money(cached));
     samples=[cached];
     spark();
-    put('pf-performance','Refreshing live multi-chain balance…');
+    put('pf-performance','Last confirmed balance · refreshing…');
+    setTimeout(function(){if(window.__orcaPortfolioValue==null)put('pf-performance','Last confirmed balance · live update unavailable')},12000);
   }
   /* On a first-ever session there is no confirmed total to reuse. As soon as
      the fast pooled-USDC read lands, use it as an honest provisional floor

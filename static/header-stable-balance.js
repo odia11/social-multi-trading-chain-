@@ -20,7 +20,17 @@ function refresh(force){
 }
 function start(){
   if(!el())return;
-  if(ON_PORTFOLIO){if(window.__orcaPortfolioValue!=null)render(money(window.__orcaPortfolioValue));return}
+  if(ON_PORTFOLIO){
+    if(window.__orcaPortfolioValue!=null){render(money(window.__orcaPortfolioValue));return}
+    try{
+      var raw=localStorage.getItem('orcaPortfolioLastConfirmedTotal');
+      var at=Number(localStorage.getItem('orcaPortfolioLastConfirmedTotalAt'));
+      if(raw!==null&&Number.isFinite(Number(raw))&&at>0&&Date.now()-at<86400000){
+        render(money(Number(raw)));return;
+      }
+    }catch(e){}
+    render('—');return;
+  }
   refresh(true);if(timer)clearInterval(timer);timer=setInterval(function(){refresh(false)},POLL_MS)
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();

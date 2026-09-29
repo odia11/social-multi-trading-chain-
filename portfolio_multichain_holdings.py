@@ -269,7 +269,7 @@ def install(d):
             snap = _portfolio_snapshot(d, wallet, bust=d.request.args.get('bust') == '1')
             return d.jsonify(snap)
         except Exception as exc:
-            app.logger.warning('portfolio snapshot failed: %s', type(exc).__name__)
+            app.logger.warning('portfolio snapshot failed: %s', str(exc)[:240])
             return d.jsonify({'ok': False, 'msg': 'Portfolio snapshot temporarily unavailable'}), 503
 
     marker = 'data-orca-portfolio-multichain="1"'
