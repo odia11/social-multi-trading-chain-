@@ -211,21 +211,25 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
             return fail('Solana is unavailable. No claim transaction was sent. Retry shortly.',503)
         if not valid:
             return fail('Claim approval expired. Check claim history before preparing another claim.',409)
-        sk=bytes(PrivateKey.generate());cached=session_for(wallet)
-        if cached:sk,pk,session=cached
+        # Creator-fee approvals are money-moving actions. Always start a fresh
+        # Phantom connect for a claim instead of reusing the long-lived login
+        # session. A cached session can survive an account switch in Phantom;
+        # skipping Connect then gives us a signed response that cannot belong
+        # to the exact OrcAgent wallet/claim and traps the claim in prepared.
+        sk=bytes(PrivateKey.generate())
         flow={'token':secrets.token_hex(32),'launch_id':launch_id,'wallet':wallet,
               'stage':'claim','claim_id':claim_id,
               'digest':hashlib.sha256(raw.encode()).hexdigest(),
               'secret':fernet.encrypt(sk),'created_at':int(time.time()),
-              'status':'sign' if cached else 'connect',
+              'status':'connect',
               'return_to_pwa':int(body.get('return_to_pwa') is True)}
         with sqlite3.connect(d.DB_FILE,timeout=8) as db:
             db.execute('DELETE FROM phantom_launch_links WHERE created_at<?',(int(time.time())-TTL,))
             db.execute('''INSERT INTO phantom_launch_links
                 (token,launch_id,wallet,stage,claim_id,digest,secret,created_at,status,return_to_pwa)
                 VALUES (:token,:launch_id,:wallet,:stage,:claim_id,:digest,:secret,:created_at,:status,:return_to_pwa)''',flow)
-        url=sign_url(flow,sk,pk,session) if cached else connect_url(flow)
-        return jsonify(ok=True,url=url,requires_connect=not bool(cached))
+        url=connect_url(flow)
+        return jsonify(ok=True,url=url,requires_connect=True)
 
     @app.post('/api/token-launch/<launch_id>/claim/phantom/retry-delivery')
     @d.rate_limit(4,60)
@@ -414,7 +418,8 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
                     else blockhash_valid(original_b64)):
                     return fail('Phantom approval expired before submission. Reopen this SAME saved token and retry safely.',409)
                 if bytes(tx.message)!=bytes(original.message) or not all(tx.verify_with_results()):
-                    return fail('Phantom signature did not match this exact token launch',409)
+                    return fail('Phantom signature did not match this exact creator-fee claim' if flow['stage']=='claim'
+                                else 'Phantom signature did not match this exact token launch',409)
                 if len(tx.signatures)!=len(original.signatures) or tx.signatures[1:]!=original.signatures[1:]:
                     return fail('Ephemeral token signature changed',409)
                 signature=str(tx.signatures[0])
