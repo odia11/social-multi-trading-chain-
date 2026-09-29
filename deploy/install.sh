@@ -19,6 +19,9 @@ apt-get update -qq
 # length-checked server-side before they can be published (video_uploads.py).
 apt-get install -y -qq python3 python3-venv python3-pip nginx sqlite3 curl ca-certificates rsync openssl ffmpeg xz-utils nodejs npm
 
+say "Checking protected instant-navigation contract"
+bash "$REPO_DIR/deploy/check-performance-contract.sh"   || die "Instant-navigation performance contract failed. Nothing was installed."
+
 # Pin Pump runtime even while launches are disabled, ready for the private pilot.
 bash "$REPO_DIR/deploy/install-pump-runtime.sh"
 

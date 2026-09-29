@@ -183,6 +183,16 @@ fi
 
 PULLED=1
 
+# ── protected product invariant: instant/native-app navigation ──
+# Run as the repository owner. It is source-level only and must pass before
+# /opt is touched.
+say "Protecting instant navigation performance"
+if [ "$REPO_OWNER" != root ] && id -u "$REPO_OWNER" >/dev/null 2>&1; then
+  runuser -u "$REPO_OWNER" -- bash "$REPO_DIR/deploy/check-performance-contract.sh"     || die "Instant-navigation performance contract failed. Production was not changed."
+else
+  bash "$REPO_DIR/deploy/check-performance-contract.sh"     || die "Instant-navigation performance contract failed. Production was not changed."
+fi
+
 say "Installing"
 bash "$REPO_DIR/deploy/install.sh" >/tmp/orcagent-install-$STAMP.log 2>&1 \
   || { tail -30 /tmp/orcagent-install-$STAMP.log; die "Install failed. The old code is still running — nothing was restarted."; }

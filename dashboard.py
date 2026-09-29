@@ -17414,6 +17414,7 @@ def service_worker_root():
     resp = make_response(send_from_directory(app.static_folder, 'sw.js'))
     resp.headers['Content-Type'] = 'application/javascript'
     resp.headers['Service-Worker-Allowed'] = '/'
+    resp.headers['Cache-Control'] = 'no-cache, max-age=0'
     return resp
 
 @app.route('/api/push/vapid-public-key')

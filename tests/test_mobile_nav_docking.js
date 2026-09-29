@@ -8,7 +8,7 @@ const js=fs.readFileSync('static/mobile-bottom-nav.js','utf8');
 assert.match(css,/\.oa-bottom-nav\{[^}]*position:fixed!important;[^}]*bottom:0!important;[^}]*box-sizing:border-box!important/);
 assert(!css.includes('box-sizing:content-box'));
 assert(home.includes('viewport-fit=cover'));
-assert(boot.includes('mobile-bottom-nav.css?v=4'));
+assert(boot.includes('mobile-bottom-nav.css?v=5'));
 assert(boot.includes('mobile-bottom-nav.js?v=5'));
 const start=js.indexOf('var _dockFrame=0;'),end=js.indexOf('function build(){',start);
 assert(start>=0&&end>start);
