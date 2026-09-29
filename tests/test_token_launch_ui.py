@@ -74,7 +74,8 @@ def test_token_launch_ui():
     assert 'tl-token-fee-overview' in js and 'tl-claim-history-' in js
     assert 'Solscan ↗' in js and 'Refresh available' in js
     assert 'creatorClaimLaunch' in js and "$('tl-claim-now').addEventListener" in js
-    assert "renderClaimRows($('tl-recent-earnings'),history.slice(0,3),true)" in js
+    # Recent activity: the latest real claims (expired never-approved attempts left out).
+    assert "renderClaimRows($('tl-recent-earnings'),history.filter(function(c){return !isExpired(c)}).slice(0,3),true," in js
     assert 'Pump.fun' not in js and 'PumpSwap' not in js and 'Pump fees' not in js and 'Pump transaction' not in js
     css=(ROOT/'static/token-launch-redesign.css').read_text()
     assert '.tl-saved>.tl-section-head{display:none}' in css

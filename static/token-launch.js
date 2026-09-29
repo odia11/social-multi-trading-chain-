@@ -24,7 +24,7 @@ function rawAmount(raw,asset){
  }catch(e){return '—'}
 }
 function claimLabel(value){
- return {confirmed:'Claimed',confirmed_no_payout:'No payout',prepared:'Awaiting approval',submitted:'Pending confirmation',expired_unverified:'Needs review'}[value]||String(value||'Unknown').replaceAll('_',' ');
+ return {confirmed:'Claimed',confirmed_no_payout:'No payout',prepared:'Awaiting approval',submitted:'Pending confirmation',expired_unverified:'Expired'}[value]||String(value||'Unknown').replaceAll('_',' ');
 }
 function claimDate(value){return value?new Date(Number(value)*1000).toLocaleString([], {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—'}
 function rawNumber(raw,asset){
@@ -36,7 +36,10 @@ function creatorClaimLaunch(){
 function updateCreatorClaimButton(){
  var btn=$('tl-claim-now');if(!btn)return;
  var launch=creatorClaimLaunch();
- var pending=Number((creatorEarnings||{}).pending_claims||0)>0;
+ // The button claims USDC; only a waiting USDC claim holds it (the server
+ // keeps one claim per asset, so a pending SOL claim never blocks this one).
+ var pending=((creatorEarnings||{}).history||[]).some(function(c){
+   return c.quote_asset==='USDC'&&(c.status==='prepared'||c.status==='submitted')});
  var available=false;try{available=BigInt(creatorAvailableRaw||'0')>0n}catch(e){}
  btn.dataset.launchId=launch?launch.id:'';
  if(pending){btn.disabled=false;btn.dataset.mode='history';btn.innerHTML='Check pending <span aria-hidden="true">›</span>';return}
@@ -44,10 +47,15 @@ function updateCreatorClaimButton(){
  btn.innerHTML='Claim Now <span aria-hidden="true">›</span>';
  btn.disabled=!cfg.enabled||!launch||!available;
 }
-function renderClaimRows(target,claims,showToken){
+// Claims that were prepared but never approved in Phantom expire and can no
+// longer settle (the server checks the chain before retiring them). They are
+// kept out of the list and summarised in one line instead of piling up.
+function isExpired(c){return c.status==='expired_unverified'}
+function renderClaimRows(target,claims,showToken,emptyText){
  if(!target)return;target.replaceChildren();
- if(!claims||!claims.length){target.appendChild(dom('p','tl-helper','No creator-fee claims yet.'));return}
- claims.slice(0,12).forEach(function(c){
+ var all=claims||[],live=all.filter(function(c){return !isExpired(c)}),expired=all.length-live.length;
+ if(!live.length)target.appendChild(dom('p','tl-helper',emptyText||'No creator-fee claims yet.'));
+ live.slice(0,12).forEach(function(c){
   var row=dom('div','tl-claim-row');
   var main=dom('div','tl-claim-main');
   if(showToken)main.appendChild(dom('strong','',c.symbol||c.name||'Token'));
@@ -60,24 +68,30 @@ function renderClaimRows(target,claims,showToken){
   if(c.signature){var link=dom('a','','Solscan ↗');link.href='https://solscan.io/tx/'+encodeURIComponent(c.signature);link.target='_blank';link.rel='noopener noreferrer';side.appendChild(link)}
   if(side.children.length)row.appendChild(side);target.appendChild(row);
  });
+ if(expired&&emptyText===undefined)target.appendChild(dom('p','tl-claim-expired-note',
+   expired+(expired===1?' earlier attempt':' earlier attempts')+' expired without approval in Phantom — nothing was claimed or charged.'));
 }
 function renderCreatorEarnings(){
  var panel=$('tl-creator-earnings');if(!panel)return;
  panel.hidden=!mine.length;if(!mine.length)return;
  var data=creatorEarnings||{verified_claimed_raw:{USDC:'0'},confirmed_claims:0,pending_claims:0,history:[]};
  var claimedRaw=(data.verified_claimed_raw||{}).USDC||'0';
+ var claimedSol=(data.verified_claimed_raw||{}).SOL||'0';
+ var hasSol=false;try{hasSol=BigInt(claimedSol)>0n}catch(e){}
  text('tl-claimed-usdc',rawAmount(claimedRaw,'USDC'));
- text('tl-claimed-fiat','≈ $'+rawNumber(claimedRaw,'USDC').toFixed(2));
- var history=data.history||[],review=history.filter(function(c){return c.status==='expired_unverified'}).length;
- text('tl-claim-count',String(history.length));
- var parts=[];if(data.pending_claims)parts.push(data.pending_claims+' pending');if(data.confirmed_claims)parts.push(data.confirmed_claims+' confirmed');if(review)parts.push(review+' review');
+ // Claims paid out in SOL count too; they used to be left out of this total.
+ text('tl-claimed-fiat','≈ $'+rawNumber(claimedRaw,'USDC').toFixed(2)+(hasSol?' + '+rawAmount(claimedSol,'SOL'):''));
+ var history=data.history||[],expired=history.filter(isExpired).length;
+ // Only real claims count; expired never-approved attempts are listed apart.
+ text('tl-claim-count',String(history.length-expired));
+ var parts=[];if(data.pending_claims)parts.push(data.pending_claims+' pending');if(data.confirmed_claims)parts.push(data.confirmed_claims+' confirmed');if(expired)parts.push(expired+' expired');
  text('tl-claim-count-note',parts.length?parts.join(' · '):'No claims yet');
  var creatorLive=mine.some(function(row){return row.status==='live'&&row.reward_mode==='creator'});
  var communityLive=mine.some(function(row){return row.status==='live'&&row.reward_mode==='community'});
  text('tl-creator-share',creatorLive?'100%':communityLive?'Split':'—');
  text('tl-creator-share-note',creatorLive?'of creator fees on Creator Rewards launches':communityLive?'Uses each token’s configured split':'No live creator-reward launch yet');
  renderClaimRows($('tl-global-claim-history'),history,true);
- renderClaimRows($('tl-recent-earnings'),history.slice(0,3),true);
+ renderClaimRows($('tl-recent-earnings'),history.filter(function(c){return !isExpired(c)}).slice(0,3),true,'No creator-fee activity yet.');
  updateCreatorClaimButton();
 }
 async function refreshAvailableFees(showNotice){
@@ -646,8 +660,19 @@ function toggleGlobalClaimHistory(forceOpen){
 }
 $('tl-toggle-history').addEventListener('click',function(){toggleGlobalClaimHistory(false)});
 $('tl-view-all-claims').addEventListener('click',function(){toggleGlobalClaimHistory(true)});
-$('tl-claim-now').addEventListener('click',function(){
- if(this.dataset.mode==='history'){toggleGlobalClaimHistory(true);return}
+$('tl-claim-now').addEventListener('click',async function(){
+ if(this.dataset.mode==='history'){
+   // Re-check first: the server settles claims approved in Phantom and
+   // retires ones that were never approved, which frees "Claim Now".
+   var btn=this;btn.disabled=true;status('Checking your pending claim on Solana…');
+   try{creatorEarnings=await call('/api/token-launch/creator-earnings');renderCreatorEarnings()}
+   catch(e){status(e.message||'Could not check the pending claim',true);btn.disabled=false;return}
+   btn.disabled=false;
+   if(btn.dataset.mode==='claim'){status('Nothing is waiting any more — you can claim your creator fees now.');return}
+   toggleGlobalClaimHistory(true);
+   status('A claim is still waiting for approval in Phantom. If you did not approve it, it expires within about two minutes and you can claim again.');
+   return;
+ }
  var launch=creatorClaimLaunch();
  if(!launch){status('A confirmed USDC Creator Rewards launch is required before fees can be claimed.',true);return}
  claimRewards(launch);
