@@ -77,7 +77,7 @@
         </div>
         <div class="tl-fee-strip" aria-label="Token launch fee disclosure">
           <div><span class="tl-fee-icon" aria-hidden="true">◎</span><div><small>OrcAgent launch fee</small><strong>0</strong></div></div>
-          <div><span class="tl-fee-icon" aria-hidden="true">▢</span><div><small>Network + Pump fees</small><strong>Shown in Phantom / on-chain</strong></div></div>
+          <div><span class="tl-fee-icon" aria-hidden="true">▢</span><div><small>Network + protocol fees</small><strong>Shown in Phantom / on-chain</strong></div></div>
         </div>
         <label class="tl-ack"><input id="tl-ack" type="checkbox"> <span>I understand that network/rent fees apply and creator rewards are not guaranteed.</span></label>
         <div class="tl-recent-status" id="tl-recent-status" hidden><strong>Recent launch status</strong><div id="tl-recent-items"></div></div>
@@ -110,15 +110,51 @@
   </section>
   <section class="tl-card tl-saved" id="saved-launches" aria-labelledby="tl-saved-title">
     <div class="tl-section-head"><span class="tl-section-tag">YOUR WORKSPACE</span><h2 id="tl-saved-title">Your launches</h2><p>Follow your launch here. Confirmation updates automatically after Phantom approval.</p></div>
-    <section class="tl-creator-earnings" id="tl-creator-earnings" aria-labelledby="tl-earnings-title" hidden>
-      <div class="tl-earnings-head"><div><span class="tl-section-tag">CREATOR EARNINGS</span><h3 id="tl-earnings-title">Creator fees</h3><p>Only visible to this wallet. Claimed totals use verified on-chain receipts.</p></div><span class="tl-private-chip">Private</span></div>
-      <div class="tl-earnings-grid">
-        <div class="tl-earning"><small>Available now</small><strong id="tl-available-usdc">—</strong><span id="tl-available-note">Checking your creator vault…</span></div>
-        <div class="tl-earning"><small>Total claimed</small><strong id="tl-claimed-usdc">0 USDC</strong><span>Verified wallet receipts</span></div>
-        <div class="tl-earning"><small>Claims</small><strong id="tl-claim-count">0</strong><span id="tl-claim-count-note">No claims yet</span></div>
+    <section class="tl-creator-earnings tl-ce-v2" id="tl-creator-earnings" aria-labelledby="tl-earnings-title" hidden>
+      <div class="tl-ce-head">
+        <div class="tl-ce-title-wrap">
+          <span class="tl-ce-title-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+          <div><h3 id="tl-earnings-title">Creator Earnings</h3><p>Earnings from tokens you created on OrcAgent.</p></div>
+        </div>
+        <span class="tl-private-chip"><span aria-hidden="true">▣</span> Private</span>
       </div>
-      <div class="tl-earnings-actions"><button type="button" class="tl-btn tl-btn-secondary" id="tl-refresh-earnings">Refresh</button><button type="button" class="tl-btn tl-btn-secondary" id="tl-toggle-history">Claim history</button></div>
+
+      <div class="tl-ce-available">
+        <div class="tl-ce-available-copy">
+          <small>Available to claim <span class="tl-info" title="Verified wallet-wide creator fees currently available to claim" aria-label="About available creator fees">i</span></small>
+          <strong id="tl-available-usdc">—</strong>
+          <span class="tl-ce-fiat" id="tl-available-fiat">Checking on-chain…</span>
+          <span class="tl-ce-scope" id="tl-available-note">Checking your creator rewards…</span>
+        </div>
+        <button type="button" class="tl-ce-claim-btn" id="tl-claim-now" disabled>Claim Now <span aria-hidden="true">›</span></button>
+      </div>
+
+      <div class="tl-ce-metrics">
+        <article class="tl-ce-metric">
+          <span class="tl-ce-metric-icon" aria-hidden="true">▣</span>
+          <div><small>Total claimed</small><strong id="tl-claimed-usdc">0 USDC</strong><span id="tl-claimed-fiat">≈ $0.00</span></div>
+        </article>
+        <article class="tl-ce-metric">
+          <span class="tl-ce-metric-icon" aria-hidden="true">▤</span>
+          <div><small>Total claims</small><strong id="tl-claim-count">0</strong><span id="tl-claim-count-note">No claims yet</span></div>
+        </article>
+        <article class="tl-ce-metric">
+          <span class="tl-ce-metric-icon" aria-hidden="true">%</span>
+          <div><small>Your share</small><strong id="tl-creator-share">—</strong><span id="tl-creator-share-note">Based on your live reward setup</span></div>
+        </article>
+      </div>
+
+      <div class="tl-ce-actions">
+        <button type="button" class="tl-ce-history-btn" id="tl-toggle-history"><span aria-hidden="true">↶</span> Claim history <span aria-hidden="true">›</span></button>
+        <button type="button" class="tl-ce-refresh-btn" id="tl-refresh-earnings" aria-label="Refresh creator earnings" title="Refresh creator earnings">↻</button>
+      </div>
+
       <div class="tl-global-claim-history" id="tl-global-claim-history" hidden></div>
+
+      <div class="tl-ce-recent">
+        <div class="tl-ce-recent-head"><div><strong>Recent earnings</strong><span>Your latest creator-fee activity on OrcAgent.</span></div><button type="button" id="tl-view-all-claims">View all <span aria-hidden="true">›</span></button></div>
+        <div class="tl-ce-recent-list" id="tl-recent-earnings"><p class="tl-helper">No creator-fee activity yet.</p></div>
+      </div>
     </section>
     <div id="tl-mine" class="tl-list"><p class="tl-helper">Loading your launches…</p></div>
   </section>

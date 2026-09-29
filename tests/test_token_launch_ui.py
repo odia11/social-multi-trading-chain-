@@ -32,11 +32,14 @@ def test_token_launch_ui():
                 'id="all-tab"','id="mine-tab"','id="cards"','id="search"',
                 'id="pair"','id="tl-community-fields"','Creator + Community Rewards',
                 'id="tl-creator-earnings"','id="tl-available-usdc"','id="tl-claimed-usdc"',
-                'id="tl-global-claim-history"','id="tl-refresh-earnings"'):
+                'id="tl-global-claim-history"','id="tl-refresh-earnings"',
+                'id="tl-claim-now"','id="tl-recent-earnings"','id="tl-creator-share"'):
                 assert token in html,token
             assert re.search(r'name="tl-mode" value="creator" checked',html)
             assert re.search(r'id="tl-image"[^>]*required',html)
-            assert 'Network + Pump fees' in html and 'OrcAgent launch fee' in html
+            assert 'Network + protocol fees' in html and 'OrcAgent launch fee' in html
+            assert 'Creator Earnings' in html and 'Earnings from tokens you created on OrcAgent.' in html
+            assert 'Pump.fun' not in html and 'PumpSwap' not in html and 'Pump fees' not in html
             assert 'https://phantom.app/ul/v1/signAndSendTransaction' not in html
             assert re.search(r'token-launch-redesign\.css\?v=\d{10}',html)
             assert re.search(r'token-launch(?:es)?\.js\?v=\d{10}',html)
@@ -70,6 +73,9 @@ def test_token_launch_ui():
     assert 'No live USDC Creator Rewards token yet.' not in js
     assert 'tl-token-fee-overview' in js and 'tl-claim-history-' in js
     assert 'Solscan ↗' in js and 'Refresh available' in js
+    assert 'creatorClaimLaunch' in js and "$('tl-claim-now').addEventListener" in js
+    assert "renderClaimRows($('tl-recent-earnings'),history.slice(0,3),true)" in js
+    assert 'Pump.fun' not in js and 'PumpSwap' not in js and 'Pump fees' not in js and 'Pump transaction' not in js
     css=(ROOT/'static/token-launch-redesign.css').read_text()
     assert '.tl-saved>.tl-section-head{display:none}' in css
     print('PASS quick-launch hero, live stats, responsive form, real reward choices, wallet approval')

@@ -27,6 +27,23 @@ function claimLabel(value){
  return {confirmed:'Claimed',confirmed_no_payout:'No payout',prepared:'Awaiting approval',submitted:'Pending confirmation',expired_unverified:'Needs review'}[value]||String(value||'Unknown').replaceAll('_',' ');
 }
 function claimDate(value){return value?new Date(Number(value)*1000).toLocaleString([], {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—'}
+function rawNumber(raw,asset){
+ try{var base=asset==='SOL'?1000000000:1000000;return Number(BigInt(raw||'0'))/base}catch(e){return 0}
+}
+function creatorClaimLaunch(){
+ return mine.find(function(row){return row.status==='live'&&row.reward_mode==='creator'&&row.quote_asset==='USDC'})||null;
+}
+function updateCreatorClaimButton(){
+ var btn=$('tl-claim-now');if(!btn)return;
+ var launch=creatorClaimLaunch();
+ var pending=Number((creatorEarnings||{}).pending_claims||0)>0;
+ var available=false;try{available=BigInt(creatorAvailableRaw||'0')>0n}catch(e){}
+ btn.dataset.launchId=launch?launch.id:'';
+ if(pending){btn.disabled=false;btn.dataset.mode='history';btn.innerHTML='Check pending <span aria-hidden="true">›</span>';return}
+ btn.dataset.mode='claim';
+ btn.innerHTML='Claim Now <span aria-hidden="true">›</span>';
+ btn.disabled=!cfg.enabled||!launch||!available;
+}
 function renderClaimRows(target,claims,showToken){
  if(!target)return;target.replaceChildren();
  if(!claims||!claims.length){target.appendChild(dom('p','tl-helper','No creator-fee claims yet.'));return}
@@ -48,21 +65,31 @@ function renderCreatorEarnings(){
  var panel=$('tl-creator-earnings');if(!panel)return;
  panel.hidden=!mine.length;if(!mine.length)return;
  var data=creatorEarnings||{verified_claimed_raw:{USDC:'0'},confirmed_claims:0,pending_claims:0,history:[]};
- text('tl-claimed-usdc',rawAmount((data.verified_claimed_raw||{}).USDC||'0','USDC'));
+ var claimedRaw=(data.verified_claimed_raw||{}).USDC||'0';
+ text('tl-claimed-usdc',rawAmount(claimedRaw,'USDC'));
+ text('tl-claimed-fiat','≈ $'+rawNumber(claimedRaw,'USDC').toFixed(2));
  var history=data.history||[],review=history.filter(function(c){return c.status==='expired_unverified'}).length;
  text('tl-claim-count',String(history.length));
  var parts=[];if(data.pending_claims)parts.push(data.pending_claims+' pending');if(data.confirmed_claims)parts.push(data.confirmed_claims+' confirmed');if(review)parts.push(review+' review');
  text('tl-claim-count-note',parts.length?parts.join(' · '):'No claims yet');
- renderClaimRows($('tl-global-claim-history'),data.history||[],true);
+ var creatorLive=mine.some(function(row){return row.status==='live'&&row.reward_mode==='creator'});
+ var communityLive=mine.some(function(row){return row.status==='live'&&row.reward_mode==='community'});
+ text('tl-creator-share',creatorLive?'100%':communityLive?'Split':'—');
+ text('tl-creator-share-note',creatorLive?'of creator fees on Creator Rewards launches':communityLive?'Uses each token’s configured split':'No live creator-reward launch yet');
+ renderClaimRows($('tl-global-claim-history'),history,true);
+ renderClaimRows($('tl-recent-earnings'),history.slice(0,3),true);
+ updateCreatorClaimButton();
 }
 async function refreshAvailableFees(showNotice){
  var button=$('tl-refresh-earnings');if(button)button.disabled=true;
  try{
   var fees=await call('/api/token-launch/creator-fees');creatorAvailableRaw=fees.pump_vault_raw;
   text('tl-available-usdc',rawAmount(creatorAvailableRaw,'USDC'));
-  text('tl-available-note','Wallet-wide unclaimed bonding-curve fees. PumpSwap fees excluded.');
+  text('tl-available-fiat','≈ $'+rawNumber(creatorAvailableRaw,'USDC').toFixed(2));
+  text('tl-available-note','Wallet-wide creator fees available through OrcAgent.');
+  updateCreatorClaimButton();
   if(showNotice)status('Creator fee balance refreshed.');
- }catch(e){creatorAvailableRaw='';text('tl-available-usdc','Unavailable');text('tl-available-note','Could not verify the creator vault. Tap refresh to retry.');if(showNotice)status(e.message||'Creator vault unavailable',true)}
+ }catch(e){creatorAvailableRaw='';text('tl-available-usdc','Unavailable');text('tl-available-fiat','Live balance unavailable');text('tl-available-note','Could not verify creator fees. Tap refresh to retry.');updateCreatorClaimButton();if(showNotice)status(e.message||'Creator fee balance unavailable',true)}
  finally{if(button)button.disabled=false}
 }
 function renderPreview(){
@@ -217,7 +244,7 @@ async function launchStage(row,stage){
   : 'The token is already created. Its initial creator fee goes 100% to your wallet UNTIL this second transaction is confirmed. Final split: '+((10000-row.community_bps)/100).toFixed(2)+'% creator / '+(row.community_bps/100).toFixed(2)+'% '+row.community_wallet+'. This final allocation is irreversible.';
  try{
    var result=await dialog(title,details,async function(){
-     text('tl-dialog-status',create?'Preparing your orc token address; this can take up to 90 seconds…':'Building the Pump transaction…');
+     text('tl-dialog-status',create?'Preparing your orc token address; this can take up to 90 seconds…':'Building your launch transaction…');
      var path='/api/token-launch/'+row.id+'/'+(create?'prepare':'prepare-finalize');
      var prepared=await call(path,{});
      if(cfg.pilotCreatorOnly){
@@ -274,7 +301,7 @@ async function claimRewards(row){
  busy=true;
  try{
    var result=await dialog('Review creator-fee claim',
-     'This is a real Solana transaction. You pay the network cost and receive only actual Pump fees. The regular creator vault can include fees from other tokens created by this wallet. Community fee distribution sends its allocated shares to both wallets.',
+     'This is a real Solana transaction. You pay the network cost and receive only creator fees available on-chain. Creator rewards can include eligible fees from other tokens created by this wallet. Community fee distribution sends its configured shares to both wallets.',
      async function(){
        text('tl-dialog-status','Checking on-chain reward vaults…');
        var ready=await call('/api/token-launch/'+row.id+'/claim/prepare',{});
@@ -477,7 +504,7 @@ function drawMine(){
           var fees=await call('/api/token-launch/creator-fees');
           creatorAvailableRaw=fees.pump_vault_raw;
           text('tl-available-usdc',rawAmount(creatorAvailableRaw,'USDC'));
-          text('tl-available-note','Wallet-wide unclaimed bonding-curve fees. PumpSwap fees excluded.');
+          text('tl-available-note','Wallet-wide creator fees available through OrcAgent.');
           verification.textContent='Available to claim: '+rawAmount(creatorAvailableRaw,'USDC')+'. This creator vault belongs only to your connected wallet and can include eligible fees across your creator tokens.';
         }catch(e){verification.textContent=e.message||'Creator vault unavailable';status(verification.textContent,true)}
       });
@@ -487,7 +514,7 @@ function drawMine(){
     action('Claim history',function(){showClaims(row)});
   }
   if(row.status==='live'&&row.reward_mode==='holder'){
-    el.appendChild(dom('p','tl-helper','Pump distributes Holder Rewards; there is no separate creator claim for this mode.'));
+    el.appendChild(dom('p','tl-helper','Holder Rewards are distributed on-chain; there is no separate creator claim for this mode.'));
   }
   if(row.mint&&row.status==='pending_shares'){
     var a=dom('a','','Trade on OrcAgent →');
@@ -611,7 +638,20 @@ $('tl-image').addEventListener('change',async function(){
 });
 $('tl-save').addEventListener('click',saveDraft);
 $('tl-refresh-earnings').addEventListener('click',function(){refreshAvailableFees(true)});
-$('tl-toggle-history').addEventListener('click',function(){var box=$('tl-global-claim-history');box.hidden=!box.hidden;this.textContent=box.hidden?'Claim history':'Hide history'});
+function toggleGlobalClaimHistory(forceOpen){
+ var box=$('tl-global-claim-history'),button=$('tl-toggle-history');if(!box)return;
+ box.hidden=forceOpen===true?false:!box.hidden;
+ if(button)button.innerHTML=box.hidden?'<span aria-hidden="true">↶</span> Claim history <span aria-hidden="true">›</span>':'<span aria-hidden="true">↶</span> Hide history <span aria-hidden="true">⌃</span>';
+ if(!box.hidden)box.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+$('tl-toggle-history').addEventListener('click',function(){toggleGlobalClaimHistory(false)});
+$('tl-view-all-claims').addEventListener('click',function(){toggleGlobalClaimHistory(true)});
+$('tl-claim-now').addEventListener('click',function(){
+ if(this.dataset.mode==='history'){toggleGlobalClaimHistory(true);return}
+ var launch=creatorClaimLaunch();
+ if(!launch){status('A confirmed USDC Creator Rewards launch is required before fees can be claimed.',true);return}
+ claimRewards(launch);
+});
 renderPreview();loadMine();
 // Phantom returns through the system browser on iOS. The original installed
 // web app remains the source of truth and refreshes as soon as it is resumed.
