@@ -1204,6 +1204,12 @@ def _build_claim_rpcs() -> list:
     rpcs.append('https://api.mainnet-beta.solana.com')
     return rpcs
 CLAIM_SOL_RPCS = _build_claim_rpcs()
+_API_KEY_IN_URL_RE = re.compile(r'((?:api[-_]?key|token)=)[^&\s\'"]+', re.I)
+
+def _scrub_url_secrets(text) -> str:
+    """Mask api-key=/token= values, e.g. inside a requests error that quotes its URL."""
+    return _API_KEY_IN_URL_RE.sub(r'\1***', str(text))
+
 def _rpc_label(url: str) -> str:
     if 'helius' in url: return 'Helius'
     if 'alchemy' in url: return 'Alchemy'
@@ -24654,11 +24660,13 @@ def _fetch_wallet_tokens(wallet: str, onchain_wallet: str = None) -> dict:
                 }, timeout=12)
                 _rpc_raw = _rpc_r.json()
                 _prog_accounts = _rpc_raw.get('result', {}).get('value') or []
-                print(f'[wallet-tokens] prog={_prog_id[:8]} rpc={_rpc_url}: {len(_prog_accounts)} accounts', flush=True)
+                print(f'[wallet-tokens] prog={_prog_id[:8]} rpc={_rpc_label(_rpc_url)}: {len(_prog_accounts)} accounts', flush=True)
                 if _prog_accounts:
                     break
             except Exception as _rpc_err:
-                print(f'[wallet-tokens] prog={_prog_id[:8]} rpc={_rpc_url} error: {_rpc_err}', flush=True)
+                # Never log the RPC URL itself: its query string carries the API key.
+                print(f'[wallet-tokens] prog={_prog_id[:8]} rpc={_rpc_label(_rpc_url)} error: '
+                      f'{_scrub_url_secrets(_rpc_err)}', flush=True)
         for acc in _prog_accounts:
             info     = (acc.get('account') or {}).get('data', {}).get('parsed', {}).get('info') or {}
             mint     = info.get('mint', '')
