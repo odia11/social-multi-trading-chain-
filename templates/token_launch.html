@@ -25,16 +25,6 @@
     </div>
     <div class="tl-hero-coin" aria-hidden="true"><div class="tl-coin-face"><span>▲</span></div></div>
   </header>
-  <section class="tl-stats" aria-label="Verified OrcAgent token launch statistics">
-    <div class="tl-stat"><div class="tl-stat-icon tl-stat-rocket" aria-hidden="true">↗</div><div><span>Live</span><strong id="stat-all">—</strong></div></div>
-    <div class="tl-stat"><div class="tl-stat-icon tl-stat-usdc" aria-hidden="true">$</div><div><span>USDC</span><strong id="stat-usdc">—</strong></div></div>
-    <div class="tl-stat"><div class="tl-stat-icon tl-stat-sol" aria-hidden="true">◎</div><div><span>SOL</span><strong id="stat-sol">—</strong></div></div>
-  </section>
-  <section class="tl-steps" aria-label="How token launch works">
-    <div class="tl-step"><span class="tl-step-num">1</span><span class="tl-step-symbol" aria-hidden="true">▤</span><strong>Create</strong><small>Set up your token<br>details</small></div>
-    <div class="tl-step"><span class="tl-step-num">2</span><span class="tl-step-symbol" aria-hidden="true">▢</span><strong>Approve</strong><small>Confirm in your<br>Phantom wallet</small></div>
-    <div class="tl-step"><span class="tl-step-num">3</span><span class="tl-step-symbol" aria-hidden="true">↗</span><strong>Live</strong><small>Get listed on<br>OrcAgent</small></div>
-  </section>
   {% if pilot_creator_only %}
   <div class="tl-alert" role="status"><strong>Private OrcAgent mainnet pilot · USDC + 100% Creator Rewards.</strong> This test is limited to your signed-in Phantom wallet. Launch preparation is capped at 0.025 SOL, reserving at least 0.005 SOL for follow-up costs within your 0.03 SOL test budget. The separate USDC test trade is manual and at most 2 USDC.</div>
   {% endif %}
@@ -42,7 +32,7 @@
   <div class="tl-alert" role="status"><strong>Preflight mode.</strong> Save your token as a draft. Mainnet signing is disabled until final validation. Nothing is spent by saving a draft.</div>
   {% endif %}
   <section class="tl-builder tl-card" id="tl-form" aria-labelledby="tl-form-title">
-    <div class="tl-section-head tl-builder-heading"><span class="tl-section-tag">CREATE TOKEN</span><h2 id="tl-form-title">Launch your token</h2><p>Choose your token details and approve in Phantom.</p></div>
+    <div class="tl-section-head tl-builder-heading"><span class="tl-section-tag">NEW TOKEN</span><h2 id="tl-form-title">Create a coin</h2><p>Name, ticker and logo. Review your launch, then approve in Phantom.</p></div>
     <div class="tl-form-grid">
       <div class="tl-fields">
         <div class="tl-columns">
@@ -67,7 +57,7 @@
               </div>
             </fieldset>
             <details class="tl-rewards"><summary><span class="tl-rewards-play" aria-hidden="true">▶</span><strong id="tl-reward-summary">Rewards: 100% creator</strong><span class="tl-chevron" aria-hidden="true">⌄</span></summary><fieldset class="tl-fieldset">
-              <legend class="tl-label">Reward mode <span class="tl-info" title="Who receives eligible Pump creator fees" aria-label="Who receives eligible Pump creator fees">i</span></legend>
+              <legend class="tl-label">Reward mode <span class="tl-info" title="Who receives eligible creator fees" aria-label="Who receives eligible creator fees">i</span></legend>
               <div class="tl-options" role="group" aria-label="Creator rewards mode">
                 <label class="tl-option"><input type="radio" name="tl-mode" value="creator" checked><span class="tl-choice"><span aria-hidden="true">♛</span> Creator</span></label>
                 <label class="tl-option"><input type="radio" name="tl-mode" value="community" {% if pilot_creator_only %}disabled{% endif %}><span class="tl-choice"><span aria-hidden="true">♙</span> Community</span></label>
@@ -93,7 +83,7 @@
         <div class="tl-recent-status" id="tl-recent-status" hidden><strong>Recent launch status</strong><div id="tl-recent-items"></div></div>
         <div class="tl-status" id="tl-status" role="status" aria-live="polite"></div>
         <button id="tl-save" class="tl-btn tl-btn-primary tl-btn-block" type="button">{% if launch_enabled %}Continue to approve →{% else %}Save launch draft →{% endif %}</button>
-        <p class="tl-footnote">Token logo is required by Pump. OrcAgent first saves the draft; only your Phantom approval can create the token. A community fee split needs its own approval.</p>
+        <p class="tl-footnote">Your details are saved before wallet approval. Nothing is created or spent until you approve in Phantom. A community fee split needs one additional approval.</p>
       </div>
       <aside class="tl-preview-panel" aria-label="Live token preview">
         <span class="tl-preview-heading">LIVE PREVIEW</span>
@@ -107,6 +97,16 @@
         <p><strong>You're in control.</strong> No launch or swap is sent without your wallet approval. If your wallet needs SOL for network/rent, you can fund the saved draft with USDC where gasless funding is available.</p>
       </aside>
     </div>
+  </section>
+  <section class="tl-stats" aria-label="Verified OrcAgent token launch statistics">
+    <div class="tl-stat"><div class="tl-stat-icon tl-stat-rocket" aria-hidden="true">↗</div><div><span>Live</span><strong id="stat-all">—</strong></div></div>
+    <div class="tl-stat"><div class="tl-stat-icon tl-stat-usdc" aria-hidden="true">$</div><div><span>USDC</span><strong id="stat-usdc">—</strong></div></div>
+    <div class="tl-stat"><div class="tl-stat-icon tl-stat-sol" aria-hidden="true">◎</div><div><span>SOL</span><strong id="stat-sol">—</strong></div></div>
+  </section>
+  <section class="tl-steps" aria-label="How token launch works">
+    <div class="tl-step"><span class="tl-step-num">1</span><span class="tl-step-symbol" aria-hidden="true">▤</span><strong>Create</strong><small>Set up your token<br>details</small></div>
+    <div class="tl-step"><span class="tl-step-num">2</span><span class="tl-step-symbol" aria-hidden="true">▢</span><strong>Approve</strong><small>Confirm in your<br>Phantom wallet</small></div>
+    <div class="tl-step"><span class="tl-step-num">3</span><span class="tl-step-symbol" aria-hidden="true">↗</span><strong>Live</strong><small>Get listed on<br>OrcAgent</small></div>
   </section>
   <section class="tl-card tl-saved" id="saved-launches" aria-labelledby="tl-saved-title">
     <div class="tl-section-head"><span class="tl-section-tag">YOUR WORKSPACE</span><h2 id="tl-saved-title">Your launches</h2><p>Follow your launch here. Confirmation updates automatically after Phantom approval.</p></div>

@@ -162,7 +162,7 @@ async function launchStage(row,stage){
  var create=stage==='create';
  var title=create?'Approve token launch':'Lock the community fee split';
  var details=create
-  ? 'You will approve a real Solana mainnet token creation. Pair: '+row.quote_asset+'. Mode: '+row.reward_mode+'. Network rent and Pump trading fees apply. OrcAgent adds no launch fee.'
+  ? 'Create '+row.symbol+' / '+row.quote_asset+' on Solana. Estimated network and rent costs are checked before Phantom opens. Review the final transaction in your wallet. OrcAgent adds no launch fee.'
   : 'The token is already created. Its initial creator fee goes 100% to your wallet UNTIL this second transaction is confirmed. Final split: '+((10000-row.community_bps)/100).toFixed(2)+'% creator / '+(row.community_bps/100).toFixed(2)+'% '+row.community_wallet+'. This final allocation is irreversible.';
  try{
    var result=await dialog(title,details,async function(){
@@ -519,7 +519,6 @@ async function saveDraft(){
  // One obvious action on the form: save the immutable draft first,
  // then offer explicit Phantom approval. No automatic signing/spending.
  if(readyToApprove){
-   $('saved-launches').scrollIntoView({behavior:'smooth',block:'nearest'});
    await launchStage(readyToApprove,'create');
  }
 }

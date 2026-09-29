@@ -172,3 +172,6 @@ html,body{background:var(--bg)}
  .tl-detail-body{padding-left:0}.tl-detail-body .tl-actions{gap:7px}.tl-detail-body .tl-actions button{font-size:11px!important;padding:8px!important}
 }
 @media(max-width:360px){.tl-item-icon{width:51px;height:51px}.tl-item-identity strong{font-size:15px}.tl-option .tl-choice{font-size:12px}.tl-rewards summary{font-size:14px}}
+
+/* Put creation first; keep overview and recovery below the form. */
+@media(min-width:851px){.tl-hero{min-height:0;margin-bottom:18px}.tl-hero-coin{display:none}.tl-hero-actions{width:auto}.tl-lead{margin-bottom:14px}.tl-steps{display:none}}
