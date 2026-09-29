@@ -77,8 +77,8 @@ def install(appmod) -> None:
             for href, kind in (
                 (f'/static/navbar.css?v={version}', 'style'),
                 (f'/static/navbar.js?v={version}', 'script'),
-                ('/static/mobile-bottom-nav.css?v=6', 'style'),
-                ('/static/mobile-bottom-nav.js?v=6', 'script'),
+                ('/static/mobile-bottom-nav.css?v=7', 'style'),
+                ('/static/mobile-bottom-nav.js?v=7', 'script'),
                 (f'/static/header-stable-balance.js?v={version}', 'script'),
             ):
                 marker = f'rel="preload" href="{href}"'

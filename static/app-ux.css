@@ -23,8 +23,8 @@ body{max-width:100%;overflow-x:hidden;overflow-x:clip;background:#080d12!importa
   /* The shared bottom nav itself occupies about 98px including its inner
      padding. Older rules reserved 118-132px, leaving a visible dead strip at
      the bottom of many pages. Keep only the space the fixed control needs. */
-  html body.oa-shared-ux{padding-bottom:calc(102px + env(safe-area-inset-bottom,0px) + var(--oa-nav-lift,0px))!important}
-  html body.oa-shared-ux.oa-portfolio .wlt-center{padding-bottom:calc(108px + env(safe-area-inset-bottom,0px) + var(--oa-nav-lift,0px))!important}
+  html body.oa-shared-ux{padding-bottom:calc(102px + env(safe-area-inset-bottom,0px))!important}
+  html body.oa-shared-ux.oa-portfolio .wlt-center{padding-bottom:calc(108px + env(safe-area-inset-bottom,0px))!important}
 
   /* iOS zooms the viewport when a focused form control is below 16px. That
      creates the apparent page jump seen in in-app browsers, so text controls

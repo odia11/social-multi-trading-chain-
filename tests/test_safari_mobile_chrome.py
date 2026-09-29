@@ -7,13 +7,24 @@ BF=(ROOT/'static'/'bfcache-guard.js').read_text()
 SW=(ROOT/'static'/'sw.js').read_text()
 
 checks={
- 'large Safari toolbar corrections are allowed': 'Math.max(-360,Math.min(180,next))' in JS and 'Math.abs(next)>120' not in JS,
- 'keyboard is detected by focused text input instead of a magic gap': "_editingText()" in JS and "vv.height < layoutH*0.72" in JS,
- 'nav recalculates on bfcache and visibility restore': "orca:bfcache-restored" in JS and "visibilitychange" in JS,
- 'page reserves the visual-viewport nav lift': '--oa-nav-lift' in CSS and '--oa-nav-lift' in APP,
- 'both legacy navs are forcibly hidden': '#mobile-nav,#mob-bottom-nav{display:none!important}' in CSS,
- 'bfcache helper does not silence native pageshow listeners': 'stopImmediatePropagation' not in BF,
- 'service worker boot cache uses the new nav bundle': 'orcagent-static-v2' in SW and 'mobile-bottom-nav.js?v=6' in SW,
+ 'bottom nav is fixed and forcibly visible':
+      'position:fixed!important' in CSS and 'bottom:0!important' in CSS
+      and 'transform:none!important' in CSS and 'visibility:visible!important' in CSS,
+ 'Safari visualViewport is not used to translate the footer':
+      'visibleBottom-nav.getBoundingClientRect().bottom' not in JS
+      and 'translate3d(0,' not in JS,
+ 'old bfcache geometry is explicitly cleared':
+      "setProperty('--oa-nav-lift','0px')" in JS
+      and "setProperty('transform','none','important')" in JS,
+ 'page never reserves a second visual-viewport lift':
+      'var(--oa-nav-lift' not in CSS and 'var(--oa-nav-lift' not in APP,
+ 'both legacy navs are forcibly hidden':
+      '#mobile-nav,#mob-bottom-nav{display:none!important}' in CSS,
+ 'bfcache helper does not silence native pageshow listeners':
+      'stopImmediatePropagation' not in BF,
+ 'service worker boot cache uses the corrected nav bundle':
+      'orcagent-static-v3' in SW and 'mobile-bottom-nav.js?v=7' in SW
+      and 'mobile-bottom-nav.css?v=7' in SW,
 }
 for label,ok in checks.items():
     print(('PASS' if ok else 'FAIL')+' - '+label)
