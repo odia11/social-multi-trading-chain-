@@ -1356,16 +1356,29 @@ def _rpc_candidates(chain: str) -> list:
     primary via _get_web3(); only idempotent balance reads may fail over."""
     primary = EVM_CHAINS[chain]['rpc_url']
     urls = [primary]
+    # Read-only balance calls may fail over. Transaction/signing paths still
+    # use EVM_CHAINS[chain]['rpc_url'] via _get_web3(), so these fallbacks can
+    # never silently change where a signed transaction is broadcast.
+    env_key = chain.upper() + '_RPC_FALLBACK_URLS'
+    # Keep the explicit Base key visible for backwards compatibility and
+    # regression coverage; other chains follow the same naming convention.
+    extra = (os.environ.get('BASE_RPC_FALLBACK_URLS', '') if chain == 'base'
+             else os.environ.get(env_key, ''))
+    urls.extend([u.strip() for u in extra.split(',') if u.strip()])
     if chain == 'base':
-        # BASE_RPC_FALLBACK_URLS lets production override/extend this list.
-        # Public fallbacks are reads only; signing/broadcast paths still use
-        # the explicitly configured primary endpoint.
-        extra = os.environ.get('BASE_RPC_FALLBACK_URLS', '')
-        urls.extend([u.strip() for u in extra.split(',') if u.strip()])
         urls.extend([
+            'https://base-rpc.publicnode.com',
             'https://public.1rpc.io/base',
             'https://base.publicnode.com',
         ])
+    elif chain == 'bsc':
+        urls.append('https://bsc-rpc.publicnode.com')
+    elif chain == 'arbitrum':
+        urls.append('https://arbitrum-one-rpc.publicnode.com')
+    elif chain == 'polygon':
+        # The primary PublicNode endpoint has intermittently returned 529 from
+        # this production host. dRPC is an independent read fallback.
+        urls.append('https://polygon.drpc.org')
     out=[]; seen=set()
     for u in urls:
         if u and u not in seen:
@@ -24567,14 +24580,15 @@ def _fetch_wallet_tokens(wallet: str, onchain_wallet: str = None) -> dict:
     sol_price_usd = 0.0
 
     # ── SOL balance ──
-    sol_balance = 0.0
+    # Never turn an RPC outage/rate-limit into a real-looking 0.00 balance.
+    # _get_user_sol uses the healthy unindexed PublicNode read first and then
+    # the configured Solana fallback pool. If every provider fails, fail this
+    # snapshot so the UI keeps its last confirmed value instead of overwriting
+    # it with zero.
     try:
-        r = requests.post(SOLANA_RPC, json={
-            'jsonrpc': '2.0', 'id': 1, 'method': 'getBalance', 'params': [onchain_wallet]
-        }, timeout=8)
-        sol_balance = round(r.json()['result']['value'] / 1e9, 6)
-    except Exception:
-        pass
+        sol_balance = round(float(_get_user_sol(onchain_wallet)), 9)
+    except Exception as exc:
+        raise RuntimeError('SOL balance unavailable from verified RPC') from exc
 
     # ── SOL price from DexScreener ──
     try:
@@ -24803,32 +24817,14 @@ def api_wallet_balance():
     # funds. Falls back to the session wallet only if no trading key is
     # saved yet, matching the previous behavior for that case.
     balance_wallet = _get_trading_wallet_address(wallet) or wallet
-    # Public Solana RPCs can rate-limit getBalance while token reads through
-    # another provider still work. Try the ordered fallback pool instead of
-    # making one provider hiccup a hard Portfolio failure.
-    sol = None
-    last_balance_error = None
-    seen_rpcs = set()
-    for rpc in CLAIM_SOL_RPCS:
-        if not rpc or rpc in seen_rpcs:
-            continue
-        seen_rpcs.add(rpc)
-        try:
-            r = requests.post(rpc, json={
-                'jsonrpc': '2.0', 'id': 1, 'method': 'getBalance',
-                'params': [balance_wallet]
-            }, timeout=4)
-            body = r.json()
-            value = (body.get('result') or {}).get('value')
-            if value is None:
-                raise ValueError((body.get('error') or {}).get('message') or 'RPC returned no balance')
-            sol = round(float(value) / 1e9, 6)
-            break
-        except Exception as e:
-            last_balance_error = str(e)
-    if sol is None:
+    # One authoritative native-SOL reader for the entire app. It prefers the
+    # healthy unindexed PublicNode endpoint and fails over across configured
+    # providers. Provider outages are never converted to a displayed zero.
+    try:
+        sol = round(float(_get_user_sol(balance_wallet)), 9)
+    except Exception as exc:
         return jsonify({'ok': False, 'msg': 'SOL balance temporarily unavailable',
-                        'detail': last_balance_error}), 503
+                        'detail': type(exc).__name__}), 503
     usd = round(sol * _sol_price_usd, 4) if _sol_price_usd else None
 
     # SOL currently committed to open positions -- the Wallet page's "In Open
@@ -24997,6 +24993,20 @@ def _get_solana_usdc_balance(address: str) -> float:
         with _sol_usdc_balance_lock:
             _sol_usdc_balance_cache[key] = (time.time(), 0.0)
         return 0.0
+
+    # Indexed token-account methods can all be throttled at once even while
+    # ordinary account reads are healthy. OrcAgent trades canonical USDC from
+    # the wallet's deterministic associated token account, so an exact
+    # getAccountInfo read can still prove the spendable balance without an
+    # indexer. This is the same verified path used by the trading bot.
+    try:
+        _, spendable = _get_bot_solana_balances(key)
+        spendable = float(spendable)
+        with _sol_usdc_balance_lock:
+            _sol_usdc_balance_cache[key] = (time.time(), spendable)
+        return spendable
+    except Exception:
+        pass
 
     raise RuntimeError(
         'Solana USDC balance unavailable'

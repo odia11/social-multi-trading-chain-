@@ -63,6 +63,12 @@ def test_singleflight_shape_is_present():
     assert block.count('_evm_read_cache.get(cache_key)') >= 2
 
 
+def test_polygon_has_independent_read_fallback():
+    block=SRC[SRC.index('def _rpc_candidates'):SRC.index('def _web3_for_rpc')]
+    assert "chain == 'polygon'" in block
+    assert 'https://polygon.drpc.org' in block
+
+
 if __name__=='__main__':
     for name in sorted(n for n in globals() if n.startswith('test_')):
         globals()[name]()
