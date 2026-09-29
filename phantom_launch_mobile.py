@@ -81,6 +81,18 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
                 (flow['claim_id'],flow['launch_id'],flow['wallet'])).fetchone()
         return dict(claim) if claim else None
 
+    # A Solana blockhash stays valid for ~60-90 seconds. One fetched moments
+    # ago can still look invalid to a slightly lagging RPC node that has not
+    # seen it yet -- which refused a freshly prepared claim ("Claim approval
+    # expired") before Phantom was even opened. Within this window after the
+    # transaction was prepared it cannot have expired, so the RPC is not asked.
+    BLOCKHASH_MIN_LIFE=45
+
+    def still_valid(raw,issued_at,claim_read=False):
+        if issued_at and 0<=int(time.time())-int(issued_at)<BLOCKHASH_MIN_LIFE:
+            return True
+        return blockhash_valid(raw,claim_read=True) if claim_read else blockhash_valid(raw)
+
     def current(flow):
         row=lookup(flow['launch_id'],flow['wallet'])
         if not row:return None,None
@@ -206,7 +218,7 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
             return fail('This claim was already submitted. Check claim history.',409)
         raw=claim['transaction_b64']
         try:
-            valid=bool(raw and blockhash_valid(raw,claim_read=True))
+            valid=bool(raw and still_valid(raw,claim['created_at'],claim_read=True))
         except RuntimeError:
             return fail('Solana is unavailable. No claim transaction was sent. Retry shortly.',503)
         if not valid:
@@ -258,7 +270,7 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
             if check_signature(claim['signature'],{'prepare_tx_b64':claim['transaction_b64'],
                     'wallet':wallet,'mint':claim['mint']},'claim'):
                 return jsonify(ok=True,confirmed=True,signature=claim['signature'])
-            if not blockhash_valid(claim['transaction_b64'],claim_read=True):
+            if not still_valid(claim['transaction_b64'],claim['created_at'],claim_read=True):
                 return fail('The original claim expired. Check history before preparing another claim.',409)
             from launch_delivery import relay_identical_signed
             delivered=relay_identical_signed(raw,claim['signature'],[
@@ -410,8 +422,8 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
                 if not 1<=len(signed)<=1232:raise ValueError('Invalid transaction size')
                 tx=Transaction.from_bytes(signed)
                 if blockhash_valid is not None and not (
-                    blockhash_valid(original_b64,claim_read=True) if flow['stage']=='claim'
-                    else blockhash_valid(original_b64)):
+                    still_valid(original_b64,(claim_for(flow) or {'created_at':0})['created_at'],claim_read=True)
+                    if flow['stage']=='claim' else blockhash_valid(original_b64)):
                     return fail('Phantom approval expired before submission. Reopen this SAME saved token and retry safely.',409)
                 if bytes(tx.message)!=bytes(original.message) or not all(tx.verify_with_results()):
                     return fail('Phantom signature did not match this exact token launch',409)
