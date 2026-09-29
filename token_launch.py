@@ -509,8 +509,26 @@ def install(d):
         return (tail[0][1]==(wallet,) and tail[1][1]==(str(ata),)
                 and all(0<len(item[2])<=64 for item in tail))
 
+    def phantom_claim_wrapper_ok(signed_msg,prepared_msg,wallet):
+        '''Before RELAYING a Phantom-signed claim: accept Phantom's standard
+        wrapper (see _claim_instructions_match -- the Pump claim itself must be
+        identical) only while the priority fee it added stays within the
+        claim's SOL budget. After confirmation check_signature bounds the
+        actual debit again.'''
+        if not _claim_instructions_match(signed_msg,prepared_msg,wallet):return False
+        keys=signed_msg.account_keys
+        limit=min(1_400_000,200_000*len(signed_msg.instructions));price=0
+        for ix in signed_msg.instructions:
+            if str(keys[ix.program_id_index])!=COMPUTE_BUDGET_PROGRAM:continue
+            data=bytes(ix.data)
+            if data[:1]==b'\x02':limit=int.from_bytes(data[1:5],'little')
+            elif data[:1]==b'\x03':price=int.from_bytes(data[1:9],'little')
+        fee=limit*price//1_000_000+5000*signed_msg.header.num_required_signatures
+        return fee<=PILOT_MAX_FOLLOWUP_SOL_LAMPORTS
+
     # Internal offline/on-chain regression hook, never an HTTP route.
     app._orca_claim_message_match=_claim_instructions_match
+    app._orca_phantom_claim_wrapper_ok=phantom_claim_wrapper_ok
 
     def check_signature(signature,row,stage):
         """Check the *exact* prepared transaction, not merely any Pump trade.
@@ -1527,4 +1545,5 @@ def install(d):
     # the exact owner-bound Pump transaction, never an OrcAgent key.
     if os.getenv('ENCRYPTION_KEY'):
         from phantom_launch_mobile import install as install_phantom_launch_mobile
-        install_phantom_launch_mobile(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid)
+        install_phantom_launch_mobile(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid,
+                                      phantom_claim_wrapper_ok)
