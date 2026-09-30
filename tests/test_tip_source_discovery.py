@@ -41,7 +41,9 @@ class SourceDiscoveryTests(unittest.TestCase):
         if method == 'getAccountInfo':
             return {'value': {'owner': PROGRAM}}
         if method == 'getBalance':
-            return {'value': 100000}
+            # Above a plain wallet's rent floor (890,880) plus the fee; a
+            # wallet under that floor cannot pay any Solana fee at all.
+            return {'value': 5_000_000}
         if method == 'getLatestBlockhash':
             return {'value': {'blockhash': str(Hash.default())}}
         if method == 'sendTransaction':
