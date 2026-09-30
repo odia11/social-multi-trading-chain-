@@ -65,7 +65,7 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
 (function(){
   if(!window.matchMedia('(max-width:768px)').matches)return;
   ensureStyle('/static/mobile-bottom-nav.css?v=9','mobile-bottom-nav.css');
-  ensureScript('/static/mobile-bottom-nav.js?v=9','mobile-bottom-nav.js');
+  ensureScript('/static/mobile-bottom-nav.js?v=10','mobile-bottom-nav.js');
 })();
 
 /* Consistent reply/repost/like/bookmark SVGs wherever feed actions exist. */

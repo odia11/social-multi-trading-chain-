@@ -44,8 +44,7 @@
      Claude's fit-content wrapper made portrait images sit hard-left with a
      large dead area on the right. The image itself still keeps its aspect
      ratio and is never cropped. */
-  body.oa-home-mobile #composer-image-preview,
-  body.oa-home-mobile #composer-video-preview{
+  body.oa-home-mobile #composer-image-preview{
     width:100%!important;
     max-width:100%!important;
     box-sizing:border-box!important;
@@ -55,8 +54,7 @@
     border-radius:14px!important;
     background:#060c12!important;
   }
-  body.oa-home-mobile #composer-image-preview-img,
-  body.oa-home-mobile #composer-video-preview-el{
+  body.oa-home-mobile #composer-image-preview-img{
     display:block!important;
     width:auto!important;
     max-width:100%!important;
@@ -67,19 +65,14 @@
     object-fit:contain!important;
     background:#060c12!important;
   }
-  body.oa-home-mobile .composer-video-status{
-    width:100%!important;
-    box-sizing:border-box!important;
-    margin-top:8px!important;
-  }
   body.oa-home-mobile #composer-chart-preview,
   body.oa-home-mobile #composer-trade-preview{
     margin:0 0 12px!important;
   }
 
-  /* One tidy row: five equal attachment buttons (Chart, Trade, Call, Image, Video) + a square emoji button,
-     then the full-width POST. A wrapping flex row used to push "Video" and
-     the emoji onto a ragged second line. */
+  /* One tidy row: four equal attachment buttons (Chart, Trade, Call, Image) + a square emoji button,
+     then the full-width POST. A wrapping flex row used to push the last
+     button and the emoji onto a ragged second line. */
   /* #feed-composer.feed-composer in the selector: home-mobile-polish.css
      forces display:flex (and home-mobile.css a 48px left indent) on this row
      with `body.oa-home-mobile #feed-composer ...`, and it is injected at
@@ -88,7 +81,7 @@
      regardless of load order. */
   body.oa-home-mobile #feed-composer.feed-composer .feed-composer-actions{
     display:grid!important;
-    grid-template-columns:repeat(5,minmax(0,1fr)) 46px!important;
+    grid-template-columns:repeat(4,minmax(0,1fr)) 46px!important;
     align-items:stretch!important;
     gap:6px!important;
     padding:12px 0 0!important;

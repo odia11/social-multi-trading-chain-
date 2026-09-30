@@ -71,6 +71,7 @@ if not ff:
 if ff:
     os.environ['ORCAGENT_FFMPEG'] = ff
     media = tempfile.mkdtemp(); os.environ['ORCAGENT_MEDIA_DIR'] = media
+    os.environ['ORCAGENT_FEED_VIDEO_POSTS'] = '1'   # the upload pipeline itself; off for users
     clip = os.path.join(media, 'clip.mp4')
     subprocess.run([ff, '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25',
                     '-t', '5', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', clip], check=True)

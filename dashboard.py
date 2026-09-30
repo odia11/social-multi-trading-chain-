@@ -18006,7 +18006,7 @@ def _navbar_html(active_nav: str = '') -> Markup:
 <div class="pt-nb-scrim" id="pt-nb-scrim"></div>
 %(bottom_nav)s
 <script src="/static/navbar.js?v=%(v)s" defer></script>
-<script src="/static/mobile-bottom-nav.js?v=9" defer></script>
+<script src="/static/mobile-bottom-nav.js?v=10" defer></script>
 ''' % {'v': _APP_VERSION, 'nav_links': nav_links, 'more_items_desktop': more_items_desktop, 'more_items_mobile': more_items_mobile, 'bottom_nav': bottom_nav})
 
 @app.route('/api/version')
@@ -22036,6 +22036,16 @@ def _parse_feed_embed(content):
     return {'kind': 'photo', 'text_part': '', 'symbol': '', 'pnl_pct': 0.0, 'pnl_sol': 0.0, 'pnl_currency': 'SOL'}
 
 
+VIDEO_POSTS_OFF_MSG = 'Video posts are not allowed on OrcAgent'
+
+
+def _feed_video_posts_enabled() -> bool:
+    """Users may not post videos. Off unless ORCAGENT_FEED_VIDEO_POSTS=1
+    (kept only so the upload pipeline can still be tested); existing video
+    posts keep playing."""
+    return os.environ.get('ORCAGENT_FEED_VIDEO_POSTS', '0') == '1'
+
+
 @app.route('/api/feed/post', methods=['POST'])
 @rate_limit(15, 60)
 def feed_post_create():
@@ -22048,6 +22058,8 @@ def feed_post_create():
     video_id = str(body.get('video_id', '') or '').strip()
     if not content and not image_data and not video_id:
         return jsonify({'ok': False, 'msg': 'Content cannot be empty'}), 400
+    if video_id and not _feed_video_posts_enabled():
+        return jsonify({'ok': False, 'msg': VIDEO_POSTS_OFF_MSG}), 403
     if FEED_CALL_MARKER in content:
         # Only api_make_call() posts a call (with its server-fetched price).
         return jsonify({'ok': False, 'msg': 'Use the Call button to call a token'}), 400

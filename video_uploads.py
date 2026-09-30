@@ -343,6 +343,8 @@ def install(d):
         wallet = d._authenticated_wallet()
         if not wallet:
             return jsonify({'ok': False, 'msg': 'Not logged in'}), 401
+        if not d._feed_video_posts_enabled():
+            return jsonify({'ok': False, 'msg': d.VIDEO_POSTS_OFF_MSG}), 403
         if not _ffmpeg():
             return jsonify({'ok': False, 'msg': 'Video uploads are not available right now'}), 503
         try:
