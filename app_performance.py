@@ -46,7 +46,7 @@ def install(appmod) -> None:
                 tags.append('<script src="/static/bfcache-guard.js?v=2"></script>')
 
             style('app-ux.css', '/static/app-ux.css?v=9', ' id="oa-app-ux-css"')
-            script('app-ux.js', '/static/app-ux.js?v=9', ' id="oa-app-ux-js"')
+            script('app-ux.js', '/static/app-ux.js?v=10', ' id="oa-app-ux-js"')
 
             # The navbar is rendered later in <body>, and its JS used to be the
             # thing that only then discovered the fixed mobile bottom-nav
@@ -65,7 +65,7 @@ def install(appmod) -> None:
             style('shared-trade-card-v2.css', '/static/shared-trade-card-v2.css?v=1', ' id="oa-shared-trade-card-css"')
             script('shared-trade-card-v2.js', '/static/shared-trade-card-v2.js?v=2', ' id="oa-shared-trade-card-js"')
             style('feed-action-icons.css', '/static/feed-action-icons.css?v=5')
-            script('feed-action-icons.js', '/static/feed-action-icons.js?v=4')
+            script('feed-action-icons.js', '/static/feed-action-icons.js?v=5')
             script('swipe-back.js', '/static/swipe-back.js?v=1')
 
             if 'fonts.googleapis.com' in html and 'rel="preconnect" href="https://fonts.googleapis.com"' not in html:
@@ -88,7 +88,7 @@ def install(appmod) -> None:
                 style('groups-redesign.css', '/static/groups-redesign.css?v=1')
                 script('groups-redesign.js', '/static/groups-redesign.js?v=1')
             elif path == '/':
-                style('home-mobile.css', '/static/home-mobile.css?v=13', ' media="(max-width:768px)"')
+                style('home-mobile.css', '/static/home-mobile.css?v=14', ' media="(max-width:768px)"')
                 style('home-mobile-polish.css', '/static/home-mobile-polish.css?v=8', ' media="(max-width:768px)"')
                 style('home-composer-mobile.css', '/static/home-composer-mobile.css?v=7', ' media="(max-width:768px)"')
                 style('home-desktop.css', '/static/home-desktop.css?v=1', ' media="(min-width:1025px)"')

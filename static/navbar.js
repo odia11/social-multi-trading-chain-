@@ -43,8 +43,8 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/'||!window.matchMedia('(max-width:768px)').matches)return;
   document.documentElement.classList.add('oa-home-mobile-root');
-  ensureStyle('/static/home-mobile.css?v=13','home-mobile.css');
-  ensureScript('/static/home-mobile.js?v=11','home-mobile.js');
+  ensureStyle('/static/home-mobile.css?v=14','home-mobile.css');
+  ensureScript('/static/home-mobile.js?v=12','home-mobile.js');
 })();
 
 (function(){
@@ -71,7 +71,7 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
 /* Consistent reply/repost/like/bookmark SVGs wherever feed actions exist. */
 (function(){
   ensureStyle('/static/feed-action-icons.css?v=5','feed-action-icons.css');
-  ensureScript('/static/feed-action-icons.js?v=4','feed-action-icons.js');
+  ensureScript('/static/feed-action-icons.js?v=5','feed-action-icons.js');
 })();
 
 var _NB_LIVE_CHAINS=['solana','bsc','base','arbitrum','polygon','robinhood'];

@@ -69,16 +69,88 @@ function buildPortfolio(afterEl){
   var el=document.createElement('section');el.className='oa-m-portfolio';el.id='oa-m-portfolio';
   el.innerHTML='<div class="oa-m-pf-icon">▣</div><div class="oa-m-pf-main"><div class="oa-m-pf-label">Total Portfolio Value</div><div class="oa-m-pf-row"><strong id="oa-m-pf-value">—</strong><span>Live</span></div></div><div class="oa-m-pf-chart">'+spark()+'</div><a href="/wallet" class="oa-m-pf-btn">View Portfolio <span>→</span></a>';
   afterEl.insertAdjacentElement('afterend',el);
+  startPortfolio();
+  return el;
+}
+function startPortfolio(){
   var cached=_homeCachedPortfolio();
   if(cached!==null)_paintHomePortfolio(cached,false,false);
   refreshHomePortfolio();
+  if(_oaPortfolioTimer)clearInterval(_oaPortfolioTimer);
   _oaPortfolioTimer=setInterval(refreshHomePortfolio,30000);
+}
+/* ── Signed-in Home: a cockpit instead of the marketing hero ──────────────
+   The hero ("Smarter Trading. Stronger Together.") is a pitch for someone
+   who has not joined yet; its four icons do nothing. A signed-in trader
+   gets what they came for instead: their portfolio, the four things they
+   do most, and what is moving right now. */
+function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function signedIn(){var w=window.__SESSION_WALLET;return !!(w&&w!=='__SESSION_WALLET__')}
+function greeting(){var h=new Date().getHours();return h<5?'Good night':h<12?'Good morning':h<18?'Good afternoon':'Good evening'}
+function actionIcon(t){var p={
+  deposit:'<path d="M12 4v11M7 10l5 5 5-5"/><path d="M4 19h16"/>',
+  trade:'<path d="M4 16l5-5 4 4 7-7"/><path d="M15 8h5v5"/>',
+  launch:'<path d="M12 3c3 2 5 6 5 10l-2 3H9l-2-3c0-4 2-8 5-10z"/><circle cx="12" cy="10" r="1.6"/><path d="M9 16l-2 4 3-1M15 16l2 4-3-1"/>',
+  call:'<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>'
+};return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+p[t]+'</svg>'}
+function buildToday(wrap){
+  var old=document.getElementById('oa-m-portfolio');if(old)old.remove();
+  var el=document.createElement('section');el.className='oa-m-today';el.id='oa-m-portfolio';
+  el.innerHTML='<div class="oa-m-today-hi">'+greeting()+'</div>'
+    +'<a class="oa-m-today-value" href="/wallet"><span class="oa-m-today-label">Portfolio</span>'
+    +'<strong id="oa-m-pf-value">—</strong><span class="oa-m-today-go">View →</span></a>'
+    +'<div class="oa-m-actions">'
+    +'<a href="/wallet#deposit" class="primary">'+actionIcon('deposit')+'<span>Deposit</span></a>'
+    +'<a href="/live-market">'+actionIcon('trade')+'<span>Trade</span></a>'
+    +'<a href="/token-launch">'+actionIcon('launch')+'<span>Launch</span></a>'
+    +'<button type="button" id="oa-m-action-call">'+actionIcon('call')+'<span>Call</span></button>'
+    +'</div>';
+  wrap.insertBefore(el,wrap.firstChild);
+  document.getElementById('oa-m-action-call').onclick=function(){
+    if(typeof window._openCallSheet==='function')window._openCallSheet();else location.href='/calls';
+  };
+  startPortfolio();
   return el;
+}
+function oppAge(ts){var s=Math.max(0,Date.now()/1000-(Number(ts)||0));if(!ts)return '';if(s<3600)return Math.max(1,Math.floor(s/60))+'m';if(s<86400)return Math.floor(s/3600)+'h';return Math.floor(s/86400)+'d'}
+function oppCard(href,img,sym,sub,subCls){
+  return '<a class="oa-m-opp" href="'+href+'">'
+    +(img?'<img src="'+esc(img)+'" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">':'<span class="oa-m-opp-ph"></span>')
+    +'<span class="oa-m-opp-txt"><b>$'+esc(sym)+'</b><small class="'+(subCls||'')+'">'+sub+'</small></span></a>';
+}
+function buildOpps(afterEl){
+  var old=document.getElementById('oa-m-opps');if(old)old.remove();
+  var el=document.createElement('section');el.className='oa-m-opps';el.id='oa-m-opps';
+  el.innerHTML='<div class="oa-m-opps-block" id="oa-m-surge" hidden><div class="oa-m-opps-hd"><span class="hot">Surging now</span><a href="/live-market">Live Market →</a></div><div class="oa-m-opps-rail" id="oa-m-surge-rail"></div></div>'
+    +'<div class="oa-m-opps-block" id="oa-m-launches" hidden><div class="oa-m-opps-hd"><span>New on OrcAgent</span><a href="/launches">All launches →</a></div><div class="oa-m-opps-rail" id="oa-m-launch-rail"></div></div>';
+  afterEl.insertAdjacentElement('afterend',el);
+  loadOpps();
+  setInterval(function(){if(!document.hidden)loadOpps()},60000);
+  return el;
+}
+function loadOpps(){
+  var surge=fetch('/api/market/surges',{credentials:'include'}).then(function(r){return r.json()}).then(function(d){
+    var list=((d&&d.surges)||[]).slice(0,10),box=document.getElementById('oa-m-surge'),rail=document.getElementById('oa-m-surge-rail');
+    if(!box||!rail)return;box.hidden=!list.length;
+    rail.innerHTML=list.map(function(s){
+      var chg=Number(s.price_change_5m)||Number(s.price_change_obs)||0;
+      return oppCard('/live-market?mint='+encodeURIComponent(s.mint)+'&profile=1',s.image_url,s.symbol||'TOKEN',
+        (Math.abs(chg)>=0.05?(chg>=0?'+':'')+chg.toFixed(1)+'%':'surging'),chg>=0?'up':'down');
+    }).join('');
+  }).catch(function(){});
+  var launches=fetch('/api/token-launches?page=1',{credentials:'include'}).then(function(r){return r.json()}).then(function(d){
+    var list=((d&&d.launches)||[]).slice(0,10),box=document.getElementById('oa-m-launches'),rail=document.getElementById('oa-m-launch-rail');
+    if(!box||!rail)return;box.hidden=!list.length;
+    rail.innerHTML=list.map(function(l){
+      return oppCard(l.trade_url||('/token/'+encodeURIComponent(l.mint)),l.logo_url,l.symbol,esc(l.quote_asset)+' · '+oppAge(l.finalized_at||l.created_at));
+    }).join('');
+  }).catch(function(){});
+  return Promise.allSettled([surge,launches]);
 }
 document.addEventListener('visibilitychange',function(){if(!document.hidden)refreshHomePortfolio()});
 // Pull-to-refresh on Home (wired up in dashboard.js) refreshes these cards
 // in place along with the feed.
-window.OrcAgentRefreshHome=function(){return Promise.allSettled([refreshHomePortfolio(),updateMajorMarkets(),refreshBot()])};
+window.OrcAgentRefreshHome=function(){return Promise.allSettled([refreshHomePortfolio(),updateMajorMarkets(),refreshBot(),document.getElementById('oa-m-opps')?loadOpps():null])};
 window.addEventListener('pageshow',refreshHomePortfolio);
 function choosePair(d){var a=(d&&d.pairs)||[];if(!a.length)return null;a.sort(function(x,y){return num(y.liquidity&&y.liquidity.usd)-num(x.liquidity&&x.liquidity.usd)});return a[0]}
 function formatPrice(n){n=num(n);if(n>=1000)return '$'+n.toLocaleString('en-US',{maximumFractionDigits:0});if(n>=1)return '$'+n.toLocaleString('en-US',{maximumFractionDigits:2});if(n>0)return '$'+n.toPrecision(4);return '—'}
@@ -170,5 +242,5 @@ function moveComposer(afterEl){var c=document.getElementById('feed-composer');if
 function keepComposerOpen(c){if(!c)return;var t=document.getElementById('postText');c.classList.add('expanded');if(!t)return;t.addEventListener('focus',function(){c.classList.add('expanded')});t.addEventListener('blur',function(){requestAnimationFrame(function(){c.classList.add('expanded')})});t.addEventListener('input',function(){c.classList.add('expanded')})}
 function feedTabs(afterEl){var nativeTabs=document.querySelector('.feed-tabs');if(nativeTabs)nativeTabs.style.display='none';var old=document.getElementById('oa-m-feed-label');if(old)old.remove();var e=document.createElement('div');e.className='oa-m-feed-label';e.id='oa-m-feed-label';e.innerHTML='<button class="active" data-feed="foryou">For You</button><button data-feed="following">Following</button><button data-feed="calls">Calls</button><button data-feed="trends">Trends</button>';afterEl.insertAdjacentElement('afterend',e);e.addEventListener('click',function(ev){var b=ev.target.closest('button');if(!b)return;if(b.dataset.feed==='trends'){location.href='/live-market';return}e.querySelectorAll('button').forEach(function(x){x.classList.toggle('active',x===b)});var native=document.querySelector('.feed-tab[data-tab="'+b.dataset.feed+'"]');if(native)native.click()});return e}
 function hideLegacyDuplicate(){document.querySelectorAll('.botbar,.feed-bot-card').forEach(function(el){el.classList.add('oa-m-legacy-hidden')})}
-ready(function(){document.body.classList.add('oa-home-mobile');var wrap=document.querySelector('.wrap');if(!wrap)return;hideLegacyDuplicate();var hero=buildHero(wrap),bot=buildBot(wrap,hero),pf=buildPortfolio(bot),market=buildMarkets(pf),shortcuts=buildShortcuts(market),composer=moveComposer(shortcuts);keepComposerOpen(composer);if(composer)feedTabs(composer);setTimeout(hideLegacyDuplicate,500)});
+ready(function(){document.body.classList.add('oa-home-mobile');var wrap=document.querySelector('.wrap');if(!wrap)return;hideLegacyDuplicate();var composer;if(signedIn()){var today=buildToday(wrap),opps=buildOpps(today),bot=buildBot(wrap,opps),market=buildMarkets(bot);composer=moveComposer(market)}else{var hero=buildHero(wrap),gbot=buildBot(wrap,hero),pf=buildPortfolio(gbot),gmarket=buildMarkets(pf),shortcuts=buildShortcuts(gmarket);composer=moveComposer(shortcuts)}keepComposerOpen(composer);if(composer)feedTabs(composer);setTimeout(hideLegacyDuplicate,500)});
 })();

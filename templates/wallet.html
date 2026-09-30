@@ -3216,5 +3216,14 @@ initPullToRefresh({ onRefresh: function(){
 
 <link rel="stylesheet" href="/static/tip-experience.css?v={{ app_version }}">
 <script src="/static/tip-experience.js?v={{ app_version }}" defer></script>
+<script>
+// /wallet#deposit (Home's Deposit button) opens the deposit sheet directly;
+// the hash is dropped so a refresh or back does not open it again.
+window.addEventListener('load',function(){
+  if(location.hash!=='#deposit'||typeof _modalDeposit!=='function')return;
+  try{history.replaceState(null,'',location.pathname+location.search)}catch(_){}
+  _modalDeposit();
+});
+</script>
 </body>
 </html>

@@ -52,9 +52,9 @@ assert(/body\.oa-home-mobile\{overflow:visible!important/.test(polish));
 
 // Every place that loads these assets agrees on the new versions.
 for(const [f,needles] of Object.entries({
-  'static/navbar.js':['home-mobile.css?v=13','home-mobile.js?v=11'],
-  'static/app-ux.js':['home-mobile.css?v=13','home-mobile-polish.css?v=8','home-mobile.js?v=11'],
+  'static/navbar.js':['home-mobile.css?v=14','home-mobile.js?v=12'],
+  'static/app-ux.js':['home-mobile.css?v=14','home-mobile-polish.css?v=8','home-mobile.js?v=12'],
   'static/home-mobile.js':['home-mobile-polish.css?v=8'],
-  'app_performance.py':['home-mobile.css?v=13','home-mobile-polish.css?v=8']}))
+  'app_performance.py':['home-mobile.css?v=14','home-mobile-polish.css?v=8']}))
   for(const n of needles) assert(fs.readFileSync(f,'utf8').includes(n),f+' must reference '+n);
 console.log('PASS Android Home scroll: no blocking touch listeners, no inline touch handlers, html is the only scroller');
