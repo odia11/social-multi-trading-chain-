@@ -28,7 +28,7 @@ def test_tip_native_ready_uses_required_lamports_not_10000():
 
 def test_transfer_enforces_fee_plus_ata_rent_before_send():
     b = block(TIP, 'def _solana_transfer', 'def _evm_transfer')
-    assert 'required_lamports = 20_000' in b
+    assert 'required_lamports = _fee_payer_rent_lamports(d) + 20_000' in b  # wallet rent floor + fee
     assert 'getMinimumBalanceForRentExemption' in b
     assert 'lamports < required_lamports' in b
 

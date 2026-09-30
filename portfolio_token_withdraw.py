@@ -409,7 +409,7 @@ def _solana_transfer(d, wallet, token_address, to_address, amount,
     native, _ = _rpc_call_any(
         d, 'getBalance', [owner_text, {'commitment':'confirmed'}])
     lamports = int((native or {}).get('value') or 0)
-    required_lamports = 20_000
+    required_lamports = _fee_payer_rent_lamports(d) + 20_000
     if not dest_info or not dest_info.get('value'):
         try:
             rent, _ = _rpc_call_any(
@@ -554,6 +554,30 @@ def _user_tip_wallets(d, user_id):
     return {'session': session_wallet, 'solana': solana_wallet, 'evm': evm_wallet}
 
 
+# Solana rejects any transaction that leaves the fee payer holding more than
+# zero but less than the rent-exempt minimum of a plain wallet (0 data bytes,
+# 890,880 lamports today): "InsufficientFundsForRent, account_index 0". A
+# wallet at 890,946 lamports therefore cannot pay even a 5,000-lamport fee,
+# although it "has SOL". Every SOL check below counts this floor.
+_FEE_PAYER_RENT_FALLBACK = 890_880
+_fee_payer_rent_cache = {'value': 0, 'at': 0.0}
+
+
+def _fee_payer_rent_lamports(d):
+    now = time.time()
+    if _fee_payer_rent_cache['value'] and now - _fee_payer_rent_cache['at'] < 3600:
+        return _fee_payer_rent_cache['value']
+    try:
+        rent, _ = _rpc_call_any(d, 'getMinimumBalanceForRentExemption', [0])
+        value = int(rent or 0)
+        if value <= 0:
+            raise ValueError('empty rent answer')
+    except Exception:
+        return _FEE_PAYER_RENT_FALLBACK
+    _fee_payer_rent_cache.update(value=value, at=now)
+    return value
+
+
 def _tip_required_lamports(d, owner_text, recipient_text):
     """SOL required for a canonical-USDC tip, including ATA rent if needed."""
     from solders.pubkey import Pubkey
@@ -571,7 +595,9 @@ def _tip_required_lamports(d, owner_text, recipient_text):
             [bytes(recipient), bytes(token_program), bytes(mint)], ata_program)
         dest_info, _ = _rpc_call_any(
             d, 'getAccountInfo', [str(dest_ata), {'encoding':'base64'}])
-        required = 20_000  # normal signature/transaction headroom
+        # The wallet's own rent-exempt floor plus signature/transaction
+        # headroom, plus the recipient's token-account rent when it is new.
+        required = _fee_payer_rent_lamports(d) + 20_000
         if not dest_info or not dest_info.get('value'):
             try:
                 rent, _ = _rpc_call_any(
@@ -581,9 +607,9 @@ def _tip_required_lamports(d, owner_text, recipient_text):
                 required += 2_100_000
         return required
     except Exception:
-        # Conservative fallback: enough for a new classic SPL token account
-        # plus the transaction itself.
-        return 2_120_000
+        # Conservative fallback: the wallet's own floor, a new classic SPL
+        # token account and the transaction itself.
+        return _FEE_PAYER_RENT_FALLBACK + 2_120_000
 
 
 def _tip_solana_ready(d, sender_wallet, amount, recipient_wallet):
@@ -625,6 +651,24 @@ def _tip_solana_ready(d, sender_wallet, amount, recipient_wallet):
         'lamports': lamports,
         'required_lamports': required_lamports,
     }
+
+
+def _needs_sol_message(sol, amount):
+    """Plain advice when a Solana tip lacks network gas and spare USDC."""
+    spare_needed = Decimal('0.20')
+    max_tip = (sol['balance'] - spare_needed).quantize(Decimal('0.01'), rounding=ROUND_DOWN)
+    add_usdc = (amount + spare_needed - sol['balance']).quantize(Decimal('0.01'))
+    if add_usdc <= 0:
+        add_usdc = Decimal('0.01')
+    text = ('Solana needs a tiny bit of SOL in your trading wallet for the network fee. '
+            'OrcAgent converts it from USDC automatically, but that needs $0.20 USDC '
+            'next to the tip. ')
+    if max_tip >= Decimal('0.01'):
+        text += 'You can tip up to $%s right now, ' % max_tip
+        text += 'or add $%s USDC to send $%s.' % (add_usdc, amount.quantize(Decimal('0.01')))
+    else:
+        text += 'Add $%s USDC (or 0.002 SOL) to your trading wallet and try again.' % add_usdc
+    return text
 
 
 def _tip_evm_candidates(d, sender_wallet, amount, recipient_evm):
@@ -859,6 +903,17 @@ def install(d):
                         break
                     except Exception:
                         tx_hash = ''
+
+            if not tx_hash and sol and (
+                    not sol.get('native_ready') or solana_gas_shortfall) \
+                    and (sol['balance'] - amount) < Decimal('0.20'):
+                # The one failure a member can fix themselves: too little SOL
+                # for Solana's network fee, and too little USDC left beside
+                # the tip to convert into it. Say exactly what to do.
+                return jsonify({
+                    'ok': False, 'reason': 'needs_sol',
+                    'error': _needs_sol_message(sol, amount),
+                }), 400
 
             if not tx_hash:
                 if solana_error:
