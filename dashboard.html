@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
 <script>if(typeof globalThis.Buffer==='undefined'){globalThis.Buffer={from:function(a){return new Uint8Array(a)},alloc:function(n){return new Uint8Array(n)}};}</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
 <script>
 /* Home's feed is what people open the app for, so it is requested here --
    before fonts, styles and the ~20 other startup requests -- and handed to
@@ -10,8 +12,6 @@
 window.__oaFeedEarly={url:url,data:fetch(url,{credentials:'same-origin'})
 .then(function(r){return r.ok?r.json():null}).catch(function(){return null})}}catch(e){}})();
 </script>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0a0b0e">
 <title>OrcAgent — Multi-Chain Social Trading Platform</title>
 <link rel="manifest" href="/app.webmanifest" crossorigin="use-credentials">
