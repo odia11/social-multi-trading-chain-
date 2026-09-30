@@ -290,7 +290,7 @@ function renderChartSvg(idx, candles, currentPrice){
   var waiting=wrap.querySelector('.pt-chart-waiting');
   if(n<2){
     if(!waiting){waiting=document.createElement('div');waiting.className='pt-chart-waiting';wrap.appendChild(waiting);}
-    waiting.textContent='Live price available · waiting for a second price observation';
+    waiting.textContent='First price is in · the chart draws itself as this token trades';
   }else if(waiting) waiting.remove();
 
   // Reused across renders (not removed+recreated) so the CSS `top`
@@ -885,6 +885,7 @@ function fetchSafety(idx, mint){
   fetch('/api/token/'+encodeURIComponent(mint)+'/safety', {credentials:'include'})
     .then(function(r){ return r.json(); })
     .then(function(d){
+      if(d && d.ok){ _pfSafety[mint] = d; _pfRefresh(mint); }
       if(!el) return;
       if(!d || !d.ok){ el.innerHTML=''; return; }
       var lpOk = (d.lp_locked_pct||0) >= 50;
@@ -903,8 +904,9 @@ function fetchFriends(idx, mint){
   fetch('/api/token/'+encodeURIComponent(mint)+'/co-traders', {credentials:'include'})
     .then(function(r){ return r.json(); })
     .then(function(d){
-      if(!friendsEl) return;
       var users = (d && d.ok && d.users) || [];
+      (_pfCommunity[mint] = _pfCommunity[mint] || {}).users = users; _pfRefresh(mint);
+      if(!friendsEl) return;
       if(!users.length){
         friendsEl.innerHTML = '<span class="pt-friends-empty">👥 0 friends</span>';
         return;
@@ -922,6 +924,7 @@ function fetchFriends(idx, mint){
   fetch('/api/token/'+encodeURIComponent(mint)+'/holders', {credentials:'include'})
     .then(function(r){ return r.json(); })
     .then(function(d){
+      if(d && d.ok){ (_pfCommunity[mint] = _pfCommunity[mint] || {}).holders = Number(d.platform_holders)||0; _pfRefresh(mint); }
       var ftEl = document.getElementById('pt-ft-stats-'+idx);
       if(!ftEl || !d || !d.ok) return;
       var t = ST.tokens[Number(idx)];
@@ -1344,10 +1347,11 @@ function syncTokenProfile(){
     card.classList.toggle('pt-profile-open',chosen);
     var button=card.querySelector('.pt-profile-btn');
     if(button){button.textContent=chosen?'Close':'Profile';button.setAttribute('aria-label',chosen?'Close token profile':'Open token profile');}
+    if(!chosen) _pfUnmount(card);
   });
   if(active){
     var card=document.getElementById('pt-card-'+idx);
-    if(card){card.scrollIntoView({block:'start'});loadTokenProfileDetails(card,_profileMint);}
+    if(card){window.scrollTo(0,0);loadTokenProfileDetails(card,_profileMint);_pfMount(card,ST.tokens[idx]);}
     if(_chartTimers[idx] && _chartTimers[idx].candles)
       requestAnimationFrame(function(){renderChartSvg(idx,_chartTimers[idx].candles,_cardRefPrice(_chartTimers[idx],idx));});
   }
@@ -1363,18 +1367,254 @@ function loadTokenProfileDetails(card,mint){
     box.replaceChildren();
     var title=document.createElement('h2');title.textContent='About '+(info.name||info.symbol||'this token');box.appendChild(title);
     var desc=document.createElement('p');desc.textContent=info.description||'The creator has not added a description yet.';box.appendChild(desc);
-    var address=document.createElement('p');address.className='pt-profile-address';
-    address.textContent='Token address: '+mint;box.appendChild(address);
+    // Links the creator chose: plain web links only (isSafeUrl), as chips.
     var links=document.createElement('div');links.className='pt-profile-links';
     function link(url,label){
       if(!isSafeUrl(url)) return;
       var a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.textContent=label;links.appendChild(a);
     }
-    link(info.website_url,'Website ↗');link(info.twitter_url,'X ↗');
-    if((info.chain||'solana')==='solana') link('https://solscan.io/token/'+encodeURIComponent(mint),'Solscan ↗');
-    box.appendChild(links);
+    link(info.website_url,'Website');link(info.twitter_url,'X');link(info.telegram_url,'Telegram');
+    if(links.childNodes.length) box.appendChild(links);
+    // Contract: short address, Copy, and the explorer.
+    var lbl=document.createElement('div');lbl.className='pt-pf-lbl';lbl.textContent='Contract';box.appendChild(lbl);
+    var row=document.createElement('div');row.className='pt-pf-contract';
+    var addr=document.createElement('span');addr.className='pt-profile-address mono';addr.textContent=shortAddr(mint);addr.title=mint;row.appendChild(addr);
+    var copy=document.createElement('button');copy.type='button';copy.className='pt-pf-copy';copy.textContent='Copy';
+    copy.addEventListener('click',function(){
+      var done=function(){copy.textContent='Copied';setTimeout(function(){copy.textContent='Copy';},1500);};
+      if(navigator.clipboard) navigator.clipboard.writeText(mint).then(done,function(){toast('Copy failed');}); else toast(mint);
+    });
+    row.appendChild(copy);
+    if((info.chain||'solana')==='solana'){
+      var sc=document.createElement('a');sc.className='pt-pf-explorer';sc.href='https://solscan.io/token/'+encodeURIComponent(mint);
+      sc.target='_blank';sc.rel='noopener noreferrer';sc.textContent='Solscan ↗';row.appendChild(sc);
+    }
+    box.appendChild(row);
   }).catch(function(){ if(card.isConnected) box.textContent='Token details are temporarily unavailable.'; });
 }
+/* ── Token page (profile mode) ──
+   The open card becomes a token page: a back/share/watch bar, the price
+   with "New" instead of a bare dash, empty market data in words, the
+   member's own position, safety checks, who holds it on OrcAgent, and a
+   Buy/Sell bar pinned under the thumb (mobile). The feed card itself is
+   untouched: everything here is added to, or restyled on, .pt-profile-open
+   only, and removed again when the page closes. */
+var _pfSafety = {};      // mint -> /api/token/<mint>/safety answer
+var _pfCommunity = {};   // mint -> {users: [...], holders: n}
+var _pfHold = {};        // mint -> /api/trade/holding answer
+var _pfObserver = null;
+var _PF_EMPTY = {liq: 'Not reported yet', vol: 'No trades yet', ratio: 'No trades yet', mcap: 'Not reported yet'};
+
+function _pfNode(tag, cls, text){
+  var n = document.createElement(tag);
+  if(cls) n.className = cls;
+  if(text != null) n.textContent = text;
+  return n;
+}
+function _pfCard(mint){
+  var c = document.querySelector('.pt-card.pt-profile-open');
+  return c && c.dataset.mint === mint ? c : null;
+}
+function _pfSection(card, cls){
+  var s = card.querySelector('.' + cls);
+  if(!s){ s = _pfNode('section', 'pt-pf-section ' + cls); card.insertBefore(s, card.querySelector('.pt-profile-about')); }
+  return s;
+}
+function _pfMount(card, t){
+  if(!card || !t) return;
+  var mint = t.mint;
+  if(!card.querySelector('.pt-pf-bar')){
+    var bar = _pfNode('div', 'pt-pf-bar');
+    var back = _pfNode('button', 'pt-pf-back', 'Live Market');
+    back.type = 'button'; back.dataset.action = 'token-profile'; back.dataset.mint = mint;
+    back.setAttribute('aria-label', 'Back to Live Market');
+    var share = _pfNode('button', 'pt-pf-icon pt-pf-share', '');
+    share.type = 'button'; share.setAttribute('aria-label', 'Share token');
+    share.addEventListener('click', function(){
+      var url = location.origin + '/token/' + encodeURIComponent(mint);
+      if(navigator.share) navigator.share({title: '$' + (t.symbol || ''), url: url}).catch(function(){});
+      else if(navigator.clipboard) navigator.clipboard.writeText(url).then(function(){ toast('Link copied'); });
+    });
+    var star = _pfNode('button', 'pt-pf-icon pt-pf-star', '');
+    star.type = 'button'; star.setAttribute('aria-label', 'Watchlist');
+    star.addEventListener('click', function(){
+      var w = card.querySelector('.pt-watch-btn');
+      if(w) w.click();
+      setTimeout(function(){ _pfDecorate(card); }, 400);
+    });
+    bar.appendChild(back); bar.appendChild(share); bar.appendChild(star);
+    card.insertBefore(bar, card.firstChild);
+  }
+  _pfSection(card, 'pt-pf-position').hidden = true;
+  _pfSection(card, 'pt-pf-safety').hidden = true;
+  _pfSection(card, 'pt-pf-community');
+  var buy = card.querySelector('.pt-buy-btn');
+  if(buy) buy.textContent = 'Buy $' + (t.symbol || '');
+  _pfDecorate(card);
+  _pfRefresh(mint);
+  // Price, change and market data are patched in place every tick and poll;
+  // re-apply the empty-state wording and the position value after each.
+  if(_pfObserver) _pfObserver.disconnect();
+  if('MutationObserver' in window){
+    _pfObserver = new MutationObserver(function(){ _pfDecorate(card); });
+    var stats = card.querySelector('.pt-card-stats');
+    if(stats) _pfObserver.observe(stats, {subtree: true, childList: true, characterData: true});
+  }
+  _pfLoadHolding(card, t);
+}
+function _pfUnmount(card){
+  var bar = card.querySelector('.pt-pf-bar');
+  if(!bar) return;
+  bar.remove();
+  card.querySelectorAll('.pt-pf-section').forEach(function(s){ s.remove(); });
+  var buy = card.querySelector('.pt-buy-btn');
+  if(buy) buy.textContent = 'Buy';
+  var sell = card.querySelector('.pt-sell-btn');
+  if(sell){ sell.disabled = false; sell.removeAttribute('title'); }
+  card.querySelectorAll('.pt-pf-empty').forEach(function(el){ el.classList.remove('pt-pf-empty'); });
+  var chg = card.querySelector('.pt-chg');
+  if(chg) chg.classList.remove('pt-pf-new');
+  if(_pfObserver){ _pfObserver.disconnect(); _pfObserver = null; }
+}
+function _pfDecorate(card){
+  if(!card || !card.classList.contains('pt-profile-open')) return;
+  var idx = card.dataset.idx;
+  Object.keys(_PF_EMPTY).forEach(function(k){
+    var el = document.getElementById('pt-' + k + '-' + idx);
+    if(!el) return;
+    var empty = el.textContent.trim() === '—';
+    if(el.classList.contains('pt-pf-empty') !== empty) el.classList.toggle('pt-pf-empty', empty);
+    if(el.dataset.empty !== _PF_EMPTY[k]) el.dataset.empty = _PF_EMPTY[k];
+  });
+  var chg = document.getElementById('pt-chg-' + idx);
+  if(chg){
+    var isNew = chg.textContent.trim() === '—';
+    if(chg.classList.contains('pt-pf-new') !== isNew) chg.classList.toggle('pt-pf-new', isNew);
+  }
+  var star = card.querySelector('.pt-pf-star');
+  if(star){
+    var on = watchSet.has(card.dataset.mint);
+    if(star.classList.contains('on') !== on) star.classList.toggle('on', on);
+    star.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+  _pfRenderPosition(card);
+}
+function _pfRefresh(mint){
+  var card = _pfCard(mint);
+  if(!card) return;
+  _pfRenderSafety(card, _pfSafety[mint]);
+  _pfRenderCommunity(card, _pfCommunity[mint] || {});
+}
+function _pfLoadHolding(card, t){
+  var mint = t.mint, sell = card.querySelector('.pt-sell-btn');
+  if(sell){ sell.disabled = true; sell.title = "You don't hold this token"; }
+  fetch('/api/trade/holding?chain=' + encodeURIComponent(t.chain || 'solana')
+        + '&token_address=' + encodeURIComponent(mint), {credentials: 'include', headers: authHeaders()})
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(d){
+      if(!card.isConnected || !card.classList.contains('pt-profile-open') || card.dataset.mint !== mint) return;
+      _pfHold[mint] = d && d.ok ? d : null;
+      var held = !!(d && d.ok && Number(d.amount) > 0);
+      if(sell){ sell.disabled = !held; if(held) sell.removeAttribute('title'); }
+      var buy = card.querySelector('.pt-buy-btn');
+      if(buy) buy.textContent = held ? 'Buy more' : 'Buy $' + (t.symbol || '');
+      _pfRenderPosition(card);
+    })
+    .catch(function(){});
+}
+function _pfUsd(n){
+  n = Number(n) || 0;
+  var a = Math.abs(n);
+  return (n < 0 ? '-' : '') + '$' + (a >= 1000 ? a.toLocaleString('en-US', {maximumFractionDigits: 0}) : a.toFixed(2));
+}
+function _pfAmount(n){
+  n = Number(n) || 0;
+  if(n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+  if(n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if(n >= 1e3) return n.toLocaleString('en-US', {maximumFractionDigits: 0});
+  return n.toLocaleString('en-US', {maximumFractionDigits: 4});
+}
+function _pfRenderPosition(card){
+  var box = card.querySelector('.pt-pf-position');
+  if(!box) return;
+  var h = _pfHold[card.dataset.mint];
+  var t = ST.tokens[Number(card.dataset.idx)];
+  if(!h || !(Number(h.amount) > 0)){ box.hidden = true; return; }
+  var price = Number(t && t.price_usd) || Number(h.price_usd) || 0;
+  var value = price > 0 ? Number(h.amount) * price : Number(h.value_usd) || 0;
+  var cost = h.cost_usd != null ? Number(h.cost_usd) : null;
+  var entry = h.entry_price_usd != null ? Number(h.entry_price_usd) : null;
+  var pnl = cost != null && cost > 0 ? value - cost : null;
+  var key = [value.toFixed(4), pnl == null ? '' : pnl.toFixed(4), h.amount].join('|');
+  if(box.dataset.key === key && !box.hidden) return;
+  box.dataset.key = key;
+  box.replaceChildren();
+  box.appendChild(_pfNode('h3', 'pt-pf-h', 'Your position'));
+  var top = _pfNode('div', 'pt-pf-pos-top');
+  var left = _pfNode('div');
+  left.appendChild(_pfNode('div', 'pt-pf-lbl', 'Value now'));
+  left.appendChild(_pfNode('div', 'pt-pf-pos-value mono', _pfUsd(value)));
+  top.appendChild(left);
+  if(pnl != null){
+    var up = pnl >= 0, right = _pfNode('div', 'pt-pf-pos-pnl ' + (up ? 'up' : 'down'));
+    right.appendChild(_pfNode('div', 'mono', (up ? '+' : '') + _pfUsd(pnl)));
+    right.appendChild(_pfNode('div', 'mono pt-pf-pos-pct', (up ? '+' : '') + (pnl / cost * 100).toFixed(1) + '%'));
+    top.appendChild(right);
+  }
+  box.appendChild(top);
+  var grid = _pfNode('div', 'pt-pf-pos-grid');
+  function cell(label, val){ var c = _pfNode('div'); c.appendChild(_pfNode('div', 'pt-pf-lbl', label)); c.appendChild(_pfNode('div', 'mono pt-pf-pos-v', val)); grid.appendChild(c); }
+  cell('You hold', _pfAmount(h.amount));
+  cell('Avg buy price', entry ? fmtPrice(entry) : '—');
+  cell('You paid', cost != null ? _pfUsd(cost) : '—');
+  box.appendChild(grid);
+  box.hidden = false;
+}
+function _pfRenderSafety(card, d){
+  var box = card.querySelector('.pt-pf-safety');
+  if(!box) return;
+  if(!d){ box.hidden = true; return; }
+  var lp = Number(d.lp_locked_pct) || 0;
+  var rows = [
+    lp >= 50 ? [true, 'Liquidity locked', Math.round(lp) + '%'] : [false, 'Liquidity not locked', 'Can be pulled'],
+    d.mint_authority_active ? [false, 'Mint authority active', 'Supply can grow'] : [true, 'Mint authority revoked', 'No new supply']
+  ];
+  if(d.freeze_authority_active) rows.push([false, 'Freeze authority active', 'Wallets can be frozen']);
+  box.replaceChildren();
+  box.appendChild(_pfNode('h3', 'pt-pf-h', 'Safety checks'));
+  rows.forEach(function(r){
+    var row = _pfNode('div', 'pt-pf-check ' + (r[0] ? 'ok' : 'bad'));
+    row.appendChild(_pfNode('span', 'pt-pf-check-ico', r[0] ? '✓' : '✕'));
+    row.appendChild(_pfNode('span', 'pt-pf-check-t', r[1]));
+    row.appendChild(_pfNode('span', 'pt-pf-check-s', r[2]));
+    box.appendChild(row);
+  });
+  box.hidden = false;
+}
+function _pfRenderCommunity(card, c){
+  var box = card.querySelector('.pt-pf-community');
+  if(!box) return;
+  var users = c.users || [], holders = Number(c.holders) || 0;
+  box.replaceChildren();
+  var ico = _pfNode('div', 'pt-pf-comm-ico', '');
+  var text = _pfNode('div', 'pt-pf-comm-text');
+  if(users.length){
+    var avs = _pfNode('div', 'pt-friend-avs');
+    users.slice(0, 3).forEach(function(u){
+      var src = u.avatar_url && safeMediaUrl(u.avatar_url);
+      if(src){ var img = document.createElement('img'); img.src = src; img.alt = ''; avs.appendChild(img); }
+      else avs.appendChild(_pfNode('div', 'ph', (u.username || '?').slice(0, 1).toUpperCase()));
+    });
+    box.appendChild(avs);
+    text.appendChild(_pfNode('strong', null, users.length + (users.length === 1 ? ' person you follow holds it' : ' people you follow hold it')));
+  } else {
+    box.appendChild(ico);
+    text.appendChild(_pfNode('strong', null, 'No one you follow holds this yet'));
+  }
+  text.appendChild(_pfNode('span', null, holders ? holders + ' trader' + (holders === 1 ? '' : 's') + ' on OrcAgent hold it' : 'Trades on OrcAgent show up here'));
+  box.appendChild(text);
+}
+
 function setTokenProfile(mint){
   _profileMint=_profileMint===mint?null:mint;
   _focusedMint=_profileMint||_focusedMint;

@@ -792,6 +792,75 @@ body{--oa-canvas:#0a0b0e;--oa-surface:#0d0f12;--oa-surface2:#101216;--oa-panel:#
 .pt-profile-links a{border-color:#2a2f37}
 .pt-chart-waiting{background:#0d0f12cc}
 }
+
+/* ── Token page (profile mode): the open card as a page ──
+   Back/share/watch bar, "New" instead of a bare dash, empty market data in
+   words, Your position, Safety checks, On OrcAgent, About with Copy, and a
+   Buy/Sell bar pinned under the thumb on phones. The gold chart stays. */
+body.pt-profile-mode .pt-feed-hd,body.pt-profile-mode #oa-lm-quick{display:none!important}
+body.pt-profile-mode .pt-card.pt-profile-open .pt-card-hd-right,
+body.pt-profile-mode .pt-card.pt-profile-open .pt-card-ft{display:none!important}
+.pt-pf-bar{grid-column:1/-1;order:0;display:flex;align-items:center;gap:8px;padding:10px 14px 4px}
+.pt-pf-back{height:44px;display:flex;align-items:center;gap:6px;padding:0 10px 0 2px;border:0;background:transparent;color:#eef1f5;font:600 15px Geist,system-ui,sans-serif;cursor:pointer;margin-right:auto}
+.pt-pf-back:before{content:'';width:10px;height:10px;border-left:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);margin:0 4px 0 6px}
+.pt-pf-icon{width:44px;height:44px;border-radius:14px;border:1px solid #1d2833;background:#0d151e;color:#eef1f5;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1}
+.pt-pf-share:before{content:'';width:14px;height:14px;border:2px solid currentColor;border-top:0;border-radius:0 0 3px 3px;margin-top:6px}
+.pt-pf-share:after{content:'↑';position:absolute;font:700 14px/1 Geist,system-ui,sans-serif;margin-top:-8px}
+.pt-pf-share{position:relative}
+.pt-pf-star:before{content:'☆';font-size:22px}
+.pt-pf-star.on{color:#f7b955;border-color:#3a2f1c}.pt-pf-star.on:before{content:'★'}
+body.oa-live-v2 .pt-card .pt-chg.pt-pf-new,body .pt-card .pt-chg.pt-pf-new{font-size:0!important;letter-spacing:0!important}
+body .pt-card .pt-chg.pt-pf-new:after{content:'New · no 24h change yet';display:inline-block;padding:5px 10px;border-radius:999px;background:#152230;color:#8e97a3;font:600 12px Geist,system-ui,sans-serif;letter-spacing:0}
+body.oa-live-v2 .pt-card .pt-stat-val.pt-pf-empty,body .pt-card .pt-stat-val.pt-pf-empty{font-size:0!important;letter-spacing:0!important}
+body .pt-card .pt-stat-val.pt-pf-empty:after{content:attr(data-empty);font:500 13px Geist,system-ui,sans-serif;color:#8e97a3}
+.pt-pf-section{grid-column:1/-1;margin:0 14px 10px;padding:14px;border:1px solid #1d2833;border-radius:18px;background:#0d151e;color:#eef1f5}
+.pt-pf-section[hidden]{display:none!important}
+.pt-pf-h{margin:0 0 10px;font:800 15px Geist,system-ui,sans-serif}
+.pt-pf-lbl{font:500 12px Geist,system-ui,sans-serif;color:#8e97a3}
+.pt-pf-position{order:5;border-color:#24382f}
+.pt-pf-pos-top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+.pt-pf-pos-value{font:700 26px/1.1 'JetBrains Mono',monospace;margin-top:4px}
+.pt-pf-pos-pnl{text-align:right;font:700 18px/1.2 'JetBrains Mono',monospace}
+.pt-pf-pos-pnl .pt-pf-pos-pct{font-size:13px}
+.pt-pf-pos-pnl.up{color:#3ad29b}.pt-pf-pos-pnl.down{color:#ff7a88}
+.pt-pf-pos-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #1d2833}
+.pt-pf-pos-v{font-size:13px;font-weight:600;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pt-pf-safety{order:7}
+.pt-pf-check{display:flex;align-items:center;gap:10px;font-size:14px;padding:4px 0}
+.pt-pf-check-ico{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:800 12px Geist,system-ui,sans-serif;flex-shrink:0}
+.pt-pf-check.ok .pt-pf-check-ico{background:#12291f;color:#3ad29b}
+.pt-pf-check.bad .pt-pf-check-ico{background:#2a1a1f;color:#ff7a88}
+.pt-pf-check-t{flex:1;min-width:0}.pt-pf-check-s{font-size:12px;color:#8e97a3}
+.pt-pf-community{order:8;display:flex;align-items:center;gap:12px}
+.pt-pf-comm-ico{width:40px;height:40px;border-radius:12px;background:#152230;flex-shrink:0;position:relative}
+.pt-pf-comm-ico:before{content:'';position:absolute;left:12px;top:9px;width:10px;height:10px;border:2px solid #f7b955;border-radius:50%}
+.pt-pf-comm-ico:after{content:'';position:absolute;left:8px;top:23px;width:18px;height:8px;border:2px solid #f7b955;border-bottom:0;border-radius:10px 10px 0 0}
+.pt-pf-comm-text{display:flex;flex-direction:column;gap:2px;min-width:0}
+.pt-pf-comm-text strong{font:600 14px Geist,system-ui,sans-serif}
+.pt-pf-comm-text span{font-size:12px;color:#8e97a3}
+body.pt-profile-mode .pt-card.pt-profile-open .pt-profile-about{margin:0 14px 14px;padding:16px;border:1px solid #1d2833;border-radius:18px;background:#0d151e}
+body.pt-profile-mode .pt-card.pt-profile-open .pt-profile-about h2{color:#eef1f5;font-size:17px;font-weight:800}
+.pt-profile-links{margin:0 0 12px}
+.pt-profile-links a{height:36px;padding:0 12px;display:inline-flex;align-items:center;border:1px solid #1d2833;border-radius:10px;background:#111b25;color:#eef1f5;font-size:13px;font-weight:600}
+.pt-pf-contract{display:flex;align-items:center;gap:8px;margin-top:6px}
+.pt-pf-contract .pt-profile-address{flex:1;min-width:0;margin:0;font-size:13px;color:#d5dbe2}
+.pt-pf-copy{height:40px;padding:0 14px;border-radius:12px;border:1px solid #1d2833;background:#111b25;color:#eef1f5;font:600 13px Geist,system-ui,sans-serif;cursor:pointer}
+.pt-pf-explorer{height:40px;padding:0 14px;display:inline-flex;align-items:center;border-radius:12px;border:1px solid #3a2f1c;background:#19140c;color:#f7b955;font-size:13px;font-weight:600;text-decoration:none}
+/* Buy is the main action, Sell the second; Sell is off when nothing is held. */
+body.pt-profile-mode .pt-card.pt-profile-open .pt-buy-btn{order:2;background:linear-gradient(180deg,#ffd26a,#f7b43f)!important;color:#111820!important;border:1px solid #ffd36f!important;font-weight:800!important}
+body.pt-profile-mode .pt-card.pt-profile-open .pt-sell-btn{order:1;background:#1a1015!important;color:#ff8a96!important;border:1px solid #5a2a33!important}
+body.pt-profile-mode .pt-card.pt-profile-open .pt-sell-btn:disabled{background:transparent!important;color:#5c6773!important;border-color:#2a3440!important;cursor:default}
+body.pt-profile-mode .pt-card.pt-profile-open .pt-trade-btns{grid-template-columns:116px minmax(0,1fr)!important}
+body.pt-profile-mode .pt-card.pt-profile-open .pt-chart-waiting{left:50%!important;right:auto!important;transform:translateX(-50%);bottom:40px!important;background:transparent!important;color:#b8c0ca!important;text-align:center;white-space:nowrap}
+@media(max-width:767px){
+ body.pt-profile-mode .pt-card.pt-profile-open{border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;overflow:visible!important}
+ body.pt-profile-mode .pt-card.pt-profile-open .pt-chart-wrap{order:4!important}
+ body.pt-profile-mode .pt-card.pt-profile-open .pt-stat-row{order:6!important}
+ body.pt-profile-mode .pt-card.pt-profile-open .pt-profile-about{order:9!important}
+ /* Sits on the menu; its lower padding runs under the round POST button. */
+ body.pt-profile-mode .pt-card.pt-profile-open .pt-trade-btns{position:fixed!important;left:0;right:0;bottom:calc(72px + env(safe-area-inset-bottom,0px));z-index:1100;padding:12px 16px 36px!important;background:#0a131c;border-top:1px solid #1d2833}
+ body.pt-profile-mode .pt-feed-list{padding-bottom:220px!important}
+}
 </style>
 </head>
 <body>
