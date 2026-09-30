@@ -22,6 +22,7 @@ if not ff:
 os.environ['ORCAGENT_FFMPEG'] = ff
 media = tempfile.mkdtemp()
 os.environ['ORCAGENT_MEDIA_DIR'] = media
+os.environ['ORCAGENT_FEED_VIDEO_POSTS'] = '1'   # video posts are off for users; this tests the pipeline itself
 
 import app_entry
 import video_uploads as vu
