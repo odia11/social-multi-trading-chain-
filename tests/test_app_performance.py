@@ -39,7 +39,7 @@ check('ordinary mobile bottom space is tightened from the old 132px reserve',
 check('portfolio gets a compact but safe fixed-nav reserve',
       'body.oa-shared-ux.oa-portfolio .wlt-center' in CSS)
 check('every HTML response gets the current shared performance assets early',
-      'app-ux.css?v=9' in PERF and 'app-ux.js?v=10' in PERF)
+      'app-ux.css?v=9' in PERF and 'app-ux.js?v=11' in PERF)
 check('route-critical redesign assets are applied before first paint',
       'portfolio-redesign.css?v=6' in PERF
       and 'live-market-redesign.css?v=8' in PERF
@@ -49,7 +49,7 @@ check('production WSGI installs the performance adapter',
       'from app_performance import install as _install_app_performance' in ENTRY
       and '_install_app_performance(_dashboard)' in ENTRY)
 check('fallback loader no longer duplicates document prefetching',
-      'app-ux.css?v=9' in LOADER and 'app-ux.js?v=10' in LOADER
+      'app-ux.css?v=9' in LOADER and 'app-ux.js?v=11' in LOADER
       and 'fetchDocument' not in LOADER and 'primeCore' not in LOADER)
 check('nginx compresses text assets while retaining live proxy streaming',
       'gzip on;' in NGINX and 'application/javascript' in NGINX

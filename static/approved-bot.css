@@ -106,3 +106,29 @@ body.oa-bot-page .strategy-heading .strategy-tag{
  border-radius:9px;padding:8px 10px;letter-spacing:0;font-size:12px;
 }
 body.oa-bot-page #bot-min-trade{width:7ch!important}
+
+/* The bot's own card, then what it is doing (holding now, last trades),
+   then its controls -- three separate cards instead of one long block. */
+body.oa-bot-page .status-card{border-radius:20px;padding-bottom:17px;margin:0 0 12px}
+body.oa-bot-page .status-head{border-bottom:0;padding-bottom:0!important}
+body.oa-bot-page .strategy-card{border-radius:20px;border-top:1px solid #292d34;padding-top:4px}
+body.oa-bot-page .bot-activity{background:#15171b;border:1px solid #292d34;border-radius:20px;padding:14px 17px 8px;margin:0 0 12px}
+body.oa-bot-page .ba-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding-bottom:12px;border-bottom:1px solid #2a2d33}
+body.oa-bot-page .ba-stats span{display:block;font-size:11px;color:#a1a5ae}
+body.oa-bot-page .ba-stats strong{display:block;font-size:17px;font-weight:720;color:#f7f9fa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.oa-bot-page .ba-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:13px 0 4px}
+body.oa-bot-page .ba-head h2{font-size:14px;font-weight:780;color:#f7f9fa}
+body.oa-bot-page .ba-head span{font-size:12px;color:#a1a5ae}
+body.oa-bot-page .ba-head a{font-size:12.5px;font-weight:700;color:var(--gold);text-decoration:none}
+body.oa-bot-page .ba-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #23262c;color:inherit;text-decoration:none;min-height:48px}
+body.oa-bot-page .ba-row:first-child{border-top:0}
+body.oa-bot-page .ba-main{flex:1;min-width:0}
+body.oa-bot-page .ba-main b{display:block;font-size:14.5px;font-weight:720;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.oa-bot-page .ba-main small,body.oa-bot-page .ba-res small{display:block;font-size:11.5px;color:#8f949d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.oa-bot-page .ba-res{text-align:right;flex:0 0 auto}
+body.oa-bot-page .ba-res b{display:block;font:700 14px var(--mono)}
+body.oa-bot-page .ba-row .up{color:var(--green)}
+body.oa-bot-page .ba-row .dn{color:var(--red)}
+body.oa-bot-page .ba-empty{font-size:12.5px;color:#8f949d;padding:8px 0 12px}
+/* Wide screens show these numbers in the stat cards below. */
+@media(min-width:769px){body.oa-bot-page .ba-stats{display:none}}

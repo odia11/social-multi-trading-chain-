@@ -23,7 +23,7 @@ checks={
  'bfcache helper does not silence native pageshow listeners':
       'stopImmediatePropagation' not in BF,
  'service worker boot cache uses the corrected nav bundle':
-      'orcagent-static-v9' in SW and 'mobile-bottom-nav.js?v=10' in SW
+      'orcagent-static-v10' in SW and 'mobile-bottom-nav.js?v=10' in SW
       and 'mobile-bottom-nav.css?v=9' in SW,
 }
 for label,ok in checks.items():
