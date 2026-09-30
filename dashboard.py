@@ -13616,20 +13616,49 @@ def page_security():
 # changes in a way that requires every user to accept again. Old acceptance
 # rows stay in tos_acceptances for the audit trail; only the latest row per
 # user is compared against this constant.
-TOS_VERSION = '1.0'
+TOS_VERSION = '1.1'   # 1.1: adds the Fees section (what OrcAgent charges, and what it doesn't)
 
-_TOS_CONTENT_HTML = '''
+
+def _tos_fee_pct(rate: float) -> str:
+    """0.0075 -> '0.75'; the same figure the Fees page shows."""
+    return ('%.2f' % (rate * 100)).rstrip('0').rstrip('.')
+
+
+# Built from FEE_RATE_TXN itself, so the Terms can never quote a fee the app
+# does not charge. Only <h2> and <p>: the PDF copy (_parse_tos_html_blocks)
+# reads exactly those two tags.
+_TOS_CONTENT_HTML = f'''
     <h2>Access</h2>
     <p>OrcAgent is open to anyone who connects a supported wallet. Access may
     be limited, paused, or revoked at the platform's discretion.</p>
+    <h2>Fees</h2>
+    <p>OrcAgent charges one platform fee: {_tos_fee_pct(FEE_RATE_TXN)}% of the amount of every buy
+    and every sell made through OrcAgent, whether you place the trade yourself
+    or your bot does, on every supported chain. It is calculated on the amount
+    of that swap, not on profit, and it is taken from the trade itself. A full
+    round trip (buy and sell) therefore costs {_tos_fee_pct(FEE_RATE_TXN * 2)}% in platform fees.</p>
+    <p>OrcAgent charges no fee for connecting a wallet, deposits, withdrawals
+    and token sends, tips, launching a token, claiming creator rewards, token
+    calls, or holding a position.</p>
+    <p>Network fees, token-account rent, swap and bridge provider fees and
+    slippage are set by the blockchain or the provider, not by OrcAgent, and
+    apply to every on-chain transaction, profitable or not. Where OrcAgent
+    provides a chain's gas token for a transaction, that cost is recovered from
+    the same trade and shown as a line before you confirm; it is not a
+    subsidy.</p>
+    <p>The rate in effect is always shown on the Fees page. A change applies
+    only to trades placed after it takes effect, and a change to these Terms
+    asks you to accept them again.</p>
     <h2>No investment advice</h2>
-    <p>Nothing on OrcAgent constitutes financial or investment advice.
+    <p>Nothing on OrcAgent constitutes financial or investment advice. Token
+    calls, rankings and AI signals are opinions, not recommendations.
     Cryptocurrency trading carries a high risk of loss, including total loss
     of funds.</p>
     <h2>Your responsibility</h2>
     <p>You are solely responsible for the trades your account and bot
-    configuration make. Use a wallet dedicated to OrcAgent, not one holding
-    your primary assets.</p>
+    configuration make. On-chain transactions cannot be reversed once
+    confirmed. Use a wallet dedicated to OrcAgent, not one holding your
+    primary assets.</p>
     <h2>No warranty</h2>
     <p>OrcAgent is provided "as is," without warranty of any kind.</p>
     '''

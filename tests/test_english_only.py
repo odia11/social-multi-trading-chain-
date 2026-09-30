@@ -26,7 +26,7 @@ import os
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 SKIP_DIRS = ('.git/', 'node_modules/', 'tests/', 'venv/', 'deploy/', 'static/vendor/')
 EXTS = ('.html', '.js', '.py')
 
@@ -54,7 +54,11 @@ LABEL_WORDS = """vandaag|gisteren|morgen|opslaan|annuleren|bevestigen|bezig|
 goedkeuren|afwijzen|instellen|wijzigen|kopieren|gekopieerd|onbekend|
 overzicht|opbrengst|opname|geanalyseerd|voorstellen|actieve|
 bekijken|verbergen|tonen|kijken|wijzigen|aanpassen|weergeven|
-uitklappen|inklappen|vernieuwen|vervangen|herstellen|bewaren"""
+uitklappen|inklappen|vernieuwen|vervangen|herstellen|bewaren|
+verbonden|verbinding|ontkoppeld|welkom|doorgaan|klaar|wachten|geannuleerd|
+bedankt|alsjeblieft|alstublieft|ongeldig|verlopen|portemonnee|meldingen|
+berichten|volgers|gedeeld|verstuurd|ontvangen|verwijderd|toegevoegd|geduld|
+resultaten|terug"""
 
 SENT = re.compile(r'\b(' + SENTENCE_WORDS.replace('\n', '').replace(' ', '') + r')\b', re.I)
 LABEL = re.compile(r'\b(' + LABEL_WORDS.replace('\n', '').replace(' ', '') + r')\b', re.I)
@@ -107,6 +111,8 @@ def shippable_strings(text):
         stripped = line.strip()
         if stripped.startswith(('#', '//', '*', '/*')):
             continue
+        if len(stripped) > 1500:
+            continue                       # a minified bundle line, not our copy
         for m in re.finditer(r"'([^'\n]{3,})'|\"([^\"\n]{3,})\"|>([^<>{}\n]{3,})<", line):
             frag = (m.group(1) or m.group(2) or m.group(3) or '').strip()
             if frag:
@@ -142,6 +148,15 @@ for path, lineno, frag in found[:25]:
     print(f'   {path}:{lineno}: {frag}')
 check('no Dutch left in anything that can reach a screen — labels, buttons, '
       'messages, placeholders and errors alike', not found)
+
+# "Verbonden met OrcAgent" -- the page Phantom returns to after signing in
+# from the home-screen app -- slipped past for a long time: this test was
+# pointed at a folder that no longer existed, so it scanned nothing and
+# passed. REPO is now this checkout itself, and the scan must find files.
+check('the scan really reads the app (not an empty or missing folder)',
+      os.path.isfile(os.path.join(REPO, 'dashboard.py')))
+check('the Phantom sign-in page says it in English',
+      'Connected to OrcAgent' in open(os.path.join(REPO, 'templates', 'phantom_callback.html')).read())
 
 # ── the one that would have been missed ───────────────────────────────────
 # The model answers in the language it is asked in, so a Dutch prompt puts
