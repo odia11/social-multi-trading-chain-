@@ -14,8 +14,7 @@
    origin src= script is covered by CSP's 'self' source expression instead,
    independent of the nonce, so it always runs. The sibling <style> tag
    this pairs with was never affected: CSP's style-src here still allows
-   'unsafe-inline', so only script elements needed this fix. See
-   page-transition-direction.js for the same fix applied to a third script.
+   'unsafe-inline', so only script elements needed this fix.
 
    Not deferred: this mirrors the exact position/timing of the inline block
    it replaces (right after </head>, before <body> parses) -- the class has

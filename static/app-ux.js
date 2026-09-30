@@ -20,7 +20,7 @@ var ROUTE_ASSETS={
   '/groups':['groups-redesign.css?v=1','groups-redesign.js?v=1'],
   '/messages':['messages-ui.css?v=1','messages-inbox.css?v=1','messages-thread.css?v=2','messages-ui.js?v=3'],
   '/notifications':[],
-  '/profile':['profile-v2.css?v={app}','profile-gold-tip.css?v={app}-gold-v1','tip-experience.css?v={app}-profile-balance-live-3','tip-experience.js?v={app}-profile-balance-live-3'],
+  '/profile':['profile-v2.css?v={app}','profile-gold-tip.css?v={app}','tip-experience.css?v={app}','tip-experience.js?v={app}'],
   '/bot':['approved-bot.css?v={app}'],
   '/settings':[]
 };

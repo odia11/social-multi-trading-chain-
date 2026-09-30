@@ -12776,16 +12776,7 @@ def profile():
         total_pnl = round(stats['total_pnl'] or 0, 4)
         avg_pnl   = round(stats['avg_pnl'] or 0, 4)
         wallet_short = (wallet[:4] + '...' + wallet[-4:]) if len(wallet) >= 8 else wallet
-        sol_balance = None
-        try:
-            r = requests.post(SOLANA_RPC, json={
-                'jsonrpc': '2.0', 'id': 1, 'method': 'getBalance', 'params': [wallet]
-            }, timeout=5)
-            sol_balance = round(r.json()['result']['value'] / 1e9, 4)
-        except Exception:
-            pass
         total_pnl_usd = _sol_usd(total_pnl)
-        sol_balance_usd = _sol_usd(sol_balance)
         return _render_no_cache(
             'profile.html',
             wallet=wallet,
@@ -12810,8 +12801,6 @@ def profile():
             posts=[dict(p) for p in posts],
             recent_calls=recent_calls,
             recent_trades=recent_trades,
-            sol_balance=sol_balance,
-            sol_balance_usd=sol_balance_usd,
             is_verified=bool(user["is_verified"]),
             is_own_profile=True,
             notify_enabled=False,
@@ -12872,19 +12861,7 @@ def profile_view(wallet_address: str):
         wallet_short = (wallet_address[:4] + '...' + wallet_address[-4:]) if len(wallet_address) >= 8 else wallet_address
         sw = session_wallet or ''
         sw_short = (sw[:4] + '...' + sw[-4:]) if len(sw) >= 8 else sw
-        sol_balance = None
-        # Only a Solana wallet can be looked up through a Solana RPC; attempting
-        # this for an EVM user needlessly delays their profile by up to 5s.
-        if is_valid_solana_address(wallet_address):
-            try:
-                r = requests.post(SOLANA_RPC, json={
-                    'jsonrpc': '2.0', 'id': 1, 'method': 'getBalance', 'params': [wallet_address]
-                }, timeout=5)
-                sol_balance = round(r.json()['result']['value'] / 1e9, 4)
-            except Exception:
-                pass
         total_pnl_usd = _sol_usd(total_pnl)
-        sol_balance_usd = _sol_usd(sol_balance)
         is_own = bool(session_wallet and session_wallet == user["wallet_address"])
         is_following = False
         follows_me = False
@@ -12936,8 +12913,6 @@ def profile_view(wallet_address: str):
             posts=[dict(p) for p in posts],
             recent_calls=recent_calls,
             recent_trades=recent_trades,
-            sol_balance=sol_balance,
-            sol_balance_usd=sol_balance_usd,
             is_verified=bool(user["is_verified"]),
             is_own_profile=is_own,
             is_following=is_following,
@@ -23736,19 +23711,6 @@ def get_profile(user_id: int):
     open_count  = sum(1 for p in us.get('positions', {}).values() if p.get('amount', 0) > 0)
     bot_active  = bool(us.get('trader_running', False))
 
-    # SOL balance — best-effort, non-blocking
-    sol_balance = 0.0
-    if wallet and _PROXY_RPCS:
-        for _rpc in _PROXY_RPCS:
-            try:
-                _r = requests.post(_rpc, json={
-                    'jsonrpc': '2.0', 'id': 1, 'method': 'getBalance', 'params': [wallet]
-                }, timeout=5)
-                sol_balance = round(_r.json()['result']['value'] / 1e9, 4)
-                break
-            except Exception:
-                continue
-
     return jsonify({
         'ok':              True,
         'user_id':         uid,
@@ -23764,7 +23726,6 @@ def get_profile(user_id: int):
         'avg_hold_seconds': round(float(avg_hold), 1) if avg_hold else None,
         'follower_count':  int(follower_count),
         'following_count': int(following_count),
-        'sol_balance':     sol_balance,
         'open_trades':     open_count,
         'closed_trades':   int(trade_count or 0),
         'total_pnl':       total_pnl,
@@ -23875,23 +23836,10 @@ def profile_user_trades(user_id: int):
         logging.exception('Failed computing live positions for profile trades, user_id=%s', user_id)
         positions = []
 
-    sol_balance = 0.0
-    if wallet and _PROXY_RPCS:
-        for _rpc in _PROXY_RPCS:
-            try:
-                _r = requests.post(_rpc, json={
-                    'jsonrpc': '2.0', 'id': 1, 'method': 'getBalance', 'params': [wallet]
-                }, timeout=5)
-                sol_balance = round(_r.json()['result']['value'] / 1e9, 4)
-                break
-            except Exception:
-                continue
-
     return jsonify({
         'ok':           True,
         'trades':       trades,
         'positions':    positions,
-        'sol_balance':  sol_balance,
         'open_count':   len(positions),
         'total_closed': total_closed,
         'total_pnl':    total_pnl_all,

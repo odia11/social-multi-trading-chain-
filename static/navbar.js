@@ -71,7 +71,7 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
 /* Consistent reply/repost/like/bookmark SVGs wherever feed actions exist. */
 (function(){
   ensureStyle('/static/feed-action-icons.css?v=5','feed-action-icons.css');
-  ensureScript('/static/feed-action-icons.js?v=3','feed-action-icons.js');
+  ensureScript('/static/feed-action-icons.js?v=4','feed-action-icons.js');
 })();
 
 var _NB_LIVE_CHAINS=['solana','bsc','base','arbitrum','polygon','robinhood'];
