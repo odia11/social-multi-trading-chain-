@@ -2,7 +2,9 @@
 
 - A new creator or community launch is saved with 2000 bps for OrcAgent;
   the creator keeps the rest (minus any community share). Holder Rewards
-  tokens and launches from before this change stay at 0.
+  (which could never carry OrcAgent's share) is not offered, and an old
+  Holder Rewards draft cannot be prepared. Launches from before this change
+  stay at 0.
 - The split is installed ON-CHAIN as fee-sharing shareholders, with the
   same second wallet approval the community split already used: the real
   launch builder asks for that finalization, and its transaction names the
@@ -58,8 +60,16 @@ check('a community launch: creator 65% · community 15% · OrcAgent 20%',
 r = draft('community', community_wallet=community, community_bps=8000)
 check('a community share that would leave the creator nothing is refused, naming the 20% platform fee',
       r.status_code == 400 and 'the platform fee is 20%' in r.get_json()['msg'])
-r = draft('holder'); hrow = r.get_json()['draft']
-check('a Holder Rewards launch has no OrcAgent share', hrow['orcagent_bps'] == 0)
+r = draft('holder')
+check('Holder Rewards (no creator share, so no OrcAgent share) is not offered for new launches',
+      r.status_code == 400 and 'draft' not in (r.get_json() or {}))
+old_holder = draft('creator').get_json()['draft']['id']
+with sqlite3.connect(d.DB_FILE) as conn:
+    conn.execute("UPDATE token_launches SET reward_mode='holder', orcagent_bps=0 WHERE id=?", (old_holder,))
+with patch.dict(os.environ, {'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED': '1'}), patch('token_launch.requests.post') as post:
+    r = client.post(P + old_holder + '/prepare', json={}, headers=H)
+    check('an old Holder Rewards draft cannot be prepared (it would launch without OrcAgent\'s 20%)',
+          r.status_code == 409 and 'no longer offered' in r.get_json()['msg'] and not post.called)
 
 shared, orc_bps = app._orca_launch_shared, app._orca_launch_orc_bps
 old = {'reward_mode': 'creator', 'orcagent_bps': 0, 'quote_asset': 'USDC'}

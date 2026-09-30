@@ -54,7 +54,6 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .tl-option input:checked+.tl-choice{color:#ffd089;background:#2b241c;border-color:var(--gold);box-shadow:inset 0 0 0 1px #f8ba5550}
 .tl-option input:focus-visible+.tl-choice{outline:2px solid var(--gold);outline-offset:2px}.tl-option input:disabled+.tl-choice{opacity:.42}
 .tl-asset-icon{display:grid;place-items:center;font-size:15px;font-weight:900;border-radius:50%;width:24px;height:24px;flex:none}.tl-usdc{background:#277bc1;color:white}.tl-sol{background:#10131a;color:#94f1cd}
-.tl-holder{margin-top:8px}.tl-holder .tl-choice{font-size:11px;min-height:38px}.tl-holder small{display:inline-block;color:var(--muted);font-size:10px;font-weight:400}
 .tl-community-box{padding:14px;margin:13px 0 15px;border-radius:12px;background:#221d17;border:1px solid #5b4627}
 .tl-community-box[hidden]{display:none}.tl-community-box strong{font-size:13px}.tl-community-box p,.tl-community-box small{font-size:11px;color:var(--muted);line-height:1.55}
 .tl-community-box .tl-input{margin-bottom:11px}.tl-fee-strip{display:grid;grid-template-columns:1fr 1.2fr;border:1px solid var(--border);border-radius:12px;overflow:hidden;margin:13px 0}

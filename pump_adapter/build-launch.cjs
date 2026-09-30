@@ -36,7 +36,10 @@ async function build(data){
   const mint=Keypair.fromSecretKey(Uint8Array.from(bytes));
   bytes.fill(0);
   if(!mint.publicKey.toBase58().endsWith('orc'))throw Error('Mint must end in orc');
-  const holderReward = data.reward_mode==='holder';
+  // Holder Rewards is not offered: a holder-reward coin's creator is a
+  // holders PDA, so OrcAgent's creator-fee share could never be installed.
+  if(!['creator','community'].includes(data.reward_mode))throw Error('Unsupported reward mode');
+  const holderReward = false;
   const create = await PUMP_SDK.createV2Instruction({
     mint: mint.publicKey,
     name: data.name,

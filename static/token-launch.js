@@ -118,34 +118,31 @@ function renderPreview(){
  var bps=toBps($('tl-community-share').value);
  text('tl-preview-name',name);text('tl-preview-symbol',symbol+' / '+asset);
  text('tl-review-pair',asset);
- text('tl-review-mode',{creator:'Creator',community:'Creator + Community',holder:'Holder'}[mode]);
- var orc=mode==='holder'?0:orcBps;
- text('tl-review-creator',mode==='holder'?'Holder rewards':money((10000-orc-(mode==='community'?bps:0))/100));
+ text('tl-review-mode',{creator:'Creator',community:'Creator + Community'}[mode]);
+ var orc=orcBps;
+ text('tl-review-creator',money((10000-orc-(mode==='community'?bps:0))/100));
  text('tl-review-community',mode==='community'?money(bps/100):'—');
  if($('tl-review-orc-line')){$('tl-review-orc-line').hidden=!orc;text('tl-review-orc',money(orc/100))}
  $('tl-community-fields').hidden=mode!=='community';
- text('tl-reward-summary',mode==='holder'?'Rewards: token holders'
-   :mode==='community'?(orc?'Rewards: you + community · '+money(orc/100)+' platform fee':'Rewards: creator + community')
+ text('tl-reward-summary',mode==='community'?(orc?'Rewards: you + community · '+money(orc/100)+' platform fee':'Rewards: creator + community')
    :(orc?'Rewards: '+money((10000-orc)/100)+' to you · '+money(orc/100)+' platform fee':'Rewards: 100% creator'));
  renderFeeStrips(mode,bps);
 }
 // The fee tiles, the worked example and the acknowledgement follow the chosen
-// mode. Holder Rewards pay creator fees to holders: the creator gets none and
-// OrcAgent takes no platform fee (orc_bps is 0 for that mode server-side).
+// mode. A new launch is Creator or Community: OrcAgent's platform fee always
+// comes out of the creator fees (Holder Rewards is no longer offered).
 function renderFeeStrips(mode,bps){
  var earn=document.querySelector('#tl-earn-strip'),orcStrip=document.querySelector('#tl-orc-share-strip');
  var example=$('tl-earn-example'),ack=document.querySelector('label.tl-ack span');
  if(ack&&ack.dataset.base===undefined)ack.dataset.base=ack.textContent;
  if(!orcBps)return;
- var holder=mode==='holder',mine=10000-orcBps-(mode==='community'?bps:0);
- if(earn){earn.querySelector('small').textContent=holder?'Creator fees':'Your earnings';
-  earn.querySelector('strong').textContent=holder?'All to token holders':money(mine/100)+' of creator fees'}
- if(orcStrip)orcStrip.querySelector('strong').textContent=holder?'None on Holder Rewards':money(orcBps/100)+' of creator fees';
+ var mine=10000-orcBps-(mode==='community'?bps:0);
+ if(earn){earn.querySelector('small').textContent='Your earnings';
+  earn.querySelector('strong').textContent=money(mine/100)+' of creator fees'}
+ if(orcStrip)orcStrip.querySelector('strong').textContent=money(orcBps/100)+' of creator fees';
  // The worked example is written for Creator Rewards (you keep the rest).
  if(example)example.hidden=mode!=='creator';
- if(ack)ack.textContent=holder
-   ?' I understand that network/rent fees apply, rewards are not guaranteed, and with Holder Rewards every creator fee goes to the token\'s holders: I receive none of it, and OrcAgent takes no platform fee.'
-   :mode==='community'
+ if(ack)ack.textContent=mode==='community'
    ?' I understand that network/rent fees apply, creator rewards are not guaranteed, and of this token\'s creator fees I receive '+money(mine/100)+', my community '+money(bps/100)+' and OrcAgent\'s platform fee is '+money(orcBps/100)+' (never a share of trading volume).'
    :ack.dataset.base;
 }
