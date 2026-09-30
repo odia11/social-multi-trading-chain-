@@ -116,6 +116,56 @@ check('top calls link to their feed post', top[0]['post_id'] == post_id and top[
 r = alice.post('/api/calls', json={'mint': MINT, 'note': 'x' * 281, 'post_to_feed': True}, headers=H, base_url=BASE)
 check('a reason over 280 characters is refused', r.status_code == 400)
 
+# ── any token on any chain can be called, even while DexScreener is down ──
+from unittest.mock import patch  # noqa: E402
+SOL_ADDR = '2KLsQKvwLWsJG95pBQHHJcodsotzkd1MbFYAnKH399qY'   # the address from the report
+EVM_ADDR = '0x' + 'ab' * 20
+class GT:
+    def __init__(self, code, body): self.status_code, self._b = code, body
+    def json(self): return self._b
+gt_calls = []
+def fake_gt(url, headers=None, timeout=None):
+    gt_calls.append(url)
+    if '/networks/solana/tokens/' + SOL_ADDR in url:
+        return GT(200, {'data': {'attributes': {'address': SOL_ADDR, 'symbol': 'CRUMB', 'name': 'Crumb',
+                                                'price_usd': '0.00042', 'market_cap_usd': '420000', 'image_url': 'https://x/c.png'}}})
+    if '/networks/base/tokens/' + EVM_ADDR in url:
+        return GT(200, {'data': {'attributes': {'address': EVM_ADDR, 'symbol': 'BASED', 'name': 'Based',
+                                                'price_usd': '1.5', 'fdv_usd': '9000000'}}})
+    return GT(404, {})
+with patch.object(d, '_dex_get', lambda *a, **k: None), patch.object(d, '_gt_try_take', lambda reserve=0: True), \
+        patch.object(d.requests, 'get', side_effect=fake_gt):
+    got = alice.get('/api/calls/lookup?q=' + SOL_ADDR, base_url=BASE).get_json()['tokens']
+    check('a Solana address DexScreener cannot serve is found via GeckoTerminal',
+          got and got[0]['symbol'] == 'CRUMB' and got[0]['chain'] == 'solana' and got[0]['price'] == 0.00042)
+    got = alice.get('/api/calls/lookup?q=' + EVM_ADDR, base_url=BASE).get_json()['tokens']
+    check('an EVM address is tried on the EVM chains until found (Base)', bool(got) and got[0]['chain'] == 'base'
+      and got[0]['price'] == 1.5 and got[0]['market_cap'] == 9_000_000)
+    d._scanner_cache['data'] = [{'mint': 'Scan1111111111111111111111111111111111pump', 'symbol': 'SCAN', 'name': 'Scanned',
+                                 'chain': 'solana', 'price_usd': 0.01, 'market_cap': 10_000_000, 'image_url': ''}]
+    n_before = len(gt_calls)
+    got = alice.get('/api/calls/lookup?q=Scan1111111111111111111111111111111111pump', base_url=BASE).get_json()['tokens']
+    check("a token already in the app's own market list needs no outside request",
+          got and got[0]['symbol'] == 'SCAN' and len(gt_calls) == n_before)
+    got = alice.get('/api/calls/lookup?q=sca', base_url=BASE).get_json()['tokens']
+    check('...and is found by its ticker too', got and got[0]['symbol'] == 'SCAN')
+    orig_td = d.get_token_data
+    d.get_token_data = lambda mint, fast=False, chain=None: None
+    try:
+        r = bob.post('/api/calls', json={'mint': SOL_ADDR, 'chain': 'solana', 'post_to_feed': True}, headers=H, base_url=BASE)
+    finally:
+        d.get_token_data = orig_td
+    row = db('SELECT symbol, price_at_call, mcap_at_call, chain FROM token_calls WHERE mint=?', SOL_ADDR)
+    check('...and the call is placed at that server-side price', r.status_code == 200 and row == [('CRUMB', 0.00042, 420000.0, 'solana')])
+pairs = [{'chainId': 'solana', 'priceUsd': '9', 'liquidity': {'usd': 1e6},
+          'baseToken': {'address': 'Other111111111111111111111111111111111111', 'symbol': 'OTH'},
+          'quoteToken': {'address': SOL_ADDR, 'symbol': 'CRUMB'}}]
+check("a pool where the address is only the QUOTE token never lends it the other token's price",
+      d._call_rows_from_pairs(pairs, want_mint=SOL_ADDR) == [])
+src = open(os.path.join(os.path.dirname(__file__), '..', 'dashboard.py')).read()
+check('the peak loop falls back to GeckoTerminal for tokens DexScreener did not price',
+      "simple/networks/' " in src or "/simple/networks/'" in src)
+
 # ── the page ──
 import json, subprocess  # noqa: E402
 ROOT = os.path.join(os.path.dirname(__file__), '..')
