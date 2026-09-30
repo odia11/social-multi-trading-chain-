@@ -32,10 +32,10 @@ check('...and what is free', all(w in flat for w in ('deposits', 'withdrawals', 
 share = ('%g' % (d.ORCAGENT_CREATOR_FEE_BPS / 100))
 check("...and OrcAgent's share of new tokens' creator fees: 20% of creator fees, not of volume, creator keeps 80%",
       d.ORCAGENT_CREATOR_FEE_BPS == 2000 and share == '20'
-      and 'OrcAgent receives 20% of the token\'s creator fees, and the creator receives the other 80%' in flat
-      and 'This is 20% of the creator fees, not 20% of trading volume' in flat
-      and 'Tokens launched before 30 September 2026 keep a 0% OrcAgent share' in flat
-      and 'has no OrcAgent share' in flat)
+      and 'the creator earns 80% of the token\'s creator fees, and OrcAgent\'s platform fee is the other 20%' in flat
+      and 'The platform fee is 20% of the creator fees, not 20% of trading volume' in flat
+      and 'Tokens launched before 30 September 2026 have no platform fee' in flat
+      and 'neither does a Holder Rewards token' in flat)
 check('the Terms state OrcAgent is independent and name third-party protocols and infrastructure',
       '<h2>Third-party protocols and infrastructure</h2>' in tos and 'OrcAgent is an independent platform' in flat)
 check('no launch-protocol branding in the public Terms', 'pump' not in flat.lower())
@@ -51,7 +51,7 @@ glance = ' '.join(tos.split('<h2>Access</h2>')[0].split())
 check('the Terms OPEN with the fees: trading, $0 launch, the 80/20 creator-fee split with a worked example',
       tos.strip().startswith('<h2>Fees at a glance</h2>')
       and pct + '% of every buy and every sell' in glance and 'Launching a token: $0' in glance
-      and 'the creator receives 80% and OrcAgent receives 20%' in glance
+      and 'the creator earns 80% of them, paid to the creator\'s wallet, and OrcAgent\'s platform fee is the other 20%, instead of an upfront launch fee' in glance
       and 'This is 20% of the creator fees, not 20% of trading volume' in glance
       and 'if a token earns $100 in creator fees, the creator receives $80 and OrcAgent receives $20' in glance)
 check('token launches have their own section, with the community example',
@@ -71,8 +71,10 @@ check('someone who accepted 1.0 is asked to accept the new Terms, with the Fees 
       st['needs_acceptance'] and '<h2>Fees</h2>' in st['html'])
 
 page = client.get('/info', base_url=BASE).get_data(as_text=True)
-check('the Fees page shows the live rate, the $0 launch fee, the 20% creator-fee share and the 0% items',
-      pct + '%' in page and 'What has no OrcAgent fee' in page and 'OrcAgent launch fee' in page
-      and '20% of the token\'s creator fees' in page and 'not 20% of trading' in page)
+check('the Fees page shows the live rate, the $0 launch fee, what the creator earns, the platform fee and the 0% items',
+      pct + '%' in page and 'What has no OrcAgent fee' in page and '<div class="fee-stat-label">Launch fee</div>' in page
+      and 'Creator earnings' in page and 'OrcAgent platform fee' in page
+      and '80% of the token\'s creator fees' in page and 'never of trading volume' in page
+      and '$800 for the creator' in page and '$200 for OrcAgent' in page)
 check('...and its Terms section is the same text', '<h2>Fees</h2>' in page)
 raise SystemExit(0 if all(checks) else 1)
