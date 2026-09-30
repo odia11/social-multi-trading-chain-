@@ -1002,6 +1002,14 @@ function _safeInit(name, promiseOrValue){
 }
 
 async function launchApp(){
+  // The feed is what Home is for: paint it now (from this device, then the
+  // request <head> already sent) instead of after the session and Terms
+  // checks below. It fills #center-feed while #app is still hidden.
+  // A microtask, not a direct call: launchApp() can run while this file is
+  // still being evaluated, before the feed's own variables further down
+  // (_homeFeedData, _homeFeedFilter, ...) have been assigned.
+  var _feedNeedsReload=false;
+  Promise.resolve().then(function(){ return _safeInit('loadHomeFeed', loadHomeFeed()); });
   // ── 1. Verify / silently restore server-side session ────────────
   if(phantomKey){
     try{
@@ -1011,7 +1019,7 @@ async function launchApp(){
         // Restore the proven session first. Never open a signing prompt just
         // because a deploy, network outage or rate limit interrupted a read.
         const restored = await _resumeFromDeviceToken();
-        if(restored) _applySessionWallet(restored);
+        if(restored){ _applySessionWallet(restored); _feedNeedsReload=true; }
       } else if(stateResponse.ok && sr && sr.wallet){
         // Pick up any server-side flag changes (key uploaded from another tab, etc.)
         if(typeof sr.is_admin==='boolean') _isAdmin=sr.is_admin;
@@ -1084,9 +1092,10 @@ async function launchApp(){
   // (including loadHomeFeed) via this same await. _safeInit swallows +
   // console.errors instead of letting anything here propagate.
   await _safeInit('fetchState', fetchState());
-  // Feed first: it is the content the user came to Home to see. Everything
-  // else can hydrate just after the first frame instead of competing with it.
-  _safeInit('loadHomeFeed', loadHomeFeed());
+  // The feed already started at the top of launchApp(). Only a session that
+  // was restored on the way needs it again (likes and own posts are per
+  // viewer).
+  if(_feedNeedsReload) _safeInit('loadHomeFeed', loadHomeFeed());
   _oaIdle(function(){ _safeInit('fetchTrades', fetchTrades()); }, 450);
   _oaIdle(function(){ _safeInit('fetchLeaderboard', fetchLeaderboard()); }, 650);
   _oaIdle(function(){ _safeInit('fetchBadges', fetchBadges()); }, 850);
@@ -8482,20 +8491,71 @@ document.addEventListener('keydown', function(e){
 
 var _homeFeedRequestSeq=0;
 var _homeFeedLastRenderedFilter='';
+
+// ── Home feed, the way big feeds load ──
+// 1. One phone-sized page (HOME_FEED_PAGE posts); older posts come with
+//    infinite scroll. The regular tabs ask for posts only -- bare bot trades
+//    are never shown there, and with many bot trades a 200-row page used to
+//    be almost all trades.
+// 2. The first page is requested by dashboard.html's <head> before any
+//    other script runs (window.__oaFeedEarly), instead of after ~20 other
+//    startup requests on a server with a handful of request threads.
+// 3. The last feed this member saw is painted from this device at once
+//    (stale-while-revalidate), then replaced by the fresh one.
+var HOME_FEED_PAGE=40;
+var HOME_FEED_CACHE_TTL=6*3600*1000;
+function _homeFeedUrl(filter, before){
+  var url='/api/social/feed?filter='+filter;
+  if(_homeFeedFilter!=='live' && _homeFeedFilter!=='livetrades') url+='&kinds=posts&limit='+HOME_FEED_PAGE;
+  if(before) url+='&before='+encodeURIComponent(before);
+  return url;
+}
+function _homeFeedViewer(){
+  var w=window.__SESSION_WALLET;
+  if(w && w!=='__SESSION_WALLET__') return w;
+  return (typeof phantomKey!=='undefined' && phantomKey) || '';
+}
+function _homeFeedCacheRead(filter){
+  try{
+    var c=JSON.parse(localStorage.getItem('oa_feed_v1:'+filter)||'null');
+    if(!c || c.w!==_homeFeedViewer() || !Array.isArray(c.items) || !c.items.length) return null;
+    if(Date.now()-c.t>HOME_FEED_CACHE_TTL) return null;
+    return c;
+  }catch(e){ return null; }
+}
+function _homeFeedCacheWrite(filter, data){
+  try{
+    var raw=JSON.stringify({w:_homeFeedViewer(), t:Date.now(), items:data.items, next_cursor:data.next_cursor||null});
+    if(raw.length<400000) localStorage.setItem('oa_feed_v1:'+filter, raw);
+  }catch(e){}
+}
 async function loadHomeFeed(){
   var requestSeq=++_homeFeedRequestSeq;
   const filter = _homeFeedApiFilter();
   const el = document.getElementById('center-feed');
-  if(el && !_homeFeedData.length) el.innerHTML = '<div class="fc-loading">Loading…</div>';
+  var early=window.__oaFeedEarly; window.__oaFeedEarly=null;
+  if(el && !_homeFeedData.length){
+    var cached=_homeFeedCacheRead(filter);
+    if(cached){
+      _homeFeedData=cached.items; _homeFeedNextCursor=cached.next_cursor;
+      _homeFeedLastRenderedFilter=filter;
+      try{ renderHomeFeed(); }catch(e){ el.innerHTML='<div class="fc-loading">Loading…</div>'; }
+    } else el.innerHTML = '<div class="fc-loading">Loading…</div>';
+  }
   try{
-    const _ctl = new AbortController();
-    const _tid = setTimeout(()=>_ctl.abort(), 12000);
-    const r = await fetch('/api/social/feed?filter=' + filter, {signal:_ctl.signal});
-    clearTimeout(_tid);
-    console.log('[feed] status:', r.status);
-    if(!r.ok) throw new Error('HTTP ' + r.status);
-    const data = await r.json();
+    var data=null;
+    // The request <head> already sent: the Home tab's first page.
+    if(early && filter==='all' && _homeFeedUrl('all')===early.url) data=await early.data;
+    if(!data){
+      const _ctl = new AbortController();
+      const _tid = setTimeout(()=>_ctl.abort(), 12000);
+      const r = await fetch(_homeFeedUrl(filter), {signal:_ctl.signal});
+      clearTimeout(_tid);
+      if(!r.ok) throw new Error('HTTP ' + r.status);
+      data = await r.json();
+    }
     if(requestSeq !== _homeFeedRequestSeq || filter !== _homeFeedApiFilter()) return;
+    if(data && Array.isArray(data.items)) _homeFeedCacheWrite(filter, data);
     if(data && Array.isArray(data.items)){
       // Keep the existing post nodes (including loaded images, media state,
       // reply fields and scroll position) when a background poll is identical.
@@ -8547,7 +8607,7 @@ async function loadMoreHomeFeed(){
   try{
     const _ctl = new AbortController();
     const _tid = setTimeout(()=>_ctl.abort(), 12000);
-    const r = await fetch('/api/social/feed?filter=' + filter + '&before=' + encodeURIComponent(_homeFeedNextCursor), {signal:_ctl.signal});
+    const r = await fetch(_homeFeedUrl(filter, _homeFeedNextCursor), {signal:_ctl.signal});
     clearTimeout(_tid);
     if(!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();

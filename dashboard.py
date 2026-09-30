@@ -20989,6 +20989,16 @@ def platform_stats():
 def social_feed():
     feed_filter = request.args.get('filter', 'all')
     before = request.args.get('before', '')
+    # Home's feed never shows bare bot trades (it drops them client-side), so
+    # it asks for posts only: with thousands of bot trades a 200-row page was
+    # almost all trades -- a big download, a scan of the whole trades table,
+    # and next to no posts. It also asks for a first page that fits a phone
+    # (limit); older posts come with infinite scroll.
+    posts_only = request.args.get('kinds') == 'posts'
+    try:
+        page_limit = max(10, min(200, int(request.args.get('limit', 200))))
+    except (TypeError, ValueError):
+        page_limit = 200
     # Normalize the incoming ISO cursor the same way the CASE expression
     # normalizes stored created_at values, so the string comparison lines up.
     before_norm = before.replace('T', ' ').replace('Z', '') if before else ''
@@ -21024,6 +21034,7 @@ def social_feed():
                        u.avatar_url, u.is_verified, NULL as repost_of, fp.image_url
                 FROM feed_posts fp
                 LEFT JOIN users u ON fp.wallet = u.wallet_address
+            ''' + ('' if posts_only else '''
                 UNION ALL
                 SELECT t.id, u.wallet_address as wallet, NULL as content,
                        t.timestamp as created_at,
@@ -21038,6 +21049,7 @@ def social_feed():
                        u.avatar_url, u.is_verified, NULL as repost_of, NULL as image_url
                 FROM trades t
                 LEFT JOIN users u ON t.user_id = u.id
+            ''') + '''
                 UNION ALL
                 SELECT fr.id, fr.reposter_wallet as wallet, NULL as content,
                        fr.created_at,
@@ -21053,8 +21065,9 @@ def social_feed():
             ORDER BY
               CASE WHEN created_at LIKE '%T%'
                    THEN replace(replace(created_at,'T',' '),'Z','')
-                   ELSE created_at END DESC LIMIT 200
-        ''', (my_wallet, my_wallet, my_wallet) + tuple(extra_params)).fetchall()
+                   ELSE created_at END DESC LIMIT ?
+        ''', (my_wallet,) + (() if posts_only else (my_wallet,)) + (my_wallet,)
+            + tuple(extra_params) + (page_limit,)).fetchall()
 
         # Batch-fetch like/reply counts for exactly the rows on this page instead
         # of a correlated subquery per row (which forced SQLite to compute counts

@@ -23,10 +23,17 @@ UMask=0077
 # dashboard.py starts its trading/background loops in-process, so extra workers
 # would duplicate money-moving work. Threads provide request concurrency while
 # retaining one authoritative copy of each loop.
+#
+# 16 threads, not 4: one Home load alone sends ~20 requests, and a request
+# waiting on an RPC or price API holds its thread the whole time. With 4,
+# a handful of members queued everyone else's feed behind those waits. The
+# requests are I/O-bound (they wait, holding no lock), SQLite runs in WAL mode
+# with a busy timeout, and it is still one process -- so this adds waiting
+# room, not a second copy of anything.
 ExecStart=/opt/orcagent/venv/bin/gunicorn app_entry:app \
     --bind 127.0.0.1:8080 \
     --workers 1 \
-    --threads 4 \
+    --threads 16 \
     --timeout 120 \
     --access-logfile - \
     --error-logfile -
