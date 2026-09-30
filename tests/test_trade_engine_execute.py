@@ -19,7 +19,7 @@ import tempfile
 import time
 from decimal import Decimal
 
-sys.path.insert(0, '/home/user/Orc-agent-Solana-chain-')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trade_engine import execute as X                             # noqa: E402
 from trade_engine import ledger as L                              # noqa: E402

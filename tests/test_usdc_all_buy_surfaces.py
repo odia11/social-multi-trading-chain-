@@ -4,7 +4,7 @@ import os
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(os.path.join(REPO, 'dashboard.py'), encoding='utf-8').read()
-CARD = open(os.path.join(REPO, 'static', 'token-card.js'), encoding='utf-8').read()
+LM = open(os.path.join(REPO, 'static', 'live-market-pro.js'), encoding='utf-8').read()
 TREE = ast.parse(SRC)
 
 
@@ -35,12 +35,12 @@ check('a requested amount above the maximum is capped safely',
       'min(max_trade_usdc, float(requested_usdc))' in flow)
 check('the shared Solana swap explicitly uses the configured USDC base',
       'base=SOLANA_BASE_CURRENCY' in flow)
-check('Robinhood is an EVM chain in the shared token card',
-      "['base', 'arbitrum', 'polygon', 'robinhood']" in CARD)
-check('the token card routes every EVM buy to the EVM endpoint',
-      "url = side === 'buy' ? '/api/evm/trade/buy'" in CARD)
-check('the token card labels every chain in USDC',
-      "function _tcUnit(chain){ return 'USDC'; }" in CARD)
+check('Robinhood is an EVM chain on Live Market',
+      "var EVM_TRADE_CHAINS = {bsc:1, base:1, arbitrum:1, polygon:1, robinhood:1};" in LM)
+check('Live Market routes every EVM buy to the EVM endpoint',
+      "(isEvm ? '/api/evm/trade/buy' : '/api/instant-trade')" in LM)
+check('Live Market labels a Solana buy in USDC',
+      "isEvm ? evmCurrencyLabel(t.chain) : 'USDC'" in LM)
 
 evm = fn('_evm_buy_flow')
 check('EVM buys also refuse a sub-minimum amount instead of increasing it',

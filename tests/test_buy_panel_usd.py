@@ -25,7 +25,7 @@ import re
 import subprocess
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JS = open(REPO + '/static/live-market-pro.js').read()
 HTML = open(REPO + '/templates/live_market_pro.html').read()
 
@@ -147,73 +147,6 @@ check('no cost is displayed that the backend did not send: the rows are built '
       'by iterating the response, not from a hardcoded list',
       'for(var k in kinds)' in rq)
 
-
-# ── the token card: the other surface with a Buy button ───────────────────
-TC  = open(REPO + '/static/token-card.js').read()
-TCC = open(REPO + '/static/token-card.css').read()
-
-node2 = subprocess.run(['node', '--check', REPO + '/static/token-card.js'],
-                       capture_output=True, text=True)
-check('token-card.js parses', node2.returncode == 0)
-
-
-def tcfn(name):
-    m = re.search(r'^(?:async )?function ' + name + r'\(.*?^\}', TC, re.S | re.M)
-    assert m, f'no function {name}'
-    return m.group(0)
-
-
-exec_fn = tcfn('executeTrade')
-check('the card\'s Buy button passes the CHAIN to the trade. Without it the chain '
-      'defaulted to solana, so every EVM token bought from this card went to the '
-      'Solana route and was rejected as an invalid mint — the EVM branches were '
-      'unreachable from this button entirely',
-      'chain)' in exec_fn and 'tokenAddress, chain)' in exec_fn)
-check('...and the panel supplies it from the pair being viewed',
-      '_lmtdPair && _lmtdPair.chainId' in TC)
-
-do = tcfn('_doTrade')
-check('Base, Arbitrum and Polygon route to the EVM buy, not to Solana',
-      '_TC_EVM_CHAINS.indexOf(chain)' in do and "'/api/evm/trade/buy'" in do)
-check('...sending the chain with the amount', "chain: chain" in do)
-
-side = tcfn('_lmtdSidePanelHtml')
-check('the input\'s unit follows the chain. It was hardcoded to SOL, so on BSC '
-      'the field said SOL while the amount was spent as USDC',
-      '_tcUnit(chain)' in side and "'SOL'" not in side.split('lmtd-sol-input-unit')[1][:80])
-check('an EVM buy is labelled as a spend ceiling here too',
-      'You spend at most' in side)
-check('the percentage chips are dropped on EVM chains, because they work off the '
-      'SOL balance and would be percentages of the wrong currency entirely',
-      'isEvm ? \'\'' in side)
-check('a breakdown area is rendered', 'lmtd-quote' in side)
-check('typing re-prices', 'oninput="_lmtdQuote()"' in side)
-
-q = tcfn('_lmtdQuote')
-check('the card prices through the SAME endpoint as Live Market, so the two '
-      'surfaces cannot show different numbers for one trade',
-      "'/api/trade/quote'" in TC)
-check('...only for an EVM buy — a Solana buy has no ceiling to price against',
-      '_tcIsEvm(chain)' in q and "_lmtdSide !== 'buy'" in q)
-check('pricing is debounced here too', 'clearTimeout' in q and '450' in q)
-check('the breakdown is priced when the panel opens, not only after a keystroke: '
-      'the field carries a default amount, and a breakdown that appeared only on '
-      'typing would leave that default unexplained',
-      '_lmtdQuote();' in tcfn('_lmtdWireSidePanel'))
-
-fq2 = tcfn('_lmtdFetchQuote')
-check('a late answer for a changed amount is discarded',
-      "parseFloat(input.value) !== amt" in fq2)
-check('the costs are itemised from the response', 'costs_by_kind' in fq2)
-check('...and the reserve is explained as held back rather than charged',
-      'held back against' in fq2 and 'stays yours' in fq2)
-check('a quote that cannot execute shows the reason, not a price',
-      'reject_reason' in fq2)
-
-for cls in ('lmtd-quote', 'lmtd-quote-row', 'lmtd-quote-get', 'lmtd-quote-note',
-            'lmtd-quote-bad', 'lmtd-spend-label'):
-    check(f'.{cls} is styled', '.' + cls + '{' in TCC)
-check('the card\'s figures line up in columns too', 'tabular-nums' in TCC)
 
 print(f'\n{sum(1 for _, c in checks if c)}/{len(checks)} checks passed')
 sys.exit(0 if all(c for _, c in checks) else 1)

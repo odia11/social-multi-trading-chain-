@@ -19,11 +19,12 @@ THE RULE
 The server is the authority on who is signed in. When the HTML has not
 already answered it, the page asks — one GET, and only then.
 """
+import os
 import ast
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py').read()
 JS = open(REPO + '/static/dashboard.js').read()
 TREE = ast.parse(SRC)

@@ -13972,8 +13972,7 @@ def live_market():
     """Live Market -- now the desktop 'Pro terminal' layout (see
     live_market_pro.html). Same public/no-login-gate pattern as before:
     individual API calls handle their own 401s client-side rather than
-    gating the page itself. The previous mobile-oriented template is kept
-    on disk (live_market.html, unrouted) in case it's needed again."""
+    gating the page itself."""
     session_wallet = _current_wallet()
     wallet_short = ((session_wallet[:4] + '...' + session_wallet[-4:])
                     if len(session_wallet) >= 8 else '')
@@ -15423,8 +15422,7 @@ def referrals_page():
 
 @app.route('/settings')
 def settings_page():
-    # Use the current dashboard Settings, including account passkeys and
-    # optional app lock. The legacy settings.html is missing that UI.
+    # Settings live on Home (account passkeys, optional app lock, alerts).
     wallet = _authenticated_wallet()
     if not wallet:
         return redirect('/?connect=1#settings')

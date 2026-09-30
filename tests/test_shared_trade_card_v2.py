@@ -15,7 +15,7 @@ def test_groups_legacy_renderer_is_now_wrapped_by_shared_component():
 
 def test_messages_uses_same_runtime_renderer():
     assert "patch('_renderDmTokenCard')" in JS
-    assert '/live-market?addr=' in JS
+    assert "'/live-market?mint='+encodeURIComponent(t.mint)+'&profile=1'" in JS
 
 
 def test_legacy_records_without_mint_fall_back_to_original_renderer():

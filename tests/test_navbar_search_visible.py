@@ -36,10 +36,11 @@ count) rather than trusting a fixed string, so it keeps holding if the
 rules are reformatted, and fails loudly if either selector's specificity
 relationship to `.pt-nb-nav a` regresses.
 """
+import os
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CSS = open(REPO + '/static/navbar.css', encoding='utf-8').read()
 
 

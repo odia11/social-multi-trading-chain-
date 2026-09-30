@@ -1,8 +1,8 @@
 """Regression coverage for every supported EVM source -> Solana USDC buy.
 
 No RPC calls are made here. The test exercises the reverse-bridge source picker
-with the same five EVM chain names the registry exposes, and verifies that the
-frontend's shared token-card route still recognises all of them.
+with the same five EVM chain names the registry exposes, and verifies that
+Live Market's buy route still recognises all of them.
 """
 # Runnable on its own, like every other test here: these import modules from
 # the repository root, and `python3 tests/x.py` puts tests/ on the path and
@@ -18,7 +18,7 @@ import evm_to_solana_bridge as ext
 from trade_engine.registry import CHAINS
 
 ROOT = Path(__file__).resolve().parents[1]
-CARD = (ROOT / 'static' / 'token-card.js').read_text(encoding='utf-8')
+LM = (ROOT / 'static' / 'live-market-pro.js').read_text(encoding='utf-8')
 
 EXPECTED_EVM = {'bsc', 'base', 'arbitrum', 'polygon', 'robinhood'}
 
@@ -30,8 +30,9 @@ def check(message, condition):
 
 check('registry exposes exactly the five supported EVM chains',
       {name for name, cfg in CHAINS.items() if cfg.kind == 'evm'} == EXPECTED_EVM)
-check('frontend token card recognises every supported EVM chain',
-      all((f"'{chain}'" in CARD) for chain in EXPECTED_EVM))
+_lm_evm = LM.split('var EVM_TRADE_CHAINS = {', 1)[1].split('}', 1)[0]
+check('Live Market recognises every supported EVM chain',
+      all((f"{chain}:1" in _lm_evm) for chain in EXPECTED_EVM))
 
 balances = {
     'bsc': 200.0,

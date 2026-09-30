@@ -63,7 +63,7 @@ def install(appmod) -> None:
                 if marker not in html:
                     tags.append(f'<link rel="preload" href="{href}" as="{kind}" data-oa-shell-preload="1">')
             style('shared-trade-card-v2.css', '/static/shared-trade-card-v2.css?v=1', ' id="oa-shared-trade-card-css"')
-            script('shared-trade-card-v2.js', '/static/shared-trade-card-v2.js?v=1', ' id="oa-shared-trade-card-js"')
+            script('shared-trade-card-v2.js', '/static/shared-trade-card-v2.js?v=2', ' id="oa-shared-trade-card-js"')
             style('feed-action-icons.css', '/static/feed-action-icons.css?v=5')
             script('feed-action-icons.js', '/static/feed-action-icons.js?v=4')
             script('swipe-back.js', '/static/swipe-back.js?v=1')

@@ -10,7 +10,6 @@ NOTIF = (ROOT / 'static/notif-poll.js').read_text(encoding='utf-8')
 TRADERS = (ROOT / 'templates/traders.html').read_text(encoding='utf-8')
 MESSAGES = (ROOT / 'templates/messages.html').read_text(encoding='utf-8')
 PROFILE = (ROOT / 'templates/profile.html').read_text(encoding='utf-8')
-SETTINGS = (ROOT / 'templates/settings.html').read_text(encoding='utf-8')
 TREE = ast.parse(DASH)
 
 def decorators(name):
@@ -55,7 +54,8 @@ def test_clients_send_tokens_before_newly_guarded_mutations():
     assert "'X-CSRF-Token':_csrfToken" in TRADERS
     assert "'X-CSRF-Token': _csrfToken" in MESSAGES
     assert "'X-CSRF-Token': _csrf" in PROFILE
-    assert "'X-CSRF-Token':_csrf" in SETTINGS
+    # Settings (on Home) save with the token too.
+    assert "headers:{'Content-Type':'application/json','X-CSRF-Token':_csrfToken}" in DASH_JS.split('function _savePref(')[1][:400]
 
 def test_dynamic_group_sql_identifier_is_allowlisted():
     assert "if field not in {'avatar_url', 'banner_url'}:" in DASH

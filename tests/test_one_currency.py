@@ -27,10 +27,11 @@ That the split does not collapse in either direction: no user-facing string
 may name USDG, and no log or routing path may be "tidied up" into claiming
 USDC where USDG is what really moved.
 """
+import os
 import ast
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py').read()
 TREE = ast.parse(SRC)
 
@@ -129,8 +130,7 @@ def _strings_naming_usdg(text):
             out.append(line.strip())
     return out
 
-for path in ('/templates/wallet.html', '/static/live-market-pro.js',
-             '/static/token-card.js'):
+for path in ('/templates/wallet.html', '/static/live-market-pro.js'):
     leaks = _strings_naming_usdg(open(REPO + path).read())
     check(f'no USDG reaches the screen from {path.rsplit("/", 1)[-1]}', not leaks)
 

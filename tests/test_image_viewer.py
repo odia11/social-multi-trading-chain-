@@ -20,12 +20,13 @@ Its wrapper was full width while the image inside it was not, so the remove
 button — positioned against the wrapper's right edge — floated in empty space
 well clear of the photo it was meant to remove.
 """
+import os
 import ast
 import re
 import sys
 from html.parser import HTMLParser
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py').read()
 JS = open(REPO + '/static/dashboard.js').read()
 PAGE = open(REPO + '/dashboard.html').read()

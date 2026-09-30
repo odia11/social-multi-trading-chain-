@@ -28,7 +28,6 @@ from trusted_phantom_autoconnect import install as _install_trusted_phantom_auto
 from share_card_concept_d import install as _install_share_card_concept_d
 from share_token_card import install as _install_share_token_card
 from messages_premium_ui import install as _install_messages_premium_ui
-from live_market_deeplink_fix import install as _install_live_market_deeplink_fix
 from auto_trading_bot_route import install as _install_auto_trading_bot_route
 from multichain_auto_bot import install as _install_multichain_auto_bot
 from live_market_pooled_buy_balance import install as _install_live_market_pooled_buy_balance
@@ -83,7 +82,6 @@ _install_share_card_concept_d(_dashboard)
 # X preview of a token post = the app's own token card (share_token_card.py).
 _install_share_token_card(_dashboard)
 _install_messages_premium_ui(_dashboard)
-_install_live_market_deeplink_fix(_dashboard)
 _install_auto_trading_bot_route(_dashboard)
 
 # Reject untrusted Host headers before any security- or auth-sensitive route

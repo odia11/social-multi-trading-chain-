@@ -11,11 +11,12 @@ WHAT IT MUST NOT DO
 Read-only, like verify_live.py. It answers a question about money; it never
 moves any, and it never prints a key.
 """
+import os
 import ast
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/tools/why_stuck.py').read()
 
 # A sentence a user reads must not depend on where the source happens to

@@ -4601,6 +4601,7 @@ async function loadSettingsPage(){
       var notifs=document.getElementById('pref-notifs'); if(notifs) notifs.checked=!!d.pref_notifications;
       var scam  =document.getElementById('pref-scam');   if(scam)   scam.checked  =!!d.pref_scam_filter;
       var sound =document.getElementById('pref-sound');  if(sound)  sound.checked =!!d.pref_sound_alerts;
+      var surge =document.getElementById('pref-surge');  if(surge)  surge.checked =!!d.pref_surge_alerts;
       var autobot=document.getElementById('pref-autobot'); if(autobot) autobot.checked=!!d.bot_running;
       if(d.is_verified){
         var nameEl=document.getElementById('sb-user-name');

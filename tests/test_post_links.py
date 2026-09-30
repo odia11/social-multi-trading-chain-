@@ -7,9 +7,10 @@ inside an href, which would rewrite the middle of a URL into a link of its
 own.
 
 The real functions are lifted out of static/dashboard.js and run in node."""
+import os
 import json, re, subprocess, sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JS   = open(REPO + '/static/dashboard.js').read()
 
 checks = []
@@ -51,8 +52,10 @@ var out = [];
 CASES.forEach(function(c){ out.push(_fcRichText(c)); });
 console.log(JSON.stringify(out));
 '''
-open('_lh.js', 'w').write(harness)
-res = subprocess.run(['node', '_lh.js'], capture_output=True, text=True)
+import tempfile
+_lh = os.path.join(tempfile.mkdtemp(), '_lh.js')
+open(_lh, 'w').write(harness)
+res = subprocess.run(['node', _lh], capture_output=True, text=True)
 assert res.returncode == 0, res.stderr
 R = dict(zip(CASES, json.loads(res.stdout)))
 for c in CASES:
