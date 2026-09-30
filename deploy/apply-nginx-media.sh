@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Let nginx serve published video posts straight from disk. Without this the
 # Flask fallback route still works, but every viewer would hold one of the
-# app's four request threads for as long as a video streams.
+# app's request threads (16, see orcagent.service) for as long as a video streams.
 #
 # Idempotent and safe after every deploy: only inserts a location block in
 # front of each existing `location /static/` block, never touching Certbot's

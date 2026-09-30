@@ -4,6 +4,14 @@
 <script>if(typeof globalThis.Buffer==='undefined'){globalThis.Buffer={from:function(a){return new Uint8Array(a)},alloc:function(n){return new Uint8Array(n)}};}</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
+<script>
+/* Home's feed is what people open the app for, so it is requested here --
+   before fonts, styles and the ~20 other startup requests -- and handed to
+   loadHomeFeed() in dashboard.js, which must build the same URL. */
+(function(){try{var url='/api/social/feed?filter=all&kinds=posts&limit=40';
+window.__oaFeedEarly={url:url,data:fetch(url,{credentials:'same-origin'})
+.then(function(r){return r.ok?r.json():null}).catch(function(){return null})}}catch(e){}})();
+</script>
 <meta name="theme-color" content="#0a0b0e">
 <title>OrcAgent — Multi-Chain Social Trading Platform</title>
 <link rel="manifest" href="/app.webmanifest" crossorigin="use-credentials">
@@ -1030,6 +1038,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
 #support-send-btn:disabled{opacity:.5;cursor:not-allowed}
 @media(max-width:480px){#support-panel{right:10px;left:10px;width:auto;bottom:78px}}
 .trade-table-wrap{overflow-x:auto;border:1px solid var(--border2);border-radius:8px}
+.oa-retired{display:none!important}
 .trade-table{width:100%;border-collapse:collapse;font-size:10px;min-width:420px}
 .trade-table th{color:#aaaaaa;text-transform:uppercase;letter-spacing:.08em;font-size:7px;padding:6px 10px;border-bottom:1px solid var(--border);text-align:left;font-weight:400;background:var(--bg3)}
 .trade-table td{padding:6px 10px;border-bottom:1px solid rgba(42,64,96,.4);color:#ffffff;font-family:'Share Tech Mono',monospace}
@@ -4159,7 +4168,10 @@ __IMAGE_LIGHTBOX__
   <div id="lf-toast-wrap"></div>
 
 
-    <div class="trade-table-wrap">
+    <!-- Retired from Home: the bot's trades live on /bot and /live-trades,
+         and the log, Refresh and Solscan buttons belong to the old dashboard.
+         Kept in the DOM (hidden) because older code still writes into them. -->
+    <div class="trade-table-wrap oa-retired">
       <table class="trade-table">
         <thead><tr><th>Time</th><th>Token</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th></th></tr></thead>
         <tbody id="trade-tbody">
@@ -4170,7 +4182,7 @@ __IMAGE_LIGHTBOX__
 
 
   <!-- ACTIVITY LOG -->
-  <div class="panels" style="grid-template-columns:1fr">
+  <div class="panels oa-retired" style="grid-template-columns:1fr">
     <div class="panel">
       <div class="panel-hdr" style="display:flex;align-items:center;justify-content:space-between">
         <span>Activity Log</span>
@@ -4184,7 +4196,7 @@ __IMAGE_LIGHTBOX__
   </div>
 
   <!-- BOTTOM LINKS -->
-  <div class="bottom">
+  <div class="bottom oa-retired">
     <button class="bot-btn" onclick="fetchState();fetchMarketOnly()">↺ Refresh</button>
     <button class="bot-btn" id="btn-solscan" onclick="window.open('https://solscan.io','_blank')">Solscan ↗</button>
   </div>
