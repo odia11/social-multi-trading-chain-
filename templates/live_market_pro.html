@@ -779,6 +779,19 @@ body.pt-profile-mode .pt-card.pt-profile-open .pt-profile-btn{min-width:58px;col
  body.pt-profile-mode .pt-card.pt-profile-open .pt-chart-svg{height:334px!important}
  body.pt-profile-mode .pt-chart-waiting{bottom:10px;font-size:10px}
 }
+
+/* Desktop wears the same charcoal as the menu bar and every other page --
+   the navy of the phone card design (live-market-redesign/final.css) made
+   the canvas, panels and cards a different colour from the header above. */
+@media(min-width:768px){
+body{--oa-canvas:#0a0b0e;--oa-surface:#0d0f12;--oa-surface2:#101216;--oa-panel:#0d0f12;--oa-panel2:#101216;
+     --oa-line:#1c2027;--oa-line2:#21252c;--oa-border:#1c2027}
+.pt-profile-btn{border-color:#2a2f37;background:#16191f}
+.pt-profile-btn:hover{background:#21252c}
+.pt-profile-about{border-top-color:#1c2027}
+.pt-profile-links a{border-color:#2a2f37}
+.pt-chart-waiting{background:#0d0f12cc}
+}
 </style>
 </head>
 <body>
