@@ -22,7 +22,10 @@ async function main(){
  const community=Keypair.generate().publicKey.toBase58();
  const blockhash=Keypair.generate().publicKey.toBase58();
  for(const asset of ['USDC','SOL'])for(const mode of ['creator','community','holder']){
+  // New launches carry OrcAgent's 20% creator-fee share (holder: none).
+  const orcBps=mode==='holder'?0:2000;
   const args={wallet,community_wallet:community,community_bps:1500,
+   orcagent_bps:orcBps,orcagent_wallet:orcBps?'HC5ahspSox3XRmDbzXjXVoAASuY89RCmGUKwp87FRJS5':'',
    name:'OrcAgent Preflight',symbol:'PREF',
    uri:'https://orcagent.fun/token-launch/metadata/0123456789abcdef0123456789abcdef',
    quote_asset:asset,reward_mode:mode,blockhash};
@@ -35,8 +38,8 @@ async function main(){
    tx.signatures[0].signature===null&&tx.signatures[1].signature!==null&&
    tx.instructions.some(i=>i.programId.equals(PUMP_PROGRAM_ID))&&
    built.holder_reward===(mode==='holder')&&
-   built.needs_fee_share_finalization===(mode==='community'));
-  if(mode==='community'){
+   built.needs_fee_share_finalization===(mode!=='holder'));
+  if(mode!=='holder'){
    assert(asset+'/'+mode+' sharing setup included',tx.instructions.some(i=>i.programId.equals(PUMP_FEE_PROGRAM_ID)));
    const shares=await finalize({...args,mint:built.mint,stage:'finalize'});
    const finalRaw=Buffer.from(shares.transaction_b64,'base64');

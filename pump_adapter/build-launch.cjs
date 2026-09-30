@@ -8,6 +8,16 @@ const {Keypair,PublicKey,Transaction} = require('@solana/web3.js');
 const {TOKEN_PROGRAM_ID,NATIVE_MINT,createAssociatedTokenAccountIdempotentInstruction,getAssociatedTokenAddressSync} = require('@solana/spl-token');
 const USDC = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 const MAX_BYTES=1232;
+// OrcAgent's creator-fee share, if the saved launch carries one. Holder
+// Rewards have no creator share to divide.
+function orcShare(data){
+  if(!['creator','community'].includes(data.reward_mode))return null;
+  const bps=Number(data.orcagent_bps||0);
+  if(!bps)return null;
+  if(!Number.isSafeInteger(bps)||bps<0||bps>5000)throw Error('Invalid OrcAgent share');
+  return {address:new PublicKey(data.orcagent_wallet),bps};
+}
+function needsShares(data){return data.reward_mode==='community'||!!orcShare(data);}
 async function build(data){
   const wallet = new PublicKey(data.wallet);
   const quoteMint = data.quote_asset==='USDC' ? USDC : NATIVE_MINT;
@@ -40,11 +50,12 @@ async function build(data){
     quoteTokenProgram: TOKEN_PROGRAM_ID,
   });
   const ixs=[create];
-  if(data.reward_mode==='community'){
+  if(needsShares(data)){
     // A single legacy transaction with create_v2 + create_config + update
     // exceeds Solana's 1232-byte packet limit, even without ATA setup.
     // Create with the default 100% creator split, and REQUIRE a second,
-    // user-approved finalization to install the requested community split.
+    // user-approved finalization to install the agreed split (community
+    // and/or OrcAgent's creator-fee share).
     ixs.push(await PUMP_SDK.createFeeSharingConfig({
       creator:wallet,mint:mint.publicKey,pool:null}));
   }
@@ -60,18 +71,32 @@ async function build(data){
     instruction_count:ixs.length,
     quote_mint:quoteMint.toBase58(),
     holder_reward:holderReward,
-    needs_fee_share_finalization:data.reward_mode==='community',
+    needs_fee_share_finalization:needsShares(data),
     // No private keys, no claim amounts or speculative rewards in response.
   };
 }
 async function finalize(data){
   const wallet=new PublicKey(data.wallet);
   const mint=new PublicKey(data.mint);
-  const community=new PublicKey(data.community_wallet);
-  const bps=Number(data.community_bps);
-  if(!Number.isSafeInteger(bps)||bps<=0||bps>=10000||community.equals(wallet)){
-    throw Error('Invalid community share');
+  const orc=orcShare(data);
+  const orcBps=orc?orc.bps:0;
+  const holders=[];
+  if(data.reward_mode==='community'){
+    const community=new PublicKey(data.community_wallet);
+    const bps=Number(data.community_bps);
+    if(!Number.isSafeInteger(bps)||bps<=0||bps+orcBps>=10000||community.equals(wallet)||
+       (orc&&community.equals(orc.address))){
+      throw Error('Invalid community share');
+    }
+    holders.push({address:community,shareBps:bps});
   }
+  if(orc){
+    if(orc.address.equals(wallet))throw Error('Invalid OrcAgent share');
+    holders.push({address:orc.address,shareBps:orcBps});
+  }
+  if(!holders.length)throw Error('No fee split to finalize');
+  const creatorBps=10000-holders.reduce((sum,h)=>sum+h.shareBps,0);
+  if(creatorBps<1)throw Error('Invalid fee split');
   const quoteMint=data.quote_asset==='USDC'?USDC:NATIVE_MINT;
   const ixs=[];
   if(data.quote_asset==='USDC'){
@@ -80,10 +105,7 @@ async function finalize(data){
   }
   ixs.push(await PUMP_SDK.updateFeeSharesV2({
     authority:wallet,mint,currentShareholders:[wallet],
-    newShareholders:[
-      {address:wallet,shareBps:10000-bps},
-      {address:community,shareBps:bps},
-    ],quoteMint,quoteTokenProgram:TOKEN_PROGRAM_ID,
+    newShareholders:[{address:wallet,shareBps:creatorBps},...holders],quoteMint,quoteTokenProgram:TOKEN_PROGRAM_ID,
   }));
   const tx=new Transaction({feePayer:wallet,recentBlockhash:data.blockhash});
   tx.add(...ixs);

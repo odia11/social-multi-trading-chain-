@@ -31,13 +31,18 @@ PHANTOM_CLAIM_WRAPPER='L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95'
 WSOL_MINT='So11111111111111111111111111111111111111112'
 PUMP_PROGRAM='6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'
 _MODES={'creator','community','holder'}
+# OrcAgent's share of a NEW token's creator fees, in basis points (2000 = 20%).
+# Installed on-chain as a fee-sharing shareholder next to the creator, so the
+# protocol itself pays OrcAgent its part on every distribution -- never taken
+# from trading volume. Tokens launched before this existed keep 0.
+ORCAGENT_CREATOR_FEE_BPS=max(0,min(5000,int(os.environ.get('ORCAGENT_CREATOR_FEE_BPS','2000') or 0)))
 _ASSETS={'USDC','SOL'}
 _B58=re.compile(r'^[1-9A-HJ-NP-Za-km-z]{32,44}$')
 _SIG=re.compile(r'^[1-9A-HJ-NP-Za-km-z]{85,90}$')
 _DRAFT_ID=re.compile(r'^[0-9a-f]{32}$')
 
 
-def _validate_form(d, data, wallet):
+def _validate_form(d, data, wallet, orc_bps=0):
     if not isinstance(data,dict):raise ValueError('Invalid token details')
     name=data.get('name'); symbol=data.get('symbol'); desc=data.get('description','')
     mode=data.get('reward_mode','community'); quote=data.get('quote_asset','USDC')
@@ -53,7 +58,10 @@ def _validate_form(d, data, wallet):
     if mode=='community':
         if not isinstance(community,str) or not d.is_valid_solana_address(community) or community==wallet:
             raise ValueError('Enter a different, valid Solana community wallet')
-        if isinstance(bps,bool) or not isinstance(bps,int) or not 1<=bps<=9999:
+        if isinstance(bps,bool) or not isinstance(bps,int) or not 1<=bps<=9999-orc_bps:
+            if orc_bps:
+                raise ValueError('Community share must be between 0.01%% and %.2f%% of creator fees '
+                                 '(OrcAgent receives %s%%)' % ((9999-orc_bps)/100, ('%g' % (orc_bps/100))))
             raise ValueError('Community share must be 1–9999 basis points')
     else:
         community=''; bps=0
@@ -114,6 +122,9 @@ def install(d):
             UNIQUE(wallet,client_nonce)
         )''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_token_launch_owner ON token_launches(wallet,created_at)')
+        # Launches from before the OrcAgent creator-fee share keep 0.
+        if 'orcagent_bps' not in {r[1] for r in conn.execute('PRAGMA table_info(token_launches)')}:
+            conn.execute('ALTER TABLE token_launches ADD COLUMN orcagent_bps INTEGER NOT NULL DEFAULT 0')
         # Claims are a separate ledger, NEVER another OrcAgent trade/fee entry.
         # No amount is reported as received until its precise chain transaction
         # confirms; accrued_raw is only a dated pre-claim observation.
@@ -185,9 +196,41 @@ def install(d):
         return dict(row) if row else None
 
     def public_row(row):
-        return {k:row[k] for k in ('id','name','symbol','description','reward_mode',
+        out={k:row[k] for k in ('id','name','symbol','description','reward_mode',
                    'quote_asset','community_wallet','community_bps','status','mint',
                    'launch_signature','finalize_signature','created_at','error')}
+        out['orcagent_bps']=orc_bps(row)
+        out['creator_bps']=10000-orc_bps(row)-(int(row['community_bps'] or 0) if row['reward_mode']=='community' else 0)
+        return out
+
+    def orc_wallet():
+        return getattr(d,'FEE_WALLET','')
+
+    def orc_bps(row):
+        # Holder Rewards pay holders, not the creator: there is no creator
+        # share for OrcAgent to take a part of.
+        if row['reward_mode'] not in ('creator','community'):return 0
+        try:return int(row['orcagent_bps'] or 0)
+        except (KeyError,IndexError,TypeError,ValueError):return 0
+
+    def shared(row):
+        # Fees sit in the token's fee-sharing config and are paid out to its
+        # shareholders by a distribution: community splits, and every token
+        # with an OrcAgent share. Needs the second, finalizing approval.
+        return row['reward_mode']=='community' or orc_bps(row)>0
+
+    def wallet_vault(row):
+        # Only a plain 100%-creator USDC token pays into the creator's
+        # wallet-wide USDC vault (claimed with the creator's own claim).
+        return row['reward_mode']=='creator' and row['quote_asset']=='USDC' and not shared(row)
+
+    def row_sharing_ok(row):
+        return sharing_check(row['mint'],row['wallet'],row['community_wallet'],
+                             row['community_bps'] if row['reward_mode']=='community' else 0,orc_bps(row))
+
+    # Internal regression hooks, never HTTP routes.
+    app._orca_launch_shared=shared
+    app._orca_launch_orc_bps=orc_bps
 
     # A fixed public RPC fallback covers narrow, READ-ONLY verification,
     # launch simulation and creator-USDC claim preflight methods. It is never used to sign, send or
@@ -304,6 +347,7 @@ def install(d):
         if not blockhash:raise RuntimeError('No recent Solana blockhash')
         data={k:row[k] for k in ('wallet','name','symbol','reward_mode',
                                   'quote_asset','community_wallet','community_bps')}
+        data.update(orcagent_bps=orc_bps(row),orcagent_wallet=orc_wallet() if orc_bps(row) else '')
         data.update(stage=stage,blockhash=blockhash,mint=row['mint'],
                     uri='https://orcagent.fun/token-launch/metadata/'+row['id'])
         if mint_secret:data['mint_secret']=mint_secret
@@ -435,7 +479,15 @@ def install(d):
             raise RuntimeError('Solana blockhash validity unavailable')
         return answer['value']
 
-    def sharing_check(mint,wallet,community,bps):
+    def expected_shares(wallet,community,bps,orcagent_bps=0):
+        # Exactly who is paid what (basis points) from a token's creator fees.
+        expected={wallet:10000-bps-orcagent_bps}
+        if bps:expected[community]=bps
+        if orcagent_bps:expected[orc_wallet()]=orcagent_bps
+        return expected
+    app._orca_expected_shares=expected_shares
+
+    def sharing_check(mint,wallet,community,bps,orcagent_bps=0):
         helper=os.path.join(d.BASE,'pump_adapter','check-sharing.cjs')
         def run(data):
             try:
@@ -452,10 +504,10 @@ def install(d):
             raise RuntimeError('Fee-sharing account has not been confirmed')
         decoded=run({'action':'verify','mint':mint,'data_b64':state['data'][0]})
         shares=decoded.get('shares',[])
+        expected=expected_shares(wallet,community,bps,orcagent_bps)
         return (decoded.get('mint')==mint and decoded.get('admin_revoked') is True
-                and len(shares)==2
-                and {s['wallet']:s['bps'] for s in shares}
-                    == {wallet:10000-bps,community:bps})
+                and len(shares)==len(expected)
+                and {s['wallet']:s['bps'] for s in shares}==expected)
 
     def mint_exists(mint):
         program=Pubkey.from_string(PUMP_PROGRAM)
@@ -574,7 +626,7 @@ def install(d):
             # Launch/finalization, unlike claims, MUST include our mint and
             # Pump's bonding-curve program ID.
             if stage!='claim' and (row['mint'] not in keys or PUMP_PROGRAM not in keys):
-                raise ValueError('Unexpected token or Pump program')
+                raise ValueError('Unexpected token or launch program')
         except (IndexError,KeyError,TypeError,base64.binascii.Error) as exc:
             raise ValueError('Unrecognized on-chain transaction') from exc
         return True
@@ -788,15 +840,14 @@ def install(d):
                 if stage=='create' and not mint_exists(row['mint']):
                     unavailable+=1
                     continue
-                if stage=='finalize' and not sharing_check(row['mint'],row['wallet'],
-                                            row['community_wallet'],row['community_bps']):
+                if stage=='finalize' and not row_sharing_ok(row):
                     unavailable+=1
                     continue
             except (RuntimeError,ValueError,KeyError,TypeError):
                 # Preserve status. Do not log RPC data or user-controlled text.
                 unavailable+=1
                 continue
-            target=('pending_shares' if row['reward_mode']=='community' else 'live') if stage=='create' else 'live'
+            target=('pending_shares' if shared(row) else 'live') if stage=='create' else 'live'
             previous='submitted' if stage=='create' else 'finalize_submitted'
             sig_col='launch_signature' if stage=='create' else 'finalize_signature'
             with sqlite3.connect(d.DB_FILE,timeout=8) as conn:
@@ -831,6 +882,7 @@ def install(d):
         return d._render_no_cache('token_launch.html',wallet=wallet,
             csrf_token=d._get_csrf_token(),launch_enabled=enabled(),
             pilot_creator_only=pilot_wallet(wallet),
+            orcagent_bps=0 if pilot_wallet(wallet) else ORCAGENT_CREATOR_FEE_BPS,
             funding_available=bool(os.getenv('JUPITER_API_KEY','').strip()),
             app_version=launch_assets_version(),
             navbar_html=d._navbar_html)
@@ -848,7 +900,9 @@ def install(d):
            pilot_max_launch_sol_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS if pilot else None,
            pilot_max_trade_usdc_micro=PILOT_MAX_TRADE_USDC_MICRO if pilot else None,
            usdc_launch_funding_available=bool(os.getenv('JUPITER_API_KEY','').strip()),
-           fee_disclosure='Pump fees and Solana network/rent fees apply. OrcAgent does not charge an extra launch fee.',
+           fee_disclosure=('Network and launch-protocol fees apply. OrcAgent launch fee: $0. '
+                           + ('OrcAgent receives %g%% of new tokens\' creator fees (not of trading volume).' % (ORCAGENT_CREATOR_FEE_BPS/100) if ORCAGENT_CREATOR_FEE_BPS and not pilot else '')).strip(),
+           orcagent_bps=0 if pilot else ORCAGENT_CREATOR_FEE_BPS,
            capabilities={'creator':True,'community':not pilot,'holder':not pilot})
 
     @app.post('/api/token-launch/draft')
@@ -860,8 +914,11 @@ def install(d):
         if request.content_length and request.content_length>1_750_000:
             return fail('Token details too large',413)
         body=request.get_json(silent=True)
+        # No valid OrcAgent wallet configured -> no share, rather than drafts
+        # that can never be built.
+        new_orc=0 if (pilot_wallet(wallet) or not d.is_valid_solana_address(orc_wallet() or '')) else ORCAGENT_CREATOR_FEE_BPS
         try:
-            name,symbol,desc,mode,quote,community,bps=_validate_form(d,body,wallet)
+            name,symbol,desc,mode,quote,community,bps=_validate_form(d,body,wallet,new_orc)
             if pilot_wallet(wallet) and (mode!='creator' or quote!='USDC'):
                 raise ValueError('Pilot allows USDC / 100% Creator Rewards only')
             nonce=body.get('client_nonce')
@@ -884,9 +941,10 @@ def install(d):
                 return fail('You have 20 saved drafts. Launching more tokens requires clearing old drafts.',409)
             conn.execute('''INSERT INTO token_launches
               (id,wallet,client_nonce,name,symbol,description,icon_webp,reward_mode,
-               quote_asset,community_wallet,community_bps,created_at)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
-              (launch_id,wallet,nonce,name,symbol,desc,icon,mode,quote,community,bps,int(time.time())))
+               quote_asset,community_wallet,community_bps,orcagent_bps,created_at)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+              (launch_id,wallet,nonce,name,symbol,desc,icon,mode,quote,community,bps,
+               new_orc if mode in ('creator','community') else 0,int(time.time())))
         return jsonify(ok=True,draft=public_row(lookup(launch_id,wallet))),201
 
     @app.get('/token-launch/metadata/<launch_id>')
@@ -1027,7 +1085,7 @@ def install(d):
             # balances; those values must never be fabricated from drafts.
             stats=conn.execute("SELECT quote_asset,count(*) FROM token_launches WHERE status='live' AND mint IS NOT NULL AND launch_signature<>'' GROUP BY quote_asset").fetchall()
             rows=conn.execute('''SELECT id,name,symbol,description,quote_asset,
-                    reward_mode,community_wallet,community_bps,wallet,mint,created_at,finalized_at
+                    reward_mode,community_wallet,community_bps,orcagent_bps,wallet,mint,created_at,finalized_at
                     FROM token_launches WHERE '''+clause+
                     ' ORDER BY finalized_at DESC,created_at DESC,id DESC LIMIT 20 OFFSET ?',
                     [*params,(int(page)-1)*20]).fetchall()
@@ -1071,7 +1129,7 @@ def install(d):
                 except RuntimeError as exc:return fail(exc,503)
                 return jsonify(ok=True,mint=row['mint'],transaction_b64=row['prepare_tx_b64'],
                     quote_asset=row['quote_asset'],reward_mode=row['reward_mode'],
-                    needs_finalization=row['reward_mode']=='community',
+                    needs_finalization=shared(row),
                     pilot_estimated_max_sol_lamports=pilot_cost,expires_in=60,reused=True)
             try:
                 if blockhash_valid(row['prepare_tx_b64']):
@@ -1080,10 +1138,10 @@ def install(d):
                         else PUBLIC_MAX_LAUNCH_SOL_LAMPORTS,enforce_public=True)
                     return jsonify(ok=True,mint=row['mint'],transaction_b64=row['prepare_tx_b64'],
                         quote_asset=row['quote_asset'],reward_mode=row['reward_mode'],
-                        needs_finalization=row['reward_mode']=='community',
+                        needs_finalization=shared(row),
                         pilot_estimated_max_sol_lamports=pilot_cost,expires_in=45,reused=True)
                 if mint_exists(row['mint']):
-                    return fail('This token already exists on Pump. Recover its signature from Phantom before retrying.',409)
+                    return fail('This token already exists on-chain. Recover its signature from Phantom before retrying.',409)
             except RuntimeError as exc:return fail(exc,503)
             with sqlite3.connect(d.DB_FILE,timeout=8) as conn:
                 cur=conn.execute('''UPDATE token_launches SET status='draft',mint=NULL,
@@ -1157,7 +1215,7 @@ def install(d):
                     return jsonify(ok=True,mint=row['mint'],transaction_b64=row['finalize_tx_b64'],
                         pilot_estimated_max_sol_lamports=followup_cost,
                         expires_in=45,reused=True)
-                if sharing_check(row['mint'],wallet,row['community_wallet'],row['community_bps']):
+                if row_sharing_ok(row):
                     return fail('Fee sharing is already final on-chain. Recover the transaction signature from Phantom.',409)
             except RuntimeError as exc:return fail(exc,503)
             with sqlite3.connect(d.DB_FILE,timeout=8) as conn:
@@ -1167,7 +1225,7 @@ def install(d):
                      AND finalize_signature='' ''',(launch_id,wallet))
                 if cur.rowcount!=1:return fail('Fee-sharing request changed; reload.',409)
             row=lookup(launch_id,wallet)
-        if row['reward_mode']!='community' or row['status']!='pending_shares':
+        if not shared(row) or row['status']!='pending_shares':
             return fail('Launch must be confirmed before finalizing fee shares',409)
         try:
             built=build_tx(row,'finalize')
@@ -1263,7 +1321,7 @@ def install(d):
         except RuntimeError as exc:return fail(exc,503)
         response=jsonify(ok=True,quote_asset='USDC',pump_vault_raw=str(raw),
                scope='creator_wallet_all_tokens_pump_bonding_curve',
-               note='Wallet-wide unclaimed bonding-curve USDC creator fees. Not token-specific, not yet received, PumpSwap fees excluded.')
+               note='Wallet-wide unclaimed bonding-curve USDC creator fees. Not token-specific, not yet received, fees after graduation excluded.')
         response.headers['Cache-Control']='private, no-store'
         return response
 
@@ -1281,7 +1339,7 @@ def install(d):
         if not wallet:return fail('Connect your wallet',401)
         row=lookup(launch_id,wallet)
         if not row:return fail('Launch not found',404)
-        if row['status']!='live' or row['reward_mode']!='creator' or row['quote_asset']!='USDC':
+        if row['status']!='live' or not wallet_vault(row):
             return fail('Confirm your USDC Creator Rewards launch first',409)
         return creator_fee_response(wallet)
 
@@ -1298,7 +1356,7 @@ def install(d):
             return fail('Only confirmed creator/community launches can claim creator fees',409)
         # An on-chain Phantom approval can settle before the client successfully
         # posts its signature. Reconcile BEFORE offering any fresh payable tx.
-        if row['reward_mode']=='creator' and row['quote_asset']=='USDC':
+        if wallet_vault(row):
             with closing(sqlite3.connect(d.DB_FILE)) as conn:
                 unresolved=conn.execute('''SELECT id FROM token_reward_claims
                     WHERE wallet=? AND quote_asset='USDC'
@@ -1359,7 +1417,7 @@ def install(d):
         if not blockhash:return fail('No recent Solana blockhash',503)
         path=os.path.join(d.BASE,'pump_adapter','build-reward-claim.cjs')
         params={'wallet':wallet,'mint':row['mint'],'quote_asset':row['quote_asset'],
-                'reward_mode':row['reward_mode'],'blockhash':blockhash}
+                'reward_mode':row['reward_mode'],'fee_sharing':shared(row),'blockhash':blockhash}
         primary=getattr(d,'SOLANA_RPC_URL','') or d.SOLANA_RPC
         claim_rpcs=list(getattr(d,'CLAIM_SOL_RPCS',[]) or [])
         public_mainnet='https://api.mainnet-beta.solana.com'
@@ -1368,7 +1426,7 @@ def install(d):
         # so try the working read-only endpoint first and retain configured
         # providers as fallbacks. USDC uses narrow derived-account reads and can
         # keep configured providers first.
-        broad_creator_read=(row['quote_asset']=='SOL' or row['reward_mode']=='community')
+        broad_creator_read=(row['quote_asset']=='SOL' or shared(row))
         endpoints=(list(dict.fromkeys([public_mainnet,*claim_rpcs,primary,_VERIFY_RPC]))
                    if broad_creator_read else
                    list(dict.fromkeys([*claim_rpcs,primary,_VERIFY_RPC,public_mainnet])))
@@ -1412,7 +1470,9 @@ def install(d):
                   (id,launch_id,wallet,mint,quote_asset,reward_mode,accrued_raw,accrued_scope,
                    transaction_b64,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)''',
                   (claim_id,launch_id,wallet,row['mint'],row['quote_asset'],
-                   row['reward_mode'],accrued,built.get('accrued_scope',''),
+                   # A distribution from a fee-sharing config, whatever the
+                   # launch's label: never the wallet-wide creator vault.
+                   'community' if shared(row) else row['reward_mode'],accrued,built.get('accrued_scope',''),
                    built['transaction_b64'],int(time.time())))
         except RuntimeError as exc:
             # A rejected simulation (including insufficient ATA rent) is a
@@ -1457,10 +1517,10 @@ def install(d):
         except ValueError as exc:return fail(exc)
         except RuntimeError as exc:return fail(exc,503)
         received_raw=''
-        if confirmed and row['reward_mode']=='creator' and row['quote_asset']=='USDC':
+        if confirmed and wallet_vault(row):
             try:received_raw=verified_creator_usdc_receipt(sig,wallet,allow_zero=True)
             except RuntimeError as exc:return fail(exc,503)
-        status=('confirmed' if int(received_raw)>0 else 'confirmed_no_payout') if confirmed and row['reward_mode']=='creator' and row['quote_asset']=='USDC' else ('confirmed' if confirmed else 'submitted')
+        status=('confirmed' if int(received_raw)>0 else 'confirmed_no_payout') if confirmed and wallet_vault(row) else ('confirmed' if confirmed else 'submitted')
         with sqlite3.connect(d.DB_FILE) as conn:
             cur=conn.execute('''UPDATE token_reward_claims
                  SET signature=?,status=?,confirmed_at=?,received_raw=?
@@ -1519,13 +1579,12 @@ def install(d):
         if confirmed:
             try:
                 if is_create and not mint_exists(row['mint']):
-                    return fail('Mint was not verified on Pump. Check explorer before retrying.',503)
-                if not is_create and not sharing_check(row['mint'],wallet,
-                       row['community_wallet'],row['community_bps']):
+                    return fail('Mint was not verified on-chain. Check explorer before retrying.',503)
+                if not is_create and not row_sharing_ok(row):
                     return fail('On-chain fee shares do not match the agreed split.',409)
             except RuntimeError as exc:return fail(exc,503)
         if is_create:
-            status=('pending_shares' if row['reward_mode']=='community' else 'live') if confirmed else 'submitted'
+            status=('pending_shares' if shared(row) else 'live') if confirmed else 'submitted'
         else:
             status='live' if confirmed else 'finalize_submitted'
         with sqlite3.connect(d.DB_FILE) as conn:

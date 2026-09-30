@@ -14,7 +14,9 @@ async function run(){
  const wallet=new PublicKey(data.wallet);
  const mint=new PublicKey(data.mint);
  const quote=data.quote_asset==='USDC'?USDC:NATIVE_MINT;
- const sharing=data.reward_mode==='community';
+ // A fee-sharing config (community split and/or OrcAgent's creator-fee share)
+ // is paid out by a permissionless distribution to every shareholder.
+ const sharing=data.reward_mode==='community'||data.fee_sharing===true;
  if(!['community','creator'].includes(data.reward_mode))throw Error('Holder fees are handled by Pump, not this wallet');
  const feeOwner=sharing?feeSharingConfigPda(mint):wallet;
  const rpc=process.env.ORCA_LAUNCH_RPC;

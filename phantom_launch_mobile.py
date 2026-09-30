@@ -44,6 +44,18 @@ def b58dec(value):
     zeros=len(value)-len(value.lstrip('1'))
     return b'\0'*zeros+number.to_bytes((number.bit_length()+7)//8,'big')
 
+def _orc_bps(row):
+    # Same rule as token_launch: OrcAgent's share exists only for creator
+    # and community launches that were saved with one.
+    if row.get('reward_mode') not in ('creator','community'):return 0
+    try:return int(row.get('orcagent_bps') or 0)
+    except (TypeError,ValueError):return 0
+
+
+def _shared(row):
+    return row.get('reward_mode')=='community' or _orc_bps(row)>0
+
+
 def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=None,claim_wrapper_ok=None):
     app=d.app
     fernet=Fernet(os.environ['ENCRYPTION_KEY'].encode())
@@ -514,8 +526,9 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
             if check_signature(signature,row,flow['stage']) and (
                 mint_exists(row['mint']) if flow['stage']=='create'
                 else sharing_check(row['mint'],row['wallet'],row['community_wallet'],
-                                   row['community_bps'])):
-                target=('pending_shares' if row['reward_mode']=='community' else 'live') if flow['stage']=='create' else 'live'
+                                   row['community_bps'] if row['reward_mode']=='community' else 0,
+                                   _orc_bps(row))):
+                target=('pending_shares' if _shared(row) else 'live') if flow['stage']=='create' else 'live'
                 with sqlite3.connect(d.DB_FILE,timeout=8) as db:
                     db.execute("""UPDATE token_launches SET status=?,
                          finalized_at=CASE WHEN ?='live' THEN ? ELSE finalized_at END

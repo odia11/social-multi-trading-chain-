@@ -124,7 +124,7 @@ def scan():
     hits = []
     for dirpath, _dirnames, filenames in os.walk(REPO):
         rel_dir = dirpath[len(REPO) + 1:] + '/'
-        if any(rel_dir.startswith(s) for s in SKIP_DIRS):
+        if any(rel_dir.startswith(s) for s in SKIP_DIRS) or '/node_modules/' in '/' + rel_dir:
             continue
         for name in sorted(filenames):
             if not name.endswith(EXTS):
