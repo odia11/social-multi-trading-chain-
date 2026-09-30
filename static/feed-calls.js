@@ -45,7 +45,7 @@
   }
   function safeImg(url){
     url = String(url || '');
-    return /^https:\/\/[^\s"'<>]+$/.test(url) ? url : '';
+    return (/^https:\/\/[^\s"'<>]+$/.test(url) || /^\/token-launch\/icon\/[A-Za-z0-9]{1,64}$/.test(url)) ? url : '';
   }
   function jsArg(v){ return esc(JSON.stringify(String(v == null ? '' : v))); }
   function tileColor(sym){
@@ -249,13 +249,9 @@
     b.disabled = !picked || busy;
     b.textContent = busy ? 'Calling…' : (picked ? 'Call $' + picked.symbol : 'Pick a token to call');
   }
-  function looksLikeAddress(q){ return /^0x[0-9a-fA-F]{40}$/.test(q) || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(q); }
-  function liveChains(){ return (typeof _NB_LIVE_CHAINS !== 'undefined' && _NB_LIVE_CHAINS) || Object.keys(CHAIN_LABELS); }
-  function toRow(p){
-    var b = p.baseToken || {};
-    return {mint: b.address || '', symbol: b.symbol || '?', name: b.name || '', chain: p.chainId || '',
-            price: num(p.priceUsd), mcap: num(p.marketCap || p.fdv), change: p.priceChange ? p.priceChange.h24 : null,
-            image: (p.info && p.info.imageUrl) || ''};
+  function toRow(t){
+    return {mint: t.mint || '', symbol: t.symbol || '?', name: t.name || '', chain: t.chain || '',
+            price: num(t.price), mcap: num(t.market_cap), change: t.change_24h, image: t.image_url || ''};
   }
   function renderResults(rows, note){
     var box = sheet.querySelector('#fcall-results');
@@ -298,20 +294,16 @@
     searchTimer = setTimeout(function(){
       var seq = ++searchSeq;
       renderResults([], 'Searching…');
-      fetch('/api/dexscreener/search?q=' + encodeURIComponent(q)).then(function(r){ return r.json(); }).then(function(d){
+      // One server lookup for every chain: the app's own market data,
+      // DexScreener, GeckoTerminal and OrcAgent launches -- a pasted address
+      // of any token this app can trade is found even while one source is
+      // rate-limited or has not indexed it yet.
+      fetch('/api/calls/lookup?q=' + encodeURIComponent(q)).then(function(r){ return r.json(); }).then(function(d){
         if(seq !== searchSeq) return;
-        var chains = liveChains(), seen = {};
-        var rows = (d.pairs || []).filter(function(p){ return chains.indexOf(p.chainId) !== -1; }).map(toRow)
-          .filter(function(t){ var k = t.chain + ':' + t.mint; if(!t.mint || seen[k]) return false; seen[k] = 1; return true; })
-          .slice(0, 5);
-        if(rows.length){ renderResults(rows); return; }
-        if(!looksLikeAddress(q)){ renderResults([], 'No tokens found'); return; }
-        return fetch('/api/token/info/' + encodeURIComponent(q)).then(function(r){ return r.json(); }).then(function(info){
-          if(seq !== searchSeq) return;
-          if(!info || !info.ok){ renderResults([], 'No tokens found'); return; }
-          renderResults([{mint: info.address || q, symbol: info.symbol || '?', name: info.name || '', chain: info.chain || '',
-                          price: num(info.price), mcap: num(info.market_cap), change: null, image: info.image_url || ''}]);
-        });
+        var rows = ((d && d.tokens) || []).map(toRow).filter(function(t){ return t.mint; });
+        renderResults(rows, rows.length ? '' : (/^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/.test(q)
+          ? 'No live price found for this address on any supported chain yet — try again in a minute'
+          : 'No tokens found — paste the contract address'));
       }).catch(function(){ if(seq === searchSeq) renderResults([], 'Search failed — try again'); });
     }, 280);
   }

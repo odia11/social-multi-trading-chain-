@@ -19544,6 +19544,139 @@ CALL_NOTE_MAX = 280
 FEED_CALL_MARKER = '__CALL__'
 _FEED_EMBED_MARKERS = ('__CHART__', '__TRADE__', FEED_CALL_MARKER)
 
+_CALL_LOOKUP_EVM_CHAINS = ('base', 'bsc', 'arbitrum', 'polygon', 'robinhood')
+
+
+def _call_token_row(mint, symbol, name, chain, price, mcap=0.0, image_url='', change_24h=None):
+    try:
+        price = float(price or 0)
+    except (TypeError, ValueError):
+        price = 0.0
+    try:
+        mcap = float(mcap or 0)
+    except (TypeError, ValueError):
+        mcap = 0.0
+    image_url = str(image_url or '')
+    if not (image_url.startswith('https://') or re.fullmatch(r'/token-launch/icon/[A-Za-z0-9]{1,64}', image_url)):
+        image_url = ''
+    return {'mint': str(mint or ''), 'symbol': str(symbol or '')[:32], 'name': str(name or '')[:80],
+            'chain': str(chain or '').lower(), 'price': price, 'market_cap': mcap,
+            'image_url': image_url[:500], 'change_24h': change_24h}
+
+
+def _call_rows_from_pairs(pairs, want_mint=''):
+    """DexScreener pairs -> one row per (chain, token), deepest pool first."""
+    rows, seen = [], set()
+    supported = [p for p in (pairs or []) if p.get('chainId') in _MARKET_LIVE_CHAINS]
+    supported.sort(key=lambda p: float((p.get('liquidity') or {}).get('usd') or 0), reverse=True)
+    for p in supported:
+        tok = p.get('baseToken') or {}
+        # A pasted address can also be the QUOTE side of a pool; that pool's
+        # price is the other token's, so it is skipped.
+        if want_mint and str(tok.get('address', '')).lower() != want_mint.lower():
+            continue
+        key = (p.get('chainId'), str(tok.get('address', '')).lower())
+        if not tok.get('address') or key in seen:
+            continue
+        seen.add(key)
+        rows.append(_call_token_row(tok.get('address'), tok.get('symbol'), tok.get('name'), p.get('chainId'),
+                                    p.get('priceUsd'), p.get('marketCap') or p.get('fdv'),
+                                    (p.get('info') or {}).get('imageUrl'), (p.get('priceChange') or {}).get('h24')))
+    return rows
+
+
+def _call_gt_token(chain, mint):
+    """One token from GeckoTerminal (covers pools DexScreener has not indexed
+    yet, and keeps working while DexScreener rate-limits this server)."""
+    network = _GECKOTERMINAL_NETWORK.get(chain)
+    if not network or not _gt_try_take(reserve=_GT_WARM_RESERVE):
+        return None
+    try:
+        r = requests.get(f'https://api.geckoterminal.com/api/v2/networks/{network}/tokens/'
+                         + requests.utils.quote(mint, safe=''),
+                         headers={'Accept': 'application/json;version=20230302'}, timeout=8)
+        if r.status_code != 200:
+            return None
+        a = (r.json().get('data') or {}).get('attributes') or {}
+    except (requests.RequestException, ValueError):
+        return None
+    row = _call_token_row(a.get('address') or mint, a.get('symbol'), a.get('name'), chain,
+                          a.get('price_usd'), a.get('market_cap_usd') or a.get('fdv_usd'), a.get('image_url'))
+    return row if row['price'] > 0 else None
+
+
+def _call_token_lookup(query, chain=None):
+    """Every way this app knows a token, so ANY token it can trade -- on every
+    chain -- can be called: the Live Market scanner's own tokens (no network),
+    DexScreener, then GeckoTerminal, then OrcAgent's own launches.
+    Returns rows (see _call_token_row), best match first."""
+    q = str(query or '').strip()
+    chain = (chain or '').lower() or None
+    if chain and chain not in _MARKET_LIVE_CHAINS:
+        chain = None
+    is_evm, is_sol = is_valid_evm_address(q), is_valid_solana_address(q)
+    rows = []
+    def keep(row):
+        if row and row['price'] > 0 and (not chain or row['chain'] == chain):
+            key = (row['chain'], row['mint'].lower())
+            if all((r['chain'], r['mint'].lower()) != key for r in rows):
+                rows.append(row)
+    scanner = list(_scanner_cache.get('data') or [])
+    if is_evm or is_sol:
+        for t in scanner:
+            if str(t.get('mint', '')).lower() == q.lower():
+                keep(_call_token_row(t.get('mint'), t.get('symbol'), t.get('name'), t.get('chain') or 'solana',
+                                     t.get('price_usd'), t.get('market_cap'), t.get('image_url'), t.get('price_change_24h')))
+        if not rows:
+            r = _dex_get('https://api.dexscreener.com/latest/dex/tokens/' + requests.utils.quote(q, safe=''), timeout=8)
+            try:
+                pairs = (r.json().get('pairs') or []) if r and r.status_code == 200 else []
+            except ValueError:
+                pairs = []
+            for row in _call_rows_from_pairs(pairs, want_mint=q):
+                keep(row)
+        if not rows and is_sol:
+            try:
+                from launched_token_market import lookup as _launch_market_lookup
+                launch = _launch_market_lookup(DB_FILE, BASE, q, _sol_price_usd)
+            except Exception:
+                launch = None
+            if launch:
+                keep(_call_token_row(q, launch.get('symbol'), launch.get('name'), 'solana',
+                                     launch.get('price_usd') or launch.get('price'), launch.get('market_cap'),
+                                     launch.get('image_url')))
+        if not rows:
+            for net in ([chain] if chain else (['solana'] if is_sol else list(_CALL_LOOKUP_EVM_CHAINS))):
+                keep(_call_gt_token(net, q))
+                if rows:
+                    break
+        return rows
+    if len(q) < 2:
+        return rows
+    ql = q.lower().lstrip('$')
+    for t in scanner:
+        if str(t.get('symbol', '')).lower().startswith(ql) or ql in str(t.get('name', '')).lower():
+            keep(_call_token_row(t.get('mint'), t.get('symbol'), t.get('name'), t.get('chain') or 'solana',
+                                 t.get('price_usd'), t.get('market_cap'), t.get('image_url'), t.get('price_change_24h')))
+    r = _dex_get('https://api.dexscreener.com/latest/dex/search?q=' + requests.utils.quote(q, safe=''))
+    try:
+        pairs = (r.json().get('pairs') or []) if r and r.status_code == 200 else []
+    except ValueError:
+        pairs = []
+    for row in _call_rows_from_pairs(pairs):
+        keep(row)
+    return rows
+
+
+@app.route('/api/calls/lookup', methods=['GET'])
+@rate_limit(40, 60)
+def api_calls_lookup():
+    """The Call sheet's search: a name, ticker or any address on any chain."""
+    q = _sanitize(request.args.get('q', '').strip())[:100]
+    rows = _call_token_lookup(q, request.args.get('chain', ''))
+    return jsonify({'ok': True, 'tokens': rows[:6]})
+
+
 @app.route('/api/calls', methods=['POST'])
 @rate_limit(10, 60)
 def api_make_call():
@@ -19589,15 +19722,18 @@ def api_make_call():
         # price, which anyone could forge to fake a huge multiplier from the start.
         td = get_token_data(mint, chain=want_chain) if want_chain else get_token_data(mint)
         if not td or not td.get('price'):
-            return jsonify({'ok': False, 'msg': 'Could not fetch this token — check the address'}), 400
+            # DexScreener rate-limited, or a token it has not indexed: every
+            # other source this app has (still a server-side price).
+            found = [r for r in _call_token_lookup(mint, want_chain) if r['mint'].lower() == mint.lower()]
+            td = dict(found[0]) if found else None
+        if not td or not td.get('price'):
+            return jsonify({'ok': False, 'msg': 'Could not find a live price for this token right now — try again in a minute'}), 400
         price = float(td['price'])
         symbol = td.get('symbol', '') or mint[:8]
         name = td.get('name', '') or symbol
         mcap = float(td.get('market_cap', 0) or 0)
         chain = str(td.get('chain', '') or want_chain or ('solana' if is_valid_solana_address(mint) else ''))
-        image_url = str(td.get('image_url', '') or '')
-        if not image_url.startswith('https://'):
-            image_url = ''
+        image_url = _call_token_row(mint, '', '', '', 0, 0, td.get('image_url'))['image_url']
 
         cur = conn.execute(
             'INSERT INTO token_calls (user_id, wallet, mint, symbol, token_name, price_at_call, mcap_at_call, peak_price, '
@@ -19791,11 +19927,13 @@ def _calls_peak_loop():
             conn = sqlite3.connect(DB_FILE)
             try:
                 rows = conn.execute(
-                    "SELECT DISTINCT mint FROM token_calls WHERE timestamp >= datetime('now','-30 days')"
+                    "SELECT mint, MAX(COALESCE(chain,'')) FROM token_calls "
+                    "WHERE timestamp >= datetime('now','-30 days') GROUP BY mint"
                 ).fetchall()
             finally:
                 conn.close()
             mints = [r[0] for r in rows]
+            chain_of = {r[0]: (r[1] or ('solana' if is_valid_solana_address(r[0]) else '')) for r in rows}
             price_by_mint = {}
             for i in range(0, len(mints), 30):
                 chunk = mints[i:i+30]
@@ -19813,6 +19951,30 @@ def _calls_peak_loop():
                 except Exception as e:
                     print(f'[calls-peak] chunk error: {e}', flush=True)
                 time.sleep(0.3)
+            # Tokens DexScreener did not price this round (not indexed, or it
+            # is rate-limiting us): GeckoTerminal, 30 per request per chain.
+            missing = {}
+            for m in mints:
+                if m not in price_by_mint and _GECKOTERMINAL_NETWORK.get(chain_of.get(m)):
+                    missing.setdefault(chain_of[m], []).append(m)
+            for chain_name, group in missing.items():
+                for i in range(0, len(group), 30):
+                    if not _gt_try_take(reserve=_GT_WARM_RESERVE):
+                        break
+                    chunk = group[i:i+30]
+                    try:
+                        r = requests.get('https://api.geckoterminal.com/api/v2/simple/networks/'
+                                         + _GECKOTERMINAL_NETWORK[chain_name] + '/token_price/' + ','.join(chunk),
+                                         headers={'Accept': 'application/json;version=20230302'}, timeout=10)
+                        found = ((r.json().get('data') or {}).get('attributes') or {}).get('token_prices') or {} \
+                            if r.status_code == 200 else {}
+                        lower = {str(k).lower(): v for k, v in found.items()}
+                        for m in chunk:
+                            price = float(lower.get(m.lower()) or 0)
+                            if price > 0:
+                                price_by_mint[m] = price
+                    except (requests.RequestException, ValueError, TypeError) as e:
+                        print(f'[calls-peak] geckoterminal {chain_name}: {type(e).__name__}', flush=True)
 
             if price_by_mint:
                 conn = sqlite3.connect(DB_FILE)
