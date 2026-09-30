@@ -281,22 +281,27 @@ html,body{min-height:100vh;min-height:100dvh;background:var(--bg);font-family:va
       <h3>Token launches</h3>
       <div class="fee-stat-row">
         <div class="fee-stat">
-          <div class="fee-stat-label">OrcAgent launch fee</div>
+          <div class="fee-stat-label">Launch fee</div>
           <div class="fee-stat-value">$0</div>
         </div>
         <div class="fee-stat">
-          <div class="fee-stat-label">OrcAgent share of creator fees</div>
+          <div class="fee-stat-label">Creator earnings</div>
+          <div class="fee-stat-value">{{ 100 - creator_share_pct|int }}%</div>
+        </div>
+        <div class="fee-stat">
+          <div class="fee-stat-label">OrcAgent platform fee</div>
           <div class="fee-stat-value">{{ creator_share_pct }}%</div>
         </div>
       </div>
-      <p>Launching a token costs nothing from OrcAgent. For tokens launched
-      through OrcAgent from 30 September 2026, OrcAgent receives
-      <strong>{{ creator_share_pct }}% of the token's creator fees</strong> and the creator
-      the rest — {{ creator_share_pct }}% of the creator fees, <strong>not {{ creator_share_pct }}% of trading
-      volume</strong>. It comes out of the creator fees the launch protocol already
-      pays, so traders pay nothing extra. The split is shown before you approve
-      and locked on-chain; older tokens and Holder Rewards tokens have no
-      OrcAgent share.</p>
+      <p>Launch for $0 and earn on every trade. For tokens launched through
+      OrcAgent from 30 September 2026, the creator earns
+      <strong>{{ 100 - creator_share_pct|int }}% of the token's creator fees</strong>, paid straight to their
+      wallet for as long as the token trades. OrcAgent's platform fee is the other
+      {{ creator_share_pct }}%, instead of an upfront launch fee — a share of the creator fees,
+      <strong>never of trading volume</strong>, so traders pay nothing extra. Example:
+      $1,000 in creator fees means ${{ (1000 - creator_share_pct|int * 10) }} for the creator and
+      ${{ creator_share_pct|int * 10 }} for OrcAgent. The split is shown before you approve and locked
+      on-chain; older tokens and Holder Rewards tokens have no platform fee.</p>
 
       <h3>What has no OrcAgent fee</h3>
       <div class="fee-stat-row">

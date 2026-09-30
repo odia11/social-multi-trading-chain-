@@ -61,7 +61,8 @@ def _validate_form(d, data, wallet, orc_bps=0):
         if isinstance(bps,bool) or not isinstance(bps,int) or not 1<=bps<=9999-orc_bps:
             if orc_bps:
                 raise ValueError('Community share must be between 0.01%% and %.2f%% of creator fees '
-                                 '(OrcAgent receives %s%%)' % ((9999-orc_bps)/100, ('%g' % (orc_bps/100))))
+                                 '(it comes out of your share; the platform fee is %s%%)'
+                                 % ((9999-orc_bps)/100, ('%g' % (orc_bps/100))))
             raise ValueError('Community share must be 1–9999 basis points')
     else:
         community=''; bps=0
@@ -901,7 +902,7 @@ def install(d):
            pilot_max_trade_usdc_micro=PILOT_MAX_TRADE_USDC_MICRO if pilot else None,
            usdc_launch_funding_available=bool(os.getenv('JUPITER_API_KEY','').strip()),
            fee_disclosure=('Network and launch-protocol fees apply. OrcAgent launch fee: $0. '
-                           + ('OrcAgent receives %g%% of new tokens\' creator fees (not of trading volume).' % (ORCAGENT_CREATOR_FEE_BPS/100) if ORCAGENT_CREATOR_FEE_BPS and not pilot else '')).strip(),
+                           + ('You earn %g%% of your token\'s creator fees; OrcAgent\'s platform fee is the other %g%% (never a share of trading volume).' % (100-ORCAGENT_CREATOR_FEE_BPS/100, ORCAGENT_CREATOR_FEE_BPS/100) if ORCAGENT_CREATOR_FEE_BPS and not pilot else '')).strip(),
            orcagent_bps=0 if pilot else ORCAGENT_CREATOR_FEE_BPS,
            capabilities={'creator':True,'community':not pilot,'holder':not pilot})
 

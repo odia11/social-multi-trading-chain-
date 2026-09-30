@@ -13618,9 +13618,10 @@ _TOS_CONTENT_HTML = f'''
     <h2>Fees at a glance</h2>
     <p>Trading: {_tos_fee_pct(FEE_RATE_TXN)}% of every buy and every sell made through OrcAgent.</p>
     <p>Launching a token: $0. OrcAgent charges no launch fee.</p>
-    <p>Creator fees of a token launched through OrcAgent: the creator receives
-    {_TOS_CREATOR}% and OrcAgent receives {_TOS_SHARE}%. This is {_TOS_SHARE}% of the creator fees,
-    not {_TOS_SHARE}% of trading volume, and traders pay nothing extra for it.
+    <p>Creator fees of a token launched through OrcAgent: the creator earns
+    {_TOS_CREATOR}% of them, paid to the creator's wallet, and OrcAgent's platform fee is
+    the other {_TOS_SHARE}%, instead of an upfront launch fee. This is {_TOS_SHARE}% of the creator
+    fees, not {_TOS_SHARE}% of trading volume, and traders pay nothing extra for it.
     Example: if a token earns $100 in creator fees, the creator receives
     ${_TOS_CREATOR} and OrcAgent receives ${_TOS_SHARE}.</p>
     <p>Everything else (connecting a wallet, deposits, withdrawals, sends,
@@ -13650,19 +13651,19 @@ _TOS_CONTENT_HTML = f'''
     asks you to accept them again.</p>
     <h2>Token launch fees</h2>
     <p>OrcAgent charges no launch fee ($0). For tokens launched
-    through OrcAgent from 30 September 2026, OrcAgent receives {_TOS_SHARE}% of the
-    token's creator fees, and the creator receives the other {_TOS_CREATOR}%.</p>
-    <p>This is {_TOS_SHARE}% of the creator fees, not {_TOS_SHARE}% of trading volume. Creator
+    through OrcAgent from 30 September 2026, the creator earns {_TOS_CREATOR}% of the
+    token's creator fees, and OrcAgent's platform fee is the other {_TOS_SHARE}%.</p>
+    <p>The platform fee is {_TOS_SHARE}% of the creator fees, not {_TOS_SHARE}% of trading volume. Creator
     fees are the part of each trade that the launch protocol already pays to a
-    token's creator; OrcAgent's share comes out of those fees and adds nothing
+    token's creator; the platform fee comes out of those fees and adds nothing
     to what traders pay.</p>
     <p>If the creator adds a community wallet, its share comes out of the
-    creator's {_TOS_CREATOR}%; OrcAgent's {_TOS_SHARE}% stays the same. Example: a 15% community
+    creator's {_TOS_CREATOR}%; the {_TOS_SHARE}% platform fee stays the same. Example: a 15% community
     share gives creator {_tos_fee_pct(1 - ORCAGENT_CREATOR_FEE_BPS / 10000 - 0.15)}%, community 15% and OrcAgent {_TOS_SHARE}%.</p>
     <p>The split is shown before you approve a launch and is locked on-chain
     with your approval; it cannot be changed afterwards. Tokens launched
-    before 30 September 2026 keep a 0% OrcAgent share, and a Holder Rewards
-    token, whose creator fees go to its holders, has no OrcAgent share.</p>
+    before 30 September 2026 have no platform fee, and neither does a Holder
+    Rewards token, whose creator fees go to its holders.</p>
     <h2>Third-party protocols and infrastructure</h2>
     <p>OrcAgent is an independent platform. Token launches, swaps, bridges,
     wallets, price data and blockchains are provided by third-party protocols

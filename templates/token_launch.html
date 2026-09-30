@@ -73,18 +73,20 @@
           <input id="tl-community-wallet" class="tl-input tl-mono" maxlength="44" placeholder="Enter community wallet address" autocomplete="off" spellcheck="false">
           <label class="tl-label" for="tl-community-share">Community share of creator fees (%)</label>
           <input id="tl-community-share" class="tl-input" type="number" min="0.01" max="{{ '%.2f'|format((9999 - (orcagent_bps|default(0)))/100) }}" step="0.01" value="10" inputmode="decimal">
-          <small>{% if orcagent_bps %}Of all creator fees: community gets this share, OrcAgent {{ '%g'|format(orcagent_bps/100) }}%, and you the rest.{% else %}Creator receives the remainder.{% endif %} The split is locked on-chain.</small>
+          <small>{% if orcagent_bps %}Your community's share comes out of your {{ '%g'|format(100 - orcagent_bps/100) }}%; the {{ '%g'|format(orcagent_bps/100) }}% platform fee stays the same.{% else %}Creator receives the remainder.{% endif %} The split is locked on-chain.</small>
         </div>
         <div class="tl-fee-strip" aria-label="Token launch fee disclosure">
-          <div><span class="tl-fee-icon" aria-hidden="true">◎</span><div><small>OrcAgent launch fee</small><strong>$0</strong></div></div>
-          {% if orcagent_bps %}<div id="tl-orc-share-strip"><span class="tl-fee-icon" aria-hidden="true">%</span><div><small>OrcAgent share of creator fees</small><strong>{{ '%g'|format(orcagent_bps/100) }}% of creator fees, not of trading volume</strong></div></div>{% endif %}
+          <div><span class="tl-fee-icon" aria-hidden="true">◎</span><div><small>Launch fee</small><strong>$0</strong></div></div>
+          {% if orcagent_bps %}<div id="tl-earn-strip"><span class="tl-fee-icon" aria-hidden="true">↗</span><div><small>Your earnings</small><strong>{{ '%g'|format(100 - orcagent_bps/100) }}% of creator fees</strong></div></div>
+          <div id="tl-orc-share-strip"><span class="tl-fee-icon" aria-hidden="true">%</span><div><small>OrcAgent platform fee</small><strong>{{ '%g'|format(orcagent_bps/100) }}% of creator fees</strong></div></div>{% endif %}
           <div><span class="tl-fee-icon" aria-hidden="true">▢</span><div><small>Network + protocol fees</small><strong>Shown in Phantom / on-chain</strong></div></div>
         </div>
-        <label class="tl-ack"><input id="tl-ack" type="checkbox"> <span>I understand that network/rent fees apply, creator rewards are not guaranteed{% if orcagent_bps %}, and OrcAgent receives {{ '%g'|format(orcagent_bps/100) }}% of this token's creator fees (not of its trading volume){% endif %}.</span></label>
+        {% if orcagent_bps %}<p class="tl-footnote" id="tl-earn-example">Launch for $0 and earn on every trade: your {{ '%g'|format(100 - orcagent_bps/100) }}% is paid straight to your wallet for as long as your token trades, and the {{ '%g'|format(orcagent_bps/100) }}% platform fee replaces an upfront launch fee. Example: if your token earns $1,000 in creator fees, you receive ${{ '{:,.0f}'.format(1000 - orcagent_bps/10) }} and OrcAgent ${{ '{:,.0f}'.format(orcagent_bps/10) }}. Traders pay nothing extra, and it is never a share of trading volume.</p>{% endif %}
+        <label class="tl-ack"><input id="tl-ack" type="checkbox"> <span>I understand that network/rent fees apply, creator rewards are not guaranteed{% if orcagent_bps %}, and I receive {{ '%g'|format(100 - orcagent_bps/100) }}% of this token's creator fees while OrcAgent's platform fee is the other {{ '%g'|format(orcagent_bps/100) }}% (never a share of trading volume){% endif %}.</span></label>
         <div class="tl-recent-status" id="tl-recent-status" hidden><strong>Recent launch status</strong><div id="tl-recent-items"></div></div>
         <div class="tl-status" id="tl-status" role="status" aria-live="polite"></div>
         <button id="tl-save" class="tl-btn tl-btn-primary tl-btn-block" type="button">{% if launch_enabled %}Continue to approve →{% else %}Save launch draft →{% endif %}</button>
-        <p class="tl-footnote">Your details are saved before wallet approval. Nothing is created or spent until you approve in Phantom. {% if orcagent_bps %}The creator-fee split (you, OrcAgent and any community wallet) is locked on-chain with one additional approval.{% else %}A community fee split needs one additional approval.{% endif %}</p>
+        <p class="tl-footnote">Your details are saved before wallet approval. Nothing is created or spent until you approve in Phantom. {% if orcagent_bps %}Your {{ '%g'|format(100 - orcagent_bps/100) }}% (and any community share) is locked on-chain with one additional approval.{% else %}A community fee split needs one additional approval.{% endif %}</p>
       </div>
       <aside class="tl-preview-panel" aria-label="Live token preview">
         <span class="tl-preview-heading">LIVE PREVIEW</span>
@@ -92,9 +94,9 @@
           <div class="tl-token"><div class="tl-token-icon" id="tl-preview-logo">▲</div><div><div class="tl-symbol" id="tl-preview-symbol">TOKEN / USDC</div><div class="tl-name" id="tl-preview-name">Your token name</div></div></div>
           <div class="tl-line"><span>Pair</span><strong id="tl-review-pair">USDC</strong></div>
           <div class="tl-line"><span>Rewards</span><strong id="tl-review-mode">Creator</strong></div>
-          <div class="tl-line"><span>Creator share</span><strong id="tl-review-creator">100.00%</strong></div>
+          <div class="tl-line"><span>Your earnings</span><strong id="tl-review-creator">100%</strong></div>
           <div class="tl-line"><span>Community share</span><strong id="tl-review-community">—</strong></div>
-          <div class="tl-line" id="tl-review-orc-line"{% if not orcagent_bps %} hidden{% endif %}><span>OrcAgent share</span><strong id="tl-review-orc">{{ '%.2f'|format((orcagent_bps|default(0))/100) }}%</strong></div>
+          <div class="tl-line" id="tl-review-orc-line"{% if not orcagent_bps %} hidden{% endif %}><span>Platform fee</span><strong id="tl-review-orc">{{ '%g'|format((orcagent_bps|default(0))/100) }}%</strong></div>
         </div>
         <p><strong>You're in control.</strong> No launch or swap is sent without your wallet approval. If your wallet needs SOL for network/rent, you can fund the saved draft with USDC where gasless funding is available.</p>
       </aside>

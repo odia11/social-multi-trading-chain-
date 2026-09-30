@@ -56,8 +56,8 @@ r = draft('community', community_wallet=community, community_bps=1500); crow = r
 check('a community launch: creator 65% · community 15% · OrcAgent 20%',
       crow['orcagent_bps'] == 2000 and crow['community_bps'] == 1500 and crow['creator_bps'] == 6500)
 r = draft('community', community_wallet=community, community_bps=8000)
-check('a community share that would leave the creator nothing is refused, naming OrcAgent\'s 20%',
-      r.status_code == 400 and 'OrcAgent receives 20%' in r.get_json()['msg'])
+check('a community share that would leave the creator nothing is refused, naming the 20% platform fee',
+      r.status_code == 400 and 'the platform fee is 20%' in r.get_json()['msg'])
 r = draft('holder'); hrow = r.get_json()['draft']
 check('a Holder Rewards launch has no OrcAgent share', hrow['orcagent_bps'] == 0)
 
@@ -102,8 +102,15 @@ with patch.dict(os.environ, {'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED': '1'}):
 # ── the page shows it before approval ──
 page = client.get('/token-launch').get_data(as_text=True)
 check('the launch page shows the $0 launch fee and 20% of creator fees (not of volume) before approval',
-      '<strong>$0</strong>' in page and 'OrcAgent share of creator fees' in page
-      and 'not of trading volume' in page and 'orcagentBps:2000' in page)
+      '<strong>$0</strong>' in page and 'OrcAgent platform fee' in page
+      and '<small>OrcAgent platform fee</small><strong>20% of creator fees</strong>' in page
+      and 'the 20% platform fee replaces an upfront launch fee' in page
+      and 'never a share of trading volume' in page and 'orcagentBps:2000' in page)
+check('...leading with what the creator earns, with a dollar example',
+      '<small>Your earnings</small><strong>80% of creator fees</strong>' in page
+      and 'your 80% is paid straight to your wallet' in page
+      and 'you receive $800 and OrcAgent $200' in page
+      and page.index('Your earnings') < page.index('OrcAgent platform fee'))
 check('no launch-protocol branding on the page or in its script', 'Pump' not in page
       and 'Pump' not in (ROOT / 'static' / 'token-launch.js').read_text())
 js = (ROOT / 'static' / 'token-launch.js').read_text()
@@ -113,7 +120,7 @@ out = subprocess.run(['node', '-e', helpers + 'console.log(splitText({orcagent_b
                       'console.log(splitText({orcagent_bps:2000,reward_mode:"community",community_bps:1500,community_wallet:"C"}))'],
                      capture_output=True, text=True, timeout=20).stdout.split('\n')
 check('the second approval names the whole split, OrcAgent included',
-      out[0] == '80% creator / 20% OrcAgent' and out[1] == '65% creator / 15% community (C) / 20% OrcAgent'
+      out[0] == '80% to you / 20% OrcAgent platform fee' and out[1] == '65% to you / 15% community (C) / 20% OrcAgent platform fee'
       and "Final split of the creator fees: '+splitText(row)" in js)
 tmp.cleanup()
 raise SystemExit(0 if all(checks) else 1)
