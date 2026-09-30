@@ -175,12 +175,19 @@
     box.innerHTML = '<div class="fcall-top-head"><h2>Best calls today</h2><a href="/calls">Leaderboard</a></div>'
       + (podium ? '<div class="fcall-podium">' + podium + '</div>' : '<p class="fcall-top-empty">No calls in the last 24 hours yet.</p>')
       + '<div class="fcall-cta"><div><b>Spot the next one early?</b><span>'
-      + (left == null ? 'Your call is tracked live, from the moment you make it.' : esc(left) + ' of 3 calls left today')
+      + (left == null ? 'Your call is tracked live, from the moment you make it.' : esc(left) + ' of ' + perDay + ' calls left today')
       + '</span></div><button type="button" onclick="if(typeof checkGuest===\'function\'&&checkGuest())return;_openCallSheet()">Call a token</button></div>';
   }
+  // The daily limit comes from the server (CALLS_PER_DAY_LIMIT), never a
+  // number written here.
+  var perDay = 5;
   function callsLeft(){
     return fetch('/api/calls/mine').then(function(r){ return r.ok ? r.json() : null; })
-      .then(function(d){ return d && d.ok ? d.calls_left_today : null; }).catch(function(){ return null; });
+      .then(function(d){
+        if(!d || !d.ok) return null;
+        if(d.calls_per_day > 0) perDay = d.calls_per_day;
+        return d.calls_left_today;
+      }).catch(function(){ return null; });
   }
   window._feedCallsTabChanged = function(tab){
     var box = document.getElementById('feed-calls-top');
@@ -310,10 +317,10 @@
   function refreshLeft(){
     var out = sheet.querySelector('#fcall-left');
     callsLeft().then(function(left){
-      if(left == null){ out.textContent = '3 per day'; return; }
+      if(left == null){ out.textContent = perDay + ' per day'; return; }
       out.replaceChildren();
-      for(var i = 0; i < 3; i++) out.appendChild(el('i', i < left ? 'on' : ''));
-      out.appendChild(el('b', null, left + ' of 3 left'));
+      for(var i = 0; i < perDay; i++) out.appendChild(el('i', i < left ? 'on' : ''));
+      out.appendChild(el('b', null, left + ' of ' + perDay + ' left'));
     });
   }
   function submit(){

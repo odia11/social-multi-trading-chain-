@@ -2708,7 +2708,7 @@ function loadTape(){
   fetch('/api/market/tape').then(function(r){ return r.json(); }).then(function(d){
     var el = document.getElementById('pt-tape-list');
     var rows = (d && d.ok && d.trades) || [];
-    var identity=JSON.stringify(rows.slice(0,14).map(function(t){return [t.id,t.tx_hash,t.timestamp,t.side,t.symbol,t.sol_amount];}));
+    var identity=JSON.stringify(rows.slice(0,14).map(function(t){return [t.id,t.tx_hash,t.timestamp,t.side,t.symbol,t.sol_amount,t.usd_amount];}));
     if(identity===_tapeIdentity) return;
     _tapeIdentity=identity;
     if(!rows.length){ el.innerHTML = '<div class="pt-tape-empty">Waiting for trades…</div>'; return; }
@@ -2717,7 +2717,7 @@ function loadTape(){
       return '<div class="pt-tape-row">'
         + '<span class="pt-tape-pill '+side+'">'+side.toUpperCase()+'</span>'
         + '<span class="pt-tape-sym">$'+esc(r.symbol)+'</span>'
-        + '<span class="pt-tape-amt">'+Number(r.sol_amount||0).toFixed(3)+' SOL</span>'
+        + '<span class="pt-tape-amt">'+(r.usd_amount!=null?'$'+Number(r.usd_amount).toFixed(2):Number(r.sol_amount||0).toFixed(3)+' SOL')+'</span>'
         + '<span class="pt-tape-age">'+fmtAgeSeconds(r.age_seconds)+'</span>'
         + '</div>';
     }).join('');

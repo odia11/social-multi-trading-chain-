@@ -19693,7 +19693,7 @@ def save_banner():
 # since the call, ranked by multiplier — same pattern popularized by Solbix
 # and similar Solana "community calls" bots. Peak price is kept fresh by
 # _calls_peak_loop() (see thread startup section near the bottom of the file).
-CALLS_PER_DAY_LIMIT = 3
+CALLS_PER_DAY_LIMIT = 5
 CALL_NOTE_MAX = 280
 # A call posted to the home feed is a feed_posts row whose content ends with
 # this marker plus {"id": <token_calls.id>}. Only api_make_call() writes it:
@@ -20114,7 +20114,8 @@ def api_calls_mine():
     try:
         uid = _get_uid(conn, wallet)
         if not uid:
-            return jsonify({'ok': True, 'calls': [], 'calls_left_today': CALLS_PER_DAY_LIMIT})
+            return jsonify({'ok': True, 'calls': [], 'calls_left_today': CALLS_PER_DAY_LIMIT,
+                            'calls_per_day': CALLS_PER_DAY_LIMIT})
         rows = conn.execute(
             'SELECT id, mint, symbol, token_name, price_at_call, peak_price, timestamp '
             'FROM token_calls WHERE user_id=? ORDER BY timestamp DESC LIMIT 100',
@@ -20130,7 +20131,8 @@ def api_calls_mine():
             'multiplier': round(r[5]/r[4], 4) if r[4] > 0 else 0,
             'timestamp': r[6],
         } for r in rows]
-        return jsonify({'ok': True, 'calls': calls, 'calls_left_today': max(0, CALLS_PER_DAY_LIMIT - today_count)})
+        return jsonify({'ok': True, 'calls': calls, 'calls_left_today': max(0, CALLS_PER_DAY_LIMIT - today_count),
+                        'calls_per_day': CALLS_PER_DAY_LIMIT})
     finally:
         conn.close()
 
@@ -29787,28 +29789,41 @@ def api_market_tape():
     cross-user events, not per-session: BUY rows are the most recently
     opened positions (open_positions.opened_at), SELL rows the most recently
     closed trades (trades.timestamp). No wallet/username is exposed -- just
-    token + SOL size + age, matching the tape's own footprint."""
+    token + size + age, matching the tape's own footprint."""
     now = time.time()
     conn = sqlite3.connect(DB_FILE)
     try:
         buys = conn.execute('''
-            SELECT symbol, spend, opened_at FROM open_positions
+            SELECT symbol, spend, amount, buy_price, opened_at, chain, base_currency FROM open_positions
             WHERE opened_at > 0 ORDER BY opened_at DESC LIMIT 30
         ''').fetchall()
         sells = conn.execute('''
-            SELECT token, amount, exit_price, timestamp FROM trades
-            WHERE exit_price IS NOT NULL AND exit_price > 0
+            SELECT token, amount, exit_price, timestamp, chain, base_currency FROM trades
+            WHERE exit_price IS NOT NULL AND exit_price > 0 AND (side IS NULL OR side = 'sell')
             ORDER BY timestamp DESC LIMIT 30
         ''').fetchall()
     finally:
         conn.close()
 
+    # Sizes in dollars: most trades are USDC now, so "0.940 SOL" was really
+    # $0.94. Only a SOL-mode Solana trade is converted at the SOL price.
+    # sol_amount stays (the size in the trade's own currency) for old clients.
+    sol_rate = _sol_price_usd if _sol_price_usd > 0 else 0.0
+    def _usd(value, chain, base):
+        is_sol = (not chain or chain == 'solana') and (base or 'SOL') == 'SOL'
+        if not is_sol:
+            return round(value, 2)
+        return round(value * sol_rate, 2) if sol_rate else None
+
     rows = []
-    for symbol, spend, opened_at in buys:
+    for symbol, spend, amount, buy_price, opened_at, chain, base in buys:
         if not symbol or not opened_at:
             continue
-        rows.append({'side': 'buy', 'symbol': symbol, 'sol_amount': round(float(spend or 0), 4), 'ts': float(opened_at)})
-    for token, amount, exit_price, ts in sells:
+        # spend is not recorded on every path; the position itself is.
+        size = float(spend or 0) or float(amount or 0) * float(buy_price or 0)
+        rows.append({'side': 'buy', 'symbol': symbol, 'sol_amount': round(size, 4),
+                     'usd_amount': _usd(size, chain, base), 'ts': float(opened_at)})
+    for token, amount, exit_price, ts, chain, base in sells:
         if not token or not ts:
             continue
         try:
@@ -29816,7 +29831,9 @@ def api_market_tape():
             epoch = calendar.timegm(dt.timetuple())
         except Exception:
             epoch = now
-        rows.append({'side': 'sell', 'symbol': token, 'sol_amount': round(float(amount or 0) * float(exit_price or 0), 4), 'ts': epoch})
+        size = float(amount or 0) * float(exit_price or 0)
+        rows.append({'side': 'sell', 'symbol': token, 'sol_amount': round(size, 4),
+                     'usd_amount': _usd(size, chain, base), 'ts': epoch})
 
     rows.sort(key=lambda r: r['ts'], reverse=True)
     rows = rows[:30]
