@@ -13592,7 +13592,8 @@ def page_info():
     nav, so the old separate footer links can jump straight to their section
     instead of loading a whole new page."""
     fee_pct = round(FEE_RATE_TXN * 100, 2)
-    return render_template('info.html', updated=_INFO_UPDATED, fee_pct=fee_pct, tos_content=_TOS_CONTENT_HTML)
+    return render_template('info.html', updated=_INFO_UPDATED, fee_pct=fee_pct, tos_content=_TOS_CONTENT_HTML,
+                           creator_share_pct=_tos_fee_pct(ORCAGENT_CREATOR_FEE_BPS / 10000))
 
 # Old standalone routes now redirect into the combined /info page at the
 # matching anchor — keeps existing bookmarks/links working.
@@ -13616,7 +13617,12 @@ def page_security():
 # changes in a way that requires every user to accept again. Old acceptance
 # rows stay in tos_acceptances for the audit trail; only the latest row per
 # user is compared against this constant.
-TOS_VERSION = '1.1'   # 1.1: adds the Fees section (what OrcAgent charges, and what it doesn't)
+TOS_VERSION = '1.2'   # 1.1: Fees section. 1.2: OrcAgent's share of new tokens' creator fees,
+                      # third-party protocols, OrcAgent as an independent platform.
+
+# OrcAgent's share of a NEW token's creator fees, in basis points -- the same
+# setting token_launch.py installs on-chain (ORCAGENT_CREATOR_FEE_BPS).
+ORCAGENT_CREATOR_FEE_BPS = max(0, min(5000, int(os.environ.get('ORCAGENT_CREATOR_FEE_BPS', '2000') or 0)))
 
 
 def _tos_fee_pct(rate: float) -> str:
@@ -13637,9 +13643,18 @@ _TOS_CONTENT_HTML = f'''
     or your bot does, on every supported chain. It is calculated on the amount
     of that swap, not on profit, and it is taken from the trade itself. A full
     round trip (buy and sell) therefore costs {_tos_fee_pct(FEE_RATE_TXN * 2)}% in platform fees.</p>
+    <p>Token launches: OrcAgent charges no launch fee ($0). For tokens launched
+    through OrcAgent from 30 September 2026, OrcAgent receives {_tos_fee_pct(ORCAGENT_CREATOR_FEE_BPS / 10000)}% of the
+    token's creator fees, and the creator receives the other {_tos_fee_pct(1 - ORCAGENT_CREATOR_FEE_BPS / 10000)}%
+    (shared with a community wallet if the creator chooses one). This is {_tos_fee_pct(ORCAGENT_CREATOR_FEE_BPS / 10000)}% of the
+    creator fees, not {_tos_fee_pct(ORCAGENT_CREATOR_FEE_BPS / 10000)}% of trading volume: it is part of the creator fees the
+    launch protocol already pays to a token's creator and adds nothing to what
+    traders pay. The split is shown before you approve a launch and is locked
+    on-chain with your approval. Tokens launched before that date keep a 0%
+    OrcAgent share, and a Holder Rewards token, whose creator fees go to its
+    holders, has no OrcAgent share.</p>
     <p>OrcAgent charges no fee for connecting a wallet, deposits, withdrawals
-    and token sends, tips, launching a token, claiming creator rewards, token
-    calls, or holding a position.</p>
+    and token sends, tips, token calls, or holding a position.</p>
     <p>Network fees, token-account rent, swap and bridge provider fees and
     slippage are set by the blockchain or the provider, not by OrcAgent, and
     apply to every on-chain transaction, profitable or not. Where OrcAgent
@@ -13649,6 +13664,13 @@ _TOS_CONTENT_HTML = f'''
     <p>The rate in effect is always shown on the Fees page. A change applies
     only to trades placed after it takes effect, and a change to these Terms
     asks you to accept them again.</p>
+    <h2>Third-party protocols and infrastructure</h2>
+    <p>OrcAgent is an independent platform. Token launches, swaps, bridges,
+    wallets, price data and blockchains are provided by third-party protocols
+    and infrastructure that OrcAgent does not own or control and is not
+    affiliated with. Their availability, fees, rules and behavior are set by
+    them and can change without notice; OrcAgent is not responsible for
+    their failures, delays or changes.</p>
     <h2>No investment advice</h2>
     <p>Nothing on OrcAgent constitutes financial or investment advice. Token
     calls, rankings and AI signals are opinions, not recommendations.

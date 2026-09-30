@@ -278,21 +278,40 @@ html,body{min-height:100vh;min-height:100dvh;background:var(--bg);font-family:va
       before you confirm. It is charged to you, not subsidised — what OrcAgent
       provides is the token, not the money.</p>
 
-      <h3>What has no OrcAgent fee</h3>
+      <h3>Token launches</h3>
       <div class="fee-stat-row">
         <div class="fee-stat">
-          <div class="fee-stat-label">Token launch</div>
-          <div class="fee-stat-value">0%</div>
+          <div class="fee-stat-label">OrcAgent launch fee</div>
+          <div class="fee-stat-value">$0</div>
         </div>
+        <div class="fee-stat">
+          <div class="fee-stat-label">OrcAgent share of creator fees</div>
+          <div class="fee-stat-value">{{ creator_share_pct }}%</div>
+        </div>
+      </div>
+      <p>Launching a token costs nothing from OrcAgent. For tokens launched
+      through OrcAgent from 30 September 2026, OrcAgent receives
+      <strong>{{ creator_share_pct }}% of the token's creator fees</strong> and the creator
+      the rest — {{ creator_share_pct }}% of the creator fees, <strong>not {{ creator_share_pct }}% of trading
+      volume</strong>. It comes out of the creator fees the launch protocol already
+      pays, so traders pay nothing extra. The split is shown before you approve
+      and locked on-chain; older tokens and Holder Rewards tokens have no
+      OrcAgent share.</p>
+
+      <h3>What has no OrcAgent fee</h3>
+      <div class="fee-stat-row">
         <div class="fee-stat">
           <div class="fee-stat-label">Tips, sends &amp; withdrawals</div>
           <div class="fee-stat-value">0%</div>
         </div>
+        <div class="fee-stat">
+          <div class="fee-stat-label">Token calls</div>
+          <div class="fee-stat-value">0%</div>
+        </div>
       </div>
       <p>Connecting a wallet, deposits, withdrawals and token sends, tips,
-      launching a token, claiming creator rewards, token calls and holding a
-      position cost nothing from OrcAgent. Only the network's own fee (and,
-      for a launch, the launch protocol's fee shown in Phantom) applies.</p>
+      token calls and holding a position cost nothing from OrcAgent. Only the
+      network's own fee applies.</p>
       <p>Moving funds between chains through the in-app bridge pays the bridge
       provider's fee and slippage, which come out of the bridged amount and are
       shown before you confirm. OrcAgent adds nothing on top.</p>

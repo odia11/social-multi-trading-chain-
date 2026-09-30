@@ -2,6 +2,8 @@
 (function(){
 'use strict';
 var cfg=window.ORC_TOKEN_LAUNCH||{};
+// OrcAgent's share of a new token's creator fees (basis points); 0 = none.
+var orcBps=Math.max(0,Math.min(5000,parseInt(cfg.orcagentBps,10)||0));
 var mine=[];
 var creatorEarnings=null;
 var creatorAvailableRaw=null;
@@ -14,7 +16,7 @@ function text(id,value){var e=$(id);if(e)e.textContent=value}
 function status(msg,err){var e=$('tl-status');if(!e)return;e.textContent=msg;e.className='tl-status '+(err?'err':'ok')}
 function dom(tag,cls,value){var el=document.createElement(tag);if(cls)el.className=cls;if(value!==undefined)el.textContent=value;return el}
 function choice(name){var el=document.querySelector('input[name="'+name+'"]:checked');return el?el.value:''}
-function money(n){return (Number(n)||0).toFixed(2)+'%'}
+function money(n){return String(Number((Number(n)||0).toFixed(2)))+'%'}
 function toBps(v){var n=Number(v);if(!Number.isFinite(n)||n<=0||n>=100)return 0;var bps=Math.round(n*100);return bps>0&&bps<10000&&Math.abs(bps/100-n)<.000001?bps:0}
 function rawAmount(raw,asset){
  try{
@@ -31,7 +33,9 @@ function rawNumber(raw,asset){
  try{var base=asset==='SOL'?1000000000:1000000;return Number(BigInt(raw||'0'))/base}catch(e){return 0}
 }
 function creatorClaimLaunch(){
- return mine.find(function(row){return row.status==='live'&&row.reward_mode==='creator'&&row.quote_asset==='USDC'})||null;
+ // The wallet-wide creator vault: plain 100%-creator USDC tokens only. A
+ // token with a creator-fee split pays out by distribution instead.
+ return mine.find(function(row){return row.status==='live'&&row.reward_mode==='creator'&&row.quote_asset==='USDC'&&!row.orcagent_bps})||null;
 }
 function updateCreatorClaimButton(){
  var btn=$('tl-claim-now');if(!btn)return;
@@ -115,10 +119,14 @@ function renderPreview(){
  text('tl-preview-name',name);text('tl-preview-symbol',symbol+' / '+asset);
  text('tl-review-pair',asset);
  text('tl-review-mode',{creator:'Creator',community:'Creator + Community',holder:'Holder'}[mode]);
- text('tl-review-creator',mode==='holder'?'Holder rewards':mode==='creator'?'100.00%':money((10000-bps)/100));
+ var orc=mode==='holder'?0:orcBps;
+ text('tl-review-creator',mode==='holder'?'Holder rewards':money((10000-orc-(mode==='community'?bps:0))/100));
  text('tl-review-community',mode==='community'?money(bps/100):'—');
+ if($('tl-review-orc-line')){$('tl-review-orc-line').hidden=!orc;text('tl-review-orc',money(orc/100))}
  $('tl-community-fields').hidden=mode!=='community';
- text('tl-reward-summary',mode==='holder'?'Rewards: token holders':mode==='community'?'Rewards: creator + community':'Rewards: 100% creator');
+ text('tl-reward-summary',mode==='holder'?'Rewards: token holders'
+   :mode==='community'?(orc?'Rewards: creator + community · OrcAgent '+money(orc/100):'Rewards: creator + community')
+   :(orc?'Rewards: '+money((10000-orc)/100)+' creator · '+money(orc/100)+' OrcAgent':'Rewards: 100% creator'));
 }
 async function call(path,body){
  var opt={credentials:'include'};
@@ -247,15 +255,22 @@ async function checkFunding(row,notice){
  }catch(e){notice.textContent=e.message||'Unable to check SOL balance';status(notice.textContent,true)}
  finally{busy=false}
 }
+function splitText(row){
+ var orc=Number(row.orcagent_bps)||0,com=row.reward_mode==='community'?(Number(row.community_bps)||0):0;
+ var parts=[money((10000-orc-com)/100)+' creator'];
+ if(com)parts.push(money(com/100)+' community ('+row.community_wallet+')');
+ if(orc)parts.push(money(orc/100)+' OrcAgent');
+ return parts.join(' / ');
+}
 async function launchStage(row,stage){
  if(!cfg.enabled){status('Live token launches remain disabled during mainnet preflight.',true);return}
  if(busy)return;
  busy=true;
  var create=stage==='create';
- var title=create?'Approve token launch':'Lock the community fee split';
+ var title=create?'Approve token launch':'Lock the creator-fee split';
  var details=create
   ? 'Create '+row.symbol+' / '+row.quote_asset+' on Solana. Estimated network and rent costs are checked before Phantom opens. Review the final transaction in your wallet. OrcAgent adds no launch fee.'
-  : 'The token is already created. Its initial creator fee goes 100% to your wallet UNTIL this second transaction is confirmed. Final split: '+((10000-row.community_bps)/100).toFixed(2)+'% creator / '+(row.community_bps/100).toFixed(2)+'% '+row.community_wallet+'. This final allocation is irreversible.';
+  : 'The token is already created. Its initial creator fee goes 100% to your wallet UNTIL this second transaction is confirmed. Final split of the creator fees: '+splitText(row)+'. This final allocation is irreversible.';
  try{
    var result=await dialog(title,details,async function(){
      text('tl-dialog-status',create?'Preparing your orc token address; this can take up to 90 seconds…':'Building your launch transaction…');
@@ -300,8 +315,8 @@ async function launchStage(row,stage){
    },{fundId:row.id});
    if(!result||result.handoff)return;
    if(result.result.confirmed){
-     status(create&&row.reward_mode==='community'
-       ? 'Token created. Finalize the community fee shares now to complete launch.'
+     status(create&&(row.reward_mode==='community'||row.orcagent_bps>0)
+       ? 'Token created. Approve the creator-fee split now to complete the launch.'
        : 'Transaction confirmed on Solana.');
    }else status('Transaction submitted. Confirmation is still pending. Use Check transaction if needed.');
    await loadMine();
@@ -451,9 +466,11 @@ function drawMine(){
   identity.appendChild(chips);top.appendChild(identity);
   top.appendChild(dom('span','tl-flag'+(row.status==='live'?' is-live':''),row.status.replaceAll('_',' ')));
   el.appendChild(top);
-  el.appendChild(dom('p','tl-helper',row.reward_mode==='community'
-    ? 'Community '+(row.community_bps/100).toFixed(2)+'% · Creator '+((10000-row.community_bps)/100).toFixed(2)+'%'
-    :row.reward_mode==='holder'?'Creator fees belong to holders':'Creator fees belong to creator'));
+  var rowOrc=row.reward_mode==='holder'?0:(row.orcagent_bps||0);
+  el.appendChild(dom('p','tl-helper',row.reward_mode==='holder'?'Creator fees belong to holders'
+    :row.reward_mode==='community'
+    ? 'Creator '+((10000-rowOrc-row.community_bps)/100).toFixed(2)+'% · Community '+(row.community_bps/100).toFixed(2)+'%'+(rowOrc?' · OrcAgent '+(rowOrc/100).toFixed(2)+'%':'')
+    :(rowOrc?'Creator '+((10000-rowOrc)/100).toFixed(2)+'% · OrcAgent '+(rowOrc/100).toFixed(2)+'% of creator fees':'Creator fees belong to creator')));
   if(row.status==='live'&&row.mint){
     var live=dom('div','tl-live-note');live.appendChild(dom('span','tl-live-dot'));
     live.appendChild(dom('span','','Your token is live. Open Live Market to buy or sell.'));el.appendChild(live);
@@ -511,7 +528,7 @@ function drawMine(){
   if(row.status==='finalize_prepared'&&!cfg.enabled)actions.lastElementChild.disabled=true;
   if(row.status==='finalize_prepared'||row.status==='finalize_submitted')var splitCheck=action('Check fee split',function(){checkKnown(row,'finalize',splitCheck,verification)});
   if(row.status==='live'&&row.reward_mode!=='holder'){
-    if(row.reward_mode==='creator'&&row.quote_asset==='USDC'){
+    if(row.reward_mode==='creator'&&row.quote_asset==='USDC'&&!row.orcagent_bps){
       action('Refresh available',async function(){
         try{
           verification.textContent='Checking your creator fee balance…';
@@ -523,7 +540,8 @@ function drawMine(){
         }catch(e){verification.textContent=e.message||'Creator vault unavailable';status(verification.textContent,true)}
       });
     }
-    action(cfg.enabled?'Claim creator fees':'Claims in preflight',function(){claimRewards(row)});
+    action(cfg.enabled?(row.orcagent_bps>0||row.reward_mode==='community'?'Distribute creator fees':'Claim creator fees'):'Claims in preflight',function(){claimRewards(row)});
+    if(row.orcagent_bps>0)el.appendChild(dom('p','tl-helper','Distributing pays every share at once: you '+((10000-row.orcagent_bps-(row.reward_mode==='community'?row.community_bps:0))/100).toFixed(2)+'%, OrcAgent '+(row.orcagent_bps/100).toFixed(2)+'%'+(row.reward_mode==='community'?', community '+(row.community_bps/100).toFixed(2)+'%':'')+'.'));
     if(!cfg.enabled)actions.lastElementChild.disabled=true;
     action('Claim history',function(){showClaims(row)});
   }
@@ -563,7 +581,7 @@ function drawMine(){
       var lastBox=dom('div','tl-token-fee-metric');lastBox.appendChild(dom('small','','Last status'));
       lastBox.appendChild(dom('strong','',feeStats&&feeStats.last_claim?claimLabel(feeStats.last_claim.status):'No claims'));feeOverview.appendChild(lastBox);
       feeBody.appendChild(feeOverview);
-      if(row.reward_mode==='creator'&&row.quote_asset==='USDC')feeBody.appendChild(dom('p','tl-fee-scope','USDC creator vaults are wallet-wide. A payout claimed here can include eligible fees from other tokens created by this same wallet.'));
+      if(row.reward_mode==='creator'&&row.quote_asset==='USDC'&&!row.orcagent_bps)feeBody.appendChild(dom('p','tl-fee-scope','USDC creator vaults are wallet-wide. A payout claimed here can include eligible fees from other tokens created by this same wallet.'));
       var feeActions=dom('div','tl-actions');
       ['Claim creator fees','Claims in preflight','Claim history','Refresh available'].forEach(function(label){
         Array.from(actions.children).forEach(function(button){
@@ -610,7 +628,7 @@ async function saveDraft(){
  if(busy)return;
  var ack=$('tl-ack');if(!ack.checked){status('Confirm that you understand the network costs and creator rewards.',true);return}
  var bps=toBps($('tl-community-share').value),mode=choice('tl-mode');
- if(mode==='community'&&!bps){status('Choose a community share between 0.01% and 99.99%.',true);return}
+ if(mode==='community'&&(!bps||bps+orcBps>9999)){status('Choose a community share between 0.01% and '+((9999-orcBps)/100).toFixed(2)+'%.',true);return}
  busy=true;$('tl-save').disabled=true;
  var readyToApprove=null,savedDraft=null;
  try{
