@@ -67,7 +67,7 @@ row = db('SELECT price_at_call, note, chain, image_url, post_id FROM token_calls
 check('...at the price the SERVER fetched (a sent price is ignored)', row[0] == 0.0001)
 check('...with the reason, chain and logo kept', row[1] == 'Volume is picking up' and row[2] == 'solana'
       and row[3] == 'https://cdn.example/sjp.png' and row[4] == post_id)
-check('...and 2 of 3 calls are left today', data.get('calls_left_today') == 2)
+check('...and 4 of 5 calls are left today', data.get('calls_left_today') == 4)
 check("the caller's followers are told", ('follow_post', 'alice called $SJP') in
       db('SELECT type, content FROM notifications WHERE user_id=?', bu)
       and any(p[1] == 'New call' and bu in p[0] for p in pushed))

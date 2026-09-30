@@ -19693,7 +19693,7 @@ def save_banner():
 # since the call, ranked by multiplier — same pattern popularized by Solbix
 # and similar Solana "community calls" bots. Peak price is kept fresh by
 # _calls_peak_loop() (see thread startup section near the bottom of the file).
-CALLS_PER_DAY_LIMIT = 3
+CALLS_PER_DAY_LIMIT = 5
 CALL_NOTE_MAX = 280
 # A call posted to the home feed is a feed_posts row whose content ends with
 # this marker plus {"id": <token_calls.id>}. Only api_make_call() writes it:
@@ -20114,7 +20114,8 @@ def api_calls_mine():
     try:
         uid = _get_uid(conn, wallet)
         if not uid:
-            return jsonify({'ok': True, 'calls': [], 'calls_left_today': CALLS_PER_DAY_LIMIT})
+            return jsonify({'ok': True, 'calls': [], 'calls_left_today': CALLS_PER_DAY_LIMIT,
+                            'calls_per_day': CALLS_PER_DAY_LIMIT})
         rows = conn.execute(
             'SELECT id, mint, symbol, token_name, price_at_call, peak_price, timestamp '
             'FROM token_calls WHERE user_id=? ORDER BY timestamp DESC LIMIT 100',
@@ -20130,7 +20131,8 @@ def api_calls_mine():
             'multiplier': round(r[5]/r[4], 4) if r[4] > 0 else 0,
             'timestamp': r[6],
         } for r in rows]
-        return jsonify({'ok': True, 'calls': calls, 'calls_left_today': max(0, CALLS_PER_DAY_LIMIT - today_count)})
+        return jsonify({'ok': True, 'calls': calls, 'calls_left_today': max(0, CALLS_PER_DAY_LIMIT - today_count),
+                        'calls_per_day': CALLS_PER_DAY_LIMIT})
     finally:
         conn.close()
 
