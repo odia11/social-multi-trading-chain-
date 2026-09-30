@@ -351,6 +351,104 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
   .sup-list-pane{max-height:260px}
   .sup-chat-pane{min-height:420px}
 }
+/* ══════════ ADMIN v2: grouped navigation, clearer type, mobile tab bar ══════════
+   Five groups -- Overview, People, Money, Trading, System -- in the sidebar
+   on desktop and as a bottom tab bar on a phone, with the pages of the
+   current group as sub-tabs in the top bar. Every view, id and handler
+   below is unchanged; only how you get there and how it reads. */
+:root{--muted:#8a919c;--line:#1d2229;--sub:#9aa1ab}
+body{background:#07080a}
+aside{background:#0a0b0e;border-right-color:#161a20}
+.sb-grp{font-size:10.5px;font-weight:800;letter-spacing:.1em;color:#6b727d;margin:16px 11px 6px}
+.nav-btn{color:#aab1bb;font-weight:600;min-height:38px}
+.nav-btn .nav-icon{display:inline-flex;align-items:center;justify-content:center;width:10px}
+.nav-btn .nav-icon::before{content:'';width:7px;height:7px;border-radius:50%;background:#3a414c}
+.nav-btn.active{background:#1a1610;color:#f7b955}
+.nav-btn.active .nav-icon::before{background:#f7b955}
+.nav-btn .nav-dot{display:none}
+.adm-badge{margin-left:auto;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#f7b955;color:#0a0b0e;font-size:11px;font-weight:800;display:none;align-items:center;justify-content:center;box-sizing:border-box}
+.adm-badge.red{background:#f76b62;color:#fff}
+.sup-nav-badge{min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:800;background:#f7b955;color:#0a0b0e}
+.card,.kpi-card,.stat-card,.chart-wrap,.health-card,.tbl,.log-wrap{border-color:var(--line);border-radius:14px}
+.kpi-lbl,.stat-lbl,.health-row-lbl,.sec-count,.tbl-hdr{color:var(--sub)}
+.kpi-ico{display:none}
+.kpi-val{font-size:28px}
+.topbar{padding:12px 28px;gap:14px;flex-wrap:wrap;background:rgba(7,8,10,.92);border-bottom-color:#161a20}
+.topbar-grp{font-size:11.5px;font-weight:700;color:var(--sub);letter-spacing:.02em}
+.topbar-title{font-size:20px;font-weight:800}
+.topbar-sub{display:none}
+.adm-subtabs{display:flex;gap:4px;padding:3px;border-radius:11px;background:#101216;border:1px solid var(--line);margin-right:auto}
+.adm-subtabs:empty{display:none}
+.adm-subtab{height:34px;padding:0 13px;border-radius:8px;border:0;background:transparent;color:var(--sub);font:inherit;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+.adm-subtab.active{background:#1f242c;color:#eef1f5}
+.adm-subtab .adm-badge{margin-left:0;display:inline-flex}
+.topbar-left{display:flex;flex-direction:column;min-width:0}
+
+/* Needs your attention */
+.att-hdr{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.att-hdr h2{margin:0;font-size:12px;font-weight:800;letter-spacing:.08em;color:var(--sub)}
+.att-pill{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:7px;font-size:11px;font-weight:800;background:#221c10;color:#f7b955}
+.att-pill.clear{background:#10231b;color:#3ad29b}
+.att-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:22px}
+.att-card{display:flex;flex-direction:column;gap:5px;padding:14px 16px;border-radius:14px;border:1px solid var(--line);background:#101216;color:#eef1f5;text-align:left;font:inherit;cursor:pointer;min-height:44px}
+.att-card:hover{border-color:#2a3038}
+.att-card .att-lbl{font-size:12px;color:var(--sub);font-weight:600}
+.att-card .att-n{font-family:'JetBrains Mono',monospace;font-size:26px;font-weight:700;line-height:1.1}
+.att-card .att-go{font-size:12px;font-weight:700;color:#f7b955}
+.att-card.clear .att-n{color:#3ad29b;font-size:17px;font-family:inherit;margin-top:6px}
+.att-card.clear .att-go{color:var(--sub);font-weight:600}
+.att-card.alert{border-color:#4a2320;background:#150e0d}
+.att-card.alert .att-lbl{color:#ffb3ad}.att-card.alert .att-n{color:#f76b62}.att-card.alert .att-go{color:#ffb3ad}
+
+/* phone: bottom tab bar replaces the sidebar (and the app's own bottom bar) */
+.adm-tabbar{display:none}
+@media(max-width:768px){
+  aside{display:none!important}
+  #oa-bottom-nav{display:none!important}
+  .topbar{position:sticky;top:0;padding:10px 14px;gap:10px}
+  .topbar-left{flex:1 1 auto}
+  .topbar-title{font-size:18px}
+  .topbar-right .refresh-btn{padding:0 12px;height:40px}
+  .topbar-right .back-link{display:none}
+  .adm-subtabs{order:3;flex:1 0 100%;margin:0;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .adm-subtabs::-webkit-scrollbar{display:none}
+  .adm-subtab{flex:1 0 auto;justify-content:center;height:38px}
+  .att-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .att-card .att-n{font-size:22px}
+  .kpi-val{font-size:22px}
+  .view{padding:14px 14px calc(96px + env(safe-area-inset-bottom,0px))}
+  .adm-tabbar{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));position:fixed;left:0;right:0;bottom:0;z-index:60;
+    height:calc(66px + env(safe-area-inset-bottom,0px));padding:6px 6px env(safe-area-inset-bottom,0px);box-sizing:border-box;
+    background:#0a0b0e;border-top:1px solid #1a1e25}
+  .adm-tab{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border:0;background:none;
+    color:#8a919c;font:inherit;font-size:10.5px;font-weight:700;cursor:pointer;min-height:44px}
+  .adm-tab svg{width:20px;height:20px}
+  .adm-tab.active{color:#f7b955}
+  .adm-tab .adm-badge{position:absolute;top:0;left:calc(50% + 4px);margin:0;min-width:16px;height:16px;font-size:10px;padding:0 4px}
+  .toast{bottom:calc(80px + env(safe-area-inset-bottom,0px))}
+
+  /* Users, trades and fee rows read as cards on a phone instead of a
+     table you have to scroll sideways; numbers get their own labels. */
+  #view-users .tbl,#view-trades .tbl,#view-revenue .tbl,#view-overview .tbl{min-width:0}
+  #view-users .tbl-hdr,#view-trades .tbl-hdr,#view-revenue .tbl-hdr.col-revenue,#view-overview .tbl-hdr{display:none}
+  .tbl-row.col-users{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 10px;padding:14px}
+  .tbl-row.col-users>:nth-child(1){grid-column:1/-1}
+  .tbl-row.col-users>:nth-child(6){text-align:right}
+  .tbl-row.col-users>:nth-child(4)::before{content:'Positions ';color:var(--sub);font-family:'Geist',system-ui,sans-serif}
+  .tbl-row.col-users>:nth-child(5)::before{content:'Trades ';color:var(--sub);font-family:'Geist',system-ui,sans-serif}
+  .tbl-row.col-users>:nth-child(6)::before{content:'PnL today ';color:var(--sub);font-weight:500;font-family:'Geist',system-ui,sans-serif}
+  .tbl-row.col-users>.usr-actions{grid-column:1/-1;flex-direction:row;flex-wrap:wrap}
+  .tbl-row.col-users>.usr-actions .btn{flex:1 1 0;width:auto;min-height:44px;font-size:12.5px}
+  .tbl-row.col-trades,.tbl-row.col-revenue{grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:12px 14px}
+  .tbl-row.col-trades>:nth-child(2),.tbl-row.col-revenue>:nth-child(2){text-align:right;color:#eef1f5;font-weight:700}
+  .tbl-row.col-trades>:nth-child(3)::before,.tbl-row.col-revenue>:nth-child(3)::before{content:'Amount ';color:var(--sub)}
+  .tbl-row.col-revenue>:nth-child(3)::before{content:'Gross '}
+  .tbl-row.col-trades>:nth-child(4),.tbl-row.col-revenue>:nth-child(4){text-align:right}
+  .tbl-row.col-revenue>:nth-child(4)::before{content:'Fee ';color:var(--sub);font-weight:500}
+  .tbl-row.col-trades>:nth-child(5),.tbl-row.col-revenue>:nth-child(5){justify-self:start}
+  .tbl-row.col-trades>:nth-child(6),.tbl-row.col-revenue>:nth-child(6){text-align:right}
+  .tbl-row.col-revenue>:nth-child(7){grid-column:1/-1}
+}
 </style>
 </head>
 <body>
@@ -368,50 +466,22 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
   </div>
 
   <div class="sb-nav">
-    <button class="nav-btn active" id="nav-overview"   onclick="showView('overview')">
-      <span class="nav-icon">⊞</span>Overview<span class="nav-dot"></span>
-    </button>
-    <button class="nav-btn" id="nav-users"     onclick="showView('users')">
-      <span class="nav-icon">👥</span>Users<span class="nav-dot"></span>
-    </button>
-    <button class="nav-btn" id="nav-trades"    onclick="showView('trades')">
-      <span class="nav-icon">⇄</span>Trades<span class="nav-dot"></span>
-    </button>
-    <button class="nav-btn" id="nav-revenue"   onclick="showView('revenue')">
-      <span class="nav-icon">◈</span>Revenue<span class="nav-dot"></span>
-    </button>
-    <button class="nav-btn" id="nav-performance" onclick="showView('performance')">
-      <span class="nav-icon">📊</span>Performance<span class="nav-dot"></span>
-    </button>
-    <div class="sb-sep"></div>
-    <button class="nav-btn" id="nav-system"    onclick="showView('system')">
-      <span class="nav-icon">⌬</span>System<span class="nav-dot"></span>
-    </button>
-    <button class="nav-btn" id="nav-moderation" onclick="showView('moderation')">
-      <span class="nav-icon">⚑</span>Moderation<span class="nav-dot"></span>
-    </button>
-    <button class="nav-btn" id="nav-support" onclick="showView('support')">
-      <span class="nav-icon">💬</span>Support<span class="nav-dot"></span><span id="support-nav-badge" class="sup-nav-badge" style="display:none"></span>
-    </button>
-    <button class="nav-btn" id="nav-security" onclick="showView('security')">
-      <span class="nav-icon">🔒</span>Security<span class="nav-dot"></span>
-    </button>
-    <button class="nav-btn" id="nav-aifilters" onclick="showView('aifilters')">
-      <span class="nav-icon">✦</span>AI Filters<span class="nav-dot"></span>
-    </button>
-    <div class="sb-sep"></div>
-    <button class="nav-btn" id="nav-settings" onclick="showView('settings')">
-      <span class="nav-icon">⚙</span>Settings<span class="nav-dot"></span>
-    </button>
-    <a href="/" class="nav-btn">
-      <span class="nav-icon">⌂</span>Dashboard
-    </a>
+    <button class="nav-btn active" id="nav-overview" onclick="showView('overview')"><span class="nav-icon"></span>Overview</button>
+    <div class="sb-grp" data-grp="people">PEOPLE</div>
+    <button class="nav-btn" id="nav-users" onclick="showView('users')"><span class="nav-icon"></span>Users</button>
+    <button class="nav-btn" id="nav-moderation" onclick="showView('moderation')"><span class="nav-icon"></span>Moderation</button>
+    <button class="nav-btn" id="nav-support" onclick="showView('support')"><span class="nav-icon"></span>Support<span id="support-nav-badge" class="sup-nav-badge" style="display:none"></span></button>
+    <div class="sb-grp" data-grp="money">MONEY</div>
+    <button class="nav-btn" id="nav-revenue" onclick="showView('revenue')"><span class="nav-icon"></span>Revenue &amp; gas<span class="adm-badge red" data-badge="revenue"></span></button>
+    <button class="nav-btn" id="nav-trades" onclick="showView('trades')"><span class="nav-icon"></span>Trades</button>
+    <div class="sb-grp" data-grp="trading">TRADING</div>
+    <button class="nav-btn" id="nav-performance" onclick="showView('performance')"><span class="nav-icon"></span>Bot performance</button>
+    <button class="nav-btn" id="nav-aifilters" onclick="showView('aifilters')"><span class="nav-icon"></span>AI filters<span class="adm-badge" data-badge="aifilters"></span></button>
+    <div class="sb-grp" data-grp="system">SYSTEM</div>
+    <button class="nav-btn" id="nav-security" onclick="showView('security')"><span class="nav-icon"></span>Security</button>
+    <button class="nav-btn" id="nav-system" onclick="showView('system')"><span class="nav-icon"></span>System health</button>
+    <button class="nav-btn" id="nav-settings" onclick="showView('settings')"><span class="nav-icon"></span>Settings</button>
   </div>
-  <!-- Mobile-only: the fading edge on .sb-nav hints there's more to scroll to,
-       but isn't a reliable enough signal on its own (iOS hides scrollbars,
-       and a subtle gradient over dark backgrounds is easy to miss) -- this is
-       what actually got AI Filters and Settings found. -->
-  <button class="sb-nav-chevron" onclick="_scrollNavBar(1)" aria-label="Scroll tabs right">›</button>
 
   <div class="sb-status">
     <div class="sb-sys-card">
@@ -436,10 +506,12 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
 <!-- ════════════════ MAIN ════════════════ -->
 <main>
   <div class="topbar">
-    <div>
+    <div class="topbar-left">
+      <div class="topbar-grp" id="topbar-grp">Admin</div>
       <div class="topbar-title" id="topbar-title">Overview</div>
       <div class="topbar-sub" id="topbar-sub">{{ stats.users_count }} users · {{ stats.trades_count }} trades</div>
     </div>
+    <div class="adm-subtabs" id="adm-subtabs" role="tablist" aria-label="Pages in this section"></div>
     <div class="topbar-right">
       <button class="refresh-btn" onclick="refreshView()">↺ Refresh</button>
       <a href="/" class="back-link">← Back to app</a>
@@ -450,6 +522,15 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
 
     <!-- ══════════ VIEW: OVERVIEW ══════════ -->
     <div class="view active" id="view-overview">
+      <section id="att-wrap" aria-label="Needs your attention">
+        <div class="att-hdr"><h2>NEEDS YOUR ATTENTION</h2><span class="att-pill" id="att-total">…</span></div>
+        <div class="att-grid" id="att-grid">
+          <button class="att-card" data-att="support" onclick="showView('support')"><span class="att-lbl">Open support cases</span><span class="att-n" id="att-support">—</span><span class="att-go" id="att-support-go">Open inbox →</span></button>
+          <button class="att-card" data-att="aifilters" onclick="showView('aifilters')"><span class="att-lbl">AI filter proposals</span><span class="att-n" id="att-aifilters">—</span><span class="att-go">Approve or reject →</span></button>
+          <button class="att-card" data-att="revenue" onclick="showView('revenue')"><span class="att-lbl">Failed fee transfers</span><span class="att-n" id="att-revenue">—</span><span class="att-go" id="att-revenue-go">Revenue →</span></button>
+          <button class="att-card" data-att="moderation" onclick="showView('moderation')"><span class="att-lbl">Blocked IP addresses</span><span class="att-n" id="att-moderation">—</span><span class="att-go">Moderation →</span></button>
+        </div>
+      </section>
       <div class="kpi-grid">
         <div class="kpi-card">
           <div class="kpi-ico" style="background:rgba(124,140,255,.14)">👥</div>
@@ -573,7 +654,7 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
       <div class="chart-wrap">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
           <div class="chart-title" style="margin-bottom:0">Revenue — Last 7 Days</div>
-          <button class="btn btn-amber" id="collect-btn" data-owner-only onclick="collectFees()">💰 Collect Fees</button>
+          <button class="btn btn-amber" id="collect-btn" data-owner-only onclick="collectFees()">Collect fees</button>
           <div id="owner-only-note" style="display:none;font-size:11px;color:var(--muted);max-width:260px;text-align:right"></div>
         </div>
         <div class="chart-bars" id="rev-chart">
@@ -586,7 +667,7 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
       </div>
 
       <div class="sec-hdr">
-        <div class="sec-title">⛽ Gas sponsor wallet</div>
+        <div class="sec-title">Gas sponsor wallets</div>
         <div class="sec-count" id="gs-address">—</div>
       </div>
       <div id="gs-disabled" class="tbl-empty" style="display:none">
@@ -1028,7 +1109,7 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
 
         <!-- Card 1: Platform limits -->
         <div class="card" style="padding:22px 22px 24px">
-          <div class="card-title" style="font-size:15px;margin-bottom:20px">⚡ Platform limits</div>
+          <div class="card-title" style="font-size:15px;margin-bottom:20px">Platform limits</div>
           <div style="display:flex;flex-direction:column;gap:16px">
 
             <div class="stg-field">
@@ -1060,7 +1141,7 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
 
         <!-- Card 2: Feature flags -->
         <div class="card" style="padding:22px 22px 24px">
-          <div class="card-title" style="font-size:15px;margin-bottom:20px">🚩 Feature flags</div>
+          <div class="card-title" style="font-size:15px;margin-bottom:20px">Feature flags</div>
           <div style="display:flex;flex-direction:column;gap:4px">
 
             <div class="stg-toggle-row" id="flag-signups">
@@ -1109,7 +1190,7 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
         <!-- Card 3: Admin access -->
         <div class="card" style="padding:22px 22px 24px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
-            <div class="card-title" style="font-size:15px;margin-bottom:0">👤 Admin access</div>
+            <div class="card-title" style="font-size:15px;margin-bottom:0">Team &amp; roles</div>
             <button class="btn btn-amber" onclick="openInviteModal()" style="font-size:12px;padding:6px 12px">+ Invite</button>
           </div>
           <div style="display:flex;flex-direction:column;gap:0" id="admin-access-list">
@@ -1127,6 +1208,14 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
 
   </div><!-- /views -->
 </main>
+
+<nav class="adm-tabbar" id="adm-tabbar" aria-label="Admin sections">
+  <button class="adm-tab active" data-grp="overview" onclick="showGroup('overview')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 11l9-8 9 8v9a1 1 0 01-1 1h-5v-6h-6v6H4a1 1 0 01-1-1z"/></svg>Home</button>
+  <button class="adm-tab" data-grp="people" onclick="showGroup('people')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0114 0M16 4a4 4 0 010 8M22 21a7 7 0 00-4-6.3"/></svg>People<span class="adm-badge" data-badge="people"></span></button>
+  <button class="adm-tab" data-grp="money" onclick="showGroup('money')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>Money<span class="adm-badge red" data-badge="money"></span></button>
+  <button class="adm-tab" data-grp="trading" onclick="showGroup('trading')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg>Trading<span class="adm-badge" data-badge="trading"></span></button>
+  <button class="adm-tab" data-grp="system" onclick="showGroup('system')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/></svg>System</button>
+</nav>
 </div>
 
 <!-- ── INVITE MODAL ── -->
@@ -1249,8 +1338,16 @@ function _applyRoleUI(role) {
     var btn = document.getElementById('nav-' + name);
     if (btn) btn.style.display = allowed.indexOf(name) >= 0 ? '' : 'none';
   });
-  document.querySelectorAll('.sb-sep').forEach(function(sep) {
-    sep.style.display = (role === 'admin' || role === 'executive') ? '' : 'none';
+  // A group whose pages this role cannot open disappears entirely --
+  // its sidebar label and its phone tab.
+  Object.keys(_GROUPS).forEach(function(g) {
+    var any = _GROUPS[g].some(function(v) { return allowed.indexOf(v) >= 0; });
+    document.querySelectorAll('.sb-grp[data-grp="' + g + '"], .adm-tab[data-grp="' + g + '"]').forEach(function(el) {
+      el.style.display = any ? '' : 'none';
+    });
+  });
+  document.querySelectorAll('#att-grid .att-card').forEach(function(card) {
+    card.style.display = allowed.indexOf(card.dataset.att) >= 0 ? '' : 'none';
   });
   // Matches /api/admin/ai-filters/run-now's own _require_role('admin', 'executive').
   var runBtn = document.getElementById('aif-run-btn');
@@ -1279,7 +1376,60 @@ async function _initRoleBasedUI() {
 }
 
 // ── VIEW SWITCHING ──
-var _titles = {overview:'Overview',users:'Users',trades:'Trades',revenue:'Revenue',performance:'Performance',system:'System',moderation:'Moderation',support:'Support',security:'Security',aifilters:'AI Filters',settings:'Settings'};
+var _titles = {overview:'Overview',users:'Users',trades:'Trades',revenue:'Revenue & gas',performance:'Bot performance',system:'System health',moderation:'Moderation',support:'Support',security:'Security',aifilters:'AI filters',settings:'Settings'};
+// Five groups: the sidebar on desktop, the tab bar on a phone, and the
+// sub-tabs in the top bar all come from this one map.
+var _GROUPS = {
+  overview: ['overview'],
+  people:   ['users','moderation','support'],
+  money:    ['revenue','trades'],
+  trading:  ['performance','aifilters'],
+  system:   ['security','system','settings']
+};
+var _GROUP_NAMES = {overview:'Admin', people:'People', money:'Money', trading:'Trading', system:'System'};
+function _groupOf(view) {
+  for (var g in _GROUPS) if (_GROUPS[g].indexOf(view) >= 0) return g;
+  return 'overview';
+}
+function showGroup(g) {
+  var allowed = _ROLE_TABS[_userRole] || [];
+  var first = (_GROUPS[g] || []).filter(function(v) { return allowed.indexOf(v) >= 0; })[0];
+  if (first) showView(first);
+}
+var _badgeCounts = {};
+function _setBadge(key, n) {
+  _badgeCounts[key] = n || 0;
+  document.querySelectorAll('[data-badge="' + key + '"]').forEach(function(b) {
+    b.textContent = n > 9 ? '9+' : (n || '');
+    b.style.display = n > 0 ? 'inline-flex' : 'none';
+  });
+  // Phone tabs add up their group's pages.
+  var groupTotals = {people: (_badgeCounts.support || 0), money: (_badgeCounts.revenue || 0), trading: (_badgeCounts.aifilters || 0)};
+  Object.keys(groupTotals).forEach(function(g) {
+    document.querySelectorAll('.adm-tab [data-badge="' + g + '"]').forEach(function(b) {
+      var t = groupTotals[g];
+      b.textContent = t > 9 ? '9+' : (t || '');
+      b.style.display = t > 0 ? 'inline-flex' : 'none';
+    });
+  });
+  _renderSubtabs();
+}
+function _renderSubtabs() {
+  var active = document.querySelector('.view.active');
+  var view = active ? active.id.replace('view-', '') : 'overview';
+  var g = _groupOf(view);
+  var allowed = _ROLE_TABS[_userRole] || [];
+  var pages = _GROUPS[g].filter(function(v) { return allowed.indexOf(v) >= 0; });
+  var box = document.getElementById('adm-subtabs');
+  if (!box) return;
+  box.innerHTML = pages.length < 2 ? '' : pages.map(function(v) {
+    var n = _badgeCounts[v] || 0;
+    return '<button class="adm-subtab' + (v === view ? ' active' : '') + '" role="tab" aria-selected="' + (v === view) + '" onclick="showView(\'' + v + '\')">'
+      + _titles[v] + (n > 0 ? '<span class="adm-badge' + (v === 'revenue' ? ' red' : '') + '">' + (n > 9 ? '9+' : n) + '</span>' : '') + '</button>';
+  }).join('');
+  document.getElementById('topbar-grp').textContent = _GROUP_NAMES[g];
+  document.querySelectorAll('.adm-tab').forEach(function(t) { t.classList.toggle('active', t.dataset.grp === g); });
+}
 function showView(name) {
   var allowed = _ROLE_TABS[_userRole] || Object.keys(_titles);
   if (allowed.indexOf(name) < 0) return;
@@ -1296,6 +1446,8 @@ function showView(name) {
     nb.scrollIntoView({behavior: 'smooth', inline: 'nearest', block: 'nearest'});
   }
   document.getElementById('topbar-title').textContent = _titles[name] || name;
+  _renderSubtabs();
+  window.scrollTo(0, 0);
   if (!_loaded[name]) { _loaded[name] = true; loadView(name); }
 }
 function _scrollNavBar(dir) {
@@ -1385,6 +1537,7 @@ function _txRow(t, showTx) {
 
 // ══════════════════ OVERVIEW ══════════════════
 async function loadOverview() {
+  loadAttention();
   var [admin, fees, stats, online] = await Promise.all([_a('/api/admin'), _a('/api/admin/fees'), _a('/api/admin/stats'), _a('/api/online-count')]);
   if (online && online.ok) document.getElementById('ov-online').textContent = online.online;
   if (admin) {
@@ -1412,6 +1565,51 @@ async function loadOverview() {
     var sessions = admin?.users_with_key ?? '—';
     document.getElementById('sb-sys-meta').innerHTML =
       'Bots active · ' + traders + '<br>Sessions · ' + sessions + '<br>Queue · 0 backlog';
+  }
+}
+
+// Needs your attention: only real, countable signals, and only the ones this
+// role may open (the cards of other pages are hidden by _applyRoleUI).
+async function loadAttention() {
+  var allowed = _ROLE_TABS[_userRole] || [];
+  var can = function(v) { return allowed.indexOf(v) >= 0; };
+  var [sup, aif, rev, bans] = await Promise.all([
+    can('support') ? _a('/api/admin/support/threads?status=open') : null,
+    can('aifilters') ? _a('/api/admin/ai-filters') : null,
+    can('revenue') ? _a('/api/admin/revenue') : null,
+    can('moderation') ? _a('/api/admin/bans') : null,
+  ]);
+  var total = 0;
+  function put(key, n, goText) {
+    var card = document.querySelector('#att-grid .att-card[data-att="' + key + '"]');
+    var el = document.getElementById('att-' + key);
+    if (!card || !el) return;
+    if (n == null) { el.textContent = '—'; return; }
+    card.classList.toggle('clear', n === 0);
+    card.classList.toggle('alert', key === 'revenue' && n > 0);
+    el.textContent = n === 0 ? 'All clear' : n;
+    if (goText) { var go = document.getElementById('att-' + key + '-go'); if (go) go.textContent = goText; }
+    total += n;
+  }
+  if (sup && sup.ok) {
+    var threads = sup.threads || [];
+    put('support', threads.length, threads.length ? 'Open inbox →' : 'Nothing waiting');
+  }
+  if (aif && aif.ok) {
+    var pending = (aif.proposals || []).filter(function(p) { return p.status === 'pending'; }).length;
+    put('aifilters', pending);
+    _setBadge('aifilters', pending);
+  }
+  if (rev && rev.ok) {
+    var failed = (rev.transactions || []).filter(function(t) { return t.status === 'failed'; }).length;
+    put('revenue', failed, failed ? _fmt(rev.failed) + ' SOL not collected →' : 'Nothing failed');
+    _setBadge('revenue', failed);
+  }
+  if (bans) put('moderation', (bans.bans || []).length, (bans.bans || []).length ? 'Moderation →' : 'None active');
+  var pill = document.getElementById('att-total');
+  if (pill) {
+    pill.textContent = total ? total + ' open' : 'All clear';
+    pill.classList.toggle('clear', !total);
   }
 }
 
@@ -1630,7 +1828,7 @@ async function collectFees() {
   var btn = document.getElementById('collect-btn');
   btn.disabled = true; btn.textContent = 'Collecting…';
   var r = await fetch('/api/admin/collect-fees', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':window._csrfToken}, credentials:'include', body:'{}'}).then(r => r.json()).catch(() => null);
-  btn.disabled = false; btn.textContent = '💰 Collect Fees';
+  btn.disabled = false; btn.textContent = 'Collect fees';
   if (r?.ok) { toast('✓ ' + (r.msg || 'Collected'), true); _loaded.revenue = false; loadRevenue(); }
   else toast('Error: ' + (r?.error || 'Failed'), false);
 }
@@ -1951,6 +2149,7 @@ async function _supAdminToggleStatus() {
 }
 
 function _supSetNavBadge(n) {
+  _setBadge('support', n);
   var b = document.getElementById('support-nav-badge');
   if (!b) return;
   b.textContent = n > 9 ? '9+' : n;
