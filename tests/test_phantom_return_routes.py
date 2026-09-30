@@ -62,7 +62,7 @@ check('the signMessage callback preserves source context and return route',
 check('ordinary browsers return automatically to their original OrcAgent route',
       'window.location.replace(returnTo)' in CALLBACK)
 check('installed-app callback confirms login without a Safari redirect or instruction panel',
-      "msg.textContent = 'Verbonden met OrcAgent'" in CALLBACK
+      "msg.textContent = 'Connected to OrcAgent'" in CALLBACK
       and 'pwa-note' not in CALLBACK)
 check('callback rejects external and recursive callback redirects',
       "u.origin !== window.location.origin" in CALLBACK
