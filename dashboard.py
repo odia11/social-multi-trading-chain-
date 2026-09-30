@@ -25100,6 +25100,8 @@ def api_token_info(mint_address):
         # socials
         socials = info.get('socials') or []
         twitter = next((s.get('url') for s in socials if (s.get('type') or '').lower() == 'twitter'), None)
+        telegram = next((s.get('url') for s in socials if (s.get('type') or '').lower() == 'telegram'), None)
+        website = next((w.get('url') for w in (info.get('websites') or []) if w.get('url')), None)
         # price in SOL: DexScreener doesn't expose priceNative directly on all pairs,
         # but priceNative is the quote-token price (usually SOL for Solana pairs)
         price_sol = _f(p.get('priceNative'))
@@ -25150,6 +25152,8 @@ def api_token_info(mint_address):
             'banner_url':        info.get('header'),
             # socials / links
             'twitter_url':       twitter,
+            'telegram_url':      telegram,
+            'website_url':       website,
             'dexscreener_url':   p.get('url') or f'https://dexscreener.com/{p.get("chainId","solana")}/{mint}',
         })
     except Exception as e:
@@ -25280,11 +25284,24 @@ def api_trade_holding():
 
     td    = get_token_data(addr)
     price = float(td['price']) if td and td.get('price') else 0.0
+    # What the member paid, for the token page's "Your position" -- known only
+    # for a tracked position. A SOL-mode Solana position stores SOL; every
+    # other one is already in dollars. Unknown stays None, never a guess.
+    entry_usd = cost_usd = None
+    if source == 'position':
+        _is_sol = chain == 'solana' and (pos.get('base_currency') or 'SOL') == 'SOL'
+        _rate = (_sol_price_usd if _sol_price_usd > 0 else 0.0) if _is_sol else 1.0
+        if _rate > 0:
+            _entry = float(pos.get('buy_price') or 0.0)
+            _spend = float(pos.get('spend') or 0.0)
+            entry_usd = round(_entry * _rate, 12) if _entry > 0 else None
+            cost_usd = round(_spend * _rate, 2) if _spend > 0 else None
     return jsonify({
         'ok': True, 'chain': chain, 'amount': amount, 'price_usd': price,
         'value_usd': round(amount * price, 6) if price > 0 else 0.0,
         'symbol': pos.get('symbol') or (td.get('symbol', '') if td else ''),
         'source': source,
+        'entry_price_usd': entry_usd, 'cost_usd': cost_usd,
     })
 
 
