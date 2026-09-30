@@ -8,9 +8,14 @@ HOME = (ROOT / 'static' / 'home-mobile.js').read_text()
 MESSAGES = (ROOT / 'messages_premium_ui.py').read_text()
 
 def test_route_css_is_applied_before_first_paint():
-    assert 'rel="stylesheet"' in PERF and 'rel="preload"' not in PERF
+    # Route CSS is a real stylesheet (applied before first paint); preload is
+    # only used for the shared shell bundle, marked as such.
+    assert 'rel="stylesheet"' in PERF
+    for line in PERF.splitlines():
+        if 'rel="preload"' in line and '<link' in line:
+            assert 'data-oa-shell-preload' in line, line
     for asset in ('portfolio-redesign.css','live-market-redesign.css','home-mobile.css','groups-redesign.css'):
-        assert asset in PERF
+        assert "style('%s'" % asset in PERF, asset
 
 def test_navbar_does_not_append_duplicate_assets():
     assert 'function ensureStyle' in NAV and 'function ensureScript' in NAV
@@ -24,7 +29,7 @@ def test_route_specific_mobile_assets_are_scoped():
     assert "if path == '/':" in MOBILE and "elif path == '/live-market':" in MOBILE
 
 def test_messages_use_two_bundles():
-    assert 'messages-ui.css?v=1' in MESSAGES and 'messages-ui.js?v=3' in MESSAGES
+    assert 'messages-ui.css?v=1' in MESSAGES and 'messages-ui.js?v=4' in MESSAGES
     assert 'messages-premium-v2.css' not in MESSAGES
 
 

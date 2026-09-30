@@ -6474,10 +6474,10 @@ def _record_user_trade(user_id: int, us: dict, symbol: str, entry: float, exit_p
                        chain: str = 'solana', base: str = 'SOL'):
     """chain defaults to 'solana' so every pre-existing caller (all of them,
     until user_trader_loop()'s bot-driven EVM exits) keeps behaving exactly
-    as before. The only genuinely chain-specific pieces are which fee
-    function actually moves value (_charge_txn_fee sends SOL,
-    _charge_evm_txn_fee sends that chain's own USDC/USDG) and the currency
-    label in user-facing text -- pnl/pnl_pct/daily_stats math, the
+    as before. The only genuinely chain-specific pieces are how the fee
+    that the swap itself already collected is recorded (SOL or that
+    chain's own stablecoin) and the currency label in user-facing text --
+    pnl/pnl_pct/daily_stats math, the
     loss-streak throttle, badges, and notifications are all already
     currency-agnostic (a USD-valued price ratio) and apply identically to
     both."""
@@ -6541,11 +6541,10 @@ def _record_user_trade(user_id: int, us: dict, symbol: str, entry: float, exit_p
     # already charged at position-open time). Applies regardless of who the session
     # wallet belongs to, and regardless of pnl (win, loss, or break-even all pay it,
     # since it's charged on the swap amount, not the profit).
-    # Solana: bundled=True -- the sell swap already folded this fee into its own
-    # transaction via Jupiter's platform fee (see orcagent_solana.py), so there's no
-    # separate transfer left for users to notice leaving their wallet, just record it.
-    # EVM: _charge_evm_txn_fee sends a real separate on-chain USDC/USDG transfer --
-    # that chain's swap (0x) has no equivalent bundled-platform-fee mechanism.
+    # Every chain collects this fee inside the sell swap itself -- Jupiter's
+    # platform fee on Solana (see orcagent_solana.py), 0x's swapFeeBps on EVM --
+    # so no separate transfer ever leaves the user's wallet; this only records
+    # it. The proceeds arrive net of the fee, hence the gross-up below.
     if wallet and private_key:
         _fee_ts = now.strftime('%Y-%m-%dT%H:%M:%SZ')
         if chain == 'solana' and base == 'USDC':
@@ -21667,7 +21666,8 @@ def api_instant_trade():
                     if current_sol < SOL_NETWORK_RESERVE:
                         return jsonify({'error':
                             f'Not enough SOL for network fees — you have {current_sol:.4f} '
-                            f'and about {SOL_NETWORK_RESERVE} is needed.'}), 400
+                            f'and about {SOL_NETWORK_RESERVE} is needed. Trades themselves '
+                            f'are funded with USDC; this is only the fee.'}), 400
                 # The trading wallet, not the session wallet: they are two
                 # different keypairs and the funds live on the first.
                 trading_wallet = _get_trading_wallet_address(wallet) or wallet
@@ -25456,12 +25456,17 @@ def _get_solana_usdc_balance(address: str) -> float:
     # the wallet's deterministic associated token account, so an exact
     # getAccountInfo read can still prove the spendable balance without an
     # indexer. This is the same verified path used by the trading bot.
+    # Only a positive amount is proof: an empty associated account says
+    # nothing about USDC held in any other token account, so with every
+    # indexed read failing that is "unavailable", never a whole-wallet zero
+    # (the same rule as the 429 path above).
     try:
         _, spendable = _get_bot_solana_balances(key)
         spendable = float(spendable)
-        with _sol_usdc_balance_lock:
-            _sol_usdc_balance_cache[key] = (time.time(), spendable)
-        return spendable
+        if spendable > 0:
+            with _sol_usdc_balance_lock:
+                _sol_usdc_balance_cache[key] = (time.time(), spendable)
+            return spendable
     except Exception:
         pass
 

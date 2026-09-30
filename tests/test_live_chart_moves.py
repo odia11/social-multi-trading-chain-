@@ -40,7 +40,9 @@ def fn(name):
     return ast.get_source_segment(SRC, f) or ''
 
 # ── the server side ───────────────────────────────────────────────────────
-prices = fn('api_market_prices')
+# The route validates, then prices; both halves are shared helpers now (the
+# batch endpoint uses them too), so read them in that order.
+prices = fn('api_market_prices') + fn('_validated_market_pairs') + fn('_market_prices_for_pairs')
 check('there is one endpoint that answers for many pools at once, so a screen '
       'of tokens costs one upstream request rather than one per card',
       # Many pools go into ONE url. Which list is joined changed when the
@@ -57,10 +59,10 @@ check('...with duplicates dropped, since the same pool can appear on screen '
 check('addresses are validated for the chain they claim to be on, never '
       'pasted into a URL as sent — this builds an outbound request out of '
       'something a caller controls',
-      '_addr_ok(' in prices and 'is_valid_evm_address' in prices
-      and '_SOLANA_ADDR_RE' in prices)
+      "is_valid_evm_address(a) if chain in EVM_CHAINS else bool(_SOLANA_ADDR_RE.match(a))" in prices
+      and 'if a and ok(a)' in prices)
 check('...and an unknown chain is refused before anything is fetched',
-      prices.index('EVM_CHAINS and chain') < prices.index('_dex_get'))
+      prices.index("if chain not in EVM_CHAINS and chain != 'solana':") < prices.index('_dex_get'))
 
 ttl = re.search(r'_LIVE_PRICE_TTL\s*=\s*(\d+)', SRC)
 check('a live price is cached briefly rather than not at all, so every viewer '
@@ -89,7 +91,8 @@ check('a failed price fetch is quiet, leaving the chart showing what it drew '
       'except Exception' in prices)
 check('...and a failure still returns whatever WAS cached, rather than '
       'throwing away good prices because one fetch missed',
-      prices.rstrip().endswith("return jsonify({'ok': True, 'prices': prices})"))
+      fn('_market_prices_for_pairs').rstrip().endswith('return prices')
+      and "print(f'[prices] batch fetch failed" in prices)
 check('...and it is rate limited like every other public endpoint',
       '@rate_limit' in SRC[SRC.index('def api_market_prices') - 200:
                            SRC.index('def api_market_prices')])
@@ -97,37 +100,43 @@ check('...and it is rate limited like every other public endpoint',
 # ── the page ──────────────────────────────────────────────────────────────
 check('the page runs ONE price ticker for the whole screen, not one per card',
       JS.count('startLivePrices()') == 2      # the definition, and one call
-      and 'if(_priceTimer) return;' in JS)
-check('...batching every visible chart into a request per chain',
-      'byChain' in JS and 'pairs.join(\',\')' in JS)
-
+      and 'if(_priceTimer)return;' in JS)
 tick = JS[JS.index('function tickLivePrices'):]
 tick = tick[:tick.index('function startLivePrices')]
+check('...batching every visible chart into ONE request, grouped per chain',
+      "(groups[c]=groups[c]||[]).push(st.pair);" in tick
+      and "fetch('/api/market/prices-batch?'" in tick and tick.count('fetch(') == 1)
+
+apply = JS[JS.index('function _applyLivePrice'):]
+apply = apply[:apply.index('function tickLivePrices')]
 check('a chart redraws from the candles it already has, so a price tick costs '
-      'no candle fetch at all', 'st.candles' in tick and 'fetchChart' not in tick)
+      'no candle fetch at all', 'st.candles' in apply and 'fetchChart' not in apply + tick)
 check('...moving the newest candle, which is the one still forming — its '
-      'close IS the current price', 'last.c = px' in tick)
+      'close IS the current price', 'last.c=px;' in apply)
 check('...and stretching its high and low to match, or the wick would end up '
       'outside its own candle',
-      'if(px > last.h) last.h = px;' in tick and 'if(px < last.l) last.l = px;' in tick)
+      'if(px>last.h)last.h=px;' in apply and 'if(px<last.l)last.l=px;' in apply)
 check('...and skipping a redraw when the price has not changed, so an '
-      'unchanged chart is not repainted every four seconds',
-      'px === st.price' in tick)
+      'unchanged chart is not repainted on every tick',
+      'px===st.price) return;' in apply)
 
-_ms = re.search(r'\}, (\d+)\);\s*// must not be shorter', JS)
-check('the page ticks no faster than the server\'s price window — extra ticks '
+_ms = re.search(r'var _pricePollBaseMs = (\d+);', JS)
+check('the page asks no faster than the server\'s price window — extra asks '
       'would only re-ask for an answer that cannot have changed yet, which is '
       'the exact mistake the candle polling was making',
-      _ms and ttl and int(_ms.group(1)) >= int(ttl.group(1)) * 1000)
+      _ms and ttl and int(_ms.group(1)) >= int(ttl.group(1)) * 1000
+      and 'Date.now()<_priceNextAt' in tick)
 check('nothing is asked for while the tab is in the background — that is how '
       'a page gets rate limited for charts nobody is looking at',
-      "document.visibilityState === 'visible'" in JS)
+      "document.visibilityState!=='visible'" in tick)
 
 # ── and the candle polling that this makes unnecessary ────────────────────
-m = re.search(r'chartTick\(idx\); \}, (\d+)\);', JS)
+mount = JS[JS.index('function mountChart'):]
+mount = mount[:mount.index('function unmountChart')]
+_iv = [int(x) for x in re.findall(r'chartTick\(idx\);\s*\n\s*\}, (\d+)\);', mount)]
 check('the candles are no longer polled harder than the server will answer. '
       'They were fetched every 5s against a 30s cache — six identical replies '
-      'for one answer', m and int(m.group(1)) >= 15000)
+      'for one answer', _iv and min(_iv) >= 15000)
 
 passed = sum(1 for _, ok in checks if ok)
 print(f'\n{passed}/{len(checks)} checks passed')

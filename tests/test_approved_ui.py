@@ -41,7 +41,9 @@ def test_portfolio_single_real_balance_and_actions():
     for function in ('_modalDeposit()', '_modalSend()'):
         assert function in WALLET
     assert "data-portfolio-tab=\"assets\"" in WALLET
-    assert "data-portfolio-tab=\"chains\"" in WALLET
+    # Chains is plumbing the user never needs to see (one USDC balance
+    # across every chain), so Portfolio has no Chains tab.
+    assert "data-portfolio-tab=\"chains\"" not in WALLET
     assert "data-portfolio-tab=\"history\"" in WALLET
     assert "hero=document.createElement" not in PORT_JS
     assert "allocation=document.createElement" not in PORT_JS

@@ -117,6 +117,11 @@ reset()
 out['buy_status'], out['buy'] = post(BUY)
 out['buy_swaps'] = list(SWAPS)
 out['buy_fees'] = list(FEES)
+def fee_rows():
+    with sqlite3.connect(d.DB_FILE) as _c:
+        return [list(r) for r in _c.execute(
+            "SELECT fee_amount, fee_tx, kind, chain FROM fees ORDER BY rowid")]
+out['buy_fee_rows'] = fee_rows()
 out['buy_key_uses'] = len(KEY_USES)
 out['tokens_after_buy'] = tokens_row()
 
@@ -186,6 +191,7 @@ out['sell_status'], out['sell'] = post({'symbol': 'BONK', 'token_address': MINT,
                                         'side': 'sell'})
 out['sell_swaps'] = list(SWAPS)
 out['sell_fees'] = list(FEES)
+out['sell_fee_rows'] = fee_rows()
 out['tokens_after_full_sell'] = tokens_row()
 
 # ── a PARTIAL sell must not ──
@@ -233,9 +239,12 @@ check('the key is taken through _use_key, so this trade route now reaches the '
       'security log like every other one does', R['buy_key_uses'] >= 1)
 check('the realized fill comes back rather than being re-parsed by hand',
       b['token_amount'] == 1234.5)
-check('the fee is recorded as bundled, on the SOL spent',
-      len(R['buy_fees']) == 1 and R['buy_fees'][0]['bundled'] is True
-      and abs(R['buy_fees'][0]['sol'] - 0.05) < 1e-9)
+# Trades are funded in USDC: the fee rides inside the swap and is booked as a
+# bundled stablecoin fee, 0.75% of what was spent -- no second transfer.
+check('the fee is recorded as bundled, on the amount spent',
+      R['buy_fees'] == [] and len(R['buy_fee_rows']) == 1
+      and R['buy_fee_rows'][0][1:] == ['bundled-in-swap', 'buy', 'solana']
+      and abs(R['buy_fee_rows'][0][0] - round(0.05 * 0.0075, 6)) < 1e-9)
 check('...and the holding is credited', R['tokens_after_buy'])
 
 check('a wallet that cannot pay the network fee now fails with the wrapper\'s own '
@@ -274,9 +283,11 @@ check('too little USDC is a separate refusal, naming USDC and what to send',
 s = R['sell']
 check('a full sell succeeds and reports what it received',
       R['sell_status'] == 200 and s['success'] and s['sol_amount'] == 0.049)
-check('...charging the fee on the SOL actually received',
-      len(R['sell_fees']) == 1 and abs(R['sell_fees'][0]['sol'] - 0.049) < 1e-9
-      and R['sell_fees'][0]['kind'] == 'sell')
+_sell_rows = [r for r in R['sell_fee_rows'] if r[2] == 'sell']
+check('...charging the fee on what was actually received',
+      R['sell_fees'] == [] and len(_sell_rows) == 1 and _sell_rows[0][1] == 'bundled-in-swap'
+      # 0.049 arrived net of the fee, so the fee is 0.75% of the gross swap.
+      and abs(_sell_rows[0][0] - round(0.049 / (1 - 0.0075) * 0.0075, 6)) < 1e-9)
 check('...and zeroing the holding', R['tokens_after_full_sell'][0] == 0)
 
 check('a PARTIAL sell still sells', R['partial_status'] == 200

@@ -82,13 +82,13 @@ check('...and bounded, so it cannot grow a row per wallet forever',
 # The MARKUP, not the stylesheet. Splitting on the bare class name landed on
 # the CSS rule of the same name, which contains no buttons at all -- so the
 # "Bridge is gone" check passed without ever looking at the action row.
-_open = '<div class="wlt-hero-actions">'
-assert _open in WALLET, 'the action row markup moved'
-actions = WALLET.split(_open)[1].split('</div>')[0]
+_open = re.search(r'<div class="wlt-hero-actions"[^>]*>', WALLET)
+assert _open, 'the action row markup moved'
+actions = WALLET[_open.end():].split('</div>')[0]
 check('the action row no longer offers Bridge as a manual chore',
       '_modalBridge()' not in actions)
 check('...while Deposit, Send and Swap — the three people actually use — stay',
-      all(x in actions for x in ('_modalDeposit()', '_modalSend()', 'openSwapModal()')))
+      all(x in actions for x in ('_modalDeposit()', '_modalSend()', '_modalSolUsdcSwap()')))
 check('the automatic bridge is untouched: buying on a chain with no balance '
       'still moves funds by itself and completes the purchase',
       '_maybe_start_auto_bridge_for_buy' in SRC

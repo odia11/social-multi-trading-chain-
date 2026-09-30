@@ -119,11 +119,18 @@ GM = open(REPO + '/gas_manager.py').read()
 check('the background sweep that grants SOL checks the rule before it starts, '
       'so it does not read every user\'s balance to reach a decision already '
       'known', "getattr(_app, 'ORCAGENT_FRONTS_GAS', True)" in GM)
-check('...while the EVM sweep is deliberately NOT gated, because it tops wallets '
-      'up from the USER\'S own stablecoin — that is their money and must keep '
-      'working whatever the platform fronts',
-      '_ensure_evm_gas(' in GM
-      and 'ORCAGENT_FRONTS_GAS' not in GM.split('def _sweep_user_chain')[1])
+# The EVM top-up from the USER'S own stablecoin is their money and must keep
+# working whatever the platform fronts. It runs just-in-time inside each
+# trade's own _ensure_evm_gas() call; the periodic sweep that pre-emptively
+# walked every user and chain is skipped when the platform fronts no gas,
+# because it only added RPC load (and public-RPC rate limits) for nothing.
+_per_user = GM.split('def _sweep_user_chain')[1].split('\ndef ')[0]
+_evm_exec = fn('_te_evm_swap_executor')
+check('...while the EVM top-up from the user\'s own stablecoin is never gated: '
+      'each trade still runs it just-in-time, and the per-user top-up itself '
+      'has no platform-fronting check',
+      '_ensure_evm_gas(' in _evm_exec and 'ORCAGENT_FRONTS_GAS' not in _evm_exec
+      and '_ensure_evm_gas(' in _per_user and 'ORCAGENT_FRONTS_GAS' not in _per_user)
 
 # ── the user pays, which is what makes this a rail and not a subsidy ───────
 q = fn('_te_needs_sponsored_gas')

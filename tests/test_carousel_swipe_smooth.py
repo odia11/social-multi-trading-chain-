@@ -4,8 +4,7 @@ rail) must swipe/scroll smoothly on both touch and desktop.
 WHAT WAS HAPPENING
 Two separate bugs, both on templates/live_market_pro.html and
 static/live-market-pro.js -- the single template served for /live-market on
-every viewport (mobile and desktop alike; live_market.html is the old,
-unrouted mobile-only template kept on disk but not served):
+every viewport (mobile and desktop alike):
 
 1. Desktop had no way to scroll these rails at all. They are plain
    overflow-x:auto strips with the native scrollbar hidden (scrollbar-width:
@@ -113,7 +112,7 @@ check('...and restores scrollLeft after replacing innerHTML, so a periodic '
 # order matters: the innerHTML write must sit between the capture and the
 # restore, not before the capture or after the restore.
 capture_idx = surges_fn.index('rail.scrollLeft')
-innerhtml_idx = surges_fn.index('rail.innerHTML =')
+innerhtml_idx = re.search(r'rail\.innerHTML\s*=', surges_fn).start()
 restore_idx = surges_fn.rindex('rail.scrollLeft')
 check('the capture happens before the rebuild, and the restore happens '
       'after it (not the other way around)',

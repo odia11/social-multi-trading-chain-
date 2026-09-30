@@ -104,7 +104,8 @@ else:
     W = os.path.join(home if os.path.isdir(home) else '/home', 'orcagent-deploy-test')
     shutil.rmtree(W, ignore_errors=True)
     os.makedirs(W)
-    shutil.chown(W, OWNER, OWNER)
+    # The owner's own primary group: 'nobody' is in 'nogroup' on Debian/Ubuntu.
+    shutil.chown(W, OWNER, __import__('grp').getgrgid(pwd.getpwnam(OWNER).pw_gid).gr_name)
     os.chmod(W, 0o755)
     origin, clone = os.path.join(W, 'origin.git'), os.path.join(W, 'clone')
 

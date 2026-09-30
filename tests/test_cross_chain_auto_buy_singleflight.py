@@ -91,7 +91,12 @@ def test_retry_reuses_live_bridge_even_after_time_window():
 def test_terminal_failure_closes_attached_buy_state_in_source():
     assert "auto_buy_status='failed'" in SRC
     assert "Funding bridge did not complete" in SRC
-    assert "Funding bridge timed out before purchase" in SRC
+    # An overdue bridge is not closed as a timeout any more: its buy waits in
+    # 'reconciling', and funds that land after the buy window cancel the buy
+    # without signing anything new.
+    assert "THEN 'reconciling' ELSE auto_buy_status END" in SRC
+    assert ("if new_status == 'bridge_filled' and auto_buy_status == 'reconciling':" in SRC
+            and 'Funds arrived after the buy window; no automatic token purchase was made' in SRC)
 
 
 def test_evm_origin_bridge_uses_user_funded_gasless_setup_before_sponsor():

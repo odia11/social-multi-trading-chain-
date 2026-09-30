@@ -123,6 +123,9 @@ out['quote'] = q
 out['exec_status'], out['exec'] = execute({'quote_id': q['quote_id']})
 out['swaps'] = list(SWAPS)
 out['fees'] = list(FEES)
+with sqlite3.connect(d.DB_FILE) as _c:
+    out['fee_rows'] = [list(r) for r in _c.execute(
+        "SELECT fee_amount, fee_tx, kind, chain FROM fees WHERE user_wallet=? ORDER BY rowid", (WALLET,))]
 
 # ── status ──
 r = c.get('/api/trade/status/' + out['exec']['trade_id'])
@@ -223,16 +226,24 @@ check('an unauthenticated caller cannot execute or inspect a trade',
 q, ex, swaps = R['quote'], R['exec'], R['swaps']
 check('the trade completes', R['exec_status'] == 200 and ex['ok'] and ex['completed'])
 check('exactly one swap went out', len(swaps) == 1)
-check('the swap SELLS THE PURCHASE, not the $100 the user entered — this single '
-      'number is the difference between the engine and every legacy endpoint',
-      swaps[0]['amount'] == q['token_purchase_usd'] and float(swaps[0]['amount']) < 100)
+# The 0.75% is collected inside that same swap (0x swapFeeBps), so what is
+# swapped is the purchase plus its fee -- nothing else leaves the wallet.
+_fee = float(q['costs_by_kind']['platform_fee'])
+check('the swap SELLS THE PURCHASE (plus the fee collected inside it), not the $100 '
+      'the user entered — this single number is the difference between the engine '
+      'and every legacy endpoint',
+      abs(float(swaps[0]['amount']) - (float(q['token_purchase_usd']) + _fee)) < 0.005
+      and float(swaps[0]['amount']) < 100)
 check('...on the chain and token from the stored quote',
       swaps[0]['chain'] == 'base' and swaps[0]['token'] == '0xTOKEN'
       and swaps[0]['action'] == 'buy')
-check('the fee is charged on the PURCHASE too. The legacy path charges 0.75% of '
-      'the full amount the user typed, on top of having already swapped all of '
-      'it — so the real spend exceeds the number on screen',
-      len(R['fees']) == 1 and str(R['fees'][0]['usdc']) == str(float(q['token_purchase_usd'])))
+check('the fee is 0.75% of what is swapped, not of the full amount the user typed, '
+      'and it is taken inside the swap — never a second transfer on top, which is '
+      'how the real spend used to exceed the number on screen',
+      R['fees'] == [] and len(R['fee_rows']) == 1
+      and R['fee_rows'][0][1:3] == ['0x-bundled:0xSWAPPED', 'buy']
+      and abs(R['fee_rows'][0][0] - _fee) < 0.005
+      and abs(_fee - float(swaps[0]['amount']) * 0.0075) < 0.01)
 check('purchase plus fee never exceeds what the user agreed to spend',
       float(q['token_purchase_usd']) + float(q['costs_by_kind']['platform_fee']) <= 100.0)
 check('the transaction hash comes back', ex['tx_hash'] == '0xSWAPPED')
