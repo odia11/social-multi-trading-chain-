@@ -121,7 +121,7 @@ html,body{background:#080e11}
 </div>
 <script>
 var CSRF={{ csrf_token|tojson }},running=false,hasKey=false,botFormDirty=false;
-function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
 function usd(v,signed){v=Number(v)||0;var t='$'+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});return signed?(v>=0?'+':'-')+t:t}
 function capital(r){return r.trading_wallet_usdc!=null?usd(r.trading_wallet_usdc):(parseFloat(r.trading_wallet_sol||0).toFixed(4)+' SOL')}
 /* Token prices run from dollars to a millionth of a cent: four significant digits. */

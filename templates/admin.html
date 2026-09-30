@@ -1995,7 +1995,7 @@ var _supActiveId = null;
 var _supChatPollTimer = null;
 
 function _supEsc(s) {
-  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g, '&#39;');
 }
 function _supRelTime(ts) {
   if (!ts) return '—';
@@ -2170,7 +2170,7 @@ function _supStartBadgePoll() {
 // ══════════════════ SECURITY ══════════════════
 function _escHtml(s) {
   return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 function _walletStatusTag(status, label) {
   var cls = status === 'known_trader' ? 'tag-green' : status === 'unknown' ? 'tag-red' : 'tag-muted';

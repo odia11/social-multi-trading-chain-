@@ -2668,15 +2668,15 @@ async function _loadSidebarTraders(){
       var init=name.slice(0,2).toUpperCase()
       var circCol='hsl('+(_hash(name)%360)+',46%,33%)'
       var avHtml=t.avatar_url
-        ?'<img class="sb-tr-avimg" src="'+t.avatar_url+'" onerror="this.style.display=\'none\';this.nextSibling.style.display=\'flex\'">'
-          +'<div class="sb-tr-av" style="display:none;background:'+circCol+'">'+init+'</div>'
-        :'<div class="sb-tr-av" style="background:'+circCol+'">'+init+'</div>'
+        ?'<img class="sb-tr-avimg" src="'+esc(t.avatar_url)+'" onerror="this.style.display=\'none\';this.nextSibling.style.display=\'flex\'">'
+          +'<div class="sb-tr-av" style="display:none;background:'+circCol+'">'+esc(init)+'</div>'
+        :'<div class="sb-tr-av" style="background:'+circCol+'">'+esc(init)+'</div>'
       return '<div class="sb-tr-row">'
         +'<span class="sb-tr-rank">'+(t.rank||'')+'</span>'
         +avHtml
         +'<div style="flex:1;min-width:0">'
-          +'<div class="sb-tr-name">'+name+'</div>'
-          +'<div class="sb-tr-handle">'+handle+'</div>'
+          +'<div class="sb-tr-name">'+esc(name)+'</div>'
+          +'<div class="sb-tr-handle">'+esc(handle)+'</div>'
         +'</div>'
         +'<div class="sb-tr-pnl" style="color:'+pnlCol+'">'+pnlStr+'</div>'
       +'</div>'
