@@ -26,10 +26,11 @@ This is checked against the SERVER'S ACTUAL RENDERED OUTPUT for both a
 signed-in and a signed-out visitor, not just the source text, because what
 matters is the byte order the browser receives.
 """
+import os
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = open(REPO + '/dashboard.html', encoding='utf-8').read()
 
 checks = []

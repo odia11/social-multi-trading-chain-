@@ -15,7 +15,7 @@ import os
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SH = open(REPO + '/tools/why_signed_out.sh', encoding='utf-8').read()
 
 checks = []

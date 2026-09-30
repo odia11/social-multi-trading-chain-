@@ -15,8 +15,7 @@
    Trading" taps on a stale cached bundle silently fell through to whatever
    the old anchor's href already pointed at. A same-origin src= script is
    covered by CSP's 'self' source expression instead, independent of the
-   nonce, so it always runs. See static/page-transition-direction.js for
-   the same fix applied to a first instance of this bug.
+   nonce, so it always runs.
 
    Not deferred: this mirrors the exact position/timing of the inline block
    it replaces (right after <head>, before any other script), which is what

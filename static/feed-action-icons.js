@@ -1,12 +1,13 @@
 /* Upgrades feed action glyphs without touching existing button listeners.
    The shared navbar loads this on OrcAgent pages, so it also fills the one
    remaining shell gap: pages without page-loader.js get that common loader
-   once; pages that already rendered #pgl-bar are left untouched. */
+   once; pages that already rendered #pgl-bar, or load page-loader.js
+   themselves further down (Home), are left untouched. */
 (function(){
 'use strict';
 function ensureCommonLoader(){
-  if(document.getElementById('pgl-bar')||document.getElementById('oa-page-loader-fallback'))return;
-  var s=document.createElement('script');s.id='oa-page-loader-fallback';s.src='/static/page-loader.js?v=3';s.defer=true;document.head.appendChild(s);
+  if(document.getElementById('pgl-bar')||document.getElementById('oa-page-loader-fallback')||document.querySelector('script[src^="/static/page-loader.js"]'))return;
+  var s=document.createElement('script');s.id='oa-page-loader-fallback';s.src='/static/page-loader.js?v=4';s.defer=true;document.head.appendChild(s);
 }
 /* Deferred navbar scripts run after HTML parsing, so a template's own bottom
    page-loader has already executed by this point when it exists. */

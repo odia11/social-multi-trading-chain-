@@ -17,10 +17,11 @@ each other rather than against a string typed here: the chain list comes from
 SURGE_ALERT_CHAIN_NAMES, the funding currency from SOLANA_BASE_CURRENCY.
 Change the code and the intro has to follow.
 """
+import os
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = open(REPO + '/dashboard.html', encoding='utf-8').read()
 SRC = open(REPO + '/dashboard.py', encoding='utf-8').read()
 

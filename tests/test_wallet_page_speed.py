@@ -19,11 +19,12 @@ chore, in a row of four where the other three are things people actually do,
 asked everyone to understand a piece of plumbing they never have to touch.
 The endpoints stay: the automatic path is what uses them.
 """
+import os
 import ast
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py', encoding='utf-8').read()
 WALLET = open(REPO + '/templates/wallet.html', encoding='utf-8').read()
 TREE = ast.parse(SRC)

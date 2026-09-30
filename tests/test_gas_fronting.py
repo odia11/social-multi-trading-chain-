@@ -27,11 +27,12 @@ WHAT MUST STAY TRUE
   * the accounting still reports what was fronted and whether it came back,
     which is the only way "it comes back" is a fact rather than a hope.
 """
+import os
 import ast
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py').read()
 TREE = ast.parse(SRC)
 

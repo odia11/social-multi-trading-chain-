@@ -8,9 +8,10 @@ help, and nothing on screen says what actually broke.
 
 These build a tiny Flask app with the real handler from dashboard.py bolted
 on, and assert that every way a route can fail still comes back as JSON."""
+import os
 import json, re, sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC  = open(REPO + '/dashboard.py').read()
 
 checks = []

@@ -8,7 +8,7 @@ CSS = (ROOT / 'static/profile-gold-tip.css').read_text()
 
 def test_gold_style_loads_after_profile_v2_and_cache_busts():
     old = '/static/profile-v2.css?v={{ app_version }}'
-    new = '/static/profile-gold-tip.css?v={{ app_version }}-gold-v1'
+    new = '/static/profile-gold-tip.css?v={{ app_version }}'
     assert HTML.count(old) == 1
     assert HTML.count(new) == 1
     assert HTML.index(old) < HTML.index(new)

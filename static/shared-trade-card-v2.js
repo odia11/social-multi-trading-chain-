@@ -36,7 +36,7 @@ function normalize(raw){
 function render(raw,fallback){
   var t=normalize(raw);
   if(!t.mint){return typeof fallback==='function'?fallback(raw):''}
-  var route='/live-market?addr='+encodeURIComponent(t.mint);
+  var route='/live-market?mint='+encodeURIComponent(t.mint)+'&profile=1';
   var pos=t.pct>=0, side=t.side==='BUY'?'buy':'sell';
   return '<div class="oa-stc '+(pos?'pos':'neg')+'" data-oa-stc="1" data-mint="'+esc(t.mint)+'" data-route="'+esc(route)+'" data-entry="'+esc(t.entry)+'" data-current="'+esc(t.current)+'" data-chain="'+esc(t.chain)+'" role="link" tabindex="0">'
     +'<div class="oa-stc-banner" data-oa-stc-banner'+(t.banner?' style="background-image:url(\''+esc(t.banner).replace(/'/g,'%27')+'\')"':'')+'></div>'

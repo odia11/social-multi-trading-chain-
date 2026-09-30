@@ -19,7 +19,7 @@ for(const ev of ['touchstart','touchmove','touchend']){
 }
 // A reload is only the fallback for pages without their own loader.
 const reloadAt=src.indexOf('location.reload()');
-assert(reloadAt>0&&/typeof opts\.onRefresh==='function'\?opts\.onRefresh:function\(\)\{\s*location\.reload\(\)/.test(src),
+assert(reloadAt>0&&/var inPlace=typeof opts\.onRefresh==='function';\s*var onRefresh=inPlace\?opts\.onRefresh:function\(\)\{\s*location\.reload\(\)/.test(src),
   'location.reload() may only be the fallback when a page passes no onRefresh');
 
 function run(opts){
@@ -34,8 +34,8 @@ assert.deepEqual(run({onRefresh:()=>0}),ALL);
 assert.deepEqual(run({pull:false,onRefresh:()=>0}),[],'pull:false opts a page out');
 
 // Guards against refreshing while the user is really just scrolling.
-assert(src.includes('innerScrolled(e.target)'),'a scrolled inner box under the finger must block a pull');
-assert(src.includes('inOverlay(e.target)'),'touches in fixed/sticky layers must never start a pull');
+assert(src.includes('innerScrolled(t)')&&src.includes('!mayPull(startTarget)'),'a scrolled inner box under the finger must block a pull');
+assert(src.includes('inOverlay(t)'),'touches in fixed/sticky layers must never start a pull');
 assert(src.includes('customScrollerActive()'),'scrollEl (e.g. an open chat thread) must switch pulling off');
 assert(src.includes('opts.ignoreTarget'),'ignoreTarget (e.g. the chat composer) must be honoured');
 
@@ -49,7 +49,7 @@ for(const f of fs.readdirSync('templates').filter(f=>f.endsWith('.html'))){
 // to the feed plus the mobile Home cards.
 assert(home.indexOf('/static/pull-to-refresh.js')>0&&home.indexOf('/static/pull-to-refresh.js')<home.indexOf('/static/dashboard.js'),
   'Home must load pull-to-refresh.js before dashboard.js');
-assert(/initPullToRefresh\(\{\s*onRefresh:[^]*loadHomeFeed\(\)[^]*OrcAgentRefreshHome/.test(dash),'Home refresh must reload the feed and the Home cards');
+assert(/initPullToRefresh\(\{\s*onRefresh:[^]*OrcAgentRefreshHome\(\)[^]*return loadHomeFeed\(\)/.test(dash),'Home refresh must reload the feed and the Home cards');
 assert(homeMobile.includes('window.OrcAgentRefreshHome=function(){return Promise.allSettled([refreshHomePortfolio(),updateMajorMarkets(),refreshBot()])}'));
 for(const f of ['static/navbar.js','static/app-ux.js'])
   assert(fs.readFileSync(f,'utf8').includes('home-mobile.js?v=11'),f+' must cache-bust home-mobile.js');

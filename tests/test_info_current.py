@@ -12,11 +12,12 @@ checks them against each other rather than against a string I typed here: the
 chain list comes from SURGE_ALERT_CHAIN_NAMES, and the funding currency from
 SOLANA_BASE_CURRENCY. Change the code and the page has to follow.
 """
+import os
 import re
 import sys
 from html.parser import HTMLParser
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INFO = open(REPO + '/templates/info.html').read()
 SRC = open(REPO + '/dashboard.py').read()
 CSS = open(REPO + '/static/navbar.css').read()

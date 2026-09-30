@@ -18,7 +18,7 @@ assert 'if (_lastConvSig === null)' in html
 assert 'if (_activePeerId && window.innerWidth <= 767' in html
 assert "if(main)mo.observe(main,{attributes:true,attributeFilter:['class']});" in ui
 assert "subtree:true,attributes:true,attributeFilter:['class','style']" not in ui
-assert 'messages-ui.js?v=3' in inj
+assert 'messages-ui.js?v=4' in inj
 
 # Validate both inline scripts as actual JavaScript, with only Jinja tags removed.
 for idx, script in enumerate(re.findall(r'<script(?:\s[^>]*)?>([\s\S]*?)</script>', html)):

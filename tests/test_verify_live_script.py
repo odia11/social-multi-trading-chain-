@@ -12,11 +12,12 @@ reaches for is checked here against dashboard.py, without importing either.
 Two other things matter as much as the names: that it never signs or sends
 anything, and that it never prints a secret.
 """
+import os
 import ast
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = open(REPO + '/tools/verify_live.py').read()
 APP = open(REPO + '/dashboard.py').read()
 

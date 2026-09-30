@@ -18,10 +18,11 @@ The count on the collapsed row is not decoration. Hiding the filters without
 it would be worse than the clutter: a feed narrowed by a forgotten toggle
 looks exactly like a feed with nothing in it.
 """
+import os
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = open(REPO + '/templates/live_market_pro.html').read()
 JS = open(REPO + '/static/live-market-pro.js').read()
 CSS = re.search(r'<style>(.*?)</style>', HTML, re.S).group(1)

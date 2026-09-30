@@ -2992,8 +2992,13 @@ function _getTradeSoundCtx(){
   }
   return _tradeSoundCtx;
 }
+// Only for someone who turned sound alerts on: creating an AudioContext
+// starts the audio hardware (tens of ms on a phone, on the very touchend
+// that ends a swipe or pull-to-refresh), and once it runs nothing is left
+// to do here.
 ['click','touchend','keydown'].forEach(function(evt){
   document.addEventListener(evt, function(){
+    if(!_prefSoundAlerts || (_tradeSoundCtx && _tradeSoundCtx.state === 'running')) return;
     var ctx = _getTradeSoundCtx();
     if(ctx && ctx.state === 'suspended') ctx.resume().catch(function(){});
   }, {passive: true});
@@ -4596,6 +4601,7 @@ async function loadSettingsPage(){
       var notifs=document.getElementById('pref-notifs'); if(notifs) notifs.checked=!!d.pref_notifications;
       var scam  =document.getElementById('pref-scam');   if(scam)   scam.checked  =!!d.pref_scam_filter;
       var sound =document.getElementById('pref-sound');  if(sound)  sound.checked =!!d.pref_sound_alerts;
+      var surge =document.getElementById('pref-surge');  if(surge)  surge.checked =!!d.pref_surge_alerts;
       var autobot=document.getElementById('pref-autobot'); if(autobot) autobot.checked=!!d.bot_running;
       if(d.is_verified){
         var nameEl=document.getElementById('sb-user-name');
@@ -10391,12 +10397,12 @@ document.addEventListener('DOMContentLoaded', function(){
 });
 
 // Pull down at the top of Home (like Instagram) to refresh the feed and the
-// mobile Home cards (portfolio value, markets, AI bot) in place.
+// mobile Home cards (portfolio value, markets, AI bot) in place. The spinner
+// waits for the feed only; the cards update as their (wallet/RPC) numbers
+// arrive, so a slow balance never holds the pull.
 if(typeof initPullToRefresh==='function'){
   initPullToRefresh({ onRefresh: function(){
-    var jobs=[];
-    try{ jobs.push(loadHomeFeed()); }catch(e){}
-    try{ if(typeof window.OrcAgentRefreshHome==='function') jobs.push(window.OrcAgentRefreshHome()); }catch(e){}
-    return Promise.allSettled(jobs);
+    try{ if(typeof window.OrcAgentRefreshHome==='function') window.OrcAgentRefreshHome(); }catch(e){}
+    try{ return loadHomeFeed(); }catch(e){ return Promise.resolve(); }
   }});
 }

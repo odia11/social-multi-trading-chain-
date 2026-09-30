@@ -103,7 +103,6 @@ check('a SELL still routes back into whatever the position was opened with. '
 
 # ── the screens ──
 LM = (REPO / 'static/live-market-pro.js').read_text(encoding='utf-8')
-TC = (REPO / 'static/token-card.js').read_text(encoding='utf-8')
 # The buy screen is the full sheet now; the label moved with it, from the
 # in-card panel's markup into openBuySheet(). Same statement, same currency,
 # read where it is actually written today.
@@ -113,22 +112,11 @@ check('...and sends amount_usdc, with amount_sol alongside for an older deploy',
       'amount_usdc:amt, amount_sol:amt' in LM)
 check('...and reports back in the currency the server names',
       "(d.currency || 'USDC')" in LM)
-check('the token card says USDC for every chain it trades',
-      "function _tcUnit(chain){ return 'USDC'; }" in TC)
-check('...and sends both names too', 'amount_usdc:amount, amount_sol:amount' in TC)
 
-ST = (REPO / 'templates/settings.html').read_text(encoding='utf-8')
-check('the setting is stated rather than offered, since there is nothing to '
-      'choose', 'st-row-value">USDC<' in ST and 'id="s-solbase"' not in ST)
-check('...and the page no longer sends a field the server ignores',
-      'pref_solana_base_currency:' not in ST)
-check('...with the styling for a stated value actually defined, not a class '
-      'name that renders as nothing', '.st-row-value{' in ST)
-check('...and it presents USDC as the trading currency across supported chains; '
-      'native gas handling is server-side and must not make the UI tell a USDC-only '
-      'user to acquire another trading currency',
-      'Bot trade sizing is configured in USDC across supported chains.' in ST
-      and 'st-row-value">USDC<' in ST)
+# Settings (on Home) offers no base-currency choice: there is nothing to choose.
+HOME = (REPO / 'dashboard.html').read_text(encoding='utf-8') + (REPO / 'static/dashboard.js').read_text(encoding='utf-8')
+check('Settings offers no SOL/USDC base-currency switch and sends no field the server ignores',
+      'id="s-solbase"' not in HOME and 'pref_solana_base_currency' not in HOME)
 
 # ── the wallet page ────────────────────────────────────────────────────────
 # It led with SOL as "Available balance" and put USDC in a card below. After

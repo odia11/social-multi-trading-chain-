@@ -2947,10 +2947,14 @@ document.addEventListener('DOMContentLoaded', function(){
   renderSortList();
   // Deep links must paint the requested token before the full scanner feed.
   // The feed is only a background numbers refresh once that profile exists.
-  var _qMint = new URLSearchParams(location.search).get('mint');
+  // ?addr= is the older spelling that token cards in DMs and shared trades
+  // (and links already sent) use; it opens the token's profile like
+  // ?mint=...&profile=1.
+  var _qs = new URLSearchParams(location.search);
+  var _qMint = _qs.get('mint') || _qs.get('addr');
   if(_qMint){
     _focusedMint = _qMint;
-    if(new URLSearchParams(location.search).get('profile')==='1') _profileMint=_qMint;
+    if(_qs.get('profile')==='1' || (_qs.get('addr') && !_qs.get('mint'))) _profileMint=_qMint;
     // Warm real chart history in parallel with token details, with the server
     // resolving the active pool. A first visit does not wait for the scanner.
     fetchChart(_qMint,'5m','','solana').then(function(r){
@@ -2989,7 +2993,7 @@ document.addEventListener('DOMContentLoaded', function(){
   // later without replacing the focused card.
   window.addEventListener('popstate',function(){
     var q=new URLSearchParams(location.search);
-    _profileMint=q.get('profile')==='1'?q.get('mint'):null;
+    _profileMint=q.get('profile')==='1'?q.get('mint'):(q.get('addr')&&!q.get('mint')?q.get('addr'):null);
     syncTokenProfile();
   });
 

@@ -16,11 +16,11 @@ function closestLink(e){var n=e.target;return n&&n.closest?n.closest('a[href]'):
 var ROUTE_ASSETS={
   '/':['home-mobile.css?v=13','home-mobile-polish.css?v=8','home-composer-mobile.css?v=7','home-desktop.css?v=1','home-mobile.js?v=11','home-desktop.js?v=1'],
   '/wallet':['portfolio-redesign.css?v={app}','portfolio-history-redesign.css?v={app}','portfolio-redesign.js?v={app}','portfolio-history-redesign.js?v={app}','approved-portfolio.js?v={app}','portfolio-assets.js?v=1'],
-  '/live-market':['live-market-redesign.css?v=8','live-market-final.css?v=6','live-market-redesign.js?v=5','live-market-hotfix.js?v=8','token-card.css?v={app}'],
+  '/live-market':['live-market-redesign.css?v=8','live-market-final.css?v=6','live-market-redesign.js?v=5','live-market-hotfix.js?v=8'],
   '/groups':['groups-redesign.css?v=1','groups-redesign.js?v=1'],
-  '/messages':['messages-ui.css?v=1','messages-inbox.css?v=1','messages-thread.css?v=2','messages-ui.js?v=3'],
+  '/messages':['messages-ui.css?v=1','messages-inbox.css?v=1','messages-thread.css?v=2','messages-ui.js?v=4'],
   '/notifications':[],
-  '/profile':['profile-v2.css?v={app}','profile-gold-tip.css?v={app}-gold-v1','tip-experience.css?v={app}-profile-balance-live-3','tip-experience.js?v={app}-profile-balance-live-3'],
+  '/profile':['profile-v2.css?v={app}','profile-gold-tip.css?v={app}','tip-experience.css?v={app}','tip-experience.js?v={app}'],
   '/bot':['approved-bot.css?v={app}'],
   '/settings':[]
 };

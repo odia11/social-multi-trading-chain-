@@ -13,8 +13,7 @@
    order -- see app_entry.py). An inline <script> appended here would never
    get CSP's per-response nonce and script-src-elem would silently drop it.
    A same-origin src= script is covered by CSP's 'self' source expression
-   instead, independent of the nonce, so it always runs. See
-   page-transition-direction.js for the same fix applied to a second script.
+   instead, independent of the nonce, so it always runs.
 
    Not deferred: this mirrors the exact position/timing of the inline block
    it replaces (right after </head>, before <body> parses), so pageshow

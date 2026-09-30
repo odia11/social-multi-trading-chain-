@@ -16,7 +16,7 @@ import sys
 import tempfile
 from decimal import Decimal
 
-sys.path.insert(0, '/home/user/Orc-agent-Solana-chain-')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trade_engine import subsidy as S                          # noqa: E402
 

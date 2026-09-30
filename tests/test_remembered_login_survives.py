@@ -50,10 +50,11 @@ by executing the SHIPPED function (sliced out of dashboard.js, not a
 hand-copied version): kept on abort, kept on 503, kept on 429, kept when a
 second tab had rotated it, cleared when genuinely dead.
 """
+import os
 import re
 import sys
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JS = open(REPO + '/static/dashboard.js', encoding='utf-8').read()
 
 checks = []

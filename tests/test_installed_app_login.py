@@ -29,7 +29,7 @@ import sys
 import tempfile
 import time
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py').read()
 JS = open(REPO + '/static/dashboard.js').read()
 TREE = ast.parse(SRC)

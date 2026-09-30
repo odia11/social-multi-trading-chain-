@@ -32,7 +32,7 @@ import sys
 import tempfile
 import sqlite3
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/dashboard.py', encoding='utf-8').read()
 JS = open(REPO + '/static/dashboard.js', encoding='utf-8').read()
 TREE = ast.parse(SRC)

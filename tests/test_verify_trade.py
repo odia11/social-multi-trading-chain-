@@ -26,7 +26,7 @@ import sys
 import tempfile
 import time
 
-REPO = '/home/user/Orc-agent-Solana-chain-'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(REPO + '/tools/verify_trade.py').read()
 JOINED = re.sub(r"'\s*\n\s*f?'", '', SRC)
 

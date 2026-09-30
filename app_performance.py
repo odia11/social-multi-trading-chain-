@@ -45,30 +45,8 @@ def install(appmod) -> None:
             if 'bfcache-guard.js' not in html:
                 tags.append('<script src="/static/bfcache-guard.js?v=2"></script>')
 
-            # Tells app-ux.css's mobile view-transition rules which direction
-            # to slide: forward (default, no attribute) or back.
-            #
-            # This is a plain external <script src>, not an inline block, on
-            # purpose: CSP's script-src-elem here is 'self' plus a per-response
-            # nonce, and the nonce only gets stamped onto <script> tags that
-            # already exist in the body by the time security_hardening.py's
-            # own after_request runs. Because Flask calls after_request hooks
-            # in REVERSE install() order (see app_entry.py's "register SEO
-            # first so its pass runs last" comment) and this module installs
-            # before security_hardening, an inline block appended here would
-            # never get nonced and CSP would silently drop it -- confirmed by
-            # testing (this route direction attribute never got set). A same-
-            # origin src= script is covered by the 'self' source expression
-            # instead, independent of the nonce, so it always runs. Not
-            # deferred like the scripts below: the Navigation API's
-            # pagereveal event this listens for can fire before a deferred
-            # script would even run, and missing it just silently falls back
-            # to a forward slide for that one navigation instead of erroring.
-            if 'page-transition-direction.js' not in html:
-                tags.append('<script src="/static/page-transition-direction.js?v=1"></script>')
-
-            style('app-ux.css', '/static/app-ux.css?v=8', ' id="oa-app-ux-css"')
-            script('app-ux.js', '/static/app-ux.js?v=8', ' id="oa-app-ux-js"')
+            style('app-ux.css', '/static/app-ux.css?v=9', ' id="oa-app-ux-css"')
+            script('app-ux.js', '/static/app-ux.js?v=9', ' id="oa-app-ux-js"')
 
             # The navbar is rendered later in <body>, and its JS used to be the
             # thing that only then discovered the fixed mobile bottom-nav
@@ -85,9 +63,9 @@ def install(appmod) -> None:
                 if marker not in html:
                     tags.append(f'<link rel="preload" href="{href}" as="{kind}" data-oa-shell-preload="1">')
             style('shared-trade-card-v2.css', '/static/shared-trade-card-v2.css?v=1', ' id="oa-shared-trade-card-css"')
-            script('shared-trade-card-v2.js', '/static/shared-trade-card-v2.js?v=1', ' id="oa-shared-trade-card-js"')
+            script('shared-trade-card-v2.js', '/static/shared-trade-card-v2.js?v=2', ' id="oa-shared-trade-card-js"')
             style('feed-action-icons.css', '/static/feed-action-icons.css?v=5')
-            script('feed-action-icons.js', '/static/feed-action-icons.js?v=3')
+            script('feed-action-icons.js', '/static/feed-action-icons.js?v=4')
             script('swipe-back.js', '/static/swipe-back.js?v=1')
 
             if 'fonts.googleapis.com' in html and 'rel="preconnect" href="https://fonts.googleapis.com"' not in html:
