@@ -8553,10 +8553,17 @@ function _feedComposerTag(){
   if(s){ s.focus(); s.select(); }
 }
 
+// The /api/social/feed filter for the active tab ('calls' = the Calls tab).
+function _homeFeedApiFilter(){
+  return _homeFeedFilter === 'following' ? 'following' : (_homeFeedFilter === 'calls' ? 'calls' : 'all');
+}
+
 function _feedTab(btn, tab){
   document.querySelectorAll('.feed-tab').forEach(function(t){ t.classList.remove('active'); });
   btn.classList.add('active');
+  if(_homeFeedFilter !== tab) _homeFeedData = [];  // never show one tab's posts under another
   _homeFeedFilter = tab;
+  if(typeof window._feedCallsTabChanged === 'function') window._feedCallsTabChanged(tab);
   if(tab === 'following' && _homeFeedData.length){
     renderHomeFeed();
     loadHomeFeed();
@@ -8618,7 +8625,7 @@ var _homeFeedRequestSeq=0;
 var _homeFeedLastRenderedFilter='';
 async function loadHomeFeed(){
   var requestSeq=++_homeFeedRequestSeq;
-  const filter = _homeFeedFilter === 'following' ? 'following' : 'all';
+  const filter = _homeFeedApiFilter();
   const el = document.getElementById('center-feed');
   if(el && !_homeFeedData.length) el.innerHTML = '<div class="fc-loading">Loading…</div>';
   try{
@@ -8629,7 +8636,7 @@ async function loadHomeFeed(){
     console.log('[feed] status:', r.status);
     if(!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
-    if(requestSeq !== _homeFeedRequestSeq || filter !== (_homeFeedFilter === 'following' ? 'following' : 'all')) return;
+    if(requestSeq !== _homeFeedRequestSeq || filter !== _homeFeedApiFilter()) return;
     if(data && Array.isArray(data.items)){
       // Keep the existing post nodes (including loaded images, media state,
       // reply fields and scroll position) when a background poll is identical.
@@ -8677,7 +8684,7 @@ async function loadHomeFeed(){
 async function loadMoreHomeFeed(){
   if (_homeFeedLoadingMore || !_homeFeedNextCursor) return;
   _homeFeedLoadingMore = true;
-  const filter = _homeFeedFilter === 'following' ? 'following' : 'all';
+  const filter = _homeFeedApiFilter();
   try{
     const _ctl = new AbortController();
     const _tid = setTimeout(()=>_ctl.abort(), 12000);
@@ -9154,7 +9161,9 @@ function renderHomeFeed(appendItems){
   const el = document.getElementById('center-feed');
   if(!el) return;
   if((!_homeFeedData||!_homeFeedData.length) && !_activeDeepLinkedPost){
-    el.innerHTML='<p style="color:#565d68;padding:20px">No posts yet</p>';
+    el.innerHTML = _homeFeedFilter === 'calls'
+      ? '<div class="fc-empty">No calls yet. Spot a token early? Tap Call and be the first.</div>'
+      : '<p style="color:#565d68;padding:20px">No posts yet</p>';
     return;
   }
   var items = appendItems || _homeFeedData;
@@ -9529,7 +9538,9 @@ function _renderFeedCard(e, cardIndex){
   var isOwn = !!(e.user_id && _myProfileId && e.user_id === _myProfileId);
   var isAdminWallet = !!(phantomKey && phantomKey === 'HC5ahspSox3XRmDbzXjXVoAASuY89RCmGUKwp87FRJS5');
   var canDelete = !!(e.id && (isOwn || e.is_own || _isAdmin || isAdminWallet));
-  var canEdit   = !!(e.id && e.type !== 'trade' && !e.trade_id && (isOwn || e.is_own));
+  var isCallPost = (e.content||'').indexOf('__CALL__') !== -1;
+  // A call is a public record (like a trade): delete, never edit.
+  var canEdit   = !!(e.id && e.type !== 'trade' && !e.trade_id && !isCallPost && (isOwn || e.is_own));
   var showMenu  = canDelete || canEdit;
   // "Someone replied to your post" -- see _fcHasNewReply()'s comment for how
   // the seen/unseen baseline works. Only meaningful on your own posts.
@@ -9544,8 +9555,15 @@ function _renderFeedCard(e, cardIndex){
 
   /* ── text body ── */
   var textBody = '';
+  var callHtml = '';
   if(e.content){
     var _rawContent = e.content;
+    // ── Token call (feed-calls.js draws it from the server's numbers) ──
+    var _callIdx = _rawContent.indexOf('__CALL__');
+    if(_callIdx >= 0){
+      _rawContent = _rawContent.slice(0, _callIdx).trim();
+      if(e.call && typeof window._feedCallCardHtml === 'function') callHtml = window._feedCallCardHtml(e.call, postId);
+    }
     // ── Terminal trade card ──────────────────────────────────────────
     var _tradeIdx = _rawContent.indexOf('__TRADE__');
     if(_tradeIdx >= 0){
@@ -9695,12 +9713,14 @@ function _renderFeedCard(e, cardIndex){
     +'<div class="fc-header">'
     +_aProf+'<span class="fc-name" style="font-weight:700">'+esc(e.username||'Trader')+(e.verified ? ' <svg width="14" height="14" viewBox="0 0 24 24" style="vertical-align:-2px"><circle cx="12" cy="12" r="12" fill="#f7b955"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#0a0b0e" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '')+_teamBadgeHtml(e.team_role)+'</span></a>'
     +_aProf+'<span class="fc-handle">'+esc(handle)+'</span></a>'
+    +(callHtml ? '<span class="fc-call-badge">CALLED</span>' : '')
     +(timeStr ? '<span class="fc-sep">·</span><span class="fc-time">'+esc(timeStr)+'</span>' : '')
     +'</div>'
     +tradeHtml
     +'<div id="fc-text-'+safePostId+'">'
     +textBody
     +'</div>'
+    +callHtml
     +(e.image_url
       ? '<div class="fc-post-image-wrap" onclick="event.stopPropagation();_openImgLightbox('+esc(JSON.stringify(e.image_url))+')"><img class="fc-post-image" src="'+esc(e.image_url)+'" alt="" loading="lazy"></div>'
       : '')

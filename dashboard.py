@@ -2963,6 +2963,14 @@ def run_migrations():
         # labeled as such (see api_tos_my_acceptance_pdf).
         "ALTER TABLE tos_acceptances ADD COLUMN content_html TEXT DEFAULT NULL",
         "ALTER TABLE feed_posts ADD COLUMN view_count INTEGER DEFAULT 0",
+        # Token calls posted to the home feed: the caller's own one-line reason,
+        # the feed post that carries the call, the token's chain + logo at call
+        # time, and the latest price the peak loop saw (for "now" on the card).
+        "ALTER TABLE token_calls ADD COLUMN note TEXT DEFAULT ''",
+        "ALTER TABLE token_calls ADD COLUMN post_id INTEGER DEFAULT NULL",
+        "ALTER TABLE token_calls ADD COLUMN chain TEXT DEFAULT ''",
+        "ALTER TABLE token_calls ADD COLUMN image_url TEXT DEFAULT ''",
+        "ALTER TABLE token_calls ADD COLUMN last_price REAL DEFAULT NULL",
         "ALTER TABLE feed_posts ADD COLUMN image_url TEXT DEFAULT NULL",
         "ALTER TABLE follows ADD COLUMN notify_enabled INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE trades ADD COLUMN view_count INTEGER DEFAULT 0",
@@ -4878,6 +4886,8 @@ def get_token_data(mint, fast: bool = False, chain: str = None):
             'pairAddress':   p.get('pairAddress', '') or '',
             'pairCreatedAt': int(p.get('pairCreatedAt', 0) or 0),
             'dexId':         (p.get('dexId', '') or '').lower(),
+            'chain':         (p.get('chainId', '') or '').lower(),
+            'image_url':     (p.get('info') or {}).get('imageUrl', '') or '',
         }
     except: return None
 
@@ -19526,6 +19536,13 @@ def save_banner():
 # and similar Solana "community calls" bots. Peak price is kept fresh by
 # _calls_peak_loop() (see thread startup section near the bottom of the file).
 CALLS_PER_DAY_LIMIT = 3
+CALL_NOTE_MAX = 280
+# A call posted to the home feed is a feed_posts row whose content ends with
+# this marker plus {"id": <token_calls.id>}. Only api_make_call() writes it:
+# the numbers on the card always come from token_calls (server-fetched
+# prices), never from the post text, so a call's result cannot be forged.
+FEED_CALL_MARKER = '__CALL__'
+_FEED_EMBED_MARKERS = ('__CHART__', '__TRADE__', FEED_CALL_MARKER)
 
 @app.route('/api/calls', methods=['POST'])
 @rate_limit(10, 60)
@@ -19542,6 +19559,18 @@ def api_make_call():
     # leaderboard, profile feed) is already chain-agnostic.
     if not (is_valid_solana_address(mint) or is_valid_evm_address(mint)):
         return jsonify({'ok': False, 'msg': 'Invalid token address'}), 400
+    # Optional: the caller's reason, and whether to post the call to the home
+    # feed (the Call button on Home does; the /calls page doesn't).
+    note = _sanitize(str(data.get('note', '') or ''))
+    for _marker in _FEED_EMBED_MARKERS:
+        note = note.replace(_marker, '')
+    note = note.strip()
+    if len(note) > CALL_NOTE_MAX:
+        return jsonify({'ok': False, 'msg': f'Keep your reason under {CALL_NOTE_MAX} characters'}), 400
+    post_to_feed = data.get('post_to_feed') is True
+    want_chain = str(data.get('chain', '') or '').strip().lower()
+    if want_chain not in _MARKET_LIVE_CHAINS:
+        want_chain = None
 
     conn = sqlite3.connect(DB_FILE)
     try:
@@ -19558,21 +19587,46 @@ def api_make_call():
 
         # Always fetch the price fresh server-side -- never trust a client-submitted
         # price, which anyone could forge to fake a huge multiplier from the start.
-        td = get_token_data(mint)
+        td = get_token_data(mint, chain=want_chain) if want_chain else get_token_data(mint)
         if not td or not td.get('price'):
             return jsonify({'ok': False, 'msg': 'Could not fetch this token — check the address'}), 400
         price = float(td['price'])
         symbol = td.get('symbol', '') or mint[:8]
         name = td.get('name', '') or symbol
         mcap = float(td.get('market_cap', 0) or 0)
+        chain = str(td.get('chain', '') or want_chain or ('solana' if is_valid_solana_address(mint) else ''))
+        image_url = str(td.get('image_url', '') or '')
+        if not image_url.startswith('https://'):
+            image_url = ''
 
-        conn.execute(
-            'INSERT INTO token_calls (user_id, wallet, mint, symbol, token_name, price_at_call, mcap_at_call, peak_price) '
-            'VALUES (?,?,?,?,?,?,?,?)',
-            (uid, wallet, mint, symbol, name, price, mcap, price)
+        cur = conn.execute(
+            'INSERT INTO token_calls (user_id, wallet, mint, symbol, token_name, price_at_call, mcap_at_call, peak_price, '
+            'note, chain, image_url, last_price) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+            (uid, wallet, mint, symbol, name, price, mcap, price, note, chain, image_url[:500], price)
         )
+        call_id = cur.lastrowid
+        post_id = None
+        if post_to_feed:
+            now = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            content = (note + '\n' if note else '') + FEED_CALL_MARKER + json.dumps({'id': call_id})
+            post_id = conn.execute('INSERT INTO feed_posts (wallet, content, created_at) VALUES (?,?,?)',
+                                   (wallet, content, now)).lastrowid
+            conn.execute('UPDATE token_calls SET post_id=? WHERE id=?', (post_id, call_id))
         conn.commit()
-        return jsonify({'ok': True, 'symbol': symbol, 'price': price, 'calls_left_today': CALLS_PER_DAY_LIMIT - today_count - 1})
+        if post_id:
+            try:
+                link = '/#post-p' + str(post_id)
+                follower_ids = _notify_followers(conn, uid, 'follow_post',
+                                                 lambda actor_name: actor_name + ' called $' + symbol, link, wallet)
+                conn.commit()
+                author = conn.execute('SELECT COALESCE(username,"") FROM users WHERE id=?', (uid,)).fetchone()
+                author_name = (author[0] if author and author[0] else wallet[:8] + '…')
+                _send_push_notifications_bulk(follower_ids, 'New call', author_name + ' called $' + symbol, link)
+            except Exception as e:
+                # The call itself is saved; a failed follower ping must not undo it.
+                print(f'[calls] follower notify failed for call {call_id}: {type(e).__name__}: {e}', flush=True)
+        return jsonify({'ok': True, 'id': call_id, 'post_id': post_id, 'symbol': symbol, 'price': price,
+                        'calls_left_today': CALLS_PER_DAY_LIMIT - today_count - 1})
     except sqlite3.OperationalError as e:
         # sqlite3.OperationalError is NOT only "database is locked" -- it also
         # covers a read-only file, a full disk, a missing column and more.
@@ -19605,7 +19659,7 @@ def api_calls_top():
         rows = conn.execute(f'''
             SELECT tc.id, tc.mint, tc.symbol, tc.token_name, tc.price_at_call, tc.mcap_at_call,
                    tc.peak_price, tc.timestamp, u.wallet_address, u.username, u.avatar_url,
-                   u.is_verified
+                   u.is_verified, tc.post_id, COALESCE(tc.image_url,'')
             FROM token_calls tc
             JOIN users u ON u.id = tc.user_id
             WHERE {cutoff_sql} AND tc.price_at_call > 0
@@ -19631,7 +19685,7 @@ def api_calls_top():
         result = []
         for r in rows:
             (cid, mint, symbol, name, price_at_call, mcap_at_call, peak_price,
-             ts, caller_wallet, caller_username, caller_avatar, caller_verified) = r
+             ts, caller_wallet, caller_username, caller_avatar, caller_verified, post_id, image_url) = r
             multiplier = round(peak_price / price_at_call, 4) if price_at_call > 0 else 0
             result.append({
                 'id': cid, 'mint': mint, 'symbol': symbol, 'name': name,
@@ -19644,6 +19698,9 @@ def api_calls_top():
                 'caller_verified': bool(caller_verified),
                 'like_count': like_counts.get(cid, 0),
                 'liked_by_me': cid in my_likes,
+                # The feed post of a call made from Home (None for /calls-page calls).
+                'post_id': post_id,
+                'image_url': image_url or '',
             })
         return jsonify({'ok': True, 'calls': result})
     finally:
@@ -19766,6 +19823,9 @@ def _calls_peak_loop():
                             'WHERE mint=? AND ?>peak_price',
                             (price, mint, price)
                         )
+                        # "Now" on a feed call card -- the same observation,
+                        # no extra request.
+                        conn.execute('UPDATE token_calls SET last_price=? WHERE mint=?', (price, mint))
                     conn.commit()
                 finally:
                     conn.close()
@@ -20540,6 +20600,10 @@ def social_feed():
             JOIN users u2 ON f.following_id = u2.id
             WHERE f.follower_id = ?)''')
         extra_params.append(my_uid)
+    elif feed_filter == 'calls':
+        # The Calls tab: only posts that really carry a call (made by
+        # api_make_call), not any post whose text happens to hold the marker.
+        conditions.append("kind = 'p' AND id IN (SELECT post_id FROM token_calls WHERE post_id IS NOT NULL)")
     if before_norm:
         conditions.append('''(CASE WHEN created_at LIKE '%T%'
                    THEN replace(replace(created_at,'T',' '),'Z','')
@@ -20743,6 +20807,8 @@ def social_feed():
             'repost_of':   repost_of,
             'original':    originals.get(repost_of) if kind == 'r' else None,
         })
+    if feed:
+        _attach_feed_calls(feed)
     _attach_videos = globals().get('_attach_feed_videos')
     if callable(_attach_videos) and feed:
         try:
@@ -21536,8 +21602,73 @@ def _feed_text_part(content: str) -> str:
     which silently ate most of the allowance and then rejected the post with
     'Too long' while the composer's own counter still showed room left)."""
     content = content or ''
-    idxs = [i for i in (content.find('__CHART__'), content.find('__TRADE__')) if i != -1]
+    idxs = [i for i in (content.find(m) for m in _FEED_EMBED_MARKERS) if i != -1]
     return content[:min(idxs)].strip() if idxs else content
+
+def _feed_call_payloads(conn, targets):
+    """targets: [(feed_post_id, item_dict)]. Attaches item['call'] -- the
+    live numbers of the token call that post carries -- to every post whose
+    __CALL__ marker names a call that really belongs to THAT post
+    (token_calls.post_id). A marker copied into another post shows nothing."""
+    wanted = {}
+    for post_id, item in targets:
+        content = item.get('content') or ''
+        if FEED_CALL_MARKER not in content:
+            continue
+        call_id = _parse_feed_embed(content).get('call_id') or 0
+        if call_id and post_id:
+            wanted.setdefault(int(call_id), []).append((int(post_id), item))
+    if not wanted:
+        return
+    ids = list(wanted)
+    ph = ','.join('?' * len(ids))
+    for (cid, post_id, mint, symbol, name, chain, image_url, price_at_call, mcap_at_call,
+         peak_price, last_price, called_at) in conn.execute(
+            f'''SELECT id, post_id, mint, symbol, token_name, COALESCE(chain,''), COALESCE(image_url,''),
+                       price_at_call, mcap_at_call, peak_price, last_price, timestamp
+                FROM token_calls WHERE id IN ({ph})''', ids):
+        if not price_at_call or price_at_call <= 0:
+            continue
+        now_price = last_price if last_price and last_price > 0 else price_at_call
+        peak = max(peak_price or 0, price_at_call)
+        payload = {
+            'id': cid, 'mint': mint, 'symbol': symbol or '', 'name': name or '',
+            'chain': chain or ('solana' if is_valid_solana_address(mint) else ''),
+            'image_url': image_url or '',
+            'price_at_call': price_at_call, 'peak_price': peak, 'last_price': now_price,
+            'multiplier': round(peak / price_at_call, 4),
+            'now_multiplier': round(now_price / price_at_call, 4),
+            'mcap_at_call': mcap_at_call or 0,
+            'mcap_peak': (mcap_at_call or 0) * peak / price_at_call,
+            'mcap_now': (mcap_at_call or 0) * now_price / price_at_call,
+            'called_at': called_at or '',
+        }
+        for want_post, item in wanted.get(cid, []):
+            if post_id and int(post_id) == want_post:
+                item['call'] = payload
+
+
+def _attach_feed_calls(items):
+    """Feed rows / a single post (and repost originals) -> item['call']."""
+    targets = []
+    for item in items:
+        if item.get('type') == 'repost':
+            original, ref = item.get('original'), str(item.get('repost_of') or '')
+            if original and ref.startswith('p') and ref[1:].isdigit():
+                targets.append((int(ref[1:]), original))
+        elif item.get('id') and not item.get('trade_id') and item.get('type') != 'trade':
+            targets.append((item['id'], item))
+    if not targets:
+        return
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            _feed_call_payloads(conn, targets)
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        print(f'[feed] call attach skipped: {e}', flush=True)
+
 
 def _parse_feed_embed(content):
     """Parses a feed_posts.content string for a __CHART__/__TRADE__ embed (appended
@@ -21551,6 +21682,17 @@ def _parse_feed_embed(content):
     content = content or ''
     chart_idx = content.find('__CHART__')
     trade_idx = content.find('__TRADE__')
+    call_idx = content.find(FEED_CALL_MARKER)
+    if call_idx != -1:
+        # The symbol lives in token_calls, not in the post; callers that need
+        # it resolve call_id there (_feed_call_payloads).
+        call_id = 0
+        try:
+            call_id = int(json.loads(content[call_idx + len(FEED_CALL_MARKER):]).get('id', 0))
+        except Exception:
+            pass
+        return {'kind': 'call', 'text_part': content[:call_idx].strip(), 'call_id': call_id,
+                'symbol': '', 'pnl_pct': 0.0, 'pnl_sol': 0.0, 'pnl_currency': 'SOL'}
     if chart_idx != -1:
         symbol = ''
         try:
@@ -21590,6 +21732,9 @@ def feed_post_create():
     video_id = str(body.get('video_id', '') or '').strip()
     if not content and not image_data and not video_id:
         return jsonify({'ok': False, 'msg': 'Content cannot be empty'}), 400
+    if FEED_CALL_MARKER in content:
+        # Only api_make_call() posts a call (with its server-fetched price).
+        return jsonify({'ok': False, 'msg': 'Use the Call button to call a token'}), 400
     if image_data and video_id:
         return jsonify({'ok': False, 'msg': 'A post can have an image or a video, not both'}), 400
     # Two separate limits, both enforced here regardless of what the client
@@ -21735,11 +21880,14 @@ def feed_post_edit(post_id):
         return jsonify({'ok': False, 'msg': 'That attachment is too large to post'}), 400
     conn = sqlite3.connect(DB_FILE)
     try:
-        row = conn.execute('SELECT wallet FROM feed_posts WHERE id=?', (post_id,)).fetchone()
+        row = conn.execute('SELECT wallet, content FROM feed_posts WHERE id=?', (post_id,)).fetchone()
         if not row:
             return jsonify({'ok': False, 'msg': 'Post not found'}), 404
         if row[0] != wallet:
             return jsonify({'ok': False, 'msg': 'Forbidden'}), 403
+        if FEED_CALL_MARKER in (row[1] or '') or FEED_CALL_MARKER in content:
+            # A call is a public record of what you said, when -- like a trade.
+            return jsonify({'ok': False, 'msg': 'A call cannot be edited. You can delete it.'}), 400
         conn.execute('UPDATE feed_posts SET content=? WHERE id=?', (content, post_id))
         conn.commit()
         return jsonify({'ok': True})
@@ -22050,6 +22198,8 @@ def get_feed_post(post_id):
         'verified':    bool(is_verified),
         'image_url':   image_url or '',
     }
+    if not is_trade:
+        _attach_feed_calls([post])
     _attach_videos = globals().get('_attach_feed_videos')
     if callable(_attach_videos) and not is_trade:
         try:
@@ -22552,6 +22702,15 @@ def share_feed_to_x(post_id):
             text = 'Check out my post on @OrcAgent'
             image_data_uri = row[1] if row else None
             wants_media = True
+        elif embed['kind'] == 'call':
+            call = conn.execute('SELECT symbol, price_at_call, peak_price FROM token_calls WHERE id=? AND post_id=?',
+                                (embed.get('call_id') or 0, post_id[1:])).fetchone()
+            if embed['text_part']:
+                text = embed['text_part']
+            elif call and call[1]:
+                text = f"I called ${call[0]} on @OrcAgent — {max(call[2] or 0, call[1]) / call[1]:.1f}x since the call"
+            else:
+                text = 'Check out my call on @OrcAgent'
         else:
             text = embed['text_part']
         text = text[:250]
