@@ -34,7 +34,7 @@ check("...and OrcAgent's share of new tokens' creator fees: 20% of creator fees,
       d.ORCAGENT_CREATOR_FEE_BPS == 2000 and share == '20'
       and 'OrcAgent receives 20% of the token\'s creator fees, and the creator receives the other 80%' in flat
       and 'This is 20% of the creator fees, not 20% of trading volume' in flat
-      and 'Tokens launched before that date keep a 0% OrcAgent share' in flat
+      and 'Tokens launched before 30 September 2026 keep a 0% OrcAgent share' in flat
       and 'has no OrcAgent share' in flat)
 check('the Terms state OrcAgent is independent and name third-party protocols and infrastructure',
       '<h2>Third-party protocols and infrastructure</h2>' in tos and 'OrcAgent is an independent platform' in flat)
@@ -44,8 +44,19 @@ check('...and that network / provider fees are not OrcAgent’s and gas fronting
 check('the Terms use only headings and paragraphs (the PDF copy reads exactly those)',
       set(re.findall(r'<(\w+)', tos)) == {'h2', 'p'})
 blocks = d._parse_tos_html_blocks(tos)
-check('...so the PDF includes the Fees section', ('h2', 'Fees') in blocks)
-check('the version is bumped past 1.1 (the creator-fee share is new)', d.TOS_VERSION not in ('1.0', '1.1'))
+check('...so the PDF includes the fee summary, Fees and Token launch fees sections',
+      {('h2', 'Fees at a glance'), ('h2', 'Fees'), ('h2', 'Token launch fees')} <= set(blocks))
+check('the version is bumped past 1.2 (the fee summary is new)', d.TOS_VERSION not in ('1.0', '1.1', '1.2'))
+glance = ' '.join(tos.split('<h2>Access</h2>')[0].split())
+check('the Terms OPEN with the fees: trading, $0 launch, the 80/20 creator-fee split with a worked example',
+      tos.strip().startswith('<h2>Fees at a glance</h2>')
+      and pct + '% of every buy and every sell' in glance and 'Launching a token: $0' in glance
+      and 'the creator receives 80% and OrcAgent receives 20%' in glance
+      and 'This is 20% of the creator fees, not 20% of trading volume' in glance
+      and 'if a token earns $100 in creator fees, the creator receives $80 and OrcAgent receives $20' in glance)
+check('token launches have their own section, with the community example',
+      '<h2>Token launch fees</h2>' in tos and 'creator 65%, community 15% and OrcAgent 20%' in flat
+      and 'it cannot be changed afterwards' in flat)
 
 w = str(Keypair().pubkey()); uid = d.get_or_create_user(w)
 c = sqlite3.connect(d.DB_FILE)
