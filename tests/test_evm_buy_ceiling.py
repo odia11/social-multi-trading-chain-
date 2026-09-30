@@ -108,6 +108,12 @@ out['buy_status'], out['buy'] = buy({'chain': 'base', 'token_address': EVM,
                                      'amount_usdc': 100})
 out['swaps'] = list(SWAPS)
 out['fees'] = list(FEES)
+def fee_rows():
+    with sqlite3.connect(d.DB_FILE) as _c:
+        return [list(r) for r in _c.execute(
+            "SELECT fee_amount, fee_tx, kind, chain FROM fees WHERE user_wallet=? ORDER BY rowid",
+            (WALLET,))]
+out['fee_rows'] = fee_rows()
 out['positions'] = list(POSITIONS)
 out['gas_calls'] = list(GAS_CALLS)
 
@@ -153,6 +159,7 @@ out['legacy_status'], out['legacy'] = buy({'chain': 'base', 'token_address': EVM
                                            'amount_usdc': 100})
 out['legacy_swaps'] = list(SWAPS)
 out['legacy_fees'] = list(FEES)
+out['legacy_fee_rows'] = fee_rows()
 d.TRADE_ENGINE_MANUAL_EVM = True
 
 # ── the BSC route, which was a full copy of this one ──
@@ -190,16 +197,22 @@ check('exactly one swap goes out', len(swaps) == 1)
 check('the swap sells LESS than the $100 entered — before this the full $100 was '
       'swapped and the fee was charged on top of it',
       float(swaps[0]['amount']) < 100.0)
-# _charge_evm_txn_fee takes the GROSS amount and works the 0.75% out itself,
-# so what is asserted here is the base it was given.
-check('the fee is worked out on what was bought, not on the amount entered',
-      len(R['fees']) == 1 and float(R['fees'][0]['usdc']) == float(swaps[0]['amount']))
-spent = float(swaps[0]['amount']) + sum(float(v) for v in b['costs'].values())
-check(f'purchase + every cost = ${spent:.2f}, exactly the $100 ceiling and not a '
-      f'cent over. The old route spent $100.75 plus gas for the same request',
+# The 0.75% is collected INSIDE the one swap (0x swapFeeBps/swapFeeToken), so
+# a confirmed swap cannot exist without its fee and no second transfer ever
+# leaves the user's wallet; the fee is recorded as bundled with that swap.
+swap_usd, fee_usd = float(swaps[0]['amount']), float(b['costs']['platform_fee'])
+check('the fee is taken inside the one swap, never as a second transfer from the wallet',
+      R['fees'] == [] and len(R['fee_rows']) == 1
+      and R['fee_rows'][0][1] == '0x-bundled:0xBOUGHT' and R['fee_rows'][0][2] == 'buy')
+check('the one swap is the purchase plus its fee',
+      abs(swap_usd - (float(b['amount_usdc']) + fee_usd)) < 0.01)
+spent = swap_usd + float(b['costs']['source_gas']) + float(b['costs']['slippage_reserve'])
+check(f'swap + gas + slippage reserve = ${spent:.2f}, exactly the $100 ceiling and '
+      f'not a cent over. The old route spent $100.75 plus gas for the same request',
       abs(spent - 100.0) < 0.01)
-check('...and the fee inside that is 0.75% of the purchase, not of the $100',
-      abs(float(b['costs']['platform_fee']) - float(swaps[0]['amount']) * 0.0075) < 0.01)
+check('...and the fee is 0.75% of what is swapped (what 0x takes), not of the $100, '
+      'and it is recorded at that amount',
+      abs(fee_usd - swap_usd * 0.0075) < 0.01 and abs(R['fee_rows'][0][0] - fee_usd) < 0.005)
 check('the response reports what was actually bought, not the amount typed',
       float(b['amount_usdc']) < 100 and float(b['max_spend_usd']) == 100.0)
 check('...and itemises where the rest of the money went',
@@ -245,8 +258,9 @@ lg = R['legacy']
 check('with TRADE_ENGINE_MANUAL_EVM off the route goes back to the old behaviour, '
       'swapping the full amount entered',
       R['legacy_status'] == 200 and float(R['legacy_swaps'][0]['amount']) == 100.0)
-check('...including charging the fee on top of it, which is what the engine path '
-      'fixes', float(R['legacy_fees'][0]['usdc']) == 100.0)
+check('...with the fee inside that full $100 swap (0.75), which is what the engine '
+      'path fixes: there the ceiling holds',
+      R['legacy_fees'] == [] and R['legacy_fee_rows'][-1][:3] == [0.75, 'bundled-in-swap', 'buy'])
 check('the engine path is the default; the old one needs an explicit opt-out',
       R['flag_default'] is True)
 

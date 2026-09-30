@@ -21,10 +21,11 @@ def test_back_links():
     page=client.get('/token-launch')
     assert page.status_code==200
     html=page.get_data(as_text=True)
-    assert 'id="orca-launch-back" class="tl-back" href="/launches"' in html
-    assert '/static/launch-back.js' in html
-    assert 'href="/">Home</a>' in html
-    print('PASS Token Launch back fallback to /launches, directory back fallback to /')
+    # The redesigned launch page carries the app's own navigation (top bar and
+    # bottom nav), so it has no separate back link or its script.
+    assert "{{ navbar_html('token-launch') }}" in (ROOT/'templates'/'token_launch.html').read_text()
+    assert 'orca-launch-back' not in html and '/static/launch-back.js' not in html
+    print('PASS Token Launch uses the app navigation, directory back fallback to /')
     tmp.cleanup()
 
 if __name__=='__main__':test_back_links()

@@ -12,12 +12,19 @@ from solders.keypair import Keypair
 ROOT=Path(__file__).resolve().parents[1]
 SCRIPT=ROOT/'pump_adapter/grind-mint.py'
 def test_bounds():
-    path=Path(tempfile.gettempdir())/('orcagent-mint-'+str(os.getuid())+'.lock')
-    with path.open('a') as lock:
-        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    # Two creators may search at once (two slot locks); a third fails fast.
+    locks=[]
+    try:
+        for slot in range(2):
+            lock=(Path(tempfile.gettempdir())/('orcagent-mint-%d-%d.lock' % (os.getuid(), slot))).open('a')
+            fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            locks.append(lock)
         r=subprocess.run([sys.executable,str(SCRIPT)],capture_output=True,text=True,timeout=3)
         assert r.returncode==1 and r.stdout==''
         assert 'retry shortly' in r.stderr
+    finally:
+        for lock in locks:
+            lock.close()
     code="import runpy; m=runpy.run_path("+repr(str(SCRIPT))+"); m['generate'](timeout=0)"
     r=subprocess.run([sys.executable,'-c',code],capture_output=True,text=True,timeout=3)
     assert r.returncode!=0 and r.stdout=='' and 'took too long' in r.stderr

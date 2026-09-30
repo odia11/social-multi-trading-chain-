@@ -182,10 +182,14 @@ check('the origin check that replaced it compares from position 0, not anywhere 
       'in the string', "client.url.indexOf(self.location.origin) !== 0" in _sw_code)
 
 # ── 4. Live Market ──
-check('Live Market reads ?mint= from the url', "URLSearchParams(location.search).get('mint')" in LM)
-check('the deep-linked token is queued and injected when the first feed load '
-      'actually finishes, instead of after a guessed 900ms delay',
-      '_pendingDeepLinkMint = _qMint' in LM and 'setTimeout(function(){ prependSearchedToken' not in LM)
+check('Live Market reads ?mint= from the url (and the older ?addr=)',
+      "var _qMint = _qs.get('mint') || _qs.get('addr');" in LM)
+check('the deep-linked token is shown straight away, and if that first attempt '
+      'did not land it is queued and injected when the feed load actually '
+      'finishes, instead of after a guessed 900ms delay',
+      "prependSearchedToken(_qMint,'','').finally(function(){" in LM
+      and '_pendingDeepLinkMint=_qMint' in LM
+      and 'setTimeout(function(){ prependSearchedToken' not in LM)
 check('...and injected from .finally, so a failed scanner load still shows it',
       re.search(r'\.finally\(function\(\)\s*\{[^}]*_pendingDeepLinkMint', LM, re.S))
 check('it is consumed once, not re-injected on every 15s poll',

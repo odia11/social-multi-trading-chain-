@@ -121,6 +121,9 @@ out['sell_status'], out['sell'] = sell()
 out['sells'] = list(SELLS)
 out['fees'] = list(FEES)
 out['row'] = trade_rows()
+with sqlite3.connect(d.DB_FILE) as _c:
+    out['fee_rows'] = [list(r) for r in _c.execute(
+        "SELECT fee_amount, fee_tx, kind, chain FROM fees WHERE user_wallet=? ORDER BY rowid", (WALLET,))]
 out['position_left'] = TOKEN in STATE['positions']
 
 # ── selling nothing ──
@@ -205,11 +208,18 @@ check('...and says it is a measured figure rather than an estimate',
       sl['exit_price_estimated'] is False)
 check('the trade history row carries that same measured price',
       R['row'] and abs(float(R['row'][0]) - 0.025) < 1e-9)
+# The 0.75% is collected inside the sell swap (0x swapFeeBps), so the $25 the
+# wallet received is already net of it: the fee is 0.75% of the gross swap,
+# $25 / (1 - 0.0075), recorded with that swap -- never a second transfer.
+_gross = 25.0 / (1 - 0.0075)
 check('the fee is taken on the real proceeds, not on a market-price guess',
-      len(R['fees']) == 1 and float(R['fees'][0]['usdc']) == 25.0)
+      R['fees'] == [] and len(R['fee_rows']) == 1
+      and R['fee_rows'][0][1:3] == ['0x-bundled:0xSOLD', 'sell']
+      and abs(R['fee_rows'][0][0] - _gross * 0.0075) < 1e-6
+      and abs(float(R['row'][3]) - R['fee_rows'][0][0]) < 1e-9)
 check('the profit follows from the measured price too — $0.025 out against '
       '$0.01 in on 1000 tokens is $15, where the quoted price would have said $10',
-      abs(float(R['fees'][0]['profit']) - 15.0) < 1e-6)
+      abs(float(R['row'][2]) - 15.0) < 1e-6 and abs(float(R['sell']['pnl']) - 15.0) < 1e-6)
 
 est = R['est']
 check('when the balance cannot be read the sell still completes on the market '

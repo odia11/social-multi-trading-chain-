@@ -82,9 +82,15 @@ class SourceDiscoveryTests(unittest.TestCase):
             self.assertEqual(tip._solana_source_accounts(self.d, self.owner, MINT), [self.account])
 
     def test_healthy_mint_lookup_stays_fast(self):
-        with patch.object(tip, '_rpc_call', return_value={'value': [self.account]}) as rpc:
+        # A real RPC answers per method: the exact associated-account read
+        # (tried first, since it survives indexer rate limits) finds none for
+        # this mint, and the first indexed lookup finds the funded account.
+        def rpc_answer(url, method, params):
+            return {'value': None} if method == 'getAccountInfo' else {'value': [self.account]}
+        with patch.object(tip, '_rpc_call', side_effect=rpc_answer) as rpc:
             self.assertEqual(tip._solana_source_accounts(self.d, self.owner, MINT), [self.account])
-            self.assertEqual(rpc.call_count, 1)
+            methods = [c.args[1] for c in rpc.call_args_list]
+            self.assertEqual(methods, ['getAccountInfo', 'getTokenAccountsByOwner'])
 
     def test_total_rpc_failure_is_not_reported_as_empty_balance(self):
         with patch.object(tip, '_rpc_call', side_effect=RuntimeError('offline')):

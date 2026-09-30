@@ -89,8 +89,12 @@ class ReplyIdentityTests(unittest.TestCase):
             '_REACTION_EMOJIS': frozenset(('🔥', '❤️')),
             're': __import__('re'),
             '_send_push_notification': lambda *a, **k: None,
+            # Token calls attached to feed items are covered by test_feed_calls.
+            '_attach_feed_calls': lambda items: None,
+            'hashlib': __import__('hashlib'),
+            'urllib': __import__('urllib.parse'),
         }
-        extract(self.ns, '_feed_post_created_at', '_valid_post_interaction_sql',
+        extract(self.ns, '_feed_post_created_at', '_valid_post_interaction_sql', '_feed_avatar_photo_url',
                 '_require_interaction_post', '_delete_feed_post_interactions',
                 'get_feed_replies', 'post_feed_reply', '_notify_reply_mentions', '_post_link', '_group_post_link',
                 'social_feed', 'get_feed_post',

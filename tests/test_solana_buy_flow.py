@@ -79,7 +79,7 @@ sys.modules['solders.keypair'] = fake_solders
 STATE = {'positions': {}, 'trader_running': False}
 d.get_user_state = lambda w: STATE
 POSITIONS = []
-def upsert(user_id, wallet, mint, pos, source=None, chain=None):
+def upsert(user_id, wallet, mint, pos, source=None, chain=None, **kw):
     POSITIONS.append(dict(pos))
     STATE['positions'][mint] = dict(pos)
 d._upsert_open_position = upsert
@@ -127,6 +127,10 @@ reset()
 out['buy_status'], out['buy'] = buy()
 out['buys'] = list(BUYS)
 out['fees'] = list(FEES)
+with sqlite3.connect(d.DB_FILE) as _c:
+    out['fee_rows'] = [list(r) for r in _c.execute(
+        "SELECT fee_amount, fee_tx, kind, chain FROM fees WHERE user_wallet=? ORDER BY rowid", (WALLET,))]
+out['base_currency'] = d.SOLANA_BASE_CURRENCY
 
 # ── two balances, two jobs ──
 reset()
@@ -237,10 +241,13 @@ check('it spends the configured trade size directly — $1 of USDC, with no '
       len(R['buys']) == 1 and abs(R['buys'][0]['spend'] - 1.0) < 1e-9)
 check('...and funds the swap in USDC rather than SOL',
       R['buys'][0].get('base') == 'USDC')
+# Trades are funded in USDC, so the fee that rode inside the swap is booked as
+# a bundled stablecoin fee: 0.75% of the $1, no second transfer.
 check('the fee is recorded as bundled, taken inside the swap rather than as a '
       'second transfer the user would see leave their wallet',
-      len(R['fees']) == 1 and R['fees'][0]['bundled'] is True
-      and abs(R['fees'][0]['sol'] - 1.0) < 1e-9)
+      R['base_currency'] == 'USDC' and R['fees'] == [] and len(R['fee_rows']) == 1
+      and R['fee_rows'][0][1:] == ['bundled-in-swap', 'buy', 'solana']
+      and abs(R['fee_rows'][0][0] - 0.0075) < 1e-9)
 check('the response says the fee was collected', b['fee_collected'] is True)
 
 # ── FIX 1 ──
