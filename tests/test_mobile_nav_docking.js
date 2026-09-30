@@ -10,7 +10,7 @@ assert.match(css,/\.oa-bottom-nav\{[^}]*position:fixed!important;[^}]*bottom:0!i
 assert(!css.includes('box-sizing:content-box'));
 assert(home.includes('viewport-fit=cover'));
 assert(boot.includes('mobile-bottom-nav.css?v=9'));
-assert(boot.includes('mobile-bottom-nav.js?v=8'));
+assert(boot.includes('mobile-bottom-nav.js?v=9'));
 assert(!js.includes('visibleBottom-nav.getBoundingClientRect().bottom'),
        'do not manually translate fixed nav against visualViewport');
 assert(!js.includes('Math.max(-360,Math.min(180,next))'),

@@ -17934,7 +17934,7 @@ def _navbar_html(active_nav: str = '') -> Markup:
 <div class="pt-nb-scrim" id="pt-nb-scrim"></div>
 %(bottom_nav)s
 <script src="/static/navbar.js?v=%(v)s" defer></script>
-<script src="/static/mobile-bottom-nav.js?v=8" defer></script>
+<script src="/static/mobile-bottom-nav.js?v=9" defer></script>
 ''' % {'v': _APP_VERSION, 'nav_links': nav_links, 'more_items_desktop': more_items_desktop, 'more_items_mobile': more_items_mobile, 'bottom_nav': bottom_nav})
 
 @app.route('/api/version')
@@ -19565,7 +19565,9 @@ def _call_token_row(mint, symbol, name, chain, price, mcap=0.0, image_url='', ch
 
 
 def _call_rows_from_pairs(pairs, want_mint=''):
-    """DexScreener pairs -> one row per (chain, token), deepest pool first."""
+    """DexScreener pairs -> one row per (chain, token), deepest pool first.
+    With want_mint: only that token -- or, when the pasted address is a
+    POOL, that pool's own token."""
     rows, seen = [], set()
     supported = [p for p in (pairs or []) if p.get('chainId') in _MARKET_LIVE_CHAINS]
     supported.sort(key=lambda p: float((p.get('liquidity') or {}).get('usd') or 0), reverse=True)
@@ -19573,7 +19575,8 @@ def _call_rows_from_pairs(pairs, want_mint=''):
         tok = p.get('baseToken') or {}
         # A pasted address can also be the QUOTE side of a pool; that pool's
         # price is the other token's, so it is skipped.
-        if want_mint and str(tok.get('address', '')).lower() != want_mint.lower():
+        if want_mint and want_mint.lower() not in (str(tok.get('address', '')).lower(),
+                                                   str(p.get('pairAddress', '')).lower()):
             continue
         key = (p.get('chainId'), str(tok.get('address', '')).lower())
         if not tok.get('address') or key in seen:
@@ -19587,22 +19590,65 @@ def _call_rows_from_pairs(pairs, want_mint=''):
 
 def _call_gt_token(chain, mint):
     """One token from GeckoTerminal (covers pools DexScreener has not indexed
-    yet, and keeps working while DexScreener rate-limits this server)."""
+    yet, and keeps working while DexScreener rate-limits this server). The
+    address may be the token or one of its pools."""
     network = _GECKOTERMINAL_NETWORK.get(chain)
-    if not network or not _gt_try_take(reserve=_GT_WARM_RESERVE):
+    if not network:
         return None
+    headers = {'Accept': 'application/json;version=20230302'}
+    base = f'https://api.geckoterminal.com/api/v2/networks/{network}/'
+    addr = requests.utils.quote(mint, safe='')
     try:
-        r = requests.get(f'https://api.geckoterminal.com/api/v2/networks/{network}/tokens/'
-                         + requests.utils.quote(mint, safe=''),
-                         headers={'Accept': 'application/json;version=20230302'}, timeout=8)
-        if r.status_code != 200:
-            return None
-        a = (r.json().get('data') or {}).get('attributes') or {}
-    except (requests.RequestException, ValueError):
+        if _gt_try_take():
+            r = requests.get(base + 'tokens/' + addr, headers=headers, timeout=8)
+            if r.status_code == 200:
+                a = (r.json().get('data') or {}).get('attributes') or {}
+                row = _call_token_row(a.get('address') or mint, a.get('symbol'), a.get('name'), chain,
+                                      a.get('price_usd'), a.get('market_cap_usd') or a.get('fdv_usd'), a.get('image_url'))
+                if row['price'] > 0:
+                    return row
+        if _gt_try_take():
+            r = requests.get(base + 'pools/' + addr + '?include=base_token', headers=headers, timeout=8)
+            if r.status_code == 200:
+                body = r.json()
+                a = (body.get('data') or {}).get('attributes') or {}
+                t = next((i.get('attributes') or {} for i in body.get('included') or []
+                          if i.get('type') == 'token'), {})
+                if t.get('address'):
+                    row = _call_token_row(t.get('address'), t.get('symbol'), t.get('name'), chain,
+                                          a.get('base_token_price_usd'), a.get('market_cap_usd') or a.get('fdv_usd'),
+                                          t.get('image_url'))
+                    if row['price'] > 0:
+                        return row
+    except (requests.RequestException, ValueError, AttributeError):
         return None
-    row = _call_token_row(a.get('address') or mint, a.get('symbol'), a.get('name'), chain,
-                          a.get('price_usd'), a.get('market_cap_usd') or a.get('fdv_usd'), a.get('image_url'))
-    return row if row['price'] > 0 else None
+    return None
+
+
+_JUPITER_TOKEN_SEARCH = ('https://lite-api.jup.ag/tokens/v2/search?query=',
+                         'https://api.jup.ag/tokens/v2/search?query=')
+
+
+def _call_jupiter_token(mint):
+    """A Solana token as Jupiter -- the router this app trades Solana through
+    -- knows it: if Jupiter can route it, it can be called."""
+    for url in _JUPITER_TOKEN_SEARCH:
+        try:
+            r = requests.get(url + requests.utils.quote(mint, safe=''), timeout=6,
+                             headers={'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 OrcAgent/1.0'})
+            if r.status_code != 200:
+                continue
+            items = r.json()
+        except (requests.RequestException, ValueError):
+            continue
+        for t in items if isinstance(items, list) else []:
+            if str(t.get('id', '')) == mint:
+                row = _call_token_row(mint, t.get('symbol'), t.get('name'), 'solana', t.get('usdPrice'),
+                                      t.get('mcap') or t.get('fdv'), t.get('icon'),
+                                      (t.get('stats24h') or {}).get('priceChange'))
+                if row['price'] > 0:
+                    return row
+    return None
 
 
 def _call_token_lookup(query, chain=None):
@@ -19623,18 +19669,32 @@ def _call_token_lookup(query, chain=None):
                 rows.append(row)
     scanner = list(_scanner_cache.get('data') or [])
     if is_evm or is_sol:
+        ql = q.lower()
+        trace = []
+        # 1. The Live Market's own tokens -- by token or pool address.
         for t in scanner:
-            if str(t.get('mint', '')).lower() == q.lower():
+            if ql in (str(t.get('mint', '')).lower(), str(t.get('pair_address', '')).lower()):
                 keep(_call_token_row(t.get('mint'), t.get('symbol'), t.get('name'), t.get('chain') or 'solana',
                                      t.get('price_usd'), t.get('market_cap'), t.get('image_url'), t.get('price_change_24h')))
+        trace.append('scanner=%d' % len(rows))
+        # 2. DexScreener: the token, else the pool (its /search also knows pool addresses).
         if not rows:
-            r = _dex_get('https://api.dexscreener.com/latest/dex/tokens/' + requests.utils.quote(q, safe=''), timeout=8)
-            try:
-                pairs = (r.json().get('pairs') or []) if r and r.status_code == 200 else []
-            except ValueError:
-                pairs = []
-            for row in _call_rows_from_pairs(pairs, want_mint=q):
-                keep(row)
+            for url in ('https://api.dexscreener.com/latest/dex/tokens/', 'https://api.dexscreener.com/latest/dex/search?q='):
+                r = _dex_get(url + requests.utils.quote(q, safe=''), timeout=8)
+                try:
+                    pairs = (r.json().get('pairs') or []) if r and r.status_code == 200 else []
+                except ValueError:
+                    pairs = []
+                for row in _call_rows_from_pairs(pairs, want_mint=q):
+                    keep(row)
+                trace.append('dex=%s/%d' % (getattr(r, 'status_code', 'none'), len(pairs)))
+                if rows:
+                    break
+        # 3. Jupiter (Solana): every token it can route.
+        if not rows and is_sol and (not chain or chain == 'solana'):
+            keep(_call_jupiter_token(q))
+            trace.append('jupiter=%d' % len(rows))
+        # 4. OrcAgent's own launches.
         if not rows and is_sol:
             try:
                 from launched_token_market import lookup as _launch_market_lookup
@@ -19645,11 +19705,15 @@ def _call_token_lookup(query, chain=None):
                 keep(_call_token_row(q, launch.get('symbol'), launch.get('name'), 'solana',
                                      launch.get('price_usd') or launch.get('price'), launch.get('market_cap'),
                                      launch.get('image_url')))
+            trace.append('launch=%d' % len(rows))
+        # 5. GeckoTerminal: the token or a pool, on its chain(s).
         if not rows:
             for net in ([chain] if chain else (['solana'] if is_sol else list(_CALL_LOOKUP_EVM_CHAINS))):
                 keep(_call_gt_token(net, q))
                 if rows:
                     break
+            trace.append('gecko=%d' % len(rows))
+        print(f'[calls-lookup] {q[:6]}…{q[-4:]} ' + ' '.join(trace), flush=True)
         return rows
     if len(q) < 2:
         return rows
@@ -19951,8 +20015,26 @@ def _calls_peak_loop():
                 except Exception as e:
                     print(f'[calls-peak] chunk error: {e}', flush=True)
                 time.sleep(0.3)
-            # Tokens DexScreener did not price this round (not indexed, or it
-            # is rate-limiting us): GeckoTerminal, 30 per request per chain.
+            # Solana tokens DexScreener did not price this round: Jupiter
+            # (the router this app trades them through), 50 per request.
+            sol_missing = [m for m in mints if m not in price_by_mint and chain_of.get(m) == 'solana']
+            for i in range(0, len(sol_missing), 50):
+                chunk = sol_missing[i:i+50]
+                for host in ('https://lite-api.jup.ag', 'https://api.jup.ag'):
+                    try:
+                        r = requests.get(host + '/price/v3?ids=' + ','.join(chunk), timeout=8,
+                                         headers={'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 OrcAgent/1.0'})
+                        if r.status_code != 200:
+                            continue
+                        for m, v in (r.json() or {}).items():
+                            price = float((v or {}).get('usdPrice') or 0)
+                            if m in chunk and price > 0:
+                                price_by_mint[m] = price
+                        break
+                    except (requests.RequestException, ValueError, TypeError, AttributeError):
+                        continue
+            # Tokens still unpriced (not indexed, or DexScreener is
+            # rate-limiting us): GeckoTerminal, 30 per request per chain.
             missing = {}
             for m in mints:
                 if m not in price_by_mint and _GECKOTERMINAL_NETWORK.get(chain_of.get(m)):
