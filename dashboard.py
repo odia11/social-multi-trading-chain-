@@ -10842,6 +10842,126 @@ def _confirmed_downtrend(price_hist: list) -> bool:
         return False
     return (recent[0] - recent[-1]) / recent[0] >= MOMENTUM_EXIT_MIN_DROP
 
+
+# ── 1-SECOND EXIT FEED ──
+# Stop loss / take profit must fire the moment a price crosses them, so every
+# running bot has its own exit watcher that re-checks all open positions once
+# a second (see _exit_pass in user_trader_loop). The prices come from here:
+# ONE batched upstream read per second for every mint any bot holds, shared by
+# all users -- Jupiter's price API for Solana (the router the bot trades
+# through; 50 mints per request), DexScreener's multi-token endpoint for EVM
+# tokens and anything Jupiter did not price. Never the per-mint DexScreener
+# call: one request per mint per second would hit its rate limit, and when
+# DexScreener is down that call waits 8 seconds and serves minutes-old data.
+EXIT_CHECK_INTERVAL   = 1.0    # seconds between exit checks, per running bot
+_EXIT_PRICE_TTL       = 1.0    # a price is re-read once it is this old
+_EXIT_PRICE_MAX_AGE   = 15.0   # older than this is never acted on
+_EXIT_WATCH_TTL       = 10.0   # a mint stays watched this long after last seen
+_exit_price_lock  = threading.Lock()
+_exit_fetch_lock  = threading.Lock()
+_exit_price_cache: dict = {}   # mint -> (fetched_at, usd_price)
+_exit_watched: dict = {}       # mint -> (chain, watched_until)
+
+
+def _exit_fetch_prices(mints_by_chain: dict) -> dict:
+    """{mint: usd_price} for the given mints, read in batches; missing = unknown."""
+    found = {}
+    sol = [m for m, c in mints_by_chain.items() if (c or 'solana') == 'solana']
+    key = (os.getenv('JUPITER_API_KEY', '') or '').strip()
+    host, headers = (('https://api.jup.ag', {'x-api-key': key}) if key
+                     else ('https://lite-api.jup.ag', {}))
+    headers = {**headers, 'Accept': 'application/json', 'User-Agent': 'OrcAgent/1.0'}
+    for i in range(0, len(sol), 50):
+        chunk = sol[i:i + 50]
+        try:
+            r = requests.get(host + '/price/v3?ids=' + ','.join(chunk), headers=headers, timeout=2.5)
+            if r.status_code == 200:
+                for m, v in (r.json() or {}).items():
+                    p = float((v or {}).get('usdPrice') or 0)
+                    if m in chunk and p > 0:
+                        found[m] = p
+        except (requests.RequestException, ValueError, TypeError, AttributeError):
+            pass
+    rest = [m for m in mints_by_chain if m not in found]
+    for i in range(0, len(rest), 30):
+        chunk = rest[i:i + 30]
+        try:
+            r = _dex_get('https://api.dexscreener.com/latest/dex/tokens/' + ','.join(chunk),
+                         timeout=3, ttl_override=_EXIT_PRICE_TTL)
+            best = {}
+            for pair in ((r.json().get('pairs') or []) if r else []):
+                m = (pair.get('baseToken') or {}).get('address', '')
+                liq = float((pair.get('liquidity') or {}).get('usd') or 0)
+                p = float(pair.get('priceUsd') or 0)
+                if m in chunk and p > 0 and liq >= best.get(m, (-1, 0))[0]:
+                    best[m] = (liq, p)
+            found.update({m: v[1] for m, v in best.items()})
+        except Exception:
+            pass
+    return found
+
+
+def _exit_fresh_prices(mints_by_chain: dict) -> dict:
+    """{mint: usd_price} no older than _EXIT_PRICE_MAX_AGE. Registers the mints
+    as watched; whichever bot thread gets here first in a second refreshes
+    EVERY watched mint in one batch, the others use that result."""
+    now = time.time()
+    with _exit_price_lock:
+        for m, c in mints_by_chain.items():
+            _exit_watched[m] = (c or 'solana', now + _EXIT_WATCH_TTL)
+        for m in [m for m, (_, until) in _exit_watched.items() if until < now]:
+            del _exit_watched[m]
+            _exit_price_cache.pop(m, None)
+        due = {m: c for m, (c, _) in _exit_watched.items()
+               if now - _exit_price_cache.get(m, (0, 0))[0] >= _EXIT_PRICE_TTL}
+    if due and _exit_fetch_lock.acquire(blocking=False):
+        try:
+            got = _exit_fetch_prices(due)
+            stamp = time.time()
+            with _exit_price_lock:
+                for m, p in got.items():
+                    _exit_price_cache[m] = (stamp, p)
+        finally:
+            _exit_fetch_lock.release()
+    now = time.time()
+    with _exit_price_lock:
+        return {m: v[1] for m in mints_by_chain
+                if (v := _exit_price_cache.get(m)) and now - v[0] <= _EXIT_PRICE_MAX_AGE}
+
+
+# Liquidity and 24h volume (the rug-pull check) still come from the per-mint
+# DexScreener data, but read in the background: the exit watcher uses the last
+# answer it has and never waits on DexScreener itself.
+_exit_td_cache: dict = {}      # mint -> token data dict
+_exit_td_inflight: set = set()
+_exit_td_lock = threading.Lock()
+_exit_td_pool = ThreadPoolExecutor(max_workers=4)
+
+
+def _exit_token_data(mint: str, chain: str = 'solana'):
+    def refresh():
+        try:
+            td = get_token_data(mint, fast=True, chain=chain if chain != 'solana' else None)
+            if td:
+                _exit_td_cache[mint] = td
+        except Exception:
+            pass
+        finally:
+            with _exit_td_lock:
+                _exit_td_inflight.discard(mint)
+    with _exit_td_lock:
+        start = mint not in _exit_td_inflight
+        if start:
+            _exit_td_inflight.add(mint)
+    if start:
+        try:
+            _exit_td_pool.submit(refresh)
+        except RuntimeError:
+            with _exit_td_lock:
+                _exit_td_inflight.discard(mint)
+    return _exit_td_cache.get(mint)
+
+
 # ── PER-USER TRADER ──
 def user_trader_loop(stop_event, config, wallet: str):
     us    = get_user_state(wallet)
@@ -10975,6 +11095,318 @@ def user_trader_loop(stop_event, config, wallet: str):
     # stop_event so it stops the moment the bot does.
     if wallet in NARRATIVE_UNCAPPED_WALLETS:
         threading.Thread(target=_narrative_uncapped_fast_loop, args=(stop_event, user_id, wallet), daemon=True).start()
+
+    # ── Pass 1: exits, checked once a second in their own thread ──
+    # A stop loss or take profit that is hit is sold at once. This used to be
+    # the first step of the loop below, so it waited on everything else that
+    # loop does: balance reads, vetting and buying new tokens (seconds), a
+    # 2 s sleep, and it stopped altogether on an RPC outage or a daily-loss
+    # pause. Now _exit_watch() runs it every EXIT_CHECK_INTERVAL seconds with
+    # prices from the shared 1-second exit feed, and it is the ONLY place
+    # this bot sells -- the loop below only opens positions. It reads the
+    # loop's live settings (stop_loss, take_profit, tiered_tp_enabled), so a
+    # change in Settings reaches it on the loop's next refresh.
+    def _exit_pass():
+        _held = {m: p.get('chain', 'solana') for m, p in list(positions.items())
+                 if p.get('amount', 0) > 0 and p.get('buy_price', 0) > 0}
+        if not _held:
+            return
+        _fresh = _exit_fresh_prices(_held)
+        # ── Pass 1: exit checks for ALL open positions ──
+        # Iterates positions dict (not live scan) so tokens that drop off the
+        # DexScreener trending list still get stop-loss/take-profit every cycle.
+        for mint, pos in list(positions.items()):
+            if stop_event.is_set(): break
+            if pos.get('amount', 0) <= 0 or pos.get('buy_price', 0) <= 0:
+                continue
+            if pos.get('chain', 'solana') != 'solana' and not _enc_blob_evm:
+                continue  # no EVM trading key configured -- can't touch this position at all
+            # Every open position stays fast-polled for as long as it's held, not
+            # just once it's already close to a trigger -- a real rugpull can crash
+            # a token from healthy to way past stop-loss within a single normal
+            # (15s) scan gap, before the reactive "near-threshold" alerting below
+            # ever gets a chance to fire. Refreshed every cycle so the TTL never
+            # lapses while held. get_token_data(fast=True) caches per-mint at the
+            # HOT_MINT_TTL_FAST/MEDIUM tier (_hot_mint_fetch_ttl), so this is one
+            # shared fetch per mint per tier window, not one extra request per
+            # position/user holding it. Priority reflects the last successfully
+            # computed _near_trigger state (not just this cycle's) so a position
+            # already near its trigger doesn't lose its fast-tier ranking to a
+            # temporary price-fetch failure -- exactly the kind of DexScreener
+            # hiccup a real liquidity drain can cause.
+            _mark_hot_mint(mint, priority=bool(pos.get('_near_trigger')))
+            _td       = _exit_token_data(mint)
+            # The price this second from the shared exit feed; the last
+            # DexScreener read only when that feed has none for this mint.
+            price     = float(_fresh.get(mint) or (_td.get('price') if _td else 0) or 0)
+            label     = (_td['symbol'] if _td else '') or pos.get('symbol', mint[:8])
+            cur_liq   = float(_td.get('liquidity', 0) or 0) if _td else 0.0
+            cur_vol24 = float(_td.get('volume24h', 0) or 0) if _td else 0.0
+            if price <= 0:
+                continue
+            chg = (price - pos['buy_price']) / pos['buy_price']
+
+            # This position's own SL/TP -- its open-time snapshot
+            # (pos['sl_pct']/['tp_pct']) if it has one, else the loop's
+            # live-settings value for a position opened before that
+            # snapshot existed. See _pos_sl_frac()/_pos_tp_frac(): once
+            # a position IS snapshotted, a later Settings change must
+            # never retarget it while it's still open.
+            _eff_sl = _pos_sl_frac(pos, stop_loss)
+            _eff_tp = _pos_tp_frac(pos, take_profit)
+
+            # High/low water mark for trade-analytics logging (see
+            # /api/stats/performance) and the volatility-based trailing
+            # stop below -- independent of price_hist's short window.
+            pos['highest_price'] = max(pos.get('highest_price') or price, price)
+            pos['lowest_price']  = min(pos.get('lowest_price') or price, price)
+
+            # Rolling window for the momentum-deterioration exit below --
+            # last 5 polled prices is plenty for a 3-sample confirming trend.
+            _hist = pos.setdefault('price_hist', [])
+            # The momentum and trailing-volatility reads below were tuned on
+            # samples about 2 s apart; keep that spacing although the
+            # thresholds themselves are now checked every second.
+            if time.time() - pos.get('_hist_at', 0) >= 2.0:
+                pos['_hist_at'] = time.time()
+                _hist.append(price)
+                if len(_hist) > 5:
+                    del _hist[:-5]
+
+            # ── Near-trigger alerting — within 5% of this user's own SL/crash-exit
+            # value (relative to the threshold, e.g. -2.85%..-3.00% for a 3% SL).
+            # Tracked per-position via pos['_near_trigger'] rather than off the
+            # _hot_mints registry above (which is now unconditionally true for every
+            # held position), so these ENTER/EXIT log lines only fire on a genuine
+            # proximity transition instead of every single cycle.
+            _was_near_trigger    = bool(pos.get('_near_trigger'))
+            _now_hot             = (chg <= -0.95 * _eff_sl) or (chg <= -0.95 * crash_exit)
+            pos['_near_trigger'] = _now_hot
+            if _now_hot:
+                _mark_hot_mint(mint, priority=True)
+                if not _was_near_trigger:
+                    add_user_log(wallet, '[' + short + '] ⚡ ' + label + ' ' + str(round(chg*100,1)) +
+                                 '% — near exit threshold, checked every second')
+                    # Dedicated, grep-able stdout line (separate from the per-user UI
+                    # log above) so production behavior can be verified directly in the
+                    # server logs after deploy — full mint address + explicit UTC
+                    # timestamp, not just the truncated symbol shown in the UI.
+                    print(f"[hot-mint] {datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')} "
+                          f"ENTER mint={mint} user={short} chg={round(chg*100,1)}% "
+                          f"sl=-{round(_eff_sl*100,1)}% crash=-{round(crash_exit*100,1)}% "
+                          f"interval=1s", flush=True)
+            elif _was_near_trigger:
+                add_user_log(wallet, '[' + short + '] ' + label + ' ' + str(round(chg*100,1)) +
+                             '% — back outside trigger range, check interval back to normal')
+                print(f"[hot-mint] {datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')} "
+                      f"EXIT  mint={mint} user={short} chg={round(chg*100,1)}% "
+                      f"interval=1s", flush=True)
+
+            # ── Rugpull detector — first check, before crash-exit and stop-loss ──
+            _rug_reason = None
+            # Price-based "rugpull" trigger removed: it used to be a fixed -60%
+            # regardless of the user's own settings. The normal stop-loss check
+            # below already exits on price drop using this user's configured
+            # stop_loss (Settings), so it's the single source of truth for
+            # price-based exits now. Rugpull here stays limited to the two
+            # signals that are genuinely distinct from "price just fell": the
+            # pool being drained, or volume collapsing to near-zero.
+            if cur_liq > 0 and pos.get('entry_liquidity', 0) > 0 and cur_liq < pos['entry_liquidity'] * 0.50:
+                _liq_drop = round((1 - cur_liq / pos['entry_liquidity']) * 100, 1)
+                _rug_reason = ('liquidity dropped ' + str(_liq_drop) + '% ($' +
+                               str(int(pos['entry_liquidity'])) + ' → $' + str(int(cur_liq)) + ')')
+            elif cur_vol24 > 0 and cur_vol24 < 1000:
+                _rug_reason = '24h volume near-zero ($' + str(int(cur_vol24)) + ')'
+            if _rug_reason:
+                add_user_log(wallet, '[' + short + '] ⚠ Rugpull detected — emergency exit ' + label + ' | ' + _rug_reason)
+                print(f'[rugpull-detected] {short} {label} — {_rug_reason}', flush=True)
+                cooldown_tokens[label] = time.time() + 7200  # 2-hour cooldown
+                # '0' (Solana)/full pos['amount'] (EVM) = sell the actual on-chain
+                # balance, not blindly the tracked pos['amount'] -- they can drift
+                # (fee-on-transfer tokens, rounding), and this is a full close, so
+                # no dust left behind. See _bot_execute_exit()'s own docstring.
+                sell_ok, _exit_price, _sold_amt = _bot_execute_exit(
+                    user_id, us, wallet, mint, pos, price, label, pos['amount'], pos['spend'],
+                    'RUGPULL ' + _rug_reason[:40], pref_notifications, _enc_blob, _enc_blob_evm, True,
+                    entry_liquidity=pos.get('entry_liquidity'), entry_lp_locked_pct=pos.get('entry_lp_locked_pct'),
+                    entry_mint_authority_active=pos.get('entry_mint_authority_active'),
+                    entry_freeze_authority_active=pos.get('entry_freeze_authority_active'),
+                    sl_pct=pos.get('sl_pct'), tp_pct=pos.get('tp_pct'),
+                    sl_price=pos.get('sl_price'), tp_price=pos.get('tp_price'),
+                    entry_score=pos.get('entry_score'),
+                    highest_price=pos.get('highest_price'), lowest_price=pos.get('lowest_price'))
+                if sell_ok:
+                    _pos_chain = pos.get('chain', 'solana')
+                    _close_open_position(user_id, wallet, mint, chain=_pos_chain)
+                else:
+                    add_user_log(wallet, '[' + short + '] ✗ [rugpull] Sell failed — position kept open, will retry next scan')
+                continue  # skip crash-exit and TP/SL
+            if price < pos['buy_price'] * (1 - crash_exit):
+                crash_pct = str(round(chg*100,1)) + '%'
+                add_user_log(wallet, '[' + short + '] 🚨 [crash-exit] ' + label + ' ' + crash_pct + ' — price crashed >' + str(int(crash_exit*100)) + '% from entry, emergency exit')
+                print(f'[crash-exit] {short} {label} {crash_pct} price={price} entry={pos["buy_price"]}', flush=True)
+                sell_ok, _exit_price, _sold_amt = _bot_execute_exit(
+                    user_id, us, wallet, mint, pos, price, label, pos['amount'], pos['spend'],
+                    'CRASH EXIT ' + crash_pct, pref_notifications, _enc_blob, _enc_blob_evm, True,
+                    entry_liquidity=pos.get('entry_liquidity'), entry_lp_locked_pct=pos.get('entry_lp_locked_pct'),
+                    entry_mint_authority_active=pos.get('entry_mint_authority_active'),
+                    entry_freeze_authority_active=pos.get('entry_freeze_authority_active'),
+                    sl_pct=pos.get('sl_pct'), tp_pct=pos.get('tp_pct'),
+                    sl_price=pos.get('sl_price'), tp_price=pos.get('tp_price'),
+                    entry_score=pos.get('entry_score'),
+                    highest_price=pos.get('highest_price'), lowest_price=pos.get('lowest_price'))
+                if sell_ok:
+                    _pos_chain = pos.get('chain', 'solana')
+                    _close_open_position(user_id, wallet, mint, chain=_pos_chain)
+                else:
+                    add_user_log(wallet, '[' + short + '] ✗ [crash-exit] Sell failed — position kept open, will retry next scan')
+                continue  # skip normal TP/SL — crash exit already handled (or will retry)
+
+            # ── Staged take-profit (opt-in, users.tiered_tp_enabled -- shown to
+            # users as "Trailing Stop"; pos['trailing_enabled'] is this specific
+            # position's own open-time snapshot of that toggle, see
+            # _snapshot_entry_risk()). Stage 1 sells a slice at half the user's
+            # OWN take_profit % above entry, stage 2 sells another slice at the
+            # full target, and whatever remains becomes a trailing runner with a
+            # volatility-derived trail % (see _volatility_trailing_pct()) instead
+            # of a flat one-shot close -- a deliberate strategy swap the user
+            # opts into, not a change to the default flat-TP behavior everyone
+            # else keeps. A position without an entry-time snapshot (opened
+            # before this migration) falls back to the older single-tier
+            # TP1_MULTIPLE/TP1_SELL_FRACTION behavior instead.
+            _trailing_on  = pos.get('trailing_enabled', tiered_tp_enabled)
+            _has_snapshot = pos.get('tp_pct') is not None
+            if _trailing_on and not pos.get('tp1_hit'):
+                _tp1_target = (pos['buy_price'] * (1 + _eff_tp * TP_STAGE1_FRACTION_OF_TARGET)
+                               if _has_snapshot else pos['buy_price'] * TP1_MULTIPLE)
+                if price >= _tp1_target:
+                    _tp1_fraction = TP_STAGE1_SELL_FRACTION if _has_snapshot else TP1_SELL_FRACTION
+                    _tp1_amount = round(pos['amount'] * _tp1_fraction, 6)
+                    _tp1_spend  = round(pos['spend']  * _tp1_fraction, 6)
+                    if _tp1_amount > 0:
+                        add_user_log(wallet, '[' + short + '] TAKE PROFIT 1 (' + str(round(chg*100,1)) +
+                                     '%) — selling ' + str(int(_tp1_fraction*100)) + '% of ' + label +
+                                     ', trailing the rest')
+                        _tp1_ok, _tp1_exit_price, _tp1_sold_amt = _bot_execute_exit(
+                            user_id, us, wallet, mint, pos, price, label, _tp1_amount, _tp1_spend,
+                            ('TAKE PROFIT 1 (' + str(TP1_MULTIPLE) + 'x)' if not _has_snapshot
+                             else 'TAKE PROFIT 1 (' + str(round(_eff_tp*TP_STAGE1_FRACTION_OF_TARGET*100,1)) + '%)'),
+                            pref_notifications, _enc_blob, _enc_blob_evm, False,
+                            entry_liquidity=pos.get('entry_liquidity'), entry_lp_locked_pct=pos.get('entry_lp_locked_pct'),
+                            entry_mint_authority_active=pos.get('entry_mint_authority_active'),
+                            entry_freeze_authority_active=pos.get('entry_freeze_authority_active'),
+                            sl_pct=pos.get('sl_pct'), tp_pct=pos.get('tp_pct'),
+                            sl_price=pos.get('sl_price'), tp_price=pos.get('tp_price'),
+                            entry_score=pos.get('entry_score'),
+                            highest_price=pos.get('highest_price'), lowest_price=pos.get('lowest_price'))
+                        if _tp1_ok:
+                            pos['amount']     = round(pos['amount'] - _tp1_amount, 6)
+                            pos['spend']      = round(pos['spend']  - _tp1_spend, 6)
+                            pos['tp1_hit']    = True
+                            pos['trail_peak'] = price
+                            _upsert_open_position(user_id, wallet, mint, pos, source=pos.get('source', 'bot'),
+                                                   copy_of_wallet=pos.get('copy_of_wallet'), chain=pos.get('chain', 'solana'))
+                        else:
+                            add_user_log(wallet, '[' + short + '] ✗ TAKE PROFIT 1 sell failed — will retry next scan')
+                    continue  # re-enter fresh next scan either way
+
+            # Stage 2 only exists for a position with its own SL/TP snapshot --
+            # a pre-migration position keeps the older single-tier-then-trail
+            # shape (tp1_hit alone gates the trailing branch below for it).
+            if _trailing_on and _has_snapshot and pos.get('tp1_hit') and not pos.get('tp2_hit'):
+                _tp2_target = pos['buy_price'] * (1 + _eff_tp * TP_STAGE2_FRACTION_OF_TARGET)
+                if price >= _tp2_target:
+                    _tp2_amount = round(pos['amount'] * TP_STAGE2_SELL_FRACTION, 6)
+                    _tp2_spend  = round(pos['spend']  * TP_STAGE2_SELL_FRACTION, 6)
+                    if _tp2_amount > 0:
+                        add_user_log(wallet, '[' + short + '] TAKE PROFIT 2 (' + str(round(chg*100,1)) +
+                                     '%) — selling another ' + str(int(TP_STAGE2_SELL_FRACTION*100)) + '% of ' + label +
+                                     ', remainder runs')
+                        _tp2_ok, _tp2_exit_price, _tp2_sold_amt = _bot_execute_exit(
+                            user_id, us, wallet, mint, pos, price, label, _tp2_amount, _tp2_spend,
+                            'TAKE PROFIT 2 (' + str(round(_eff_tp*100,1)) + '%)',
+                            pref_notifications, _enc_blob, _enc_blob_evm, False,
+                            entry_liquidity=pos.get('entry_liquidity'), entry_lp_locked_pct=pos.get('entry_lp_locked_pct'),
+                            entry_mint_authority_active=pos.get('entry_mint_authority_active'),
+                            entry_freeze_authority_active=pos.get('entry_freeze_authority_active'),
+                            sl_pct=pos.get('sl_pct'), tp_pct=pos.get('tp_pct'),
+                            sl_price=pos.get('sl_price'), tp_price=pos.get('tp_price'),
+                            entry_score=pos.get('entry_score'),
+                            highest_price=pos.get('highest_price'), lowest_price=pos.get('lowest_price'))
+                        if _tp2_ok:
+                            pos['amount']     = round(pos['amount'] - _tp2_amount, 6)
+                            pos['spend']      = round(pos['spend']  - _tp2_spend, 6)
+                            pos['tp2_hit']    = True
+                            pos['trail_peak'] = price
+                            _upsert_open_position(user_id, wallet, mint, pos, source=pos.get('source', 'bot'),
+                                                   copy_of_wallet=pos.get('copy_of_wallet'), chain=pos.get('chain', 'solana'))
+                        else:
+                            add_user_log(wallet, '[' + short + '] ✗ TAKE PROFIT 2 sell failed — will retry next scan')
+                    continue  # re-enter fresh next scan either way
+
+            exit_reason = None
+            if _trailing_on and pos.get('tp1_hit'):
+                # First target already banked -- only the trailing stop governs
+                # the rest from here. The flat stop_loss/take_profit and the
+                # momentum-exit below no longer apply: "let the rest run" is the
+                # whole point once profit on this position is already locked in.
+                # Trail % is derived from this position's own recent volatility
+                # rather than one fixed number for every token (see
+                # _volatility_trailing_pct()) -- falls back to the flat
+                # TRAILING_STOP_PCT for a pre-migration position (no price_hist
+                # depth requirement difference, just the same function).
+                pos['trail_peak'] = max(pos.get('trail_peak', price), price)
+                _trail_pct = _volatility_trailing_pct(_hist)
+                _trail_dd = ((pos['trail_peak'] - price) / pos['trail_peak']) if pos['trail_peak'] > 0 else 0.0
+                if _trail_dd >= _trail_pct:
+                    exit_reason = 'TRAILING STOP -' + str(round(_trail_dd*100,1)) + '% from peak (' + str(round(_trail_pct*100,1)) + '% trail)'
+            elif chg <= -_eff_sl:
+                exit_reason = 'STOP LOSS ' + str(round(chg*100,1)) + '%'
+            elif chg >= _eff_tp:
+                exit_reason = 'TAKE PROFIT +' + str(round(chg*100,1)) + '%'
+            elif chg < 0 and _confirmed_downtrend(_hist):
+                # Confirmed downtrend caught this earlier than the user's own
+                # (possibly much wider) stop_loss would have -- 3 straight lower
+                # polls is a stronger "this isn't bouncing back" signal than
+                # waiting for one big threshold to be crossed.
+                exit_reason = 'MOMENTUM EXIT ' + str(round(chg*100,1)) + '%'
+                print(f'[momentum-exit] {short} {label} {round(chg*100,1)}% — '
+                      f'confirmed downtrend ({[round(p, 8) for p in _hist]}), cutting loss early', flush=True)
+            if exit_reason:
+                add_user_log(wallet, '[' + short + '] ' + exit_reason + ' ' + label)
+                sell_ok, _exit_price, _sold_amt = _bot_execute_exit(
+                    user_id, us, wallet, mint, pos, price, label, pos['amount'], pos['spend'],
+                    exit_reason, pref_notifications, _enc_blob, _enc_blob_evm, True,
+                    entry_liquidity=pos.get('entry_liquidity'), entry_lp_locked_pct=pos.get('entry_lp_locked_pct'),
+                    entry_mint_authority_active=pos.get('entry_mint_authority_active'),
+                    entry_freeze_authority_active=pos.get('entry_freeze_authority_active'),
+                    sl_pct=pos.get('sl_pct'), tp_pct=pos.get('tp_pct'),
+                    sl_price=pos.get('sl_price'), tp_price=pos.get('tp_price'),
+                    entry_score=pos.get('entry_score'),
+                    highest_price=pos.get('highest_price'), lowest_price=pos.get('lowest_price'),
+                    entry_volume_5m=pos.get('entry_volume_5m'), entry_volume_1h=pos.get('entry_volume_1h'),
+                    entry_volume_accel=pos.get('entry_volume_accel'),
+                    entry_buy_sell_ratio=pos.get('entry_buy_sell_ratio'),
+                    entry_unique_traders=pos.get('entry_unique_traders'),
+                    entry_market_cap=pos.get('entry_market_cap'),
+                    entry_pair_age_minutes=pos.get('entry_pair_age_minutes'),
+                    risk_score=pos.get('risk_score'), entry_slippage_pct=pos.get('entry_slippage_pct'))
+                if sell_ok:
+                    _pos_chain = pos.get('chain', 'solana')
+                    _close_open_position(user_id, wallet, mint, chain=_pos_chain)
+                else:
+                    add_user_log(wallet, '[' + short + '] ✗ Sell failed — position kept open, will retry next scan')
+
+    def _exit_watch():
+        while not stop_event.is_set():
+            _t0 = time.time()
+            try:
+                _exit_pass()
+            except Exception as _xe:
+                print(f'[exit-watch] {short} {type(_xe).__name__}: {_xe}', flush=True)
+            stop_event.wait(max(0.05, EXIT_CHECK_INTERVAL - (time.time() - _t0)))
+
+    threading.Thread(target=_exit_watch, name='exit-watch-' + short, daemon=True).start()
     try:
         while not stop_event.is_set():
             try:
@@ -11096,292 +11528,13 @@ def user_trader_loop(stop_event, config, wallet: str):
                         add_user_log(wallet, '[' + short + '] Scanning ' + str(total_live) +
                                      ' tokens... ' + _avail_label + ' Pos:' + str(open_pos) + '/' + str(max_positions))
 
-                # ── Pass 1: exit checks for ALL open positions ──
-                # Iterates positions dict (not live scan) so tokens that drop off the
-                # DexScreener trending list still get stop-loss/take-profit every cycle.
-                for mint, pos in list(positions.items()):
-                    if stop_event.is_set(): break
-                    if pos.get('amount', 0) <= 0 or pos.get('buy_price', 0) <= 0:
-                        continue
-                    if pos.get('chain', 'solana') != 'solana' and not _enc_blob_evm:
-                        continue  # no EVM trading key configured -- can't touch this position at all
-                    # Every open position stays fast-polled for as long as it's held, not
-                    # just once it's already close to a trigger -- a real rugpull can crash
-                    # a token from healthy to way past stop-loss within a single normal
-                    # (15s) scan gap, before the reactive "near-threshold" alerting below
-                    # ever gets a chance to fire. Refreshed every cycle so the TTL never
-                    # lapses while held. get_token_data(fast=True) caches per-mint at the
-                    # HOT_MINT_TTL_FAST/MEDIUM tier (_hot_mint_fetch_ttl), so this is one
-                    # shared fetch per mint per tier window, not one extra request per
-                    # position/user holding it. Priority reflects the last successfully
-                    # computed _near_trigger state (not just this cycle's) so a position
-                    # already near its trigger doesn't lose its fast-tier ranking to a
-                    # temporary price-fetch failure -- exactly the kind of DexScreener
-                    # hiccup a real liquidity drain can cause.
-                    _mark_hot_mint(mint, priority=bool(pos.get('_near_trigger')))
-                    _td       = get_token_data(mint, fast=True)
-                    price     = float(_td['price']) if _td else 0.0
-                    label     = (_td['symbol'] if _td else '') or pos.get('symbol', mint[:8])
-                    cur_liq   = float(_td.get('liquidity', 0) or 0) if _td else 0.0
-                    cur_vol24 = float(_td.get('volume24h', 0) or 0) if _td else 0.0
-                    if price <= 0:
-                        continue
-                    chg = (price - pos['buy_price']) / pos['buy_price']
+                # ── Pass 1 (exits) runs in its own thread, once a second ──
+                # Stop loss, take profit, crash/rug exits and the trailing stop are
+                # checked by _exit_watch() (started above the loop), not here: this
+                # loop also reads balances and looks for, vets and buys new tokens,
+                # which can take many seconds, and it pauses entirely on an RPC
+                # outage or a daily-loss pause. None of that may delay a sell.
 
-                    # This position's own SL/TP -- its open-time snapshot
-                    # (pos['sl_pct']/['tp_pct']) if it has one, else the loop's
-                    # live-settings value for a position opened before that
-                    # snapshot existed. See _pos_sl_frac()/_pos_tp_frac(): once
-                    # a position IS snapshotted, a later Settings change must
-                    # never retarget it while it's still open.
-                    _eff_sl = _pos_sl_frac(pos, stop_loss)
-                    _eff_tp = _pos_tp_frac(pos, take_profit)
-
-                    # High/low water mark for trade-analytics logging (see
-                    # /api/stats/performance) and the volatility-based trailing
-                    # stop below -- independent of price_hist's short window.
-                    pos['highest_price'] = max(pos.get('highest_price') or price, price)
-                    pos['lowest_price']  = min(pos.get('lowest_price') or price, price)
-
-                    # Rolling window for the momentum-deterioration exit below --
-                    # last 5 polled prices is plenty for a 3-sample confirming trend.
-                    _hist = pos.setdefault('price_hist', [])
-                    _hist.append(price)
-                    if len(_hist) > 5:
-                        del _hist[:-5]
-
-                    # ── Near-trigger alerting — within 5% of this user's own SL/crash-exit
-                    # value (relative to the threshold, e.g. -2.85%..-3.00% for a 3% SL).
-                    # Tracked per-position via pos['_near_trigger'] rather than off the
-                    # _hot_mints registry above (which is now unconditionally true for every
-                    # held position), so these ENTER/EXIT log lines only fire on a genuine
-                    # proximity transition instead of every single cycle.
-                    _was_near_trigger    = bool(pos.get('_near_trigger'))
-                    _now_hot             = (chg <= -0.95 * _eff_sl) or (chg <= -0.95 * crash_exit)
-                    pos['_near_trigger'] = _now_hot
-                    if _now_hot:
-                        _mark_hot_mint(mint, priority=True)
-                        if not _was_near_trigger:
-                            add_user_log(wallet, '[' + short + '] ⚡ ' + label + ' ' + str(round(chg*100,1)) +
-                                         '% — near exit threshold, maintaining 2s decision cadence')
-                            # Dedicated, grep-able stdout line (separate from the per-user UI
-                            # log above) so production behavior can be verified directly in the
-                            # server logs after deploy — full mint address + explicit UTC
-                            # timestamp, not just the truncated symbol shown in the UI.
-                            print(f"[hot-mint] {datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')} "
-                                  f"ENTER mint={mint} user={short} chg={round(chg*100,1)}% "
-                                  f"sl=-{round(_eff_sl*100,1)}% crash=-{round(crash_exit*100,1)}% "
-                                  f"interval=2s", flush=True)
-                    elif _was_near_trigger:
-                        add_user_log(wallet, '[' + short + '] ' + label + ' ' + str(round(chg*100,1)) +
-                                     '% — back outside trigger range, check interval back to normal')
-                        print(f"[hot-mint] {datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')} "
-                              f"EXIT  mint={mint} user={short} chg={round(chg*100,1)}% "
-                              f"interval=2s->{_scan_interval}s", flush=True)
-
-                    # ── Rugpull detector — first check, before crash-exit and stop-loss ──
-                    _rug_reason = None
-                    # Price-based "rugpull" trigger removed: it used to be a fixed -60%
-                    # regardless of the user's own settings. The normal stop-loss check
-                    # below already exits on price drop using this user's configured
-                    # stop_loss (Settings), so it's the single source of truth for
-                    # price-based exits now. Rugpull here stays limited to the two
-                    # signals that are genuinely distinct from "price just fell": the
-                    # pool being drained, or volume collapsing to near-zero.
-                    if cur_liq > 0 and pos.get('entry_liquidity', 0) > 0 and cur_liq < pos['entry_liquidity'] * 0.50:
-                        _liq_drop = round((1 - cur_liq / pos['entry_liquidity']) * 100, 1)
-                        _rug_reason = ('liquidity dropped ' + str(_liq_drop) + '% ($' +
-                                       str(int(pos['entry_liquidity'])) + ' → $' + str(int(cur_liq)) + ')')
-                    elif cur_vol24 > 0 and cur_vol24 < 1000:
-                        _rug_reason = '24h volume near-zero ($' + str(int(cur_vol24)) + ')'
-                    if _rug_reason:
-                        add_user_log(wallet, '[' + short + '] ⚠ Rugpull detected — emergency exit ' + label + ' | ' + _rug_reason)
-                        print(f'[rugpull-detected] {short} {label} — {_rug_reason}', flush=True)
-                        cooldown_tokens[label] = time.time() + 7200  # 2-hour cooldown
-                        # '0' (Solana)/full pos['amount'] (EVM) = sell the actual on-chain
-                        # balance, not blindly the tracked pos['amount'] -- they can drift
-                        # (fee-on-transfer tokens, rounding), and this is a full close, so
-                        # no dust left behind. See _bot_execute_exit()'s own docstring.
-                        sell_ok, _exit_price, _sold_amt = _bot_execute_exit(
-                            user_id, us, wallet, mint, pos, price, label, pos['amount'], pos['spend'],
-                            'RUGPULL ' + _rug_reason[:40], pref_notifications, _enc_blob, _enc_blob_evm, True,
-                            entry_liquidity=pos.get('entry_liquidity'), entry_lp_locked_pct=pos.get('entry_lp_locked_pct'),
-                            entry_mint_authority_active=pos.get('entry_mint_authority_active'),
-                            entry_freeze_authority_active=pos.get('entry_freeze_authority_active'),
-                            sl_pct=pos.get('sl_pct'), tp_pct=pos.get('tp_pct'),
-                            sl_price=pos.get('sl_price'), tp_price=pos.get('tp_price'),
-                            entry_score=pos.get('entry_score'),
-                            highest_price=pos.get('highest_price'), lowest_price=pos.get('lowest_price'))
-                        if sell_ok:
-                            _pos_chain = pos.get('chain', 'solana')
-                            _close_open_position(user_id, wallet, mint, chain=_pos_chain)
-                            open_pos_by_chain[_pos_chain] = max(0, open_pos_by_chain.get(_pos_chain, 0) - 1)
-                            if _pos_chain == 'solana':
-                                open_pos -= 1
-                        else:
-                            add_user_log(wallet, '[' + short + '] ✗ [rugpull] Sell failed — position kept open, will retry next scan')
-                        continue  # skip crash-exit and TP/SL
-                    if price < pos['buy_price'] * (1 - crash_exit):
-                        crash_pct = str(round(chg*100,1)) + '%'
-                        add_user_log(wallet, '[' + short + '] 🚨 [crash-exit] ' + label + ' ' + crash_pct + ' — price crashed >' + str(int(crash_exit*100)) + '% from entry, emergency exit')
-                        print(f'[crash-exit] {short} {label} {crash_pct} price={price} entry={pos["buy_price"]}', flush=True)
-                        sell_ok, _exit_price, _sold_amt = _bot_execute_exit(
-                            user_id, us, wallet, mint, pos, price, label, pos['amount'], pos['spend'],
-                            'CRASH EXIT ' + crash_pct, pref_notifications, _enc_blob, _enc_blob_evm, True,
-                            entry_liquidity=pos.get('entry_liquidity'), entry_lp_locked_pct=pos.get('entry_lp_locked_pct'),
-                            entry_mint_authority_active=pos.get('entry_mint_authority_active'),
-                            entry_freeze_authority_active=pos.get('entry_freeze_authority_active'),
-                            sl_pct=pos.get('sl_pct'), tp_pct=pos.get('tp_pct'),
-                            sl_price=pos.get('sl_price'), tp_price=pos.get('tp_price'),
-                            entry_score=pos.get('entry_score'),
-                            highest_price=pos.get('highest_price'), lowest_price=pos.get('lowest_price'))
-                        if sell_ok:
-                            _pos_chain = pos.get('chain', 'solana')
-                            _close_open_position(user_id, wallet, mint, chain=_pos_chain)
-                            open_pos_by_chain[_pos_chain] = max(0, open_pos_by_chain.get(_pos_chain, 0) - 1)
-                            if _pos_chain == 'solana':
-                                open_pos -= 1
-                        else:
-                            add_user_log(wallet, '[' + short + '] ✗ [crash-exit] Sell failed — position kept open, will retry next scan')
-                        continue  # skip normal TP/SL — crash exit already handled (or will retry)
-
-                    # ── Staged take-profit (opt-in, users.tiered_tp_enabled -- shown to
-                    # users as "Trailing Stop"; pos['trailing_enabled'] is this specific
-                    # position's own open-time snapshot of that toggle, see
-                    # _snapshot_entry_risk()). Stage 1 sells a slice at half the user's
-                    # OWN take_profit % above entry, stage 2 sells another slice at the
-                    # full target, and whatever remains becomes a trailing runner with a
-                    # volatility-derived trail % (see _volatility_trailing_pct()) instead
-                    # of a flat one-shot close -- a deliberate strategy swap the user
-                    # opts into, not a change to the default flat-TP behavior everyone
-                    # else keeps. A position without an entry-time snapshot (opened
-                    # before this migration) falls back to the older single-tier
-                    # TP1_MULTIPLE/TP1_SELL_FRACTION behavior instead.
-                    _trailing_on  = pos.get('trailing_enabled', tiered_tp_enabled)
-                    _has_snapshot = pos.get('tp_pct') is not None
-                    if _trailing_on and not pos.get('tp1_hit'):
-                        _tp1_target = (pos['buy_price'] * (1 + _eff_tp * TP_STAGE1_FRACTION_OF_TARGET)
-                                       if _has_snapshot else pos['buy_price'] * TP1_MULTIPLE)
-                        if price >= _tp1_target:
-                            _tp1_fraction = TP_STAGE1_SELL_FRACTION if _has_snapshot else TP1_SELL_FRACTION
-                            _tp1_amount = round(pos['amount'] * _tp1_fraction, 6)
-                            _tp1_spend  = round(pos['spend']  * _tp1_fraction, 6)
-                            if _tp1_amount > 0:
-                                add_user_log(wallet, '[' + short + '] TAKE PROFIT 1 (' + str(round(chg*100,1)) +
-                                             '%) — selling ' + str(int(_tp1_fraction*100)) + '% of ' + label +
-                                             ', trailing the rest')
-                                _tp1_ok, _tp1_exit_price, _tp1_sold_amt = _bot_execute_exit(
-                                    user_id, us, wallet, mint, pos, price, label, _tp1_amount, _tp1_spend,
-                                    ('TAKE PROFIT 1 (' + str(TP1_MULTIPLE) + 'x)' if not _has_snapshot
-                                     else 'TAKE PROFIT 1 (' + str(round(_eff_tp*TP_STAGE1_FRACTION_OF_TARGET*100,1)) + '%)'),
-                                    pref_notifications, _enc_blob, _enc_blob_evm, False,
-                                    entry_liquidity=pos.get('entry_liquidity'), entry_lp_locked_pct=pos.get('entry_lp_locked_pct'),
-                                    entry_mint_authority_active=pos.get('entry_mint_authority_active'),
-                                    entry_freeze_authority_active=pos.get('entry_freeze_authority_active'),
-                                    sl_pct=pos.get('sl_pct'), tp_pct=pos.get('tp_pct'),
-                                    sl_price=pos.get('sl_price'), tp_price=pos.get('tp_price'),
-                                    entry_score=pos.get('entry_score'),
-                                    highest_price=pos.get('highest_price'), lowest_price=pos.get('lowest_price'))
-                                if _tp1_ok:
-                                    pos['amount']     = round(pos['amount'] - _tp1_amount, 6)
-                                    pos['spend']      = round(pos['spend']  - _tp1_spend, 6)
-                                    pos['tp1_hit']    = True
-                                    pos['trail_peak'] = price
-                                    _upsert_open_position(user_id, wallet, mint, pos, source=pos.get('source', 'bot'),
-                                                           copy_of_wallet=pos.get('copy_of_wallet'), chain=pos.get('chain', 'solana'))
-                                else:
-                                    add_user_log(wallet, '[' + short + '] ✗ TAKE PROFIT 1 sell failed — will retry next scan')
-                            continue  # re-enter fresh next scan either way
-
-                    # Stage 2 only exists for a position with its own SL/TP snapshot --
-                    # a pre-migration position keeps the older single-tier-then-trail
-                    # shape (tp1_hit alone gates the trailing branch below for it).
-                    if _trailing_on and _has_snapshot and pos.get('tp1_hit') and not pos.get('tp2_hit'):
-                        _tp2_target = pos['buy_price'] * (1 + _eff_tp * TP_STAGE2_FRACTION_OF_TARGET)
-                        if price >= _tp2_target:
-                            _tp2_amount = round(pos['amount'] * TP_STAGE2_SELL_FRACTION, 6)
-                            _tp2_spend  = round(pos['spend']  * TP_STAGE2_SELL_FRACTION, 6)
-                            if _tp2_amount > 0:
-                                add_user_log(wallet, '[' + short + '] TAKE PROFIT 2 (' + str(round(chg*100,1)) +
-                                             '%) — selling another ' + str(int(TP_STAGE2_SELL_FRACTION*100)) + '% of ' + label +
-                                             ', remainder runs')
-                                _tp2_ok, _tp2_exit_price, _tp2_sold_amt = _bot_execute_exit(
-                                    user_id, us, wallet, mint, pos, price, label, _tp2_amount, _tp2_spend,
-                                    'TAKE PROFIT 2 (' + str(round(_eff_tp*100,1)) + '%)',
-                                    pref_notifications, _enc_blob, _enc_blob_evm, False,
-                                    entry_liquidity=pos.get('entry_liquidity'), entry_lp_locked_pct=pos.get('entry_lp_locked_pct'),
-                                    entry_mint_authority_active=pos.get('entry_mint_authority_active'),
-                                    entry_freeze_authority_active=pos.get('entry_freeze_authority_active'),
-                                    sl_pct=pos.get('sl_pct'), tp_pct=pos.get('tp_pct'),
-                                    sl_price=pos.get('sl_price'), tp_price=pos.get('tp_price'),
-                                    entry_score=pos.get('entry_score'),
-                                    highest_price=pos.get('highest_price'), lowest_price=pos.get('lowest_price'))
-                                if _tp2_ok:
-                                    pos['amount']     = round(pos['amount'] - _tp2_amount, 6)
-                                    pos['spend']      = round(pos['spend']  - _tp2_spend, 6)
-                                    pos['tp2_hit']    = True
-                                    pos['trail_peak'] = price
-                                    _upsert_open_position(user_id, wallet, mint, pos, source=pos.get('source', 'bot'),
-                                                           copy_of_wallet=pos.get('copy_of_wallet'), chain=pos.get('chain', 'solana'))
-                                else:
-                                    add_user_log(wallet, '[' + short + '] ✗ TAKE PROFIT 2 sell failed — will retry next scan')
-                            continue  # re-enter fresh next scan either way
-
-                    exit_reason = None
-                    if _trailing_on and pos.get('tp1_hit'):
-                        # First target already banked -- only the trailing stop governs
-                        # the rest from here. The flat stop_loss/take_profit and the
-                        # momentum-exit below no longer apply: "let the rest run" is the
-                        # whole point once profit on this position is already locked in.
-                        # Trail % is derived from this position's own recent volatility
-                        # rather than one fixed number for every token (see
-                        # _volatility_trailing_pct()) -- falls back to the flat
-                        # TRAILING_STOP_PCT for a pre-migration position (no price_hist
-                        # depth requirement difference, just the same function).
-                        pos['trail_peak'] = max(pos.get('trail_peak', price), price)
-                        _trail_pct = _volatility_trailing_pct(_hist)
-                        _trail_dd = ((pos['trail_peak'] - price) / pos['trail_peak']) if pos['trail_peak'] > 0 else 0.0
-                        if _trail_dd >= _trail_pct:
-                            exit_reason = 'TRAILING STOP -' + str(round(_trail_dd*100,1)) + '% from peak (' + str(round(_trail_pct*100,1)) + '% trail)'
-                    elif chg <= -_eff_sl:
-                        exit_reason = 'STOP LOSS ' + str(round(chg*100,1)) + '%'
-                    elif chg >= _eff_tp:
-                        exit_reason = 'TAKE PROFIT +' + str(round(chg*100,1)) + '%'
-                    elif chg < 0 and _confirmed_downtrend(_hist):
-                        # Confirmed downtrend caught this earlier than the user's own
-                        # (possibly much wider) stop_loss would have -- 3 straight lower
-                        # polls is a stronger "this isn't bouncing back" signal than
-                        # waiting for one big threshold to be crossed.
-                        exit_reason = 'MOMENTUM EXIT ' + str(round(chg*100,1)) + '%'
-                        print(f'[momentum-exit] {short} {label} {round(chg*100,1)}% — '
-                              f'confirmed downtrend ({[round(p, 8) for p in _hist]}), cutting loss early', flush=True)
-                    if exit_reason:
-                        add_user_log(wallet, '[' + short + '] ' + exit_reason + ' ' + label)
-                        sell_ok, _exit_price, _sold_amt = _bot_execute_exit(
-                            user_id, us, wallet, mint, pos, price, label, pos['amount'], pos['spend'],
-                            exit_reason, pref_notifications, _enc_blob, _enc_blob_evm, True,
-                            entry_liquidity=pos.get('entry_liquidity'), entry_lp_locked_pct=pos.get('entry_lp_locked_pct'),
-                            entry_mint_authority_active=pos.get('entry_mint_authority_active'),
-                            entry_freeze_authority_active=pos.get('entry_freeze_authority_active'),
-                            sl_pct=pos.get('sl_pct'), tp_pct=pos.get('tp_pct'),
-                            sl_price=pos.get('sl_price'), tp_price=pos.get('tp_price'),
-                            entry_score=pos.get('entry_score'),
-                            highest_price=pos.get('highest_price'), lowest_price=pos.get('lowest_price'),
-                            entry_volume_5m=pos.get('entry_volume_5m'), entry_volume_1h=pos.get('entry_volume_1h'),
-                            entry_volume_accel=pos.get('entry_volume_accel'),
-                            entry_buy_sell_ratio=pos.get('entry_buy_sell_ratio'),
-                            entry_unique_traders=pos.get('entry_unique_traders'),
-                            entry_market_cap=pos.get('entry_market_cap'),
-                            entry_pair_age_minutes=pos.get('entry_pair_age_minutes'),
-                            risk_score=pos.get('risk_score'), entry_slippage_pct=pos.get('entry_slippage_pct'))
-                        if sell_ok:
-                            _pos_chain = pos.get('chain', 'solana')
-                            _close_open_position(user_id, wallet, mint, chain=_pos_chain)
-                            open_pos_by_chain[_pos_chain] = max(0, open_pos_by_chain.get(_pos_chain, 0) - 1)
-                            if _pos_chain == 'solana':
-                                open_pos -= 1
-                        else:
-                            add_user_log(wallet, '[' + short + '] ✗ Sell failed — position kept open, will retry next scan')
 
                 # ── Profit protection: gate Pass 2 without touching exit logic ──
                 _now_plk   = time.time()
