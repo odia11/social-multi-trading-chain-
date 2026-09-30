@@ -10962,6 +10962,20 @@ def _exit_token_data(mint: str, chain: str = 'solana'):
     return _exit_td_cache.get(mint)
 
 
+def _server_error_msg(e, where: str) -> str:
+    """An unexpected server-side failure, as the browser may see it.
+
+    Exception text can carry SQL, file paths, provider responses or request
+    data; it belongs in the server log, never in a response to a member.
+    Validation messages meant for the user are returned elsewhere, not here."""
+    try:
+        detail = _redact_keys(str(e))[:300]
+    except Exception:
+        detail = ''
+    print(f'[{where}] server error: {type(e).__name__}: {detail}', flush=True)
+    return 'Something went wrong on our side. Please try again.'
+
+
 # ── PER-USER TRADER ──
 def user_trader_loop(stop_event, config, wallet: str):
     us    = get_user_state(wallet)
@@ -12524,8 +12538,14 @@ def index():
     html = _get_index_base_html()
     _sw = session.get('wallet', '')
     _ss = (_sw[:4] + '...' + _sw[-4:]) if len(_sw) > 8 else _sw
-    html = html.replace('__SESSION_WALLET__', _sw)
-    html = html.replace('__SESSION_SHORT__',  _ss)
+    # These land inside JavaScript string literals in dashboard.html. Every
+    # login path validates the address today; encode anyway, so a quote,
+    # backslash or "</script>" in a session value could never break out.
+    def _js_str(v):
+        return (json.dumps(str(v))[1:-1].replace('<', '\\u003c').replace('>', '\\u003e')
+                .replace("'", '\\u0027'))
+    html = html.replace('__SESSION_WALLET__', _js_str(_sw))
+    html = html.replace('__SESSION_SHORT__',  _js_str(_ss))
     resp = app.response_class(html, mimetype='text/html')
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     resp.headers['Pragma'] = 'no-cache'
@@ -13454,7 +13474,7 @@ def api_badges(wallet_addr):
         badges = [b.strip() for b in (row[0] or '').split(',') if b.strip()]
         return jsonify({'ok': True, 'badges': badges})
     except Exception as e:
-        return jsonify({'ok': False, 'error': str(e)}), 500
+        return jsonify({'ok': False, 'error': _server_error_msg(e, '/api/badges/<wallet_addr>')}), 500
 
 
 def _sync_copy_relationship(conn, wallet: str, new_target: str | None) -> None:
@@ -14563,7 +14583,10 @@ def wallet_page():
             client_secret=API_SHARED_SECRET,
         )
     except Exception as e:
-        return f'<h1>Wallet Error: {str(e)}</h1>', 500
+        # Never echo the exception into HTML: it can carry request data and
+        # internal details. The log keeps the reason.
+        print(f'[wallet] page error: {type(e).__name__}: {_redact_keys(str(e))[:200]}', flush=True)
+        return '<h1>Wallet is temporarily unavailable. Please try again.</h1>', 500
 
 
 @app.route('/api/bsc/balance', methods=['GET'])
@@ -15683,7 +15706,8 @@ def referrals_page():
             csrf_token=_get_csrf_token(),
         )
     except Exception as e:
-        return f'<h1>Referrals Error: {str(e)}</h1>', 500
+        print(f'[referrals] page error: {type(e).__name__}: {_redact_keys(str(e))[:200]}', flush=True)
+        return '<h1>Referrals are temporarily unavailable. Please try again.</h1>', 500
 
 
 @app.route('/settings')
@@ -21918,7 +21942,7 @@ def api_instant_trade():
                 (wallet,)).fetchone()
         except Exception as e:
             traceback.print_exc()
-            return jsonify({'error': f'DB error: {e}'}), 500
+            return jsonify({'error': _server_error_msg(e, '/api/instant-trade')}), 500
         finally:
             conn.close()
         if not row or not row[1]:
@@ -22158,7 +22182,7 @@ def api_instant_trade():
 
     except Exception as e:
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _server_error_msg(e, '/api/instant-trade')}), 500
 
 
 FEED_POST_TEXT_MAX  = 500    # what a user actually types -- matches the composer textarea's own maxlength
@@ -23535,12 +23559,15 @@ def post_permalink(post_id):
     # INSERT), which no social unfurler accepts as og:image -- only use it if it's
     # an actual path/URL, otherwise fall back to the site icon.
     raw_image = post['image_url'] or ''
-    if raw_image.startswith('http'):
+    if raw_image.startswith('https://'):
         image_url = raw_image
-    elif raw_image.startswith('/'):
+    elif raw_image.startswith('/') and not raw_image.startswith('//'):
         image_url = f'https://orcagent.fun{raw_image}'
     else:
         image_url = 'https://orcagent.fun/static/icon-512.png'
+    # Goes into attributes of a page whose every <script> gets a CSP nonce,
+    # so a quote in it must never close the attribute.
+    image_url = _html_lib.escape(image_url, quote=True)
     safe_id  = _html_lib.escape(post_id)
     page_url = f'https://orcagent.fun/post/{safe_id}'
     html_doc = f'''<!doctype html>
@@ -24808,7 +24835,7 @@ def search_users():
             ('%' + q + '%', me or 0)
         ).fetchall()
     except Exception as e:
-        return jsonify({'ok': False, 'msg': 'Server error: ' + str(e)}), 500
+        return jsonify({'ok': False, 'msg': _server_error_msg(e, '/api/users/search')}), 500
     finally:
         conn.close()
     return jsonify({'ok': True, 'users': [
@@ -24851,7 +24878,7 @@ def search_tokens():
                 break
         return jsonify({'ok': True, 'tokens': results})
     except Exception as e:
-        return jsonify({'ok': False, 'msg': str(e)}), 500
+        return jsonify({'ok': False, 'msg': _server_error_msg(e, '/api/tokens/search')}), 500
 
 @app.route('/api/dexscreener/token-boosts')
 @rate_limit(30, 60)
@@ -25126,7 +25153,7 @@ def api_token_info(mint_address):
             'dexscreener_url':   p.get('url') or f'https://dexscreener.com/{p.get("chainId","solana")}/{mint}',
         })
     except Exception as e:
-        return jsonify({'ok': False, 'msg': str(e)}), 500
+        return jsonify({'ok': False, 'msg': _server_error_msg(e, '/api/token/info/<mint_address>')}), 500
 
 
 @app.route('/api/trade/buy', methods=['POST'])
@@ -25519,7 +25546,7 @@ def api_wallet_tokens():
         print(f'[wallet-tokens] tokens found: {len(tokens)}', flush=True)
         return jsonify({'ok': True, 'tokens': tokens, 'cached': False})
     except Exception as e:
-        return jsonify({'ok': False, 'msg': str(e)}), 500
+        return jsonify({'ok': False, 'msg': _server_error_msg(e, '/api/wallet/tokens')}), 500
 
 
 @app.route('/api/wallet/total', methods=['GET'])
@@ -25538,7 +25565,7 @@ def api_wallet_total():
             'token_count': len(data['tokens']),
         })
     except Exception as e:
-        return jsonify({'ok': False, 'msg': str(e)}), 500
+        return jsonify({'ok': False, 'msg': _server_error_msg(e, '/api/wallet/total')}), 500
 
 
 @app.route('/api/wallet/balance', methods=['GET'])
@@ -25871,7 +25898,7 @@ def api_portfolio_summary():
         lamports = r.json()['result']['value']
         sol_balance = round(lamports / 1e9, 6)
     except Exception as e:
-        return jsonify({'ok': False, 'msg': str(e)}), 500
+        return jsonify({'ok': False, 'msg': _server_error_msg(e, '/api/portfolio-summary')}), 500
 
     us = get_user_state(wallet)
     live_map = {t['mint']: t for t in state.get('tokens', [])}
@@ -26059,7 +26086,7 @@ def api_wallet_transactions():
             LIMIT 20
         ''', (uid,)).fetchall()
     except Exception as e:
-        return jsonify({'ok': False, 'msg': str(e)}), 500
+        return jsonify({'ok': False, 'msg': _server_error_msg(e, '/api/wallet/transactions')}), 500
     finally:
         conn.close()
     txns = []
@@ -26190,7 +26217,7 @@ def delete_dm_thread(peer_id):
         )
         conn.commit()
     except Exception as e:
-        return jsonify({'ok': False, 'msg': 'Server error: ' + str(e)}), 500
+        return jsonify({'ok': False, 'msg': _server_error_msg(e, '/api/messages/thread/<int:peer_id>')}), 500
     finally:
         conn.close()
     return jsonify({'ok': True})
@@ -26368,7 +26395,7 @@ def send_dm(peer_id):
         _send_push_notification(peer_id, sender_name, preview, '/messages/' + wallet)
         conn.commit()
     except Exception as e:
-        return jsonify({'ok': False, 'msg': 'Server error: ' + str(e)}), 500
+        return jsonify({'ok': False, 'msg': _server_error_msg(e, '/api/messages/<int:peer_id>')}), 500
     finally:
         conn.close()
     return jsonify({'ok': True, 'success': True, 'message_id': message_id,
@@ -26742,7 +26769,7 @@ def delete_dm(message_id):
         conn.execute('DELETE FROM direct_messages WHERE id=?', (message_id,))
         conn.commit()
     except Exception as e:
-        return jsonify({'ok': False, 'msg': 'Server error: ' + str(e)}), 500
+        return jsonify({'ok': False, 'msg': _server_error_msg(e, '/api/messages/<int:message_id>')}), 500
     finally:
         conn.close()
     return jsonify({'ok': True})
@@ -26792,7 +26819,7 @@ def edit_dm(message_id):
             'SELECT edited_at FROM direct_messages WHERE id=?', (message_id,)
         ).fetchone()[0]
     except Exception as e:
-        return jsonify({'ok': False, 'msg': 'Server error: ' + str(e)}), 500
+        return jsonify({'ok': False, 'msg': _server_error_msg(e, '/api/messages/<int:message_id>')}), 500
     finally:
         conn.close()
     return jsonify({'ok': True, 'message': text, 'edited_at': edited_at})
@@ -26874,7 +26901,7 @@ def post_group_chat():
             'SELECT COALESCE(username,""), COALESCE(avatar_url,""), wallet_address FROM users WHERE id=?', (me,)
         ).fetchone()
     except Exception as e:
-        return jsonify({'ok': False, 'msg': 'Server error: ' + str(e)}), 500
+        return jsonify({'ok': False, 'msg': _server_error_msg(e, '/api/chat')}), 500
     finally:
         conn.close()
     return jsonify({
@@ -26907,7 +26934,7 @@ def delete_group_chat(message_id):
         conn.execute('DELETE FROM group_chat WHERE id=?', (message_id,))
         conn.commit()
     except Exception as e:
-        return jsonify({'ok': False, 'msg': 'Server error: ' + str(e)}), 500
+        return jsonify({'ok': False, 'msg': _server_error_msg(e, '/api/chat/<int:message_id>')}), 500
     finally:
         conn.close()
     return jsonify({'ok': True})
@@ -27033,7 +27060,7 @@ def share_trade_dm(peer_id):
         conn.commit()
         message_id = cur.lastrowid
     except Exception as e:
-        return jsonify({'ok': False, 'msg': 'Server error: ' + str(e)}), 500
+        return jsonify({'ok': False, 'msg': _server_error_msg(e, '/api/messages/<int:peer_id>/share-trade')}), 500
     finally:
         conn.close()
     return jsonify({'ok': True, 'message_id': message_id, 'created_at': now})
@@ -27155,7 +27182,7 @@ def send_wallet_message(wallet):
         conn.commit()
         msg_id = cur.lastrowid
     except Exception as e:
-        return jsonify({'ok': False, 'msg': 'Server error: ' + str(e)}), 500
+        return jsonify({'ok': False, 'msg': _server_error_msg(e, '/api/messages/<wallet>')}), 500
     finally:
         conn.close()
     return jsonify({'ok': True, 'message': {

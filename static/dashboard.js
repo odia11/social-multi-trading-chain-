@@ -9301,7 +9301,11 @@ async function showTokenCard(symbol,knownAddr){
     const fmtBig=n=>n==null?'—':'$'+parseInt(n).toLocaleString('en-US')
     const pctBadge=(v,lbl)=>{const n=parseFloat(v||0),c=n>=0?'#3ad29b':'#f76b62',bg=n>=0?'rgba(58,210,155,0.12)':'rgba(247,107,98,0.12)';return`<span style="background:${bg};color:${c};border-radius:6px;padding:3px 8px;font-size:11px;font-family:\'JetBrains Mono\',monospace;font-weight:700">${lbl} ${n>=0?'+':''}${n.toFixed(2)}%</span>`}
     const ch24=parseFloat(p.priceChange?.h24||0)
+    // Token creators choose these links: only plain web links may become an
+    // href (never javascript:, data: or other schemes), same rule Live
+    // Market's socialsHtml() applies.
     const _links=[...(p.info?.socials||[]),...(p.info?.websites||[]).map(function(w){return{type:'website',url:w.url}}),...(p.info?.links||[])]
+      .filter(function(l){return l && typeof l.url==='string' && /^https?:\/\//i.test(l.url.trim())})
       .filter(l=>/^https?:\/\//i.test(l.url||''));
     const _li=function(l){var t=(l.type||'').toLowerCase(),u=(l.url||'').toLowerCase();if(t==='twitter'||u.indexOf('twitter.com')>=0||u.indexOf('x.com')>=0)return'\u{1F426}';if(t==='telegram'||u.indexOf('t.me/')>=0)return'✈️';if(t==='discord'||u.indexOf('discord')>=0)return'\u{1F4AC}';return'\u{1F310}';};
     const _lbl=function(l){var s=(l.type||l.label||'link');return s.charAt(0).toUpperCase()+s.slice(1);};

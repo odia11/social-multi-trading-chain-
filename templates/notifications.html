@@ -137,7 +137,7 @@ var _csrfToken = {{ csrf_token|tojson }};
 var _personal = [];
 var _activeTab = 'trades';
 function _esc(s){
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g, '&#39;');
 }
 // n.content is a pre-formatted sentence baked in at notification-creation time
 // (e.g. "Alice mentioned you in a post") — there's no separate, structured

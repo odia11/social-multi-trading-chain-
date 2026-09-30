@@ -355,7 +355,7 @@ def page_html(t, chain, token, base='https://orcagent.fun') -> str:
             'background:#080b10;color:#f3f5f8;font:600 16px/1.5 system-ui,-apple-system,sans-serif}'
             'a{color:#f7b955}</style></head><body>'
             f'<p>Opening on OrcAgent… <a href="{esc(target)}">Continue</a></p>'
-            f'<script>location.replace({json.dumps(target)});</script>'
+            f'<script>location.replace({json.dumps(target).replace("<", chr(92) + "u003c")});</script>'
             '</body></html>')
 
 

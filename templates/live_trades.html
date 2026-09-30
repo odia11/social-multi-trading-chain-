@@ -74,7 +74,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:'J
 <script>
 var _ltInitial = {positions: {{ open_positions|tojson }}, trades: {{ closed_trades|tojson }}};
 var _ltBot = {{ bot_status|tojson }};
-function _ltEsc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function _ltEsc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 // Token prices run from dollars down to a millionth of a cent: keep four
 // significant digits instead of a fixed six decimals that shows 0.000000.
 function _ltPrice(v){
