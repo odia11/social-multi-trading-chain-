@@ -30,7 +30,14 @@ COMPUTE_BUDGET_PROGRAM='ComputeBudget111111111111111111111111111111'
 PHANTOM_CLAIM_WRAPPER='L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95'
 WSOL_MINT='So11111111111111111111111111111111111111112'
 PUMP_PROGRAM='6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'
-_MODES={'creator','community','holder'}
+# Reward modes a NEW launch may choose. OrcAgent always earns its share of
+# the creator fees, and pump.fun's Holder Rewards cannot carry it: the
+# program makes a holders PDA the coin's creator, so every creator fee goes
+# to holders and no fee-sharing config (OrcAgent's 20%) can exist. Holder
+# Rewards is therefore not offered; tokens already launched with it are
+# on-chain and keep working as they are. Changing OrcAgent's share or these
+# modes is the owner's call only.
+_MODES={'creator','community'}
 # OrcAgent's share of a NEW token's creator fees, in basis points (2000 = 20%).
 # Installed on-chain as a fee-sharing shareholder next to the creator, so the
 # protocol itself pays OrcAgent its part on every distribution -- never taken
@@ -321,6 +328,10 @@ def install(d):
         raise RuntimeError(last_error or 'Solana RPC verification unavailable. Never create a duplicate token.')
 
     def build_tx(row,stage):
+        # A Holder Rewards draft saved before that mode was withdrawn must not
+        # become a token now: it would launch without OrcAgent's share.
+        if stage=='create' and row['reward_mode'] not in _MODES:
+            raise ValueError('Holder Rewards is no longer offered. Start a new launch with Creator or Community rewards.')
         # Fail fast when all RPCs are throttled, before potentially spending
         # 90 seconds grinding an Orc mint. Fetch a NEW blockhash after grinding.
         if stage=='create':
@@ -904,7 +915,7 @@ def install(d):
            fee_disclosure=('Network and launch-protocol fees apply. OrcAgent launch fee: $0. '
                            + ('You earn %g%% of your token\'s creator fees; OrcAgent\'s platform fee is the other %g%% (never a share of trading volume).' % (100-ORCAGENT_CREATOR_FEE_BPS/100, ORCAGENT_CREATOR_FEE_BPS/100) if ORCAGENT_CREATOR_FEE_BPS and not pilot else '')).strip(),
            orcagent_bps=0 if pilot else ORCAGENT_CREATOR_FEE_BPS,
-           capabilities={'creator':True,'community':not pilot,'holder':not pilot})
+           capabilities={'creator':True,'community':not pilot,'holder':False})
 
     @app.post('/api/token-launch/draft')
     @d.rate_limit(6,60)
@@ -916,7 +927,8 @@ def install(d):
             return fail('Token details too large',413)
         body=request.get_json(silent=True)
         # No valid OrcAgent wallet configured -> no share, rather than drafts
-        # that can never be built.
+        # that can never be built. (Production's FEE_WALLET is a fixed valid
+        # address, pinned by tests/test_token_launch_orcagent_always_20.py.)
         new_orc=0 if (pilot_wallet(wallet) or not d.is_valid_solana_address(orc_wallet() or '')) else ORCAGENT_CREATOR_FEE_BPS
         try:
             name,symbol,desc,mode,quote,community,bps=_validate_form(d,body,wallet,new_orc)
@@ -1115,6 +1127,11 @@ def install(d):
         if not row:return fail('Launch not found',404)
         if pilot_wallet(wallet) and (row['reward_mode']!='creator' or row['quote_asset']!='USDC'):
             return fail('Pilot allows USDC / 100% Creator Rewards only',409)
+        # A Holder Rewards draft saved before that mode was withdrawn (even
+        # one already prepared) must not become a token without OrcAgent's
+        # share. Nothing was signed or sent for it.
+        if row['reward_mode'] not in _MODES and not row['launch_signature']:
+            return fail('Holder Rewards is no longer offered. Start a new launch with Creator or Community rewards.',409)
         if pilot_wallet(wallet):
             with closing(sqlite3.connect(d.DB_FILE)) as conn:
                 already=conn.execute('''SELECT id FROM token_launches

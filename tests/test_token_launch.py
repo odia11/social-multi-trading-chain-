@@ -241,7 +241,7 @@ def test_creator_pilot_wallet_budget():
       assert '100% Creator Rewards' in html
       assert 'value="community" disabled' in html
       assert 'value="creator" checked' in html
-      assert 'value="holder" disabled' in html
+      assert 'value="holder"' not in html
       assert 'value="SOL" disabled' in html
       assert client.post('/api/token-launch/draft',json={**base,
           'reward_mode':'community','community_wallet':other,
@@ -439,7 +439,7 @@ def test_public_creators_share_safe_launch_path():
             sess['wallet']=wallet;sess['csrf_token']='test-csrf'
         conf=client.get('/api/token-launch/config').get_json()
         assert conf['enabled'] and not conf['pilot_creator_only']
-        assert conf['capabilities']=={'creator':True,'community':True,'holder':True}
+        assert conf['capabilities']=={'creator':True,'community':True,'holder':False}
         assert 'Preflight mode' not in client.get('/token-launch').get_data(as_text=True)
         body={'client_nonce':f'public-creator-{index}-nonce-0001',
              'name':'Public Creator','symbol':f'PUB{index}',
