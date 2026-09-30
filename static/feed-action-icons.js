@@ -7,7 +7,7 @@
 'use strict';
 function ensureCommonLoader(){
   if(document.getElementById('pgl-bar')||document.getElementById('oa-page-loader-fallback')||document.querySelector('script[src^="/static/page-loader.js"]'))return;
-  var s=document.createElement('script');s.id='oa-page-loader-fallback';s.src='/static/page-loader.js?v=5';s.defer=true;document.head.appendChild(s);
+  var s=document.createElement('script');s.id='oa-page-loader-fallback';s.src='/static/page-loader.js?v=6';s.defer=true;document.head.appendChild(s);
 }
 /* Deferred navbar scripts run after HTML parsing, so a template's own bottom
    page-loader has already executed by this point when it exists. */

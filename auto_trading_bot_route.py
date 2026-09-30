@@ -4,7 +4,6 @@ This module gives the autonomous bot one stable destination and fixes every
 navigation-style "Start Trading" CTA to use it. The actual bot start/stop
 button on the bot page is deliberately excluded.
 """
-import sqlite3
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -74,35 +73,8 @@ def install(dashboard):
 
     @app.route('/auto-trading-bot')
     def auto_trading_bot_page():
-        dashboard._log_readonly_attempt()
-        wallet = dashboard._authenticated_wallet()
-        if not wallet:
-            return redirect('/')
-
-        conn = sqlite3.connect(dashboard.DB_FILE)
-        try:
-            row = conn.execute(
-                'SELECT narrative_agent_enabled, tiered_tp_enabled FROM users WHERE wallet_address=?',
-                (wallet,),
-            ).fetchone()
-        finally:
-            conn.close()
-
-        narrative_agent_enabled = bool(row[0]) if row else False
-        tiered_tp_enabled = bool(row[1]) if row else False
-
-        return dashboard._render_no_cache(
-            'auto_trading_bot.html',
-            wallet=wallet,
-            wallet_short=(wallet[:4] + '...' + wallet[-4:]) if len(wallet) >= 8 else wallet,
-            is_admin=dashboard._is_owner(wallet),
-            csrf_token=dashboard._get_csrf_token(),
-            narrative_agent_enabled=narrative_agent_enabled,
-            tiered_tp_enabled=tiered_tp_enabled,
-            tp1_multiple=dashboard.TP1_MULTIPLE,
-            tp1_sell_fraction=int(dashboard.TP1_SELL_FRACTION * 100),
-            trailing_stop_pct=int(dashboard.TRAILING_STOP_PCT * 100),
-        )
+        # One bot page: the same view the menu's /bot renders.
+        return dashboard.bot_overview_page()
 
     @app.after_request
     def _fix_start_trading_links(response):

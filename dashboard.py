@@ -14341,8 +14341,10 @@ def bot_overview_page():
         conn.close()
     narrative_agent_enabled = bool(row[0]) if row else False
     tiered_tp_enabled       = bool(row[1]) if row else False
+    # The menu's "Bot" opens the bot itself -- status, on/off, settings and
+    # what it is holding and trading -- not a marketing intro.
     return _render_no_cache(
-        'bot.html',
+        'auto_trading_bot.html',
         wallet=wallet,
         wallet_short=(wallet[:4] + '...' + wallet[-4:]) if len(wallet) >= 8 else wallet,
         is_admin=_is_owner(wallet),
@@ -27938,7 +27940,7 @@ def bot_overview():
         'open_positions': 0, 'max_positions': 3,
         'take_profit': 15.0, 'stop_loss': 8.0,
         'min_trade_size': 1.0, 'max_trade_size': 10.0, 'daily_loss_limit': 50.0,
-        'trading_wallet_short': None, 'trading_wallet_sol': 0.0,
+        'trading_wallet_short': None, 'trading_wallet_sol': 0.0, 'trading_wallet_usdc': None,
         'total_trades': 0, 'wins': 0, 'losses': 0, 'win_rate': 0.0,
         'best_trade': None, 'worst_trade': None,
     }
@@ -27954,36 +27956,49 @@ def bot_overview():
 
         trading_wallet_short = None
         trading_wallet_sol = 0.0
+        trading_wallet_usdc = None
         if enc_key:
             try:
                 with _use_key(enc_key, wallet) as _pk:
                     from solders.keypair import Keypair as _KP_ov
                     trading_wallet = str(_KP_ov.from_base58_string(_pk).pubkey())
                 trading_wallet_short = (trading_wallet[:4] + '...' + trading_wallet[-4:])
-                trading_wallet_sol = _get_user_sol(trading_wallet)
+                # The capital the bot trades with (USDC) next to the SOL it
+                # pays network fees with -- the same cached read the bot uses.
+                try:
+                    trading_wallet_sol, trading_wallet_usdc = _get_bot_solana_balances(trading_wallet)
+                except Exception:
+                    trading_wallet_sol = _get_user_sol(trading_wallet)
             except Exception:
                 pass
 
-        # Bot Overview only covers trades the bot itself executed — manual Live
-        # Market instant-trades (source='manual') get their own summary on the
-        # wallet page instead, so they're excluded here.
+        # Bot Overview only covers the bot's own finished round trips (the
+        # scanner bot and the Narrative agent) -- the same set Live Trades
+        # lists. Manual Live Market trades (source='manual') get their own
+        # summary on the wallet page, and single buy/sell legs are not trades.
         c = conn.cursor()
-        c.execute("SELECT COUNT(*), SUM(CASE WHEN pnl>=0 THEN 1 ELSE 0 END) FROM trades WHERE user_id=? AND COALESCE(source,'bot')='bot'", (uid,))
+        _bot_rows = ("FROM trades WHERE user_id=? AND COALESCE(source,'bot') IN ('bot','narrative') "
+                     "AND side IS NULL AND pnl IS NOT NULL")
+        c.execute("SELECT COUNT(*), SUM(CASE WHEN pnl>=0 THEN 1 ELSE 0 END) " + _bot_rows, (uid,))
         total_trades, wins = c.fetchone()
         total_trades = total_trades or 0
         wins = wins or 0
         losses = total_trades - wins
         win_rate = round(wins / total_trades * 100, 1) if total_trades else 0.0
 
-        best_trade = worst_trade = None
-        c.execute("SELECT token, pnl, timestamp FROM trades WHERE user_id=? AND COALESCE(source,'bot')='bot' AND pnl IS NOT NULL ORDER BY pnl DESC LIMIT 1", (uid,))
-        r = c.fetchone()
-        if r:
-            best_trade = {'token': r[0] or '—', 'pnl': round(r[1] or 0, 6), 'timestamp': r[2]}
-        c.execute("SELECT token, pnl, timestamp FROM trades WHERE user_id=? AND COALESCE(source,'bot')='bot' AND pnl IS NOT NULL ORDER BY pnl ASC LIMIT 1", (uid,))
-        r = c.fetchone()
-        if r:
-            worst_trade = {'token': r[0] or '—', 'pnl': round(r[1] or 0, 6), 'timestamp': r[2]}
+        # Results in dollars: a USDC trade's pnl already is, an old SOL-mode
+        # trade's is converted -- never a USDC number labelled "SOL".
+        _sol_rate = _sol_price_usd if _sol_price_usd > 0 else 1.0
+        def _extreme(order):
+            r = c.execute("SELECT token, pnl, timestamp, chain, base_currency " + _bot_rows +
+                          " ORDER BY pnl " + order + " LIMIT 1", (uid,)).fetchone()
+            if not r:
+                return None
+            is_sol = (not r[3] or r[3] == 'solana') and (r[4] or 'SOL') == 'SOL'
+            return {'token': r[0] or '—', 'pnl': round(r[1] or 0, 6), 'timestamp': r[2],
+                    'pnl_usd': round((r[1] or 0) * (_sol_rate if is_sol else 1.0), 2)}
+        best_trade = _extreme('DESC')
+        worst_trade = _extreme('ASC')
     finally:
         conn.close()
 
@@ -28004,6 +28019,7 @@ def bot_overview():
         'daily_loss_limit': daily_loss_limit if daily_loss_limit is not None else 50.0,
         'trading_wallet_short': trading_wallet_short,
         'trading_wallet_sol': trading_wallet_sol,
+        'trading_wallet_usdc': trading_wallet_usdc,
         'total_trades': total_trades,
         'wins': wins,
         'losses': losses,

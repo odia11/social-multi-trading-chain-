@@ -145,31 +145,9 @@ function observeModalsIn(root){if(!root||root.nodeType!==1)return;if(isModalNode
    page gets the shared bottom navigation. */
 function watchThread(){var main=document.querySelector('.msgs-main');if(!main)return;function sync(){document.body.classList.toggle('oa-thread-open',main.classList.contains('thread-open'))}sync();if(window.MutationObserver)new MutationObserver(sync).observe(main,{attributes:true,attributeFilter:['class']})}
 
-/* The AI-bot landing CTA must open Bot Overview itself, never Live Market.
-   Do it in-place so iOS/PWA navigation, query stripping or cached route state
-   cannot send the user somewhere else. */
-function wireBotLanding(){
-  var cta=document.getElementById('bot-start-landing');
-  if(!cta||cta.dataset.oaBotWired==='1')return;
-  cta.dataset.oaBotWired='1';
-  cta.addEventListener('click',function(e){
-    e.preventDefault();
-    e.stopPropagation();
-    var intro=document.getElementById('bot-intro');
-    var dash=document.getElementById('bot-dashboard');
-    if(!dash){window.location.href='/bot?view=trading';return;}
-    if(intro)intro.style.display='none';
-    dash.classList.add('active');
-    try{window._showTrading=true}catch(_){ }
-    try{history.replaceState({oaBotTrading:true},'', '/bot?view=trading')}catch(_){ }
-    if(typeof window.loadOverview==='function')window.loadOverview();
-    window.scrollTo({top:0,behavior:'instant'});
-  },true);
-}
-
 function ready(){
   document.body.classList.add('oa-shared-ux');
-  tuneTree(document);syncModalLock();wireBotLanding();scheduleRoutePrime();
+  tuneTree(document);syncModalLock();scheduleRoutePrime();
   // Register the app-wide service worker for every signed-in/browser session,
   // not only users who happened to open notification settings. It caches only
   // public /static/ assets; private HTML/API data remain network-only.
@@ -183,7 +161,6 @@ function ready(){
     var modalAdded=false;
     ms.forEach(function(m){m.addedNodes.forEach(function(n){if(n.nodeType!==1)return;tuneTree(n);observeModalsIn(n);if(isModalNode(n)||(n.querySelector&&n.querySelector(MODAL_SEL)))modalAdded=true})});
     if(modalAdded)syncModalLock();
-    wireBotLanding();
   }).observe(document.body,{childList:true,subtree:true});
   watchThread();
 }
