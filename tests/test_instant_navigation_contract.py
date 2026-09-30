@@ -25,8 +25,8 @@ checks={
   'shared shell assets preload from head':
       'data-oa-shell-preload' in PERF and 'mobile-bottom-nav.css?v=9' in PERF,
   'shared UX is cache-busted consistently':
-      'app-ux.css?v=9' in PERF and 'app-ux.js?v=9' in PERF
-      and 'app-ux.css?v=9' in LOADER and 'app-ux.js?v=9' in LOADER,
+      'app-ux.css?v=9' in PERF and 'app-ux.js?v=10' in PERF
+      and 'app-ux.css?v=9' in LOADER and 'app-ux.js?v=10' in LOADER,
   'service worker runtime cache is public static GET only':
       "url.pathname.indexOf('/static/')!==0" in SW
       and "url.origin!==self.location.origin" in SW

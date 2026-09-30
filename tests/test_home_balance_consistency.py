@@ -23,9 +23,9 @@ checks={
   'home snapshot also synchronizes the shared header':
       "new CustomEvent('orca:portfolio-value'" in JS,
   'changed home bundles are cache-busted everywhere':
-      'home-mobile.css?v=13' in NAV and 'home-mobile.js?v=11' in NAV
-      and 'home-mobile.css?v=13' in UX and 'home-mobile.js?v=11' in UX
-      and 'home-mobile.css?v=13' in PERF,
+      'home-mobile.css?v=14' in NAV and 'home-mobile.js?v=12' in NAV
+      and 'home-mobile.css?v=14' in UX and 'home-mobile.js?v=12' in UX
+      and 'home-mobile.css?v=14' in PERF,
 }
 for label,ok in checks.items():
     print(('PASS' if ok else 'FAIL')+' - '+label)
