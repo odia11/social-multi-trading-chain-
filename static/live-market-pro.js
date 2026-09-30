@@ -2639,6 +2639,40 @@ function surgeCardHtml(s){
 }
 
 var _surgeMarkup=null, _tapeIdentity=null, _traderIdentity=null;
+// Tokens launched on OrcAgent, newest first. Tapping one opens its card here
+// (the same in-page path a surge uses), so the buy runs through OrcAgent.
+var _launchMarkup=null;
+function _launchAge(ts){
+  var s=Math.max(0,Date.now()/1000-(Number(ts)||0));
+  if(!ts) return '';
+  if(s<3600) return Math.max(1,Math.floor(s/60))+'m';
+  if(s<86400) return Math.floor(s/3600)+'h';
+  return Math.floor(s/86400)+'d';
+}
+function launchCardHtml(l){
+  return '<div class="pt-launch-card" data-action="open-surge" data-mint="'+esc(l.mint)+'" data-symbol="'+esc(l.symbol)+'">'
+    +'<img class="pt-launch-img" src="'+esc(l.logo_url)+'" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+    +'<div class="pt-launch-body"><div class="pt-launch-sym">$'+esc(l.symbol)+'</div>'
+    +'<div class="pt-launch-meta">'+esc(l.quote_asset)+' · '+_launchAge(l.finalized_at||l.created_at)+'</div></div>'
+    +'<span class="pt-launch-buy">Buy</span></div>';
+}
+function loadLaunches(){
+  fetch('/api/token-launches?page=1', {credentials:'include'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      var wrap=document.getElementById('pt-launch-wrap'), rail=document.getElementById('pt-launch-rail');
+      if(!wrap || !rail || _railsBeingTouched['pt-launch-rail']) return;
+      var list=((d && d.launches) || []).slice(0, 12);
+      // No launches yet: no empty strip.
+      if(!list.length){ wrap.style.display='none'; _launchMarkup=null; return; }
+      wrap.style.display='';
+      var markup=list.map(launchCardHtml).join('');
+      if(markup!==_launchMarkup){
+        var keep=rail.scrollLeft; rail.innerHTML=markup; _launchMarkup=markup; rail.scrollLeft=keep;
+      }
+    })
+    .catch(function(){});
+}
 function loadSurges(){
   fetch('/api/market/surges', {credentials:'include'})
     .then(function(r){ return r.json(); })
@@ -2941,6 +2975,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
   enableDragScroll(document.getElementById('pt-story-rail'));
   enableDragScroll(document.getElementById('pt-surge-rail'));
+  enableDragScroll(document.getElementById('pt-launch-rail'));
   enableDragScroll(document.getElementById('pt-trader-rail'));
 
   _prefetchBalances();
@@ -2977,6 +3012,7 @@ document.addEventListener('DOMContentLoaded', function(){
     loadWatchlistSet().then(function(){ loadFeed(); });
   }
   loadSurges();
+  loadLaunches();
   loadTape();
   loadTraders();
   loadWatchlist();
@@ -3015,6 +3051,7 @@ document.addEventListener('DOMContentLoaded', function(){
     }).catch(function(){});
   }, 15000);
   setInterval(function(){ if(!document.hidden) loadSurges(); }, 12000);
+  setInterval(function(){ if(!document.hidden) loadLaunches(); }, 60000);
   setInterval(function(){ if(!document.hidden) loadTape(); }, 8000);
   setInterval(function(){ if(!document.hidden) loadTraders(); }, 30000);
   setInterval(function(){ if(!document.hidden) loadPulse(); }, 20000);
@@ -3028,7 +3065,7 @@ document.addEventListener('DOMContentLoaded', function(){
 // feed refreshes in poll mode -- merged in place, no flash of a re-rendered
 // list.
 window.OrcAgentRefreshLiveMarket=function(){
-  loadFeed(true); loadSurges(); loadTape(); loadTraders(); loadWatchlist(); loadPulse();
+  loadFeed(true); loadSurges(); loadLaunches(); loadTape(); loadTraders(); loadWatchlist(); loadPulse();
 };
 
 })();

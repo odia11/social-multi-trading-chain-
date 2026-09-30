@@ -255,6 +255,19 @@ async function checkFunding(row,notice){
  }catch(e){notice.textContent=e.message||'Unable to check SOL balance';status(notice.textContent,true)}
  finally{busy=false}
 }
+// The one OrcAgent link for a launched token: /token/<mint> opens its card
+// in Live Market, where a buy runs through OrcAgent.
+function tokenPath(mint){return '/token/'+encodeURIComponent(mint)}
+async function shareToken(row,btn){
+ var url=location.origin+tokenPath(row.mint),title='$'+row.symbol+' on OrcAgent';
+ var textLine='$'+row.symbol+' ('+row.name+') is live. Buy it on OrcAgent:';
+ var label=btn.textContent;
+ try{
+  if(navigator.share){await navigator.share({title:title,text:textLine,url:url});return}
+  await navigator.clipboard.writeText(textLine+' '+url);btn.textContent='Link copied ✓';
+ }catch(e){if(e&&e.name==='AbortError')return;btn.textContent='Copy unavailable'}
+ setTimeout(function(){btn.textContent=label},1800);
+}
 function splitText(row){
  var orc=Number(row.orcagent_bps)||0,com=row.reward_mode==='community'?(Number(row.community_bps)||0):0;
  var parts=[money((10000-orc-com)/100)+' to you'];
@@ -473,8 +486,10 @@ function drawMine(){
     :(rowOrc?'You earn '+money((10000-rowOrc)/100)+' of creator fees · Platform fee '+money(rowOrc/100):'Creator fees belong to creator')));
   if(row.status==='live'&&row.mint){
     var live=dom('div','tl-live-note');live.appendChild(dom('span','tl-live-dot'));
-    live.appendChild(dom('span','','Your token is live. Open Live Market to buy or sell.'));el.appendChild(live);
-    var trade=dom('a','tl-buy-sell','Buy / Sell');trade.href='/live-market?mint='+encodeURIComponent(row.mint);el.appendChild(trade);
+    live.appendChild(dom('span','','Your token is live. Share its OrcAgent link: every trade earns you creator fees.'));el.appendChild(live);
+    var trade=dom('a','tl-buy-sell','Buy / Sell on OrcAgent');trade.href=tokenPath(row.mint);el.appendChild(trade);
+    var shareBtn=dom('button','tl-share-token','Share token link');shareBtn.type='button';
+    shareBtn.onclick=function(){shareToken(row,shareBtn)};el.appendChild(shareBtn);
   }
   if(row.mint&&row.status!=='live')el.appendChild(dom('div','tl-mono',row.mint));
   var actions=dom('div','tl-actions');
@@ -550,7 +565,7 @@ function drawMine(){
   }
   if(row.mint&&row.status==='pending_shares'){
     var a=dom('a','','Trade on OrcAgent →');
-    a.href='/live-market?mint='+encodeURIComponent(row.mint);actions.appendChild(a);
+    a.href=tokenPath(row.mint);actions.appendChild(a);
   }
   if(row.launch_signature&&row.launch_signature.length>80){
     var explorer=dom('a','','View transaction ↗');

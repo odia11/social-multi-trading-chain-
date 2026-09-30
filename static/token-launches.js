@@ -7,6 +7,15 @@
  function short(a){return a?a.slice(0,6)+'…'+a.slice(-5):'—'}
  function line(label,value,mono){var wrap=dom('div','line');wrap.appendChild(dom('label','',label));wrap.appendChild(dom('b',mono?'mint':'',value));return wrap}
  function action(parent,title,url,external){var a=dom('a','',title);a.href=url;if(external){a.target='_blank';a.rel='noopener noreferrer'}parent.appendChild(a)}
+ async function shareToken(data,path,btn){
+  var url=location.origin+path,title='$'+data.symbol+' on OrcAgent';
+  var text='$'+data.symbol+' ('+data.name+') is live. Buy it on OrcAgent:';
+  try{
+   if(navigator.share){await navigator.share({title:title,text:text,url:url});return}
+   await navigator.clipboard.writeText(text+' '+url);btn.textContent='Link copied ✓';
+  }catch(e){if(e&&e.name==='AbortError')return;btn.textContent='Copy unavailable'}
+  setTimeout(function(){btn.textContent='Share'},1800);
+ }
  function showOne(data){
   var card=dom('article','token'),top=dom('div','token-top');
   var logo=dom('img');logo.src=data.logo_url;logo.alt=data.name+' logo';logo.loading='lazy';
@@ -15,7 +24,10 @@
   top.appendChild(dom('span','token-chip','● Live'));card.appendChild(top);
   card.appendChild(dom('p','description',data.description||'Launched on OrcAgent'));
   var details=dom('div','details');details.appendChild(line('Trading pair',data.quote_asset));
-  var share=data.reward_mode==='community'?(100-data.community_bps/100).toFixed(2)+'% creator / '+(data.community_bps/100).toFixed(2)+'% community':data.reward_mode==='holder'?'Holder Rewards':'100% creator';
+  var orc=data.reward_mode==='holder'?0:(Number(data.orcagent_bps)||0),com=data.reward_mode==='community'?(Number(data.community_bps)||0):0;
+  function pct(b){return String(Number((b/100).toFixed(2)))+'%'}
+  var share=data.reward_mode==='holder'?'Holder Rewards'
+   :pct(10000-orc-com)+' creator'+(com?' · '+pct(com)+' community':'')+(orc?' · '+pct(orc)+' platform fee':'');
   details.appendChild(line('Rewards',share));details.appendChild(line('Creator',short(data.wallet),true));
   details.appendChild(line('Mint',short(data.mint),true));
   var cap=line('Market cap','Loading…');details.appendChild(cap);
@@ -31,7 +43,13 @@
   }else capValue.textContent='—';
   var time=data.finalized_at||data.created_at;
   if(time)details.appendChild(line('Launched',new Date(time*1000).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})));
-  card.appendChild(details);var actions=dom('div','actions');action(actions,'Trade on OrcAgent →','/live-market?mint='+encodeURIComponent(data.mint),false);
+  card.appendChild(details);var actions=dom('div','actions');
+  var tradeUrl=data.trade_url||('/token/'+encodeURIComponent(data.mint));
+  var buy=dom('a','buy','Buy on OrcAgent');buy.href=tradeUrl;actions.appendChild(buy);
+  // Sharing the OrcAgent link (not an explorer or another app's page) sends
+  // buyers to where every trade earns this token's creator.
+  var shareBtn=dom('button','','Share');shareBtn.type='button';shareBtn.onclick=function(){shareToken(data,tradeUrl,shareBtn)};
+  actions.appendChild(shareBtn);
   var copy=dom('button','','Copy mint');copy.type='button';copy.onclick=async function(){
     try{await navigator.clipboard.writeText(data.mint);copy.textContent='Copied ✓'}
     catch(e){copy.textContent='Copy unavailable'}
