@@ -151,6 +151,20 @@ input{font-family:inherit}
 .pt-surge-sub{font-size:10.5px;color:var(--muted2);font-family:var(--mono);white-space:nowrap}
 .pt-surge-rail{display:flex;gap:10px;padding:11px 22px 14px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;cursor:grab}
 .pt-surge-rail::-webkit-scrollbar{display:none}
+/* ── NEW ON ORCAGENT: tokens launched here, bought here ── */
+.pt-launch-wrap{border-bottom:1px solid var(--line);background:linear-gradient(180deg,rgba(247,185,85,.07),transparent 70%)}
+.pt-launch-hd{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:13px 22px 0}
+.pt-launch-title{font-size:11.5px;font-weight:800;letter-spacing:.09em;color:var(--accent);font-family:var(--mono)}
+.pt-launch-all{font-size:11px;font-weight:700;color:var(--muted2);font-family:var(--mono);text-decoration:none;white-space:nowrap}
+.pt-launch-rail{display:flex;gap:10px;padding:11px 22px 14px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;cursor:grab}
+.pt-launch-rail::-webkit-scrollbar{display:none}
+.pt-launch-card{flex:0 0 auto;width:200px;display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid rgba(247,185,85,.3);border-radius:12px;padding:10px 12px;cursor:pointer;transition:border-color .12s,transform .12s}
+.pt-launch-card:hover{border-color:rgba(247,185,85,.6);transform:translateY(-1px)}
+.pt-launch-img{width:38px;height:38px;border-radius:10px;object-fit:cover;background:#21262c;flex:none}
+.pt-launch-body{min-width:0;flex:1}
+.pt-launch-sym{font-size:13px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pt-launch-meta{font-size:10.5px;color:var(--muted2);font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.pt-launch-buy{flex:none;font-size:11px;font-weight:800;color:#141617;background:var(--accent);border-radius:8px;padding:6px 9px}
 /* Set by enableDragScroll() in live-market-pro.js while a mouse-drag pan is
    in progress: a grabbing cursor, and no text selection dragged out of the
    cards as the rail moves.
@@ -749,7 +763,7 @@ input{font-family:inherit}
 body.pt-profile-mode .pt-shell{max-width:1120px!important;min-width:0!important}
 body.pt-profile-mode .pt-panel{grid-template-columns:minmax(0,1fr)!important;overflow:visible!important}
 body.pt-profile-mode .pt-left,body.pt-profile-mode .pt-right,
-body.pt-profile-mode .pt-surge-wrap,body.pt-profile-mode .pt-story-rail,
+body.pt-profile-mode .pt-surge-wrap,body.pt-profile-mode .pt-story-rail,body.pt-profile-mode .pt-launch-wrap,
 body.pt-profile-mode .pt-trader-rail-wrap,body.pt-profile-mode .pt-scanning-pill{display:none!important}
 body.pt-profile-mode .pt-center{max-height:none!important;overflow:visible!important}
 body.pt-profile-mode .pt-feed-list{padding:12px!important}
@@ -849,6 +863,15 @@ body.pt-profile-mode .pt-card.pt-profile-open .pt-profile-btn{min-width:58px;col
           <span class="pt-surge-sub" id="pt-surge-sub"></span>
         </div>
         <div class="pt-surge-rail" id="pt-surge-rail"></div>
+      </div>
+
+      <!-- Tokens launched on OrcAgent: tapped here, bought here. -->
+      <div class="pt-launch-wrap" id="pt-launch-wrap" style="display:none">
+        <div class="pt-launch-hd">
+          <span class="pt-launch-title">NEW ON ORCAGENT</span>
+          <a class="pt-launch-all" href="/launches">All launches →</a>
+        </div>
+        <div class="pt-launch-rail" id="pt-launch-rail"></div>
       </div>
 
       <div class="pt-story-rail" id="pt-story-rail"></div>

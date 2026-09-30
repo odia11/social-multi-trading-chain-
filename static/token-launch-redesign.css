@@ -153,6 +153,8 @@ html,body{background:var(--bg)}
 .tl-item>.tl-helper{font-size:13px;margin:14px 0}.tl-live-note{display:flex;align-items:center;gap:12px;padding:14px;margin:16px 0;background:#14322c;border:1px solid #287b59;border-radius:12px;color:#e5f1ec;font-size:14px;line-height:1.4}
 .tl-live-dot{width:13px;height:13px;border-radius:50%;background:#48d999;box-shadow:0 0 18px #48d99988;flex:none}
 .tl-buy-sell{display:grid;place-items:center;min-height:58px;background:linear-gradient(120deg,#ffca6b,#ffb94a);border:1px solid #ffd477;border-radius:12px;color:#111820!important;font-size:18px;font-weight:800;box-shadow:0 0 24px #f8ba5540;margin-bottom:16px}
+.tl-share-token{display:block;width:100%;min-height:46px;margin:-6px 0 16px;border:1px solid #3c4550;border-radius:12px;background:#1b2027;color:var(--text);font:inherit;font-size:14px;font-weight:800;cursor:pointer}
+.tl-share-token:hover{border-color:#ffca6b}
 .tl-item-details{border-top:1px solid #35414d}.tl-item-details summary{list-style:none;display:flex;align-items:center;gap:14px;min-height:72px;cursor:pointer}.tl-item-details summary::-webkit-details-marker{display:none}
 .tl-detail-icon{font-size:25px;color:#ffbc51;width:30px;text-align:center;flex:none}.tl-detail-heading{display:flex;flex-direction:column;gap:2px;flex:1}.tl-detail-heading strong{font-size:17px}.tl-detail-heading small{color:#9daec2;font-size:12px}.tl-detail-chevron{font-size:25px;line-height:1}.tl-item-details[open] .tl-detail-chevron{transform:rotate(180deg)}
 .tl-detail-body{padding:0 0 18px 44px}.tl-detail-body .tl-helper{font-size:13px;line-height:1.5}.tl-detail-body .tl-mono{padding:10px;background:#1b2530;border-radius:8px}.tl-detail-body>a{font-size:12px;color:#ffca79}

@@ -1094,7 +1094,10 @@ def install(d):
         for row in rows:
             item=dict(row)
             item['logo_url']='/token-launch/icon/'+item['id']
-            item['trade_url']='/live-market?mint='+item['mint']
+            # One short OrcAgent link for trading and for sharing: it opens
+            # the token's card in Live Market, where a buy runs through
+            # OrcAgent (and earns the creator their share of creator fees).
+            item['trade_url']='/token/'+item['mint']
             entries.append(item)
         response=jsonify(ok=True,launches=entries,total=total,page=int(page),
              page_size=20,counts={r[0]:r[1] for r in stats})
