@@ -11,7 +11,7 @@ checks={
       '<nav id="oa-bottom-nav" class="oa-bottom-nav"' in D
       and 'aria-label="Create post"' in D
       and '/static/mobile-bottom-nav.css?v=9' in D
-      and '/static/mobile-bottom-nav.js?v=8' in D,
+      and '/static/mobile-bottom-nav.js?v=9' in D,
  'client hydrates server footer instead of depending on creating it':
       "document.getElementById('oa-bottom-nav')||_createBottomNav()" in JS
       and "nav.dataset.oaHydrated" in JS,
@@ -32,7 +32,7 @@ checks={
       and 'width:62px;height:62px;margin-top:-18px' in (ROOT/'static'/'mobile-bottom-nav.css').read_text()
       and 'calc(92px + env(safe-area-inset-bottom,0px))' in HOME,
  'corrected footer bundle is cache busted':
-      'mobile-bottom-nav.js?v=8' in (ROOT/'static'/'navbar.js').read_text()
+      'mobile-bottom-nav.js?v=9' in (ROOT/'static'/'navbar.js').read_text()
       and 'mobile-bottom-nav.css?v=9' in (ROOT/'static'/'navbar.js').read_text(),
 }
 for label,ok in checks.items():

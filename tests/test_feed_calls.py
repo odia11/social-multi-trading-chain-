@@ -157,14 +157,39 @@ with patch.object(d, '_dex_get', lambda *a, **k: None), patch.object(d, '_gt_try
         d.get_token_data = orig_td
     row = db('SELECT symbol, price_at_call, mcap_at_call, chain FROM token_calls WHERE mint=?', SOL_ADDR)
     check('...and the call is placed at that server-side price', r.status_code == 200 and row == [('CRUMB', 0.00042, 420000.0, 'solana')])
+JUP_ADDR = '7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr'
+POOL_ADDR = '8sLbNZoA1cfnvMJLPfp98ZLAnFSYCFApfJKMbiXNLwxj'
+def fake_jup(url, headers=None, timeout=None):
+    if 'jup.ag/tokens/v2/search' in url and JUP_ADDR in url:
+        return GT(200, [{'id': JUP_ADDR, 'symbol': 'JUPT', 'name': 'Routed', 'usdPrice': 0.02, 'mcap': 2e6,
+                         'icon': 'https://x/j.png', 'stats24h': {'priceChange': 12.5}}])
+    return GT(404, {})
+with patch.object(d, '_dex_get', lambda *a, **k: None), patch.object(d, '_gt_try_take', lambda reserve=0: True), \
+        patch.object(d.requests, 'get', side_effect=fake_jup):
+    got = alice.get('/api/calls/lookup?q=' + JUP_ADDR, base_url=BASE).get_json()['tokens']
+    check('a Solana token Jupiter can route is found through Jupiter', got and got[0]['symbol'] == 'JUPT'
+          and got[0]['price'] == 0.02 and got[0]['market_cap'] == 2e6)
+class Dex:
+    status_code = 200
+    def __init__(self, body): self._b = body
+    def json(self): return self._b
+def fake_dex(url, **k):
+    if '/search?q=' + POOL_ADDR in url:
+        return Dex({'pairs': [{'chainId': 'solana', 'pairAddress': POOL_ADDR, 'priceUsd': '0.5', 'marketCap': 5e6,
+                               'liquidity': {'usd': 1e5}, 'baseToken': {'address': JUP_ADDR, 'symbol': 'REAL', 'name': 'Real'}}]})
+    return Dex({'pairs': []})
+with patch.object(d, '_dex_get', side_effect=fake_dex):
+    got = alice.get('/api/calls/lookup?q=' + POOL_ADDR, base_url=BASE).get_json()['tokens']
+    check('a pasted POOL address finds the token that pool trades', got and got[0]['symbol'] == 'REAL'
+          and got[0]['mint'] == JUP_ADDR)
 pairs = [{'chainId': 'solana', 'priceUsd': '9', 'liquidity': {'usd': 1e6},
           'baseToken': {'address': 'Other111111111111111111111111111111111111', 'symbol': 'OTH'},
           'quoteToken': {'address': SOL_ADDR, 'symbol': 'CRUMB'}}]
 check("a pool where the address is only the QUOTE token never lends it the other token's price",
       d._call_rows_from_pairs(pairs, want_mint=SOL_ADDR) == [])
 src = open(os.path.join(os.path.dirname(__file__), '..', 'dashboard.py')).read()
-check('the peak loop falls back to GeckoTerminal for tokens DexScreener did not price',
-      "simple/networks/' " in src or "/simple/networks/'" in src)
+check('the peak loop falls back to Jupiter and GeckoTerminal for tokens DexScreener did not price',
+      "/simple/networks/'" in src and "'/price/v3?ids='" in src)
 
 # ── the page ──
 import json, subprocess  # noqa: E402

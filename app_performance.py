@@ -68,7 +68,7 @@ def install(appmod) -> None:
                 tags.append('<script src="/static/page-transition-direction.js?v=1"></script>')
 
             style('app-ux.css', '/static/app-ux.css?v=8', ' id="oa-app-ux-css"')
-            script('app-ux.js', '/static/app-ux.js?v=6', ' id="oa-app-ux-js"')
+            script('app-ux.js', '/static/app-ux.js?v=7', ' id="oa-app-ux-js"')
 
             # The navbar is rendered later in <body>, and its JS used to be the
             # thing that only then discovered the fixed mobile bottom-nav
@@ -78,7 +78,7 @@ def install(appmod) -> None:
                 (f'/static/navbar.css?v={version}', 'style'),
                 (f'/static/navbar.js?v={version}', 'script'),
                 ('/static/mobile-bottom-nav.css?v=9', 'style'),
-                ('/static/mobile-bottom-nav.js?v=8', 'script'),
+                ('/static/mobile-bottom-nav.js?v=9', 'script'),
                 (f'/static/header-stable-balance.js?v={version}', 'script'),
             ):
                 marker = f'rel="preload" href="{href}"'
