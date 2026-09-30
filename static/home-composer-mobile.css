@@ -77,7 +77,7 @@
     margin:0 0 12px!important;
   }
 
-  /* One tidy row: four equal attachment buttons + a square emoji button,
+  /* One tidy row: five equal attachment buttons (Chart, Trade, Call, Image, Video) + a square emoji button,
      then the full-width POST. A wrapping flex row used to push "Video" and
      the emoji onto a ragged second line. */
   /* #feed-composer.feed-composer in the selector: home-mobile-polish.css
@@ -88,9 +88,9 @@
      regardless of load order. */
   body.oa-home-mobile #feed-composer.feed-composer .feed-composer-actions{
     display:grid!important;
-    grid-template-columns:repeat(4,minmax(0,1fr)) 46px!important;
+    grid-template-columns:repeat(5,minmax(0,1fr)) 46px!important;
     align-items:stretch!important;
-    gap:7px!important;
+    gap:6px!important;
     padding:12px 0 0!important;
     border-top:1px solid rgba(255,255,255,.065)!important;
   }

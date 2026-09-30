@@ -1,0 +1,129 @@
+/* Token calls on the home feed: the call card, the Calls tab strip and the
+   Call sheet. Palette = the app's own (#0a0b0e ground, #f7b955 accent). */
+
+/* ── "CALLED" badge next to the author ── */
+.fc-call-badge{display:inline-flex;align-items:center;margin-left:6px;padding:2px 7px;border-radius:7px;
+  background:rgba(247,185,85,.13);color:#f7b955;font-size:10px;font-weight:800;letter-spacing:.05em;line-height:1.4;flex-shrink:0}
+
+/* ── the card under a call post ── */
+.fcall-card{margin:6px 0 10px;padding:12px;border:1px solid #1f242c;border-radius:14px;background:#101216;
+  display:flex;flex-direction:column;gap:10px;cursor:default;max-width:100%;box-sizing:border-box}
+.fcall-top{display:flex;align-items:center;gap:10px;min-width:0}
+.fcall-tile{position:relative;width:40px;height:40px;border-radius:11px;flex-shrink:0;overflow:hidden;
+  display:flex;align-items:center;justify-content:center;color:#e8ecf2;font-size:10.5px;font-weight:800;letter-spacing:.02em}
+.fcall-tile img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.fcall-id{flex:1;min-width:0}
+.fcall-sym{font-size:15.5px;font-weight:800;color:#eef1f5;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fcall-sub{font-size:11.5px;color:#8a919c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fcall-multi{text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end}
+.fcall-multi b{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:23px;line-height:1;font-weight:800;color:#eef1f5;letter-spacing:-.02em}
+.fcall-multi b.up{color:#3ad29b}
+.fcall-multi span{font-size:10.5px;color:#8a919c;margin-top:4px;white-space:nowrap}
+.fcall-spark{display:block;width:100%;height:44px;overflow:visible}
+.fcall-spark-empty{display:none}
+.fcall-spark-base{stroke:#3a414c;stroke-width:1;stroke-dasharray:3 4;fill:none;vector-effect:non-scaling-stroke}
+.fcall-spark-line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.fcall-spark-line.up{stroke:#3ad29b}
+.fcall-spark-line.down{stroke:#f76b62}
+.fcall-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.fcall-stat{background:#14171c;border-radius:9px;padding:7px 9px;min-width:0}
+.fcall-stat span{display:block;font-size:10.5px;color:#8a919c;line-height:1.3}
+.fcall-stat b{display:block;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;font-weight:700;color:#eef1f5;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fcall-stat b.up{color:#3ad29b}
+.fcall-stat b.down{color:#f76b62}
+.fcall-actions{display:flex;gap:8px}
+.fcall-buy{flex:1;min-width:0;height:42px;border:0;border-radius:11px;background:#f7b955;color:#0a0b0e;font:inherit;
+  font-size:13.5px;font-weight:800;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 12px}
+.fcall-chart{display:inline-flex;align-items:center;justify-content:center;height:42px;padding:0 16px;border-radius:11px;
+  border:1px solid #1f242c;background:#14171c;color:#eef1f5;font-size:13px;font-weight:700;text-decoration:none}
+.fcall-buy:active,.fcall-chart:active{transform:scale(.98)}
+
+/* ── Calls tab: best calls today + CTA ── */
+#feed-calls-top{padding:14px 14px 4px}
+#feed-calls-top[hidden]{display:none}
+.fcall-top-loading,.fcall-top-empty{color:#8a919c;font-size:13px;padding:6px 2px}
+.fcall-top-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.fcall-top-head h2{margin:0;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#8a919c}
+.fcall-top-head a{font-size:12.5px;font-weight:700;color:#f7b955;text-decoration:none}
+.fcall-podium{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.fcall-top-card{min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:10px;border-radius:13px;
+  border:1px solid #1f242c;background:#101216;color:#eef1f5;font:inherit;text-align:left;cursor:pointer}
+.fcall-top-card.first{border-color:#3a301c;background:#15120c}
+.fcall-rank{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:700;color:#8a919c}
+.fcall-top-card.first .fcall-rank{color:#f7b955}
+.fcall-top-sym{font-size:13px;font-weight:700;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fcall-top-card b{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:20px;font-weight:800;color:#eef1f5;line-height:1.1}
+.fcall-top-card b.up{color:#3ad29b}
+.fcall-top-by{font-size:11px;color:#8a919c;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fcall-cta{margin-top:12px;display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px dashed #3a301c;border-radius:14px}
+.fcall-cta>div{flex:1;min-width:0}
+.fcall-cta b{display:block;font-size:14px;color:#eef1f5}
+.fcall-cta span{display:block;font-size:12px;color:#8a919c}
+.fcall-cta button{flex-shrink:0;height:40px;padding:0 16px;border:0;border-radius:11px;background:#f7b955;color:#0a0b0e;
+  font:inherit;font-size:13.5px;font-weight:800;cursor:pointer}
+
+/* ── the Call sheet (bottom sheet on a phone, a dialog on desktop) ── */
+html.fcall-sheet-open,html.fcall-sheet-open body{overflow:hidden}
+.fcall-sheet-wrap{position:fixed;inset:0;z-index:100000;background:rgba(3,4,6,.72);display:flex;align-items:flex-end;justify-content:center}
+.fcall-sheet-wrap[hidden]{display:none}
+.fcall-sheet{width:100%;max-width:480px;max-height:92vh;max-height:92dvh;overflow-y:auto;overscroll-behavior:contain;box-sizing:border-box;
+  background:#0e1014;border:1px solid #2a2418;border-bottom:0;border-radius:22px 22px 0 0;color:#eef1f5;
+  padding:10px 16px calc(18px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:12px;
+  font-family:'Geist',system-ui,-apple-system,sans-serif;animation:fcall-up .22s ease-out}
+@keyframes fcall-up{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}
+.fcall-grab{width:40px;height:4px;border-radius:2px;background:#2a3038;align-self:center}
+.fcall-sheet-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.fcall-sheet-head h2{margin:0;font-size:20px;font-weight:800;letter-spacing:-.01em}
+.fcall-sheet-head p{margin:2px 0 0;font-size:12.5px;color:#8a919c;line-height:1.4}
+.fcall-close{width:44px;height:44px;flex-shrink:0;border-radius:50%;border:1px solid #1f242c;background:#14171c;color:#eef1f5;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;margin:-4px -4px 0 0}
+.fcall-search{display:flex;align-items:center;gap:8px;height:48px;padding:0 12px;border:1px solid #2a3038;border-radius:12px;
+  background:#101216;color:#8a919c}
+.fcall-search:focus-within{border-color:#f7b955}
+.fcall-search input{flex:1;min-width:0;height:100%;background:transparent;border:0;outline:0;color:#eef1f5;font:inherit;font-size:16px}
+.fcall-results{display:flex;flex-direction:column;gap:6px}
+.fcall-results:empty{display:none}
+.fcall-results-note{margin:0;padding:6px 2px;font-size:13px;color:#8a919c}
+.fcall-result{display:flex;align-items:center;gap:10px;width:100%;min-height:56px;padding:8px 10px;border-radius:12px;
+  border:1px solid #1f242c;background:#101216;color:#eef1f5;font:inherit;text-align:left;cursor:pointer}
+.fcall-result.on{border-color:#f7b955;background:#1a1610}
+.fcall-result .fcall-tile{width:36px;height:36px;border-radius:10px}
+.fcall-result-id{flex:1;min-width:0;display:flex;flex-direction:column}
+.fcall-result-sym{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fcall-result-sym i{font-style:normal;font-weight:500;font-size:12px;color:#8a919c}
+.fcall-result-sub{font-size:11.5px;color:#8a919c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fcall-result-px{display:flex;flex-direction:column;align-items:flex-end;flex-shrink:0;font-family:'JetBrains Mono',ui-monospace,monospace}
+.fcall-result-px b{font-size:12.5px}
+.fcall-result-px span{font-size:11.5px}
+.fcall-result-px .up{color:#3ad29b}
+.fcall-result-px .down{color:#f76b62}
+.fcall-note{position:relative;display:flex;flex-direction:column;gap:6px}
+.fcall-note>span{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#8a919c}
+.fcall-note>span i{font-style:normal;font-weight:600;text-transform:none;letter-spacing:0}
+.fcall-note textarea{resize:none;background:#101216;border:1px solid #2a3038;border-radius:12px;padding:10px 12px 20px;
+  color:#eef1f5;font:inherit;font-size:16px;line-height:1.4;outline:0}
+.fcall-note textarea:focus{border-color:#f7b955}
+.fcall-note em{position:absolute;right:10px;bottom:6px;font-style:normal;font-size:10.5px;color:#6b727d}
+.fcall-info{display:flex;flex-direction:column;gap:6px;padding:11px 12px;border-radius:12px;background:#101216;border:1px solid #1f242c}
+.fcall-info-row{display:flex;align-items:center;justify-content:space-between;font-size:12.5px;color:#8a919c}
+.fcall-info-row #fcall-left{display:flex;align-items:center;gap:4px;color:#eef1f5}
+#fcall-left i{width:16px;height:6px;border-radius:3px;background:#2a3038}
+#fcall-left i.on{background:#f7b955}
+#fcall-left b{margin-left:6px;font-weight:700}
+.fcall-info p{margin:0;font-size:11.5px;color:#8a919c;line-height:1.45}
+.fcall-msg{margin:0;font-size:12.5px;color:#3ad29b;min-height:0}
+.fcall-msg:empty{display:none}
+.fcall-msg.bad{color:#f76b62}
+.fcall-submit{height:52px;flex-shrink:0;border:0;border-radius:14px;background:#f7b955;color:#0a0b0e;font:inherit;font-size:16px;font-weight:800;cursor:pointer}
+.fcall-submit:disabled{background:#2a2418;color:#8f7a55;cursor:default}
+@media (min-width:769px){
+  .fcall-sheet-wrap{align-items:center}
+  .fcall-sheet{border-radius:20px;border-bottom:1px solid #2a2418;padding-bottom:18px;max-height:88vh}
+  .fcall-grab{display:none}
+}
+@media (max-width:360px){
+  .fcall-multi b{font-size:20px}
+  .fcall-stat{padding:6px 7px}
+  .fcall-stat b{font-size:11.5px}
+}

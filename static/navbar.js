@@ -43,8 +43,8 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/'||!window.matchMedia('(max-width:768px)').matches)return;
   document.documentElement.classList.add('oa-home-mobile-root');
-  ensureStyle('/static/home-mobile.css?v=12','home-mobile.css');
-  ensureScript('/static/home-mobile.js?v=10','home-mobile.js');
+  ensureStyle('/static/home-mobile.css?v=13','home-mobile.css');
+  ensureScript('/static/home-mobile.js?v=11','home-mobile.js');
 })();
 
 (function(){

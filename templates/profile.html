@@ -496,7 +496,7 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
         <div class="pf-posts">
           {% set ns = namespace(shown=0) %}
           {% for post in posts %}
-            {% set _t = post.content %}{% if '__TRADE__' in _t %}{% set _t = _t.split('__TRADE__')[0] %}{% endif %}{% if '__CHART__' in _t %}{% set _t = _t.split('__CHART__')[0] %}{% endif %}{% set _t = _t.strip() %}
+            {% set _t = post.content %}{% if '__TRADE__' in _t %}{% set _t = _t.split('__TRADE__')[0] %}{% endif %}{% if '__CHART__' in _t %}{% set _t = _t.split('__CHART__')[0] %}{% endif %}{% if '__CALL__' in _t %}{% set _t = _t.split('__CALL__')[0] %}{% endif %}{% set _t = _t.strip() %}
             {% if _t %}{% set ns.shown = ns.shown + 1 %}<article class="pf-post"><div class="pf-post-content">{{ _t }}</div><div class="pf-post-meta"><span class="pf-post-time">{{ (post.created_at or '')[:16] }}</span><span class="pf-post-likes"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/></svg>{{ post.likes or 0 }}</span></div></article>{% endif %}
           {% endfor %}
           {% if ns.shown == 0 %}<div class="pf-empty"><span class="pf-empty-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span><strong>No posts yet</strong><span>New posts will appear here.</span></div>{% endif %}

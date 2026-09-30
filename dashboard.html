@@ -4097,6 +4097,11 @@ __IMAGE_LIGHTBOX__
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
         <span class="feed-pill-label">Trade</span>
       </button>
+      <!-- Call chip: call a token (tracked live, posted to the feed) -->
+      <button class="feed-composer-pill feed-call-pill" id="call-pill-btn" type="button" onclick="event.stopPropagation();if(checkGuest())return;_openCallSheet()" aria-label="Call a token">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M15 9a4 4 0 0 1 0 6"/><path d="M18 6a8 8 0 0 1 0 12"/></svg>
+        <span class="feed-pill-label">Call</span>
+      </button>
       <!-- Image chip -->
       <button class="feed-composer-pill" id="image-pill-btn" onclick="event.stopPropagation();document.getElementById('composer-image-input').click()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
@@ -4123,7 +4128,11 @@ __IMAGE_LIGHTBOX__
   <div class="feed-tabs">
     <button class="feed-tab active" data-tab="foryou" onclick="_feedTab(this,this.dataset.tab)">For You</button>
     <button class="feed-tab" data-tab="following" onclick="_feedTab(this,this.dataset.tab)">Following</button>
+    <button class="feed-tab" data-tab="calls" onclick="_feedTab(this,this.dataset.tab)">Calls</button>
   </div>
+
+  <!-- CALLS TAB: today's best calls + a way in (feed-calls.js) -->
+  <div id="feed-calls-top" hidden></div>
 
   <!-- CENTER FEED -->
   <div id="center-feed"><div class="fc-loading">Loading…</div></div>
@@ -4781,6 +4790,8 @@ if (window.__SESSION_WALLET) {
 <script src="/static/chart-scrub.js?v=__ASSET_VER__" defer></script>
 <script src="/static/pull-to-refresh.js?v=__ASSET_VER__" defer></script>
 <script src="/static/orc-wallet-adapter.js?v=__ASSET_VER__" defer></script>
+<link rel="stylesheet" href="/static/feed-calls.css?v=__ASSET_VER__">
+<script src="/static/feed-calls.js?v=__ASSET_VER__" defer></script>
 <script src="/static/dashboard.js?v=__ASSET_VER__" defer></script>
 
 <!-- ── TOKEN DETAIL PANEL ── -->
