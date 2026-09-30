@@ -7808,8 +7808,8 @@ function _renderTradeTerminalCard(t){
     fumbleSlot = '<div class="tc-fumble" data-fb-mint="'+esc(_fbMint)+'"'
       + ' data-fb-tokens="'+esc(String(_fbTokens))+'"'
       + ' data-fb-exit="'+esc(String(_fbExit))+'"'
-      + ' style="display:none;font-size:11px;margin-top:6px;padding-top:6px;'
-      + 'border-top:1px solid #1a1f2e;line-height:1.5"></div>';
+      + ' style="display:none;font-size:12px;margin-top:8px;padding-top:8px;'
+      + 'border-top:1px solid rgba(255,255,255,.12);line-height:1.5;font-weight:600"></div>';
   }
   // One complete card shared by the composer and the published feed.
   // Keep every value in normal layout flow; the percentage cannot cover prices.
@@ -7826,6 +7826,7 @@ function _renderTradeTerminalCard(t){
         +'<div class="oa-home-trade-pct" style="color:'+pctCol+'">'+pctStr+'</div>'
       +'</div>'
       +'<div class="oa-home-trade-profit">'+solStr+'</div>'
+      +fumbleSlot
       +'<div class="oa-home-trade-footer">View token <span aria-hidden="true">→</span></div>'
     +'</div>'
   +'</div>';
@@ -8926,18 +8927,18 @@ function _fumbleLine(tokens, exitPrice, now){
   };
   // Under a couple of percent either way is noise, not a story.
   if(Math.abs(pct) < 2){
-    return '<span style="color:#565d68">Worth about the same today ('
+    return '<span style="color:#b3bac4">Worth about the same today ('
          + money(worthNow) + ')</span>';
   }
   if(delta > 0){
-    return '<span style="color:#565d68">Held instead, today: </span>'
+    return '<span style="color:#b3bac4">Held instead, today: </span>'
          + '<span style="color:#00d084;font-weight:700">' + money(worthNow) + '</span>'
          + '<span style="color:#00d084"> (+' + pct.toFixed(0) + '%)</span>'
-         + '<span style="color:#565d68"> — left on the table, not earned</span>';
+         + '<span style="color:#b3bac4"> — left on the table, not earned</span>';
   }
-  return '<span style="color:#565d68">Selling saved </span>'
+  return '<span style="color:#b3bac4">Selling saved </span>'
        + '<span style="color:#f7b955;font-weight:700">' + money(delta) + '</span>'
-       + '<span style="color:#565d68"> — worth ' + money(worthNow) + ' today</span>';
+       + '<span style="color:#b3bac4"> — worth ' + money(worthNow) + ' today</span>';
 }
 
 function _paintFumble(el){
