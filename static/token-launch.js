@@ -127,6 +127,27 @@ function renderPreview(){
  text('tl-reward-summary',mode==='holder'?'Rewards: token holders'
    :mode==='community'?(orc?'Rewards: you + community · '+money(orc/100)+' platform fee':'Rewards: creator + community')
    :(orc?'Rewards: '+money((10000-orc)/100)+' to you · '+money(orc/100)+' platform fee':'Rewards: 100% creator'));
+ renderFeeStrips(mode,bps);
+}
+// The fee tiles, the worked example and the acknowledgement follow the chosen
+// mode. Holder Rewards pay creator fees to holders: the creator gets none and
+// OrcAgent takes no platform fee (orc_bps is 0 for that mode server-side).
+function renderFeeStrips(mode,bps){
+ var earn=document.querySelector('#tl-earn-strip'),orcStrip=document.querySelector('#tl-orc-share-strip');
+ var example=$('tl-earn-example'),ack=document.querySelector('label.tl-ack span');
+ if(ack&&ack.dataset.base===undefined)ack.dataset.base=ack.textContent;
+ if(!orcBps)return;
+ var holder=mode==='holder',mine=10000-orcBps-(mode==='community'?bps:0);
+ if(earn){earn.querySelector('small').textContent=holder?'Creator fees':'Your earnings';
+  earn.querySelector('strong').textContent=holder?'All to token holders':money(mine/100)+' of creator fees'}
+ if(orcStrip)orcStrip.querySelector('strong').textContent=holder?'None on Holder Rewards':money(orcBps/100)+' of creator fees';
+ // The worked example is written for Creator Rewards (you keep the rest).
+ if(example)example.hidden=mode!=='creator';
+ if(ack)ack.textContent=holder
+   ?' I understand that network/rent fees apply, rewards are not guaranteed, and with Holder Rewards every creator fee goes to the token\'s holders: I receive none of it, and OrcAgent takes no platform fee.'
+   :mode==='community'
+   ?' I understand that network/rent fees apply, creator rewards are not guaranteed, and of this token\'s creator fees I receive '+money(mine/100)+', my community '+money(bps/100)+' and OrcAgent\'s platform fee is '+money(orcBps/100)+' (never a share of trading volume).'
+   :ack.dataset.base;
 }
 async function call(path,body){
  var opt={credentials:'include'};
