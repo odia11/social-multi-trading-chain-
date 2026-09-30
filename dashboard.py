@@ -11041,6 +11041,10 @@ def user_trader_loop(stop_event, config, wallet: str):
                 # against -- SOL itself in SOL mode (no extra call), or this
                 # wallet's own Solana USDC balance in USDC mode.
                 us_solana_avail = us_sol if _solana_base == 'SOL' else _bot_usdc_avail
+                # What Live Trades shows as "Ready": the capital the bot trades
+                # with, read from this same snapshot rather than a second call.
+                us['trading_ready'] = round(float(us_solana_avail or 0), 4)
+                us['trading_ready_currency'] = _solana_base
                 total_live = len(live)
                 print(f'[bot] {short} running=True tokens={total_live} pos={open_pos}/5 sol={round(us_sol,4)} '
                       f'{_solana_base.lower()}_avail={round(us_solana_avail,4)} scanning...', flush=True)
@@ -14114,6 +14118,14 @@ def history():
     )
 
 
+def _sig6(x) -> float:
+    """A price kept to six significant digits (0.0000213987 -> 0.0000213987)."""
+    try:
+        return float('%.6g' % float(x or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _fetch_open_bot_positions(wallet):
     """Same open_positions query as /history's open-positions block above
     (WHERE user_id=? AND source='bot') -- shared by /live-trades (page) and
@@ -14141,15 +14153,42 @@ def _fetch_open_bot_positions(wallet):
             c.execute(
                 '''SELECT mint_address, symbol, amount, buy_price, opened_at,
                           sl_price, tp_price, trailing_enabled, chain, base_currency
-                   FROM open_positions WHERE user_id=? AND source='bot' ORDER BY opened_at DESC''',
+                   FROM open_positions WHERE user_id=? AND source IN ('bot','narrative')
+                   ORDER BY opened_at DESC''',
                 (user_id,)
             )
+            rows = c.fetchall()
             live_map = {t['mint']: t for t in state.get('tokens', [])}
+            # A held token that has left the scanner list still needs a real
+            # price: the one the bot's own SL/TP monitor reads (cached, so
+            # usually free). Fetched together, bounded, and never guessed --
+            # a price that cannot be read shows as unknown, not as entry
+            # (which read as a flat 0% forever).
+            _missing = [(r[0], r[8]) for r in rows if r[0] and not (live_map.get(r[0]) or {}).get('price')]
+            _fetched = {}
+            if _missing:
+                def _px(item):
+                    try:
+                        d = get_token_data(item[0], fast=True, chain=(item[1] or 'solana'))
+                        return item[0], float((d or {}).get('price') or 0)
+                    except Exception:
+                        return item[0], 0.0
+                try:
+                    with ThreadPoolExecutor(max_workers=min(6, len(_missing))) as ex:
+                        for _m, _p in ex.map(_px, _missing[:12], timeout=6):
+                            if _p > 0:
+                                _fetched[_m] = _p
+                except Exception:
+                    pass
             _sol_rate = _sol_price_usd if _sol_price_usd > 0 else 1.0
-            for mint_addr, symbol, amount, buy_price, opened_at, snap_sl_price, snap_tp_price, snap_trailing, p_chain, p_base in c.fetchall():
+            for mint_addr, symbol, amount, buy_price, opened_at, snap_sl_price, snap_tp_price, snap_trailing, p_chain, p_base in rows:
                 live       = live_map.get(mint_addr, {})
-                cur_price  = live.get('price', buy_price)
-                pnl_pct    = round((cur_price - buy_price) / buy_price * 100, 2) if buy_price > 0 else 0.0
+                cur_price  = float(live.get('price') or _fetched.get(mint_addr) or 0)
+                price_known = cur_price > 0
+                if not price_known:
+                    cur_price = buy_price
+                pnl_pct    = (round((cur_price - buy_price) / buy_price * 100, 2)
+                              if buy_price > 0 and price_known else None)
                 # Same reasoning as history()/leaderboard()/traders() -- only a
                 # plain SOL-mode Solana position's stake/pnl is SOL-denominated;
                 # an EVM chain's own USDC/USDG (or a USDC-mode Solana position)
@@ -14173,24 +14212,94 @@ def _fetch_open_bot_positions(wallet):
                 _has_snap = snap_sl_price is not None and snap_tp_price is not None
                 open_positions.append({
                     'token':         symbol or (mint_addr[:8] if mint_addr else '—'),
-                    'entry_price':   round(buy_price, 6),
-                    'current_price': round(cur_price, 6),
-                    'tp_price':      round(snap_tp_price, 6) if _has_snap else round(buy_price * take_profit_mult, 6),
-                    'sl_price':      round(snap_sl_price, 6) if _has_snap else round(buy_price * (1 - stop_loss), 6),
+                    # Significant digits, not six decimals: a micro-cap at
+                    # $0.0000214 rounded to 6 places read as $0.000021 and
+                    # its live price as a flat $0.00002.
+                    'entry_price':   _sig6(buy_price),
+                    'current_price': _sig6(cur_price),
+                    'tp_price':      _sig6(snap_tp_price) if _has_snap else _sig6(buy_price * take_profit_mult),
+                    'sl_price':      _sig6(snap_sl_price) if _has_snap else _sig6(buy_price * (1 - stop_loss)),
                     'tiered_tp':     bool(snap_trailing) if _has_snap else bool(tiered_tp_enabled),
                     'amount':        round(amount, 4),
                     'stake_sol':     round(buy_price * amount, 4),
                     'stake_usd':     round(buy_price * amount * _rate, 2),
                     'pnl_pct':       pnl_pct,
                     'pnl_sol':       round((cur_price - buy_price) * amount, 6),
-                    'pnl_usd':       round((cur_price - buy_price) * amount * _rate, 2),
+                    'pnl_usd':       round((cur_price - buy_price) * amount * _rate, 2) if price_known else 0.0,
+                    'price_known':   price_known,
                     'opened_at':     opened_str,
+                    'opened_ts':     float(opened_at) if opened_at else None,
+                    'chain':         p_chain or 'solana',
                     'mint_address':  mint_addr or '',
                 })
         conn.close()
     except Exception as e:
         print(f'[live-trades] DB error: {e}', flush=True)
     return open_positions
+
+
+def _bot_exit_label(reason: str) -> str:
+    """'STOP LOSS -12.3%' -> 'Stop loss'. The number is already on the row."""
+    r = (reason or '').strip().upper()
+    for prefix, label in (('TAKE PROFIT', 'Take profit'), ('TP1', 'Take profit'), ('TP2', 'Take profit'),
+                          ('TRAILING', 'Trailing stop'), ('STOP LOSS', 'Stop loss'),
+                          ('MOMENTUM', 'Momentum exit'), ('RUG', 'Rug protection'),
+                          ('CRASH', 'Crash exit'), ('TIME', 'Time limit'), ('STARTUP', 'Restart exit')):
+        if r.startswith(prefix):
+            return label
+    return (reason or 'Sold').strip()[:24].capitalize() if reason else 'Sold'
+
+
+def _fetch_closed_bot_trades(wallet: str, limit: int = 30) -> list:
+    """The bot's recent round trips -- what it bought, at what price, what it
+    sold for, and the result -- newest first. Only the bot's own trades
+    (source bot/narrative); manual and copy trades have their own history."""
+    out = []
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            row = conn.execute('SELECT id FROM users WHERE wallet_address=?', (wallet,)).fetchone()
+            if not row:
+                return out
+            rows = conn.execute(
+                '''SELECT token, mint_address, entry_price, exit_price, amount, pnl, timestamp,
+                          opened_at, exit_reason, hold_seconds, chain, base_currency
+                   FROM trades
+                   WHERE user_id=? AND COALESCE(source,'bot') IN ('bot','narrative')
+                     AND side IS NULL AND exit_price IS NOT NULL AND entry_price > 0
+                   ORDER BY id DESC LIMIT ?''', (row[0], int(limit))).fetchall()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f'[live-trades] closed trades DB error: {e}', flush=True)
+        return out
+    _sol_rate = _sol_price_usd if _sol_price_usd > 0 else 1.0
+    for (token, mint, entry, exit_p, amount, pnl, ts, opened_at, reason, hold, chain, base) in rows:
+        entry, exit_p, amount = float(entry or 0), float(exit_p or 0), float(amount or 0)
+        is_sol = (not chain or chain == 'solana') and (base or 'SOL') == 'SOL'
+        sold_ts = None
+        try:
+            sold_ts = datetime.datetime.strptime(str(ts)[:19], '%Y-%m-%d %H:%M:%S').replace(
+                tzinfo=datetime.timezone.utc).timestamp()
+        except Exception:
+            pass
+        bought_ts = float(opened_at) if opened_at else (sold_ts - float(hold) if sold_ts and hold else None)
+        out.append({
+            'token':       token or ((mint or '')[:8] or '—'),
+            'mint_address': mint or '',
+            'chain':       chain or 'solana',
+            'entry_price': entry,
+            'exit_price':  exit_p,
+            'amount':      amount,
+            'stake_usd':   round(entry * amount * (_sol_rate if is_sol else 1.0), 2),
+            'pnl_usd':     round(float(pnl or 0) * (_sol_rate if is_sol else 1.0), 2),
+            'pnl_pct':     round((exit_p - entry) / entry * 100, 2) if entry > 0 else None,
+            'exit_reason': _bot_exit_label(reason),
+            'bought_ts':   bought_ts,
+            'sold_ts':     sold_ts,
+            'hold_seconds': (float(hold) if hold else (sold_ts - bought_ts if sold_ts and bought_ts else None)),
+        })
+    return out
 
 
 @app.route('/live-trades')
@@ -14201,6 +14310,7 @@ def live_trades():
     return _render_no_cache(
         'live_trades.html',
         open_positions=_fetch_open_bot_positions(wallet),
+        closed_trades=_fetch_closed_bot_trades(wallet),
         bot_status=_bot_status_summary(wallet),
         wallet=wallet,
         wallet_short=(wallet[:4] + '...' + wallet[-4:]) if len(wallet) >= 8 else wallet,
@@ -14213,7 +14323,8 @@ def api_live_trades():
     wallet = _authenticated_wallet()
     if not wallet:
         return jsonify({'ok': False, 'positions': []}), 401
-    return jsonify({'ok': True, 'positions': _fetch_open_bot_positions(wallet)})
+    return jsonify({'ok': True, 'positions': _fetch_open_bot_positions(wallet),
+                    'trades': _fetch_closed_bot_trades(wallet)})
 
 
 @app.route('/bot')
@@ -27747,6 +27858,10 @@ def _bot_status_summary(wallet: str) -> dict:
         'running': running,
         'sol_ready': sol_ready,
         'sol_ready_usd': _sol_usd(sol_ready),
+        # The bot's trading capital (USDC in USDC mode) as it last read it;
+        # None until the bot has run a cycle.
+        'trading_ready': us.get('trading_ready'),
+        'trading_ready_currency': us.get('trading_ready_currency'),
         'open_positions': open_positions,
         'win_rate': win_rate,
     }
