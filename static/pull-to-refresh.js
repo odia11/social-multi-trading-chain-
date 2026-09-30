@@ -20,7 +20,13 @@
  */
 (function(){
 'use strict';
-var THRESHOLD=72, MAX_PULL=120, MIN_SPIN_MS=650, MAX_SPIN_MS=15000;
+var THRESHOLD=72, MAX_PULL=120, MIN_SPIN_MS=450;
+// An in-place refresh never holds the spinner longer than this: whatever is
+// still loading lands on its own, and the page is free for the next pull.
+// A slow wallet or RPC call used to keep the spinner up (and every new pull
+// ignored) for up to 15 s -- the "stuck" refresh. A full reload keeps
+// spinning until the new page replaces this one.
+var MAX_SPIN_MS=3000, MAX_RELOAD_SPIN_MS=15000;
 
 function scrollTop(){
   var se=document.scrollingElement||document.documentElement;
@@ -82,7 +88,8 @@ window.initPullToRefresh=function(opts){
   opts=opts||{};
   if(opts.pull===false)return;
   if(window.__oaPtrInit)return;window.__oaPtrInit=true;
-  var onRefresh=typeof opts.onRefresh==='function'?opts.onRefresh:function(){
+  var inPlace=typeof opts.onRefresh==='function';
+  var onRefresh=inPlace?opts.onRefresh:function(){
     location.reload();
     return new Promise(function(){});   // keep spinning until the new page replaces this one
   };
@@ -91,13 +98,14 @@ window.initPullToRefresh=function(opts){
   // element, pulling is off -- dragging down there means "scroll up".
   function customScrollerActive(){try{return !!(typeof opts.scrollEl==='function'&&opts.scrollEl())}catch(_){return false}}
 
-  var ind=null,arc=null,startX=0,startY=0,tracking=false,pulling=false,dist=0,refreshing=false,armedOnce=false;
+  var ind=null,arc=null,startX=0,startY=0,startTarget=null,tracking=false,pulling=false,dist=0,refreshing=false,armedOnce=false,frame=0;
 
   function ensure(){if(!ind){injectStyle();ind=makeIndicator();arc=ind.querySelector('.oa-ptr-arc');}}
+  // Only transform/opacity change while the finger moves (compositor-only);
+  // the header is measured once per pull, never per touchmove.
   function place(y,opacity,progress,anim){
     ensure();
     ind.classList.toggle('oa-ptr-anim',!!anim);
-    ind.style.top=headerBottom()+'px';
     ind.style.transform='translate3d(0,'+(y-50)+'px,0) rotate('+(progress*270)+'deg)';
     ind.style.opacity=String(opacity);
     if(arc)arc.setAttribute('stroke-dashoffset',String(53.4*(1-Math.min(1,progress)*.85)));
@@ -113,20 +121,31 @@ window.initPullToRefresh=function(opts){
     place(THRESHOLD*.8,1,.9,true);
     var started=Date.now(),p;
     try{p=Promise.resolve(onRefresh());}catch(e){p=Promise.resolve();}
-    var cap=new Promise(function(res){setTimeout(res,MAX_SPIN_MS)});
+    var cap=new Promise(function(res){setTimeout(res,inPlace?MAX_SPIN_MS:MAX_RELOAD_SPIN_MS)});
     Promise.race([p.catch(function(){}),cap]).then(function(){
       var wait=Math.max(0,MIN_SPIN_MS-(Date.now()-started));
       setTimeout(function(){refreshing=false;hide();},wait);
     });
   }
 
+  // touchstart stays cheap (every tap and scroll starts here); the ancestor
+  // walks run once, on the first downward move of a possible pull.
   document.addEventListener('touchstart',function(e){
     tracking=pulling=false;dist=0;armedOnce=false;
-    if(refreshing||e.touches.length!==1)return;
-    if(scrollTop()>0||customScrollerActive()||inOverlay(e.target)||innerScrolled(e.target))return;
-    if(opts.ignoreTarget&&e.target&&e.target.closest&&e.target.closest(opts.ignoreTarget))return;
-    tracking=true;startX=e.touches[0].clientX;startY=e.touches[0].clientY;
+    if(refreshing||e.touches.length!==1||scrollTop()>0)return;
+    tracking=true;startTarget=e.target;startX=e.touches[0].clientX;startY=e.touches[0].clientY;
   },{passive:true});
+  function mayPull(t){
+    if(customScrollerActive()||inOverlay(t)||innerScrolled(t))return false;
+    return !(opts.ignoreTarget&&t&&t.closest&&t.closest(opts.ignoreTarget));
+  }
+  function paint(){
+    frame=0;
+    if(!pulling)return;
+    var progress=dist/THRESHOLD;
+    place(dist,Math.min(1,progress*1.2),progress,false);
+    ind.classList.toggle('oa-ptr-armed',dist>=THRESHOLD);
+  }
 
   document.addEventListener('touchmove',function(e){
     if(!tracking||e.touches.length!==1)return;
@@ -134,28 +153,30 @@ window.initPullToRefresh=function(opts){
     if(!pulling){
       if(Math.abs(dx)<6&&Math.abs(dy)<6)return;
       // Upward or sideways first movement: this is a scroll/swipe, not a pull.
-      if(dy<=0||Math.abs(dx)>Math.abs(dy)||scrollTop()>0){tracking=false;return;}
-      pulling=true;
+      if(dy<=0||Math.abs(dx)>Math.abs(dy)||scrollTop()>0||!mayPull(startTarget)){tracking=false;return;}
+      pulling=true;ensure();ind.style.top=headerBottom()+'px';
     }
     if(scrollTop()>0){tracking=pulling=false;hide();return;}
     // Rubber-band resistance, like native iOS/Instagram.
     dist=Math.min(MAX_PULL,Math.max(0,dy)*.5);
-    var progress=dist/THRESHOLD;
-    place(dist,Math.min(1,progress*1.2),progress,false);
     var armed=dist>=THRESHOLD;
-    ind.classList.toggle('oa-ptr-armed',armed);
     if(armed&&!armedOnce){armedOnce=true;try{navigator.vibrate&&navigator.vibrate(8)}catch(_){}}
     if(!armed)armedOnce=false;
+    if(!frame)frame=requestAnimationFrame(paint);
   },{passive:true});
 
   function end(){
     if(!tracking)return;
     tracking=false;
+    if(frame){cancelAnimationFrame(frame);frame=0;}
     if(pulling&&dist>=THRESHOLD&&!refreshing)run();
     else if(pulling)hide();
     pulling=false;dist=0;
   }
   document.addEventListener('touchend',end,{passive:true});
-  document.addEventListener('touchcancel',function(){tracking=pulling=false;dist=0;if(!refreshing)hide();},{passive:true});
+  document.addEventListener('touchcancel',function(){
+    if(frame){cancelAnimationFrame(frame);frame=0;}
+    tracking=pulling=false;dist=0;if(!refreshing)hide();
+  },{passive:true});
 };
 })();
