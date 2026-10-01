@@ -763,6 +763,8 @@ MAX_RISK_PCT_PER_TRADE = 0.02  # 2% of capital at risk per trade
 # larger slice of the live market each cycle instead of only ever choosing
 # among the single highest-momentum handful.
 BUY_POOL_SIZE = 25
+ENTRY_PICKS_PER_SCAN = 5          # candidates tried per scan when one fails a check
+ENTRY_REJECT_COOLDOWN_SEC = 600   # a candidate that failed a check rests this long
 # Opt-in tiered take-profit (users.tiered_tp_enabled) -- sell TP1_SELL_FRACTION
 # of the position once price reaches TP1_MULTIPLE x entry, then trail the
 # remainder with TRAILING_STOP_PCT off its peak instead of the flat
@@ -11874,6 +11876,9 @@ def user_trader_loop(stop_event, config, wallet: str):
                     # kinds of entries to avoid, learned from this user's own
                     # replayed bot trades; also tighter exits for the buy.
                     _tune = bot_learning.tuning_for(DB_FILE, user_id, take_profit * 100, stop_loss * 100)
+                    _entry_rejected = us.setdefault('entry_rejected', {})
+                    for _rm in [m for m, t in _entry_rejected.items() if t <= time.time()]:
+                        _entry_rejected.pop(_rm, None)
                     not_held = [t for t in live if positions.get(t['mint'], {}).get('amount', 0) == 0]
                     qualifying = []
                     _skip_log  = []
@@ -11921,6 +11926,7 @@ def user_trader_loop(stop_event, config, wallet: str):
                         )
                         _cd_exp  = cooldown_tokens.get(_tsym)
                         _cooling = bool(_cd_exp and _now_cd < _cd_exp)
+                        _rej_exp = _entry_rejected.get(_t['mint'], 0)
 
                         _bias        = _learned_bias.get(_liquidity_tier(_t.get('liquidity', 0) or 0), 0.0)
                         _sc_effective = _sc + _bias
@@ -11952,6 +11958,10 @@ def user_trader_loop(stop_event, config, wallet: str):
                             continue
                         if _cooling:
                             _skip_log.append(f'[skip] {_tsym}: cooldown ({int(_cd_exp - _now_cd)}s remaining)')
+                            continue
+                        if _rej_exp > _now_cd:
+                            _skip_log.append(f'[skip] {_tsym}: failed an entry check, resting '
+                                             f'({int(_rej_exp - _now_cd)}s remaining)')
                             continue
                         qualifying.append(_t)
                     qualifying.sort(key=lambda t: (t.get('change5m', 0), t.get('change24h', 0)), reverse=True)
@@ -11987,189 +11997,210 @@ def user_trader_loop(stop_event, config, wallet: str):
                         # regardless of pool size, so widening this pool automatically feeds
                         # them a more diverse trade history too -- no separate wiring needed.
                         _pool = qualifying[:BUY_POOL_SIZE]
-                        if len(_pool) > 1:
-                            _weights = [max(0.1, _p.get('score', 0)) for _p in _pool]
-                            best = random.choices(_pool, weights=_weights, k=1)[0]
-                        else:
-                            best = _pool[0]
-                        bmint = best['mint']
-                        label = best['symbol'] or bmint[:8]
-                        sc    = best['score']
-                        m5    = best.get('change5m', 0)
-                        m5s   = ('+' if m5 >= 0 else '') + str(round(m5, 1)) + '%'
-                        add_user_log(wallet, '[' + short + '] Best: ' + label +
-                                     ' score ' + str(sc) + '/10 → BUYING m5:' + m5s)
-                        _safety = _check_mint_safety(bmint)
-                        if _safety['mint_authority_active'] or _safety['freeze_authority_active']:
-                            add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
-                                         ' — mint/freeze authority still active (rug risk)')
-                            continue
-                        # AI-tunable entry filters -- defaults until an admin approves a
-                        # proposal from the daily self-analysis loop (run_ai_self_analysis()).
-                        _ai_filters = get_ai_active_filters()
-                        _best_liq = float(best.get('liquidity', 0) or 0)
-                        if _best_liq < _ai_filters['min_liquidity_usd']:
-                            add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
-                                         ' — liquidity $' + str(int(_best_liq)) + ' below AI filter minimum $' +
-                                         str(int(_ai_filters['min_liquidity_usd'])))
-                            continue
-                        _pair_created = best.get('pairCreatedAt', 0) or 0
-                        _pair_age_min = (time.time() - _pair_created / 1000) / 60 if _pair_created > 0 else 0
-                        if _pair_created > 0 and _pair_age_min < _ai_filters['min_pair_age_minutes']:
-                            add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
-                                         ' — pair age ' + str(round(_pair_age_min)) + 'm below AI filter minimum ' +
-                                         str(int(_ai_filters['min_pair_age_minutes'])) + 'm')
-                            continue
-                        _lp = _check_lp_locked(bmint)
-                        if _lp['ok'] and _lp['lp_locked_pct'] < _ai_filters['min_lp_locked_pct']:
-                            add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
-                                         ' — only ' + str(round(_lp['lp_locked_pct'])) + '% of LP locked (AI filter needs >=' +
-                                         str(int(_ai_filters['min_lp_locked_pct'])) + '%)')
-                            continue
-                        # Dynamic risk management (section 5): holder concentration --
-                        # reuses the SAME RugCheck response as the LP-lock check above,
-                        # so this costs no extra request. Fails open (like lp_locked_pct)
-                        # if RugCheck didn't flag anything or the check itself errored.
-                        if _lp['ok'] and _lp.get('holder_concentration_risk'):
-                            add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
-                                         ' — RugCheck flags concentrated holder ownership (rug risk)')
-                            continue
-                        # Learned LP-locked-% bracket check: unlike the liquidity
-                        # bias above (known for every candidate up front), the
-                        # actual lp_locked_pct is only known now, for the one
-                        # candidate that already won Pass 2 -- so this can only
-                        # veto the pick, not shape which candidate got picked.
-                        # A strongly negative bias here means this wallet has
-                        # historically lost more than it's won at this exact LP-
-                        # locked bracket, so skip and let the next scan try again.
-                        if _lp['ok']:
-                            _lp_bias_val = _learned_lp_bias_map.get(_lp_locked_tier(_lp['lp_locked_pct']), 0.0)
-                            if _lp_bias_val <= -1.0:
-                                add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
-                                             ' — learned: this wallet has historically lost more than won at '
-                                             + str(round(_lp['lp_locked_pct'])) + '% LP locked')
-                                continue
-                        # Stake scales continuously with the score, from 1x the user's
-                        # min_trade_size at the qualifying floor (score 5.0) up to 3x at
-                        # a perfect score (10.0) -- so with the $1 default min_trade_size,
-                        # stakes range $1 (score 5) to $3 (score 10) rather than the old
-                        # flat 1x/2x split. Scales proportionally if min_trade_size is
-                        # changed in settings. The spend<=us_sol check below is still the
-                        # only hard cap (no percentage-of-balance sizing, no max_trade_size
-                        # clamp).
-                        _sc_clamped = max(5.0, min(10.0, sc))
-                        factor = 1 + (_sc_clamped - 5.0) / 5.0 * 2
-                        # min_trade_usdc is already USD-denominated -- in USDC mode
-                        # that IS the spend amount directly (USDC ≈ $1, no price
-                        # lookup needed); SOL mode still converts it through the
-                        # live SOL/USD rate exactly as before.
-                        min_spend_sol = (min_trade_usdc if _solana_base == 'USDC'
-                                         else (min_trade_usdc / _sol_price_usd if _sol_price_usd > 0 else 0.02))
-                        spend = round(min_spend_sol * factor, 4)
-                        # Risk cap: never put more than MAX_RISK_PCT_PER_TRADE of this
-                        # wallet's trading capital into a single position, full stop.
-                        # (The textbook version of this rule scales the cap by 1/stop_loss
-                        # -- a tighter SL "affording" a bigger stake for the same $ at risk
-                        # -- but that assumes the stop-loss actually fires at the modeled
-                        # price. It doesn't always: illiquid microcaps can slip well past
-                        # it, which is exactly why the momentum-deterioration exit above
-                        # exists. A flat cap on allocation stays protective even when a
-                        # stop-loss doesn't execute cleanly, which matters more here than
-                        # in the classic formula's assumptions.) Only ever shrinks the
-                        # score-based stake above, never grows it -- the score/LP-lock/
-                        # AI-gate checks already decide whether to take the trade at all.
-                        # Floored at min_spend_sol (this user's own configured minimum
-                        # stake) so the cap never overrides their explicit floor -- on a
-                        # small trading balance, 2% can be less than their own min trade
-                        # size, and silently shrinking every trade toward zero there would
-                        # make the bot stop trading meaningfully rather than manage risk.
-                        _risk_cap_spend = max(min_spend_sol, round(us_solana_avail * MAX_RISK_PCT_PER_TRADE, 4))
-                        spend = min(spend, _risk_cap_spend)
-                        if spend >= 0.001 and spend <= us_solana_avail:
-                            # Dynamic risk management (section 5): estimated price impact
-                            # / slippage for THIS spend size, via a real Jupiter quote --
-                            # a hard DO-NOT-TRADE gate, not just an AI/score veto. Fails
-                            # CLOSED (unlike the rug-risk signals above): an unpriceable
-                            # trade is itself a reason not to trade blind, and the real
-                            # swap needs this same route to exist anyway.
-                            _impact = (_check_price_impact(bmint, spend, input_mint=USDC_MINT, input_decimals=6)
-                                       if _solana_base == 'USDC' else _check_price_impact(bmint, spend))
-                            if not _impact['ok']:
-                                add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
-                                             ' — could not get a price quote (no route / illiquid)')
-                                continue
-                            if _impact['price_impact_pct'] > MAX_ENTRY_PRICE_IMPACT_PCT:
-                                add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
-                                             ' — estimated price impact ' + str(round(_impact['price_impact_pct']*100, 1)) +
-                                             '% exceeds ' + str(round(MAX_ENTRY_PRICE_IMPACT_PCT*100)) + '% max for a ' +
-                                             str(spend) + ' SOL buy')
-                                continue
-                            # Net Expected Edge Filter: does this trade's OWN take-profit
-                            # target even clear estimated round-trip costs (entry+exit price
-                            # impact, platform fees, an assumed priority-fee %)? Reuses the
-                            # SAME quote's price impact just measured above -- no extra call.
-                            # Never claims to predict profitability (see MIN_EDGE_TO_COST_
-                            # RATIO's own comment) -- this only rejects setups where hitting
-                            # their own stated target still wouldn't cover costs.
-                            _edge = _estimate_net_edge(_impact['price_impact_pct'], take_profit * 100)
-                            print(f'[edge-filter] {short} {label} gross_move={_edge["expected_gross_move_pct"]}% '
-                                  f'entry_cost={_edge["estimated_entry_cost_pct"]}% exit_cost={_edge["estimated_exit_cost_pct"]}% '
-                                  f'fees={_edge["estimated_fees_pct"]}% net_edge={_edge["expected_net_edge_pct"]}% '
-                                  f'decision={_edge["decision"]}' + (f' reason={_edge["reason"]}' if _edge['reason'] else ''),
-                                  flush=True)
-                            if _edge['decision'] != 'PROCEED':
-                                add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
-                                             ' — net expected edge insufficient (' + str(_edge['reason']) + ')')
-                                continue
-                            # Last-look AI sanity check on top of every local filter above --
-                            # see get_ai_trade_decision()'s own docstring for why this can only
-                            # ever turn a BUY into a HOLD (skip), never place a trade itself.
-                            _ai_decision = get_ai_trade_decision(best, bmint, label, spend)
-                            if _ai_decision['action'] != 'BUY':
-                                add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
-                                             ' — AI check: ' + (_ai_decision.get('reasoning') or 'HOLD'))
-                                continue
-                            if bmint not in positions:
-                                positions[bmint] = {'amount': 0.0, 'buy_price': 0.0, 'spend': 0.0}
-                            pos = positions[bmint]
-                            with _use_key(_enc_blob, wallet) as _pk:
-                                _buy_ok, _entry_price, _tok_amt = _buy_and_get_realized(wallet, _pk, bmint, spend, best['price'], base=_solana_base)
-                            if _buy_ok:
-                                pos['amount']          = _tok_amt
-                                pos['buy_price']       = _entry_price
-                                pos['spend']           = spend
-                                pos['base']            = _solana_base
-                                pos['symbol']          = label
-                                pos['opened_at']       = time.time()
-                                pos['entry_liquidity'] = float(best.get('liquidity', 0) or 0)
-                                _risk_score = _compute_entry_risk_score(
-                                    lp_locked_pct=_lp.get('lp_locked_pct') if _lp.get('ok') else None,
-                                    holder_concentration_risk=bool(_lp.get('holder_concentration_risk')),
-                                    mint_authority_active=bool(_safety.get('mint_authority_active')),
-                                    freeze_authority_active=bool(_safety.get('freeze_authority_active')))
-                                pos.update(_snapshot_entry_risk(wallet, _entry_price, entry_score=sc,
-                                                                 token_candidate=best, risk_score=_risk_score))
-                                # Entry slippage (Trade Analytics V2): deviation between the
-                                # price used to size/score this candidate and the realized
-                                # fill above -- stored on the position so the eventual close's
-                                # trades row can carry both entry and exit slippage together.
-                                pos['entry_slippage_pct'] = (
-                                    round(abs(_entry_price - best['price']) / best['price'] * 100, 4)
-                                    if best.get('price', 0) else None)
-                                pos['entry_lp_locked_pct'] = _lp.get('lp_locked_pct') if _lp.get('ok') else None
-                                pos['entry_mint_authority_active'] = _safety.get('mint_authority_active') if _safety.get('ok') else None
-                                pos['entry_freeze_authority_active'] = _safety.get('freeze_authority_active') if _safety.get('ok') else None
-                                _upsert_open_position(user_id, wallet, bmint, pos, source='bot')
-                                if _solana_base == 'SOL':
-                                    _charge_txn_fee(_pk, wallet, user_id, label, spend, 'buy', bundled=True)
-                                else:
-                                    _record_bundled_stable_fee(
-                                        wallet, user_id, label, spend, 'buy', 'solana')
-                                open_pos += 1
-                                _trigger_copy_buy(wallet, bmint, best['price'], label, float(best.get('liquidity', 0) or 0))
+                        # A candidate that fails a check below no longer ends the scan:
+                        # the next one in the pool is tried right away (up to
+                        # ENTRY_PICKS_PER_SCAN), and the rejected token rests for
+                        # ENTRY_REJECT_COOLDOWN_SEC instead of being picked -- and rejected --
+                        # again on every scan. A rejection used to `continue` the whole bot
+                        # loop, which also skipped the EVM chains below for that round.
+                        _rejected_pick = None
+                        for _pick_try in range(min(len(_pool), ENTRY_PICKS_PER_SCAN)):
+                            if _rejected_pick:
+                                _entry_rejected[_rejected_pick] = time.time() + ENTRY_REJECT_COOLDOWN_SEC
+                            if stop_event.is_set() or not _pool:
+                                _rejected_pick = None
+                                break
+                            if len(_pool) > 1:
+                                _weights = [max(0.1, _p.get('score', 0)) for _p in _pool]
+                                best = random.choices(_pool, weights=_weights, k=1)[0]
                             else:
-                                add_user_log(wallet, '[' + short + '] ✗ BUY failed — ' + label + ' position NOT recorded')
-                                positions.pop(bmint, None)
+                                best = _pool[0]
+                            bmint = best['mint']
+                            _pool.remove(best)
+                            _rejected_pick = bmint
+                            label = best['symbol'] or bmint[:8]
+                            sc    = best['score']
+                            m5    = best.get('change5m', 0)
+                            m5s   = ('+' if m5 >= 0 else '') + str(round(m5, 1)) + '%'
+                            add_user_log(wallet, '[' + short + '] Best: ' + label +
+                                         ' score ' + str(sc) + '/10 → checking m5:' + m5s)
+                            _safety = _check_mint_safety(bmint)
+                            if _safety['mint_authority_active'] or _safety['freeze_authority_active']:
+                                add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
+                                             ' — mint/freeze authority still active (rug risk)')
+                                continue
+                            # AI-tunable entry filters -- defaults until an admin approves a
+                            # proposal from the daily self-analysis loop (run_ai_self_analysis()).
+                            _ai_filters = get_ai_active_filters()
+                            _best_liq = float(best.get('liquidity', 0) or 0)
+                            if _best_liq < _ai_filters['min_liquidity_usd']:
+                                add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
+                                             ' — liquidity $' + str(int(_best_liq)) + ' below AI filter minimum $' +
+                                             str(int(_ai_filters['min_liquidity_usd'])))
+                                continue
+                            _pair_created = best.get('pairCreatedAt', 0) or 0
+                            _pair_age_min = (time.time() - _pair_created / 1000) / 60 if _pair_created > 0 else 0
+                            if _pair_created > 0 and _pair_age_min < _ai_filters['min_pair_age_minutes']:
+                                add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
+                                             ' — pair age ' + str(round(_pair_age_min)) + 'm below AI filter minimum ' +
+                                             str(int(_ai_filters['min_pair_age_minutes'])) + 'm')
+                                continue
+                            _lp = _check_lp_locked(bmint)
+                            if _lp['ok'] and _lp['lp_locked_pct'] < _ai_filters['min_lp_locked_pct']:
+                                add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
+                                             ' — only ' + str(round(_lp['lp_locked_pct'])) + '% of LP locked (AI filter needs >=' +
+                                             str(int(_ai_filters['min_lp_locked_pct'])) + '%)')
+                                continue
+                            # Dynamic risk management (section 5): holder concentration --
+                            # reuses the SAME RugCheck response as the LP-lock check above,
+                            # so this costs no extra request. Fails open (like lp_locked_pct)
+                            # if RugCheck didn't flag anything or the check itself errored.
+                            if _lp['ok'] and _lp.get('holder_concentration_risk'):
+                                add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
+                                             ' — RugCheck flags concentrated holder ownership (rug risk)')
+                                continue
+                            # Learned LP-locked-% bracket check: unlike the liquidity
+                            # bias above (known for every candidate up front), the
+                            # actual lp_locked_pct is only known now, for the one
+                            # candidate that already won Pass 2 -- so this can only
+                            # veto the pick, not shape which candidate got picked.
+                            # A strongly negative bias here means this wallet has
+                            # historically lost more than it's won at this exact LP-
+                            # locked bracket, so skip and let the next scan try again.
+                            if _lp['ok']:
+                                _lp_bias_val = _learned_lp_bias_map.get(_lp_locked_tier(_lp['lp_locked_pct']), 0.0)
+                                if _lp_bias_val <= -1.0:
+                                    add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
+                                                 ' — learned: this wallet has historically lost more than won at '
+                                                 + str(round(_lp['lp_locked_pct'])) + '% LP locked')
+                                    continue
+                            # Stake scales continuously with the score, from 1x the user's
+                            # min_trade_size at the qualifying floor (score 5.0) up to 3x at
+                            # a perfect score (10.0) -- so with the $1 default min_trade_size,
+                            # stakes range $1 (score 5) to $3 (score 10) rather than the old
+                            # flat 1x/2x split. Scales proportionally if min_trade_size is
+                            # changed in settings. The spend<=us_sol check below is still the
+                            # only hard cap (no percentage-of-balance sizing, no max_trade_size
+                            # clamp).
+                            _sc_clamped = max(5.0, min(10.0, sc))
+                            factor = 1 + (_sc_clamped - 5.0) / 5.0 * 2
+                            # min_trade_usdc is already USD-denominated -- in USDC mode
+                            # that IS the spend amount directly (USDC ≈ $1, no price
+                            # lookup needed); SOL mode still converts it through the
+                            # live SOL/USD rate exactly as before.
+                            min_spend_sol = (min_trade_usdc if _solana_base == 'USDC'
+                                             else (min_trade_usdc / _sol_price_usd if _sol_price_usd > 0 else 0.02))
+                            spend = round(min_spend_sol * factor, 4)
+                            # Risk cap: never put more than MAX_RISK_PCT_PER_TRADE of this
+                            # wallet's trading capital into a single position, full stop.
+                            # (The textbook version of this rule scales the cap by 1/stop_loss
+                            # -- a tighter SL "affording" a bigger stake for the same $ at risk
+                            # -- but that assumes the stop-loss actually fires at the modeled
+                            # price. It doesn't always: illiquid microcaps can slip well past
+                            # it, which is exactly why the momentum-deterioration exit above
+                            # exists. A flat cap on allocation stays protective even when a
+                            # stop-loss doesn't execute cleanly, which matters more here than
+                            # in the classic formula's assumptions.) Only ever shrinks the
+                            # score-based stake above, never grows it -- the score/LP-lock/
+                            # AI-gate checks already decide whether to take the trade at all.
+                            # Floored at min_spend_sol (this user's own configured minimum
+                            # stake) so the cap never overrides their explicit floor -- on a
+                            # small trading balance, 2% can be less than their own min trade
+                            # size, and silently shrinking every trade toward zero there would
+                            # make the bot stop trading meaningfully rather than manage risk.
+                            _risk_cap_spend = max(min_spend_sol, round(us_solana_avail * MAX_RISK_PCT_PER_TRADE, 4))
+                            spend = min(spend, _risk_cap_spend)
+                            if spend >= 0.001 and spend <= us_solana_avail:
+                                # Dynamic risk management (section 5): estimated price impact
+                                # / slippage for THIS spend size, via a real Jupiter quote --
+                                # a hard DO-NOT-TRADE gate, not just an AI/score veto. Fails
+                                # CLOSED (unlike the rug-risk signals above): an unpriceable
+                                # trade is itself a reason not to trade blind, and the real
+                                # swap needs this same route to exist anyway.
+                                _impact = (_check_price_impact(bmint, spend, input_mint=USDC_MINT, input_decimals=6)
+                                           if _solana_base == 'USDC' else _check_price_impact(bmint, spend))
+                                if not _impact['ok']:
+                                    add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
+                                                 ' — could not get a price quote (no route / illiquid)')
+                                    continue
+                                if _impact['price_impact_pct'] > MAX_ENTRY_PRICE_IMPACT_PCT:
+                                    add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
+                                                 ' — estimated price impact ' + str(round(_impact['price_impact_pct']*100, 1)) +
+                                                 '% exceeds ' + str(round(MAX_ENTRY_PRICE_IMPACT_PCT*100)) + '% max for a ' +
+                                                 str(spend) + ' SOL buy')
+                                    continue
+                                # Net Expected Edge Filter: does this trade's OWN take-profit
+                                # target even clear estimated round-trip costs (entry+exit price
+                                # impact, platform fees, an assumed priority-fee %)? Reuses the
+                                # SAME quote's price impact just measured above -- no extra call.
+                                # Never claims to predict profitability (see MIN_EDGE_TO_COST_
+                                # RATIO's own comment) -- this only rejects setups where hitting
+                                # their own stated target still wouldn't cover costs.
+                                _edge = _estimate_net_edge(_impact['price_impact_pct'], take_profit * 100)
+                                print(f'[edge-filter] {short} {label} gross_move={_edge["expected_gross_move_pct"]}% '
+                                      f'entry_cost={_edge["estimated_entry_cost_pct"]}% exit_cost={_edge["estimated_exit_cost_pct"]}% '
+                                      f'fees={_edge["estimated_fees_pct"]}% net_edge={_edge["expected_net_edge_pct"]}% '
+                                      f'decision={_edge["decision"]}' + (f' reason={_edge["reason"]}' if _edge['reason'] else ''),
+                                      flush=True)
+                                if _edge['decision'] != 'PROCEED':
+                                    add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
+                                                 ' — net expected edge insufficient (' + str(_edge['reason']) + ')')
+                                    continue
+                                # Last-look AI sanity check on top of every local filter above --
+                                # see get_ai_trade_decision()'s own docstring for why this can only
+                                # ever turn a BUY into a HOLD (skip), never place a trade itself.
+                                _ai_decision = get_ai_trade_decision(best, bmint, label, spend)
+                                if _ai_decision['action'] != 'BUY':
+                                    add_user_log(wallet, '[' + short + '] SKIPPING ' + label +
+                                                 ' — AI check: ' + (_ai_decision.get('reasoning') or 'HOLD'))
+                                    continue
+                                if bmint not in positions:
+                                    positions[bmint] = {'amount': 0.0, 'buy_price': 0.0, 'spend': 0.0}
+                                pos = positions[bmint]
+                                with _use_key(_enc_blob, wallet) as _pk:
+                                    _buy_ok, _entry_price, _tok_amt = _buy_and_get_realized(wallet, _pk, bmint, spend, best['price'], base=_solana_base)
+                                if _buy_ok:
+                                    pos['amount']          = _tok_amt
+                                    pos['buy_price']       = _entry_price
+                                    pos['spend']           = spend
+                                    pos['base']            = _solana_base
+                                    pos['symbol']          = label
+                                    pos['opened_at']       = time.time()
+                                    pos['entry_liquidity'] = float(best.get('liquidity', 0) or 0)
+                                    _risk_score = _compute_entry_risk_score(
+                                        lp_locked_pct=_lp.get('lp_locked_pct') if _lp.get('ok') else None,
+                                        holder_concentration_risk=bool(_lp.get('holder_concentration_risk')),
+                                        mint_authority_active=bool(_safety.get('mint_authority_active')),
+                                        freeze_authority_active=bool(_safety.get('freeze_authority_active')))
+                                    pos.update(_snapshot_entry_risk(wallet, _entry_price, entry_score=sc,
+                                                                     token_candidate=best, risk_score=_risk_score))
+                                    # Entry slippage (Trade Analytics V2): deviation between the
+                                    # price used to size/score this candidate and the realized
+                                    # fill above -- stored on the position so the eventual close's
+                                    # trades row can carry both entry and exit slippage together.
+                                    pos['entry_slippage_pct'] = (
+                                        round(abs(_entry_price - best['price']) / best['price'] * 100, 4)
+                                        if best.get('price', 0) else None)
+                                    pos['entry_lp_locked_pct'] = _lp.get('lp_locked_pct') if _lp.get('ok') else None
+                                    pos['entry_mint_authority_active'] = _safety.get('mint_authority_active') if _safety.get('ok') else None
+                                    pos['entry_freeze_authority_active'] = _safety.get('freeze_authority_active') if _safety.get('ok') else None
+                                    _upsert_open_position(user_id, wallet, bmint, pos, source='bot')
+                                    if _solana_base == 'SOL':
+                                        _charge_txn_fee(_pk, wallet, user_id, label, spend, 'buy', bundled=True)
+                                    else:
+                                        _record_bundled_stable_fee(
+                                            wallet, user_id, label, spend, 'buy', 'solana')
+                                    open_pos += 1
+                                    _trigger_copy_buy(wallet, bmint, best['price'], label, float(best.get('liquidity', 0) or 0))
+                                else:
+                                    add_user_log(wallet, '[' + short + '] ✗ BUY failed — ' + label + ' position NOT recorded')
+                                    positions.pop(bmint, None)
+                            # Reached only when this candidate passed every check: bought, a
+                            # buy that failed, or no room in the balance -- not the token's fault.
+                            _rejected_pick = None
+                            break
+                        if _rejected_pick:
+                            _entry_rejected[_rejected_pick] = time.time() + ENTRY_REJECT_COOLDOWN_SEC
 
                 # ── Pass 2 (EVM): same idea, once per configured EVM chain ──
                 # Only runs at all if this user ever generated an EVM trading
