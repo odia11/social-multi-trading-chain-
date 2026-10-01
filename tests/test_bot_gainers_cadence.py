@@ -19,15 +19,16 @@ def extract(name, ns):
 
 
 def test_policy():
-    eligible = extract('_bot_gainers_eligible', {'BOT_MIN_24H_TXNS': 300, 'BOT_MIN_24H_SELLS': 30})
-    good = {'txns24h': 300, 'txns24h_sells': 30, 'has_profile': True}
+    assert 'BOT_MIN_24H_TXNS = 100' in SOURCE and 'BOT_MIN_24H_SELLS = 10' in SOURCE
+    eligible = extract('_bot_gainers_eligible', {'BOT_MIN_24H_TXNS': 100, 'BOT_MIN_24H_SELLS': 10})
+    good = {'txns24h': 100, 'txns24h_sells': 10}
     assert eligible(good)
-    for change in ({'txns24h': 299}, {'txns24h_sells': 29},
-                   {'has_profile': False}, {'txns24h': None},
+    assert eligible({**good, 'has_profile': False}), 'a paid DexScreener profile is not required'
+    for change in ({'txns24h': 99}, {'txns24h_sells': 9}, {'txns24h': None},
                    {'txns24h': 'bad'}, {'txns24h_sells': None}):
         assert not eligible({**good, **change}), change
     assert not eligible({})
-    print('PASS strict 24h >=300 transactions, >=30 sells, Dex profile metadata on every BUY')
+    print('PASS 24h >=100 transactions, >=10 sells on every BUY; no paid profile needed')
 
 
 def test_fast_pump_chain_isolation():

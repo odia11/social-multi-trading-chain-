@@ -3859,16 +3859,20 @@ profit_cooldown:  dict = {}  # user_id -> expiry_timestamp — 1-hour pause afte
 _learned_bias_cache: dict = {}  # user_id -> (computed_at, {tier: bias}) — see _learned_liquidity_bias()
 _learned_lp_bias_cache: dict = {}  # user_id -> (computed_at, {tier: bias}) — see _learned_lp_bias()
 
-# DexScreener Gainers-style bot universe, enforced before every autonomous BUY.
-# The public pair API exposes transaction totals and info metadata, not the
-# Gainers webpage's complete profile flag or global ranking. has_profile is
-# a conservative available-info proxy; unknown data is NOT a pass.
-BOT_MIN_24H_TXNS = 300
-BOT_MIN_24H_SELLS = 30
+# The bot's universe, enforced before every autonomous BUY: a token that
+# really trades -- enough transactions in 24h, and real sells among them
+# (a token nobody can sell is a honeypot). Unknown data is NOT a pass.
+# It used to also require a DexScreener profile (logo, website or socials):
+# that is paid metadata most new tokens never buy, and it kept the bot from
+# buying almost anything. The safety checks that matter (mint/freeze
+# authority, LP lock, holder concentration, price impact, honeypot) run on
+# every pick regardless.
+BOT_MIN_24H_TXNS = 100
+BOT_MIN_24H_SELLS = 10
 
 
 def _bot_gainers_eligible(token):
-    if not isinstance(token, dict) or not token.get('has_profile'):
+    if not isinstance(token, dict):
         return False
     try:
         return (int(token.get('txns24h') or 0) >= BOT_MIN_24H_TXNS
@@ -5107,8 +5111,8 @@ def get_ai_trade_decision(token_data: dict, mint: str, symbol: str, spend_sol: f
 # from the admin dashboard first, so a single bad or overfit day of analysis
 # can't silently change every user's live trading.
 AI_FILTER_DEFAULTS = {
-    'min_liquidity_usd':     20000,  # matches the narrative agent's own existing floor
-    'min_pair_age_minutes':  30,
+    'min_liquidity_usd':     10000,  # a $1-$3 bot stake moves a $10K pool by well under 1%
+    'min_pair_age_minutes':  10,     # 30 minutes skipped most of a new token's run
     'min_lp_locked_pct':     50,
 }
 # (min, max) a proposed value is clamped into before it can even be stored as
