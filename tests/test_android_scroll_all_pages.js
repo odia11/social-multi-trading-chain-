@@ -38,9 +38,9 @@ for(const [f,re] of [['static/app-ux.css',/body\{max-width:100%;overflow-x:hidde
                      ['static/live-market-mobile-drawer-fix.css',/overflow-x:hidden!important;overflow-x:clip!important/],
                      ['static/live-market-redesign.css',/body\.oa-live-v2\{[^}]*overflow-x:hidden!important;overflow-x:clip!important/]])
   assert(re.test(fs.readFileSync(f,'utf8')),f+': body needs overflow-x:clip after the hidden fallback');
-for(const [f,n] of [['app_performance.py','app-ux.css?v=7'],['app_performance.py','live-market-redesign.css?v=8'],
-                    ['static/page-loader.js','app-ux.css?v=7'],['static/navbar.js','live-market-redesign.css?v=8'],
-                    ['static/app-ux.js','live-market-redesign.css?v=8'],['mobile_ui_hotfix.py','live-market-mobile-drawer-fix.css?v=2']])
+for(const [f,n] of [['app_performance.py','app-ux.css?v=7'],['app_performance.py','live-market-redesign.css?v=9'],
+                    ['static/page-loader.js','app-ux.css?v=7'],['static/navbar.js','live-market-redesign.css?v=9'],
+                    ['static/app-ux.js','live-market-redesign.css?v=9'],['mobile_ui_hotfix.py','live-market-mobile-drawer-fix.css?v=2']])
   assert(fs.readFileSync(f,'utf8').includes(n),f+' must cache-bust '+n);
 
 // /history: the filter bar only exists when there are trades.

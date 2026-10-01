@@ -1870,8 +1870,8 @@ function _paintFees(t, mode){
   if(sellEl){
     sellEl.innerHTML =
         '<div class="pt-quote-row"><span>OrcAgent fee</span><span>'
-      +   esc(pct) + '% of what the sale returns</span></div>'
-      + '<div class="pt-quote-row"><span>Network fee</span><span>paid in '
+      +   esc(pct) + '% of the sale</span></div>'
+      + '<div class="pt-quote-row"><span>Network fee</span><span>'
       +   esc(gas) + ' gas</span></div>'
       + '<div class="pt-quote-note">Both are taken when the sale settles, so '
       + 'the amounts follow whatever it actually returns.</div>';
