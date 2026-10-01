@@ -28,7 +28,7 @@ CSRF, BASE = 'tok' * 10, 'https://orcagent.fun'
 H = {'X-CSRF-Token': CSRF}
 pushed = []
 d._send_push_notifications_bulk = lambda ids, title, body, url='/': pushed.append((list(ids), title, body))
-d._send_push_notification = lambda uid, title, body, url='/': pushed.append(([uid], title, body))
+d._send_push_notification = lambda uid, title, body, url='/', *a, **k: pushed.append(([uid], title, body))
 
 MINT = str(Keypair().pubkey())
 d.get_token_data = lambda mint, fast=False, chain=None: {

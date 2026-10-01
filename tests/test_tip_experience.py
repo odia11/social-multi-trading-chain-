@@ -32,7 +32,7 @@ def fake_app():
         _authenticated_wallet=lambda: ({
             '1':'wallet-1','2':'wallet-2','3':'wallet-3'
         }.get(__import__('flask').request.headers.get('X-User'))),
-        _send_push_notification=lambda *_:None)
+        _send_push_notification=lambda *_, **__:None)
     return temp,d
 
 

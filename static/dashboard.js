@@ -6774,11 +6774,11 @@ async function _dmAutoRefresh(){
 async function dmFetchUnread(){
   if(!phantomKey) return;
   try{
-    const [r1,r2]=await Promise.all([
-      fetch('/api/messages/unread').then(x=>x.json()).catch(()=>({ok:false,unread:0})),
-      fetch('/api/messages/unread_count').then(x=>x.json()).catch(()=>({count:0}))
-    ]);
-    _dmSetUnreadBadge((r1.ok?r1.unread||0:0)+(r2.count||0));
+    // unread_count covers DMs (direct_messages) and the legacy wallet
+    // messages together -- adding /api/messages/unread on top would count
+    // every DM twice.
+    const r2=await fetch('/api/messages/unread_count').then(x=>x.json()).catch(()=>({count:0}));
+    _dmSetUnreadBadge(r2.count||0);
   }catch(e){}
 }
 

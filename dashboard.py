@@ -17439,10 +17439,10 @@ def _send_push_notification_sync(user_id, title, body, url='/', icon='', tag='')
         except Exception as e:
             print(f"[push] failed for user {user_id}: {e}", flush=True)
 
-def _send_push_notification(user_id, title, body, url='/'):
+def _send_push_notification(user_id, title, body, url='/', icon='', tag=''):
     threading.Thread(
         target=_send_push_notification_sync,
-        args=(user_id, title, body, url),
+        args=(user_id, title, body, url, icon, tag),
         daemon=True
     ).start()
 
@@ -17854,6 +17854,52 @@ def push_unsubscribe():
         finally:
             conn.close()
     return jsonify({'ok': True})
+
+@app.route('/api/push/status', methods=['GET'])
+@rate_limit(30, 60)
+def push_status():
+    """Whether phone notifications can work for this user right now: the
+    server can send (VAPID key + pywebpush), and how many of the user's
+    devices are registered. Lets the app re-register a phone the server
+    lost, and the Settings page say plainly why nothing arrives."""
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'msg': 'Not logged in'}), 401
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        uid = _get_uid(conn, wallet)
+        devices = conn.execute('SELECT COUNT(*) FROM push_subscriptions WHERE user_id=?',
+                               (uid,)).fetchone()[0] if uid else 0
+        endpoint = str(request.args.get('endpoint', ''))[:2048]
+        this_device = bool(endpoint and uid and conn.execute(
+            'SELECT 1 FROM push_subscriptions WHERE user_id=? AND endpoint=?',
+            (uid, endpoint)).fetchone())
+    finally:
+        conn.close()
+    return jsonify({'ok': True, 'server_ready': bool(_PYWEBPUSH_OK and VAPID_PRIVATE_KEY and VAPID_PUBLIC_KEY),
+                    'devices': devices, 'this_device': this_device})
+
+@app.route('/api/push/test', methods=['POST'])
+@rate_limit(3, 60)
+def push_test():
+    """Send a test notification to the caller's own registered devices."""
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'msg': 'Not logged in'}), 401
+    if not (_PYWEBPUSH_OK and VAPID_PRIVATE_KEY):
+        return jsonify({'ok': False, 'msg': 'Phone notifications are not set up on the server yet'}), 503
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        uid = _get_uid(conn, wallet)
+        devices = conn.execute('SELECT COUNT(*) FROM push_subscriptions WHERE user_id=?',
+                               (uid,)).fetchone()[0] if uid else 0
+    finally:
+        conn.close()
+    if not devices:
+        return jsonify({'ok': False, 'msg': 'No device is registered for notifications yet — turn them on first'}), 409
+    _send_push_notification(uid, 'OrcAgent', 'Notifications are working on this device ✓', '/notifications',
+                            tag='push-test')
+    return jsonify({'ok': True, 'devices': devices})
 
 @app.route('/api/notifications/mine/mark_read_batch', methods=['POST'])
 @rate_limit(30, 60)
@@ -26304,6 +26350,14 @@ def get_dm_history(peer_id):
             'WHERE receiver_id=? AND sender_id=? AND is_read=0',
             (me, peer_id)
         )
+        # The bell's "X: message" entries for this conversation are read
+        # too once it is open -- otherwise the bell kept counting DMs the
+        # user had already seen in the thread.
+        peer_row = conn.execute('SELECT wallet_address FROM users WHERE id=?', (peer_id,)).fetchone()
+        if peer_row and peer_row[0]:
+            conn.execute(
+                "UPDATE notifications SET is_read=1 WHERE user_id=? AND type='message' "
+                "AND actor_wallet=? AND is_read=0", (me, peer_row[0]))
         conn.commit()
     except Exception as e:
         print(f'[dm_get] ERROR me={me if "me" in dir() else "?"} peer={peer_id}: {e}', flush=True)
@@ -26389,6 +26443,8 @@ def send_dm(peer_id):
             return jsonify({'ok': False, 'msg': 'User not found'}), 404
         if me == int(peer_id):
             return jsonify({'ok': False, 'msg': 'Cannot message yourself'}), 400
+        if not conn.execute('SELECT 1 FROM users WHERE id=?', (int(peer_id),)).fetchone():
+            return jsonify({'ok': False, 'msg': 'User not found'}), 404
         if message_type == 'trade':
             trow = conn.execute(
                 '''SELECT token, entry_price, exit_price, pnl, mint_address,
@@ -26445,8 +26501,12 @@ def send_dm(peer_id):
             'INSERT INTO notifications (user_id, type, content, link, actor_wallet) VALUES (?,?,?,?,?)',
             (peer_id, 'message', sender_name + ': ' + preview, '/messages/' + wallet, wallet)
         )
-        _send_push_notification(peer_id, sender_name, preview, '/messages/' + wallet)
         conn.commit()
+        # Only once the message is really stored. One tag per sender: a burst
+        # of messages from the same person updates one alert on the phone
+        # (with sound) instead of stacking ten.
+        _send_push_notification(peer_id, sender_name, preview, '/messages/' + wallet,
+                                tag='dm-%d' % me)
     except Exception as e:
         return jsonify({'ok': False, 'msg': _server_error_msg(e, '/api/messages/<int:peer_id>')}), 500
     finally:
@@ -27129,9 +27189,18 @@ def wallet_unread_count():
         return jsonify({'count': 0})
     conn = sqlite3.connect(DB_FILE)
     try:
+        # Every DM the Messages page sends lives in direct_messages; the old
+        # wallet-addressed `messages` table is only the legacy channel. This
+        # count used to read the legacy table alone, so the message badge in
+        # the navigation never showed a new DM at all.
         count = conn.execute(
             'SELECT COUNT(*) FROM messages WHERE receiver_wallet=? AND is_read=0', (me,)
         ).fetchone()[0]
+        uid = _get_uid(conn, me)
+        if uid:
+            count += conn.execute(
+                'SELECT COUNT(*) FROM direct_messages WHERE receiver_id=? AND is_read=0', (uid,)
+            ).fetchone()[0]
     finally:
         conn.close()
     return jsonify({'count': count})

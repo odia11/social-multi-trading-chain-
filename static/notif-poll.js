@@ -1,6 +1,9 @@
 function _pushNotif(title, body){
   if(!document.hidden) return;
   if(!('Notification' in window) || Notification.permission !== 'granted') return;
+  /* This device gets the real phone push from the server: showing this
+     in-page one as well would buzz twice for the same DM. */
+  try{ if(sessionStorage.getItem('oa_push_synced')) return; }catch(_){}
   try{ new Notification(title, {body, icon:'/favicon.ico?v=2'}); }catch(e){}
 }
 
@@ -70,16 +73,25 @@ async function _silentPushResubscribeCheck(){
     if(!reg) reg = await navigator.serviceWorker.register('/sw.js');
     await navigator.serviceWorker.ready;
     var sub = await reg.pushManager.getSubscription();
-    if(sub) return;
-    var keyRes = await fetch('/api/push/vapid-public-key').then(function(r){return r.json();});
-    if(!keyRes.key) return;
-    var pad = '='.repeat((4 - keyRes.key.length % 4) % 4);
-    var b64 = (keyRes.key + pad).replace(/-/g,'+').replace(/_/g,'/');
-    var raw = window.atob(b64);
-    var arr = new Uint8Array(raw.length);
-    for(var i=0;i<raw.length;i++) arr[i]=raw.charCodeAt(i);
-    var newSub = await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:arr});
-    await fetch('/api/push/subscribe', {method:'POST', credentials:'include', headers:await _notifCsrfHeaders(), body:JSON.stringify(newSub.toJSON())});
+    if(!sub){
+      var keyRes = await fetch('/api/push/vapid-public-key').then(function(r){return r.json();});
+      if(!keyRes.key) return;
+      var pad = '='.repeat((4 - keyRes.key.length % 4) % 4);
+      var b64 = (keyRes.key + pad).replace(/-/g,'+').replace(/_/g,'/');
+      var raw = window.atob(b64);
+      var arr = new Uint8Array(raw.length);
+      for(var i=0;i<raw.length;i++) arr[i]=raw.charCodeAt(i);
+      sub = await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:arr});
+    }
+    /* Tell the server about this device on every app load (once per
+       session), not only when the phone had no subscription: the server can
+       have lost a device the phone still believes is subscribed, and then
+       nothing (DMs, replies, alerts) ever reached the phone again. */
+    var synced='';
+    try{ synced=sessionStorage.getItem('oa_push_synced')||''; }catch(_){}
+    if(synced===sub.endpoint) return;
+    var res = await fetch('/api/push/subscribe', {method:'POST', credentials:'include', headers:await _notifCsrfHeaders(), body:JSON.stringify(sub.toJSON())}).then(function(r){return r.json();});
+    if(res && res.ok){ try{ sessionStorage.setItem('oa_push_synced', sub.endpoint); }catch(_){} }
   }catch(e){}
 }
 _silentPushResubscribeCheck();

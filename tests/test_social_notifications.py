@@ -26,7 +26,7 @@ CSRF, BASE = 'tok' * 10, 'https://orcagent.fun'   # session cookie is Secure, sc
 H = {'X-CSRF-Token': CSRF}
 
 pushed = []
-d._send_push_notification = lambda uid, title, body, url='/': pushed.append((uid, title, body))
+d._send_push_notification = lambda uid, title, body, url='/', *a, **k: pushed.append((uid, title, body))
 
 def member(name):
     w = str(Keypair().pubkey()); uid = d.get_or_create_user(w)
