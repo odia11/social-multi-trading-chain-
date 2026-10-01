@@ -4578,14 +4578,16 @@ def _hydrate_positions_from_db(wallet: str, us: dict):
             rows = conn.execute(
                 '''SELECT mint_address, symbol, amount, buy_price, spend, entry_liquidity, opened_at, chain,
                           entry_lp_locked_pct, entry_mint_authority_active, entry_freeze_authority_active, source,
-                          base_currency
+                          base_currency, sl_pct, tp_pct, sl_price, tp_price, trailing_enabled, entry_score,
+                          highest_price, lowest_price, copy_of_wallet
                    FROM open_positions WHERE user_id=?''', (row[0],)
             ).fetchall()
         finally:
             conn.close()
         for (mint, symbol, amount, buy_price, spend, entry_liquidity, opened_at, chain,
              entry_lp_locked_pct, entry_mint_authority_active, entry_freeze_authority_active, source,
-             base_currency) in rows:
+             base_currency, sl_pct, tp_pct, sl_price, tp_price, trailing_enabled, entry_score,
+             highest_price, lowest_price, copy_of_wallet) in rows:
             # chain must be carried into the restored dict, not just the DB row --
             # every place that iterates us['positions'] and calls the Solana-only
             # _execute_user_swap() relies on pos['chain'] to skip BSC entries.
@@ -4604,6 +4606,18 @@ def _hydrate_positions_from_db(wallet: str, us: dict):
                 'entry_mint_authority_active': bool(entry_mint_authority_active) if entry_mint_authority_active is not None else None,
                 'entry_freeze_authority_active': bool(entry_freeze_authority_active) if entry_freeze_authority_active is not None else None,
             }
+            # The position's OWN stop loss / take profit, frozen when it was
+            # opened (see _snapshot_entry_risk). They are stored, but were
+            # never read back: after every restart -- every deploy -- each
+            # position silently fell back to the account-wide settings, and a
+            # learned or custom tighter stop was lost. Only set when present,
+            # so a position from before the snapshot keeps that fallback.
+            snap = {'sl_pct': sl_pct, 'tp_pct': tp_pct, 'sl_price': sl_price, 'tp_price': tp_price,
+                    'entry_score': entry_score, 'highest_price': highest_price,
+                    'lowest_price': lowest_price, 'copy_of_wallet': copy_of_wallet}
+            us['positions'][mint].update({k: v for k, v in snap.items() if v is not None})
+            if trailing_enabled is not None:
+                us['positions'][mint]['trailing_enabled'] = bool(trailing_enabled)
         if rows:
             print(f'[open_positions] restored {len(rows)} open position(s) for {wallet[:8]}…', flush=True)
     except Exception as e:
@@ -10869,6 +10883,8 @@ def _confirmed_downtrend(price_hist: list) -> bool:
 # call: one request per mint per second would hit its rate limit, and when
 # DexScreener is down that call waits 8 seconds and serves minutes-old data.
 EXIT_CHECK_INTERVAL   = 1.0    # seconds between exit checks, per running bot
+EXIT_NO_PRICE_ALERT_SEC = 20.0 # a held token without any live price this long -> tell the user
+EXIT_SELL_FAIL_ALERT  = 5      # this many failed exit sells in a row -> tell the user
 _EXIT_PRICE_TTL       = 1.0    # a price is re-read once it is this old
 _EXIT_PRICE_MAX_AGE   = 15.0   # older than this is never acted on
 _EXIT_WATCH_TTL       = 10.0   # a mint stays watched this long after last seen
@@ -10913,6 +10929,29 @@ def _exit_fetch_prices(mints_by_chain: dict) -> dict:
             found.update({m: v[1] for m, v in best.items()})
         except Exception:
             pass
+    # Third, independent source: if Jupiter and DexScreener are both down or
+    # blocked, a stop loss must not go blind. GeckoTerminal prices many
+    # addresses per call, per network.
+    missing = {}
+    for m, c in mints_by_chain.items():
+        net = _GECKOTERMINAL_NETWORK.get((c or 'solana').lower())
+        if m not in found and net:
+            missing.setdefault(net, []).append(m)
+    for net, mints in missing.items():
+        for i in range(0, len(mints), 30):
+            chunk = mints[i:i + 30]
+            try:
+                r = requests.get('https://api.geckoterminal.com/api/v2/simple/networks/%s/token_price/%s'
+                                 % (net, ','.join(chunk)), headers={'Accept': 'application/json'}, timeout=2.5)
+                prices = (((r.json().get('data') or {}).get('attributes') or {}).get('token_prices') or {}
+                          if r.status_code == 200 else {})
+                low = {k.lower(): v for k, v in prices.items()}
+                for m in chunk:
+                    p = float(low.get(m.lower()) or 0)
+                    if p > 0:
+                        found[m] = p
+            except (requests.RequestException, ValueError, TypeError, AttributeError):
+                pass
     return found
 
 
@@ -10948,6 +10987,8 @@ def _exit_fresh_prices(mints_by_chain: dict) -> dict:
 # DexScreener data, but read in the background: the exit watcher uses the last
 # answer it has and never waits on DexScreener itself.
 _exit_td_cache: dict = {}      # mint -> token data dict
+_exit_td_at: dict = {}         # mint -> when that data was read
+_EXIT_TD_PRICE_MAX_AGE = 30.0  # its price may stand in for the live feed only this long
 _exit_td_inflight: set = set()
 _exit_td_lock = threading.Lock()
 _exit_td_pool = ThreadPoolExecutor(max_workers=4)
@@ -10959,6 +11000,7 @@ def _exit_token_data(mint: str, chain: str = 'solana'):
             td = get_token_data(mint, fast=True, chain=chain if chain != 'solana' else None)
             if td:
                 _exit_td_cache[mint] = td
+                _exit_td_at[mint] = time.time()
         except Exception:
             pass
         finally:
@@ -11171,13 +11213,34 @@ def user_trader_loop(stop_event, config, wallet: str):
             _mark_hot_mint(mint, priority=bool(pos.get('_near_trigger')))
             _td       = _exit_token_data(mint)
             # The price this second from the shared exit feed; the last
-            # DexScreener read only when that feed has none for this mint.
-            price     = float(_fresh.get(mint) or (_td.get('price') if _td else 0) or 0)
+            # DexScreener read only when that feed has none for this mint --
+            # and only while that read is recent. An old price kept standing
+            # in for a crashing token would hold its stop loss back forever.
+            _td_fresh = bool(_td) and time.time() - _exit_td_at.get(mint, 0) <= _EXIT_TD_PRICE_MAX_AGE
+            price     = float(_fresh.get(mint) or (_td.get('price') if _td_fresh else 0) or 0)
             label     = (_td['symbol'] if _td else '') or pos.get('symbol', mint[:8])
             cur_liq   = float(_td.get('liquidity', 0) or 0) if _td else 0.0
             cur_vol24 = float(_td.get('volume24h', 0) or 0) if _td else 0.0
             if price <= 0:
+                # No live price from any source: the stop loss cannot be
+                # checked. Never silent -- tell the user (and the server
+                # log) once it lasts, instead of leaving them unprotected
+                # without knowing it.
+                _np = pos.setdefault('_no_price_since', time.time())
+                if time.time() - _np >= EXIT_NO_PRICE_ALERT_SEC and not pos.get('_no_price_alerted'):
+                    pos['_no_price_alerted'] = True
+                    _lbl = pos.get('symbol', mint[:8])
+                    print(f'[exit-watch] {short} NO PRICE for {_lbl} ({mint}) for '
+                          f'{int(time.time() - _np)}s -- stop loss cannot be checked', flush=True)
+                    add_user_log(wallet, f'[{short}] ⚠ No live price for {_lbl} right now — its stop loss '
+                                          'is checked again as soon as a price is back')
+                    _send_push_notification(user_id, 'Stop loss paused: ' + str(_lbl)[:24],
+                                            'No live price for this token right now. The bot checks it again '
+                                            'every second and acts as soon as a price is back.',
+                                            '/bot', tag='noprice-' + mint[:16])
                 continue
+            if pos.pop('_no_price_since', None) is not None and pos.pop('_no_price_alerted', None):
+                add_user_log(wallet, f'[{short}] ✓ Live price for {label} is back — stop loss active again')
             chg = (price - pos['buy_price']) / pos['buy_price']
 
             # This position's own SL/TP -- its open-time snapshot
@@ -11429,7 +11492,21 @@ def user_trader_loop(stop_event, config, wallet: str):
                     _pos_chain = pos.get('chain', 'solana')
                     _close_open_position(user_id, wallet, mint, chain=_pos_chain)
                 else:
-                    add_user_log(wallet, '[' + short + '] ✗ Sell failed — position kept open, will retry next scan')
+                    # Retried every second. A stop loss that keeps failing to
+                    # sell is the case where a user really loses money, so it
+                    # must reach them (and the server log), not only repeat
+                    # quietly in the activity log.
+                    pos['_sell_fails'] = pos.get('_sell_fails', 0) + 1
+                    if pos['_sell_fails'] == 1 or pos['_sell_fails'] % 30 == 0:
+                        add_user_log(wallet, '[' + short + '] ✗ Sell failed — position kept open, retrying every second'
+                                     + (' (' + str(pos['_sell_fails']) + ' tries)' if pos['_sell_fails'] > 1 else ''))
+                    if pos['_sell_fails'] == EXIT_SELL_FAIL_ALERT:
+                        print(f'[exit-watch] {short} SELL KEEPS FAILING for {label} ({mint}) '
+                              f'after {exit_reason}: {EXIT_SELL_FAIL_ALERT} tries', flush=True)
+                        _send_push_notification(user_id, 'Could not sell ' + str(label)[:24] + ' yet',
+                                                exit_reason + ' — the sell has not gone through. The bot keeps '
+                                                'retrying every second; you can also sell it yourself.',
+                                                '/bot', tag='sellfail-' + mint[:16])
 
     def _exit_watch():
         while not stop_event.is_set():
