@@ -11093,6 +11093,132 @@ def _exit_fetch_prices(mints_by_chain: dict) -> dict:
     return found
 
 
+# ── What a position would REALLY sell for ──
+# The market price says what the token trades at; it does not say what
+# selling THIS many tokens into the pool returns. When liquidity is pulled
+# the two split: the chart can sit still while a sale would return a
+# fraction of it. So every Solana position also gets a Jupiter sell quote
+# (its exact token amount -> USDC) every few seconds, in the background.
+# The normal cost of exiting that size (price impact, fees) is taken as the
+# baseline at the first quote, so a tight stop loss is not triggered by
+# ordinary costs; only a WORSENING of what a sale returns counts. Implausible
+# quotes (wrong decimals, a glitch) are ignored, and a liquidity stop needs
+# two consecutive quotes to agree before anything is sold.
+EXIT_REALIZABLE_TTL = 5.0        # seconds between sell quotes per position
+EXIT_REALIZABLE_MAX_AGE = 20.0   # an older quote is not used for a decision
+_realizable_cache: dict = {}     # (mint, amount_key) -> (ts, usd_per_token)
+_realizable_inflight: set = set()
+_realizable_lock = threading.Lock()
+_realizable_pool = ThreadPoolExecutor(max_workers=4)
+_token_decimals_cache: dict = {}
+_SOLANA_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+
+
+def _token_decimals_strict(mint: str):
+    """On-chain decimals, or None when unknown -- never a guessed default:
+    a wrong decimal count would make a sell quote look like a crash."""
+    if mint in _token_decimals_cache:
+        return _token_decimals_cache[mint]
+    for rpc in [u for u in (SOLANA_RPC_URL, SOLANA_RPC) if u]:
+        try:
+            r = requests.post(rpc, json={'jsonrpc': '2.0', 'id': 1, 'method': 'getTokenSupply',
+                                         'params': [mint]}, timeout=4)
+            dec = int(r.json()['result']['value']['decimals'])
+            if 0 <= dec <= 18:
+                _token_decimals_cache[mint] = dec
+                return dec
+        except Exception:
+            continue
+    return None
+
+
+def _jupiter_sell_quote_usdc(mint: str, amount: float):
+    """USDC a sale of `amount` tokens would return right now, or None."""
+    dec = _token_decimals_strict(mint)
+    if dec is None or amount <= 0:
+        return None
+    raw = int(amount * (10 ** dec))
+    if raw <= 0:
+        return None
+    key = (os.getenv('JUPITER_API_KEY', '') or '').strip()
+    headers = {'Accept': 'application/json', 'User-Agent': 'OrcAgent/1.0'}
+    if JUPITER_PROXY:
+        url = JUPITER_PROXY + '/quote'
+        if PROXY_SECRET:
+            headers['X-Proxy-Secret'] = PROXY_SECRET
+    elif key:
+        url, headers['x-api-key'] = 'https://api.jup.ag/swap/v1/quote', key
+    else:
+        url = 'https://lite-api.jup.ag/swap/v1/quote'
+    r = requests.get(url, params={'inputMint': mint, 'outputMint': _SOLANA_USDC_MINT,
+                                  'amount': str(raw), 'slippageBps': 300},
+                     headers=headers, timeout=4)
+    if r.status_code != 200:
+        return None
+    out = int((r.json() or {}).get('outAmount') or 0)
+    return out / 1e6 if out > 0 else None
+
+
+def _exit_realizable_price(mint: str, amount: float):
+    """(usd_per_token, quoted_at) from the latest sell quote for this exact
+    position size, or (None, 0). Never blocks: a stale entry starts a
+    background refresh and the last answer is returned meanwhile."""
+    k = (mint, '%.6g' % amount)
+    now = time.time()
+    with _realizable_lock:
+        hit = _realizable_cache.get(k)
+        due = (not hit or now - hit[0] >= EXIT_REALIZABLE_TTL) and k not in _realizable_inflight
+        if due:
+            _realizable_inflight.add(k)
+    if due:
+        def refresh():
+            try:
+                usdc = _jupiter_sell_quote_usdc(mint, amount)
+                if usdc:
+                    with _realizable_lock:
+                        _realizable_cache[k] = (time.time(), usdc / amount)
+            except Exception:
+                pass
+            finally:
+                with _realizable_lock:
+                    _realizable_inflight.discard(k)
+        try:
+            _realizable_pool.submit(refresh)
+        except RuntimeError:
+            with _realizable_lock:
+                _realizable_inflight.discard(k)
+    if hit and now - hit[0] <= EXIT_REALIZABLE_MAX_AGE:
+        return hit[1], hit[0]
+    return None, 0.0
+
+
+def _liquidity_stop(pos: dict, mint: str, market_price: float, sl_frac: float):
+    """(triggered, sell_value_change) -- the stop loss measured on what a
+    sale would actually return. Solana only; (False, None) without a usable
+    quote, so the market-price stop loss is what applies then."""
+    if pos.get('chain', 'solana') != 'solana' or market_price <= 0 or pos.get('buy_price', 0) <= 0:
+        return False, None
+    real, at = _exit_realizable_price(mint, float(pos.get('amount') or 0))
+    if not real:
+        return False, None
+    ratio = real / market_price
+    if not (0.02 < ratio < 1.5):
+        return False, None          # implausible quote: ignore, never act on it
+    ratio = min(ratio, 1.0)
+    base = max(pos.get('_impact_base') or 0.0, ratio)   # best observed = normal exit cost
+    pos['_impact_base'] = base
+    pos['_sell_value_ratio'] = round(ratio / base, 4)
+    effective = market_price * (ratio / base)
+    chg = (effective - pos['buy_price']) / pos['buy_price']
+    if chg > -sl_frac:
+        pos['_liq_breach'] = 0
+        return False, chg
+    if pos.get('_liq_breach_at') != at:      # count each NEW quote once
+        pos['_liq_breach_at'] = at
+        pos['_liq_breach'] = pos.get('_liq_breach', 0) + 1
+    return pos.get('_liq_breach', 0) >= 2, chg
+
+
 def _exit_fresh_prices(mints_by_chain: dict) -> dict:
     """{mint: usd_price} no older than _EXIT_PRICE_MAX_AGE. Registers the mints
     as watched; whichever bot thread gets here first in a second refreshes
@@ -11581,6 +11707,9 @@ def user_trader_loop(stop_event, config, wallet: str):
                             add_user_log(wallet, '[' + short + '] ✗ TAKE PROFIT 2 sell failed — will retry next scan')
                     continue  # re-enter fresh next scan either way
 
+            # The stop loss measured on what selling would really return --
+            # catches pulled liquidity that the market price does not show.
+            _liq_hit, _liq_chg = _liquidity_stop(pos, mint, price, _eff_sl)
             exit_reason = None
             if _trailing_on and pos.get('tp1_hit'):
                 # First target already banked -- only the trailing stop governs
@@ -11599,6 +11728,9 @@ def user_trader_loop(stop_event, config, wallet: str):
                     exit_reason = 'TRAILING STOP -' + str(round(_trail_dd*100,1)) + '% from peak (' + str(round(_trail_pct*100,1)) + '% trail)'
             elif chg <= -_eff_sl:
                 exit_reason = 'STOP LOSS ' + str(round(chg*100,1)) + '%'
+            elif _liq_hit:
+                exit_reason = ('STOP LOSS ' + str(round(_liq_chg*100,1)) + '% on sell value '
+                               '(liquidity dropped; market ' + str(round(chg*100,1)) + '%)')
             elif chg >= _eff_tp:
                 exit_reason = 'TAKE PROFIT +' + str(round(chg*100,1)) + '%'
             elif chg < 0 and _confirmed_downtrend(_hist):
@@ -33812,6 +33944,7 @@ threading.Thread(target=_autostart_bots, daemon=True).start()
 # them); a trailing/staged take profit is the bot's -- the guardian takes the
 # whole position at the target instead.
 GUARDIAN_INTERVAL = 1.0
+_guardian_state = {'running': False, 'last_pass': 0.0}
 _guardian_users_cache = {'at': 0.0, 'rows': []}
 _guardian_settings_cache: dict = {}
 _guardian_pool = ThreadPoolExecutor(max_workers=4)
@@ -33937,8 +34070,13 @@ def _guardian_pass():
             pos['highest_price'] = max(pos.get('highest_price') or price, price)
             pos['lowest_price'] = min(pos.get('lowest_price') or price, price)
             chg = (price - pos['buy_price']) / pos['buy_price']
-            if chg <= -_pos_sl_frac(pos, cfg['sl']):
+            _sl = _pos_sl_frac(pos, cfg['sl'])
+            liq_hit, liq_chg = _liquidity_stop(pos, mint, price, _sl)
+            if chg <= -_sl:
                 reason = 'STOP LOSS ' + str(round(chg * 100, 1)) + '%'
+            elif liq_hit:
+                reason = ('STOP LOSS ' + str(round(liq_chg * 100, 1)) + '% on sell value '
+                          '(liquidity dropped; market ' + str(round(chg * 100, 1)) + '%)')
             elif chg >= _pos_tp_frac(pos, cfg['tp']):
                 reason = 'TAKE PROFIT +' + str(round(chg * 100, 1)) + '%'
             else:
@@ -33954,10 +34092,12 @@ def _position_guardian_loop():
     time.sleep(15)   # after startup and the bot auto-restart above
     print('[guardian] position guardian running: stop loss / take profit for positions held while a bot is off',
           flush=True)
+    _guardian_state['running'] = True
     while True:
         t0 = time.time()
         try:
             _guardian_pass()
+            _guardian_state['last_pass'] = time.time()
         except Exception as e:
             print(f'[guardian] {type(e).__name__}: {e}', flush=True)
         time.sleep(max(0.05, GUARDIAN_INTERVAL - (time.time() - t0)))
@@ -33965,6 +34105,85 @@ def _position_guardian_loop():
 
 if os.environ.get('ORCAGENT_POSITION_GUARDIAN', '1') != '0':
     threading.Thread(target=_position_guardian_loop, name='position-guardian', daemon=True).start()
+
+
+# ── Admin: positions at risk ──
+# Every open position the platform is not able to protect right now, in one
+# list: no live price (its stop loss cannot be checked), an exit sell that
+# keeps failing, a sale that would return far less than normal (liquidity
+# pulled), or nobody watching it. Read from the live in-memory state the bot
+# and the guardian act on, so it shows what they see.
+def _positions_at_risk(now=None):
+    now = now or time.time()
+    guardian_ok = bool(_guardian_state.get('running')) and now - _guardian_state.get('last_pass', 0) < 30
+    rows, total, watched = [], 0, {'bot': 0, 'guardian': 0, 'off': 0, 'nobody': 0}
+    for wallet, us in list(user_states.items()):
+        bot = _bot_is_running(us)
+        for mint, pos in list((us.get('positions') or {}).items()):
+            if pos.get('amount', 0) <= 0 or pos.get('buy_price', 0) <= 0:
+                continue
+            total += 1
+            chain = pos.get('chain', 'solana')
+            by = ('off' if pos.get('protect') is False else
+                  'bot' if bot else 'guardian' if guardian_ok else 'nobody')
+            watched[by] += 1
+            issues = []
+            nps = pos.get('_no_price_since')
+            if nps and now - nps >= EXIT_NO_PRICE_ALERT_SEC:
+                issues.append({'kind': 'no_price', 'level': 3,
+                               'text': 'No live price for %ds — its stop loss cannot be checked' % int(now - nps)})
+            if pos.get('_sell_fails', 0) > 0:
+                issues.append({'kind': 'sell_failing', 'level': 3,
+                               'text': 'Exit sell failed %dx — still retrying every second' % pos['_sell_fails']})
+            ratio = pos.get('_sell_value_ratio')
+            if ratio is not None and ratio < 0.85:
+                issues.append({'kind': 'liquidity', 'level': 2,
+                               'text': 'A sale now returns %d%% less than normal — liquidity dropped'
+                                       % round((1 - ratio) * 100)})
+            if not _chain_tradeable(chain):
+                issues.append({'kind': 'unsupported', 'level': 1,
+                               'text': chain.title() + ' is no longer supported — cannot be sold here'})
+            elif by == 'nobody':
+                issues.append({'kind': 'unwatched', 'level': 3,
+                               'text': 'Nobody is watching it: the bot is off and the guardian is not running'})
+            if not issues:
+                continue
+            cached = _exit_price_cache.get(mint)
+            price = cached[1] if cached and now - cached[0] <= 120 else None
+            chg = ((price - pos['buy_price']) / pos['buy_price'] * 100) if price else None
+            sl = pos.get('sl_pct')
+            rows.append({'wallet': wallet, 'mint': mint, 'chain': chain,
+                         'symbol': pos.get('symbol') or mint[:8], 'source': pos.get('source', 'bot'),
+                         'spend': round(float(pos.get('spend') or 0), 2),
+                         'entry': pos['buy_price'], 'price': price,
+                         'change_pct': round(chg, 2) if chg is not None else None,
+                         'sl_pct': sl, 'watched_by': by, 'issues': issues,
+                         'level': max(i['level'] for i in issues)})
+    rows.sort(key=lambda r: (-r['level'], r['change_pct'] if r['change_pct'] is not None else 0))
+    return {'ok': True, 'total_open': total, 'watched': watched, 'guardian_running': guardian_ok,
+            'at_risk': rows, 'count': len(rows)}
+
+
+@app.route('/api/admin/positions-at-risk', methods=['GET'])
+@rate_limit(30, 60)
+def api_admin_positions_at_risk():
+    err = _require_role('admin', 'executive', 'analyst')
+    if err:
+        return err
+    data = _positions_at_risk()
+    wallets = list({r['wallet'] for r in data['at_risk']})
+    names = {}
+    if wallets:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            marks = ','.join('?' * len(wallets))
+            names = dict(conn.execute(f'SELECT wallet_address, username FROM users WHERE wallet_address IN ({marks})',
+                                      wallets).fetchall())
+        finally:
+            conn.close()
+    for r in data['at_risk']:
+        r['username'] = names.get(r['wallet']) or ''
+    return jsonify(data)
 
 def _startup_fee_recovery():
     """One-time recovery run 30 s after boot — collects any fees missed before fee_paid tracking."""
