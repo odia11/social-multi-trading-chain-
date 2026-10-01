@@ -1,21 +1,14 @@
 """Self-learning for the auto trading bot.
 
-After every closed bot trade, each user's own recent bot trades are replayed
-to see what would have worked better, and the bot applies what the evidence
-supports -- automatically, with no one having to approve it:
+After every closed bot trade, each user's own recent bot trades are analysed
+and the bot applies what the evidence supports to its ENTRIES --
+automatically, with no one having to approve it: a minimum entry score, and
+up to three kinds of entries to avoid (token age, market cap, buy/sell
+pressure, chain), when those trades lost money on their own.
 
-- Take profit / stop loss. Every closed trade recorded its real intra-trade
-  peak and trough (highest_price / lowest_price), so "what if the take profit
-  had been lower" and "what if the stop loss had been tighter" can be
-  replayed exactly on those trades. Ambiguous cases (both the new stop and
-  the new target would have been touched, order unknown) are scored as the
-  LOSS, and replayed exits pay the same execution cost the user's real exits
-  paid. A WIDER target or stop is never replayed (nothing was recorded after
-  a trade closed), so learning only ever makes the bot's exits earlier or
-  tighter than the user's own settings, never riskier.
-- Entry quality. A minimum entry score, and up to three kinds of entries to
-  avoid (token age, market cap, buy/sell pressure, chain), when those trades
-  lost money on their own.
+It never changes EXITS. The user's own take profit and stop loss are
+followed exactly: learning used to lower the take profit and tighten the
+stop loss, which sold positions at levels the user never chose.
 
 Guards against learning noise:
 - nothing changes before MIN_POSITIONS closed bot trades;
@@ -24,9 +17,9 @@ Guards against learning noise:
 - one change set at a time: after APPLY it is measured on the next
   EVAL_POSITIONS real trades and rolled back automatically if those did
   worse than before (that knob then rests for ROLLBACK_COOLDOWN_SEC);
-- it never touches trade size, max positions, the daily loss limit, the
-  crash exit or any safety filter, keeps at least half of the trades the bot
-  would otherwise take, and the user can switch it off on the bot page.
+- it never touches take profit, stop loss, trade size, max positions, the
+  daily loss limit or any safety filter, keeps at least half of the trades
+  the bot would otherwise take, and the user can switch it off on the bot page.
 """
 import json
 import math
@@ -43,7 +36,6 @@ ROLLBACK_COOLDOWN_SEC = 7 * 86400
 MIN_GAIN_PER_TRADE = 0.75   # %-points per trade a replayed change must add
 MIN_BUCKET = 8              # trades in a bucket before it can be avoided
 MAX_AVOID = 3
-TP_FLOOR, SL_FLOOR = 4.0, 2.0   # never tune exits tighter than this (%)
 SCORE_FLOOR_BASE, SCORE_FLOOR_MAX = 5.0, 8.0
 REFRESH_SEC = 300
 # How clearly a group of entries must lose compared with the rest before it
@@ -129,31 +121,6 @@ def load_positions(conn, user_id, window=WINDOW):
     return out[-window:]
 
 
-# ── replaying exits ─────────────────────────────────────────────────────────
-
-def _exec_costs(positions):
-    """What the user's real exits cost beyond their trigger (slippage, a
-    fast candle): replayed exits pay the same."""
-    tp_c = [max(0.0, p['tp'] - p['pnl']) for p in positions if p['kind'] == 'tp' and p['tp']]
-    sl_c = [max(0.0, -p['pnl'] - p['sl']) for p in positions if p['kind'] == 'sl' and p['sl']]
-    tp_cost = min(5.0, median(tp_c)) if tp_c else 1.0
-    sl_cost = min(10.0, median(sl_c)) if sl_c else 1.0
-    return tp_cost, sl_cost
-
-
-def replay(p, t, s, costs):
-    """This one position's result had its take profit been t% and its stop
-    loss s% (None = unchanged). Only ever tighter than what it really used."""
-    tp_cost, sl_cost = costs
-    t = t if (t is not None and p['tp'] and t < p['tp']) else None
-    s = s if (s is not None and p['sl'] and s < p['sl']) else None
-    if s is not None and p['trough'] is not None and p['trough'] >= s:
-        return -s - sl_cost          # touched the tighter stop (assume first)
-    if t is not None and p['peak'] is not None and p['peak'] >= t:
-        return t - tp_cost           # touched the lower target
-    return p['pnl']
-
-
 def _z_worse(group, rest):
     """How many standard errors the group's average result sits below the
     rest's (0 when it does not, or when there is too little data)."""
@@ -175,35 +142,6 @@ def _halves_improve(positions, outcome):
         if sum(outcome(p) for p in part) <= sum(p['pnl'] for p in part):
             return False
     return True
-
-
-def tune_exits(positions, user_tp, user_sl):
-    """Best (tp, sl) at or below the user's own settings, or None."""
-    usable = [p for p in positions if p['kind'] != 'tiered' and p['tp'] and p['sl']
-              and p['peak'] is not None and p['trough'] is not None]
-    if len(usable) < MIN_POSITIONS or not user_tp or not user_sl:
-        return None
-    costs = _exec_costs(usable)
-    base = sum(p['pnl'] for p in usable)
-    lo_t, lo_s = max(TP_FLOOR, user_tp * 0.4), max(SL_FLOOR, user_sl * 0.5)
-    ts = sorted({round(lo_t + (user_tp - lo_t) * i / 10, 1) for i in range(11)})
-    ss = sorted({round(lo_s + (user_sl - lo_s) * i / 6, 1) for i in range(7)})
-    best = None
-    for t in ts:
-        for s in ss:
-            if t <= s + 1.0 or (t >= user_tp and s >= user_sl):
-                continue
-            total = sum(replay(p, t, s, costs) for p in usable)
-            gain = total - base
-            if gain / len(usable) < MIN_GAIN_PER_TRADE:
-                continue
-            if best is None or gain > best['gain']:
-                best = {'tp': t, 'sl': s, 'gain': gain}
-    if best and _halves_improve(usable, lambda p: replay(p, best['tp'], best['sl'], costs)):
-        best['n'] = len(usable)
-        best['per_trade'] = best['gain'] / len(usable)
-        return best
-    return None
 
 
 # ── entry quality ───────────────────────────────────────────────────────────
@@ -299,16 +237,7 @@ def tune_avoid(positions):
 
 def analyse(positions, user_tp, user_sl):
     """What the evidence supports right now (pure; no side effects)."""
-    out = {'tp': None, 'sl': None, 'score_floor': None, 'avoid': [], 'notes': []}
-    ex = tune_exits(positions, user_tp, user_sl)
-    if ex:
-        if ex['tp'] < user_tp:
-            out['tp'] = ex['tp']
-        if ex['sl'] < user_sl:
-            out['sl'] = ex['sl']
-        out['notes'].append(
-            f"Exits: take profit {ex['tp']:g}% / stop loss {ex['sl']:g}% would have added "
-            f"{ex['per_trade']:+.1f}% per trade over your last {ex['n']} bot trades")
+    out = {'score_floor': None, 'avoid': [], 'notes': []}
     sf = tune_score_floor(positions)
     if sf:
         out['score_floor'] = sf['floor']
@@ -358,20 +287,33 @@ def _log(conn, user_id, message):
                  (user_id, user_id))
 
 
-KNOBS = ('tp', 'sl', 'score_floor', 'avoid')
+KNOBS = ('score_floor', 'avoid')
+_EXIT_KNOBS = ('tp', 'sl')   # learned by earlier versions; never applied any more
 
 
 def _describe(changes):
     bits = []
-    if 'tp' in changes:
-        bits.append(f"take profit -> {changes['tp']:g}%" if changes['tp'] is not None else 'take profit back to your setting')
-    if 'sl' in changes:
-        bits.append(f"stop loss -> {changes['sl']:g}%" if changes['sl'] is not None else 'stop loss back to your setting')
     if 'score_floor' in changes:
         bits.append(f"minimum entry score -> {changes['score_floor']:g}" if changes['score_floor'] else 'minimum entry score back to normal')
     if 'avoid' in changes:
         bits.append('avoiding ' + ', '.join(a['label'] for a in changes['avoid']) if changes['avoid'] else 'no entries avoided')
     return '; '.join(bits)
+
+
+def _drop_exit_knobs(st):
+    """Forget take profit / stop loss changes an earlier version learned: the
+    bot follows the user's own exits exactly now."""
+    for k in _EXIT_KNOBS:
+        (st.get('active') or {}).pop(k, None)
+    pending = st.get('pending')
+    if pending:
+        for k in _EXIT_KNOBS:
+            (pending.get('changes') or {}).pop(k, None)
+            (pending.get('previous') or {}).pop(k, None)
+        if not pending.get('changes'):
+            st.pop('pending', None)
+    for k in _EXIT_KNOBS:
+        (st.get('cooldown') or {}).pop(k, None)
 
 
 def step(conn, user_id, user_tp, user_sl, now=None):
@@ -380,6 +322,7 @@ def step(conn, user_id, user_tp, user_sl, now=None):
     now = now or time.time()
     _ensure(conn)
     enabled, st = _load(conn, user_id)
+    _drop_exit_knobs(st)
     active = st.get('active') or {}
     if not enabled:
         return enabled, st
@@ -454,8 +397,8 @@ def _positions_since(conn, user_id, trade_id):
 # ── what the bot loop uses ──────────────────────────────────────────────────
 
 def tuning_for(db_file, user_id, user_tp, user_sl, force=False):
-    """The adjustments the bot applies right now: {'tp','sl','score_floor',
-    'avoid'} (None/[] = use the user's own settings). Re-analysed at most
+    """The entry adjustments the bot applies right now: {'score_floor',
+    'avoid'} (None/[] = no extra entry rule). Exits are never adjusted. Re-analysed at most
     every REFRESH_SEC, or right away after a trade closed (invalidate())."""
     now = time.time()
     with _lock:
@@ -474,13 +417,9 @@ def tuning_for(db_file, user_id, user_tp, user_sl, force=False):
         enabled, st = False, {}
     active = (st.get('active') or {}) if enabled else {}
     tuning = {
-        'tp': active.get('tp') if active.get('tp') and active['tp'] < user_tp else None,
-        'sl': active.get('sl') if active.get('sl') and active['sl'] < user_sl else None,
         'score_floor': active.get('score_floor'),
         'avoid': list(active.get('avoid') or []),
     }
-    if tuning['tp'] is not None and tuning['sl'] is not None and tuning['tp'] <= tuning['sl']:
-        tuning['tp'] = tuning['sl'] = None
     with _lock:
         _cache[user_id] = (now, tuning)
     return tuning
@@ -580,10 +519,8 @@ def install(d):
             'trades_analysed': seen, 'needs': MIN_POSITIONS,
             'measuring': bool(st.get('pending')) and enabled,
             'your_tp': user_tp, 'your_sl': user_sl,
-            'tp': active.get('tp') if active.get('tp') and active['tp'] < user_tp else None,
-            'sl': active.get('sl') if active.get('sl') and active['sl'] < user_sl else None,
             'score_floor': active.get('score_floor'),
             'avoid': [a.get('label') for a in active.get('avoid') or []],
-            'notes': st.get('notes') or [],
+            'notes': [n for n in st.get('notes') or [] if not str(n).startswith('Exits:')],
             'log': [{'at': int(a), 'message': m} for a, m in log],
         })
