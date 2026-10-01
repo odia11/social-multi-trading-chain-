@@ -763,6 +763,8 @@ MAX_RISK_PCT_PER_TRADE = 0.02  # 2% of capital at risk per trade
 # larger slice of the live market each cycle instead of only ever choosing
 # among the single highest-momentum handful.
 BUY_POOL_SIZE = 25
+LOW_BALANCE_LOG_SEC = 300          # "not enough to buy" in the activity log at most this often
+LOW_BALANCE_PUSH_SEC = 6 * 3600    # ...and as a phone push at most this often
 ENTRY_PICKS_PER_SCAN = 5          # candidates tried per scan when one fails a check
 ENTRY_REJECT_COOLDOWN_SEC = 600   # a candidate that failed a check rests this long
 # Opt-in tiered take-profit (users.tiered_tp_enabled) -- sell TP1_SELL_FRACTION
@@ -11862,6 +11864,33 @@ def user_trader_loop(stop_event, config, wallet: str):
                     _bl_conn.close()
                 except Exception:
                     _blacklisted = frozenset()
+
+                # ── Not enough to buy: say so instead of skipping quietly ──
+                # The smallest stake the bot places is the user's own minimum
+                # trade size. Below that, every candidate used to fall through
+                # the `spend <= balance` check without a word -- the bot looked
+                # alive ("Scanning…") and never bought.
+                _min_needed = (min_trade_usdc if _solana_base == 'USDC'
+                               else (min_trade_usdc / _sol_price_usd if _sol_price_usd > 0 else 0.0))
+                if open_pos < max_positions and _min_needed > 0 and us_solana_avail < _min_needed:
+                    _fmt = (lambda v: '$' + format(v, ',.2f')) if _solana_base == 'USDC' \
+                        else (lambda v: format(v, '.4f') + ' SOL')
+                    us['buy_blocked'] = (f'Not enough {_solana_base} on Solana to buy: '
+                                         f'{_fmt(us_solana_avail)} available, your minimum trade is '
+                                         f'{_fmt(_min_needed)}. Deposit {_solana_base} to let the bot trade.')
+                    _now_lb = time.time()
+                    if _now_lb - us.get('_buy_blocked_logged', 0) >= LOW_BALANCE_LOG_SEC:
+                        us['_buy_blocked_logged'] = _now_lb
+                        add_user_log(wallet, '[' + short + '] ⚠ ' + us['buy_blocked'])
+                    if _now_lb - us.get('_buy_blocked_pushed', 0) >= LOW_BALANCE_PUSH_SEC:
+                        us['_buy_blocked_pushed'] = _now_lb
+                        _send_push_notification(
+                            user_id, 'Your bot cannot buy',
+                            f'{_fmt(us_solana_avail)} {_solana_base} available, your minimum trade is '
+                            f'{_fmt(_min_needed)}. Deposit {_solana_base} to let it trade.',
+                            '/wallet', tag='bot-low-balance')
+                else:
+                    us['buy_blocked'] = None
 
                 # ── Pass 2: pick the single best entry ──
                 if (not stop_event.is_set() and open_pos < max_positions
@@ -28790,6 +28819,8 @@ def bot_overview():
         'ok': True,
         'has_trading_key': bool(enc_key),
         'running': running,
+        # Why a running bot is not buying, in words (None when it can).
+        'buy_blocked': us.get('buy_blocked') if running else None,
         'open_positions': open_positions,
         'max_positions': max_positions if max_positions is not None else 3,
         'min_trade_size': min_trade_size if min_trade_size is not None else 1.0,
