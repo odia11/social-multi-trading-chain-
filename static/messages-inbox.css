@@ -52,7 +52,7 @@
 #msgs-left .oa-active-strip{padding:12px 0 2px}
 #msgs-left .oa-active-strip[hidden]{display:none}
 #msgs-left .oa-active-title{padding:0 18px 8px;color:var(--ib-muted);font:750 11px/1 Geist,system-ui,sans-serif;letter-spacing:.09em;text-transform:uppercase}
-#msgs-left .oa-active-row{display:flex;gap:14px;overflow-x:auto;padding:2px 18px 6px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+#msgs-left .oa-active-row{display:flex;gap:14px;overflow-x:auto;padding:6px 18px 6px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 #msgs-left .oa-active-row::-webkit-scrollbar{display:none}
 #msgs-left .oa-active-peer{flex:0 0 auto;width:62px;display:flex;flex-direction:column;align-items:center;gap:6px;padding:0;border:0;
   background:none;cursor:pointer;-webkit-tap-highlight-color:transparent}

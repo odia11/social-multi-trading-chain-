@@ -23,7 +23,7 @@ def install(dashboard_module):
                 body = body.replace('</head>', '<link rel="stylesheet" href="/static/messages-ui.css?v=1">\n</head>', 1)
             # The inbox (chat list) design; loaded last so it wins.
             if 'messages-inbox.css' not in body and '</head>' in body:
-                body = body.replace('</head>', '<link rel="stylesheet" href="/static/messages-inbox.css?v=1">\n</head>', 1)
+                body = body.replace('</head>', '<link rel="stylesheet" href="/static/messages-inbox.css?v=2">\n</head>', 1)
             # The open chat: fits the screen, no sideways drift, tip bubbles.
             if 'messages-thread.css' not in body and '</head>' in body:
                 body = body.replace('</head>', '<link rel="stylesheet" href="/static/messages-thread.css?v=2">\n</head>', 1)
