@@ -30,7 +30,7 @@ def test_bounds():
     assert r.returncode!=0 and r.stdout=='' and 'took too long' in r.stderr
     key=Keypair()
     while str(key.pubkey()).endswith('orc'):key=Keypair()
-    data={'wallet':str(Keypair().pubkey()),'quote_asset':'USDC',
+    data={'wallet':str(Keypair().pubkey()),'quote_asset':'USDC','reward_mode':'creator',
           'mint_secret':base64.b64encode(bytes(key)).decode()}
     r=subprocess.run(['/bin/bash',str(ROOT/'pump_adapter/run-node.sh'),
         str(ROOT/'pump_adapter/build-launch.cjs')],input=json.dumps(data),

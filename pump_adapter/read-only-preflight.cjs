@@ -16,16 +16,22 @@ async function main(){
  const sdk=new OnlinePumpSdk(new Connection(rpc,'confirmed'));
  const global=await sdk.fetchGlobal();
  assert('Pump mainnet create_v2 is enabled',global.createV2Enabled===true);
- assert('Pump mainnet Holder Rewards are enabled',global.isHolderRewardEnabled===true);
  assert('Pump mainnet USDC quote is supported',global.whitelistedQuoteMints.some(x=>x.toBase58()===USDC));
  const wallet=Keypair.generate().publicKey.toBase58();
  const community=Keypair.generate().publicKey.toBase58();
  const blockhash=Keypair.generate().publicKey.toBase58();
- for(const asset of ['USDC','SOL'])for(const mode of ['creator','community','holder']){
-  // New launches carry OrcAgent's 20% creator-fee share (holder: none).
-  const orcBps=mode==='holder'?0:2000;
+ // Holder Rewards is not offered (it could never carry OrcAgent's 20%):
+ // the builder must refuse it.
+ let holderRefused=false;
+ try{await build({wallet,name:'OrcAgent Preflight',symbol:'PREF',quote_asset:'USDC',reward_mode:'holder',blockhash,
+   uri:'https://orcagent.fun/token-launch/metadata/0123456789abcdef0123456789abcdef'})}
+ catch(e){holderRefused=/Unsupported reward mode/.test(String(e&&e.message))}
+ assert('Holder Rewards launches are refused',holderRefused);
+ for(const asset of ['USDC','SOL'])for(const mode of ['creator','community']){
+  // Every new launch carries OrcAgent's 20% creator-fee share.
+  const orcBps=2000;
   const args={wallet,community_wallet:community,community_bps:1500,
-   orcagent_bps:orcBps,orcagent_wallet:orcBps?'HC5ahspSox3XRmDbzXjXVoAASuY89RCmGUKwp87FRJS5':'',
+   orcagent_bps:orcBps,orcagent_wallet:'HC5ahspSox3XRmDbzXjXVoAASuY89RCmGUKwp87FRJS5',
    name:'OrcAgent Preflight',symbol:'PREF',
    uri:'https://orcagent.fun/token-launch/metadata/0123456789abcdef0123456789abcdef',
    quote_asset:asset,reward_mode:mode,blockhash};
@@ -37,9 +43,9 @@ async function main(){
    raw.length<=1232&&tx.signatures.length===2&&
    tx.signatures[0].signature===null&&tx.signatures[1].signature!==null&&
    tx.instructions.some(i=>i.programId.equals(PUMP_PROGRAM_ID))&&
-   built.holder_reward===(mode==='holder')&&
-   built.needs_fee_share_finalization===(mode!=='holder'));
-  if(mode!=='holder'){
+   built.holder_reward===false&&
+   built.needs_fee_share_finalization===true);
+  {
    assert(asset+'/'+mode+' sharing setup included',tx.instructions.some(i=>i.programId.equals(PUMP_FEE_PROGRAM_ID)));
    const shares=await finalize({...args,mint:built.mint,stage:'finalize'});
    const finalRaw=Buffer.from(shares.transaction_b64,'base64');

@@ -5,6 +5,8 @@ creator fee goes to holders and no fee-sharing config (OrcAgent's 20%) can
 exist: a Holder Rewards launch paid OrcAgent nothing. Holder Rewards is no
 longer offered: the form has no such option, the server refuses the mode,
 an old holder draft cannot be built, and the pump adapter refuses it too.
+The deploy's read-only preflight still built a Holder Rewards launch, so the
+adapter's refusal blocked every deploy; it now expects that refusal instead.
 OrcAgent's fee wallet is a fixed, valid address, so a public launch always
 carries the share. The fee tiles show the real split for Creator and Community.
 """
@@ -27,6 +29,14 @@ check('the launch form offers no Holder Rewards option', 'value="holder"' not in
 check('the pump adapter refuses anything but Creator or Community and never sets holderReward',
       "if(!['creator','community'].includes(data.reward_mode))throw Error('Unsupported reward mode');" in adapter
       and 'const holderReward = false;' in adapter)
+preflight = read('pump_adapter', 'read-only-preflight.cjs')
+check('the deploy preflight builds only Creator and Community and expects Holder Rewards to be refused',
+      "for(const mode of ['creator','community'])" in preflight and "reward_mode:'holder'" in preflight
+      and "assert('Holder Rewards launches are refused',holderRefused)" in preflight
+      and 'isHolderRewardEnabled' not in preflight)
+body = adapter[adapter.index('async function build(data){'):]
+check('the adapter refuses the mode before grinding a mint (the preflight fails fast, never after 90 s)',
+      body.index('Unsupported reward mode') < body.index('grind-mint.py'))
 dash = read('dashboard.py')
 fee = re.search(r"^FEE_WALLET\s*=\s*'([^']*)'", dash, re.M)
 check('OrcAgent\'s fee wallet is a fixed, valid Solana address, so public launches always carry the 20%',
