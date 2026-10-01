@@ -2364,11 +2364,21 @@ function _slideRelease(){
     // Not from the keypad or the slider: a drag that starts there is aimed
     // at those, not at the sheet.
     if(e.target.closest('#pt-keys, .pt-slide, .pt-sheet-pcts')) return;
+    // A sheet scrolled down (a small phone, Protection or Fees open) is
+    // scrolled back up by the same downward drag -- that must scroll, not
+    // close the sheet under the finger.
+    if(!sheet || sheet.scrollTop > 0) return;
     y0 = e.touches[0].clientY; dy = 0; dragging = true;
     sheet.classList.add('dragging');
   }
   function move(e){
     if(!dragging) return;
+    var sh = _sheetEl('pt-sheet');
+    if(sh.scrollTop > 0){                    // it became a scroll after all
+      dragging = false; dy = 0;
+      sh.classList.remove('dragging'); sh.style.transform = '';
+      return;
+    }
     dy = e.touches[0].clientY - y0;
     if(dy < 0) dy = 0;                       // upward does nothing
     _sheetEl('pt-sheet').style.transform = 'translateY(' + dy + 'px)';

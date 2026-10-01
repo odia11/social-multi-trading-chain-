@@ -10,7 +10,9 @@ row cut off under the percentage buttons.
 
 Now the amount never shrinks below what it shows, the keypad's keys get
 shorter instead, and if a small phone still runs out of room the sheet
-scrolls rather than hiding the slide-to-confirm.
+scrolls rather than hiding the slide-to-confirm. Scrolling it back up
+used to count as "swipe down to close" and shut the sheet; closing now only
+starts when the sheet is at the top.
 """
 import os, re, sys
 ROOT = os.path.join(os.path.dirname(__file__), '..')
@@ -44,6 +46,11 @@ check('the sale costs read as labelled lines, not a block of monospace', 'Geist'
 js = read('static', 'live-market-pro.js')
 check('...with short values that fit a phone', "'% of the sale</span></div>'" in js
       and 'of what the sale returns' not in js)
+drag = js[js.index('(function bindSheetDrag(){'):js.index("document.addEventListener('touchcancel',end);", js.index('(function bindSheetDrag(){'))]
+check('scrolling the sheet back up never closes it: swipe-to-close only starts at the top',
+      'if(!sheet || sheet.scrollTop > 0) return;' in drag)
+check('...and a drag that turns into a scroll stops moving the sheet',
+      "if(sh.scrollTop > 0){" in drag and "sh.style.transform = '';" in drag)
 for f in ('app_performance.py', 'static/navbar.js', 'static/app-ux.js'):
     check(f'phones fetch the new stylesheet ({f})', 'live-market-redesign.css?v=9' in read(*f.split('/')))
 raise SystemExit(0 if all(checks) else 1)
