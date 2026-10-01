@@ -7,7 +7,7 @@ must not learn from noise, must never loosen the user's own risk settings,
 must roll a change back when the next trades do worse, and must stop
 entirely when the user switches it off.
 """
-import os, random, sqlite3, sys, tempfile, time
+import json, os, random, sqlite3, sys, tempfile, time
 ROOT = os.path.join(os.path.dirname(__file__), '..')
 sys.path.insert(0, ROOT)
 import bot_learning as bl  # noqa: E402
@@ -49,9 +49,12 @@ for _ in range(10):
     trade(conn, -10.6, 9.0, 10.0, 'STOP LOSS -10.6%')
 conn.commit()
 t = bl.tuning_for(path, 1, 20.0, 10.0, force=True)
-check('under 20 closed bot trades nothing is learned', t == {'tp': None, 'sl': None, 'score_floor': None, 'avoid': []})
+check('under 20 closed bot trades nothing is learned', t == {'score_floor': None, 'avoid': []})
 
-# ── 2. trades keep peaking ~+9% then dying at the stop: a lower TP is learned ─
+# ── 2. exits are never learned: the user's own TP / SL are followed exactly ─
+# These trades kept peaking ~+9% and dying at the stop. An earlier version
+# lowered the take profit to ~9% here -- selling at a level the user never
+# chose. Now nothing about the exits changes.
 path, conn = db()
 for i in range(30):
     if i % 3 == 0:
@@ -60,23 +63,22 @@ for i in range(30):
         trade(conn, -5.6, 9.0 + (i % 2), 5.0, 'STOP LOSS -5.6%', sl=5.0)
 conn.commit()
 t = bl.tuning_for(path, 1, 20.0, 5.0, force=True)
-check('a lower take profit is learned when trades kept giving back a ~9% peak',
-      t['tp'] is not None and 4.0 <= t['tp'] <= 9.0)
-check('learned exits are never wider than the user\'s own settings, and TP stays above SL',
-      (t['tp'] or 0) <= 20.0 and (t['sl'] is None or t['sl'] <= 5.0)
-      and (t['tp'] is None or t['sl'] is None or t['tp'] > t['sl']))
-st = sqlite3.connect(path).execute('SELECT state FROM bot_learning WHERE user_id=1').fetchone()[0]
-log = [m for (m,) in sqlite3.connect(path).execute('SELECT message FROM bot_learning_log')]
-check('the change is logged in plain words and put under measurement',
-      any('Learned from your last 30 bot trades' in m and 'take profit' in m for m in log) and '"pending"' in st)
-
-# replayed result really is better on these trades (sanity of the replay)
-pos = bl.load_positions(sqlite3.connect(path), 1)
-costs = bl._exec_costs(pos)
-check('replay: the learned exits beat what really happened on these trades',
-      sum(bl.replay(p, t['tp'], t['sl'], costs) for p in pos) > sum(p['pnl'] for p in pos))
-check('replay never invents a wider exit (TP above the trade\'s own target changes nothing)',
-      all(bl.replay(p, 50.0, None, costs) == p['pnl'] for p in pos))
+check("trades that kept giving back a ~9% peak do NOT lower the user's take profit",
+      'tp' not in t and 'sl' not in t and t == {'score_floor': None, 'avoid': []})
+check('...and nothing about exits is analysed or logged',
+      not hasattr(bl, 'tune_exits') and not any('take profit' in m for (m,) in
+                                                 sqlite3.connect(path).execute('SELECT message FROM bot_learning_log')))
+# an exit change an earlier version stored is dropped, never applied
+c = sqlite3.connect(path)
+c.execute("UPDATE bot_learning SET state=? WHERE user_id=1", (json.dumps(
+    {'active': {'tp': 9.0, 'sl': 3.0}, 'pending': {'changes': {'tp': 9.0}, 'previous': {}, 'trade_id': 1,
+                                                   'before_avg': 0.0, 'applied_at': 0}}),))
+c.commit(); c.close()
+t = bl.tuning_for(path, 1, 20.0, 5.0, force=True)
+st = json.loads(sqlite3.connect(path).execute('SELECT state FROM bot_learning WHERE user_id=1').fetchone()[0])
+check('a take profit / stop loss learned by an earlier version is forgotten, not applied',
+      'tp' not in t and 'tp' not in (st.get('active') or {}) and 'sl' not in (st.get('active') or {})
+      and 'pending' not in st)
 
 # ── 3. noise: random trades, no edge in any change -> nothing applied ──────
 path, conn = db()
@@ -90,7 +92,7 @@ for i in range(60):
               score=rng.uniform(5, 9), age=rng.uniform(1, 2000), mcap=rng.uniform(5e4, 2e7), bsr=rng.uniform(0.5, 3))
 conn.commit()
 t = bl.tuning_for(path, 1, 20.0, 10.0, force=True)
-check('random trades with no pattern teach the bot nothing', t == {'tp': None, 'sl': None, 'score_floor': None, 'avoid': []})
+check('random trades with no pattern teach the bot nothing', t == {'score_floor': None, 'avoid': []})
 
 # 60 more random histories: an entry rule learned from pure noise must be rare
 fp = 0
@@ -140,48 +142,45 @@ check('Solana itself is never "avoided" (that would stop the bot)',
       all(a['dim'] != 'chain' or a['label'] != 'solana' for a in t['avoid']))
 
 # ── 6. measurement: worse next trades roll the change back ─────────────────
+def score_history(conn):
+    for i in range(40):
+        if i % 2:
+            trade(conn, -8.0, 1.0, 8.0, 'STOP LOSS -8.0%', score=5.5 + (i % 4) * 0.1)
+        else:
+            trade(conn, 12.0, 13.0, 2.0, 'TAKE PROFIT 12.0%', score=7.5)
+    conn.commit()
+
 path, conn = db()
-for i in range(30):
-    if i % 3 == 0:
-        trade(conn, 20.5, 21.0, 2.0, 'TAKE PROFIT +20.5%', sl=5.0)
-    else:
-        trade(conn, -5.6, 9.0, 5.0, 'STOP LOSS -5.6%', sl=5.0)
-conn.commit()
-first = bl.tuning_for(path, 1, 20.0, 5.0, force=True)
+score_history(conn)
+first = bl.tuning_for(path, 1, 20.0, 10.0, force=True)
 for i in range(15):
-    trade(conn, -15.0, 1.0, 15.0, 'STOP LOSS -15.0%', tp=first['tp'] or 20.0, sl=5.0)
+    trade(conn, -15.0, 1.0, 15.0, 'STOP LOSS -15.0%', score=8.0)
 conn.commit()
-after = bl.tuning_for(path, 1, 20.0, 5.0, force=True)
+after = bl.tuning_for(path, 1, 20.0, 10.0, force=True)
 log = [m for (m,) in sqlite3.connect(path).execute('SELECT message FROM bot_learning_log ORDER BY id')]
 check('a change whose next 15 trades did worse is rolled back automatically',
-      first['tp'] is not None and after['tp'] is None and any(m.startswith('Rolled back') for m in log))
-again = bl.tuning_for(path, 1, 20.0, 5.0, force=True)
-check('...and that knob then rests instead of flipping straight back', again['tp'] is None)
+      first['score_floor'] is not None and after['score_floor'] is None and any(m.startswith('Rolled back') for m in log))
+again = bl.tuning_for(path, 1, 20.0, 10.0, force=True)
+check('...and that knob then rests instead of flipping straight back', again['score_floor'] is None)
 
 # ── 7. measurement: better next trades keep it ─────────────────────────────
 path, conn = db()
-for i in range(30):
-    if i % 3 == 0:
-        trade(conn, 20.5, 21.0, 2.0, 'TAKE PROFIT +20.5%', sl=5.0)
-    else:
-        trade(conn, -5.6, 9.0, 5.0, 'STOP LOSS -5.6%', sl=5.0)
-conn.commit()
-first = bl.tuning_for(path, 1, 20.0, 5.0, force=True)
+score_history(conn)
+first = bl.tuning_for(path, 1, 20.0, 10.0, force=True)
 for i in range(15):
-    trade(conn, first['tp'] - 0.5, first['tp'] + 1, 1.0, 'TAKE PROFIT', tp=first['tp'], sl=5.0)
+    trade(conn, 12.0, 13.0, 2.0, 'TAKE PROFIT 12.0%', score=8.0)
 conn.commit()
-kept = bl.tuning_for(path, 1, 20.0, 5.0, force=True)
+kept = bl.tuning_for(path, 1, 20.0, 10.0, force=True)
 log = [m for (m,) in sqlite3.connect(path).execute('SELECT message FROM bot_learning_log ORDER BY id')]
-check('a change whose next 15 trades did better is kept', kept['tp'] == first['tp'] and any(m.startswith('Kept') for m in log))
-lower = bl.tuning_for(path, 1, first['tp'] - 1.0, 2.0, force=True)
-check('a user whose own take profit is already lower than the learned one keeps their own',
-      lower['tp'] is None)
+check('a change whose next 15 trades did better is kept',
+      first['score_floor'] is not None and kept['score_floor'] == first['score_floor']
+      and any(m.startswith('Kept') for m in log))
 
 # ── 8. switched off: the bot uses the user's own settings only ─────────────
 c = sqlite3.connect(path)
 c.execute('UPDATE bot_learning SET enabled=0 WHERE user_id=1'); c.commit()
-check('switched off, nothing learned is applied', bl.tuning_for(path, 1, 20.0, 5.0, force=True)
-      == {'tp': None, 'sl': None, 'score_floor': None, 'avoid': []})
+check('switched off, nothing learned is applied', bl.tuning_for(path, 1, 20.0, 10.0, force=True)
+      == {'score_floor': None, 'avoid': []})
 
 # ── 9. only the user's own BOT trades count ────────────────────────────────
 path, conn = db()
@@ -190,7 +189,7 @@ for i in range(30):
     trade(conn, -10.6, 9.0, 10.0, 'STOP LOSS -10.6%', user=2)
 conn.commit()
 check('manual trades and other users\' trades are not learned from',
-      bl.tuning_for(path, 1, 20.0, 10.0, force=True) == {'tp': None, 'sl': None, 'score_floor': None, 'avoid': []})
+      bl.tuning_for(path, 1, 20.0, 10.0, force=True) == {'score_floor': None, 'avoid': []})
 
 # ── 10. wiring in the live bot ─────────────────────────────────────────────
 src = open(os.path.join(ROOT, 'dashboard.py'), encoding='utf-8').read()
@@ -200,9 +199,8 @@ check('the bot loop reads the learned tuning for every entry scan',
 check('learned minimum score and avoided entries gate the Solana entry',
       "_score_floor = _tune['score_floor']" in src
       and "bot_learning.avoid_reason(\n                            _tune, 'solana', **bot_learning.candidate_features(_t))" in src)
-check('a bot buy snapshots the learned (tighter) exits; manual/copy buys do not',
-      src.count('tuning=_tune))') == 1 and "if tuning.get('sl') and tuning['sl'] < sl_pct:" in src
-      and "tuning['tp'] < tp_pct and not trailing_enabled" in src)
+check("a bot buy snapshots the user's OWN take profit and stop loss -- learning never changes them",
+      'tuning=_tune' not in src and "tuning['sl']" not in src and "tuning['tp']" not in src)
 check('a learned losing chain is skipped by the EVM entry scan', 'continue  # learned: this user' in src)
 check('every closed trade triggers a fresh analysis', 'bot_learning.invalidate(user_id)' in src)
 check('the bot page API is installed', '_install_bot_learning(_dashboard)' in entry)
@@ -211,14 +209,9 @@ from types import SimpleNamespace
 from flask import Flask, session
 path, conn = db()
 conn.execute('CREATE TABLE users (id INTEGER PRIMARY KEY, wallet_address TEXT, take_profit REAL, stop_loss REAL)')
-conn.execute("INSERT INTO users VALUES (1, 'W1', 20.0, 5.0)")
-for i in range(30):
-    if i % 3 == 0:
-        trade(conn, 20.5, 21.0, 2.0, 'TAKE PROFIT +20.5%', sl=5.0)
-    else:
-        trade(conn, -5.6, 9.0, 5.0, 'STOP LOSS -5.6%', sl=5.0)
-conn.commit()
-bl.tuning_for(path, 1, 20.0, 5.0, force=True)
+conn.execute("INSERT INTO users VALUES (1, 'W1', 20.0, 10.0)")
+score_history(conn)
+bl.tuning_for(path, 1, 20.0, 10.0, force=True)
 app = Flask('t'); app.secret_key = 'x'
 d = SimpleNamespace(app=app, DB_FILE=path, TAKE_PROFIT=0.05, STOP_LOSS=0.03,
                     rate_limit=lambda *a, **k: (lambda f: f),
@@ -230,13 +223,13 @@ with client.session_transaction() as sess:
     sess['wallet'] = 'W1'
 r = client.get('/api/bot/learning').get_json()
 check('the bot page shows what was learned, from how many trades, with the log',
-      r['ok'] and r['enabled'] and r['tp'] is not None and r['trades_analysed'] == 30
-      and r['measuring'] and r['log'] and r['your_tp'] == 20.0)
+      r['ok'] and r['enabled'] and r['score_floor'] is not None and r['trades_analysed'] == 40
+      and r['measuring'] and r['log'] and r['your_tp'] == 20.0 and 'tp' not in r and 'sl' not in r)
 check('the switch only accepts true/false', client.post('/api/bot/learning', json={'enabled': 'no'}).status_code == 400)
 r = client.post('/api/bot/learning', json={'enabled': False}).get_json()
 check('switching it off clears the applied changes immediately',
-      r['ok'] and not r['enabled'] and r['tp'] is None
-      and bl.tuning_for(path, 1, 20.0, 5.0) == {'tp': None, 'sl': None, 'score_floor': None, 'avoid': []})
+      r['ok'] and not r['enabled'] and r['score_floor'] is None
+      and bl.tuning_for(path, 1, 20.0, 10.0) == {'score_floor': None, 'avoid': []})
 r = client.post('/api/bot/learning', json={'enabled': True}).get_json()
 check('switching it back on resumes learning', r['ok'] and r['enabled'])
 page = open(os.path.join(ROOT, 'templates', 'auto_trading_bot.html'), encoding='utf-8').read()
