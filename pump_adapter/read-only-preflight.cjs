@@ -10,11 +10,35 @@ const {build,finalize}=require('./build-launch.cjs');
 const USDC='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const errors=[];
 function assert(label,condition){console.log((condition?'PASS ':'FAIL ')+label);if(!condition)errors.push(label)}
+// Pump's global config is one read-only account. A busy public RPC answers
+// 429 for it now and then, and that alone used to block a whole deploy. Try
+// the operator's trusted RPC first, then independent public read endpoints,
+// each with a short backoff; still fail closed when none of them answers.
+// Endpoint URLs are never printed (a trusted one can carry an API key).
+const FALLBACK_RPCS=['https://solana-rpc.publicnode.com','https://api.mainnet-beta.solana.com'];
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function fetchGlobalFromAnyRpc(){
+ const trusted=process.env.ORCA_LAUNCH_RPC||'';
+ if(trusted&&!/^https:\/\//.test(trusted))throw Error('A trusted HTTPS RPC endpoint is required');
+ const endpoints=[...new Set([trusted,...FALLBACK_RPCS].filter(Boolean))];
+ let last;
+ for(const [index,url] of endpoints.entries()){
+  const sdk=new OnlinePumpSdk(new Connection(url,{commitment:'confirmed',disableRetryOnRateLimit:true}));
+  for(let attempt=0;attempt<3;attempt++){
+   try{return await sdk.fetchGlobal()}
+   catch(e){
+    last=e;
+    const busy=/429|too many requests|rate.?limit|timed? ?out|fetch failed|ECONNRESET|503|502/i.test(String(e&&e.message||e));
+    console.log('RPC '+(index+1)+'/'+endpoints.length+' '+(busy?'busy':'failed')+' reading Pump config (attempt '+(attempt+1)+'/3)');
+    if(!busy)break;
+    await sleep(2000*(attempt+1));
+   }
+  }
+ }
+ throw last||Error('No Solana RPC endpoint answered');
+}
 async function main(){
- const rpc=process.env.ORCA_LAUNCH_RPC||'https://api.mainnet-beta.solana.com';
- if(!/^https:\/\//.test(rpc))throw Error('A trusted HTTPS RPC endpoint is required');
- const sdk=new OnlinePumpSdk(new Connection(rpc,'confirmed'));
- const global=await sdk.fetchGlobal();
+ const global=await fetchGlobalFromAnyRpc();
  assert('Pump mainnet create_v2 is enabled',global.createV2Enabled===true);
  assert('Pump mainnet USDC quote is supported',global.whitelistedQuoteMints.some(x=>x.toBase58()===USDC));
  const wallet=Keypair.generate().publicKey.toBase58();
