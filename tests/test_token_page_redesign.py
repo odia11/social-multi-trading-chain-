@@ -68,7 +68,8 @@ check("the gold chart stays; its first-price note no longer lies over the axis",
 check('Your position shows value, P&L, amount, avg buy price and paid when held',
       all(x in js for x in ("'Your position'", "'Value now'", "cell('You hold'", "cell('Avg buy price'", "cell('You paid'")))
 check('Safety checks, On OrcAgent and About (Copy, Solscan, creator links http(s) only)',
-      "'Safety checks'" in js and "'No one you follow holds this yet'" in js and "'Trades on OrcAgent show up here'" in js
+      "'Safety checks'" in js and "'On OrcAgent'" in js and "'No friends hold it yet'" in js
+      and "'Buys and sells by you and the people you follow show up here'" in js
       and "copy.className='pt-pf-copy'" in js and "if(!isSafeUrl(url)) return;" in js and "link(info.telegram_url,'Telegram')" in js)
 check('Buy is the gold main action, Sell secondary and off when nothing is held',
       "if(sell){ sell.disabled = !held;" in js and "sell.title = \"You don't hold this token\"" in js

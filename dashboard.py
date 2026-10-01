@@ -13609,6 +13609,106 @@ def api_token_co_traders(mint):
     return jsonify({'ok': True, 'users': result})
 
 
+TOKEN_ACTIVITY_DAYS = 14
+
+
+def _trade_ts(ts):
+    """A trades.timestamp in any of the formats it was written in -> epoch."""
+    try:
+        return datetime.datetime.strptime(str(ts)[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S').replace(
+            tzinfo=datetime.timezone.utc).timestamp()
+    except Exception:
+        return None
+
+
+@app.route('/api/token/<mint>/activity', methods=['GET'])
+@rate_limit(60, 60)
+def api_token_activity(mint):
+    """The token page's "On OrcAgent" list: the latest buys and sells of this
+    token by the member and the people they follow, newest first, in dollars.
+
+    Built from what is already recorded -- a bot / copy position's buy is its
+    open_positions row (or, once closed, its trades row's opened_at); its
+    sell is the closing trades row; a Live Market trade is a trades row with
+    a side. A Solana buy by hand is both a side='buy' row and (since manual
+    buys are protected) an open position, so only the row counts. The window
+    is the last TOKEN_ACTIVITY_DAYS: Live Market amounts are USDC since
+    September 2026 and were SOL before, so older rows are left out rather
+    than shown with a wrong dollar figure."""
+    wallet = _current_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'events': []}), 401
+    if not _MINT_RE.match(mint or ''):
+        return jsonify({'ok': False, 'events': []}), 400
+    since = time.time() - TOKEN_ACTIVITY_DAYS * 86400
+    since_day = datetime.datetime.utcfromtimestamp(since).strftime('%Y-%m-%d')
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            me = conn.execute('SELECT id FROM users WHERE wallet_address = ?', (wallet,)).fetchone()
+            if not me:
+                return jsonify({'ok': True, 'events': []})
+            me_id = me[0]
+            ids = [me_id] + [r[0] for r in conn.execute(
+                'SELECT following_id FROM follows WHERE follower_id = ?', (me_id,)).fetchall()]
+            marks = ','.join('?' * len(ids))
+            people = {r[0]: (r[1], r[2], r[3]) for r in conn.execute(
+                f'SELECT id, username, avatar_url, wallet_address FROM users WHERE id IN ({marks})', ids)}
+            open_rows = conn.execute(
+                'SELECT user_id, opened_at, spend, source, chain, base_currency FROM open_positions '
+                f'WHERE mint_address = ? AND amount > 0 AND user_id IN ({marks})', [mint] + ids).fetchall()
+            trade_rows = conn.execute(
+                'SELECT user_id, side, amount, entry_price, exit_price, timestamp, opened_at, '
+                'source, chain, base_currency FROM trades '
+                f'WHERE mint_address = ? AND user_id IN ({marks}) AND timestamp >= ? '
+                'ORDER BY id DESC LIMIT 200', [mint] + ids + [since_day]).fetchall()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f'[token-activity] DB error: {e}', flush=True)
+        return jsonify({'ok': True, 'events': []})
+
+    def rate(chain, base):
+        if (chain or 'solana') == 'solana' and (base or 'SOL') == 'SOL':
+            return _sol_price_usd if _sol_price_usd > 0 else None
+        return 1.0
+
+    def by_hand_on_solana(source, chain):
+        return source == 'manual' and (chain or 'solana') == 'solana'
+
+    events = []
+    def add(uid, side, usd, ts):
+        if usd is None or usd <= 0 or not ts or ts < since:
+            return
+        events.append((ts, uid, side, round(usd, 2)))
+    for uid, opened_at, spend, source, chain, base in open_rows:
+        if by_hand_on_solana(source, chain):
+            continue
+        r = rate(chain, base)
+        add(uid, 'buy', float(spend or 0) * r if r else None, float(opened_at or 0))
+    for uid, side, amount, entry, exit_p, ts, opened_at, source, chain, base in trade_rows:
+        at = _trade_ts(ts)
+        if side in ('buy', 'sell'):
+            add(uid, side, float(amount or 0), at)
+            continue
+        if not exit_p:
+            continue
+        r = rate(chain, base)
+        qty = float(amount or 0)
+        add(uid, 'sell', qty * float(exit_p) * r if r else None, at)
+        if opened_at and not by_hand_on_solana(source, chain):
+            add(uid, 'buy', qty * float(entry or 0) * r if r else None, float(opened_at))
+    events.sort(key=lambda e: -e[0])
+    out = []
+    for ts, uid, side, usd in events[:8]:
+        name, avatar, w_addr = people.get(uid, ('', '', ''))
+        if not name and w_addr:
+            name = w_addr[:4] + '...' + w_addr[-4:]
+        out.append({'side': side, 'usd': usd, 'ts': ts, 'user_id': uid, 'you': uid == me_id,
+                    'username': name or '', 'avatar_url': avatar or ''})
+    return jsonify({'ok': True, 'events': out})
+
+
 @app.route('/api/token/<mint>/holders', methods=['GET'])
 @rate_limit(60, 60)
 def api_token_holders(mint):
@@ -25758,6 +25858,8 @@ def api_trade_holding():
         'symbol': pos.get('symbol') or (td.get('symbol', '') if td else ''),
         'source': source,
         'entry_price_usd': entry_usd, 'cost_usd': cost_usd,
+        # "You bought 2h ago" on the token page; unknown for an untracked hold.
+        'opened_at': (float(pos.get('opened_at') or 0) or None) if source == 'position' else None,
     })
 
 
