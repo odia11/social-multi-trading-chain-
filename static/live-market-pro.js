@@ -89,7 +89,8 @@ function fmtAge(createdMs){
   var h = diff/3600000;
   if(h<1) return Math.max(1,Math.round(diff/60000))+'m';
   if(h<24) return Math.round(h)+'h';
-  return Math.round(h/24)+'d';
+  if(h<24*365) return Math.round(h/24)+'d';
+  return Math.floor(h/24/365)+'y';
 }
 function fmtAgeSeconds(s){
   s = Math.max(0, Math.round(s||0));
@@ -219,6 +220,9 @@ function renderChartSvg(idx, candles, currentPrice){
   var lows = candles.map(function(c){ return Number(c.l!=null?c.l:c.c)||0; });
   var highs = candles.map(function(c){ return Number(c.h!=null?c.h:c.c)||0; });
   var min = Math.min.apply(null, lows), max = Math.max.apply(null, highs);
+  // On the token page of a token you hold, "You bought at" is always in view.
+  var entryPx = _pfEntryPrice(idx);
+  if(entryPx > 0){ min = Math.min(min, entryPx); max = Math.max(max, entryPx); }
   if(min===max){ min = min*0.98; max = (max*1.02)||1; }
   var pad = (max-min)*0.12;
   min = Math.max(0,min-pad); max += pad;
@@ -282,6 +286,11 @@ function renderChartSvg(idx, candles, currentPrice){
   if(n>1){
     chartHtml+='<path id="pt-live-area-'+idx+'" d="'+areaD+'" fill="url(#'+gid+')"></path>';
     chartHtml+='<path id="pt-live-line-'+idx+'" d="'+lineD+'" fill="none" stroke="#f7b955" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path>';
+  }
+  if(entryPx > 0){
+    var entryY = Math.max(12, Math.min(priceH-2, priceH - ((entryPx-min)/(max-min))*priceH));
+    chartHtml+='<line class="pt-pf-entry" x1="0" y1="'+entryY.toFixed(2)+'" x2="'+plotW.toFixed(2)+'" y2="'+entryY.toFixed(2)+'" stroke="#8e97a3" stroke-width="1" stroke-dasharray="4,5" opacity=".7" vector-effect="non-scaling-stroke"></line>';
+    chartHtml+='<text class="pt-pf-entry-t" x="4" y="'+(entryY-6).toFixed(2)+'" fill="#b8c0ca" font-size="10" font-family="JetBrains Mono, monospace">'+esc('You bought at '+fmtPrice(entryPx))+'</text>';
   }
   chartHtml+='<line id="pt-live-guide-'+idx+'" x1="0" y1="'+priceY.toFixed(2)+'" x2="'+plotW.toFixed(2)+'" y2="'+priceY.toFixed(2)+'" stroke="#f7b955" stroke-width="1" stroke-dasharray="4,4" opacity=".6" vector-effect="non-scaling-stroke"></line>';
   chartHtml+='<circle id="pt-live-halo-'+idx+'" cx="'+lastPt.x.toFixed(2)+'" cy="'+priceY.toFixed(2)+'" r="7" fill="#f7b955" opacity=".18"></circle>';
@@ -1365,7 +1374,8 @@ function loadTokenProfileDetails(card,mint){
     if(!card.isConnected || card.dataset.mint!==mint) return;
     if(!info || !info.ok){box.textContent='Token details are temporarily unavailable.';return;}
     box.replaceChildren();
-    var title=document.createElement('h2');title.textContent='About '+(info.name||info.symbol||'this token');box.appendChild(title);
+    var _sym=info.symbol||(ST.tokens[Number(card.dataset.idx)]||{}).symbol||'';
+    var title=document.createElement('h2');title.textContent=_sym?'About $'+_sym:'About '+(info.name||'this token');box.appendChild(title);
     var desc=document.createElement('p');desc.textContent=info.description||'The creator has not added a description yet.';box.appendChild(desc);
     // Links the creator chose: plain web links only (isSafeUrl), as chips.
     var links=document.createElement('div');links.className='pt-profile-links';
@@ -1402,6 +1412,7 @@ function loadTokenProfileDetails(card,mint){
 var _pfSafety = {};      // mint -> /api/token/<mint>/safety answer
 var _pfCommunity = {};   // mint -> {users: [...], holders: n}
 var _pfHold = {};        // mint -> /api/trade/holding answer
+var _pfActivity = {};    // mint -> [/api/token/<mint>/activity events]
 var _pfObserver = null;
 var _PF_EMPTY = {liq: 'Not reported yet', vol: 'No trades yet', ratio: 'No trades yet', mcap: 'Not reported yet'};
 
@@ -1446,10 +1457,14 @@ function _pfMount(card, t){
     card.insertBefore(bar, card.firstChild);
   }
   _pfSection(card, 'pt-pf-position').hidden = true;
-  _pfSection(card, 'pt-pf-safety').hidden = true;
   _pfSection(card, 'pt-pf-community');
+  _pfSection(card, 'pt-pf-safety').hidden = true;
   var buy = card.querySelector('.pt-buy-btn');
   if(buy) buy.textContent = 'Buy $' + (t.symbol || '');
+  // Market cap first, as on the design; moved back on close. Every update
+  // finds these cells by id, so where they sit does not matter to it.
+  var liq = _pfStatRow(card, 'liq'), mcap = _pfStatRow(card, 'mcap');
+  if(liq && mcap && liq.nextElementSibling === mcap) liq.parentNode.insertBefore(mcap, liq);
   _pfDecorate(card);
   _pfRefresh(mint);
   // Price, change and market data are patched in place every tick and poll;
@@ -1461,12 +1476,27 @@ function _pfMount(card, t){
     if(stats) _pfObserver.observe(stats, {subtree: true, childList: true, characterData: true});
   }
   _pfLoadHolding(card, t);
+  _pfLoadActivity(card, mint);
+}
+function _pfStatRow(card, key){
+  var el = document.getElementById('pt-' + key + '-' + card.dataset.idx);
+  return el && card.contains(el) ? el.parentNode : null;
 }
 function _pfUnmount(card){
   var bar = card.querySelector('.pt-pf-bar');
   if(!bar) return;
   bar.remove();
   card.querySelectorAll('.pt-pf-section').forEach(function(s){ s.remove(); });
+  var liq = _pfStatRow(card, 'liq'), mcap = _pfStatRow(card, 'mcap');
+  if(liq && mcap && mcap.nextElementSibling === liq) liq.parentNode.insertBefore(liq, mcap);
+  var ratio = _pfStatRow(card, 'ratio');
+  if(ratio){
+    var deco = ratio.querySelector('.pt-pf-ratio');
+    if(deco) deco.remove();
+    ratio.classList.remove('pt-pf-has-ratio');
+    var lbl = ratio.querySelector('.pt-stat-lbl');
+    if(lbl) lbl.textContent = 'Buy / Sell';
+  }
   var buy = card.querySelector('.pt-buy-btn');
   if(buy) buy.textContent = 'Buy';
   var sell = card.querySelector('.pt-sell-btn');
@@ -1497,7 +1527,37 @@ function _pfDecorate(card){
     if(star.classList.contains('on') !== on) star.classList.toggle('on', on);
     star.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
+  _pfRenderRatio(card);
   _pfRenderPosition(card);
+}
+// "Buys / sells 24h": a green/red bar with the two counts, as on the design,
+// instead of "58% / 42%". No trades yet keeps the words.
+function _pfRenderRatio(card){
+  var row = _pfStatRow(card, 'ratio');
+  if(!row) return;
+  var lbl = row.querySelector('.pt-stat-lbl');
+  if(lbl && lbl.textContent !== 'Buys / sells 24h') lbl.textContent = 'Buys / sells 24h';
+  var t = ST.tokens[Number(card.dataset.idx)] || {};
+  var b = Math.max(0, Number(t.buys_24h) || 0), s = Math.max(0, Number(t.sells_24h) || 0);
+  var deco = row.querySelector('.pt-pf-ratio');
+  if(!(b + s)){
+    if(deco) deco.remove();
+    if(row.classList.contains('pt-pf-has-ratio')) row.classList.remove('pt-pf-has-ratio');
+    return;
+  }
+  var key = b + '|' + s;
+  if(deco && deco.dataset.key === key) return;
+  if(!deco){ deco = _pfNode('div', 'pt-pf-ratio'); row.appendChild(deco); }
+  deco.dataset.key = key;
+  deco.replaceChildren();
+  var bar = _pfNode('div', 'pt-pf-ratio-bar'), fill = _pfNode('i');
+  fill.style.width = Math.round(b / (b + s) * 100) + '%';
+  bar.appendChild(fill);
+  var n = _pfNode('div', 'pt-pf-ratio-n mono');
+  n.appendChild(_pfNode('span', 'up', b.toLocaleString('en-US')));
+  n.appendChild(_pfNode('span', 'down', s.toLocaleString('en-US')));
+  deco.appendChild(bar); deco.appendChild(n);
+  if(!row.classList.contains('pt-pf-has-ratio')) row.classList.add('pt-pf-has-ratio');
 }
 function _pfRefresh(mint){
   var card = _pfCard(mint);
@@ -1519,8 +1579,28 @@ function _pfLoadHolding(card, t){
       var buy = card.querySelector('.pt-buy-btn');
       if(buy) buy.textContent = held ? 'Buy more' : 'Buy $' + (t.symbol || '');
       _pfRenderPosition(card);
+      var idx = Number(card.dataset.idx), st = _chartTimers[idx];
+      if(held && st && st.candles) renderChartSvg(idx, st.candles, _cardRefPrice(st, idx));
     })
     .catch(function(){});
+}
+function _pfLoadActivity(card, mint){
+  fetch('/api/token/' + encodeURIComponent(mint) + '/activity', {credentials: 'include'})
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(d){
+      if(!d || !d.ok) return;
+      _pfActivity[mint] = d.events || [];
+      _pfRefresh(mint);
+    })
+    .catch(function(){});
+}
+// What the member paid per token, for the chart's "You bought at" line --
+// only on the open token page, only for a position they still hold.
+function _pfEntryPrice(idx){
+  var t = ST.tokens[Number(idx)];
+  if(!t || t.mint !== _profileMint) return 0;
+  var h = _pfHold[t.mint];
+  return h && Number(h.amount) > 0 && Number(h.entry_price_usd) > 0 ? Number(h.entry_price_usd) : 0;
 }
 function _pfUsd(n){
   n = Number(n) || 0;
@@ -1545,11 +1625,14 @@ function _pfRenderPosition(card){
   var cost = h.cost_usd != null ? Number(h.cost_usd) : null;
   var entry = h.entry_price_usd != null ? Number(h.entry_price_usd) : null;
   var pnl = cost != null && cost > 0 ? value - cost : null;
-  var key = [value.toFixed(4), pnl == null ? '' : pnl.toFixed(4), h.amount].join('|');
+  var key = [value.toFixed(4), pnl == null ? '' : pnl.toFixed(4), h.amount, Math.floor((Date.now() / 1000 - (Number(h.opened_at) || 0)) / 60)].join('|');
   if(box.dataset.key === key && !box.hidden) return;
   box.dataset.key = key;
   box.replaceChildren();
-  box.appendChild(_pfNode('h3', 'pt-pf-h', 'Your position'));
+  var hd = _pfNode('div', 'pt-pf-pos-hd');
+  hd.appendChild(_pfNode('h3', 'pt-pf-h', 'Your position'));
+  if(Number(h.opened_at) > 0) hd.appendChild(_pfNode('span', 'pt-pf-pos-ago', 'You bought ' + fmtAge(Number(h.opened_at) * 1000) + ' ago'));
+  box.appendChild(hd);
   var top = _pfNode('div', 'pt-pf-pos-top');
   var left = _pfNode('div');
   left.appendChild(_pfNode('div', 'pt-pf-lbl', 'Value now'));
@@ -1581,7 +1664,7 @@ function _pfRenderSafety(card, d){
   ];
   if(d.freeze_authority_active) rows.push([false, 'Freeze authority active', 'Wallets can be frozen']);
   box.replaceChildren();
-  box.appendChild(_pfNode('h3', 'pt-pf-h', 'Safety checks'));
+  box.appendChild(_pfNode('h3', 'pt-pf-lbl pt-pf-safety-h', 'Safety checks'));
   rows.forEach(function(r){
     var row = _pfNode('div', 'pt-pf-check ' + (r[0] ? 'ok' : 'bad'));
     row.appendChild(_pfNode('span', 'pt-pf-check-ico', r[0] ? '✓' : '✕'));
@@ -1595,9 +1678,13 @@ function _pfRenderCommunity(card, c){
   var box = card.querySelector('.pt-pf-community');
   if(!box) return;
   var users = c.users || [], holders = Number(c.holders) || 0;
+  var events = _pfActivity[card.dataset.mint] || [];
   box.replaceChildren();
-  var ico = _pfNode('div', 'pt-pf-comm-ico', '');
-  var text = _pfNode('div', 'pt-pf-comm-text');
+  // "On OrcAgent": who you follow holds it, then the latest buys and sells
+  // by you and the people you follow.
+  var hd = _pfNode('div', 'pt-pf-comm-hd');
+  hd.appendChild(_pfNode('h3', 'pt-pf-h', 'On OrcAgent'));
+  var who = _pfNode('div', 'pt-pf-comm-who');
   if(users.length){
     var avs = _pfNode('div', 'pt-friend-avs');
     users.slice(0, 3).forEach(function(u){
@@ -1605,14 +1692,25 @@ function _pfRenderCommunity(card, c){
       if(src){ var img = document.createElement('img'); img.src = src; img.alt = ''; avs.appendChild(img); }
       else avs.appendChild(_pfNode('div', 'ph', (u.username || '?').slice(0, 1).toUpperCase()));
     });
-    box.appendChild(avs);
-    text.appendChild(_pfNode('strong', null, users.length + (users.length === 1 ? ' person you follow holds it' : ' people you follow hold it')));
+    who.appendChild(avs);
+    who.appendChild(_pfNode('span', null, users.length + (users.length === 1 ? ' friend holds it' : ' friends hold it')));
   } else {
-    box.appendChild(ico);
-    text.appendChild(_pfNode('strong', null, 'No one you follow holds this yet'));
+    who.appendChild(_pfNode('span', null, holders ? holders + ' trader' + (holders === 1 ? '' : 's') + ' hold it' : 'No friends hold it yet'));
   }
-  text.appendChild(_pfNode('span', null, holders ? holders + ' trader' + (holders === 1 ? '' : 's') + ' on OrcAgent hold it' : 'Trades on OrcAgent show up here'));
-  box.appendChild(text);
+  hd.appendChild(who);
+  box.appendChild(hd);
+  if(events.length){
+    events.slice(0, 5).forEach(function(e){
+      var buy = e.side === 'buy', row = _pfNode('div', 'pt-pf-act');
+      row.appendChild(_pfNode('span', 'pt-pf-act-side ' + (buy ? 'buy' : 'sell'), buy ? 'BUY' : 'SELL'));
+      row.appendChild(_pfNode('span', 'pt-pf-act-who', e.you ? 'You' : '@' + (e.username || 'trader')));
+      row.appendChild(_pfNode('span', 'pt-pf-act-usd mono', _pfUsd(e.usd)));
+      row.appendChild(_pfNode('span', 'pt-pf-act-ago', fmtAge(Number(e.ts) * 1000)));
+      box.appendChild(row);
+    });
+  } else {
+    box.appendChild(_pfNode('div', 'pt-pf-comm-empty', 'Buys and sells by you and the people you follow show up here'));
+  }
 }
 
 function setTokenProfile(mint){
