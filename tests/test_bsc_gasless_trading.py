@@ -14,7 +14,7 @@ check('adapter remains installed in production entrypoint',
       'from bsc_gasless_trading import install as _install_evm_gasless_trading' in entry
       and '_install_evm_gasless_trading(_dashboard)' in entry)
 for chain, cid in [('bsc', 56), ('base', 8453), ('arbitrum', 42161),
-                   ('polygon', 137), ('robinhood', 4663)]:
+                   ('robinhood', 4663)]:
     check(f'{chain} is registered with chain id {cid}',
           f"'{chain}': Chain('{chain}', 'evm', {cid}" in registry)
 check('BSC keeps its real 18-decimal Binance-Peg USDC',

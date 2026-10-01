@@ -1009,7 +1009,7 @@ function tfPill(tf, label, active){
    EVM_TRADE_CHAINS below). Defaults to 'solana' for any candidate that
    omits it (every pre-multi-chain scanner response), so old cached
    responses never render as blank/unlabeled. */
-var EVM_TRADE_CHAINS = {bsc:1, base:1, arbitrum:1, polygon:1, robinhood:1};
+var EVM_TRADE_CHAINS = {bsc:1, base:1, arbitrum:1, robinhood:1};
 var CHAIN_LABELS = {bsc:'BSC', base:'BASE', arbitrum:'ARB', polygon:'POLY', robinhood:'HOOD'};
 // What the user is told they are spending: USDC, on every chain.
 //

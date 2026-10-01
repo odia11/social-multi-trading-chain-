@@ -17,10 +17,9 @@ def test_base_has_read_only_fallbacks_and_env_override():
     assert 'https://base.publicnode.com' in block
 
 
-def test_polygon_default_rpc_is_keyless_and_transaction_capable():
-    block=SRC[SRC.index("    'polygon': {"):SRC.index("    'robinhood': {")]
-    assert 'https://polygon-bor-rpc.publicnode.com' in block
-    assert 'https://polygon-rpc.com' not in block
+def test_polygon_is_not_a_supported_chain():
+    block=SRC[SRC.index('EVM_CHAINS = {'):SRC.index('EVM_CHAIN_FEE_WALLET')]
+    assert "'polygon'" not in block and 'POLYGON_RPC_URL' not in SRC
 
 
 def test_transactions_keep_configured_primary_web3():
@@ -63,10 +62,9 @@ def test_singleflight_shape_is_present():
     assert block.count('_evm_read_cache.get(cache_key)') >= 2
 
 
-def test_polygon_has_independent_read_fallback():
+def test_no_polygon_read_fallback_left():
     block=SRC[SRC.index('def _rpc_candidates'):SRC.index('def _web3_for_rpc')]
-    assert "chain == 'polygon'" in block
-    assert 'https://polygon.drpc.org' in block
+    assert 'polygon' not in block
 
 
 if __name__=='__main__':

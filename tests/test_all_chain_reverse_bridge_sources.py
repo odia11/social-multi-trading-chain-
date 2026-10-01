@@ -20,7 +20,7 @@ from trade_engine.registry import CHAINS
 ROOT = Path(__file__).resolve().parents[1]
 LM = (ROOT / 'static' / 'live-market-pro.js').read_text(encoding='utf-8')
 
-EXPECTED_EVM = {'bsc', 'base', 'arbitrum', 'polygon', 'robinhood'}
+EXPECTED_EVM = {'bsc', 'base', 'arbitrum', 'robinhood'}
 
 
 def check(message, condition):
@@ -28,7 +28,7 @@ def check(message, condition):
     print('PASS ' + message)
 
 
-check('registry exposes exactly the five supported EVM chains',
+check('registry exposes exactly the four supported EVM chains (Polygon removed)',
       {name for name, cfg in CHAINS.items() if cfg.kind == 'evm'} == EXPECTED_EVM)
 _lm_evm = LM.split('var EVM_TRADE_CHAINS = {', 1)[1].split('}', 1)[0]
 check('Live Market recognises every supported EVM chain',
@@ -38,7 +38,6 @@ balances = {
     'bsc': 200.0,
     'base': 200.0,
     'arbitrum': 200.0,
-    'polygon': 200.0,
     'robinhood': 200.0,
 }
 needs_sponsor = {chain: False for chain in EXPECTED_EVM}
@@ -50,7 +49,6 @@ gas_usd = {
     'bsc': 0.40,
     'base': 0.25,
     'arbitrum': 0.30,
-    'polygon': 0.20,
     'robinhood': 0.10,
 }
 

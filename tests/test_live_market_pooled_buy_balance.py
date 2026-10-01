@@ -22,7 +22,7 @@ check('BUY availability reads the wallet-wide total returned by the summary endp
       'body.total_usdc' in HOTFIX and 'pooledTotal(body)' in HOTFIX)
 check('the fallback totals Solana plus every supported EVM stable balance',
       'd.solana_usdc' in HOTFIX
-      and all(c in HOTFIX for c in ('bsc','base','arbitrum','polygon','robinhood')))
+      and all(c in HOTFIX for c in ('bsc','base','arbitrum','robinhood')) and 'polygon' not in HOTFIX)
 check('every Live Market EVM balance slot receives pooled buying power',
       'CHAINS.forEach(function(c){ body.evm_chains[c] = total; })' in HOTFIX)
 check('underfunded destination execution invokes the established auto bridge',
