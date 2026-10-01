@@ -26,8 +26,8 @@
 .ntf-row-selectable{cursor:pointer}
 .ntf-row-selected{background:rgba(247,185,85,.06)}
 .ntf-body{max-width:640px;padding:0 26px 60px}
-.ntf-tabs{display:flex;gap:26px;margin-top:15px}
-.ntf-tab{background:none;border:none;border-bottom:2px solid transparent;padding-bottom:11px;font-size:14px;font-weight:500;color:var(--muted);cursor:pointer;font-family:var(--ui);transition:color .15s,border-color .15s}
+.ntf-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:15px;border-bottom:1px solid var(--line,#1f2630)}
+.ntf-tab{background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-1px;padding:0 4px 11px;text-align:center;font-size:14px;font-weight:500;color:var(--muted);cursor:pointer;font-family:var(--ui);transition:color .15s,border-color .15s}
 .ntf-tab.active{color:var(--text);border-bottom-color:var(--accent);font-weight:600}
 .ntf-tab:hover:not(.active){color:#c0c8d4}
 .ntf-list{display:flex;flex-direction:column}
@@ -47,6 +47,7 @@
 .ntf-icon.trade-down{background:rgba(255,77,106,.14);color:var(--red)}
 .ntf-icon.copy,.ntf-icon.tip{background:rgba(247,185,85,.14);color:var(--accent)}
 .ntf-icon.social{background:rgba(255,77,106,.14);color:var(--red)}
+.ntf-icon.market{background:rgba(247,140,60,.15);color:#ff9a4d}
 .ntf-icon.message{background:rgba(99,102,241,.14);color:var(--indigo)}
 .ntf-icon.system{background:var(--bg3);color:var(--sub)}
 .ntf-avatar{width:38px;height:38px;border-radius:50%;flex-shrink:0;margin-top:2px;background:var(--bg3);border:1px solid var(--bg4);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--muted);overflow:hidden;position:relative}
@@ -179,6 +180,7 @@ var _ICON_SVG = {
   'tip': '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="13" rx="2"/><path d="M12 8v13M3 12h18M12 8C8 8 5 6 7 4c2-3 5 0 5 4Zm0 0c4 0 7-2 5-4-2-3-5 0-5 4Z"/></svg>',
   'social':     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
   'message':    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+  'market':     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c4 0 7-2.7 7-6.6 0-3.1-2-5.6-3.6-7.2-.3 1.8-1.3 3-2.5 3.6.3-3.4-1.2-6.6-4.4-8.8.2 3-1.4 5.1-3 6.8C4.1 11.4 5 13.4 5 15.4 5 19.3 8 22 12 22z"/></svg>',
   'system':     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>'
 };
 function _parseTradeContent(content){
@@ -274,6 +276,12 @@ function _rowHtml(n){
   } else if(type === 'tip'){
     iconCls = 'tip';
     bodyHtml = '<div class="ntf-text">' + _ntfContentHtml(n) + '</div>';
+  } else if(type === 'trending'){
+    iconCls = 'market';
+    bodyHtml = '<div class="ntf-text">' + _ntfContentHtml(n) + '</div>';
+  } else if(type === 'system' || type === 'admin_invite'){
+    iconCls = 'system';
+    bodyHtml = '<div class="ntf-text">' + _ntfContentHtml(n) + '</div>';
   } else if(type === 'message'){
     iconCls = 'message';
     bodyHtml = '<div class="ntf-text">' + _ntfContentHtml(n) + '</div>';
@@ -350,7 +358,9 @@ function _render(){
   if (_ntfSwipeOpenWrap && document.body.contains(_ntfSwipeOpenWrap)) return;
   var list = document.getElementById('ntf-list');
   var rows = [];
-  var NOTIF_TRADE_TYPES = {trade:1, bridge:1};
+  // Trades: your own trades, bridges, and market alerts (a token trending).
+  // A trending alert used to land under Social, drawn with a like's heart.
+  var NOTIF_TRADE_TYPES = {trade:1, bridge:1, trending:1};
   _personal.forEach(function(n){
     var isTradeType = !!NOTIF_TRADE_TYPES[n.type];
     if((_activeTab === 'social' && !isTradeType && n.type!=='tip')

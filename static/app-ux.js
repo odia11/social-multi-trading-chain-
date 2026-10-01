@@ -18,7 +18,7 @@ var ROUTE_ASSETS={
   '/wallet':['portfolio-redesign.css?v={app}','portfolio-history-redesign.css?v={app}','portfolio-redesign.js?v={app}','portfolio-history-redesign.js?v={app}','approved-portfolio.js?v={app}','portfolio-assets.js?v=1'],
   '/live-market':['live-market-redesign.css?v=9','live-market-final.css?v=6','live-market-redesign.js?v=5','live-market-hotfix.js?v=8'],
   '/groups':['groups-redesign.css?v=1','groups-redesign.js?v=1'],
-  '/messages':['messages-ui.css?v=1','messages-inbox.css?v=1','messages-thread.css?v=2','messages-ui.js?v=4'],
+  '/messages':['messages-ui.css?v=1','messages-inbox.css?v=2','messages-thread.css?v=2','messages-ui.js?v=4'],
   '/notifications':[],
   '/profile':['profile-v2.css?v={app}','profile-gold-tip.css?v={app}','tip-experience.css?v={app}','tip-experience.js?v={app}'],
   '/bot':['approved-bot.css?v={app}'],
