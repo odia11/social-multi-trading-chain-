@@ -3721,13 +3721,16 @@ async function loadWalletTokens(){
   try{
     // fetch totals and tokens in parallel
     const [totRes, tokRes]=await Promise.all([
-      fetch('/api/wallet/total').then(r=>r.json()).catch(()=>null),
+      fetch('/api/portfolio/snapshot').then(r=>r.json()).catch(()=>null),
       fetch('/api/wallet/tokens').then(r=>r.json()),
     ]);
-    // update header from /api/wallet/total
+    // Header total from the same multi-chain snapshot every other Portfolio
+    // number uses (/api/wallet/total only summed Solana tokens, so USDC on
+    // the EVM chains was missing here).
     if(totRes&&totRes.ok){
-      document.getElementById('wlt-total-usd').textContent='$'+Number(totRes.total_usd).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-      document.getElementById('wlt-total-sol').textContent='◎ '+Number(totRes.total_sol).toFixed(4);
+      const tot=Number(totRes.total_usd)||0, px=Number((totRes.sol||{}).price_usd)||0;
+      document.getElementById('wlt-total-usd').textContent='$'+tot.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+      document.getElementById('wlt-total-sol').textContent=px?'◎ '+(tot/px).toFixed(4):'—';
     }
     if(!tokRes.ok) throw new Error(tokRes.msg||'Failed to load wallet');
     if(!tokRes.tokens||tokRes.tokens.length===0){
