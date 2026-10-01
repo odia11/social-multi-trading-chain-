@@ -2722,7 +2722,7 @@ function _renderHoldings(spl){
     var sym=x.symbol||'?'
     var amt=parseFloat(x.amount||0)
     var usd=parseFloat(x.usd_value||x.value_usd||0)
-    var amtStr=amt===0?'0':amt<0.0001?amt.toExponential(2):amt<1?amt.toFixed(6):amt.toFixed(4)
+    var amtStr=amt===0?'0':amt<0.0001?amt.toExponential(2):amt<1?amt.toFixed(6):amt.toLocaleString('en-US',{maximumFractionDigits:amt>=1000?2:4})
     var logo=x.logo_url||''
     var init=esc(sym.slice(0,2).toUpperCase())
     // The fallback initial-circle must stay hidden whenever a real logo is
