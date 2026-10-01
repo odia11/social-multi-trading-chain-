@@ -377,6 +377,7 @@ aside{background:#0a0b0e;border-right-color:#161a20}
 .topbar-grp{font-size:11.5px;font-weight:700;color:var(--sub);letter-spacing:.02em}
 .topbar-title{font-size:20px;font-weight:800}
 .topbar-sub{display:none}
+.risk-list{display:grid;gap:10px;margin-top:16px}.risk-row{background:var(--bg2);border:1px solid var(--bg3);border-left:3px solid var(--accent);border-radius:12px;padding:12px 14px}.risk-row.lvl3{border-left-color:var(--red)}.risk-row.lvl1{border-left-color:var(--muted)}.risk-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px}.risk-chain{font-size:10px;font-weight:800;text-transform:uppercase;color:var(--muted);border:1px solid var(--bg3);border-radius:6px;padding:1px 6px}.risk-who{color:var(--muted);font-size:12px;overflow-wrap:anywhere}.risk-chg{margin-left:auto;font-weight:800;color:var(--green)}.risk-chg.neg{color:var(--red)}.risk-meta{color:var(--muted);font-size:12px;margin:4px 0 6px}.risk-issue{font-size:12.5px;line-height:1.4;margin-top:4px;overflow-wrap:anywhere}.risk-issue span{display:inline-block;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;padding:1px 6px;border-radius:5px;margin-right:6px;background:rgba(255,90,90,.12);color:var(--red)}.risk-issue.k-liquidity span{background:rgba(247,185,85,.14);color:var(--accent)}.risk-issue.k-unsupported span{background:rgba(255,255,255,.06);color:var(--muted)}@media(max-width:768px){ #view-risk .kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
 .adm-subtabs{display:flex;gap:4px;padding:3px;border-radius:11px;background:#101216;border:1px solid var(--line);margin-right:auto}
 .adm-subtabs:empty{display:none}
 .adm-subtab{height:34px;padding:0 13px;border-radius:8px;border:0;background:transparent;color:var(--sub);font:inherit;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
@@ -475,6 +476,7 @@ aside{background:#0a0b0e;border-right-color:#161a20}
     <button class="nav-btn" id="nav-revenue" onclick="showView('revenue')"><span class="nav-icon"></span>Revenue &amp; gas<span class="adm-badge red" data-badge="revenue"></span></button>
     <button class="nav-btn" id="nav-trades" onclick="showView('trades')"><span class="nav-icon"></span>Trades</button>
     <div class="sb-grp" data-grp="trading">TRADING</div>
+    <button class="nav-btn" id="nav-risk" onclick="showView('risk')"><span class="nav-icon"></span>Positions at risk<span class="adm-badge red" data-badge="risk"></span></button>
     <button class="nav-btn" id="nav-performance" onclick="showView('performance')"><span class="nav-icon"></span>Bot performance</button>
     <button class="nav-btn" id="nav-aifilters" onclick="showView('aifilters')"><span class="nav-icon"></span>AI filters<span class="adm-badge" data-badge="aifilters"></span></button>
     <div class="sb-grp" data-grp="system">SYSTEM</div>
@@ -721,6 +723,17 @@ aside{background:#0a0b0e;border-right-color:#161a20}
           <div id="rev-body"><div class="tbl-loading"><span class="spinner"></span></div></div>
         </div>
       </div>
+    </div>
+
+    <!-- ══════════ VIEW: POSITIONS AT RISK ══════════ -->
+    <div class="view" id="view-risk">
+      <div class="kpi-grid" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+        <div class="kpi-card"><div class="kpi-val" id="risk-count">—</div><div class="kpi-lbl">At risk now</div></div>
+        <div class="kpi-card"><div class="kpi-val" id="risk-open">—</div><div class="kpi-lbl">Open positions</div></div>
+        <div class="kpi-card"><div class="kpi-val" id="risk-watch">—</div><div class="kpi-lbl">Watched by bot / guardian</div></div>
+        <div class="kpi-card"><div class="kpi-val" id="risk-guardian">—</div><div class="kpi-lbl">Position guardian</div></div>
+      </div>
+      <div id="risk-list" class="risk-list"><div class="tbl-loading"><span class="spinner"></span></div></div>
     </div>
 
     <!-- ══════════ VIEW: PERFORMANCE ══════════ -->
@@ -1319,10 +1332,10 @@ function _applyOwnerUI(){
 // managing OTHER admins' roles/invites or restoring a DB backup, which their
 // own routes already enforce independently of this tab list).
 var _ROLE_TABS = {
-  admin:     ['overview','users','trades','revenue','performance','system','moderation','support','security','aifilters','settings'],
-  executive: ['overview','users','trades','revenue','performance','system','moderation','support','security','aifilters','settings'],
+  admin:     ['overview','users','trades','revenue','risk','performance','system','moderation','support','security','aifilters','settings'],
+  executive: ['overview','users','trades','revenue','risk','performance','system','moderation','support','security','aifilters','settings'],
   moderator: ['users','trades','moderation','support','security'],
-  analyst:   ['overview','trades','revenue','performance','system','aifilters'],
+  analyst:   ['overview','trades','revenue','risk','performance','system','aifilters'],
   user:      []
 };
 var _ROLE_BADGE = {
@@ -1334,7 +1347,7 @@ var _ROLE_BADGE = {
 
 function _applyRoleUI(role) {
   var allowed = _ROLE_TABS[role] || [];
-  ['overview','users','trades','revenue','performance','system','moderation','support','security','aifilters','settings'].forEach(function(name) {
+  ['overview','users','trades','revenue','risk','performance','system','moderation','support','security','aifilters','settings'].forEach(function(name) {
     var btn = document.getElementById('nav-' + name);
     if (btn) btn.style.display = allowed.indexOf(name) >= 0 ? '' : 'none';
   });
@@ -1376,14 +1389,14 @@ async function _initRoleBasedUI() {
 }
 
 // ── VIEW SWITCHING ──
-var _titles = {overview:'Overview',users:'Users',trades:'Trades',revenue:'Revenue & gas',performance:'Bot performance',system:'System health',moderation:'Moderation',support:'Support',security:'Security',aifilters:'AI filters',settings:'Settings'};
+var _titles = {overview:'Overview',users:'Users',trades:'Trades',revenue:'Revenue & gas',risk:'Positions at risk',performance:'Bot performance',system:'System health',moderation:'Moderation',support:'Support',security:'Security',aifilters:'AI filters',settings:'Settings'};
 // Five groups: the sidebar on desktop, the tab bar on a phone, and the
 // sub-tabs in the top bar all come from this one map.
 var _GROUPS = {
   overview: ['overview'],
   people:   ['users','moderation','support'],
   money:    ['revenue','trades'],
-  trading:  ['performance','aifilters'],
+  trading:  ['risk','performance','aifilters'],
   system:   ['security','system','settings']
 };
 var _GROUP_NAMES = {overview:'Admin', people:'People', money:'Money', trading:'Trading', system:'System'};
@@ -1404,7 +1417,7 @@ function _setBadge(key, n) {
     b.style.display = n > 0 ? 'inline-flex' : 'none';
   });
   // Phone tabs add up their group's pages.
-  var groupTotals = {people: (_badgeCounts.support || 0), money: (_badgeCounts.revenue || 0), trading: (_badgeCounts.aifilters || 0)};
+  var groupTotals = {people: (_badgeCounts.support || 0), money: (_badgeCounts.revenue || 0), trading: (_badgeCounts.aifilters || 0) + (_badgeCounts.risk || 0)};
   Object.keys(groupTotals).forEach(function(g) {
     document.querySelectorAll('.adm-tab [data-badge="' + g + '"]').forEach(function(b) {
       var t = groupTotals[g];
@@ -1467,6 +1480,7 @@ function loadView(name) {
   else if (name === 'trades') loadTrades();
   else if (name === 'revenue') loadRevenue();
   else if (name === 'performance') loadPerformance();
+  else if (name === 'risk') loadRisk();
   else if (name === 'system') loadSystem();
   else if (name === 'moderation') loadModeration();
   else if (name === 'support') loadSupport();
@@ -1476,6 +1490,43 @@ function loadView(name) {
 
 // ── HELPERS ──
 function _a(v) { return fetch(v, {credentials:'include'}).then(r => r.json()).catch(() => null); }
+// ── Positions at risk ──
+// Every open position the platform cannot fully protect right now. Refreshes
+// every 15 s while open; the red badge follows it everywhere in the admin.
+var _RISK_KIND = {no_price:'No price', sell_failing:'Sell failing', liquidity:'Liquidity', unwatched:'Unwatched', unsupported:'Unsupported'};
+function _riskEsc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+async function loadRisk(silent) {
+  var d = await _a('/api/admin/positions-at-risk');
+  if (!d || !d.ok) { if (!silent) document.getElementById('risk-list').innerHTML = '<div class="tbl-empty">Could not load positions</div>'; return; }
+  _setBadge('risk', d.count);
+  document.getElementById('risk-count').textContent = d.count;
+  document.getElementById('risk-count').style.color = d.count ? 'var(--red)' : 'var(--green)';
+  document.getElementById('risk-open').textContent = d.total_open;
+  document.getElementById('risk-watch').textContent = (d.watched.bot || 0) + ' / ' + (d.watched.guardian || 0);
+  var g = document.getElementById('risk-guardian');
+  g.textContent = d.guardian_running ? 'Running' : 'Not running';
+  g.style.color = d.guardian_running ? 'var(--green)' : 'var(--red)';
+  var list = document.getElementById('risk-list');
+  if (!d.at_risk.length) { list.innerHTML = '<div class="tbl-empty">Every open position is watched and has a live price. Nothing at risk.</div>'; return; }
+  list.innerHTML = d.at_risk.map(function(r) {
+    var chg = r.change_pct == null ? '—' : ((r.change_pct >= 0 ? '+' : '') + r.change_pct.toFixed(1) + '%');
+    var who = r.username ? '@' + r.username : _short(r.wallet);
+    return '<div class="risk-row lvl' + r.level + '">'
+      + '<div class="risk-top"><b>$' + _riskEsc(r.symbol) + '</b><span class="risk-chain">' + _riskEsc(r.chain) + '</span>'
+      + '<span class="risk-who">' + _riskEsc(who) + ' · ' + _riskEsc(r.source) + '</span>'
+      + '<span class="risk-chg' + (r.change_pct < 0 ? ' neg' : '') + '">' + chg + '</span></div>'
+      + '<div class="risk-meta">$' + _riskEsc(r.spend) + ' in · stop loss ' + (r.sl_pct != null ? '-' + _riskEsc(r.sl_pct) + '%' : 'settings')
+      + ' · watched by ' + _riskEsc(r.watched_by) + '</div>'
+      + r.issues.map(function(i){ return '<div class="risk-issue k-' + _riskEsc(i.kind) + '"><span>' + _riskEsc(_RISK_KIND[i.kind] || i.kind) + '</span>' + _riskEsc(i.text) + '</div>'; }).join('')
+      + '</div>';
+  }).join('');
+}
+setInterval(function(){
+  var v = document.getElementById('view-risk');
+  if (v && v.classList.contains('active')) loadRisk(true);
+  else if ((_ROLE_TABS[_userRole] || []).indexOf('risk') >= 0) _a('/api/admin/positions-at-risk').then(function(d){ if (d && d.ok) _setBadge('risk', d.count); });
+}, 15000);
+
 function _fmt(n, d) { return (+(n || 0)).toFixed(d != null ? d : 4); }
 function _short(w) { return w && w.length >= 8 ? w.slice(0,4)+'…'+w.slice(-4) : (w||'—'); }
 function _av(w) { return ['#35d4c4','#7c8cff','#f7b955','#3ad29b','#ff9b3d'][Math.abs(w.charCodeAt(0) - 65) % 5]; }
