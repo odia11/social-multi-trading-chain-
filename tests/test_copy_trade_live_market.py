@@ -351,7 +351,7 @@ check('...from the one place every full exit in the app comes through, so '
 check('...but never for a position that is ITSELF a copy, which is what '
       'stops a chain of them and stops two people who follow each other '
       'selling each other out in a circle',
-      re.search(r'if not _was_copy:\s*\n\s*_trigger_copy_sell', close) is not None)
+      re.search(r'if not _was_copy( and notify_copiers)?:\s*\n\s*_trigger_copy_sell', close) is not None)
 check('...reading that off the position BEFORE it is cleared, since clearing '
       'it is what this function does',
       close.index('_was_copy = bool') < close.index("['positions'][mint] = {'amount': 0.0"))

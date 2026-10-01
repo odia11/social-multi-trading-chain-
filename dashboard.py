@@ -3088,6 +3088,9 @@ def run_migrations():
         # _compute_entry_risk_score(). Not a new signal and not a
         # prediction of outcome, just one number to group/sort trades by.
         "ALTER TABLE open_positions ADD COLUMN risk_score REAL DEFAULT NULL",
+        # 1 = the user bought this by hand and switched its stop loss / take
+        # profit OFF: neither the bot nor the position guardian sells it.
+        "ALTER TABLE open_positions ADD COLUMN protect_off INTEGER DEFAULT 0",
         "ALTER TABLE trades ADD COLUMN entry_volume_5m REAL DEFAULT NULL",
         "ALTER TABLE trades ADD COLUMN entry_volume_1h REAL DEFAULT NULL",
         "ALTER TABLE trades ADD COLUMN entry_volume_accel INTEGER DEFAULT NULL",
@@ -4579,7 +4582,7 @@ def _hydrate_positions_from_db(wallet: str, us: dict):
                 '''SELECT mint_address, symbol, amount, buy_price, spend, entry_liquidity, opened_at, chain,
                           entry_lp_locked_pct, entry_mint_authority_active, entry_freeze_authority_active, source,
                           base_currency, sl_pct, tp_pct, sl_price, tp_price, trailing_enabled, entry_score,
-                          highest_price, lowest_price, copy_of_wallet
+                          highest_price, lowest_price, copy_of_wallet, protect_off
                    FROM open_positions WHERE user_id=?''', (row[0],)
             ).fetchall()
         finally:
@@ -4587,7 +4590,7 @@ def _hydrate_positions_from_db(wallet: str, us: dict):
         for (mint, symbol, amount, buy_price, spend, entry_liquidity, opened_at, chain,
              entry_lp_locked_pct, entry_mint_authority_active, entry_freeze_authority_active, source,
              base_currency, sl_pct, tp_pct, sl_price, tp_price, trailing_enabled, entry_score,
-             highest_price, lowest_price, copy_of_wallet) in rows:
+             highest_price, lowest_price, copy_of_wallet, protect_off) in rows:
             # chain must be carried into the restored dict, not just the DB row --
             # every place that iterates us['positions'] and calls the Solana-only
             # _execute_user_swap() relies on pos['chain'] to skip BSC entries.
@@ -4618,6 +4621,8 @@ def _hydrate_positions_from_db(wallet: str, us: dict):
             us['positions'][mint].update({k: v for k, v in snap.items() if v is not None})
             if trailing_enabled is not None:
                 us['positions'][mint]['trailing_enabled'] = bool(trailing_enabled)
+            if protect_off:
+                us['positions'][mint]['protect'] = False
         if rows:
             print(f'[open_positions] restored {len(rows)} open position(s) for {wallet[:8]}…', flush=True)
     except Exception as e:
@@ -6166,8 +6171,8 @@ def _upsert_open_position(user_id: int, wallet: str, mint: str, pos: dict, sourc
                     highest_price, lowest_price,
                     entry_volume_5m, entry_volume_1h, entry_volume_accel, entry_buy_sell_ratio,
                     entry_unique_traders, entry_market_cap, entry_pair_age_minutes, risk_score,
-                    updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+                    protect_off, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
                    ON CONFLICT(user_id, mint_address) DO UPDATE SET
                        symbol=excluded.symbol, amount=excluded.amount, buy_price=excluded.buy_price,
                        spend=excluded.spend, entry_liquidity=excluded.entry_liquidity,
@@ -6185,6 +6190,7 @@ def _upsert_open_position(user_id: int, wallet: str, mint: str, pos: dict, sourc
                        entry_volume_accel=excluded.entry_volume_accel, entry_buy_sell_ratio=excluded.entry_buy_sell_ratio,
                        entry_unique_traders=excluded.entry_unique_traders, entry_market_cap=excluded.entry_market_cap,
                        entry_pair_age_minutes=excluded.entry_pair_age_minutes, risk_score=excluded.risk_score,
+                       protect_off=excluded.protect_off,
                        updated_at=CURRENT_TIMESTAMP''',
                 (user_id, mint, pos.get('symbol', ''), pos.get('amount', 0.0), pos.get('buy_price', 0.0),
                  pos.get('spend', 0.0), pos.get('entry_liquidity', 0.0),
@@ -6197,12 +6203,114 @@ def _upsert_open_position(user_id: int, wallet: str, mint: str, pos: dict, sourc
                  pos.get('entry_volume_5m'), pos.get('entry_volume_1h'),
                  (int(bool(pos.get('entry_volume_accel'))) if pos.get('entry_volume_accel') is not None else None),
                  pos.get('entry_buy_sell_ratio'), pos.get('entry_unique_traders'),
-                 pos.get('entry_market_cap'), pos.get('entry_pair_age_minutes'), pos.get('risk_score')))
+                 pos.get('entry_market_cap'), pos.get('entry_pair_age_minutes'), pos.get('risk_score'),
+                 int(pos.get('protect') is False)))
             conn.commit()
         finally:
             conn.close()
     except Exception as e:
         print(f'[open_positions] upsert failed for user_id={user_id} mint={mint[:8]}: {e}', flush=True)
+
+def _protection_summary(wallet: str, mint: str):
+    """What now guards this holding: {'sl_pct','tp_pct'}, {'off': True}, or None."""
+    pos = get_user_state(wallet)['positions'].get(mint) or {}
+    if pos.get('amount', 0) <= 0:
+        return None
+    if pos.get('protect') is False:
+        return {'off': True}
+    if pos.get('sl_pct') is None:
+        return None
+    return {'sl_pct': pos.get('sl_pct'), 'tp_pct': pos.get('tp_pct')}
+
+
+def _manual_protection(data: dict) -> tuple:
+    """(protect, sl_pct, tp_pct) for a buy made by hand. Protection is ON by
+    default, at the user's own stop loss / take profit (sl/tp None = those
+    settings); the buy sheet can set other values or switch it off. Raises
+    ValueError for a value the app would refuse in Settings too."""
+    protect = data.get('protect', True)
+    if not isinstance(protect, bool):
+        raise ValueError('protect must be true or false')
+    if not protect:
+        return False, None, None
+    sl, tp = data.get('sl_pct'), data.get('tp_pct')
+    if sl is None and tp is None:
+        return True, None, None
+    ok, err = _validate_sl_tp(sl, tp)
+    if not ok:
+        raise ValueError(err)
+    if float(tp) <= float(sl):
+        raise ValueError('Take profit must be higher than the stop loss')
+    return True, float(sl), float(tp)
+
+
+def _apply_manual_protection(pos: dict, wallet: str, entry_price: float, protection: tuple) -> dict:
+    """Freeze the chosen stop loss / take profit onto a new manual position."""
+    protect, sl, tp = protection
+    if not protect:
+        pos.update({'protect': False, 'sl_pct': None, 'tp_pct': None,
+                    'sl_price': None, 'tp_price': None})
+        return pos
+    pos.update(_snapshot_entry_risk(wallet, entry_price))
+    if sl is not None and tp is not None:
+        pos['sl_pct'], pos['tp_pct'] = sl, tp
+    if entry_price > 0:
+        pos['sl_price'] = round(entry_price * (1 - pos['sl_pct'] / 100), 10)
+        pos['tp_price'] = round(entry_price * (1 + pos['tp_pct'] / 100), 10)
+    pos['protect'] = True
+    return pos
+
+
+def _register_manual_buy(user_id: int, wallet: str, mint: str, symbol: str, spent: float,
+                         tokens: float, protection: tuple, chain: str = 'solana'):
+    """A buy made by hand becomes a tracked position, so its stop loss and
+    take profit are watched every second -- by the bot when it runs, by the
+    position guardian when it does not. Buying more of a token already held
+    adds to that position at the averaged entry and keeps its protection."""
+    if tokens <= 0 or spent <= 0:
+        return None
+    us = get_user_state(wallet)
+    held = us['positions'].get(mint) or {}
+    if held.get('amount', 0) > 0 and held.get('buy_price', 0) > 0:
+        pos = dict(held)
+        pos['amount'] = held['amount'] + tokens
+        pos['spend'] = held.get('spend', 0.0) + spent
+        pos['buy_price'] = pos['spend'] / pos['amount']
+        for k, sign in (('sl', -1), ('tp', 1)):
+            if pos.get(k + '_pct') is not None:
+                pos[k + '_price'] = round(pos['buy_price'] * (1 + sign * pos[k + '_pct'] / 100), 10)
+        _upsert_open_position(user_id, wallet, mint, pos, source=held.get('source', 'manual'),
+                              copy_of_wallet=held.get('copy_of_wallet'), chain=chain)
+        return pos
+    entry = spent / tokens
+    pos = {'amount': tokens, 'buy_price': entry, 'spend': spent, 'symbol': symbol,
+           'opened_at': time.time(), 'base': SOLANA_BASE_CURRENCY if chain == 'solana' else 'USDC'}
+    _apply_manual_protection(pos, wallet, entry, protection)
+    _upsert_open_position(user_id, wallet, mint, pos, source='manual', chain=chain)
+    return pos
+
+
+def _reduce_after_manual_sell(user_id: int, wallet: str, mint: str, sold_tokens: float,
+                              full: bool, chain: str = 'solana'):
+    """Keep the tracked position in step with a sell made by hand. Without
+    this the bot (or the guardian) kept watching tokens that were already
+    sold, and its stop loss would try to sell them again."""
+    us = get_user_state(wallet)
+    pos = us['positions'].get(mint) or {}
+    if pos.get('amount', 0) <= 0:
+        return
+    if full or sold_tokens >= pos['amount'] * 0.999:
+        _close_open_position(user_id, wallet, mint, chain=chain, notify_copiers=False)
+        return
+    if sold_tokens <= 0:
+        return
+    keep = (pos['amount'] - sold_tokens) / pos['amount']
+    pos = dict(pos)
+    pos['amount'] = pos['amount'] - sold_tokens
+    pos['spend'] = pos.get('spend', 0.0) * keep
+    _upsert_open_position(user_id, wallet, mint, pos, source=pos.get('source', 'manual'),
+                          copy_of_wallet=pos.get('copy_of_wallet'), chain=chain)
+
 
 def _sell_fraction(data: dict) -> tuple:
     """How much of a holding a sell request is asking for.
@@ -6313,7 +6421,8 @@ def _reduce_open_position(user_id: int, wallet: str, mint: str, sold: float,
               f'mint={mint[:8]}: {e}', flush=True)
 
 
-def _close_open_position(user_id: int, wallet: str, mint: str, chain: str = 'solana'):
+def _close_open_position(user_id: int, wallet: str, mint: str, chain: str = 'solana',
+                         notify_copiers: bool = True):
     """Closes ONE position -- clears it from the in-memory positions dict and
     deletes its open_positions row. Nothing more: this used to also stop the
     trader loop and flip bot_enabled=0 whenever it emptied a user's LAST open
@@ -6347,7 +6456,9 @@ def _close_open_position(user_id: int, wallet: str, mint: str, chain: str = 'sol
             conn.close()
     except Exception as e:
         print(f'[open_positions] close failed for user_id={user_id} mint={mint[:8]}: {e}', flush=True)
-    if not _was_copy:
+    # notify_copiers=False: the caller already told the copiers itself
+    # (Live Market's own sell does, with the exact share it sold).
+    if not _was_copy and notify_copiers:
         _trigger_copy_sell(wallet, mint, chain=_pos_chain, fraction=1.0)
 
 def _charge_txn_fee(private_key: str, wallet: str, user_id: int, symbol: str,
@@ -7061,6 +7172,25 @@ def _bot_execute_exit(user_id: int, us: dict, wallet: str, mint: str, pos: dict,
     if not enc_blob:
         add_user_log(wallet, f'[bot] Cannot close {chain} position {mint[:8]}… — no {chain} trading key configured')
         return False, 0.0, 0.0
+    # One sell of a position at a time, whoever asks: the bot's exit
+    # watcher, the position guardian (bot off) and a sell by hand in Live
+    # Market share this lock, so the same tokens are never sold twice.
+    lock = _get_sell_lock(wallet, mint, chain)
+    if not lock.acquire(blocking=False):
+        return False, 0.0, 0.0
+    try:
+        if (us['positions'].get(mint) or {}).get('amount', 0) <= 0:
+            return False, 0.0, 0.0   # already sold meanwhile
+        return _bot_execute_exit_locked(user_id, us, wallet, mint, pos, price, symbol, sell_amount,
+                                        spend_amount, exit_reason, pref_notifications, enc_blob,
+                                        chain, full_close, record_kwargs)
+    finally:
+        lock.release()
+
+
+def _bot_execute_exit_locked(user_id, us, wallet, mint, pos, price, symbol, sell_amount,
+                             spend_amount, exit_reason, pref_notifications, enc_blob,
+                             chain, full_close, record_kwargs):
     amount_str = '0' if (chain == 'solana' and full_close) else str(sell_amount)
     with _use_key(enc_blob, wallet) as pk:
         if chain == 'solana':
@@ -8681,7 +8811,8 @@ def _te_evm_fee_charger(enc_blob: str, wallet: str, symbol: str):
     return charge
 
 def _te_run_evm_trade(*, quote_id, idem, available, wallet, enc_blob, evm_address,
-                      symbol, token_address, chain, user_id, position_source='manual'):
+                      symbol, token_address, chain, user_id, position_source='manual',
+                      protection=None):
     """Execute one EVM quote and persist only the confirmed token receipt.
 
     `token_purchase_usd` remains the cost basis for PnL, but position quantity
@@ -8730,13 +8861,20 @@ def _te_run_evm_trade(*, quote_id, idem, available, wallet, enc_blob, evm_addres
             received = (purchase / quoted_entry) if quoted_entry > 0 else 0.0
         entry_price = (purchase / received) if received > 0 else quoted_entry
 
-        _upsert_open_position(user_id, wallet, token_address, {
-            'amount':    received,
-            'buy_price': entry_price,
-            'spend':     purchase,
-            'symbol':    symbol,
-            'opened_at': time.time(),
-        }, source=position_source, chain=chain)
+        if position_source == 'manual':
+            # A buy by hand: tracked with its stop loss / take profit (the
+            # user's settings unless the buy sheet chose otherwise), added to
+            # an existing holding of the same token at the averaged entry.
+            _register_manual_buy(user_id, wallet, token_address, symbol, float(purchase),
+                                 float(received), protection or (True, None, None), chain=chain)
+        else:
+            _upsert_open_position(user_id, wallet, token_address, {
+                'amount':    received,
+                'buy_price': entry_price,
+                'spend':     purchase,
+                'symbol':    symbol,
+                'opened_at': time.time(),
+            }, source=position_source, chain=chain)
     return result
 
 
@@ -11197,6 +11335,8 @@ def user_trader_loop(stop_event, config, wallet: str):
                 continue  # no EVM trading key configured -- can't touch this position at all
             if not _chain_tradeable(pos.get('chain', 'solana')):
                 continue  # chain removed from OrcAgent (Polygon) -- nothing to sell it through
+            if pos.get('protect') is False:
+                continue  # bought by hand with stop loss / take profit switched off
             # Every open position stays fast-polled for as long as it's held, not
             # just once it's already close to a trigger -- a real rugpull can crash
             # a token from healthy to way past stop-loss within a single normal
@@ -15163,6 +15303,10 @@ def _evm_buy_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM'
     if not is_valid_evm_address(token_address):
         return jsonify({'ok': False, 'msg': 'Invalid token address'}), 400
     amount_usdc = data.get('amount_usdc')
+    try:
+        protection = _manual_protection(data)
+    except ValueError as e:
+        return jsonify({'ok': False, 'msg': str(e)}), 400
     conn = sqlite3.connect(DB_FILE)
     try:
         row = conn.execute(
@@ -15293,7 +15437,7 @@ def _evm_buy_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM'
             idem=f'{user_id}:quote:{quote.quote_id}',
             available=Decimal(str(current_balance)), wallet=wallet, enc_blob=enc_blob,
             evm_address=evm_address, symbol=symbol, token_address=token_address,
-            chain=chain, user_id=user_id)
+            chain=chain, user_id=user_id, protection=protection)
     except te_execute.QuoteNotUsable as e:
         return jsonify({'ok': False, 'requote': True, 'msg': str(e)}), 409
 
@@ -22086,6 +22230,12 @@ def api_instant_trade():
 
         if side not in ('buy', 'sell'):
             return jsonify({'error': 'side must be buy or sell'}), 400
+        protection = (True, None, None)
+        if side == 'buy':
+            try:
+                protection = _manual_protection(data)
+            except ValueError as e:
+                return jsonify({'error': str(e)}), 400
         if not token_address:
             return jsonify({'error': 'token_address is required'}), 400
         if not is_valid_solana_address(token_address):
@@ -22282,6 +22432,20 @@ def api_instant_trade():
                       f'collected inside the swap, so nothing is recorded for it',
                       flush=True)
 
+            # Track it: a buy becomes a position whose stop loss / take profit
+            # is watched every second (by the bot, or by the position guardian
+            # when the bot is off) -- Live Market buys used to have none at
+            # all. A sell keeps that position in step with what is left.
+            try:
+                if side == 'buy':
+                    _register_manual_buy(uid, wallet, token_address, symbol, amount_sol,
+                                         token_amount, protection)
+                else:
+                    _reduce_after_manual_sell(uid, wallet, token_address, token_amount,
+                                              sell_full and amount_token <= 0)
+            except Exception as _pe:
+                print(f'[instant-trade] position tracking failed for {token_address[:8]}: {_pe}', flush=True)
+
             # Whoever copies this wallet copies THIS. Live Market's own Solana
             # buy has never told the copy path anything, so a trader followed
             # for the calls they make here was followed in name only: copying
@@ -22337,6 +22501,7 @@ def api_instant_trade():
             # False means the swap went through without the platform fee, so
             # the fees table has no row for this trade.
             'fee_collected':  bool(swap_info.get('fee_bundled')),
+            'protection':     _protection_summary(wallet, token_address),
         })
 
     except Exception as e:
@@ -33632,6 +33797,174 @@ def _autostart_bots():
             print(f'[startup] failed to auto-restart {_wal[:8]}: {_e2}', flush=True)
 
 threading.Thread(target=_autostart_bots, daemon=True).start()
+
+# ── POSITION GUARDIAN ──
+# Stop loss and take profit used to be watched ONLY inside a user's running
+# bot (user_trader_loop's exit watcher). A position held while the bot was
+# off -- a buy by hand in Live Market, the bot switched off with positions
+# left, or a bot that failed to start -- had no stop loss at all. The
+# guardian watches every such position, every second, with the same shared
+# price feed and the same sell path (_bot_execute_exit, whose per-position
+# lock means the bot and the guardian can never sell the same tokens twice).
+# It leaves users whose bot is running to the bot, and positions whose
+# protection the user switched off alone. It sells on the position's own
+# stop loss / take profit (or the user's settings for a position without
+# them); a trailing/staged take profit is the bot's -- the guardian takes the
+# whole position at the target instead.
+GUARDIAN_INTERVAL = 1.0
+_guardian_users_cache = {'at': 0.0, 'rows': []}
+_guardian_settings_cache: dict = {}
+_guardian_pool = ThreadPoolExecutor(max_workers=4)
+
+
+def _bot_is_running(us: dict) -> bool:
+    t = us.get('trader_thread')
+    return bool(us.get('trader_running')) and bool(t is not None and t.is_alive())
+
+
+def _guardian_users() -> list:
+    now = time.time()
+    if now - _guardian_users_cache['at'] >= 10:
+        try:
+            conn = sqlite3.connect(DB_FILE, timeout=5)
+            try:
+                rows = conn.execute(
+                    'SELECT DISTINCT u.id, u.wallet_address FROM open_positions op '
+                    'JOIN users u ON u.id = op.user_id WHERE op.amount > 0').fetchall()
+            finally:
+                conn.close()
+            _guardian_users_cache.update(at=now, rows=rows)
+        except Exception as e:
+            print(f'[guardian] could not list positions: {e}', flush=True)
+    return list(_guardian_users_cache['rows'])
+
+
+def _guardian_settings(user_id: int):
+    hit = _guardian_settings_cache.get(user_id)
+    if hit and time.time() - hit[0] < 10:
+        return hit[1]
+    conn = sqlite3.connect(DB_FILE, timeout=5)
+    try:
+        row = conn.execute('SELECT stop_loss, take_profit, encrypted_private_key, encrypted_private_key_bsc, '
+                           'pref_notifications FROM users WHERE id=?', (user_id,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    val = {'sl': (float(row[0]) / 100) if row[0] is not None else STOP_LOSS,
+           'tp': (float(row[1]) / 100) if row[1] is not None else TAKE_PROFIT,
+           'enc_sol': row[2] or None, 'enc_evm': row[3] or None,
+           'notify': bool(row[4] if row[4] is not None else 1)}
+    _guardian_settings_cache[user_id] = (time.time(), val)
+    return val
+
+
+def _guardian_sell(user_id, wallet, us, mint, pos, price, reason, cfg):
+    short = (wallet[:6] + '...' + wallet[-4:]) if len(wallet) >= 10 else wallet
+    label = pos.get('symbol') or mint[:8]
+    try:
+        add_user_log(wallet, f'[{short}] {reason} {label} — sold by the position guardian (bot is off)')
+        ok, _xp, _amt = _bot_execute_exit(
+            user_id, us, wallet, mint, pos, price, label, pos['amount'], pos.get('spend', 0.0),
+            reason, cfg['notify'], cfg['enc_sol'], cfg['enc_evm'], True,
+            entry_liquidity=pos.get('entry_liquidity'), entry_lp_locked_pct=pos.get('entry_lp_locked_pct'),
+            entry_mint_authority_active=pos.get('entry_mint_authority_active'),
+            entry_freeze_authority_active=pos.get('entry_freeze_authority_active'),
+            sl_pct=pos.get('sl_pct'), tp_pct=pos.get('tp_pct'),
+            sl_price=pos.get('sl_price'), tp_price=pos.get('tp_price'),
+            entry_score=pos.get('entry_score'),
+            highest_price=pos.get('highest_price'), lowest_price=pos.get('lowest_price'))
+        if ok:
+            _close_open_position(user_id, wallet, mint, chain=pos.get('chain', 'solana'))
+            print(f'[guardian] {short} {reason} {label} sold', flush=True)
+            return
+        pos['_sell_fails'] = pos.get('_sell_fails', 0) + 1
+        if pos['_sell_fails'] == 1 or pos['_sell_fails'] % 30 == 0:
+            add_user_log(wallet, f'[{short}] ✗ Sell failed — position kept open, retrying every second')
+        if pos['_sell_fails'] == EXIT_SELL_FAIL_ALERT:
+            print(f'[guardian] {short} SELL KEEPS FAILING for {label} ({mint}) after {reason}', flush=True)
+            _send_push_notification(user_id, 'Could not sell ' + str(label)[:24] + ' yet',
+                                    reason + ' — the sell has not gone through. OrcAgent keeps retrying '
+                                    'every second; you can also sell it yourself.',
+                                    '/wallet', tag='sellfail-' + mint[:16])
+    except Exception as e:
+        print(f'[guardian] {short} sell error for {mint[:8]}: {type(e).__name__}: {e}', flush=True)
+    finally:
+        pos['_guard_busy'] = False
+
+
+def _guardian_pass():
+    work = []
+    for user_id, wallet in _guardian_users():
+        if not wallet:
+            continue
+        us = get_user_state(wallet)
+        if _bot_is_running(us):
+            continue   # the bot's own exit watcher has these
+        held = {m: p for m, p in list(us['positions'].items())
+                if p.get('amount', 0) > 0 and p.get('buy_price', 0) > 0
+                and p.get('protect') is not False and _chain_tradeable(p.get('chain', 'solana'))}
+        if held:
+            work.append((user_id, wallet, us, held))
+    if not work:
+        return
+    fresh = _exit_fresh_prices({m: p.get('chain', 'solana') for _, _, _, h in work for m, p in h.items()})
+    now = time.time()
+    for user_id, wallet, us, held in work:
+        cfg = _guardian_settings(user_id)
+        if not cfg:
+            continue
+        for mint, pos in held.items():
+            if pos.get('_guard_busy'):
+                continue
+            chain = pos.get('chain', 'solana')
+            if not (cfg['enc_sol'] if chain == 'solana' else cfg['enc_evm']):
+                continue
+            price = float(fresh.get(mint) or 0)
+            if price <= 0:
+                since = pos.setdefault('_no_price_since', now)
+                if now - since >= EXIT_NO_PRICE_ALERT_SEC and not pos.get('_no_price_alerted'):
+                    pos['_no_price_alerted'] = True
+                    label = pos.get('symbol') or mint[:8]
+                    print(f'[guardian] NO PRICE for {label} ({mint}) -- stop loss cannot be checked', flush=True)
+                    _send_push_notification(user_id, 'Stop loss paused: ' + str(label)[:24],
+                                            'No live price for this token right now. OrcAgent checks it again '
+                                            'every second and acts as soon as a price is back.',
+                                            '/wallet', tag='noprice-' + mint[:16])
+                continue
+            pos.pop('_no_price_since', None)
+            pos.pop('_no_price_alerted', None)
+            pos['highest_price'] = max(pos.get('highest_price') or price, price)
+            pos['lowest_price'] = min(pos.get('lowest_price') or price, price)
+            chg = (price - pos['buy_price']) / pos['buy_price']
+            if chg <= -_pos_sl_frac(pos, cfg['sl']):
+                reason = 'STOP LOSS ' + str(round(chg * 100, 1)) + '%'
+            elif chg >= _pos_tp_frac(pos, cfg['tp']):
+                reason = 'TAKE PROFIT +' + str(round(chg * 100, 1)) + '%'
+            else:
+                continue
+            pos['_guard_busy'] = True
+            try:
+                _guardian_pool.submit(_guardian_sell, user_id, wallet, us, mint, pos, price, reason, cfg)
+            except RuntimeError:
+                pos['_guard_busy'] = False
+
+
+def _position_guardian_loop():
+    time.sleep(15)   # after startup and the bot auto-restart above
+    print('[guardian] position guardian running: stop loss / take profit for positions held while a bot is off',
+          flush=True)
+    while True:
+        t0 = time.time()
+        try:
+            _guardian_pass()
+        except Exception as e:
+            print(f'[guardian] {type(e).__name__}: {e}', flush=True)
+        time.sleep(max(0.05, GUARDIAN_INTERVAL - (time.time() - t0)))
+
+
+if os.environ.get('ORCAGENT_POSITION_GUARDIAN', '1') != '0':
+    threading.Thread(target=_position_guardian_loop, name='position-guardian', daemon=True).start()
 
 def _startup_fee_recovery():
     """One-time recovery run 30 s after boot — collects any fees missed before fee_paid tracking."""
