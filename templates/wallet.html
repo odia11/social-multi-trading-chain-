@@ -356,7 +356,7 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
    It used to be a 7x7 decorative pattern hashed from the address, which no
    wallet or exchange could scan. Dark modules on white with a quiet zone,
    error correction H so the Solana mark in the middle never breaks a scan. */
-.rx-qr{width:min(248px,72vw);margin:4px auto 0;padding:14px;border-radius:22px;background:#fff;box-shadow:0 14px 40px rgba(0,0,0,.45),0 0 0 1px rgba(247,185,85,.25),0 0 0 7px rgba(247,185,85,.06);position:relative}
+.rx-qr{width:min(248px,72vw,30vh);margin:4px auto 0;padding:14px;border-radius:22px;background:#fff;box-shadow:0 14px 40px rgba(0,0,0,.45),0 0 0 1px rgba(247,185,85,.25),0 0 0 7px rgba(247,185,85,.06);position:relative}
 .rx-qr svg.rx-code{display:block;width:100%;height:auto;shape-rendering:crispEdges}
 .rx-logo{position:absolute;left:50%;top:50%;width:21%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:24%;background:#fff;padding:3%;box-sizing:border-box}
 .rx-logo svg{display:block;width:100%;height:100%}
@@ -375,6 +375,14 @@ html,body{background:var(--bg);font-family:var(--ui);color:var(--text);font-size
 .rx-warn{display:flex;gap:9px;align-items:flex-start;margin-top:12px;padding:10px 12px;border:1px solid rgba(247,185,85,.22);border-radius:12px;background:rgba(247,185,85,.05);color:#c9b48a;font-size:12px;line-height:1.45}
 .rx-warn b{color:#f3d9a6}.rx-warn svg{flex:0 0 auto;width:16px;height:16px;margin-top:1px;color:#f7b955}
 .rx-scan{display:block;margin-top:10px;text-align:center;font-size:12px;color:#8b96a3;text-decoration:none}
+.rx-nets{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;margin:0 0 14px;border:1px solid #1d2731;border-radius:14px;background:#0a0f14}
+.rx-net{height:38px;border:0;border-radius:10px;background:transparent;color:#8b96a3;font-family:inherit;font-size:13.5px;font-weight:700;line-height:1;cursor:pointer;transition:background .15s,color .15s}
+.rx-net.on{background:#1a232c;color:#f3f5f8;box-shadow:inset 0 0 0 1px rgba(247,185,85,.35)}
+.rx-chains{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:0 0 12px}
+.rx-chain{display:flex;align-items:center;justify-content:center;gap:8px;padding:8px 6px;border:1px solid #1d2731;border-radius:11px;background:#0a0f14;font-size:12.5px;color:#c9d1da;min-width:0}
+.rx-chain span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rx-chain b{font:700 11px/1 var(--mono);color:#f7b955;flex:0 0 auto}
+.rx-note{margin-top:9px;text-align:center;font-size:12px;line-height:1.45;color:#8b96a3}
 .rx-scan:hover{color:#f7b955}
 
 /* ── SOL ⇄ USDC swap (Portfolio "Swap" button) ─────────────────────────
@@ -876,7 +884,7 @@ html,body{background:#080e11}
         <div class="dep-chain-tabs" id="dep-chain-tabs">
           <button class="dep-chain-tab active" data-chain="sol" onclick="_depSwitchChain('sol')">SOL</button>
           {% if bsc_deposit_address %}
-          <button class="dep-chain-tab" data-chain="bsc" onclick="_depSwitchChain('bsc')">BSC</button>
+          <button class="dep-chain-tab" data-chain="bsc" onclick="_depSwitchChain('bsc')">EVM</button>
           {% endif %}
         </div>
       </div>
@@ -911,7 +919,7 @@ html,body{background:#080e11}
               <a class="dep-btn dep-scan" href="https://bscscan.com/address/{{ bsc_deposit_address }}" target="_blank" rel="noopener">View on BscScan ↗</a>
             </div>
             <div style="font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5">
-              This is one shared EVM wallet — the same address also receives deposits on Base, Arbitrum and Robinhood Chain. You only need USDC here: OrcAgent puts up the network fee for your first trade on a new chain, charges it to that trade, and after that the wallet tops up its own gas from your USDC. If it ever tells you it can't, sending a few cents of that chain's own gas token here (ETH for Base/Arbitrum/Robinhood, POL for Polygon, BNB for BSC) unblocks it immediately.
+              This is one shared EVM wallet — the same address also receives USDC on Base and Arbitrum. You only need USDC here: OrcAgent puts up the network fee for your first trade on a new chain, charges it to that trade, and after that the wallet tops up its own gas from your USDC. If it ever tells you it can't, sending a few cents of that chain's own gas token here (ETH for Base/Arbitrum/Robinhood, BNB for BSC) unblocks it immediately.
             </div>
           </div>
         </div>
@@ -1266,8 +1274,19 @@ function _closeModal(){
 // USDC mark (Circle's blue coin): everything on OrcAgent is priced and
 // traded in USDC, so that is what this address is for.
 var _RX_USDC_MARK='<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#2775CA"/><path d="M12.3 7.6a9.2 9.2 0 0 0 0 16.8M19.7 7.6a9.2 9.2 0 0 1 0 16.8" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/><path d="M16 9.4v13.2M19 12.6c-.5-1.2-1.6-1.8-3.1-1.8-1.8 0-3 .9-3 2.2 0 3.3 6.4 1.6 6.4 5 0 1.4-1.3 2.4-3.3 2.4-1.6 0-2.9-.7-3.4-2" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-function _modalDeposit(){
-  var addr=_walletAddr
+// Two networks, one sheet. The Solana trading wallet and the one shared EVM
+// wallet are separate addresses; the EVM one used to be on the old deposit
+// card only, which the portfolio redesign hides -- so nobody could find where
+// to send USDC on an EVM chain. Users deposit USDC only (see
+// test_one_currency.py): Robinhood Chain has no USDC, so it is not a deposit
+// chain -- the app bridges USDC there itself when a trade needs it.
+var _RX_EVM_CHAINS=['Base','BSC','Arbitrum']
+var _rxNet='sol'
+function _rxAddr(){ return _rxNet==='evm'?_bscAddr:_walletAddr }
+function _modalDeposit(net){
+  _rxNet=(net==='evm'&&_bscAddr)?'evm':'sol'
+  var evm=_rxNet==='evm'
+  var addr=_rxAddr()
   if(!addr){
     _showModal(
       '<div class="w-modal-title">Receive SOL / Tokens</div>'
@@ -1276,28 +1295,49 @@ function _modalDeposit(){
     return
   }
   // Groups of 4 are easy to compare by eye; first and last group in gold.
-  var groups=addr.match(/.{1,4}/g)||[addr]
+  // An 0x address groups its hex, with the 0x kept on the first group.
+  var groups=evm?(addr.slice(2).match(/.{1,4}/g)||[addr.slice(2)]):(addr.match(/.{1,4}/g)||[addr])
+  if(evm) groups[0]='0x'+groups[0]
   var pretty=groups.map(function(g,i){return '<span'+(i===0||i===groups.length-1?' class="hl"':'')+'>'+esc(g)+'</span>'}).join('')
   var canShare=typeof navigator.share==='function'
+  var scanUrl=evm?'https://blockscan.com/address/'+encodeURIComponent(addr):'https://solscan.io/account/'+encodeURIComponent(addr)
+  var scanName=evm?'Blockscan':'Solscan'
+  var tabs=_bscAddr
+    ?'<div class="rx-nets" role="tablist" aria-label="Network">'
+      +'<button type="button" role="tab" class="rx-net'+(evm?'':' on')+'" aria-selected="'+(!evm)+'" onclick="_modalDeposit(\'sol\')">Solana</button>'
+      +'<button type="button" role="tab" class="rx-net'+(evm?' on':'')+'" aria-selected="'+evm+'" onclick="_modalDeposit(\'evm\')">EVM chains</button>'
+    +'</div>'
+    :''
+  var chains=evm
+    ?'<div class="rx-chains">'+_RX_EVM_CHAINS.map(function(c){
+        return '<div class="rx-chain">'+esc(c)+'</div>'
+      }).join('')+'</div>'
+    :''
+  var warn=evm
+    ?'Send <b>USDC</b> on Base, BSC or Arbitrum only — the same address on all three. Never send from Solana or Ethereum to this address.'
+    :'Send USDC (or SOL) on the <b>Solana</b> network only. USDC sent from another network (Ethereum, Base, BSC…) can be lost.'
   _showModal(
-    '<div class="sx-hd"><div class="sx-title">Receive USDC</div><span class="sx-net"><i></i>Solana</span></div>'
+    '<div class="sx-hd"><div class="sx-title">Receive USDC</div><span class="sx-net"><i></i>'+(evm?'EVM':'Solana')+'</span></div>'
+    +tabs
     +'<div class="rx-qr" id="rx-qr"></div>'
-    +'<div class="rx-hint">Scan to send USDC on the Solana network</div>'
+    +'<div class="rx-hint">'+(evm?'Scan to send USDC on one of these chains':'Scan to send USDC on the Solana network')+'</div>'
+    +chains
     +'<button type="button" class="rx-addr" onclick="_rxCopy()" aria-label="Copy address">'+pretty+'</button>'
     +'<div class="rx-btns">'
       +'<button type="button" class="rx-btn rx-copy" id="rx-copy" onclick="_rxCopy()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2.5"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy address</span></button>'
       +(canShare
         ?'<button type="button" class="rx-btn rx-sec" onclick="_rxShare()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v13M7 8l5-5 5 5M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>Share</button>'
-        :'<a class="rx-btn rx-sec" href="https://solscan.io/account/'+encodeURIComponent(addr)+'" target="_blank" rel="noopener">Solscan ↗</a>')
+        :'<a class="rx-btn rx-sec" href="'+scanUrl+'" target="_blank" rel="noopener">'+scanName+' ↗</a>')
     +'</div>'
     +'<div class="rx-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>'
-      +'<span>Send USDC (or SOL) on the <b>Solana</b> network only. USDC sent from another network (Ethereum, Base, BSC…) can be lost.</span></div>'
-    +(canShare?'<a class="rx-scan" href="https://solscan.io/account/'+encodeURIComponent(addr)+'" target="_blank" rel="noopener">View on Solscan ↗</a>':'')
+      +'<span>'+warn+'</span></div>'
+    +(evm?'<div class="rx-note">No gas needed. Trading on Robinhood Chain? OrcAgent moves your USDC there automatically.</div>':'')
+    +(canShare?'<a class="rx-scan" href="'+scanUrl+'" target="_blank" rel="noopener">View on '+scanName+' ↗</a>':'')
   )
   var box=document.querySelector('#w-modal .w-modal-box'); if(box) box.classList.add('sx-box')
   ;(function paint(tries){
-    var el=document.getElementById('rx-qr'); if(!el) return
-    // Error correction H: the Solana mark covers the middle without
+    var el=document.getElementById('rx-qr'); if(!el||_rxAddr()!==addr) return
+    // Error correction H: the USDC mark covers the middle without
     // making the code unreadable.
     var svg=_qrSvg(addr,'H')
     if(!svg){
@@ -1308,7 +1348,7 @@ function _modalDeposit(){
   })(0)
 }
 function _rxCopy(){
-  _copyAddr()
+  if(_rxNet==='evm') _copyAddrBsc(); else _copyAddr()
   var b=document.getElementById('rx-copy'); if(!b) return
   var label=b.querySelector('span')
   b.classList.add('done'); if(label) label.textContent='Copied'
@@ -1317,8 +1357,9 @@ function _rxCopy(){
   b._t=setTimeout(function(){ b.classList.remove('done'); if(label) label.textContent='Copy address' },1600)
 }
 function _rxShare(){
-  if(!_walletAddr||typeof navigator.share!=='function') return
-  navigator.share({title:'My USDC address (Solana)',text:_walletAddr}).catch(function(){})
+  var addr=_rxAddr()
+  if(!addr||typeof navigator.share!=='function') return
+  navigator.share({title:_rxNet==='evm'?'My USDC address (Base, BSC, Arbitrum)':'My USDC address (Solana)',text:addr}).catch(function(){})
 }
 
 
