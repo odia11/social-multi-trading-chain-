@@ -52,7 +52,7 @@ def run_once(state):
                 _BRIDGE_TERMINAL_STATUSES=frozenset({'bridge_filled','bridge_failed','origin_tx_reverted','timed_out'}),
                 _BRIDGE_STATUS_NOTIFICATIONS={'bridge_filled':'Funding arrived'},
                 _get_0x_bridge_status=status,_execute_auto_buy_after_bridge=execute,
-                _send_push_notification=lambda *args:None)
+                _send_push_notification=lambda *args, **kw:None)
         try:extract('_bridge_status_loop',ns)()
         except StopIteration:pass
         with sqlite3.connect(db) as c:
@@ -106,7 +106,7 @@ def test_overdue_bridge_reconciles_without_stale_buy():
                     'bridge_failed':'Funding failed'},
                 _get_0x_bridge_status=provider,
                 _execute_auto_buy_after_bridge=lambda *args:fired.append(args),
-                _send_push_notification=lambda *args:None)
+                _send_push_notification=lambda *args, **kw:None)
         loop=extract('_bridge_status_loop',ns)
         def tick():
             try:loop()
