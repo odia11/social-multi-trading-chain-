@@ -106,9 +106,6 @@ _BASE_USDC = _evm('base', '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', 'USDC', 
 _ARB_ETH = _evm('arbitrum', '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', 'ETH', 18, 'native')
 _ARB_USDC = _evm('arbitrum', '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 'USDC', 6, 'stable')
 
-_POLY_POL = _evm('polygon', '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', 'POL', 18, 'native')
-_POLY_USDC = _evm('polygon', '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359', 'USDC', 6, 'stable')
-
 _HOOD_ETH = _evm('robinhood', '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', 'ETH', 18, 'native')
 # USDG, not USDC, and its decimals have not been verified against the
 # deployed contract from here. Left as None on purpose: an unverified 6 that
@@ -124,7 +121,6 @@ CHAINS: dict = {
     'bsc': Chain('bsc', 'evm', 56, _BSC_BNB, _BSC_USDC, '0x', 'BNB Chain'),
     'base': Chain('base', 'evm', 8453, _BASE_ETH, _BASE_USDC, '0x', 'Base'),
     'arbitrum': Chain('arbitrum', 'evm', 42161, _ARB_ETH, _ARB_USDC, '0x', 'Arbitrum'),
-    'polygon': Chain('polygon', 'evm', 137, _POLY_POL, _POLY_USDC, '0x', 'Polygon'),
     'robinhood': Chain('robinhood', 'evm', 4663, _HOOD_ETH, _HOOD_USDG, '0x', 'Robinhood Chain'),
 }
 

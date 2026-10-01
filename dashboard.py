@@ -1069,7 +1069,8 @@ FEE_WALLET       = 'HC5ahspSox3XRmDbzXjXVoAASuY89RCmGUKwp87FRJS5'  # fixed fee r
 # the wrong address.
 BSC_FEE_WALLET   = '0x4f187411023338E717D68c089855372997ef4640'  # fixed BSC fee recipient -- public address only, no key held anywhere
 
-# ── Other EVM chains (Base, Arbitrum, Polygon, Robinhood Chain) ─────────────
+# ── Other EVM chains (Base, Arbitrum, Robinhood Chain) ──────────────────────
+# Polygon was removed at the owner's request: no OrcAgent user trades there.
 # A secp256k1 (EVM) keypair is chain-agnostic -- the SAME address/private key
 # already generated for BSC (ensure_bsc_wallet, encrypted_private_key_bsc) is
 # valid on every chain below too, exactly like one MetaMask account works on
@@ -1113,15 +1114,6 @@ EVM_CHAINS = {
         'rpc_url': os.environ.get('ARBITRUM_RPC_URL', '') or 'https://arb1.arbitrum.io/rpc',
         'usdc': '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
         'explorer': 'https://arbiscan.io', 'dex_chain': 'arbitrum', 'zerox_chain_id': 42161,
-    },
-    'polygon': {
-        'chain_id': 137, 'native_symbol': 'POL', 'usdc_symbol': 'USDC',
-        # polygon-rpc.com started answering 401 without an API key in production.
-        # PublicNode is currently keyless and is used only when POLYGON_RPC_URL
-        # is not explicitly configured.
-        'rpc_url': os.environ.get('POLYGON_RPC_URL', '') or 'https://polygon-bor-rpc.publicnode.com',
-        'usdc': '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359',
-        'explorer': 'https://polygonscan.com', 'dex_chain': 'polygon', 'zerox_chain_id': 137,
     },
     'robinhood': {
         'chain_id': 4663, 'native_symbol': 'ETH', 'usdc_symbol': 'USDG',
@@ -1357,6 +1349,15 @@ _EVM_BALANCE_CACHE_TTL = 3.0
 _EVM_RPC_COOLDOWN_SECONDS = 12.0
 
 
+def _chain_tradeable(chain) -> bool:
+    """Whether OrcAgent can still trade on `chain`. A position or request on a
+    chain removed from EVM_CHAINS (Polygon) is left alone rather than retried
+    forever: its tokens stay in the user's own wallet, reachable with the
+    revealed key in any wallet app."""
+    chain = chain or 'solana'
+    return chain == 'solana' or chain in EVM_CHAINS
+
+
 def _rpc_candidates(chain: str) -> list:
     """Ordered read endpoints. Transaction code keeps using the configured
     primary via _get_web3(); only idempotent balance reads may fail over."""
@@ -1381,10 +1382,6 @@ def _rpc_candidates(chain: str) -> list:
         urls.append('https://bsc-rpc.publicnode.com')
     elif chain == 'arbitrum':
         urls.append('https://arbitrum-one-rpc.publicnode.com')
-    elif chain == 'polygon':
-        # The primary PublicNode endpoint has intermittently returned 529 from
-        # this production host. dRPC is an independent read fallback.
-        urls.append('https://polygon.drpc.org')
     out=[]; seen=set()
     for u in urls:
         if u and u not in seen:
@@ -5437,7 +5434,7 @@ def _discover_x_buzz() -> list[str]:
             prompt = (
                 'Find memecoins being talked about unusually heavily right now on '
                 'X/Twitter, including ones still small by volume. Look at Solana, BNB Chain '
-                '(BSC), Base, Arbitrum, Polygon and Robinhood Chain. Return ONLY a JSON array '
+                '(BSC), Base, Arbitrum and Robinhood Chain. Return ONLY a JSON array '
                 'of cashtags, max 10, e.g. ["$FOO", "$BAR"].'
             )
             resp = requests.post(
@@ -7028,6 +7025,9 @@ def _bot_execute_exit(user_id: int, us: dict, wallet: str, mint: str, pos: dict,
     trim update the position differently, so that stays the caller's job,
     same as before this helper existed."""
     chain = pos.get('chain', 'solana')
+    if not _chain_tradeable(chain):
+        add_user_log(wallet, f'[bot] {chain} is no longer supported -- {mint[:8]}… stays in your wallet; it was not sold')
+        return False, 0.0, 0.0
     enc_blob = enc_blob_solana if chain == 'solana' else enc_blob_evm
     if not enc_blob:
         add_user_log(wallet, f'[bot] Cannot close {chain} position {mint[:8]}… — no {chain} trading key configured')
@@ -10700,7 +10700,7 @@ def _check_honeypot_is(token_address: str, chain: str) -> dict:
 # NOT the same numeric ID as EVM_CHAINS[chain]['chain_id'] in every case
 # (it happens to match here, but GoPlus uses its own registry), so kept
 # separate rather than reusing that field.
-_GOPLUS_CHAIN_IDS = {'arbitrum': '42161', 'polygon': '137'}
+_GOPLUS_CHAIN_IDS = {'arbitrum': '42161'}
 
 def _check_goplus_security(token_address: str, chain: str) -> dict:
     """GoPlus Security's token_security API, used as the rug-check provider
@@ -11065,6 +11065,8 @@ def user_trader_loop(stop_event, config, wallet: str):
         _chain = _pos.get('chain', 'solana')
         if _chain != 'solana' and not _enc_blob_evm:
             continue  # no EVM trading key configured -- can't touch this position at all
+        if not _chain_tradeable(_chain):
+            continue  # chain removed from OrcAgent (Polygon) -- nothing to sell it through
         _td = get_token_data(_mint)
         _price = float(_td['price']) if _td else 0.0
         if _price <= 0:
@@ -11122,7 +11124,8 @@ def user_trader_loop(stop_event, config, wallet: str):
     # change in Settings reaches it on the loop's next refresh.
     def _exit_pass():
         _held = {m: p.get('chain', 'solana') for m, p in list(positions.items())
-                 if p.get('amount', 0) > 0 and p.get('buy_price', 0) > 0}
+                 if p.get('amount', 0) > 0 and p.get('buy_price', 0) > 0
+                 and _chain_tradeable(p.get('chain', 'solana'))}
         if not _held:
             return
         _fresh = _exit_fresh_prices(_held)
@@ -11135,6 +11138,8 @@ def user_trader_loop(stop_event, config, wallet: str):
                 continue
             if pos.get('chain', 'solana') != 'solana' and not _enc_blob_evm:
                 continue  # no EVM trading key configured -- can't touch this position at all
+            if not _chain_tradeable(pos.get('chain', 'solana')):
+                continue  # chain removed from OrcAgent (Polygon) -- nothing to sell it through
             # Every open position stays fast-polled for as long as it's held, not
             # just once it's already close to a trigger -- a real rugpull can crash
             # a token from healthy to way past stop-loss within a single normal
@@ -17523,7 +17528,7 @@ def _surge_alert_allowed(surge: dict):
 
 SURGE_ALERT_CHAIN_NAMES = {
     'solana': 'Solana', 'bsc': 'BNB Chain', 'base': 'Base',
-    'arbitrum': 'Arbitrum', 'polygon': 'Polygon', 'robinhood': 'Robinhood Chain',
+    'arbitrum': 'Arbitrum', 'robinhood': 'Robinhood Chain',
 }
 
 def _surge_fmt_usd(v: float) -> str:
@@ -19879,7 +19884,7 @@ CALL_NOTE_MAX = 280
 FEED_CALL_MARKER = '__CALL__'
 _FEED_EMBED_MARKERS = ('__CHART__', '__TRADE__', FEED_CALL_MARKER)
 
-_CALL_LOOKUP_EVM_CHAINS = ('base', 'bsc', 'arbitrum', 'polygon', 'robinhood')
+_CALL_LOOKUP_EVM_CHAINS = ('base', 'bsc', 'arbitrum', 'robinhood')
 
 
 def _call_token_row(mint, symbol, name, chain, price, mcap=0.0, image_url='', change_24h=None):
@@ -29269,7 +29274,7 @@ _market_live_cache: dict = {'ts': 0.0, 'data': []}
 # bot's scanning -- so widening this to include BSC only affects what's
 # *displayed*, and can never cause the bot to start scanning/trading BSC on
 # its own. Bot-side BSC scanning is a distinct, not-yet-built feature.
-_MARKET_LIVE_CHAINS = {'solana', 'bsc', 'base', 'arbitrum', 'polygon', 'robinhood'}
+_MARKET_LIVE_CHAINS = {'solana', 'bsc', 'base', 'arbitrum', 'robinhood'}
 _market_live_lock         = threading.Lock()
 
 # Both discovery pipelines below fall back to DexScreener's pair SEARCH
@@ -29659,7 +29664,7 @@ def _get_scanner_candidates() -> list:
     # solana/bsc ones above, just keyed by each chain's own search hint term
     # (DexScreener's search is a plain keyword match, not a chain filter, so
     # this needs one query per chain rather than a single combined one).
-    _EXTRA_CHAIN_SEARCH_TERMS = {'bsc': 'bnb', 'base': 'base', 'arbitrum': 'arbitrum', 'polygon': 'polygon',
+    _EXTRA_CHAIN_SEARCH_TERMS = {'bsc': 'bnb', 'base': 'base', 'arbitrum': 'arbitrum',
                                   'robinhood': 'robinhood'}
     for _chain, _term in _EXTRA_CHAIN_SEARCH_TERMS.items():
         time.sleep(0.3)  # stagger -- same pattern _get_narrative_candidates()/discover_tokens() use
@@ -30072,7 +30077,7 @@ def api_carousel():
 # 'robinhood' slug (the same slug visible in GeckoTerminal pool URLs).
 _GECKOTERMINAL_NETWORK = {
     'solana': 'solana', 'bsc': 'bsc', 'base': 'base', 'arbitrum': 'arbitrum',
-    'polygon': 'polygon_pos', 'robinhood': 'robinhood',
+    'robinhood': 'robinhood',
 }
 
 # How long a live price may be reused. Short, because this is the number that

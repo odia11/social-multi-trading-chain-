@@ -36,7 +36,7 @@ check('a requested amount above the maximum is capped safely',
 check('the shared Solana swap explicitly uses the configured USDC base',
       'base=SOLANA_BASE_CURRENCY' in flow)
 check('Robinhood is an EVM chain on Live Market',
-      "var EVM_TRADE_CHAINS = {bsc:1, base:1, arbitrum:1, polygon:1, robinhood:1};" in LM)
+      "var EVM_TRADE_CHAINS = {bsc:1, base:1, arbitrum:1, robinhood:1};" in LM)
 check('Live Market routes every EVM buy to the EVM endpoint',
       "(isEvm ? '/api/evm/trade/buy' : '/api/instant-trade')" in LM)
 check('Live Market labels a Solana buy in USDC',

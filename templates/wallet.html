@@ -792,7 +792,6 @@ html,body{background:#080e11}
             <option value="base">Base</option>
             <option value="bsc">BNB Chain</option>
             <option value="arbitrum">Arbitrum</option>
-            <option value="polygon">Polygon</option>
             <option value="robinhood">Robinhood</option>
           </select>
           <span class="oa-h-select-chevron" aria-hidden="true">⌄</span>
@@ -828,7 +827,7 @@ html,body{background:#080e11}
       <div class="sol-usdc-head">
         <div>
           <div class="sol-usdc-title">Convert assets</div>
-          <div class="sol-usdc-copy">Swap between the native gas token and the trading stablecoin on Solana, BSC, Base, Arbitrum, Polygon or Robinhood Chain.</div>
+          <div class="sol-usdc-copy">Swap between the native gas token and the trading stablecoin on Solana, BSC, Base, Arbitrum or Robinhood Chain.</div>
         </div>
       </div>
       <div class="sol-usdc-balances">
@@ -912,7 +911,7 @@ html,body{background:#080e11}
               <a class="dep-btn dep-scan" href="https://bscscan.com/address/{{ bsc_deposit_address }}" target="_blank" rel="noopener">View on BscScan ↗</a>
             </div>
             <div style="font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5">
-              This is one shared EVM wallet — the same address also receives deposits on Base, Arbitrum, Polygon and Robinhood Chain. You only need USDC here: OrcAgent puts up the network fee for your first trade on a new chain, charges it to that trade, and after that the wallet tops up its own gas from your USDC. If it ever tells you it can't, sending a few cents of that chain's own gas token here (ETH for Base/Arbitrum/Robinhood, POL for Polygon, BNB for BSC) unblocks it immediately.
+              This is one shared EVM wallet — the same address also receives deposits on Base, Arbitrum and Robinhood Chain. You only need USDC here: OrcAgent puts up the network fee for your first trade on a new chain, charges it to that trade, and after that the wallet tops up its own gas from your USDC. If it ever tells you it can't, sending a few cents of that chain's own gas token here (ETH for Base/Arbitrum/Robinhood, POL for Polygon, BNB for BSC) unblocks it immediately.
             </div>
           </div>
         </div>
@@ -1333,7 +1332,6 @@ var _SEND_CHAINS=[
   {v:'bsc',      label:'BSC (USDC)',            sym:'USDC', evm:true},
   {v:'base',     label:'Base (USDC)',           sym:'USDC', evm:true},
   {v:'arbitrum', label:'Arbitrum (USDC)',       sym:'USDC', evm:true},
-  {v:'polygon',  label:'Polygon (USDC)',        sym:'USDC', evm:true},
   {v:'robinhood',label:'Robinhood Chain (USDC)',sym:'USDC', evm:true},
 ]
 function _sendChain(){
@@ -1492,7 +1490,6 @@ var _CONVERT_CHAINS=[
   {v:'bsc',label:'BSC',native:'BNB',stable:'USDC'},
   {v:'base',label:'Base',native:'ETH',stable:'USDC'},
   {v:'arbitrum',label:'Arbitrum',native:'ETH',stable:'USDC'},
-  {v:'polygon',label:'Polygon',native:'POL',stable:'USDC'},
   {v:'robinhood',label:'Robinhood Chain',native:'ETH',stable:'USDC'}
 ]
 var _convertQuote=null
@@ -1909,7 +1906,6 @@ var _BRIDGE_CHAINS=[
   {v:'bsc',      label:'BSC'},
   {v:'base',     label:'Base'},
   {v:'arbitrum', label:'Arbitrum'},
-  {v:'polygon',  label:'Polygon'},
   {v:'robinhood',label:'Robinhood Chain'},
 ]
 var _bridgeQuote=null   // the last quote fetched, kept so Confirm doesn't need to re-derive anything
