@@ -3871,6 +3871,25 @@ BOT_MIN_24H_TXNS = 100
 BOT_MIN_24H_SELLS = 10
 
 
+# A token on DexScreener's trending list that trades heavily may be bought
+# after a big hour too: the "+50% in 1h = momentum exhausted" rule kept the
+# bot out of exactly the trending runners people expect it to catch. Every
+# other entry rule (the user's own breakout trigger, rising volume, not
+# reversing, score) and every safety check still apply.
+TRENDING_MIN_VOLUME_1H = 250_000
+TRENDING_MIN_VOLUME_24H = 2_000_000
+
+
+def _trending_high_volume(token) -> bool:
+    if not isinstance(token, dict) or not token.get('trending'):
+        return False
+    try:
+        return (float(token.get('volume1h') or 0) >= TRENDING_MIN_VOLUME_1H
+                or float(token.get('volume24h') or 0) >= TRENDING_MIN_VOLUME_24H)
+    except (TypeError, ValueError):
+        return False
+
+
 def _bot_gainers_eligible(token):
     if not isinstance(token, dict):
         return False
@@ -4676,6 +4695,9 @@ def _autostart_if_ready(wallet: str):
 # ── TOKEN DISCOVERY ──
 TOTD_INTERVAL = 900  # 15 minutes
 
+_trending_mints: set = set()   # Solana mints on DexScreener's trending list, last discovery round
+
+
 def discover_tokens():
     seen  = {USDC_MINT, SOL_MINT}
     mints = []
@@ -4698,11 +4720,15 @@ def discover_tokens():
         try:
             data  = r.json()
             pairs = data.get('pairs', []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            _trend = set()
             for p in pairs:
                 if p.get('chainId') == 'solana':
                     m = (p.get('baseToken') or {}).get('address', '')
+                    if m:
+                        _trend.add(m)
                     if m and m not in seen:
                         seen.add(m); mints.append(m)
+            _trending_mints.clear(); _trending_mints.update(_trend)
         except Exception: pass
     time.sleep(0.5)  # stagger
 
@@ -4859,7 +4885,14 @@ def get_token_data(mint, fast: bool = False, chain: str = None):
         r = _dex_get('https://api.dexscreener.com/latest/dex/tokens/' + mint, timeout=8, ttl_override=_ttl)
         if not r:
             return None
-        pairs = r.json().get('pairs', [])
+        return _token_data_from_pairs(r.json().get('pairs', []), chain)
+    except: return None
+
+
+def _token_data_from_pairs(pairs, chain: str = None):
+    """One token's data from DexScreener pairs (see get_token_data); shared
+    with the batched discovery read, so both describe the same pool."""
+    try:
         if not pairs: return None
         # DexScreener's pair order is NOT liquidity-sorted, so pairs[0] is
         # frequently a small or dead pool while the token's real market sits
@@ -4914,6 +4947,49 @@ def get_token_data(mint, fast: bool = False, chain: str = None):
             'image_url':     (p.get('info') or {}).get('imageUrl', '') or '',
         }
     except: return None
+
+DISCOVERY_INTERVAL = 10   # seconds between shared candidate refreshes (batched reads make this cheap)
+DEX_BATCH = 30   # tokens per DexScreener /latest/dex/tokens request (its maximum)
+
+
+def _token_data_batch(mints, chain: str = 'solana') -> dict:
+    """{mint: data} for many tokens in a few requests -- DEX_BATCH per call
+    instead of one call per token. Discovery used to read up to 100 tokens one
+    by one with a 0.3 s pause each, so one round took over half a minute before
+    the bot even saw a new candidate. A batch that fails falls back to the
+    per-token read for its tokens, so nothing is silently skipped."""
+    out = {}
+    for i in range(0, len(mints), DEX_BATCH):
+        chunk = [m for m in mints[i:i + DEX_BATCH] if m]
+        if not chunk:
+            continue
+        r = None
+        try:
+            # Fresh every discovery round (the default 30 s cache would undo it).
+            r = _dex_get('https://api.dexscreener.com/latest/dex/tokens/' + ','.join(chunk), timeout=10,
+                         ttl_override=max(1, DISCOVERY_INTERVAL - 1))
+        except Exception:
+            r = None
+        if r is not None and getattr(r, 'status_code', 200) == 200:
+            try:
+                by_mint = {}
+                for p in r.json().get('pairs', []) or []:
+                    a = (p.get('baseToken') or {}).get('address', '')
+                    if a:
+                        by_mint.setdefault(a, []).append(p)
+                for m in chunk:
+                    d = _token_data_from_pairs(by_mint.get(m) or [], chain)
+                    if d:
+                        out[m] = d
+                continue
+            except Exception:
+                pass
+        for m in chunk:
+            d = get_token_data(m, chain=chain)
+            if d:
+                out[m] = d
+            time.sleep(0.3)
+    return out
 
 _ai_cache: dict = {}
 _AI_CACHE_TTL      = 300   # seconds — cache per-token AI signal for 5 min
@@ -5869,10 +5945,9 @@ def token_loop():
             for _old_t in state.get('tokens', []):
                 _price_snapshots[_old_t['mint']] = {'price': _old_t['price'], 'ts': _snap_ts}
             all_tokens = []
-            for i, mint in enumerate(mints):
-                if i > 0:
-                    time.sleep(0.3)  # stagger per-token calls
-                data = get_token_data(mint, chain='solana')
+            _batch = _token_data_batch(mints, chain='solana')
+            for mint in mints:
+                data = _batch.get(mint)
                 if not data or data['price'] <= 0:
                     continue
                 # Minimum quality filters — score handles the rest
@@ -5907,6 +5982,7 @@ def token_loop():
                     'makers24h':     data['makers24h'],
                     'pairAddress':   data.get('pairAddress', '') or '',
                     'dexId':         data.get('dexId', '') or '',
+                    'trending':      mint in _trending_mints,
                 }
                 all_tokens.append(entry)
             # Sort by score descending — best opportunity first
@@ -5951,7 +6027,7 @@ def token_loop():
             except Exception:
                 pass
         except: pass
-        time.sleep(30)  # shared candidate refresh; never per-user 2s discovery
+        time.sleep(DISCOVERY_INTERVAL)  # shared candidate refresh; never per-user 2s discovery
 
 # ── TRADE RECORDING ──
 def check_daily_reset():
@@ -11983,7 +12059,7 @@ def user_trader_loop(stop_event, config, wallet: str):
                         if not _vol_rising:
                             _skip_log.append(f'[skip] {_tsym}: vol not rising (v5m={int(_v5m)} v1h={int(_v1h)})')
                             continue
-                        if _t.get('change1h', 0) >= 50:
+                        if _t.get('change1h', 0) >= 50 and not _trending_high_volume(_t):
                             _skip_log.append(f'[skip] {_tsym}: 1h already +{round(_t.get("change1h",0),1)}% (momentum exhausted)')
                             continue
                         if _reversing:
