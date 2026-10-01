@@ -67,3 +67,17 @@ body.oa-portfolio .pf-search-link{margin-left:auto;width:37px;height:37px;displa
 body.oa-portfolio .wlt-usdc-guide{display:none!important}
 body.oa-portfolio.pf-view-assets .holdings-hdr{display:none!important}
 body.oa-portfolio #pf-spark-line,body.oa-portfolio #pf-spark-fill{transition:d .28s ease,opacity .2s ease}
+
+/* Assets list: one layout for every row. USDC and SOL had no swap button and
+   a slightly bigger coin and padding, so their figures ended 38px further
+   right than every token's and the icons and names stepped sideways from
+   row to row. Same padding, same 42px icon, a value column of one width,
+   and an empty slot the width of the swap button on the two fixed rows. */
+body.oa-portfolio{--pf-act:32px}
+body.oa-portfolio .pf-asset-static,body.oa-portfolio .tok-row{display:flex;align-items:center;gap:12px;min-height:70px;padding:13px 4px;box-sizing:border-box}
+body.oa-portfolio .pf-asset-coin,body.oa-portfolio .tok-logo,body.oa-portfolio .tok-init{width:42px;height:42px;flex:0 0 42px;box-sizing:border-box}
+body.oa-portfolio .pf-asset-amount,body.oa-portfolio .tok-val{flex:0 0 auto;min-width:84px;text-align:right;align-items:flex-end}
+body.oa-portfolio .pf-asset-amount b,body.oa-portfolio .tok-usd{font:700 14px var(--mono)}
+body.oa-portfolio .pf-asset-amount small,body.oa-portfolio .tok-pct{font:600 11px var(--ui);margin-top:4px}
+body.oa-portfolio .pf-asset-static::after{content:'';flex:0 0 var(--pf-act)}
+body.oa-portfolio .tok-trade-btn{width:var(--pf-act);height:var(--pf-act);flex:0 0 var(--pf-act);border-radius:10px}
