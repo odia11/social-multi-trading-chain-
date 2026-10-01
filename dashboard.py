@@ -55,6 +55,7 @@ from werkzeug.exceptions import HTTPException
 # start with the spend ceiling missing, which is the one failure this
 # module exists to prevent. tests/test_module_imports.py catches breakage.
 from trade_engine import registry as te_registry
+import bot_learning  # self-learning: replays closed bot trades, tunes exits/entries
 from trade_engine import ledger as te_ledger
 from trade_engine import subsidy as te_subsidy
 from trade_engine import execute as te_execute
@@ -6001,7 +6002,8 @@ def _compute_entry_risk_score(lp_locked_pct=None, holder_concentration_risk=Fals
     return round(max(0.0, min(100.0, score)), 1)
 
 def _snapshot_entry_risk(wallet: str, entry_price: float, entry_score: float = None,
-                         token_candidate: dict = None, risk_score: float = None) -> dict:
+                         token_candidate: dict = None, risk_score: float = None,
+                         tuning: dict = None) -> dict:
     """Reads this user's CURRENT stop_loss/take_profit/tiered_tp_enabled
     settings and freezes them into a per-position snapshot at the moment a
     position is opened -- see the ALTER TABLE comment on open_positions.sl_pct
@@ -6041,6 +6043,18 @@ def _snapshot_entry_risk(wallet: str, entry_price: float, entry_score: float = N
         # to the global defaults rather than snapshotting a nonsensical target
         # (e.g. TP <= SL) onto a live position.
         sl_pct, tp_pct = STOP_LOSS * 100, TAKE_PROFIT * 100
+    # Self-learning (bot buys only -- see bot_learning): exits the user's own
+    # recent bot trades show would have done better. Only ever tighter than
+    # the user's settings; a learned take profit only for a flat exit (the
+    # staged/trailing exit was not what it was learned from).
+    if tuning:
+        _own_sl, _own_tp = sl_pct, tp_pct
+        if tuning.get('sl') and tuning['sl'] < sl_pct:
+            sl_pct = float(tuning['sl'])
+        if tuning.get('tp') and tuning['tp'] < tp_pct and not trailing_enabled:
+            tp_pct = float(tuning['tp'])
+        if not _validate_sl_tp(sl_pct, tp_pct)[0] or tp_pct <= sl_pct:
+            sl_pct, tp_pct = _own_sl, _own_tp
     result = {
         'sl_pct':           sl_pct,
         'tp_pct':           tp_pct,
@@ -6613,6 +6627,7 @@ def _record_user_trade(user_id: int, us: dict, symbol: str, entry: float, exit_p
         # instead of leaving the next scan to reuse a stale, pre-this-trade bias
         # for up to LEARNED_BIAS_TTL_SEC.
         _invalidate_learned_bias(user_id)
+        bot_learning.invalidate(user_id)
     except Exception as e:
         print(f'[trade_record] DB write failed: {e}', flush=True)
     if wallet:
@@ -11613,6 +11628,10 @@ def user_trader_loop(stop_event, config, wallet: str):
                     # there's enough closed-trade evidence to say anything.
                     _learned_bias    = _learned_liquidity_bias(user_id)
                     _learned_lp_bias_map = _learned_lp_bias(user_id)
+                    # Self-learning (bot_learning): a higher minimum score and
+                    # kinds of entries to avoid, learned from this user's own
+                    # replayed bot trades; also tighter exits for the buy.
+                    _tune = bot_learning.tuning_for(DB_FILE, user_id, take_profit * 100, stop_loss * 100)
                     not_held = [t for t in live if positions.get(t['mint'], {}).get('amount', 0) == 0]
                     qualifying = []
                     _skip_log  = []
@@ -11664,11 +11683,18 @@ def user_trader_loop(stop_event, config, wallet: str):
                         _bias        = _learned_bias.get(_liquidity_tier(_t.get('liquidity', 0) or 0), 0.0)
                         _sc_effective = _sc + _bias
                         _score_floor = 5.0 + (LOSS_STREAK_SCORE_BONUS if _streak_tighten else 0.0)
+                        if _tune.get('score_floor') and _tune['score_floor'] > _score_floor:
+                            _score_floor = _tune['score_floor']
                         if _sc_effective < _score_floor:
                             _skip_log.append(f'[skip] {_tsym}: score too low ({round(_sc,1)}'
                                               + (f'{_bias:+.1f} learned = {_sc_effective:.1f}' if _bias else '')
                                               + f' < {_score_floor:g}'
                                               + (' — loss-streak tightened' if _streak_tighten else '') + ')')
+                            continue
+                        _learned_avoid = bot_learning.avoid_reason(
+                            _tune, 'solana', **bot_learning.candidate_features(_t))
+                        if _learned_avoid:
+                            _skip_log.append(f'[skip] {_tsym}: learned from your trades — avoiding {_learned_avoid}')
                             continue
                         if not _m5_ok:
                             _skip_log.append(f'[skip] {_tsym}: trend too low (5m:{round(_m5,1)}% 1h:{round(_h1,1)}% — need {_m5_desc} on either)')
@@ -11880,7 +11906,8 @@ def user_trader_loop(stop_event, config, wallet: str):
                                     mint_authority_active=bool(_safety.get('mint_authority_active')),
                                     freeze_authority_active=bool(_safety.get('freeze_authority_active')))
                                 pos.update(_snapshot_entry_risk(wallet, _entry_price, entry_score=sc,
-                                                                 token_candidate=best, risk_score=_risk_score))
+                                                                 token_candidate=best, risk_score=_risk_score,
+                                                                 tuning=_tune))
                                 # Entry slippage (Trade Analytics V2): deviation between the
                                 # price used to size/score this candidate and the realized
                                 # fill above -- stored on the position so the eventual close's
@@ -11916,6 +11943,10 @@ def user_trader_loop(stop_event, config, wallet: str):
                             break
                         if open_pos_by_chain.get(_evm_chain, 0) >= max_positions:
                             continue
+                        if bot_learning.avoid_reason(
+                                bot_learning.tuning_for(DB_FILE, user_id, take_profit * 100, stop_loss * 100),
+                                _evm_chain):
+                            continue  # learned: this user's bot trades on this chain kept losing
                         try:
                             _bought = _bot_scan_evm_entry(
                                 user_id, wallet, positions, _evm_chain, _enc_blob_evm,

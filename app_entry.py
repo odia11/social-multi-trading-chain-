@@ -29,6 +29,7 @@ from share_card_concept_d import install as _install_share_card_concept_d
 from share_token_card import install as _install_share_token_card
 from messages_premium_ui import install as _install_messages_premium_ui
 from auto_trading_bot_route import install as _install_auto_trading_bot_route
+from bot_learning import install as _install_bot_learning
 from multichain_auto_bot import install as _install_multichain_auto_bot
 from live_market_pooled_buy_balance import install as _install_live_market_pooled_buy_balance
 from canonical_domain import install as _install_canonical_domain
@@ -83,6 +84,7 @@ _install_share_card_concept_d(_dashboard)
 _install_share_token_card(_dashboard)
 _install_messages_premium_ui(_dashboard)
 _install_auto_trading_bot_route(_dashboard)
+_install_bot_learning(_dashboard)
 
 # Reject untrusted Host headers before any security- or auth-sensitive route
 # can derive an absolute URL/origin from them. Loopback remains allowed for
