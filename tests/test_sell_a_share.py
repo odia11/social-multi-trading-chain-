@@ -381,7 +381,7 @@ check('a stale total is cleared when the amount changes, so the folded row '
 # A sell is not quoted -- what it returns is known when it settles.
 check('the sell box states the rates that apply rather than inventing a '
       'total for a swap that has not happened',
-      'what the sale returns' in JS and 'when the sale settles' in JS)
+      "'% of the sale</span></div>'" in JS and 'when the sale settles' in JS)
 check('...and the platform rate comes from the server, so the box cannot '
       'quote a rate the fee code does not charge',
       'PT_FEE_RATE_TXN' in JS and 'fee_rate_txn=FEE_RATE_TXN' in src
