@@ -53,6 +53,15 @@
     for(var i = 0; i < sym.length; i++) h = (h * 31 + sym.charCodeAt(i)) % 360;
     return 'hsl(' + h + ',32%,22%)';
   }
+  // What a token without a logo shows in its tile: up to three letters of a
+  // Latin symbol, or two characters of anything wider (Chinese, Japanese,
+  // Korean, emoji). Four Chinese characters wrapped onto two lines and ran
+  // out of the tile. Array.from keeps an emoji or a surrogate pair whole.
+  function tileInitials(sym){
+    var ch = Array.from(String(sym || '?').replace(/^\$+/, '').trim() || '?');
+    var wide = /[^\u0000-\u024f]/.test(ch[0]);
+    return {text: ch.slice(0, wide ? 2 : 3).join('').toUpperCase(), wide: wide};
+  }
   function parseTs(ts){
     // token_calls.timestamp is SQLite CURRENT_TIMESTAMP (UTC, no zone).
     var t = Date.parse(String(ts || '').replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(ts || '') ? '' : 'Z'));
@@ -62,9 +71,9 @@
   /* ── the card under a call post ── */
   function tileHtml(c, cls){
     var img = safeImg(c.image_url);
-    var ini = esc(String(c.symbol || '?').slice(0, 4).toUpperCase());
-    return '<span class="' + cls + '" style="background:' + tileColor(c.symbol) + '">'
-      + '<span aria-hidden="true">' + ini + '</span>'
+    var ini = tileInitials(c.symbol);
+    return '<span class="' + cls + (ini.wide ? ' wide' : '') + '" style="background:' + tileColor(c.symbol) + '">'
+      + '<span aria-hidden="true">' + esc(ini.text) + '</span>'
       + (img ? '<img src="' + esc(img) + '" alt="" loading="lazy" onerror="this.remove()">' : '')
       + '</span>';
   }
@@ -270,7 +279,9 @@
       b.setAttribute('role', 'option');
       var tile = el('span', 'fcall-tile');
       tile.style.background = tileColor(t.symbol);
-      tile.appendChild(el('span', null, String(t.symbol).slice(0, 4).toUpperCase()));
+      var ini = tileInitials(t.symbol);
+      if(ini.wide) tile.classList.add('wide');
+      tile.appendChild(el('span', null, ini.text));
       var img = safeImg(t.image);
       if(img){ var i = document.createElement('img'); i.src = img; i.alt = ''; i.onerror = function(){ i.remove(); }; tile.appendChild(i); }
       var mid = el('span', 'fcall-result-id');

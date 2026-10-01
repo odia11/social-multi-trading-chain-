@@ -20429,6 +20429,10 @@ def _call_token_row(mint, symbol, name, chain, price, mcap=0.0, image_url='', ch
     image_url = str(image_url or '')
     if not (image_url.startswith('https://') or re.fullmatch(r'/token-launch/icon/[A-Za-z0-9]{1,64}', image_url)):
         image_url = ''
+    # GeckoTerminal answers "no logo" with a generic missing.png -- that is
+    # not this token's picture, so it is treated as none.
+    if 'missing' in image_url.rsplit('/', 1)[-1].lower():
+        image_url = ''
     return {'mint': str(mint or ''), 'symbol': str(symbol or '')[:32], 'name': str(name or '')[:80],
             'chain': str(chain or '').lower(), 'price': price, 'market_cap': mcap,
             'image_url': image_url[:500], 'change_24h': change_24h}
@@ -20683,6 +20687,10 @@ def api_make_call():
                                    (wallet, content, now)).lastrowid
             conn.execute('UPDATE token_calls SET post_id=? WHERE id=?', (post_id, call_id))
         conn.commit()
+        if not image_url:
+            # Not on the card this second, but within a few -- not two minutes later.
+            threading.Thread(target=_call_fill_images, args=([mint], {mint: chain}),
+                             name='call-logo', daemon=True).start()
         if post_id:
             try:
                 link = '/#post-p' + str(post_id)
@@ -20848,6 +20856,53 @@ def api_calls_mine():
     finally:
         conn.close()
 
+_CALL_IMG_RETRY = 1800      # seconds before asking GeckoTerminal again for one token's logo
+_CALL_IMG_LOOKUPS = 4       # GeckoTerminal logo lookups per round, at most
+_call_img_tried = {}
+
+
+def _call_fill_images(mints, chain_of, known=None):
+    """Give calls without a logo one, once a source has it.
+
+    A call keeps the logo it was made with, and a token that had none at that
+    moment -- usually a brand-new meme DexScreener has no profile for yet --
+    showed its name in a coloured tile forever. `known` is what the caller
+    already holds (the peak loop's DexScreener pairs, at no extra request);
+    for the rest GeckoTerminal is asked, a few tokens per round, from the
+    shared budget, and each token at most every _CALL_IMG_RETRY seconds.
+    Only calls still without a logo are written."""
+    known = known or {}
+    found, lookups, now = {}, 0, time.time()
+    for m in mints:
+        url = _call_token_row(m, '', '', '', 0, 0, known.get(m))['image_url']
+        if not url and lookups < _CALL_IMG_LOOKUPS and now - _call_img_tried.get(m, 0) >= _CALL_IMG_RETRY:
+            network = _GECKOTERMINAL_NETWORK.get(chain_of.get(m) or '')
+            if network and _gt_try_take(reserve=_GT_WARM_RESERVE):
+                _call_img_tried[m] = now
+                lookups += 1
+                try:
+                    r = requests.get('https://api.geckoterminal.com/api/v2/networks/' + network + '/tokens/'
+                                     + requests.utils.quote(m, safe=''),
+                                     headers={'Accept': 'application/json;version=20230302'}, timeout=8)
+                    if r.status_code == 200:
+                        a = (r.json().get('data') or {}).get('attributes') or {}
+                        url = _call_token_row(m, '', '', '', 0, 0, a.get('image_url'))['image_url']
+                except (requests.RequestException, ValueError, AttributeError):
+                    pass
+        if url:
+            found[m] = url
+    if found:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            for m, url in found.items():
+                conn.execute("UPDATE token_calls SET image_url=? WHERE mint=? AND COALESCE(image_url,'')=''",
+                             (url[:500], m))
+            conn.commit()
+        finally:
+            conn.close()
+    return found
+
+
 def _calls_peak_loop():
     """Global background loop: refreshes peak_price for every token_call made
     in the last 30 days, batched via the same DexScreener multi-token endpoint
@@ -20866,11 +20921,15 @@ def _calls_peak_loop():
                     "SELECT mint, MAX(COALESCE(chain,'')) FROM token_calls "
                     "WHERE timestamp >= datetime('now','-30 days') GROUP BY mint"
                 ).fetchall()
+                # Calls still without a logo (filled at the end of the round).
+                no_logo = [r[0] for r in conn.execute(
+                    "SELECT DISTINCT mint FROM token_calls WHERE COALESCE(image_url,'')='' "
+                    "AND timestamp >= datetime('now','-30 days')").fetchall()]
             finally:
                 conn.close()
             mints = [r[0] for r in rows]
             chain_of = {r[0]: (r[1] or ('solana' if is_valid_solana_address(r[0]) else '')) for r in rows}
-            price_by_mint = {}
+            price_by_mint, image_by_mint = {}, {}
             for i in range(0, len(mints), 30):
                 chunk = mints[i:i+30]
                 try:
@@ -20884,6 +20943,8 @@ def _calls_peak_loop():
                         price = float(p.get('priceUsd', 0) or 0)
                         if m and price > 0 and m not in price_by_mint:
                             price_by_mint[m] = price
+                        if m and (p.get('info') or {}).get('imageUrl') and m not in image_by_mint:
+                            image_by_mint[m] = p['info']['imageUrl']
                 except Exception as e:
                     print(f'[calls-peak] chunk error: {e}', flush=True)
                 time.sleep(0.3)
@@ -20945,6 +21006,9 @@ def _calls_peak_loop():
                     conn.commit()
                 finally:
                     conn.close()
+            # Calls still without a logo: one now, if any source has it.
+            if no_logo:
+                _call_fill_images(no_logo, chain_of, image_by_mint)
         except Exception as e:
             print(f'[calls-peak] loop error: {e}', flush=True)
         time.sleep(120)
