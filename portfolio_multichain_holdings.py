@@ -21,7 +21,7 @@ def _num(v, default=0.0):
 
 _SNAPSHOT_CACHE = {}
 _SNAPSHOT_LOCK = threading.Lock()
-_SNAPSHOT_TTL = 4.0
+_SNAPSHOT_TTL = 12.0
 
 
 def _merge_evm_positions(d, wallet, tokens):
@@ -48,7 +48,7 @@ def _portfolio_snapshot(d, wallet, bust=False):
     # Token holdings and stablecoin balances are independent reads. Execute
     # them concurrently and publish only one completed snapshot to the UI.
     jobs = {'tokens': lambda: d._fetch_wallet_tokens(wallet, onchain_wallet),
-            'solana_usdc': lambda: d._get_solana_usdc_balance(onchain_wallet)}
+            'solana_usdc': lambda: d._get_solana_usdc_balance(onchain_wallet, allow_stale=True)}
 
     results = {}
     errors = {}
