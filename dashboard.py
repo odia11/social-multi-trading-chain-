@@ -29671,6 +29671,8 @@ _MARKET_MAJOR_ADDRESSES = {
 _MARKET_MAJOR_SYMBOLS = {'sol', 'wsol', 'usdc', 'usdt', 'bnb', 'wbnb', 'busd', 'eth', 'weth',
                           'btc', 'wbtc', 'matic', 'wmatic', 'pol', 'wpol', 'usdg', 'arb'}
 _LIVE_MARKET_MIN_MCAP_USD = 30_000  # hard visibility floor for Home + /live-market
+_DEX_SOLANA_DISCOVERY_META = {}  # mint -> DexScreener icon/header/openGraph metadata
+_DEX_SOLANA_DISCOVERY_META_LOCK = threading.Lock()
 
 def _is_market_major_or_impersonator(symbol: str, address: str) -> bool:
     """True for a real major asset OR anything impersonating one by ticker --
@@ -29697,7 +29699,7 @@ def _dexscreener_solana_discovery_addresses() -> list:
         'https://api.dexscreener.com/community-takeovers/latest/v1',
         'https://api.dexscreener.com/ads/latest/v1',
     )
-    seen, addresses = set(), []
+    seen, addresses, metadata = set(), [], {}
     for url in endpoints:
         r = _dex_get(url, timeout=8)
         if not r or r.status_code != 200:
@@ -29711,10 +29713,22 @@ def _dexscreener_solana_discovery_addresses() -> list:
             if not isinstance(item, dict) or item.get('chainId') != 'solana':
                 continue
             address = str(item.get('tokenAddress') or '').strip()
-            if not address or address in seen:
+            if not address:
+                continue
+            meta = metadata.setdefault(address, {})
+            for source_key, target_key in (('header', 'banner_url'), ('icon', 'icon_url'),
+                                           ('openGraph', 'open_graph_url')):
+                value = str(item.get(source_key) or '').strip()
+                if value.startswith('https://') and not meta.get(target_key):
+                    meta[target_key] = value
+            if address in seen:
                 continue
             seen.add(address)
             addresses.append(address)
+    # Keep the visual metadata next to the discovery cache. The scanner and
+    # Home feed use this only for presentation; trading never trusts it.
+    with _DEX_SOLANA_DISCOVERY_META_LOCK:
+        _DEX_SOLANA_DISCOVERY_META.update(metadata)
     return addresses
 
 
@@ -29737,6 +29751,8 @@ def _get_narrative_candidates() -> list:
         if not addr:
             return None
         info = pair.get('info') or {}
+        with _DEX_SOLANA_DISCOVERY_META_LOCK:
+            meta = dict(_DEX_SOLANA_DISCOVERY_META.get(addr) or {})
         pc = pair.get('priceChange') or {}
         vol = pair.get('volume') or {}
         liq = pair.get('liquidity') or {}
@@ -29758,7 +29774,8 @@ def _get_narrative_candidates() -> list:
             'price_change_6h': _f(pc.get('h6')),
             'price_change_24h': _f(pc.get('h24')),
             'pair_created_at': int(pair.get('pairCreatedAt')) if pair.get('pairCreatedAt') else None,
-            'image_url': info.get('imageUrl'),
+            'image_url': info.get('imageUrl') or meta.get('icon_url') or '',
+            'banner_url': meta.get('banner_url') or meta.get('open_graph_url') or info.get('imageUrl') or '',
         }
 
     addresses = _dexscreener_solana_discovery_addresses()
@@ -29898,6 +29915,8 @@ def _get_scanner_candidates() -> list:
         if not addr:
             return None
         info    = p.get('info') or {}
+        with _DEX_SOLANA_DISCOVERY_META_LOCK:
+            meta = dict(_DEX_SOLANA_DISCOVERY_META.get(addr) or {})
         pc      = p.get('priceChange') or {}
         vol     = p.get('volume') or {}
         liq     = p.get('liquidity') or {}
@@ -29921,7 +29940,8 @@ def _get_scanner_candidates() -> list:
             'chain':            p.get('chainId', 'solana'),
             'dex_id':           (p.get('dexId', '') or '').lower(),
             'pair_address':     p.get('pairAddress', ''),
-            'image_url':        info.get('imageUrl') or '',
+            'image_url':        info.get('imageUrl') or meta.get('icon_url') or '',
+            'banner_url':       meta.get('banner_url') or meta.get('open_graph_url') or info.get('imageUrl') or '',
             'price_usd':        _f(p.get('priceUsd')),
             'market_cap':       _f(p.get('marketCap')) or _f(p.get('fdv')),
             'liquidity_usd':    _f(liq.get('usd')),
