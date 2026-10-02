@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WALLET = (ROOT / 'templates' / 'wallet.html').read_text()
 CTRL = (ROOT / 'static' / 'portfolio-multichain.js').read_text()
 MOD = (ROOT / 'portfolio_multichain_holdings.py').read_text()
+DASH = (ROOT / 'dashboard.py').read_text()
 
 
 def fake_dashboard():
@@ -39,7 +40,7 @@ def fake_dashboard():
       {'symbol':'USDC','mint':'usdc','amount':20,'price_usd':1,'value_usd':20},
       {'symbol':'ABC','mint':'abc','amount':2,'price_usd':5,'value_usd':10},
     ]}
-    d._get_solana_usdc_balance=lambda addr:20
+    d._get_solana_usdc_balance=lambda addr,**kwargs:20
     balances={'bsc':5,'base':10,'arbitrum':0,'polygon':2,'robinhood':3}
     d.get_evm_usdc_balance=lambda addr,chain:balances[chain]
     d.get_token_data=lambda addr,chain=None:{'symbol':'TOK','name':'Token','price':4}
@@ -94,10 +95,17 @@ def test_total_controller_no_longer_fans_out_three_requests():
     assert 'Promise.allSettled' not in block
 
 
+def test_background_snapshot_uses_provider_failover_not_raw_public_rpc():
+    block=DASH[DASH.index("def _snapshot_portfolios"):DASH.index("@app.route('/api/admin/recover-fees'")]
+    assert "sol_balance = _get_user_sol(wallet)" in block
+    assert "r.json()['result']['value']" not in block
+    assert "threading.Semaphore(3)" in block
+
+
 def test_partial_refresh_keeps_last_confirmed_snapshot():
     d=fake_dashboard()
     first=pf._portfolio_snapshot(d,'session',bust=True)
-    d._get_solana_usdc_balance=lambda addr: (_ for _ in ()).throw(RuntimeError('rpc down'))
+    d._get_solana_usdc_balance=lambda addr,**kwargs: (_ for _ in ()).throw(RuntimeError('rpc down'))
     second=pf._portfolio_snapshot(d,'session',bust=True)
     assert second['total_usd']==first['total_usd']
     assert second['stale'] is True
