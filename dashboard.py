@@ -29670,6 +29670,7 @@ _MARKET_MAJOR_ADDRESSES = {
 }
 _MARKET_MAJOR_SYMBOLS = {'sol', 'wsol', 'usdc', 'usdt', 'bnb', 'wbnb', 'busd', 'eth', 'weth',
                           'btc', 'wbtc', 'matic', 'wmatic', 'pol', 'wpol', 'usdg', 'arb'}
+_LIVE_MARKET_MIN_MCAP_USD = 30_000  # hard visibility floor for Home + /live-market
 
 def _is_market_major_or_impersonator(symbol: str, address: str) -> bool:
     """True for a real major asset OR anything impersonating one by ticker --
@@ -29794,7 +29795,9 @@ def _get_narrative_candidates() -> list:
         if not pair:
             continue
         token = _extract(pair)
-        if token and not _is_market_major_or_impersonator(token['symbol'], token['address']):
+        if (token
+                and token.get('mcap', 0) >= _LIVE_MARKET_MIN_MCAP_USD
+                and not _is_market_major_or_impersonator(token['symbol'], token['address'])):
             result.append(token)
     return result
 
@@ -29987,7 +29990,9 @@ def _get_scanner_candidates() -> list:
     out = []
     for addr in best_pair:
         tok = _extract(best_pair[addr])
-        if tok and not _is_market_major_or_impersonator(tok['symbol'], tok['mint']):
+        if (tok
+                and tok.get('market_cap', 0) >= _LIVE_MARKET_MIN_MCAP_USD
+                and not _is_market_major_or_impersonator(tok['symbol'], tok['mint'])):
             out.append(tok)
     # Sorted by volume_24h (real, already-fetched signal) rather than left in
     # best_pair's dict-insertion order, so the scanner's default 'trending'
@@ -30149,6 +30154,10 @@ def api_market_scanner():
     now = time.time()
 
     def _passes_fast(t):
+        # Hard product rule: Live Market never shows sub-$30K market-cap tokens.
+        # A missing/zero market cap also fails closed instead of being shown.
+        if t.get('market_cap', 0) < _LIVE_MARKET_MIN_MCAP_USD:
+            return False
         if min_liquidity and t.get('liquidity_usd', 0) < min_liquidity:
             return False
         if age in _AGE_BUCKET_SECONDS:
