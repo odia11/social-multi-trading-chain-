@@ -1,4 +1,4 @@
-"""Home feed "Trending now" hero card: one token, while it is trending.
+"""Home feed "Trending now" automatic carousel: every qualifying token while it is trending.
 
 WHAT COUNTS AS TRENDING
 The candidates are the Live Market scanner's own tokens (DexScreener
@@ -48,6 +48,7 @@ import re
 import sqlite3
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 
 from flask import jsonify, request
@@ -67,7 +68,8 @@ _MINT_RE = re.compile(r'^(?:[1-9A-HJ-NP-Za-km-z]{32,44}|0x[0-9a-fA-F]{40})$')
 
 _lock = threading.Lock()
 _state = {'at': 0.0, 'token': None, 'mint': None, 'recent': {},   # recent: mint -> last time it was the hero
-          'since': 0.0}                                             # when the current hero started trending
+          'since': 0.0, 'carousel_at': 0.0, 'carousel': [], 'carousel_mints': set(),
+          'first_seen': {}}
 
 
 def _f(v):
@@ -116,7 +118,7 @@ def _public(t, surge) -> dict:
     return {
         'mint': t['mint'], 'symbol': t.get('symbol') or '', 'name': t.get('name') or '',
         'chain': (t.get('chain') or 'solana').lower(), 'pair_address': t.get('pair_address') or '',
-        'image_url': t.get('image_url') or '',
+        'image_url': t.get('image_url') or '', 'banner_url': t.get('banner_url') or '',
         'price_usd': _f(t.get('price_usd')), 'price_change_24h': _f(t.get('price_change_24h')),
         'volume_24h': _f(t.get('volume_24h')), 'liquidity_usd': _f(t.get('liquidity_usd')),
         'market_cap': _f(t.get('market_cap')),
@@ -144,6 +146,59 @@ def pick(d, candidates, surges, now=None, safe=None) -> dict | None:
         if safe(t):
             return _public(t, surges.get(t['mint']))
     return None
+
+
+def current_trending(d) -> list[dict]:
+    """Return every current safe ENTER-qualified token for the autoplay slider.
+
+    The notification hero stays first while it is alive under STAY, then the
+    remaining tokens use the same live activity ranking. Live Market caches
+    safety checks, so this does not re-hit Solana for every 20-second refresh.
+    """
+    now = time.time()
+    with _lock:
+        if (now - _state.get('carousel_at', 0.0) < CACHE_SECONDS
+                and _state.get('carousel')):
+            return [dict(t) for t in _state.get('carousel', [])]
+    hero = current_hero(d)
+    try:
+        candidates = list(d._get_scanner_cached())
+    except Exception:
+        candidates = []
+    surges = _surging(d)
+    pool = [t for t in candidates if qualifies(t, ENTER)]
+    pool.sort(key=lambda t: (t.get('mint') in surges,
+                             _f((surges.get(t.get('mint')) or {}).get('score')),
+                             _f(t.get('volume_24h')) * _buy_share(t)), reverse=True)
+    tokens, seen = [], set()
+    if hero and hero.get('mint'):
+        tokens.append(dict(hero))
+        seen.add(hero['mint'])
+    remaining = [t for t in pool if t.get('mint') and t.get('mint') not in seen]
+    safe_flags = []
+    if remaining:
+        with ThreadPoolExecutor(max_workers=min(8, len(remaining))) as ex:
+            safe_flags = list(ex.map(lambda token: _safe(d, token), remaining))
+    for t, is_safe in zip(remaining, safe_flags):
+        if not is_safe:
+            continue
+        mint = t['mint']
+        tokens.append(_public(t, surges.get(mint)))
+        seen.add(mint)
+    with _lock:
+        first_seen = _state.setdefault('first_seen', {})
+        for token in tokens:
+            mint = token['mint']
+            first_seen.setdefault(mint, now)
+            token['trending_since'] = int(token.get('trending_since') or first_seen[mint])
+        live = {token['mint'] for token in tokens}
+        for mint in list(first_seen):
+            if mint not in live and now - first_seen[mint] > 6 * 3600:
+                first_seen.pop(mint, None)
+        _state['carousel_at'] = now
+        _state['carousel'] = [dict(token) for token in tokens]
+        _state['carousel_mints'] = live
+    return tokens
 
 
 def current_hero(d) -> dict | None:
@@ -307,11 +362,41 @@ def social(d, mint, uid=None) -> dict:
             'my_vote': mine_vote, 'liked': mine_like}
 
 
+def social_many(d, mints, uid=None) -> dict:
+    """Reaction state for a whole carousel in a handful of SQLite queries."""
+    mints = list(dict.fromkeys(m for m in mints if m))
+    out = {m: {'bull': 0, 'bear': 0, 'likes': 0, 'my_vote': 0, 'liked': False} for m in mints}
+    if not mints:
+        return out
+    marks = ','.join('?' for _ in mints)
+    with _db(d) as conn:
+        for row in conn.execute(
+                f'SELECT mint,vote,COUNT(*) AS n FROM trending_hero_votes WHERE mint IN ({marks}) GROUP BY mint,vote',
+                mints).fetchall():
+            key = 'bull' if int(row['vote']) == 1 else 'bear'
+            out[row['mint']][key] = int(row['n'])
+        for row in conn.execute(
+                f'SELECT mint,COUNT(*) AS n FROM trending_hero_likes WHERE mint IN ({marks}) GROUP BY mint',
+                mints).fetchall():
+            out[row['mint']]['likes'] = int(row['n'])
+        if uid:
+            for row in conn.execute(
+                    f'SELECT mint,vote FROM trending_hero_votes WHERE user_id=? AND mint IN ({marks})',
+                    [uid] + mints).fetchall():
+                out[row['mint']]['my_vote'] = int(row['vote'])
+            for row in conn.execute(
+                    f'SELECT mint FROM trending_hero_likes WHERE user_id=? AND mint IN ({marks})',
+                    [uid] + mints).fetchall():
+                out[row['mint']]['liked'] = True
+    return out
+
+
 def _votable(mint) -> bool:
     if not isinstance(mint, str) or not _MINT_RE.match(mint):
         return False
     with _lock:
-        return mint in _state['recent'] or mint == _state.get('mint')
+        return (mint in _state['recent'] or mint == _state.get('mint')
+                or mint in _state.get('carousel_mints', set()))
 
 
 def install(d):
@@ -324,10 +409,16 @@ def install(d):
     @app.get('/api/home/trending-hero')
     @d.rate_limit(60, 60)
     def trending_hero():
-        token = current_hero(d)
-        if not token:
-            return jsonify({'ok': True, 'token': None})
-        return jsonify({'ok': True, 'token': token, 'social': social(d, token['mint'], _uid(d))})
+        tokens = current_trending(d)
+        if not tokens:
+            return jsonify({'ok': True, 'token': None, 'slides': []})
+        uid = _uid(d)
+        social_map = social_many(d, [token['mint'] for token in tokens], uid)
+        slides = [{'token': token, 'social': social_map[token['mint']]} for token in tokens]
+        # token/social remain for older clients during rollout; the current
+        # Home UI consumes slides and advances them automatically.
+        return jsonify({'ok': True, 'token': slides[0]['token'], 'social': slides[0]['social'],
+                        'slides': slides})
 
     @app.get('/api/home/trending-hero/users')
     @d.rate_limit(60, 60)
