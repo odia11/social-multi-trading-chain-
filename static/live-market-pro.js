@@ -1010,16 +1010,9 @@ function starsHtml(score){
 function tfPill(tf, label, active){
   return '<button class="pt-tf-pill'+(active?' active':'')+'" data-tf="'+tf+'">'+label+'</button>';
 }
-/* Which chain a token/trade lives on -- feeds a token's Buy/Sell routing
-   (confirmBuy/handleSell below) as well as this badge, so a Solana token
-   always spends SOL via /api/instant-trade, BSC always spends USDC via
-   /api/bsc/trade/*, and Base/Arbitrum/Polygon/Robinhood Chain always spend
-   their own chain's USD stablecoin via the generic /api/evm/trade/* (see
-   EVM_TRADE_CHAINS below). Defaults to 'solana' for any candidate that
-   omits it (every pre-multi-chain scanner response), so old cached
-   responses never render as blank/unlabeled. */
-var EVM_TRADE_CHAINS = {bsc:1, base:1, arbitrum:1};
-var CHAIN_LABELS = {bsc:'BSC', base:'BASE', arbitrum:'ARB', polygon:'POLY', robinhood:'HOOD'};
+/* OrcAgent is Solana-only. Older cached scanner responses that omit a chain
+   are treated as Solana so they never render blank. */
+var CHAIN_LABELS = {solana:'SOL'};
 // What the user is told they are spending: USDC, on every chain.
 //
 // This used to name Robinhood Chain's USDG, on the reasoning that USDC does
@@ -1854,10 +1847,8 @@ function _paintPcts(mode){
   });
 }
 
-// What the trade costs. Buying, the breakdown is quoted and rendered by
-// renderQuote() as it always was. Selling is not quoted -- what a sale
-// returns is known when it settles -- so this states the rates that apply
-// rather than inventing a total for a swap that has not happened.
+// What the trade costs. Solana buys are priced by the instant-trade route;
+// selling states the rates that apply until the transaction settles.
 function _paintFees(t, mode){
   var box = document.getElementById('pt-fees');
   var amtEl = document.getElementById('pt-fees-amt');
@@ -1878,9 +1869,8 @@ function _paintFees(t, mode){
   }
 }
 
-// Spendable balance is per chain, never a pooled total: buying on BSC spends
-// the BSC balance and nothing else. Cached briefly so reopening the sheet
-// does not re-read every chain.
+// Spendable balance is Solana USDC. Cached briefly so reopening the sheet
+// does not repeat the same wallet lookup.
 // Fetched once when the page loads, not when the sheet opens. Opening used
 // to start the request, so the first buy of a session sat on "Checking
 // balance…" for ~290ms with the 10/25/50/Max buttons inert -- measured on a
@@ -1929,7 +1919,7 @@ function _loadSheetHolding(t){
 function _loadSheetBalance(chain){
   var now = Date.now();
   var use = function(d){
-    var v = (chain === 'solana') ? d.solana_usdc : ((d.evm_chains || {})[chain]);
+    var v = d.solana_usdc;
     _sheetAvail = Number(v || 0);
     _paintSheet();
   };
@@ -1994,7 +1984,7 @@ function _openSheet(idx, mode){
     img.removeAttribute('src'); img.style.display = 'none'; ph.style.display = 'flex';
   }
   _sheetEl('pt-sheet-sym').textContent = '$' + (t.symbol || '?');
-  _sheetEl('pt-sheet-chain').textContent = CHAIN_LABELS[t.chain] || (t.chain || '').toUpperCase();
+  _sheetEl('pt-sheet-chain').textContent = 'SOL';
   _sheetEl('pt-sheet-mc').textContent = t.market_cap ? fmtUsd(t.market_cap) + ' MC' : '';
   _sheetEl('pt-sheet-price').textContent = fmtPrice(t.price_usd);
   var chg = Number(t.price_change_24h || 0);
@@ -2002,21 +1992,12 @@ function _openSheet(idx, mode){
   chgEl.textContent = (chg >= 0 ? '▲ ' : '▼ ') + Math.abs(chg).toFixed(2) + '%';
   chgEl.className = 'pt-sheet-chg ' + (chg < 0 ? 'down' : 'up');
 
-  // On the EVM chains the amount is a CEILING -- the fees and the slippage
-  // reserve come out of it, so what is bought is what remains, and the
-  // breakdown below prices exactly that. On Solana it is simply what is
-  // spent. Every chain funds a buy in USDC; the label names what actually
-  // moves, which on Robinhood Chain is USDG.
-  var isEvm = !!EVM_TRADE_CHAINS[t.chain];
   if(mode === 'sell'){
-    // A sale is entered in dollars and settles in the chain's own dollar
-    // token, so the caption names the unit being typed rather than the one
-    // that arrives -- what lands is in the fee box, where it belongs.
     _sheetEl('pt-sheet-cap-txt').textContent = 'You sell';
     _sheetEl('pt-sheet-cur').textContent = 'USD';
   } else {
-    _sheetEl('pt-sheet-cap-txt').textContent = isEvm ? 'You spend at most' : 'You spend';
-    _sheetEl('pt-sheet-cur').textContent = isEvm ? evmCurrencyLabel(t.chain) : 'USDC';
+    _sheetEl('pt-sheet-cap-txt').textContent = 'You spend';
+    _sheetEl('pt-sheet-cur').textContent = 'USDC';
   }
   _sheetEl('pt-slide').classList.toggle('sell', mode === 'sell');
 
@@ -2044,9 +2025,6 @@ function closeBuySheet(){
   _sheetEl('pt-sheet-scrim').classList.remove('open');
   try{ document.body.style.overflow = ''; }catch(e){}
   _sheetUnbindIds(idx);
-  clearTimeout(_quoteTimers[idx]);
-  delete _quotes[idx];
-  delete _quoteRenewals[idx];
 }
 
 // `settled` means the amount is final rather than mid-typing -- a tap on
@@ -2057,10 +2035,8 @@ function _sheetSetAmount(next, settled){
   var hidden = document.getElementById('pt-buy-amt-'+_sheetIdx);
   if(hidden) hidden.value = next;
   _paintSheet();
-  var t = ST.tokens[Number(_sheetIdx)];
-  // Only a buy is quoted. A sale is priced when it settles, so asking the
-  // quote route about one would be asking a buy-shaped question.
-  if(_sheetMode !== 'sell' && t && EVM_TRADE_CHAINS[t.chain]) scheduleQuote(_sheetIdx, settled ? 0 : 250);
+  // Solana buys use the shared instant-trade route; no separate EVM quote
+  // scheduler is needed.
 }
 
 // Typing a figure means it is no longer "a share of the position" -- it is
@@ -2463,155 +2439,7 @@ function openBuyPanel(idx){
   openBuySheet(idx);
 }
 
-/* ── live cost breakdown ───────────────────────────────────────────────────
-   Only for the EVM chains: /api/trade/quote prices a trade against a spend
-   ceiling, and it is the same quote the buy then executes, so what is shown
-   here is what is spent rather than an estimate drawn separately.
-
-   Solana has no such quote -- its buy has no ceiling to price against, since
-   the platform fee there already comes out of the amount inside the swap
-   itself -- so no breakdown is shown for it rather than a made-up one. */
-var _quoteTimers = {};
-var _quotes      = {};
-
-function _quoteCurrency(t){ return evmCurrencyLabel(t.chain); }
-
-function scheduleQuote(idx, delayMs){
-  clearTimeout(_quoteTimers[idx]);
-  _quoteRenewals[idx] = 0;   // a new amount starts its own renewal budget
-  delete _quotes[idx];
-  var box = document.getElementById('pt-quote-'+idx);
-  var input = document.getElementById('pt-buy-amt-'+idx);
-  var amt = parseFloat(input ? input.value : '');
-  if(!amt || amt <= 0){ if(box){ box.style.display='none'; box.innerHTML=''; } return; }
-  if(box){
-    box.style.display = 'block';
-    box.innerHTML = '<div class="pt-quote-wait">Pricing…</div>';
-  }
-  // The previous amount's total is not this amount's total.
-  var feeAmt = document.getElementById('pt-fees-amt');
-  if(feeAmt && _sheetMode !== 'sell') feeAmt.textContent = '';
-  // Debounced: a quote is a live route lookup, and firing one per keystroke
-  // would spend the rate limit on numbers the user is still typing. But a
-  // settled amount -- a tap on 25% or Max -- passes 0 and goes straight out,
-  // because there is no further keystroke coming to wait for.
-  var wait = (delayMs == null) ? 450 : delayMs;
-  if(wait <= 0){ fetchQuote(idx, amt); return; }
-  _quoteTimers[idx] = setTimeout(function(){ fetchQuote(idx, amt); }, wait);
-}
-
-function fetchQuote(idx, amt){
-  var t = ST.tokens[Number(idx)];
-  if(!t) return;
-  var box = document.getElementById('pt-quote-'+idx);
-  fetch('/api/trade/quote', {
-    method:'POST', credentials:'include', headers: authHeaders(),
-    body: JSON.stringify({chain:t.chain, token_address:t.mint, max_spend_usd:String(amt)})
-  }).then(function(r){ return r.json(); }).then(function(d){
-    var input = document.getElementById('pt-buy-amt-'+idx);
-    // The user kept typing while this was in flight: this answer prices an
-    // amount they are no longer asking about.
-    if(!input || parseFloat(input.value) !== amt) return;
-    if(!box) return;
-    if(!d || d.ok === false || d.can_execute === false){
-      _quotes[idx] = null;
-      box.innerHTML = '<div class="pt-quote-bad">'
-        + esc((d && (d.reject_reason || d.msg)) || 'Could not price this trade')
-        + '</div>';
-      return;
-    }
-    _quotes[idx] = {
-      id: d.quote_id, amt: amt,
-      expiresAt: Date.now() + (Number(d.expires_in_seconds) || 0) * 1000,
-      purchase: d.token_purchase_usd
-    };
-    renderQuote(idx, d, t);
-  }).catch(function(){
-    _quotes[idx] = null;
-    if(box) box.innerHTML = '<div class="pt-quote-bad">Could not reach the pricing service</div>';
-  });
-}
-
-var COST_LABELS = {
-  source_gas:       'Network fee',
-  destination_gas:  'Network fee (destination)',
-  platform_fee:     'OrcAgent fee',
-  bridge_fee:       'Bridge fee',
-  dex_fee:          'DEX fee',
-  slippage_reserve: 'Slippage reserve'
-};
-
-function renderQuote(idx, d, t){
-  var box = document.getElementById('pt-quote-'+idx);
-  if(!box) return;
-  var cur = _quoteCurrency(t);
-  var rows = '';
-  var kinds = d.costs_by_kind || {};
-  for(var k in kinds){
-    if(!Object.prototype.hasOwnProperty.call(kinds, k)) continue;
-    rows += '<div class="pt-quote-row"><span>' + esc(COST_LABELS[k] || k) + '</span>'
-          + '<span>-' + esc(Number(kinds[k]).toFixed(2)) + '</span></div>';
-  }
-  box.innerHTML =
-      '<div class="pt-quote-row pt-quote-top"><span>You spend</span><span>'
-    +   esc(Number(d.max_spend_usd).toFixed(2)) + ' ' + esc(cur) + '</span></div>'
-    + rows
-    + '<div class="pt-quote-row pt-quote-get"><span>You get</span><span>'
-    +   esc(Number(d.token_purchase_usd).toFixed(2)) + ' ' + esc(cur)
-    +   ' of $' + esc(t.symbol || '') + '</span></div>'
-    // The reserve is money held back against price movement, not a charge.
-    // Saying so is the difference between a cost the user resents and one
-    // they understand.
-    + (kinds.slippage_reserve
-        ? '<div class="pt-quote-note">The slippage reserve is held back against '
-          + 'price movement, not charged. Anything unused stays yours.</div>'
-        : '')
-    + '<div class="pt-quote-note" id="pt-quote-exp-'+idx+'"></div>';
-  // The folded summary carries the total, so the box says what it costs
-  // without having to be opened at all.
-  var amtEl = document.getElementById('pt-fees-amt');
-  if(amtEl){
-    var spend = Number(d.max_spend_usd), gets = Number(d.token_purchase_usd);
-    amtEl.textContent = (isFinite(spend) && isFinite(gets) && spend > gets)
-      ? ('-' + (spend - gets).toFixed(2) + ' ' + cur) : '';
-  }
-  tickQuoteExpiry(idx);
-}
-
-// While the sheet is open, a price about to lapse is renewed rather than
-// declared stale. A quote is held for ~6 seconds; sliding to confirm is a
-// deliberate gesture that takes longer than that, plus however long someone
-// spends reading the breakdown. So the old behaviour -- "This price has
-// expired, edit the amount to get a new one" -- was what most people met
-// when they finally slid, and the confirm then had to re-price on the spot,
-// paying for a round trip at the one moment nobody wants to wait. Renewing
-// in the background keeps the fast execute-this-exact-quote path available
-// the whole time the screen is up.
-var _quoteRenewals = {};
-var QUOTE_MAX_RENEWALS = 20;   // ~2 minutes; a sheet left open stops asking
-
-function tickQuoteExpiry(idx){
-  var q = _quotes[idx];
-  var el = document.getElementById('pt-quote-exp-'+idx);
-  if(!q || !el) return;
-  var left = Math.max(0, Math.round((q.expiresAt - Date.now())/1000));
-  if(left <= 1 && _sheetIdx === String(idx) && _sheetMode === 'buy'
-     && parseFloat(_sheetAmt) === q.amt
-     && (_quoteRenewals[idx] || 0) < QUOTE_MAX_RENEWALS){
-    _quoteRenewals[idx] = (_quoteRenewals[idx] || 0) + 1;
-    fetchQuote(idx, q.amt);
-    return;
-  }
-  if(left <= 0){
-    el.textContent = 'This price has expired — edit the amount to get a new one.';
-    el.className = 'pt-quote-note pt-quote-stale';
-    _quotes[idx] = null;
-    return;
-  }
-  el.textContent = 'Price held for ' + left + 's.';
-  el.className = 'pt-quote-note';
-  setTimeout(function(){ tickQuoteExpiry(idx); }, 1000);
-}
+// Solana-only: pricing/execution uses /api/instant-trade; no EVM quote cache.
 
 // ── Protection (stop loss / take profit) for a buy made by hand ──
 // Starts at the user's own settings (the same ones the bot uses); edits
@@ -2681,22 +2509,9 @@ function confirmBuy(idx){
     btn.disabled = true;
     if(_sheetIdx === null) btn.textContent = 'Buying…';
   }
-  // Which chain this token lives on decides both the endpoint and the
-  // currency the entered amount is denominated in: BSC keeps its own
-  // dedicated route, Base/Arbitrum/Polygon share the generic /api/evm/*
-  // route (chain passed in the body), and only a plain Solana token ever
-  // spends SOL via /api/instant-trade -- the three EVM engines can never be
-  // crossed with each other or with Solana here.
-  var isBsc = t.chain === 'bsc';
-  var isEvm = !!EVM_TRADE_CHAINS[t.chain];
-  var url  = isBsc ? '/api/bsc/trade/buy' : (isEvm ? '/api/evm/trade/buy' : '/api/instant-trade');
-  var body = isBsc ? {token_address:t.mint, amount_usdc:amt}
-    : isEvm ? {chain:t.chain, token_address:t.mint, amount_usdc:amt}
-    // amount_usdc is what the server reads; amount_sol is sent alongside it
-    // only so an older deploy that has not been updated still gets the value
-    // under the name it knows.
-    : {symbol:t.symbol, token_address:t.mint, pair_address:t.pair_address, side:'buy',
-       amount_usdc:amt, amount_sol:amt};
+  var url = '/api/instant-trade';
+  var body = {symbol:t.symbol, token_address:t.mint, pair_address:t.pair_address,
+              side:'buy', amount_usdc:amt, amount_sol:amt};
   // The stop loss / take profit this buy is protected with (every chain).
   var prot = _protectionChoice();
   if(prot.error){
@@ -2707,17 +2522,6 @@ function confirmBuy(idx){
   body.protect = prot.protect;
   if(prot.protect && prot.sl != null){ body.sl_pct = prot.sl; body.tp_pct = prot.tp; }
 
-  // When a live quote for this exact amount is still good, execute THAT
-  // quote rather than asking the buy route to price a fresh one. The
-  // difference matters: the user agreed to the numbers they were shown, and
-  // a second pricing a moment later is a different set of numbers wearing
-  // the same intent. The buy route prices correctly either way, so this is
-  // about honouring what was on screen, not about correctness of the total.
-  var q = _quotes[idx];
-  if(isEvm && q && q.id && q.amt === amt && q.expiresAt > Date.now()){
-    url  = '/api/trade/execute';
-    body = {quote_id: q.id};
-  }
   // Whether this attempt ended in a purchase. A bought trade must NOT leave
   // the slider armed again: the sheet would then read "Bought ..." above a
   // live "Slide to buy" for the seconds before it closes, which is an
@@ -2727,29 +2531,12 @@ function confirmBuy(idx){
     method:'POST', credentials:'include', headers: authHeaders(),
     body: JSON.stringify(body)
   }).then(function(r){ return r.json(); }).then(function(d){
-    // If this chain's own balance couldn't cover the trade, the server
-    // already started an automatic top-up from whichever chain has enough
-    // and attached this buy to it -- {ok:true, pending:true, bridge_id:...}.
-    // Poll silently until the purchase actually happens; the user only ever
-    // sees "Buying..." then a normal Bought/failed message, never bridge
-    // terminology, matching every other buy on this page.
-    if(d && d.ok && d.pending && d.bridge_id){
-      showMsg(msgEl, 'Buying $'+t.symbol+'…', true);
-      _pollAutoBuyBridge(d.bridge_id, idx, t, amt, msgEl, input);
-      return;
-    }
-    // /api/instant-trade's real success shape is {success:true, tx:<sig>, ...};
-    // /api/bsc/trade/buy's and /api/evm/trade/buy's is {ok:true, tx_hash:<sig>, ...}
-    // -- checking every one of success/tx/ok/sig/tx_hash covers all of them
-    // instead of assuming any single endpoint's exact shape (a prior version
-    // of this only checked the Solana shape, so every successful BSC buy
-    // showed "Buy failed" anyway).
+    // /api/instant-trade returns the accepted Solana transaction in one of
+    // the compatibility fields below; accept only an explicit success shape.
     if(d && (d.success || d.tx || d.ok || d.sig || d.tx_hash)){
-      // What was BOUGHT, which on an EVM chain is less than what was spent
-      // -- the costs came out of the ceiling. Saying "bought for $100" when
-      // $97.43 of token was bought is the mismatch this whole change removes.
+      // Show the realized USDC amount returned by the Solana trade when known.
       var got = (d.amount_usdc != null) ? d.amount_usdc : amt;
-      var cur = isEvm ? evmCurrencyLabel(t.chain) : (d.currency || 'USDC');
+      var cur = d.currency || 'USDC';
       var line = 'Bought ' + got + ' ' + cur + ' of $' + t.symbol;
       if(d.max_spend_usd != null && Number(d.max_spend_usd) > Number(got)){
         line += ' (spent ' + d.max_spend_usd + ' ' + cur + ')';
@@ -2757,7 +2544,6 @@ function confirmBuy(idx){
       bought = true;
       showMsg(msgEl, line, true);
       if(input) input.value = '';
-      delete _quotes[idx];
       // The receipt is the whole point of the wait: it names the transaction
       // the chain accepted and links to it. A sheet that closes in 2.6s takes
       // that away before it can be read, so a buy that produced a hash holds
@@ -2765,12 +2551,6 @@ function confirmBuy(idx){
       _showTxReceipt(idx, t, d);
       setTimeout(function(){ closeBuyPanel(idx); },
                  document.getElementById('pt-txline') ? 7000 : 2600);
-    } else if(d && d.requote){
-      // The quote expired between being shown and being confirmed. Re-price
-      // rather than executing at a number the user never saw.
-      showMsg(msgEl, 'That price expired — repricing…', false);
-      delete _quotes[idx];
-      scheduleQuote(idx);
     } else {
       showMsg(msgEl, (d && (d.error||d.msg)) || 'Buy failed', false);
     }
@@ -2788,66 +2568,6 @@ function confirmBuy(idx){
   });
 }
 
-// Polls a background auto-bridge-then-buy through to completion, purely so
-// confirmBuy() can show the same Bought/failed message it always would have
-// -- the bridge itself (and the wait, up to a few minutes) is never
-// surfaced to the user, per the "no friction from bridging" requirement.
-// The button stays disabled/'…' for the whole wait, same as any other
-// in-flight buy, rather than re-enabling and inviting a duplicate click.
-function _pollAutoBuyBridge(bridgeId, idx, t, amt, msgEl, input){
-  var attempts = 0;
-  var maxAttempts = 225; // ~30 minutes; backend keeps uncertain bridging locked and reconciles it
-  var btn = document.querySelector('#pt-buy-panel-'+idx+' .pt-buy-confirm');
-  function tick(){
-    attempts++;
-    fetch('/api/bridge/status/'+bridgeId, {credentials:'include', headers: authHeaders()})
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        if(!d || !d.ok){ return scheduleNext(); }
-        if(d.auto_buy_status === 'done'){
-          var res = d.auto_buy_result || {};
-          showMsg(msgEl, 'Bought $'+(res.symbol||t.symbol)+' for '+(res.amount_usdc!=null?res.amount_usdc:amt)+' '+evmCurrencyLabel(t.chain), true);
-          if(input) input.value = '';
-          _slideEnable(false);
-          _slideSetLabel('Bought');
-          _showTxReceipt(idx, t, res);
-          setTimeout(function(){ closeBuyPanel(idx); },
-                     document.getElementById('pt-txline') ? 7000 : 2200);
-          return;
-        }
-        if(d.auto_buy_status === 'reconciling'){
-          showMsg(msgEl, 'Bridge confirmation is delayed. Funds may still be moving. Do not retry this buy; check Wallet for the final result.', false);
-          // Never turn an unknown on-chain result into a second Buy button.
-          return;
-        }
-        if(d.auto_buy_status === 'failed'){
-          var err = (d.auto_buy_result && d.auto_buy_result.error) || 'Buy failed after funds arrived — your balance is safe, try again';
-          showMsg(msgEl, err, false);
-          if(btn){ btn.disabled=false; }
-    _restoreSlide();
-          return;
-        }
-        if(d.status === 'bridge_failed' || d.status === 'origin_tx_reverted' || d.status === 'timed_out'){
-          showMsg(msgEl, 'Buy failed — could not move funds to this chain', false);
-          if(btn){ btn.disabled=false; }
-    _restoreSlide();
-          return;
-        }
-        scheduleNext();
-      })
-      .catch(scheduleNext);
-  }
-  function scheduleNext(){
-    if(attempts >= maxAttempts){
-      showMsg(msgEl, 'Bridge confirmation is taking longer than expected. Do not retry this buy; check Wallet for its final status.', false);
-      // Keep this request visibly unresolved until the backend confirms it.
-      return;
-    }
-    setTimeout(tick, 8000);
-  }
-  tick();
-}
-
 function handleSell(idx, btn){
   var t = ST.tokens[Number(idx)];
   if(!t) return;
@@ -2858,12 +2578,7 @@ function handleSell(idx, btn){
   if(btn){ openSellSheet(idx); return; }
   var msgEl = document.getElementById('pt-buy-msg-'+idx);
   _slideSetLabel('Selling…');
-  // Same chain-based routing as confirmBuy() -- an EVM position can only ever
-  // be closed through its own chain's endpoint (it sells the exact tracked
-  // position server-side, same as the Solana endpoint does for amount_sol:0).
-  var isBsc = t.chain === 'bsc';
-  var isEvm = !!EVM_TRADE_CHAINS[t.chain];
-  var url  = isBsc ? '/api/bsc/trade/sell' : (isEvm ? '/api/evm/trade/sell' : '/api/instant-trade');
+  var url = '/api/instant-trade';
   // A SHARE, never a quantity. The server works out how many tokens that is
   // from what it can see is held -- so a tampered number can only ever ask
   // for a different slice of your own position, never for more of it than
@@ -2880,10 +2595,8 @@ function handleSell(idx, btn){
     if(!(usd > 0)){ toast('Enter an amount to sell'); _slideEnable(true); _slideReset(); return; }
     how = {sell_usd: usd};
   }
-  var body = isBsc ? Object.assign({token_address:t.mint}, how)
-    : isEvm ? Object.assign({chain:t.chain, token_address:t.mint}, how)
-    : Object.assign({symbol:t.symbol, token_address:t.mint,
-                     pair_address:t.pair_address, side:'sell', amount_sol:0}, how);
+  var body = Object.assign({symbol:t.symbol, token_address:t.mint,
+                            pair_address:t.pair_address, side:'sell', amount_sol:0}, how);
   fetch(url, {
     method:'POST', credentials:'include', headers: authHeaders(),
     body: JSON.stringify(body)
@@ -2894,8 +2607,7 @@ function handleSell(idx, btn){
     // They now answer ok:false with an error status when the sell does not
     // go through, and the two agree; both are checked so this keeps working
     // whichever version of the backend is deployed.
-    var sold = isEvm ? !!(d && d.ok && d.sell_executed)
-                     : !!(d && (d.success||d.tx||d.ok||d.sig));
+    var sold = !!(d && (d.success||d.tx||d.ok||d.sig));
     // proceeds_usdc is what the swap actually returned, measured from the
     // wallet across the trade -- shown only when it was measured, since the
     // fallback is a market quote rather than the realised amount.

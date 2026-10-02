@@ -193,6 +193,15 @@ else
   bash "$REPO_DIR/deploy/check-performance-contract.sh"     || die "Instant-navigation performance contract failed. Production was not changed."
 fi
 
+say "Removing retired 0x configuration"
+if [ -f /etc/orcagent.env ] && grep -q '^ZEROX_API_KEY=' /etc/orcagent.env; then
+  cp -a /etc/orcagent.env "/etc/orcagent.env.pre-solana-only-$STAMP"
+  sed -i '/^ZEROX_API_KEY=/d' /etc/orcagent.env
+  echo "  removed ZEROX_API_KEY from /etc/orcagent.env (backup kept for this deploy)"
+else
+  echo "  no ZEROX_API_KEY present"
+fi
+
 say "Installing"
 bash "$REPO_DIR/deploy/install.sh" >/tmp/orcagent-install-$STAMP.log 2>&1 \
   || { tail -30 /tmp/orcagent-install-$STAMP.log; die "Install failed. The old code is still running — nothing was restarted."; }

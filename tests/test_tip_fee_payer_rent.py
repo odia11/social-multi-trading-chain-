@@ -62,7 +62,7 @@ with patch.object(m, '_rpc_call_any', side_effect=RuntimeError('rpc down')):
     m._fee_payer_rent_cache.update(value=0, at=0.0)
     check('without an RPC answer the floor falls back to 890,880', m._fee_payer_rent_lamports(d) == 890_880)
 src = open(os.path.join(ROOT, 'portfolio_token_withdraw.py'), encoding='utf-8').read()
-transfer = src[src.index('def _solana_transfer('):src.index('def _evm_transfer(')]
+transfer = src[src.index('def _solana_transfer('):src.index('def _explorer(')]
 check('the transfer itself checks the same floor before signing',
       'required_lamports = _fee_payer_rent_lamports(d) + 20_000' in transfer)
 
@@ -82,7 +82,6 @@ def tip(amount):
     m._RECENT.clear()
     with patch.object(m, '_rpc_call_any', side_effect=fake_rpc), \
          patch.object(m, '_solana_source_accounts', side_effect=fake_accounts), \
-         patch.object(m, '_tip_evm_candidates', return_value=([], [])), \
          patch.object(m, '_solana_transfer', side_effect=fake_transfer), \
          patch.object(m, '_record_tip', return_value=7), \
          patch.object(d, '_validate_csrf', return_value=True), \

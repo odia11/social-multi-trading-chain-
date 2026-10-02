@@ -46,7 +46,7 @@ function paint(value){
   if(samples.length>1){
     var first=samples[0],diff=total-first;
     put('pf-performance','Session '+(diff>=0?'+':'−')+money(Math.abs(diff))+' · live balance');
-  }else put('pf-performance','Live multi-chain balance');
+  }else put('pf-performance','Live Solana balance');
 }
 document.addEventListener('orca:portfolio-value',paint);
 function boot(){
@@ -70,7 +70,7 @@ function boot(){
     var n=Number((avail.textContent||'').replace(/[^0-9.\-]/g,''));
     if(Number.isFinite(n)&&n>0){
       put('pf-total',money(n));samples=[n];spark();
-      put('pf-performance','Syncing complete multi-chain balance…');
+      put('pf-performance','Syncing Solana balance…');
     }
   }
   provisionalFromAvail();

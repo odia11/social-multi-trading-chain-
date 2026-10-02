@@ -66,6 +66,7 @@ def install(d):
                         JOIN trade_quotes q ON q.quote_id=e.quote_id
                         WHERE e.user_id=? AND e.state='COMPLETED'
                           AND LOWER(COALESCE(q.mode,''))='manual'
+                          AND LOWER(COALESCE(q.destination_chain,'solana'))='solana'
                         ORDER BY e.created_at DESC LIMIT ?
                     ''', (uid, limit)).fetchall()
                     for r in rows:
@@ -100,6 +101,7 @@ def install(d):
                     FROM trades
                     WHERE user_id=? AND exit_price IS NOT NULL AND exit_price!=0
                       AND LOWER(COALESCE(source,''))='manual'
+                      AND LOWER(COALESCE(chain,'solana'))='solana'
                     ORDER BY timestamp DESC LIMIT ?
                 ''', (uid, limit)).fetchall()
                 for r in rows:
@@ -144,7 +146,7 @@ def install(d):
 
         items.sort(key=lambda x: float(x.get('timestamp') or 0), reverse=True)
         items = items[:limit]
-        return d.jsonify({'ok': True, 'transactions': items, 'count': len(items), 'scope': 'live-market-only'})
+        return d.jsonify({'ok': True, 'transactions': items, 'count': len(items), 'scope': 'solana-live-market-only'})
 
     marker = 'data-orca-portfolio-trade-history="1"'
 

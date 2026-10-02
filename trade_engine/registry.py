@@ -81,47 +81,18 @@ class Chain:
     display_name: str
 
 
-def _evm(chain: str, address: str, symbol: str, decimals: Optional[int],
-         kind: str, note: str = '') -> Asset:
+def _asset(chain: str, address: str, symbol: str, decimals: Optional[int],
+           kind: str, note: str = '') -> Asset:
     return Asset(chain=chain, address=address, symbol=symbol,
                  decimals=decimals, kind=kind, note=note)
 
 
 # ── Solana ───────────────────────────────────────────────────────────────
-_SOL = _evm('solana', 'So11111111111111111111111111111111111111112', 'SOL', 9, 'native')
-_SOL_USDC = _evm('solana', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'USDC', 6, 'stable')
-
-# ── EVM ──────────────────────────────────────────────────────────────────
-# Native decimals are 18 on every EVM chain the platform trades. The stable
-# decimals are the ones that differ, and BSC is the reason this file exists.
-_BSC_BNB = _evm('bsc', '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', 'BNB', 18, 'native')
-_BSC_USDC = _evm(
-    'bsc', '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', 'USDC', 18, 'stable',
-    note='Binance-Peg USDC is 18 decimals, NOT the 6 that USDC has everywhere else',
-)
-
-_BASE_ETH = _evm('base', '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', 'ETH', 18, 'native')
-_BASE_USDC = _evm('base', '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', 'USDC', 6, 'stable')
-
-_ARB_ETH = _evm('arbitrum', '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', 'ETH', 18, 'native')
-_ARB_USDC = _evm('arbitrum', '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 'USDC', 6, 'stable')
-
-_HOOD_ETH = _evm('robinhood', '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', 'ETH', 18, 'native')
-# USDG, not USDC, and its decimals have not been verified against the
-# deployed contract from here. Left as None on purpose: an unverified 6 that
-# turns out to be 18 is a 10^12 sizing error, and this is the one asset in
-# the set whose decimals nobody has confirmed.
-_HOOD_USDG = _evm(
-    'robinhood', '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168', 'USDG', None, 'stable',
-    note='Global Dollar, not USDC. Decimals unverified — read from the contract.',
-)
+_SOL = _asset('solana', 'So11111111111111111111111111111111111111112', 'SOL', 9, 'native')
+_SOL_USDC = _asset('solana', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'USDC', 6, 'stable')
 
 CHAINS: dict = {
     'solana': Chain('solana', 'svm', None, _SOL, _SOL_USDC, 'jupiter', 'Solana'),
-    'bsc': Chain('bsc', 'evm', 56, _BSC_BNB, _BSC_USDC, '0x', 'BNB Chain'),
-    'base': Chain('base', 'evm', 8453, _BASE_ETH, _BASE_USDC, '0x', 'Base'),
-    'arbitrum': Chain('arbitrum', 'evm', 42161, _ARB_ETH, _ARB_USDC, '0x', 'Arbitrum'),
-    'robinhood': Chain('robinhood', 'evm', 4663, _HOOD_ETH, _HOOD_USDG, '0x', 'Robinhood Chain'),
 }
 
 

@@ -36,7 +36,7 @@ FEE = '0.0075'          # the rate the app actually runs (FEE_RATE_TXN)
 q = price_trade('100', FEE, [
     CostLine(KIND_BRIDGE_FEE, D('1.20'), source='bridge'),
     sponsored_gas(D('0.35'), recovered=True),
-    CostLine(KIND_DEX_FEE, D('0.15'), source='0x'),
+    CostLine(KIND_DEX_FEE, D('0.15'), source='jupiter'),
     CostLine(KIND_SLIPPAGE_RESERVE, D('0.30')),
 ], same_chain=False)
 
@@ -153,13 +153,13 @@ check('a string amount is accepted and exact', money('0.1') + money('0.2') == D(
 
 # Rounding must go the safe way in both directions.
 for amount in ('10', '33.33', '99.99', '100', '250.55', '1000', '7.77'):
-    qq = price_trade(amount, FEE, [CostLine(KIND_DEX_FEE, D('0.17'), source='0x')])
+    qq = price_trade(amount, FEE, [CostLine(KIND_DEX_FEE, D('0.17'), source='jupiter')])
     if qq.token_purchase_usd > ZERO:
         assert qq.total_user_spend_usd <= money(amount), amount
 check('across a spread of amounts the total NEVER exceeds the ceiling — rounding '
       'goes down on the purchase and up on the costs, never the reverse', True)
 
-qq = price_trade('0.01', FEE, [CostLine(KIND_DEX_FEE, D('0.17'), source='0x')])
+qq = price_trade('0.01', FEE, [CostLine(KIND_DEX_FEE, D('0.17'), source='jupiter')])
 check('an amount too small to cover its own costs is refused, not rounded into '
       'existence', not qq.can_execute)
 
@@ -168,69 +168,55 @@ check('an amount too small to cover its own costs is refused, not rounded into '
 # 5. Double counting
 # ════════════════════════════════════════════════════════════════
 q = price_trade('100', FEE, [
-    CostLine(KIND_DEX_FEE, D('0.15'), source='0x'),
+    CostLine(KIND_DEX_FEE, D('0.15'), source='jupiter'),
     CostLine(KIND_BRIDGE_FEE, D('1.00'), source='bridge'),
 ])
 check('every cost records where its figure came from, so a fee already inside a '
       'provider quote can be spotted instead of added twice',
-      {c.source for c in q.costs} == {'0x', 'bridge', 'orcagent'})
+      {c.source for c in q.costs} == {'jupiter', 'bridge', 'orcagent'})
 check('the breakdown groups by kind for the UI without losing the per-line detail',
       q.breakdown()['costs_by_kind'][KIND_DEX_FEE] == '0.15'
       and len(q.breakdown()['costs']) == 3)
 
 
 # ════════════════════════════════════════════════════════════════
-# 6. The registry — chain + address, and real decimals
+# 6. The registry — Solana only, with exact decimals
 # ════════════════════════════════════════════════════════════════
-check('BSC USDC is 18 decimals, not the 6 it has everywhere else — assuming 6 '
-      'here is a 10^12 sizing error',
-      R.get_chain('bsc').stable.decimals == 18)
-check('Base USDC really is 6', R.get_chain('base').stable.decimals == 6)
-check('Solana USDC is 6 and SOL is 9',
+check('the registry exposes exactly one active chain: Solana',
+      set(R.CHAINS) == {'solana'})
+check('Solana USDC is 6 decimals and SOL is 9',
       R.get_chain('solana').stable.decimals == 6
       and R.get_chain('solana').native.decimals == 9)
-check('Robinhood Chain funds trades in USDG, not USDC',
-      R.get_chain('robinhood').stable.symbol == 'USDG')
+check('Solana has no EVM chain id',
+      R.get_chain('solana').chain_id is None)
+
+for unsupported in ('bsc', 'base', 'arbitrum', 'robinhood', 'polygon', 'ethereum'):
+    try:
+        R.get_chain(unsupported); ok = False
+    except R.RegistryError:
+        ok = True
+    check(unsupported + ' is rejected by the Solana-only registry', ok)
+
+check('same-chain comparison works for Solana',
+      R.is_same_chain('solana', 'solana'))
+
+usdc = R.get_chain('solana').stable
+check('0.1 USDC converts to exactly 100000 base units',
+      R.to_raw(D('0.1'), usdc) == 100000)
+check('...and back again without drift',
+      R.from_raw(100000, usdc) == D('0.1'))
 
 try:
-    R.get_chain('robinhood').stable.require_decimals(); ok = False
-except R.UnknownDecimals:
-    ok = True
-check('an asset whose decimals were never verified RAISES instead of returning a '
-      'plausible default — the app reads decimals() from the contract for this', ok)
-
-check('Solana has no EVM chain id, and that absence is not faked with a number',
-      R.get_chain('solana').chain_id is None and R.get_chain('bsc').chain_id == 56)
-
-try:
-    R.get_chain('ethereum'); ok = False
+    R.to_raw(0.1, usdc); ok = False
 except R.RegistryError:
     ok = True
-check('a chain the platform does not trade raises rather than falling through', ok)
-
-check('same-chain is decided through the registry, so a misspelled chain cannot '
-      'read as "different" and route a same-chain trade over a bridge',
-      R.is_same_chain('base', 'base') and not R.is_same_chain('base', 'bsc'))
-
-# Raw unit conversion, where the classic float bug lives.
-usdc_bsc = R.get_chain('bsc').stable
-check('0.1 USDC on BSC converts to exactly 10^17 base units',
-      R.to_raw(D('0.1'), usdc_bsc) == 10**17)
-check('...and back again without drift', R.from_raw(10**17, usdc_bsc) == D('0.1'))
+check('binary floats are refused for base-unit conversion', ok)
 
 try:
-    R.to_raw(0.1, usdc_bsc); ok = False
+    R.to_raw(D('0.0000001'), usdc); ok = False
 except R.RegistryError:
     ok = True
-check('a float is refused for base-unit conversion — int(0.1 * 10**18) is '
-      '99999999999999998, one wei short, discovered months later', ok)
-
-try:
-    R.to_raw(D('0.0000001'), R.get_chain('base').stable); ok = False
-except R.RegistryError:
-    ok = True
-check('an amount with more precision than the token can hold raises instead of '
-      'being silently truncated', ok)
+check('more precision than Solana USDC supports is refused', ok)
 
 
 # ════════════════════════════════════════════════════════════════

@@ -11,7 +11,7 @@
 (function(){
   'use strict';
 
-  var CHAIN_LABELS = {solana:'Solana', bsc:'BSC', base:'Base', arbitrum:'Arbitrum', polygon:'Polygon', robinhood:'Robinhood'};
+  var CHAIN_LABELS = {solana:'Solana'};
   var NOTE_MAX = 280;
 
   function esc(v){

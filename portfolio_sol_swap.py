@@ -12,7 +12,7 @@ from decimal import Decimal, ROUND_DOWN
 
 import requests
 from flask import jsonify, request
-import solana_source_bridge_gasless as provider
+import solana_jupiter_gasless as provider
 
 
 def amount6(value):

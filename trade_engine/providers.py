@@ -1,22 +1,7 @@
-"""Turning a provider's answer into costs the engine can reason about.
+"""Normalize Jupiter quote data for OrcAgent's Solana trade engine.
 
-WHY ADAPTERS AND NOT A REWRITE
-The app already talks to 0x and Jupiter, and those integrations work. This
-does not replace them -- each adapter takes a callable that performs the
-real request (dashboard's own _get_0x_quote, orcagent_solana's Jupiter
-call) and only normalises what comes back. That keeps one implementation of
-each integration and makes the engine testable without a network, because a
-test passes a function that returns a recorded response.
-
-THE JOB IS NORMALISATION, AND THE RISK IS DOUBLE COUNTING
-Providers disagree about what a "fee" is. A 0x quote already has its router
-fee and price impact priced into the amount it promises to deliver; adding a
-separately estimated router fee on top charges the user twice for one thing.
-So each adapter states which costs its quote ALREADY includes, and the
-engine only adds costs nobody has accounted for yet. Everything carries the
-provider name so the breakdown shows where each figure came from.
-
-Nothing here signs, sends, or broadcasts. Quoting only.
+OrcAgent is Solana-only. This adapter does not sign, send or broadcast;
+it only converts Jupiter quote fields into the engine's internal cost model.
 """
 from __future__ import annotations
 
@@ -70,63 +55,6 @@ class SwapProvider:
 
     def quote(self, *, chain, sell_asset, buy_address, sell_amount_raw, taker) -> SwapQuote:
         raise NotImplementedError
-
-
-class ZeroExProvider(SwapProvider):
-    """0x Swap API v2, as the app already calls it.
-
-    `fetch` is dashboard's _get_0x_quote (or anything with its signature),
-    injected rather than imported so this module stays free of the app and
-    a test can hand it a recorded response.
-    """
-    name = '0x'
-
-    def __init__(self, fetch: Callable):
-        self._fetch = fetch
-
-    def quote(self, *, chain, sell_asset, buy_address, sell_amount_raw, taker) -> SwapQuote:
-        chain_cfg = R.get_chain(chain)
-        if chain_cfg.kind != 'evm':
-            raise ProviderError(f'0x does not serve {chain}, which is not EVM')
-        try:
-            data = self._fetch(sell_asset.address, buy_address, int(sell_amount_raw),
-                               taker, chain)
-        except Exception as e:
-            raise ProviderError(f'0x quote failed on {chain}: {e}') from e
-        if not isinstance(data, dict):
-            raise ProviderError('0x returned a non-object response')
-
-        buy_amount = data.get('buyAmount')
-        min_buy = data.get('minBuyAmount') or buy_amount
-        if buy_amount in (None, ''):
-            raise ProviderError('0x quote has no buyAmount — treating as no route '
-                                'rather than assuming zero')
-
-        gas_native = None
-        try:
-            gas_units = data.get('gas') or (data.get('transaction') or {}).get('gas')
-            gas_price = data.get('gasPrice') or (data.get('transaction') or {}).get('gasPrice')
-            if gas_units and gas_price:
-                gas_native = (Decimal(str(gas_units)) * Decimal(str(gas_price))
-                              / Decimal(10) ** 18)
-        except Exception:
-            gas_native = None      # an unreadable gas figure is unknown, not zero
-
-        return SwapQuote(
-            provider=self.name,
-            chain=chain,
-            sell_asset=sell_asset,
-            buy_address=buy_address,
-            sell_amount_raw=int(sell_amount_raw),
-            buy_amount_raw=int(buy_amount),
-            min_buy_amount_raw=int(min_buy),
-            price_impact_pct=money(data.get('estimatedPriceImpact') or '0'),
-            estimated_gas_native=gas_native,
-            # 0x prices its router and liquidity-provider fees into buyAmount.
-            # Adding a separate router cost here would bill the user twice.
-            included_kinds=frozenset({KIND_DEX_FEE}),
-            raw=data,
-        )
 
 
 class JupiterProvider(SwapProvider):

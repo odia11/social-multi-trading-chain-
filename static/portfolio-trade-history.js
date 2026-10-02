@@ -5,7 +5,7 @@ if((location.pathname.replace(/\/+$/,'')||'/')!=='/wallet')return;
 
 var state={open:false,side:'all',date:'',busy:false,items:[],visible:5};
 var STEP=5;
-var chainLabels={solana:'SOL',bsc:'BSC',base:'BASE',arbitrum:'ARB',polygon:'POLY',robinhood:'HOOD'};
+var chainLabels={solana:'SOL'};
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function money(v){var n=Number(v||0);return isFinite(n)?'$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}
 function dt(ts){var n=Number(ts||0);if(!n)return '—';try{return new Date(n*1000).toLocaleString(undefined,{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}catch(e){return '—'}}

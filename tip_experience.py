@@ -120,21 +120,6 @@ def _chain_confirmation(d, chain, tx_hash):
         if status.get('confirmationStatus') in ('confirmed', 'finalized'):
             return 'confirmed', None
         return None, None
-    if chain in getattr(d, 'EVM_CHAINS', {}):
-        w3 = d._get_web3(chain)
-        try:
-            receipt = w3.eth.get_transaction_receipt(tx_hash)
-        except Exception as exc:
-            # Web3 often raises TransactionNotFound while a tx is pending.
-            # Other transient RPC errors are likewise unknown, never failure.
-            if type(exc).__name__ == 'TransactionNotFound':
-                return None, None
-            raise
-        if receipt is None:
-            return None, None
-        if int(receipt['status']) == 1:
-            return 'confirmed', None
-        return 'failed', 'Transfer reverted on-chain'
     return None, None
 
 

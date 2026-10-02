@@ -9,8 +9,8 @@ from decimal import Decimal
 from unittest.mock import Mock, patch
 from flask import Flask
 
-provider = types.ModuleType('solana_source_bridge_gasless')
-with patch.dict(sys.modules, {'solana_source_bridge_gasless': provider}):
+provider = types.ModuleType('solana_jupiter_gasless')
+with patch.dict(sys.modules, {'solana_jupiter_gasless': provider}):
     import portfolio_sol_swap as swap
 
 class SwapTests(unittest.TestCase):

@@ -25,6 +25,10 @@ import sys
 import time
 import traceback
 
+# Production app_entry.py enforces the same invariant before dashboard imports:
+# OrcAgent never fronts user gas. Keep this verifier on that exact runtime mode.
+os.environ['ORCAGENT_FRONTS_GAS'] = '0'
+
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, APP_ROOT)
 
@@ -127,12 +131,10 @@ def main():
         if missing:
             raise RuntimeError(f'missing required variables: {", ".join(missing)}')
         # Presence only. A value is never printed, here or anywhere below.
-        present = [k for k in ('ZEROX_API_KEY', 'GAS_SPONSOR_PRIVATE_KEY',
-                               'SOL_GAS_SPONSOR_PRIVATE_KEY', 'JUPITER_PROXY',
+        present = [k for k in ('SOL_GAS_SPONSOR_PRIVATE_KEY', 'JUPITER_PROXY',
                                'HELIUS_API_KEY', 'PUBLIC_HOST', 'DATA_DIR')
                    if os.getenv(k)]
-        absent = [k for k in ('ZEROX_API_KEY', 'GAS_SPONSOR_PRIVATE_KEY',
-                              'SOL_GAS_SPONSOR_PRIVATE_KEY')
+        absent = [k for k in ('SOL_GAS_SPONSOR_PRIVATE_KEY',)
                   if not os.getenv(k)]
         out = f'set: {", ".join(present) or "none"}'
         if absent:
@@ -149,41 +151,8 @@ def main():
 
     attempt('storage', storage)
 
-    # ── the chains ──
-    section('EVM chains — RPC')
+    # ── Solana-only product ──
     import dashboard as d
-
-    for chain in list(getattr(d, 'ACTIVE_EVM_CHAINS', d.EVM_CHAINS)):
-        def rpc(chain=chain):
-            try:
-                w3 = d._get_web3(chain)
-                block = w3.eth.block_number
-                gas = w3.eth.gas_price
-            except Exception as e:
-                # Public endpoints increasingly refuse datacenter addresses, and
-                # a server move changes yours. Naming the variable to set turns
-                # this from a puzzle into one line in the env file.
-                url = d.EVM_CHAINS[chain].get('rpc_url', '?')
-                raise RuntimeError(
-                    f'{type(e).__name__}: {e}\n         endpoint: {url}\n'
-                    f'         set {chain.upper()}_RPC_URL in /etc/orcagent.env '
-                    f'to a provider that accepts this server') from None
-            return f'block {block}, gas {gas / 1e9:.3f} gwei'
-        attempt(f'{chain}: RPC reachable', rpc)
-
-    section('0x — swap quotes')
-    if not os.getenv('ZEROX_API_KEY'):
-        report(BAD, '0x', 'ZEROX_API_KEY is not set — no EVM trade can be priced')
-    else:
-        for chain in list(getattr(d, 'ACTIVE_EVM_CHAINS', d.EVM_CHAINS)):
-            def price(chain=chain):
-                usd = d._te_native_price_usd(chain)
-                return f'1 {d.EVM_CHAINS[chain]["native_symbol"]} = ${usd}'
-            attempt(f'{chain}: native price via 0x', price)
-
-            def gas_usd(chain=chain):
-                return f'one swap costs about ${d._te_gas_usd(chain)}'
-            attempt(f'{chain}: gas priced in USD', gas_usd)
 
     section('Solana')
 
@@ -229,83 +198,8 @@ def main():
         return f'{len(r.json().get("pairs") or [])} pairs returned'
     attempt('DexScreener', dexscreener)
 
-    # ── the thing that has never been tested: a real priced trade ──
-    section('trade engine — a real quote, priced end to end')
-    from decimal import Decimal
-
-    # A quote is built FOR somebody, and 0x rejects a taker that is not a real
-    # address -- which is how the native-token sentinel being passed here
-    # produced a 400 on every chain. Use a wallet that actually exists: the
-    # gas sponsor if configured, otherwise any user's EVM address.
-    taker = ''
-    try:
-        taker = d._gas_sponsor_address() or ''
-    except Exception:
-        pass
-    if not taker:
-        try:
-            conn = __import__('sqlite3').connect(d.DB_FILE)
-            try:
-                row = conn.execute(
-                    "SELECT bsc_wallet_address FROM users WHERE bsc_wallet_address "
-                    "IS NOT NULL AND bsc_wallet_address != '' LIMIT 1").fetchone()
-                taker = (row or [''])[0] or ''
-            finally:
-                conn.close()
-        except Exception:
-            pass
-    if not taker:
-        report(WARN, 'no wallet to quote for',
-               'a quote is built for a specific address, and there is no gas '
-               'sponsor and no user wallet to use — so the ceiling check below '
-               'is skipped rather than run against a made-up taker')
-
-    # Buy the chain's NATIVE token with the stable the trade is funded from.
-    # This used to quote the chain's own USDC -- which is what build_quote
-    # SELLS -- so every request asked 0x to route USDC into USDC and was
-    # refused, identically, on all five chains. A token cannot be routed to
-    # itself; native is the one pair guaranteed to exist everywhere.
-    priced_any = False
-    for chain, cfg_ in getattr(d, 'ACTIVE_EVM_CHAINS', d.EVM_CHAINS).items():
-        token = d.BNB_NATIVE_ADDR      # the native-token sentinel, valid as a BUY token
-        if not os.getenv('ZEROX_API_KEY') or not taker:
-            continue
-
-        def quote(chain=chain, token=token):
-            nonlocal priced_any
-            q = d.build_quote(
-                d.QuoteRequest(user_id=0, wallet='verify', source_chain=chain,
-                               destination_chain=chain, token_address=token,
-                               max_spend_usd=Decimal('100'),
-                               taker_address=taker),
-                swap_provider=d._te_swap_provider(chain),
-                gas_estimator=d._te_gas_usd,
-                fee_rate=Decimal(str(d.FEE_RATE_TXN)),
-                gas_is_sponsored=lambda c: False,
-            )
-            b = q.to_dict()
-            purchase = Decimal(b['token_purchase_usd'])
-            costs = sum(Decimal(v) for v in b['costs_by_kind'].values())
-            total = purchase + costs
-            # THE CLAIM THIS WHOLE REWRITE RESTS ON: a $100 trade costs $100.
-            if total > Decimal('100'):
-                raise AssertionError(
-                    f'CEILING BROKEN: purchase ${purchase} + costs ${costs} '
-                    f'= ${total}, above the $100 the user entered')
-            priced_any = True
-            lines = ' · '.join(f'{k} ${v}' for k, v in b['costs_by_kind'].items())
-            return (f'$100 max -> buys ${purchase} of '
-                    f'{d.EVM_CHAINS[chain]["native_symbol"]}   [{lines}]\n'
-                    f'         total ${total} — within the ceiling'
-                    + ('' if b['can_execute'] else
-                       f"\n         NOT EXECUTABLE: {b['reject_reason']}"))
-
-        attempt(f'{chain}: $100 quote adds up', quote)
-
-    if not priced_any:
-        report(WARN, 'no chain could be priced',
-               'without a working 0x key, an RPC and a wallet to quote for, no '
-               'EVM trade can be priced')
+    section('trade engine — Solana only')
+    report(OK, 'active trading chain', 'Solana via Jupiter; legacy non-Solana routes are disabled')
 
     # ── the wallets that have to hold something ──
     section('sponsor wallets')
@@ -314,16 +208,11 @@ def main():
     # rule, so the rule is reported first and the balance checks read it.
     _fronting = bool(getattr(d, 'ORCAGENT_FRONTS_GAS', False))
     if _fronting:
-        report(OK, 'OrcAgent fronts gas',
-               'a user holding only USDC can trade on an EVM chain without first '
-               'acquiring its gas token — the sponsor puts up the native token and '
-               'the trade\'s own quote charges the user for it. These wallets need '
-               'a few euros each; that is float, and it comes back.')
+        report(WARN, 'unexpected gas-fronting mode',
+               'Production is Solana-only and app_entry.py forces ORCAGENT_FRONTS_GAS=0.')
     else:
-        report(OK, 'this deployment fronts nothing',
-               'ORCAGENT_FRONTS_GAS is off, so users fund their own gas and the '
-               'sponsor wallets are meant to be empty — a low balance here is not '
-               'a problem to fix')
+        report(OK, 'gas-fronting mode',
+               'OrcAgent fronts no user gas. Solana trades use Jupiter gasless when available; otherwise the user needs SOL for network fees.')
 
     # What counts as "enough" is measured in GRANTS, not in tokens.
     #
@@ -333,70 +222,14 @@ def main():
     # "needs 0.0200" while this check said "below 0.05", so the operator had
     # two numbers for "how much do I send" and neither was the app's own.
     #
-    # A grant is what it costs to activate one user's wallet, and the app
-    # already knows it: on EVM it is the gas price of that chain times the
-    # units a top-up needs times the safety multiplier (see
-    # _gas_sponsor_needs_funding); on Solana it is a constant. Deriving from
-    # those means this stays right when a gas price moves or a constant is
-    # retuned, instead of quietly drifting into a threshold nobody rechecked.
+    # The sponsor check below remains only as a diagnostic if gas-fronting is
+    # deliberately enabled in a non-production experiment. In production it
+    # returns immediately because app_entry.py forces fronting off.
     WARN_BELOW_GRANTS = 5     # fewer than this many users could be activated
     TARGET_GRANTS     = getattr(d, 'GAS_SPONSOR_TARGET_GRANTS', 30)
 
     def _grants_left(bal, one_grant):
         return int(bal // one_grant) if one_grant > 0 else 0
-
-    def evm_sponsor():
-        if not _fronting:
-            return 'not used (ORCAGENT_FRONTS_GAS is off)'
-        addr = d._gas_sponsor_address()
-        if not addr:
-            raise Blocking('GAS_SPONSOR_PRIVATE_KEY is not set, but this '
-                           'deployment fronts gas — so on EVERY EVM chain, a '
-                           'user holding only USDC can neither trade nor send '
-                           'their own money out. The SOL bootstrap bridge is '
-                           'the only way through and it needs SOL they may not '
-                           'have. Set the key, or set ORCAGENT_FRONTS_GAS=0 if '
-                           'users really are meant to fund their own gas')
-        out, empty, dead, unreadable = [], [], [], []
-        for chain in getattr(d, 'ACTIVE_EVM_CHAINS', d.EVM_CHAINS):
-            try:
-                bal = d.get_evm_native_balance(addr, chain)
-                sym = d.EVM_CHAINS[chain]['native_symbol']
-                # The same arithmetic the app uses to decide the sponsor needs
-                # funding, so this check and that decision cannot disagree.
-                w3 = d._get_web3(chain)
-                one_grant = (w3.eth.gas_price * d.GAS_TOPUP_TX_GAS_UNITS
-                             * d.GAS_SPONSOR_TX_MULTIPLIER) / 1e18
-                left = _grants_left(bal, one_grant)
-                # Zero grants is not "very low". It is a chain where a
-                # USDC-only user can neither trade nor withdraw, right now.
-                mark = '  ← BLOCKED' if left < 1 else ('  ← low' if left < WARN_BELOW_GRANTS else '')
-                out.append(f'{chain} {bal:.5f} {sym} ({left} users){mark}')
-                if left < WARN_BELOW_GRANTS:
-                    # The amount to reach the target, not the amount to clear
-                    # the warning: topping up to just above the line means
-                    # being back here after a handful of users.
-                    need = max(0.0, one_grant * TARGET_GRANTS - bal)
-                    (dead if left < 1 else empty).append(
-                        f'{chain} (send {need:.5f} {sym})')
-            except Exception as e:
-                out.append(f'{chain} unreadable ({type(e).__name__})')
-                unreadable.append(chain)
-        line = f'{addr}\n         ' + ' · '.join(out)
-        # A chain that cannot fund a single user is an outage on that chain,
-        # not a low balance: every USDC-only user there is stuck, unable to
-        # trade and unable to get their own money out. It fails the run so
-        # the deploy cannot end on a green tick while that is true.
-        if dead:
-            raise Blocking(
-                line + '\n         NOBODY can trade or withdraw on: '
-                + ', '.join(dead))
-        if empty:
-            # Raised, not returned: the wallet being readable is not the
-            # thing being checked — its being able to do its job is.
-            raise RuntimeError(line + '\n         top these up: ' + ', '.join(empty))
-        return line
-    attempt('EVM gas sponsor funding', evm_sponsor, essential=False)
 
     def sol_sponsor():
         if not _fronting:

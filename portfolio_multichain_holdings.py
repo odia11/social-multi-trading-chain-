@@ -1,13 +1,8 @@
-"""Add every supported-chain open position to the Portfolio token feed.
+"""Authoritative Solana Portfolio snapshot.
 
-The legacy /api/wallet/tokens endpoint is Solana/SPL-oriented. OrcAgent now
-trades BSC, Base and Arbitrum too, so successful active-chain EVM
-positions must not disappear from Portfolio just because they are not SPL
-accounts. This adapter keeps the existing endpoint and appends the user's
-recorded non-Solana open positions in the same shape the wallet UI already
-renders.
-
-No trading logic is changed here. It is a read-only presentation adapter.
+OrcAgent is Solana-only. Legacy EVM database columns/rows are intentionally
+left untouched for historical recovery, but they are never queried into the
+active Portfolio snapshot.
 """
 from __future__ import annotations
 
@@ -30,64 +25,8 @@ _SNAPSHOT_TTL = 4.0
 
 
 def _merge_evm_positions(d, wallet, tokens):
-    """Append durable EVM open positions to the SPL token snapshot."""
-    out = [dict(t) for t in (tokens or [])]
-    seen = set()
-    for t in out:
-        addr = str(t.get('mint') or t.get('address') or t.get('token_address') or '').lower()
-        chain = str(t.get('chain') or 'solana').lower()
-        if addr:
-            seen.add((chain, addr))
-
-    try:
-        conn = sqlite3.connect(d.DB_FILE, timeout=8.0)
-        uid_row = conn.execute('SELECT id FROM users WHERE wallet_address=?', (wallet,)).fetchone()
-        rows = []
-        if uid_row:
-            rows = conn.execute(
-                "SELECT mint_address,symbol,amount,buy_price,spend,chain,opened_at "
-                "FROM open_positions WHERE user_id=? AND COALESCE(chain,'solana')!='solana' AND amount>0",
-                (uid_row[0],)).fetchall()
-        conn.close()
-    except Exception:
-        rows = []
-
-    supported = set(getattr(d, 'ACTIVE_EVM_CHAINS', {}).keys())
-    for address, symbol, amount, buy_price, spend, chain, opened_at in rows:
-        chain = str(chain or '').lower()
-        token_address = str(address or '').strip()
-        if chain not in supported or not token_address or (chain, token_address.lower()) in seen:
-            continue
-        amount = _num(amount)
-        if amount <= 0:
-            continue
-        symbol = str(symbol or token_address[:8]).replace('$', '')
-        price = 0.0
-        name = symbol
-        logo = ''
-        change24 = 0.0
-        try:
-            td = d.get_token_data(token_address, chain=chain)
-            if td:
-                symbol = str(td.get('symbol') or symbol).replace('$', '')
-                name = str(td.get('name') or name)
-                price = _num(td.get('price', td.get('price_usd', 0)))
-                logo = str(td.get('logo_url') or td.get('image') or '')
-                change24 = _num(td.get('change24h', td.get('price_change_24h', 0)))
-        except Exception:
-            pass
-        value = amount * price if price > 0 else _num(spend)
-        out.append({
-            'mint': token_address, 'address': token_address,
-            'token_address': token_address, 'symbol': symbol, 'name': name,
-            'amount': amount, 'price_usd': price,
-            'usd_value': value, 'value_usd': value,
-            'avg_price': _num(buy_price), 'price_change_24h': change24,
-            'logo_url': logo, 'chain': chain, 'is_evm': True,
-            'opened_at': opened_at,
-        })
-        seen.add((chain, token_address.lower()))
-    return out
+    """Legacy name kept for call-site compatibility; only Solana assets pass."""
+    return [dict(t) for t in (tokens or [])]
 
 
 def _portfolio_snapshot(d, wallet, bust=False):
@@ -99,17 +38,6 @@ def _portfolio_snapshot(d, wallet, bust=False):
                 return cached[1]
 
     onchain_wallet = d._get_trading_wallet_address(wallet) or wallet
-    evm_address = ''
-    try:
-        conn = sqlite3.connect(d.DB_FILE, timeout=8.0)
-        row = conn.execute(
-            'SELECT id,COALESCE(bsc_wallet_address,"") FROM users WHERE wallet_address=?',
-            (wallet,)).fetchone()
-        conn.close()
-        if row:
-            evm_address = str(row[1] or '')
-    except Exception:
-        pass
 
     if bust:
         try:
@@ -121,9 +49,6 @@ def _portfolio_snapshot(d, wallet, bust=False):
     # them concurrently and publish only one completed snapshot to the UI.
     jobs = {'tokens': lambda: d._fetch_wallet_tokens(wallet, onchain_wallet),
             'solana_usdc': lambda: d._get_solana_usdc_balance(onchain_wallet)}
-    if evm_address:
-        for chain in getattr(d, 'ACTIVE_EVM_CHAINS', {}):
-            jobs['stable:' + chain] = (lambda ch=chain: d.get_evm_usdc_balance(evm_address, ch))
 
     results = {}
     errors = {}
@@ -159,9 +84,8 @@ def _portfolio_snapshot(d, wallet, bust=False):
             t['chain'] = 'solana'
 
     solana_usdc = _num(results.get('solana_usdc'))
-    evm_chains = {chain: round(_num(results.get('stable:' + chain)), 6)
-                  for chain in getattr(d, 'ACTIVE_EVM_CHAINS', {})}
-    stable_total = solana_usdc + sum(evm_chains.values())
+    evm_chains = {}
+    stable_total = solana_usdc
 
     sol_row = next((t for t in assets if str(t.get('symbol') or '').upper() == 'SOL'
                     and str(t.get('chain') or 'solana') == 'solana'), None)
@@ -196,7 +120,7 @@ def _portfolio_snapshot(d, wallet, bust=False):
     snapshot = {
         'ok': True,
         'generated_at': now,
-        'wallets': {'solana': onchain_wallet, 'evm': evm_address},
+        'wallets': {'solana': onchain_wallet},
         'total_usd': round(total, 4),
         'available_to_trade_usdc': round(stable_total, 4),
         'stable': {

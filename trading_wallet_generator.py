@@ -1,13 +1,12 @@
 """Generate dedicated OrcAgent trading wallets and save them only after backup confirmation.
 
-The authenticated wallet remains the user's OrcAgent identity. This feature creates:
-- one Solana ed25519 trading wallet;
-- one EVM secp256k1 trading wallet reused on BSC/Base/Arbitrum/Polygon/etc.
+The authenticated wallet remains the user's OrcAgent identity. This feature creates
+one dedicated Solana ed25519 trading wallet.
 
-Generation does NOT persist private keys. The browser receives them once, the user
-must confirm they saved both, and only then sends them back over HTTPS to be stored
-using dashboard.py's existing wallet-bound double-Fernet encryption. No plaintext
-key is logged and API responses are explicitly no-store.
+Generation does NOT persist the private key. The browser receives it once, the user
+must confirm it was saved, and only then sends it back over HTTPS to be stored using
+dashboard.py's existing wallet-bound double-Fernet encryption. No plaintext key is
+logged and API responses are explicitly no-store.
 """
 from __future__ import annotations
 
@@ -16,7 +15,6 @@ import sqlite3
 
 from flask import jsonify, request
 from solders.keypair import Keypair
-from eth_account import Account
 
 _GENERATE_PATH = '/api/wallet/generate-trading-wallet'
 _CONFIRM_PATH = '/api/wallet/generated/confirm'
@@ -65,14 +63,14 @@ def _existing_key_state(dashboard_module, wallet: str):
         conn = sqlite3.connect(db_file, timeout=5.0)
         try:
             row = conn.execute(
-                'SELECT encrypted_private_key, encrypted_private_key_bsc FROM users WHERE wallet_address=? LIMIT 1',
+                'SELECT encrypted_private_key FROM users WHERE wallet_address=? LIMIT 1',
                 (wallet,),
             ).fetchone()
         finally:
             conn.close()
         if not row:
             return False
-        return bool((row[0] or '').strip() or (row[1] or '').strip())
+        return bool((row[0] or '').strip())
     except sqlite3.Error:
         return None
 
@@ -103,12 +101,6 @@ def install(dashboard_module):
             sol = Keypair()
             sol_address = str(sol.pubkey())
             sol_private = str(sol)
-
-            evm = Account.create()
-            evm_address = str(evm.address)
-            evm_private = evm.key.hex()
-            if not evm_private.startswith('0x'):
-                evm_private = '0x' + evm_private
         except Exception:
             app.logger.exception('trading wallet generation failed')
             return jsonify({'ok': False, 'error': 'Could not generate trading wallet'}), 500
@@ -117,7 +109,7 @@ def install(dashboard_module):
         if callable(log_fn):
             try:
                 log_fn('trading_wallet_generated', wallet,
-                       'sol=' + sol_address[:8] + '… evm=' + evm_address[:10] + '…')
+                       'sol=' + sol_address[:8] + '…')
             except Exception:
                 pass
 
@@ -125,9 +117,7 @@ def install(dashboard_module):
             'ok': True,
             'solana_address': sol_address,
             'solana_private_key': sol_private,
-            'evm_address': evm_address,
-            'evm_private_key': evm_private,
-            'warning': 'Save both private keys now. OrcAgent will not show generated keys again after confirmation.',
+            'warning': 'Save your Solana private key now. OrcAgent will not show generated keys again after confirmation.',
         })
         return _no_store(resp)
 
@@ -152,12 +142,11 @@ def install(dashboard_module):
 
         body = request.get_json(silent=True) or {}
         if body.get('backup_confirmed') is not True:
-            return jsonify({'ok': False, 'error': 'Confirm that both private keys were saved first'}), 400
+            return jsonify({'ok': False, 'error': 'Confirm that your Solana private key was saved first'}), 400
 
         sol_private = str(body.get('solana_private_key') or '').strip()
-        evm_private = str(body.get('evm_private_key') or '').strip()
-        if not sol_private or not evm_private:
-            return jsonify({'ok': False, 'error': 'Both generated private keys are required'}), 400
+        if not sol_private:
+            return jsonify({'ok': False, 'error': 'Solana private key is required'}), 400
 
         valid_sol = getattr(dashboard_module, 'is_valid_solana_private_key')
         if not valid_sol(sol_private):
@@ -169,12 +158,6 @@ def install(dashboard_module):
         except Exception:
             return jsonify({'ok': False, 'error': 'Invalid Solana private key'}), 400
 
-        try:
-            evm_account = Account.from_key(evm_private)
-            evm_address = str(evm_account.address)
-        except Exception:
-            return jsonify({'ok': False, 'error': 'Invalid EVM private key'}), 400
-
         if sol_address == wallet:
             return jsonify({'ok': False, 'error': 'Trading wallet must be separate from your connected wallet'}), 400
 
@@ -182,8 +165,7 @@ def install(dashboard_module):
         decrypt = getattr(dashboard_module, 'decrypt_private_key')
         try:
             sol_enc = encrypt(sol_private, wallet)
-            evm_enc = encrypt(evm_private, wallet)
-            if decrypt(sol_enc, wallet) != sol_private or decrypt(evm_enc, wallet) != evm_private:
+            if decrypt(sol_enc, wallet) != sol_private:
                 raise ValueError('encryption round-trip mismatch')
         except Exception:
             app.logger.exception('generated trading wallet encryption failed')
@@ -197,17 +179,16 @@ def install(dashboard_module):
                 conn.execute('BEGIN IMMEDIATE')
                 conn.execute('INSERT OR IGNORE INTO users (wallet_address) VALUES (?)', (wallet,))
                 current = conn.execute(
-                    'SELECT encrypted_private_key, encrypted_private_key_bsc FROM users WHERE wallet_address=?',
+                    'SELECT encrypted_private_key FROM users WHERE wallet_address=?',
                     (wallet,),
                 ).fetchone()
-                if current and ((current[0] or '').strip() or (current[1] or '').strip()):
+                if current and (current[0] or '').strip():
                     conn.rollback()
                     return jsonify({'ok': False, 'error': 'Trading wallet was configured in another session. Existing keys were left unchanged.'}), 409
                 conn.execute(
-                    'UPDATE users SET encrypted_private_key=?, key_hash=?, '
-                    'bsc_wallet_address=?, encrypted_private_key_bsc=? '
+                    'UPDATE users SET encrypted_private_key=?, key_hash=? '
                     'WHERE wallet_address=?',
-                    (sol_enc, sol_hash, evm_address, evm_enc, wallet),
+                    (sol_enc, sol_hash, wallet),
                 )
                 conn.commit()
             except Exception:
@@ -229,7 +210,7 @@ def install(dashboard_module):
         if callable(log_fn):
             try:
                 log_fn('generated_trading_wallet_saved', wallet,
-                       'sol=' + sol_address[:8] + '… evm=' + evm_address[:10] + '…')
+                       'sol=' + sol_address[:8] + '…')
             except Exception:
                 pass
 
@@ -237,7 +218,6 @@ def install(dashboard_module):
             'ok': True,
             'has_trading_key': True,
             'solana_address': sol_address,
-            'evm_address': evm_address,
         }))
 
     @app.after_request
@@ -255,13 +235,13 @@ def install(dashboard_module):
             if 'id="manage-modal"' not in html:
                 return response
             marker = '</head>'
-            if marker in html and '/static/trading-wallet-generator.css?v=2' not in html:
+            if marker in html and '/static/trading-wallet-generator.css?v=3' not in html:
                 html = html.replace(marker,
-                    '<link rel="stylesheet" href="/static/trading-wallet-generator.css?v=2">' + marker, 1)
+                    '<link rel="stylesheet" href="/static/trading-wallet-generator.css?v=3">' + marker, 1)
             marker = '</body>'
-            if marker in html and '/static/trading-wallet-generator.js?v=2' not in html:
+            if marker in html and '/static/trading-wallet-generator.js?v=3' not in html:
                 html = html.replace(marker,
-                    '<script src="/static/trading-wallet-generator.js?v=2"></script>' + marker, 1)
+                    '<script src="/static/trading-wallet-generator.js?v=3"></script>' + marker, 1)
             response.set_data(html)
             response.content_length = len(response.get_data())
         except Exception:

@@ -1,7 +1,7 @@
 /* Instant shared portfolio balance in the OrcAgent top bar.
    Paint the last confirmed value synchronously from localStorage so page
    navigation never flashes $0.00, then reconcile from the authoritative
-   multi-chain portfolio snapshot in the background. */
+   Solana portfolio snapshot in the background. */
 (function(){
 'use strict';
 var timer=null,inFlight=false,last='',lastAt=0;

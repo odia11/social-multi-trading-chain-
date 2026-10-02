@@ -27,8 +27,7 @@ function fmtUsd(n){
   return '$'+Math.round(n);
 }
 function fmtInt(n){return (Number(n)||0).toLocaleString('en-US')}
-var CHAINS={solana:['S','#9945ff','Solana'],bsc:['B','#f0b90b','BNB Chain'],base:['B','#0052ff','Base'],
-  arbitrum:['A','#28a0f0','Arbitrum'],polygon:['P','#8247e5','Polygon'],robinhood:['R','#00c805','Robinhood Chain']};
+var CHAINS={solana:['S','#9945ff','Solana']};
 
 // Rendered as a POST in the feed: first item under the For You tab, from
 // OrcAgent, with the token card as its attachment and Bullish / Bearish /

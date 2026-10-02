@@ -731,9 +731,9 @@ html,body{background:#080e11}
   <div class="wlt-hdr">
     <div>
       <div class="wlt-title">Portfolio</div>
-      <div class="wlt-sub">Your multi-chain trading wallet</div>
+      <div class="wlt-sub">Your Solana trading wallet</div>
     </div>
-    <a class="pf-search-link" href="/live-market" aria-label="Search tokens"><svg width="18" height="18" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="m16 16 5 5"></path></svg></a><span class="net-pill"><span class="net-dot"></span>MULTI-CHAIN · MAINNET</span>
+    <a class="pf-search-link" href="/live-market" aria-label="Search tokens"><svg width="18" height="18" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="m16 16 5 5"></path></svg></a><span class="net-pill"><span class="net-dot"></span>SOLANA · MAINNET</span>
   </div>
 
   <!-- scrollable content -->
@@ -748,8 +748,8 @@ html,body{background:#080e11}
                a wallet holding $4.64 of tradeable balance read as empty. -->
           <div class="wlt-hero-lbl">OrcAgent Trading Wallet</div>
           <div class="wlt-hero-num" id="pf-total">—</div>
-          <div class="wlt-hero-usd" id="pf-performance">Live multi-chain balance</div>
-          <div class="wlt-hero-usd pf-tradeable">Available to trade in OrcAgent: <span id="avail">—</span> <span id="avail-sub">USDC across all chains</span></div>
+          <div class="wlt-hero-usd" id="pf-performance">Live Solana balance</div>
+          <div class="wlt-hero-usd pf-tradeable">Available to trade in OrcAgent: <span id="avail">—</span> <span id="avail-sub">USDC on Solana</span></div>
         </div>
         <svg class="pf-spark" viewBox="0 0 122 73" role="img" aria-label="Portfolio trend during this session"><path id="pf-spark-fill" fill="url(#pf-spark-gradient)" d=""></path><path id="pf-spark-line" d="" stroke="#37dc9d" stroke-width="2.5" fill="none" stroke-linejoin="round" stroke-linecap="round"></path><defs><linearGradient id="pf-spark-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#32d99a" stop-opacity=".27"></stop><stop offset="100%" stop-color="#32d99a" stop-opacity="0"></stop></linearGradient></defs></svg><button class="wlt-hero-refresh" onclick="loadBalance()" aria-label="Refresh balance" title="Refresh">↻</button>
       </div>
@@ -795,11 +795,7 @@ html,body{background:#080e11}
         <label class="oa-h-network" for="oa-h-chain">
           <span class="oa-h-network-globe" aria-hidden="true">◎</span>
           <select id="oa-h-chain" aria-label="Filter history by chain">
-            <option value="all">All Chains</option>
             <option value="solana">Solana</option>
-            <option value="base">Base</option>
-            <option value="bsc">BNB Chain</option>
-            <option value="arbitrum">Arbitrum</option>
           </select>
           <span class="oa-h-select-chevron" aria-hidden="true">⌄</span>
         </label>
@@ -834,7 +830,7 @@ html,body{background:#080e11}
       <div class="sol-usdc-head">
         <div>
           <div class="sol-usdc-title">Convert assets</div>
-          <div class="sol-usdc-copy">Swap between the native gas token and the trading stablecoin on Solana, BSC, Base or Arbitrum.</div>
+          <div class="sol-usdc-copy">Swap between SOL and USDC on Solana.</div>
         </div>
       </div>
       <div class="sol-usdc-balances">
@@ -843,48 +839,28 @@ html,body{background:#080e11}
       </div>
       <div class="sol-usdc-actions">
         <button class="sol-usdc-btn" onclick="_modalConvert()">Convert assets</button>
-        <button class="sol-usdc-btn secondary" onclick="_modalBridge()">Bridge USDC</button>
       </div>
-      <div class="sol-usdc-note">Same-chain conversions use Jupiter on Solana and 0x on EVM chains. Cross-chain USDC uses the Bridge flow. You always review the live quote before confirming.</div>
+      <div class="sol-usdc-note">Solana swaps use Jupiter. You always review the live quote before confirming.</div>
     </div>
 
-    <!-- combined USDC balance across every chain this app trades on -- the
-         "one balance, many chains" view apps like fomo.family show, except
-         here it's an honest sum of real per-chain wallet balances, not an
-         actual pooled cross-chain balance (see /api/wallet/usdc-summary).
-         Solana's own tile is static (it's a separate code path from the
-         EVM chains); the EVM chains (BSC, Base, Arbitrum, Polygon -- see
-         EVM_CHAINS in dashboard.py) render into #usdc-evm-tiles from
-         usdc-summary's `evm_chains` dict, so a future chain added there
-         shows up here with no template change needed. -->
+    <!-- Solana USDC balance. Legacy EVM database fields are intentionally
+         not surfaced in the active OrcAgent portfolio. -->
     <div class="dep-card" style="margin-bottom:16px">
       <div class="dep-header">
-        <span class="dep-title">USDC <span style="color:var(--muted);font-weight:500">per chain</span></span>
+        <span class="dep-title">USDC <span style="color:var(--muted);font-weight:500">on Solana</span></span>
         <!-- The total moved to the hero above, where the balance you actually
              trade with belongs. Repeating it here would be two headline
              numbers competing to be the important one. -->
         <span class="dep-title" id="usdc-total" style="font-variant-numeric:tabular-nums">—</span>
       </div>
-      <button class="wlt-usdc-toggle" id="usdc-tiles-toggle" onclick="_toggleUsdcTiles()">View per chain <span id="usdc-tiles-chevron">▾</span></button>
-      <div class="wlt-bsc-balances wlt-usdc-tiles collapsed" id="usdc-chain-tiles">
-        <div class="wlt-bsc-bal-item">
-          <span class="wlt-bsc-bal-lbl">Solana</span>
-          <span class="wlt-bsc-bal-val" id="usdc-sol-val">—</span>
-        </div>
-        <span id="usdc-evm-tiles" style="display:contents"></span>
-      </div>
     </div>
 
-    <!-- unified deposit card — tabs per chain, so adding more chains later
-         means one more tab, never another stacked card -->
+    <!-- Solana deposit address -->
     <div class="dep-card">
       <div class="dep-header">
         <span class="dep-title">Deposit Address</span>
         <div class="dep-chain-tabs" id="dep-chain-tabs">
           <button class="dep-chain-tab active" data-chain="sol" onclick="_depSwitchChain('sol')">SOL</button>
-          {% if bsc_deposit_address %}
-          <button class="dep-chain-tab" data-chain="bsc" onclick="_depSwitchChain('bsc')">EVM</button>
-          {% endif %}
         </div>
       </div>
 
@@ -906,36 +882,6 @@ html,body{background:#080e11}
         {% endif %}
       </div>
 
-      <!-- BSC tab -->
-      {% if bsc_deposit_address %}
-      <div class="dep-chain-panel" id="dep-panel-bsc" style="display:none">
-        <div class="dep-body">
-          <div class="dep-qr"><div class="dep-qr-grid" id="dep-qr-bsc"></div></div>
-          <div class="dep-right">
-            <div class="dep-addr">{{ bsc_deposit_address }}</div>
-            <div class="dep-btns">
-              <button class="dep-btn dep-copy" onclick="_copyAddrBsc()">Copy Address</button>
-              <a class="dep-btn dep-scan" href="https://bscscan.com/address/{{ bsc_deposit_address }}" target="_blank" rel="noopener">View on BscScan ↗</a>
-            </div>
-            <div style="font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5">
-              This is one shared EVM wallet — the same address also receives USDC on Base and Arbitrum. You only need USDC here: OrcAgent puts up the network fee for your first trade on a new chain, charges it to that trade, and after that the wallet tops up its own gas from your USDC. If it ever tells you it can't, sending a few cents of that chain's own gas token here (ETH for Base/Arbitrum, BNB for BSC) unblocks it immediately.
-            </div>
-          </div>
-        </div>
-        <div class="wlt-bsc-balances">
-          <div class="wlt-bsc-bal-item">
-            <span class="wlt-bsc-bal-lbl">USDC</span>
-            <span class="wlt-bsc-bal-val" id="bsc-usdc-val">—</span>
-          </div>
-          <div class="wlt-bsc-bal-item">
-            <span class="wlt-bsc-bal-lbl">BNB <span title="A small reserve for transaction fees — topped up automatically from your USDC deposit">(gas)</span></span>
-            <span class="wlt-bsc-bal-val" id="bsc-bnb-val">—</span>
-          </div>
-        </div>
-        <button onclick="convertGasToUsdc('bsc')" id="bsc-convert-btn" title="Convert your BNB to USDC (a small amount is always kept for gas)"
-                style="background:none;border:none;color:#f7b955;font-size:12px;font-weight:700;cursor:pointer;padding:0;margin-top:10px;text-decoration:underline dotted">Convert BNB to USDC →</button>
-      </div>
-      {% endif %}
     </div>
 
     <!-- holdings -->
@@ -947,7 +893,7 @@ html,body{background:#080e11}
           <button onclick="loadTokens(true)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:0" title="Refresh">↻</button>
         </div>
       </div>
-      <div class="pf-asset-static"><div class="pf-asset-coin usdc">$</div><div class="pf-asset-description"><b>USDC</b><small>Across all chains</small></div><div class="pf-asset-amount"><b id="pf-usdc-asset">—</b><small>Stablecoin</small></div></div><div class="pf-asset-static"><div class="pf-asset-coin sol"><span>≋</span></div><div class="pf-asset-description"><b>SOL</b><small>Solana</small></div><div class="pf-asset-amount"><b id="pf-sol-asset">—</b><small id="pf-sol-price">—</small></div></div><div class="tok-list" id="tokens"><div class="state-msg">Loading…</div></div>
+      <div class="pf-asset-static"><div class="pf-asset-coin usdc">$</div><div class="pf-asset-description"><b>USDC</b><small>Solana</small></div><div class="pf-asset-amount"><b id="pf-usdc-asset">—</b><small>Stablecoin</small></div></div><div class="pf-asset-static"><div class="pf-asset-coin sol"><span>≋</span></div><div class="pf-asset-description"><b>SOL</b><small>Solana</small></div><div class="pf-asset-amount"><b id="pf-sol-asset">—</b><small id="pf-sol-price">—</small></div></div><div class="tok-list" id="tokens"><div class="state-msg">Loading…</div></div>
     </div>
 
     <!-- recent activity -->
@@ -1173,9 +1119,7 @@ function _depSwitchChain(chain){
     t.classList.toggle('active', t.dataset.chain === chain)
   })
   var solPanel = document.getElementById('dep-panel-sol')
-  var bscPanel = document.getElementById('dep-panel-bsc')
   if(solPanel) solPanel.style.display = (chain === 'sol') ? '' : 'none'
-  if(bscPanel) bscPanel.style.display = (chain === 'bsc') ? '' : 'none'
 }
 
 function _copyAddr(){
@@ -1190,72 +1134,6 @@ function _copyAddr(){
     catch(e){_wToast('Copy failed',false)}
     document.body.removeChild(el)
   })
-}
-
-var _bscAddr = {{ bsc_deposit_address|tojson }} || ''
-function _copyAddrBsc(){
-  if(!_bscAddr) return
-  navigator.clipboard.writeText(_bscAddr).then(function(){
-    _wToast('Address copied',true)
-  }).catch(function(){
-    var el=document.createElement('textarea')
-    el.value=_bscAddr;el.style.cssText='position:fixed;opacity:0'
-    document.body.appendChild(el);el.select()
-    try{document.execCommand('copy');_wToast('Address copied',true)}
-    catch(e){_wToast('Copy failed',false)}
-    document.body.removeChild(el)
-  })
-}
-
-async function _loadBscBalance(){
-  if(!_bscAddr) return
-  var usdcEl = document.getElementById('bsc-usdc-val')
-  var bnbEl = document.getElementById('bsc-bnb-val')
-  try{
-    var r = await fetch('/api/bsc/balance')
-    var d = await r.json()
-    if(d.ok){
-      if(usdcEl) usdcEl.textContent = d.usdc.toFixed(2)
-      if(bnbEl) bnbEl.textContent = d.bnb.toFixed(4)
-    } else {
-      if(usdcEl) usdcEl.textContent = '—'
-      if(bnbEl) bnbEl.textContent = '—'
-    }
-  }catch(e){
-    if(usdcEl) usdcEl.textContent = '—'
-    if(bnbEl) bnbEl.textContent = '—'
-  }
-}
-if(_bscAddr) _loadBscBalance()
-
-// One-tap "convert my gas back to USDC" -- the reverse of the automatic
-// gas top-up (which pulls USDC->gas as needed): for a user who's ended up
-// holding native gas they'd rather have as USDC. Always keeps a small
-// reserve for future gas (server-enforced, see GAS_CONVERT_RESERVE_UNITS),
-// so this never leaves the wallet unable to broadcast its own next trade.
-async function convertGasToUsdc(chain){
-  var btn = document.getElementById(chain+'-convert-btn')
-  var origText = btn ? btn.textContent : ''
-  if(btn){ btn.disabled = true; btn.textContent = 'Converting…' }
-  try{
-    var r = await fetch('/api/evm/convert-to-usdc', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': _csrf},
-      body: JSON.stringify({chain: chain}),
-      credentials: 'include',
-    })
-    var d = await r.json()
-    if(d.ok){
-      _wToast('Converted '+d.converted_native.toFixed(4)+' '+d.native_symbol+' to USDC', true)
-      if(chain === 'bsc') _loadBscBalance()
-    } else {
-      _wToast(d.msg || 'Conversion failed', false)
-    }
-  }catch(e){
-    _wToast('Conversion failed', false)
-  }finally{
-    if(btn){ btn.disabled = false; btn.textContent = origText }
-  }
 }
 
 // ── modals ────────────────────────────────────────────────
@@ -1273,16 +1151,12 @@ function _closeModal(){
 // USDC mark (Circle's blue coin): everything on OrcAgent is priced and
 // traded in USDC, so that is what this address is for.
 var _RX_USDC_MARK='<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#2775CA"/><path d="M12.3 7.6a9.2 9.2 0 0 0 0 16.8M19.7 7.6a9.2 9.2 0 0 1 0 16.8" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/><path d="M16 9.4v13.2M19 12.6c-.5-1.2-1.6-1.8-3.1-1.8-1.8 0-3 .9-3 2.2 0 3.3 6.4 1.6 6.4 5 0 1.4-1.3 2.4-3.3 2.4-1.6 0-2.9-.7-3.4-2" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-// Two networks, one sheet. The Solana trading wallet and the one shared EVM
-// wallet are separate addresses; the EVM one used to be on the old deposit
-// card only, which the portfolio redesign hides -- so nobody could find where
-// to send USDC on an EVM chain. Users deposit USDC only (see
-var _RX_EVM_CHAINS=['Base','BSC','Arbitrum']
+// Solana-only receive sheet.
 var _rxNet='sol'
-function _rxAddr(){ return _rxNet==='evm'?_bscAddr:_walletAddr }
+function _rxAddr(){ return _walletAddr }
 function _modalDeposit(net){
-  _rxNet=(net==='evm'&&_bscAddr)?'evm':'sol'
-  var evm=_rxNet==='evm'
+  _rxNet='sol'
+  var evm=false
   var addr=_rxAddr()
   if(!addr){
     _showModal(
@@ -1292,32 +1166,19 @@ function _modalDeposit(net){
     return
   }
   // Groups of 4 are easy to compare by eye; first and last group in gold.
-  // An 0x address groups its hex, with the 0x kept on the first group.
-  var groups=evm?(addr.slice(2).match(/.{1,4}/g)||[addr.slice(2)]):(addr.match(/.{1,4}/g)||[addr])
-  if(evm) groups[0]='0x'+groups[0]
+  var groups=(addr.match(/.{1,4}/g)||[addr])
   var pretty=groups.map(function(g,i){return '<span'+(i===0||i===groups.length-1?' class="hl"':'')+'>'+esc(g)+'</span>'}).join('')
   var canShare=typeof navigator.share==='function'
-  var scanUrl=evm?'https://blockscan.com/address/'+encodeURIComponent(addr):'https://solscan.io/account/'+encodeURIComponent(addr)
-  var scanName=evm?'Blockscan':'Solscan'
-  var tabs=_bscAddr
-    ?'<div class="rx-nets" role="tablist" aria-label="Network">'
-      +'<button type="button" role="tab" class="rx-net'+(evm?'':' on')+'" aria-selected="'+(!evm)+'" onclick="_modalDeposit(\'sol\')">Solana</button>'
-      +'<button type="button" role="tab" class="rx-net'+(evm?' on':'')+'" aria-selected="'+evm+'" onclick="_modalDeposit(\'evm\')">EVM chains</button>'
-    +'</div>'
-    :''
-  var chains=evm
-    ?'<div class="rx-chains">'+_RX_EVM_CHAINS.map(function(c){
-        return '<div class="rx-chain">'+esc(c)+'</div>'
-      }).join('')+'</div>'
-    :''
-  var warn=evm
-    ?'Send <b>USDC</b> on Base, BSC or Arbitrum only — the same address on all three. Never send from Solana or Ethereum to this address.'
-    :'Send USDC (or SOL) on the <b>Solana</b> network only. USDC sent from another network (Ethereum, Base, BSC…) can be lost.'
+  var scanUrl='https://solscan.io/account/'+encodeURIComponent(addr)
+  var scanName='Solscan'
+  var tabs=''
+  var chains=''
+  var warn='Send USDC (or SOL) on the <b>Solana</b> network only.'
   _showModal(
-    '<div class="sx-hd"><div class="sx-title">Receive USDC</div><span class="sx-net"><i></i>'+(evm?'EVM':'Solana')+'</span></div>'
+    '<div class="sx-hd"><div class="sx-title">Receive USDC</div><span class="sx-net"><i></i>Solana</span></div>'
     +tabs
     +'<div class="rx-qr" id="rx-qr"></div>'
-    +'<div class="rx-hint">'+(evm?'Scan to send USDC on one of these chains':'Scan to send USDC on the Solana network')+'</div>'
+    +'<div class="rx-hint">Scan to send USDC on the Solana network</div>'
     +chains
     +'<button type="button" class="rx-addr" onclick="_rxCopy()" aria-label="Copy address">'+pretty+'</button>'
     +'<div class="rx-btns">'
@@ -1344,7 +1205,7 @@ function _modalDeposit(net){
   })(0)
 }
 function _rxCopy(){
-  if(_rxNet==='evm') _copyAddrBsc(); else _copyAddr()
+  _copyAddr()
   var b=document.getElementById('rx-copy'); if(!b) return
   var label=b.querySelector('span')
   b.classList.add('done'); if(label) label.textContent='Copied'
@@ -1355,7 +1216,7 @@ function _rxCopy(){
 function _rxShare(){
   var addr=_rxAddr()
   if(!addr||typeof navigator.share!=='function') return
-  navigator.share({title:_rxNet==='evm'?'My USDC address (Base, BSC, Arbitrum)':'My USDC address (Solana)',text:addr}).catch(function(){})
+  navigator.share({title:'My USDC address (Solana)',text:addr}).catch(function(){})
 }
 
 
@@ -1365,10 +1226,7 @@ function _rxShare(){
 // is a choice now, and each option says which token it actually moves so
 // nobody has to guess.
 var _SEND_CHAINS=[
-  {v:'solana',   label:'Solana (SOL)',          sym:'SOL',  evm:false},
-  {v:'bsc',      label:'BSC (USDC)',            sym:'USDC', evm:true},
-  {v:'base',     label:'Base (USDC)',           sym:'USDC', evm:true},
-  {v:'arbitrum', label:'Arbitrum (USDC)',       sym:'USDC', evm:true},
+  {v:'solana', label:'Solana (SOL)', sym:'SOL', evm:false},
 ]
 function _sendChain(){
   var v=(document.getElementById('send-chain')||{}).value||'solana'
@@ -1435,16 +1293,15 @@ function _sendSetMax(){
     }, 1200)
     return
   }
-  var max = c.evm ? b : Math.max(0, b - SOL_FEE_RESERVE)
+  var max = Math.max(0, b - SOL_FEE_RESERVE)
   // Floored to 6 decimals for the same reason the server floors it: a value
   // rounded up is a fraction more than the wallet holds.
   max = Math.floor(max * 1e6) / 1e6
   amtEl.value = max > 0 ? max : 0
   if(note){
     note.style.color='var(--muted)'
-    note.textContent = c.evm ? ''
-      : (max > 0 ? SOL_FEE_RESERVE+' SOL is left behind to pay the network fee.'
-                 : 'Not enough SOL to send anything after the network fee.')
+    note.textContent = max > 0 ? SOL_FEE_RESERVE+' SOL is left behind to pay the network fee.'
+                               : 'Not enough SOL to send anything after the network fee.'
   }
   _sendSyncChain()
 }
@@ -1483,17 +1340,13 @@ function _execSend(){
   // Shape-checked here so an obvious typo does not cost a round trip. The
   // server validates it again regardless -- this endpoint is reachable
   // without this form.
-  if(c.evm){
-    if(!/^0x[a-fA-F0-9]{40}$/.test(to)) return _err('Enter a valid 0x address.')
-  } else {
-    if(!to||to.length<32) return _err('Enter a valid Solana address.')
-  }
+  if(!to||to.length<32) return _err('Enter a valid Solana address.')
   if(amt<=0) return _err('Enter an amount greater than 0.')
   if(note){note.style.color='var(--muted)';note.textContent='Processing…'}
   var btn=document.getElementById('send-btn')
   if(btn) btn.disabled=true
-  var url  = c.evm ? '/api/withdraw/evm' : '/api/wallet/send'
-  var body = c.evm ? {chain:c.v, to_address:to, amount:amt} : {to:to, amount_sol:amt}
+  var url = '/api/wallet/send'
+  var body = {to:to, amount_sol:amt}
   fetch(url,{
     method:'POST',credentials:'include',
     headers:Object.assign({'Content-Type':'application/json','X-CSRF-Token':_csrf},
@@ -1523,9 +1376,6 @@ function _execSend(){
 // ── same-chain native ↔ stable convert modal ───────────────────────────────
 var _CONVERT_CHAINS=[
   {v:'solana',label:'Solana',native:'SOL',stable:'USDC'},
-  {v:'bsc',label:'BSC',native:'BNB',stable:'USDC'},
-  {v:'base',label:'Base',native:'ETH',stable:'USDC'},
-  {v:'arbitrum',label:'Arbitrum',native:'ETH',stable:'USDC'},
 ]
 var _convertQuote=null
 var _convertBalance=null
@@ -1773,7 +1623,7 @@ function _modalConvert(){
   _convertBalance=null
   _showModal(
     '<div class="w-modal-title">Convert assets</div>'
-    +'<div class="w-modal-note" style="margin-top:0">Swap on the same chain. To move USDC between chains, use Bridge instead.</div>'
+    +'<div class="w-modal-note" style="margin-top:0">Swap SOL and USDC directly on Solana.</div>'
     +'<div class="br-form-card">'
       +'<div class="br-form-box" style="flex:1">'
         +'<div class="br-form-box-lbl">Network</div>'
@@ -1842,15 +1692,6 @@ function _convertLoadBalance(){
       })
     return
   }
-  fetch('/api/evm/'+cfg.v+'/balance',{credentials:'include'})
-    .then(function(r){return r.json()})
-    .then(function(d){
-      if(!d.ok) throw new Error(d.msg||'balance unavailable')
-      var native=parseFloat(d.native_balance||0), stable=parseFloat(d.usdc||0)
-      _convertBalance=dir==='native_to_stable'?native:stable
-      txt.textContent='Balance: '+_convertBalance.toFixed(6)+' '+(dir==='native_to_stable'?cfg.native:cfg.stable)
-    })
-    .catch(function(){txt.textContent='Balance: unavailable'})
 }
 function _convertInvalidate(){
   _convertQuote=null
@@ -1933,247 +1774,6 @@ function _convertConfirm(){
   }).catch(function(){
     out.innerHTML='<div class="w-modal-note" style="color:var(--red)">Network error — check your activity before retrying.</div>'
   }).finally(function(){_convertBusy=false;controls.forEach(function(el){el.disabled=false})})
-}
-
-// ── bridge modal (cross-chain, via 0x Cross-Chain API -- /api/bridge/*) ──
-var _BRIDGE_CHAINS=[
-  {v:'solana',   label:'Solana'},
-  {v:'bsc',      label:'BSC'},
-  {v:'base',     label:'Base'},
-  {v:'arbitrum', label:'Arbitrum'},
-]
-var _bridgeQuote=null   // the last quote fetched, kept so Confirm doesn't need to re-derive anything
-var _bridgeStatusTimer=null
-
-function _bridgeChainOptions(selected){
-  return _BRIDGE_CHAINS.map(function(c){
-    return '<option value="'+c.v+'"'+(c.v===selected?' selected':'')+'>'+c.label+'</option>'
-  }).join('')
-}
-
-function _modalBridge(){
-  _bridgeQuote=null
-  if(_bridgeStatusTimer){clearInterval(_bridgeStatusTimer);_bridgeStatusTimer=null}
-  _showModal(
-    '<div class="w-modal-title">Bridge</div>'
-    +'<div class="w-modal-note" style="margin-top:0">Move USDC from one chain to another. Funds may leave your origin wallet before the bridge itself finishes -- the status view below tracks that separately.</div>'
-    +'<div class="br-form-card">'
-      +'<div class="br-form-box">'
-        +'<div class="br-form-box-lbl">From</div>'
-        +'<select class="br-form-select" id="br-origin-chain" onchange="_bridgeQuote=null;document.getElementById(\'br-quote\').innerHTML=\'\';_bridgeSyncAmountSym();_bridgeSyncBalance()">'+_bridgeChainOptions('solana')+'</select>'
-      +'</div>'
-      +'<button class="br-form-swap" type="button" title="Swap direction" onclick="_bridgeSwapChains()">⇌</button>'
-      +'<div class="br-form-box">'
-        +'<div class="br-form-box-lbl">To</div>'
-        +'<select class="br-form-select" id="br-dest-chain" onchange="_bridgeQuote=null;document.getElementById(\'br-quote\').innerHTML=\'\'">'+_bridgeChainOptions('base')+'</select>'
-      +'</div>'
-    +'</div>'
-    +'<div class="br-form-amount-wrap">'
-      +'<input class="br-form-amount-inp" id="br-amount" type="number" placeholder="0.00" min="0.000001" step="0.01" oninput="_bridgeQuote=null;document.getElementById(\'br-quote\').innerHTML=\'\'">'
-      +'<span class="br-form-amount-sym" id="br-amount-sym">USDC</span>'
-    +'</div>'
-    +'<div class="br-bal-row" id="br-bal-row">'
-      +'<span id="br-bal-text">Balance: —</span>'
-      +'<button type="button" class="br-bal-max" id="br-bal-max-btn" onclick="_bridgeSetMax()">MAX</button>'
-    +'</div>'
-    +'<div class="w-modal-btns" style="margin-top:14px">'
-      +'<button class="w-modal-btn w-modal-secondary" onclick="_closeModal()">Cancel</button>'
-      +'<button class="w-modal-btn w-modal-primary" id="br-quote-btn" onclick="_bridgeGetQuote()">Get Quote</button>'
-    +'</div>'
-    +'<div id="br-quote"></div>'
-  )
-  _bridgeSyncAmountSym()
-  _bridgeSyncBalance()
-  if(!_usdcSummaryCache) loadUsdcSummary()   // modal opened before the periodic fetch ever ran once
-}
-function _bridgeSwapChains(){
-  var o=document.getElementById('br-origin-chain')
-  var d=document.getElementById('br-dest-chain')
-  if(!o||!d) return
-  var tmp=o.value; o.value=d.value; d.value=tmp
-  _bridgeQuote=null
-  var quoteEl=document.getElementById('br-quote')
-  if(quoteEl) quoteEl.innerHTML=''
-  _bridgeSyncAmountSym()
-  _bridgeSyncBalance()
-}
-function _bridgeSyncAmountSym(){
-  var o=document.getElementById('br-origin-chain')
-  var sym=document.getElementById('br-amount-sym')
-  // USDC on every chain. Robinhood Chain settles in USDG underneath, but
-  // that conversion is the bridge's job, not something to put in front of
-  // someone choosing an amount -- see user_currency_label() in dashboard.py.
-  if(o&&sym) sym.textContent = 'USDC'
-}
-// Balance shown is always the ORIGIN chain's own token -- amount is what
-// you SEND, not what you receive, and every bridge chain's default token is
-// its own USDC/USDG (the only thing this Bridge feature ever moves).
-function _bridgeBalanceFor(chain){
-  if(!_usdcSummaryCache) return null
-  if(chain==='solana') return _usdcSummaryCache.solana_usdc
-  return (_usdcSummaryCache.evm_chains||{})[chain]
-}
-function _bridgeSyncBalance(){
-  var txt=document.getElementById('br-bal-text')
-  var o=document.getElementById('br-origin-chain')
-  if(!txt||!o) return
-  var bal=_bridgeBalanceFor(o.value)
-  var sym='USDC'
-  txt.textContent = (bal==null) ? 'Balance: —' : 'Balance: '+parseFloat(bal).toFixed(4)+' '+sym
-}
-function _bridgeSetMax(){
-  var o=document.getElementById('br-origin-chain')
-  var amtEl=document.getElementById('br-amount')
-  if(!o||!amtEl) return
-  var bal=_bridgeBalanceFor(o.value)
-  if(bal==null) return
-  amtEl.value = bal>0 ? bal : 0
-  _bridgeQuote=null
-  var quoteEl=document.getElementById('br-quote')
-  if(quoteEl) quoteEl.innerHTML=''
-}
-
-function _brShortHash(h){
-  h=String(h||'')
-  return h.length>14 ? h.slice(0,8)+'…'+h.slice(-6) : h
-}
-function _brCopyTx(text, el){
-  navigator.clipboard.writeText(text).then(function(){
-    if(el){ var orig=el.textContent; el.textContent='Copied ✓'; setTimeout(function(){el.textContent=orig},1200) }
-  })
-}
-function _bridgeGetQuote(){
-  var origin=document.getElementById('br-origin-chain').value
-  var dest=document.getElementById('br-dest-chain').value
-  var amount=parseFloat(document.getElementById('br-amount').value)
-  var quoteEl=document.getElementById('br-quote')
-  if(origin===dest){quoteEl.innerHTML='<div class="w-modal-note" style="color:var(--red)">Origin and destination chain must be different.</div>';return}
-  if(!(amount>0)){quoteEl.innerHTML='<div class="w-modal-note" style="color:var(--red)">Enter an amount greater than 0.</div>';return}
-  var btn=document.getElementById('br-quote-btn')
-  btn.disabled=true;btn.textContent='Getting quote…'
-  quoteEl.innerHTML='<div class="w-modal-note">Fetching quote…</div>'
-  var qs=new URLSearchParams({origin_chain:origin,dest_chain:dest,amount:amount})
-  fetch('/api/bridge/quote?'+qs.toString(),{credentials:'include'})
-    .then(function(r){return r.json()})
-    .then(function(d){
-      if(!d.ok){
-        quoteEl.innerHTML='<div class="w-modal-note" style="color:var(--red)">'+(d.msg||'Could not get a quote')+'</div>'
-        return
-      }
-      _bridgeQuote={origin_chain:origin,dest_chain:dest,amount:amount}
-      var destLabel=_BRIDGE_CHAINS.find(function(c){return c.v===dest}).label
-      var destSym='USDC'
-      var originSym='USDC'
-      var receiveRaw=d.expected_amount_out
-      var receive=receiveRaw!=null?(parseFloat(receiveRaw)/Math.pow(10, dest==='solana'?6:(dest==='bsc'?18:6))).toFixed(4):'—'
-      var etaLabel=d.estimated_seconds?('~'+Math.round(d.estimated_seconds)+'s'):'seconds to minutes'
-      quoteEl.innerHTML=(
-        '<div class="w-modal-label" style="margin-top:16px">QUOTE</div>'
-        +'<div class="br-quote-card">'
-          +'<div class="br-quote-row"><span class="br-quote-row-lbl">You send</span><span class="br-quote-row-val">'+amount+' '+originSym+'</span></div>'
-          +'<div class="br-quote-row"><span class="br-quote-row-lbl">You receive</span><span class="br-quote-row-val accent">≈ '+receive+' '+destSym+'</span></div>'
-          +'<div class="br-quote-row"><span class="br-quote-row-lbl">On</span><span class="br-quote-row-val">'+destLabel+'</span></div>'
-          +(d.route_name?('<div class="br-quote-row"><span class="br-quote-row-lbl">Route</span><span class="br-quote-row-val">'+d.route_name+'</span></div>'):'')
-          +'<div class="br-quote-row"><span class="br-quote-row-lbl">Estimated time</span><span class="br-quote-row-val">'+etaLabel+'</span></div>'
-        +'</div>'
-        +'<div class="br-quote-meta">Fees: bridge/network fees are deducted automatically — the <b>You receive</b> amount above is already net of them. Quote ID: '+(d.quote_id||'—')+'</div>'
-        +'<div class="w-modal-btns">'
-          +'<button class="w-modal-btn w-modal-primary" onclick="_bridgeConfirm()">Confirm Bridge</button>'
-        +'</div>'
-      )
-    })
-    .catch(function(){ quoteEl.innerHTML='<div class="w-modal-note" style="color:var(--red)">Network error — try again</div>' })
-    .finally(function(){ btn.disabled=false;btn.textContent='Get Quote' })
-}
-
-function _bridgeConfirm(){
-  if(!_bridgeQuote) return
-  var quoteEl=document.getElementById('br-quote')
-  quoteEl.innerHTML='<div class="w-modal-note">Signing and submitting…</div>'
-  fetch('/api/bridge/execute',{
-    method:'POST',credentials:'include',
-    headers:Object.assign({'Content-Type':'application/json','X-CSRF-Token':_csrf},
-                           _clientSecret ? {'X-API-Shared-Secret':_clientSecret} : {}),
-    body:JSON.stringify({origin_chain:_bridgeQuote.origin_chain,dest_chain:_bridgeQuote.dest_chain,amount:_bridgeQuote.amount})
-  }).then(function(r){return r.json()}).then(function(d){
-    if(!d.ok){
-      quoteEl.innerHTML='<div class="w-modal-note" style="color:var(--red)">'+(d.msg||'Bridge failed to submit')+'</div>'
-      return
-    }
-    _bridgeRenderStatus(d.bridge_id, 'origin_tx_pending', d.tx_hash, null)
-    _bridgeStatusTimer=setInterval(function(){_bridgePollStatus(d.bridge_id)}, 8000)
-  }).catch(function(){
-    quoteEl.innerHTML='<div class="w-modal-note" style="color:var(--red)">Network error — the transaction may or may not have been submitted; check your wallet or transaction explorer before retrying.</div>'
-  })
-}
-
-// ✓/●/○ step list matching the spec's exact 4-stage view. Terminal failure
-// states (origin_tx_reverted/bridge_failed/timed_out) replace the stepper
-// with an explicit failure panel instead -- see the branch below.
-function _bridgeRenderStatus(bridgeId, status, sourceTxHash, destTxHash){
-  var quoteEl=document.getElementById('br-quote')
-  if(!quoteEl) return
-  var FAILURES={origin_tx_reverted:1,bridge_failed:1,timed_out:1}
-  if(FAILURES[status]){
-    quoteEl.innerHTML=(
-      '<div class="w-modal-label" style="margin-top:16px;color:var(--red)">BRIDGE FAILED</div>'
-      +'<div class="br-fail-card">'
-        +'<div class="br-fail-title">'+(status==='origin_tx_reverted'?'TRANSACTION REVERTED':status==='bridge_failed'?'BRIDGE FAILED':'STATUS UNKNOWN (TIMED OUT)')+'</div>'
-        +'<div class="br-fail-row"><span class="br-fail-row-lbl">Bridge ID</span><span class="br-fail-row-val">'+bridgeId+'</span></div>'
-        +(sourceTxHash?('<div class="br-fail-row"><span class="br-fail-row-lbl">Origin TX</span><span class="br-fail-row-val"><span class="br-tx-chip" onclick="_brCopyTx(\''+sourceTxHash+'\',this)" title="'+sourceTxHash+'">'+_brShortHash(sourceTxHash)+' ⧉</span></span></div>'):'')
-        +'<div class="br-note-foot" style="margin-top:10px">If funds already left your origin wallet, check the bridge transaction status before retrying — never resubmit blindly.</div>'
-      +'</div>'
-    )
-    if(_bridgeStatusTimer){clearInterval(_bridgeStatusTimer);_bridgeStatusTimer=null}
-    _loadBridgeHistory()
-    return
-  }
-  var steps=[
-    {key:'quote', label:'Quote obtained', done:true},
-    {key:'submit', label:'Transaction submitted', done:!!sourceTxHash},
-    {key:'bridge', label:'Bridge processing', done:status==='bridge_filled', active:sourceTxHash && status!=='bridge_filled'},
-    {key:'complete', label:'Destination completed', done:status==='bridge_filled'},
-  ]
-  var stepsHtml=steps.map(function(s){
-    var state=s.done?'done':(s.active?'active':'pending')
-    var mark=s.done?'✓':(s.active?'●':'')
-    return '<div class="br-step"><span class="br-step-dot '+state+'">'+mark+'</span><span class="br-step-line"></span><span class="br-step-lbl '+state+'">'+s.label+'</span></div>'
-  }).join('')
-  var txRows=''
-  if(sourceTxHash) txRows+='<div class="br-tx-row"><span>Origin TX</span><span class="br-tx-chip" onclick="_brCopyTx(\''+sourceTxHash+'\',this)" title="'+sourceTxHash+'">'+_brShortHash(sourceTxHash)+' ⧉</span></div>'
-  if(destTxHash) txRows+='<div class="br-tx-row"><span>Destination TX</span><span class="br-tx-chip" onclick="_brCopyTx(\''+destTxHash+'\',this)" title="'+destTxHash+'">'+_brShortHash(destTxHash)+' ⧉</span></div>'
-  quoteEl.innerHTML=(
-    '<div class="w-modal-label" style="margin-top:16px">TRANSACTION STATUS</div>'
-    +'<div class="br-steps">'+stepsHtml+'</div>'
-    +(txRows?('<div class="br-tx-block">'+txRows+'</div>'):'')
-    +'<div class="br-note-foot">Funds may already have left your origin wallet even while this still shows "processing."</div>'
-  )
-  if(status==='bridge_filled'){
-    if(_bridgeStatusTimer){clearInterval(_bridgeStatusTimer);_bridgeStatusTimer=null}
-    _loadBridgeHistory()
-  }
-}
-
-function _bridgePollStatus(bridgeId){
-  fetch('/api/bridge/status/'+bridgeId,{credentials:'include'}).then(function(r){return r.json()}).then(function(d){
-    if(!d.ok) return
-    _bridgeRenderStatus(bridgeId, d.status, d.source_tx_hash, d.dest_tx_hash)
-  }).catch(function(){})
-}
-
-function _loadBridgeHistory(){
-  var el=document.getElementById('bridge-history-list')
-  if(!el) return
-  fetch('/api/bridge/transactions',{credentials:'include'}).then(function(r){return r.json()}).then(function(d){
-    if(!d.ok || !d.transactions || !d.transactions.length){el.innerHTML='<div class="state-msg">No bridges yet.</div>';return}
-    el.innerHTML=d.transactions.map(function(t){
-      var color=t.status==='bridge_filled'?'var(--green)':(['origin_tx_reverted','bridge_failed','timed_out'].indexOf(t.status)>=0?'var(--red)':'var(--accent)')
-      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 2px;border-top:1px solid var(--divider);font-size:12.5px">'
-        +'<span style="color:var(--text)">'+t.source_chain+' <span style="color:var(--muted)">→</span> '+t.dest_chain+' <span style="color:var(--muted);font-family:var(--mono)">· '+t.amount_in+'</span></span>'
-        +'<span style="color:'+color+';font-weight:600;font-size:11px">'+(t.status_label||t.status)+'</span>'
-        +'</div>'
-    }).join('')
-  }).catch(function(){ el.innerHTML='<div class="state-msg">Failed to load</div>' })
 }
 
 // ── swap modal ───────────────────────────────────────────
@@ -2748,7 +2348,7 @@ function _sbSearch(q){
 function _renderHoldings(spl){
   var wrap=document.getElementById('tokens')
   if(!wrap) return
-  // Aggregated multi-chain USDC has its own pinned row above the token list.
+  // Solana USDC has its own pinned row above the token list.
   spl=spl.filter(function(x){return String(x.symbol||'').toUpperCase()!=='USDC'})
   if(!spl.length){wrap.innerHTML='';return}
   wrap.innerHTML=spl.map(function(x,i){
@@ -2921,24 +2521,12 @@ loadBalance()
 // page load or right after an action taken on this specific page.
 setInterval(function(){ if(!document.hidden) loadBalance() }, 8000)
 
-// ── combined USDC balance (Solana + every EVM chain in EVM_CHAINS) ──
-function _toggleUsdcTiles(){
-  var el=document.getElementById('usdc-chain-tiles')
-  var btn=document.getElementById('usdc-tiles-toggle')
-  var chev=document.getElementById('usdc-tiles-chevron')
-  if(!el) return
-  var collapsed=el.classList.toggle('collapsed')
-  if(btn) btn.childNodes[0].textContent = collapsed ? 'View per chain ' : 'Hide per chain '
-  if(chev) chev.textContent = collapsed ? '▾' : '▴'
-}
+// ── Solana USDC balance ──
 var _usdcLoadedOnce=false
-var _EVM_CHAIN_LABELS={bsc:'BSC',base:'Base',arbitrum:'Arbitrum',polygon:'Polygon',robinhood:'Robinhood'}
-var _usdcEvmTilesMarkup=null // avoid rebuilding chain tiles on every 8s balance poll
-var _usdcSummaryCache=null   // last-fetched {solana_usdc, evm_chains} -- the Bridge modal's balance/MAX reads this instead of its own fetch
+var _usdcSummaryCache=null
 function loadUsdcSummary(){
   _getPortfolioSnapshot(false).then(function(snap){
     var d={ok:true,total_usdc:snap.stable.total_usdc,solana_usdc:snap.stable.solana_usdc,
-           evm_chains:snap.stable.evm_chains,evm_address:snap.wallets&&snap.wallets.evm,
            solana_address:snap.wallets&&snap.wallets.solana}
     var _tot='$'+parseFloat(d.total_usdc).toFixed(2)
     document.getElementById('usdc-total').textContent=_tot
@@ -2946,32 +2534,14 @@ function loadUsdcSummary(){
     // the hero shows.
     var _availEl=document.getElementById('avail')
     if(_availEl) _availEl.textContent=_tot
-    document.getElementById('usdc-sol-val').textContent='$'+parseFloat(d.solana_usdc).toFixed(2)
     var _cUsdc=document.getElementById('convert-usdc-bal')
     if(_cUsdc) _cUsdc.textContent='$'+parseFloat(d.solana_usdc).toFixed(2)
-    // evm_chains is {chain: usdc_balance} for every chain in EVM_CHAINS
-    // (dashboard.py) -- rendered generically so a future chain added there
-    // shows up here without a template change.
-    var evmTiles=document.getElementById('usdc-evm-tiles')
-    if(evmTiles && d.evm_chains){
-      var tilesMarkup=Object.keys(d.evm_chains).map(function(chain){
-        var label=_EVM_CHAIN_LABELS[chain]||chain
-        return '<div class="wlt-bsc-bal-item"><span class="wlt-bsc-bal-lbl">'+label+'</span>'
-          +'<span class="wlt-bsc-bal-val">$'+parseFloat(d.evm_chains[chain]).toFixed(2)+'</span></div>'
-      }).join('')
-      if(tilesMarkup!==_usdcEvmTilesMarkup){
-        evmTiles.innerHTML=tilesMarkup
-        _usdcEvmTilesMarkup=tilesMarkup
-      }
-    }
     _usdcLoadedOnce=true
     _usdcSummaryCache=d
-    if(typeof _bridgeSyncBalance==='function') _bridgeSyncBalance()
   }).catch(function(){
     // Same "keep the last known value on a transient hiccup" rule as loadBalance() above.
     if(!_usdcLoadedOnce){
       document.getElementById('usdc-total').textContent='—'
-      document.getElementById('usdc-sol-val').textContent='—'
       var _a=document.getElementById('avail'); if(_a) _a.textContent='—'
     }
   })

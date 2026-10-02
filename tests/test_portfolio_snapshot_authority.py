@@ -31,8 +31,7 @@ def fake_dashboard():
       'arbitrum':{'usdc':'0xarb'}, 'polygon':{'usdc':'0xpoly'},
       'robinhood':{'usdc':'0xhood'},
     }
-    d.ACTIVE_EVM_CHAINS={k:v for k,v in d.EVM_CHAINS.items()
-                         if k in ('bsc','base','arbitrum')}
+    d.ACTIVE_EVM_CHAINS={}
     d._get_trading_wallet_address=lambda w:'soltrader'
     d._wallet_tokens_cache={}
     d._fetch_wallet_tokens=lambda wallet,onchain:{'tokens':[
@@ -51,23 +50,24 @@ def fake_dashboard():
 def test_snapshot_has_one_authoritative_total():
     d=fake_dashboard()
     snap=pf._portfolio_snapshot(d,'session',bust=True)
-    # Active stable balances only: Solana 20 + BSC 5 + Base 10 + Arbitrum 0.
-    # Disabled Polygon/Robinhood legacy balances are not active buying power.
-    assert snap['stable']['total_usdc'] == 35
-    assert snap['available_to_trade_usdc'] == 35
+    # OrcAgent is Solana-only: only Solana USDC and SPL assets count.
+    assert snap['stable']['total_usdc'] == 20
+    assert snap['available_to_trade_usdc'] == 20
+    assert snap['stable']['evm_chains'] == {}
     assert snap['sol']['value_usd'] == 100
-    assert snap['other_assets_value_usd'] == 18
-    assert snap['total_usd'] == 153
+    assert snap['other_assets_value_usd'] == 10
+    assert snap['total_usd'] == 130
     assert snap['sol']['in_positions_sol'] == 4
 
 
-def test_evm_position_is_from_durable_db_not_process_memory():
+def test_legacy_evm_position_stays_in_db_but_not_active_portfolio():
     d=fake_dashboard()
     snap=pf._portfolio_snapshot(d,'session',bust=True)
-    evm=[x for x in snap['assets'] if x.get('chain')=='base']
-    assert len(evm)==1
-    assert evm[0]['mint']=='0xtoken'
-    assert evm[0]['usd_value']==8
+    assert not [x for x in snap['assets'] if x.get('chain')=='base']
+    con=sqlite3.connect(d.DB_FILE)
+    row=con.execute("SELECT mint_address FROM open_positions WHERE chain='base'").fetchone()
+    con.close()
+    assert row and row[0]=='0xtoken'
 
 
 def test_snapshot_endpoint_is_registered():
@@ -97,11 +97,11 @@ def test_total_controller_no_longer_fans_out_three_requests():
 def test_partial_refresh_keeps_last_confirmed_snapshot():
     d=fake_dashboard()
     first=pf._portfolio_snapshot(d,'session',bust=True)
-    d.get_evm_usdc_balance=lambda addr,chain: (_ for _ in ()).throw(RuntimeError('rpc down')) if chain=='base' else 0
+    d._get_solana_usdc_balance=lambda addr: (_ for _ in ()).throw(RuntimeError('rpc down'))
     second=pf._portfolio_snapshot(d,'session',bust=True)
     assert second['total_usd']==first['total_usd']
     assert second['stale'] is True
-    assert 'stable:base' in second['unavailable']
+    assert 'solana_usdc' in second['unavailable']
 
 
 if __name__=='__main__':

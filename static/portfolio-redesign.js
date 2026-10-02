@@ -44,7 +44,7 @@ function boot(){
 
   var title=document.querySelector('.wlt-title'),sub=document.querySelector('.wlt-sub');
   if(title)title.textContent='Portfolio';
-  if(sub)sub.textContent='Your multi-chain trading wallet';
+  if(sub)sub.textContent='Your Solana trading wallet';
   document.querySelectorAll('a[href="/wallet"],a[href^="/wallet?"]').forEach(function(a){var text=(a.textContent||'').trim();if(/wallet/i.test(text))a.textContent=text.replace(/wallet/ig,'Portfolio');a.setAttribute('aria-label','Portfolio')});
 
   var center=document.querySelector('.wlt-center'),hdr=document.querySelector('.wlt-hdr'),content=document.querySelector('.wlt-content');

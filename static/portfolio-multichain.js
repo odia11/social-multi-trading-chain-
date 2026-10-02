@@ -6,7 +6,7 @@
 'use strict';
 if((location.pathname.replace(/\/+$/,'')||'/')!=='/wallet')return;
 
-var LABELS={bsc:'BSC',base:'BASE',arbitrum:'ARB',polygon:'POLY',robinhood:'HOOD',solana:'SOL'};
+var LABELS={solana:'SOL'};
 var _busy=false,_timer=null,_queued=null,_lastPaint=0;
 var AUTO_REFRESH_MS=5000;
 

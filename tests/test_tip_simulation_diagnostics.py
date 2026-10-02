@@ -103,7 +103,7 @@ def test_blockhash_and_send_prefer_same_rpc():
     from pathlib import Path
     src=(Path(__file__).resolve().parents[1]/'portfolio_token_withdraw.py').read_text()
     a=src.index('def _solana_transfer')
-    b=src.index('def _evm_transfer', a)
+    b=src.index('def _explorer', a)
     block=src[a:b]
     assert "bh_result, blockhash_rpc = _rpc_call_any(d, 'getLatestBlockhash'" in block
     assert 'preferred_url=blockhash_rpc' in block

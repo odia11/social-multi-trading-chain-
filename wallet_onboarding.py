@@ -12,7 +12,6 @@ import json
 import sqlite3
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from eth_account import Account
 from flask import jsonify, request, session
 from solders.keypair import Keypair
 
@@ -88,18 +87,8 @@ def _derive_sol(private_key: str):
     return str(kp.pubkey()), key
 
 
-def _derive_evm(private_key: str):
-    key = (private_key or '').strip()
-    acct = Account.from_key(key)
-    normalized = acct.key.hex()
-    if not normalized.startswith('0x'):
-        normalized = '0x' + normalized
-    return str(acct.address), normalized
-
-
-def _store_and_login(d, sol_private: str, evm_private: str, *, allow_existing: bool):
+def _store_and_login(d, sol_private: str, *, allow_existing: bool):
     sol_address, sol_private = _derive_sol(sol_private)
-    evm_address, evm_private = _derive_evm(evm_private)
 
     encrypt = getattr(d, 'encrypt_private_key', None)
     decrypt = getattr(d, 'decrypt_private_key', None)
@@ -108,8 +97,7 @@ def _store_and_login(d, sol_private: str, evm_private: str, *, allow_existing: b
         raise RuntimeError('Wallet security backend unavailable')
 
     sol_enc = encrypt(sol_private, sol_address)
-    evm_enc = encrypt(evm_private, sol_address)
-    if decrypt(sol_enc, sol_address) != sol_private or decrypt(evm_enc, sol_address) != evm_private:
+    if decrypt(sol_enc, sol_address) != sol_private:
         raise RuntimeError('Encrypted wallet verification failed')
 
     user_id = get_user(sol_address)
@@ -121,19 +109,20 @@ def _store_and_login(d, sol_private: str, evm_private: str, *, allow_existing: b
     try:
         conn.execute('BEGIN IMMEDIATE')
         row = conn.execute(
-            'SELECT encrypted_private_key, encrypted_private_key_bsc FROM users WHERE wallet_address=?',
+            'SELECT encrypted_private_key FROM users WHERE wallet_address=?',
             (sol_address,),
         ).fetchone()
-        has_existing = bool(row and ((row[0] or '').strip() or (row[1] or '').strip()))
+        has_existing = bool(row and (row[0] or '').strip())
         if has_existing and not allow_existing:
             conn.rollback()
             raise ValueError('This wallet is already registered. Use Connect Wallet to sign in.')
         if not has_existing:
             sol_hash = hashlib.sha256(sol_private.encode()).hexdigest()
+            # Legacy EVM columns are deliberately left untouched. OrcAgent is
+            # Solana-only, but old records are retained for historical recovery.
             conn.execute(
-                'UPDATE users SET encrypted_private_key=?, key_hash=?, '
-                'bsc_wallet_address=?, encrypted_private_key_bsc=? WHERE wallet_address=?',
-                (sol_enc, sol_hash, evm_address, evm_enc, sol_address),
+                'UPDATE users SET encrypted_private_key=?, key_hash=? WHERE wallet_address=?',
+                (sol_enc, sol_hash, sol_address),
             )
             conn.commit()
         else:
@@ -160,7 +149,7 @@ def _store_and_login(d, sol_private: str, evm_private: str, *, allow_existing: b
     except Exception:
         pass
 
-    return sol_address, evm_address, token
+    return sol_address, token
 
 
 def _with_device_cookie(d, resp, token):
@@ -207,15 +196,14 @@ def install(d):
         except ValueError as exc:
             return jsonify({'ok': False, 'error': str(exc)}), 400
         if body.get('backup_confirmed') is not True:
-            return jsonify({'ok': False, 'error': 'Confirm that you saved both private keys first'}), 400
+            return jsonify({'ok': False, 'error': 'Confirm that you saved your Solana private key first'}), 400
         sol_private = str(body.get('solana_private_key') or '').strip()
-        evm_private = str(body.get('evm_private_key') or '').strip()
-        if not sol_private or not evm_private:
-            return jsonify({'ok': False, 'error': 'Both private keys are required'}), 400
+        if not sol_private:
+            return jsonify({'ok': False, 'error': 'Solana private key is required'}), 400
         try:
-            sol_address, evm_address, token = _store_and_login(
-                d, sol_private, evm_private, allow_existing=False)
-            resp = jsonify({'ok': True, 'wallet': sol_address, 'evm_address': evm_address})
+            sol_address, token = _store_and_login(
+                d, sol_private, allow_existing=False)
+            resp = jsonify({'ok': True, 'wallet': sol_address})
             return _with_device_cookie(d, _no_store(resp), token)
         except ValueError as exc:
             return jsonify({'ok': False, 'error': str(exc)}), 409
@@ -230,24 +218,20 @@ def install(d):
         if not _csrf_ok(d):
             return jsonify({'ok': False, 'error': 'CSRF validation failed'}), 403
         if not _rate_ok(d, 'import', 10):
-            return jsonify({'ok': False, 'error': 'Too many import attempts. Try again later.'}), 429
+            return jsonify({'ok': False, 'error': 'Too many attempts. Try again later.'}), 429
         envelope = request.get_json(silent=True) or {}
         try:
             body = _open_client_envelope(envelope)
         except ValueError as exc:
             return jsonify({'ok': False, 'error': str(exc)}), 400
         sol_private = str(body.get('solana_private_key') or '').strip()
-        evm_private = str(body.get('evm_private_key') or '').strip()
         if not sol_private:
             return jsonify({'ok': False, 'error': 'Solana private key is required'}), 400
         try:
-            if not evm_private:
-                return jsonify({'ok': False, 'error': 'EVM private key is required'}), 400
             _derive_sol(sol_private)
-            _derive_evm(evm_private)
-            sol_address, evm_address, token = _store_and_login(
-                d, sol_private, evm_private, allow_existing=True)
-            resp = jsonify({'ok': True, 'wallet': sol_address, 'evm_address': evm_address})
+            sol_address, token = _store_and_login(
+                d, sol_private, allow_existing=True)
+            resp = jsonify({'ok': True, 'wallet': sol_address})
             return _with_device_cookie(d, _no_store(resp), token)
         except Exception as exc:
             msg = 'Invalid private key' if isinstance(exc, (ValueError, TypeError)) else 'Could not import wallet'
@@ -261,8 +245,8 @@ def install(d):
             html = response.get_data(as_text=True)
             if '</head>' in html and '/static/wallet-onboarding.css?v=5' not in html:
                 html = html.replace('</head>', '<link rel="stylesheet" href="/static/wallet-onboarding.css?v=5"></head>', 1)
-            if '</body>' in html and '/static/wallet-onboarding.js?v=6' not in html:
-                html = html.replace('</body>', '<script src="/static/wallet-onboarding.js?v=6" defer></script></body>', 1)
+            if '</body>' in html and '/static/wallet-onboarding.js?v=7' not in html:
+                html = html.replace('</body>', '<script src="/static/wallet-onboarding.js?v=7" defer></script></body>', 1)
             response.set_data(html)
             response.content_length = len(response.get_data())
         except Exception:

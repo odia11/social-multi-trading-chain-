@@ -67,7 +67,7 @@ HTML_NC = no_comments(HTML)
 check('the sheet carries the ids confirmBuy() already reaches for, so the '
       'trade runs through the same code it always did',
       "'pt-buy-panel-'+idx" in JS and "'pt-buy-amt-'+idx" in JS
-      and "'pt-buy-msg-'+idx" in JS and "'pt-quote-'+idx" in JS)
+      and "'pt-buy-msg-'+idx" in JS)
 check('...handed over on open and given back on close, so the next token '
       'reuses the same sheet',
       '_sheetBindIds' in JS and '_sheetUnbindIds' in JS)
@@ -141,9 +141,9 @@ check("no code path writes the old button's wording into the slider label",
 # sheet and finding the token again.
 check('every buy attempt ends in a usable screen rather than the in-flight '
       'state it was left in',
-      JS.count('_restoreSlide();') + JS.count("_slideSetLabel('Bought')") >= 6)
+      JS.count('_restoreSlide();') >= 2 and "_slideSetLabel('Bought')" in JS)
 check('...re-armed when nothing was bought, so a refusal can be retried',
-      JS.count('_restoreSlide();') >= 4)
+      JS.count('_restoreSlide();') >= 2)
 check('...and disarmed when something was, so "Bought" never sits above a '
       'live "Slide to buy" while the sheet lingers on the receipt',
       "_slideSetLabel('Bought')" in JS and 'var bought = false;' in JS)
@@ -182,29 +182,19 @@ check('the balance is fetched when the page loads, not when the sheet opens',
       '_prefetchBalances' in JS
       and re.search(r'_prefetchBalances\(\);[\s\S]{0,200}renderSortList\(\)', JS))
 
-# The quote is a live route lookup, so typing is debounced. A tap on 25% or
-# Max is not typing -- the number is final, and waiting 450ms for a further
-# keystroke that is never coming was 450ms of "Pricing…" for nothing.
-check('a settled amount prices immediately instead of waiting out the '
-      'keystroke debounce',
-      re.search(r'_sheetSetAmount\(next, settled\)', JS)
-      and 'settled ? 0 : 250' in JS)
-check('...and typing is still debounced, so a quote is not fired per digit',
-      re.search(r'delayMs == null\) \? 450', JS) is not None)
-
-# A quote is held ~6s. Sliding to confirm is deliberate and takes longer than
-# that, plus reading the breakdown -- so most slides used to land on an
-# expired price, and confirmBuy then had to re-price on the spot: a round
-# trip at the one moment nobody wants to wait.
-check('a price about to lapse is renewed while the sheet is open, so the '
-      'slide keeps hitting the execute-this-exact-quote path',
-      '_quoteRenewals' in JS and 'QUOTE_MAX_RENEWALS' in JS)
-check('...bounded, so a sheet left open does not ask forever',
-      re.search(r'QUOTE_MAX_RENEWALS\s*=\s*\d+', JS) is not None)
-check('...only for the amount actually on screen, in buy mode',
-      re.search(r'parseFloat\(_sheetAmt\) === q\.amt', JS) is not None)
-check('...and the budget resets when the amount changes',
-      re.search(r'scheduleQuote\(idx, delayMs\)\s*\{[\s\S]{0,160}_quoteRenewals\[idx\] = 0', JS))
+# Solana-only buys execute through /api/instant-trade. The retired EVM quote
+# cache must not come back: amount changes only repaint the sheet, and the
+# authoritative pricing/execution happens when the user completes the slide.
+check('changing a settled amount does not call a retired EVM quote route',
+      re.search(r'function _sheetSetAmount\(next, settled\)', JS) is not None
+      and '/api/trade/quote' not in JS)
+check('typing cannot fire an EVM quote per digit',
+      'scheduleQuote' not in JS and 'fetchQuote' not in JS)
+check('there is no expiring EVM quote cache to renew while the sheet is open',
+      '_quoteRenewals' not in JS and 'QUOTE_MAX_RENEWALS' not in JS
+      and '_quotes' not in JS)
+check('a completed buy goes straight to the Solana instant-trade endpoint',
+      "var url = '/api/instant-trade';" in JS)
 
 # ── 4. the whole thing, in a real browser ────────────────────────────────
 PORT = 5091
@@ -222,20 +212,17 @@ DRIVER = r'''
 import asyncio, json, sys
 from playwright.async_api import async_playwright
 PORT = %d
-TOK = {"mint":"M"+"1"*39,"symbol":"UPONLY","name":"Up Only","chain":"bsc",
+TOK = {"mint":"M"+"1"*39,"symbol":"UPONLY","name":"Up Only","chain":"solana",
   "pair_address":"P1","image_url":"","price_usd":0.0013,"market_cap":1300000,
   "liquidity_usd":90000,"volume_24h":200000,"buys_24h":50,"sells_24h":20,
   "price_change_24h":180.51,"pair_created_at":None,"verified_socials":False,"score":4}
-BAL = {"ok":True,"solana_usdc":0.0,"total_usdc":12.4,
-       "evm_chains":{"bsc":12.4,"base":0,"arbitrum":0,"polygon":0,"robinhood":0}}
-HOLD = {"ok":True,"chain":"bsc","amount":8000.0,"price_usd":0.0013,
+BAL = {"ok":True,"solana_usdc":12.4,"total_usdc":12.4,"evm_chains":{}}
+HOLD = {"ok":True,"chain":"solana","amount":8000.0,"price_usd":0.0013,
         "value_usd":10.4,"symbol":"UPONLY","source":"position"}
 async def main():
     out = {}
     async with async_playwright() as p:
-        b = await p.chromium.launch(
-            executable_path='/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
-            args=['--no-sandbox'])
+        b = await p.chromium.launch(args=['--no-sandbox'])
         ctx = await b.new_context(viewport={'width':390,'height':844},
                                   is_mobile=True, has_touch=True)
         page = await ctx.new_page()
@@ -319,7 +306,7 @@ async def main():
             out['traded'].append(route.request.url.split('/api')[1])
             await route.fulfill(status=200, content_type='application/json',
                                 body=json.dumps({"ok":True,"success":True,"sell_executed":True}))
-        await page.route('**/api/bsc/trade/**', rec)
+        await page.route('**/api/instant-trade', rec)
         async def slide(frac):
             box = await page.evaluate("""() => {
                 const k=document.getElementById('pt-slide-knob').getBoundingClientRect();
@@ -373,8 +360,8 @@ async def main():
         out['sell_traded'] = list(out['traded'])
 
         # A REFUSED buy must leave a screen you can try again on.
-        await page.unroute('**/api/bsc/trade/**')
-        await page.route('**/api/bsc/trade/buy', lambda r: r.fulfill(
+        await page.unroute('**/api/instant-trade')
+        await page.route('**/api/instant-trade', lambda r: r.fulfill(
             status=400, content_type='application/json',
             body=json.dumps({"ok":False,"msg":"Trading is temporarily unavailable."})))
         # Reopen in BUY mode: the sell sheet hides the percentage row, so
@@ -487,7 +474,7 @@ check('BROWSER: a HALF slide buys nothing — the point of the gesture',
 check('BROWSER: ...and the knob snaps back rather than sitting half-way',
       B.get('knob_snapped_back'))
 check('BROWSER: a COMPLETED slide buys, once',
-      B.get('full_slide_traded') == ['/bsc/trade/buy'])
+      B.get('full_slide_traded') == ['/instant-trade'])
 check('BROWSER: a short downward drag does not dismiss the sheet',
       B.get('short_swipe_kept_open'))
 check('BROWSER: a real downward swipe does, returning to Live Market',
@@ -510,7 +497,7 @@ check('BROWSER: ...measured against what is actually held',
       '$10.40' in B['sell']['held'] and 'held' in B['sell']['held'])
 check('BROWSER: ...in red, and asking for the same gesture',
       B['sell']['red'] and 'Slide to sell' in B['sell']['label'])
-check('BROWSER: a completed slide sells', B.get('sell_traded') == ['/bsc/trade/sell'])
+check('BROWSER: a completed slide sells', B.get('sell_traded') == ['/instant-trade'])
 check('BROWSER: a refused buy leaves the slider armed again, so it can be '
       'retried without closing the sheet and hunting for the token again',
       B['after_refusal']['ready'])

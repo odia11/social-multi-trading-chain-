@@ -60,7 +60,7 @@ from trade_engine import ledger as te_ledger
 from trade_engine import subsidy as te_subsidy
 from trade_engine import execute as te_execute
 from trade_engine.costs import CostError as TeCostError
-from trade_engine.providers import JupiterProvider, ZeroExProvider, ProviderError as TeProviderError
+from trade_engine.providers import JupiterProvider, ProviderError as TeProviderError
 from trade_engine.quote import QuoteError as TeQuoteError, QuoteRequest, build_quote
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
@@ -991,7 +991,6 @@ BSC_CHAIN_ID     = 56
 BSC_RPC          = 'https://bsc-dataseed.binance.org/'      # public fallback, Binance-operated
 BSC_RPC_URL      = os.environ.get('BSC_RPC_URL', '')        # set in the env file — overrides fallback (Alchemy/Ankr/etc)
 USDC_BSC_ADDR    = '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d'  # USDC (BEP-20), 18 decimals -- NOT 6 like Solana/Ethereum
-ZEROX_API_KEY    = os.environ.get('ZEROX_API_KEY', '')      # required for BSC swaps -- get one at dashboard.0x.org
 BNB_NATIVE_ADDR  = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'  # 0x's sentinel address for the native gas token
 # OWNER_WALLET vs ADMIN_WALLET — deliberately two separate constants, not
 # duplication (checked/confirmed against production 2026-08-08: same address
@@ -1086,53 +1085,66 @@ BSC_FEE_WALLET   = '0x4f187411023338E717D68c089855372997ef4640'  # fixed BSC fee
 # basescan.org, arbiscan.io, polygonscan.com -- not a bridged variant like
 # Arbitrum's USDC.e or BSC's Binance-Peg USDC, which is why BSC stays on its
 # own USDC_BSC_ADDR/18-decimals path above rather than joining this dict).
-# Robinhood Chain has no USDC at all -- bridging USDC there converts it to
-# USDG (Global Dollar, issued by Paxos), which is what `usdc` actually holds
-# for that entry; `usdc_symbol` is what every USDC-labeled UI string and log
-# line should say instead, so a Robinhood Chain trade is never mislabeled as
-# spending "USDC" when it's really USDG (address verified against Robinhood
-# Chain's own explorer, robinhoodchain.blockscout.com; router/DEX routing
-# itself still goes through 0x's Swap API below like every other chain here,
-# not a hand-built Uniswap Universal Router integration, since 0x announced
-# day-1 support for Robinhood Chain at its mainnet launch). rpc_url falls
-# back to a well-known public RPC exactly like BSC_RPC does; an *_RPC_URL
-# env var overrides it the same way BSC_RPC_URL does, for a paid/rate-limit-
-# free provider (Alchemy, Ankr, etc.) in production. dex_chain is the
-# DexScreener chainId slug for that network (used by the scanner's discovery
-# queries), zerox_chain_id is what _get_0x_quote() passes 0x's API to route
-# the swap itself.
+# Historical EVM metadata is retained only so old database rows and explorer
+# links can still be rendered. OrcAgent is Solana-only: none of these entries
+# participate in discovery, balances, quotes, trading, bridging or bot scans.
 EVM_CHAINS = {
     'bsc': {
         'chain_id': BSC_CHAIN_ID, 'native_symbol': 'BNB', 'usdc_symbol': 'USDC',
         'rpc_url': BSC_RPC_URL or BSC_RPC, 'usdc': USDC_BSC_ADDR,
-        'explorer': 'https://bscscan.com', 'dex_chain': 'bsc', 'zerox_chain_id': BSC_CHAIN_ID,
+        'explorer': 'https://bscscan.com', 'dex_chain': 'bsc',
     },
     'base': {
         'chain_id': 8453, 'native_symbol': 'ETH', 'usdc_symbol': 'USDC',
         'rpc_url': os.environ.get('BASE_RPC_URL', '') or 'https://mainnet.base.org',
         'usdc': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-        'explorer': 'https://basescan.org', 'dex_chain': 'base', 'zerox_chain_id': 8453,
+        'explorer': 'https://basescan.org', 'dex_chain': 'base',
     },
     'arbitrum': {
         'chain_id': 42161, 'native_symbol': 'ETH', 'usdc_symbol': 'USDC',
         'rpc_url': os.environ.get('ARBITRUM_RPC_URL', '') or 'https://arb1.arbitrum.io/rpc',
         'usdc': '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-        'explorer': 'https://arbiscan.io', 'dex_chain': 'arbitrum', 'zerox_chain_id': 42161,
+        'explorer': 'https://arbiscan.io', 'dex_chain': 'arbitrum',
     },
     'robinhood': {
         'chain_id': 4663, 'native_symbol': 'ETH', 'usdc_symbol': 'USDG',
         'rpc_url': os.environ.get('ROBINHOOD_RPC_URL', '') or 'https://rpc.mainnet.chain.robinhood.com',
         'usdc': '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168',  # USDG (Global Dollar) -- see usdc_symbol note above
-        'explorer': 'https://robinhoodchain.blockscout.com', 'dex_chain': 'robinhood', 'zerox_chain_id': 4663,
+        'explorer': 'https://robinhoodchain.blockscout.com', 'dex_chain': 'robinhood',
     },
 }
 
-# Robinhood Chain is kept here only so old history/addresses remain readable.
-# It is NOT an active OrcAgent chain until its routing is reliable enough for
-# production. Every new discovery, quote, trade, bridge and balance surface
-# must use ACTIVE_EVM_CHAINS instead of EVM_CHAINS.
-DISABLED_EVM_CHAINS = frozenset({'robinhood'})
-ACTIVE_EVM_CHAINS = {k: v for k, v in EVM_CHAINS.items() if k not in DISABLED_EVM_CHAINS}
+# EVM entries remain only so historical rows and addresses can be interpreted.
+# They are not supported product chains; ACTIVE_EVM_CHAINS intentionally stays empty.
+DISABLED_EVM_CHAINS = frozenset(EVM_CHAINS)
+# OrcAgent is Solana-only. Keep EVM_CHAINS as read-only legacy metadata so old
+# history rows can still be decoded, but no new EVM discovery, quote, balance,
+# bridge, trade or bot route is active.
+ACTIVE_EVM_CHAINS = {}
+SOLANA_ONLY = True
+
+def _disabled_legacy_route(*_args, **_kwargs):
+    """Keep legacy function bodies importable without registering URLs."""
+    return lambda fn: fn
+
+@app.before_request
+def _block_legacy_non_solana_routes():
+    """Fail closed for cached/old clients after OrcAgent became Solana-only.
+
+    These endpoints remain defined temporarily so old history/schema code can
+    still import cleanly, but no request is allowed to reach their EVM, bridge
+    or 0x implementation.
+    """
+    path = request.path or ''
+    blocked = (
+        path.startswith('/api/bsc/'),
+        path.startswith('/api/evm/'),
+        path.startswith('/api/bridge/'),
+        path == '/api/withdraw/evm',
+        path == '/admin/bridge-test',
+    )
+    if any(blocked):
+        return jsonify({'ok': False, 'msg': 'OrcAgent supports Solana only'}), 410
 
 EVM_CHAIN_FEE_WALLET = BSC_FEE_WALLET  # same EVM address works as the fee recipient on every chain above
 
@@ -3150,10 +3162,10 @@ def run_migrations():
         # reasoning, which only ever covered WHICH tokens got in the door --
         # see run_ai_self_analysis()'s own comment.
         "ALTER TABLE ai_filter_proposals ADD COLUMN how_analysis TEXT DEFAULT ''",
-        # ── Cross-chain bridge (0x Cross-Chain API) -- extends the existing
+        # ── Legacy cross-chain bridge schema (inactive) -- extends the existing
         # bridge_transactions table (built for Mayan, never verified against
         # its live API/SDK) rather than adding a second, parallel table. See
-        # _get_0x_bridge_quote()/_execute_cross_chain_bridge()/
+        # __disabled_bridge_quote()/_execute_cross_chain_bridge()/
         # _bridge_status_loop() below for how each of these gets used.
         # `provider` distinguishes old Mayan-attempted rows (if any exist in
         # a deployed DB) from new 0x-routed ones -- defaults to 'mayan' for
@@ -4045,7 +4057,7 @@ _BRIDGE_STATUS_INTERVAL = 15
 # under read-only reconciliation after the cutoff: a missing status receipt
 # must never be mistaken for proof that funds cannot still arrive.
 _BRIDGE_MAX_POLL_SECONDS = 1800
-# 0x Cross-Chain API's own status vocabulary -- verified against 0x's own
+# Legacy cross-chain status vocabulary retained for old rows;
 # example code (github.com/0xProject/0x-examples, schemas.ts's
 # CrossChainStatusResponseSchema), 8 values total. _BRIDGE_TERMINAL_STATUSES
 # (3 of the 8) are the only ones that stop polling -- taken directly from
@@ -4063,77 +4075,11 @@ _BRIDGE_STATUS_NOTIFICATIONS = {
     'origin_tx_reverted':  'Bridge transaction reverted on the origin chain before any funds left your wallet.',
 }
 
-def _get_0x_bridge_status(origin_chain: str, origin_tx_hash: str) -> dict:
-    """Polls 0x's Cross-Chain API status endpoint for one in-flight bridge.
-
-    ── Verified against 0x's own official example code ──
-    (github.com/0xProject/0x-examples, cross-chain-headless-example/src/
-    {crossChainClient.ts,schemas.ts}) after an earlier version of this
-    function was built from documentation alone. Endpoint, params
-    (originChain + originTxHash -- NOT quoteId, despite 0x's own "How It
-    Works" prose saying to poll with "the origin tx hash and quoteId"; the
-    working example code takes only these two), and the full 8-value status
-    enum below are all read directly from that example's Zod schemas, not
-    inferred. Any status this doesn't recognize still returns 'unknown'
-    rather than being guessed into a terminal state, so a genuinely new
-    status 0x adds later fails safe (endless "still checking") rather than
-    unsafe (falsely marked complete/failed).
-
-    Returns {'ok': True, 'status': <one of the 8 real statuses>,
-    'dest_tx_hash': str|None, 'actual_amount_out': float|None,
-    'error_reason': str|None, 'recovery_info': dict|None} on a parseable
-    response, or {'ok': False, 'rate_limited': bool, 'msg': str} on a
-    request/parsing failure (rate_limited=True on HTTP 429, so the caller
-    can back off instead of retrying immediately)."""
-    if not ZEROX_API_KEY:
-        return {'ok': False, 'rate_limited': False, 'msg': 'ZEROX_API_KEY not configured'}
-    try:
-        r = requests.get(
-            'https://api.0x.org/cross-chain/status',
-            params={'originChain': _zerox_chain_param(origin_chain), 'originTxHash': origin_tx_hash},
-            headers={'0x-api-key': ZEROX_API_KEY},
-            timeout=10,
-        )
-    except requests.exceptions.RequestException as e:
-        return {'ok': False, 'rate_limited': False, 'msg': f'{type(e).__name__}: {e}'}
-    if r.status_code == 429:
-        return {'ok': False, 'rate_limited': True, 'msg': 'rate limited'}
-    if r.status_code != 200:
-        return {'ok': False, 'rate_limited': False, 'msg': f'HTTP {r.status_code}: {r.text[:200]}'}
-    try:
-        data = r.json()
-        status = str(data.get('status') or 'unknown').lower()
-        if status not in _BRIDGE_ALL_STATUSES:
-            status = 'unknown'
-        # Real response shape (verified, see docstring): {status, bridge,
-        # steps[], failure: {reason, status, recovery, transactions} | null,
-        # transactions: [{chainId, chain, txHash, timestamp}, ...], zid} --
-        # no destinationTxHash/actualAmountOut/errorReason fields exist at
-        # all, unlike this function's first (unverified) version assumed.
-        txs = data.get('transactions') or []
-        dest_tx_hash = None
-        for _tx in txs:
-            if _tx.get('txHash') and _tx.get('txHash') != origin_tx_hash:
-                dest_tx_hash = _tx['txHash']
-                break
-        actual_amount_out = None
-        for _step in (data.get('steps') or []):
-            if _step.get('type') == 'bridge' and _step.get('settledBuyAmount') is not None:
-                try:
-                    actual_amount_out = float(_step['settledBuyAmount'])
-                except (TypeError, ValueError):
-                    pass
-        failure = data.get('failure')
-        return {
-            'ok': True,
-            'status': status,
-            'dest_tx_hash': dest_tx_hash,
-            'actual_amount_out': actual_amount_out,
-            'error_reason': (failure or {}).get('reason'),
-            'recovery_info': (failure or {}).get('recovery'),
-        }
-    except Exception as e:
-        return {'ok': False, 'rate_limited': False, 'msg': f'unparseable response: {e}'}
+def _disabled_bridge_status(origin_chain: str, origin_tx_hash: str) -> dict:
+    # Legacy compatibility only. OrcAgent is Solana-only and never contacts
+    # an EVM/cross-chain provider.
+    return {'ok': False, 'rate_limited': False,
+            'msg': 'Cross-chain bridging is disabled — OrcAgent supports Solana only'}
 
 def _bridge_status_loop():
     """Global background loop: polls 0x's Cross-Chain API status endpoint
@@ -4141,7 +4087,7 @@ def _bridge_status_loop():
     yet, updates its status once 0x reports one, and notifies the user.
     Global (not per-user) since this only tracks already-broadcast
     transactions rather than deciding whether to act -- same shape as
-    _fast_poll_loop(). See _get_0x_bridge_status() for the one part of this
+    _fast_poll_loop(). See _disabled_bridge_status() for the one part of this
     still pending live verification.
 
     Never assumes an origin-chain confirmation means the bridge itself is
@@ -4237,7 +4183,7 @@ def _bridge_status_loop():
                         finally:
                             conn_ts.close()
 
-                    result = _get_0x_bridge_status(source_chain, source_tx_hash)
+                    result = _disabled_bridge_status(source_chain, source_tx_hash)
                     conn_pa = sqlite3.connect(DB_FILE)
                     try:
                         conn_pa.execute(
@@ -7435,7 +7381,7 @@ def _execute_cross_chain_bridge(user_id: int, wallet: str, origin_chain: str, de
                                  auto_buy_token_address: str = None,
                                  auto_buy_requested_usdc: float = None) -> tuple:
     """Bridge equivalent of _execute_user_swap()/_execute_evm_swap() -- gets
-    a live 0x Cross-Chain quote, then signs and broadcasts the ORIGIN leg
+    a cross-chain quote in the retired multichain flow
     only (see _bridge_status_loop() for how the destination leg is tracked
     to completion; a signature here is never treated as the bridge being
     done). Returns (success, tx_hash_or_message, bridge_row_id) -- row_id is
@@ -7531,7 +7477,7 @@ def _execute_cross_chain_bridge(user_id: int, wallet: str, origin_chain: str, de
             # Caught here, before ever getting a quote, for the same reason:
             # left unchecked this surfaced as 0x's own raw simulation error
             # ("{'code': -32000, 'message': 'insufficient funds for
-            # transfer'}") once get_0x_bridge_quote() tried to quote against
+            # transfer'}") once _disabled_bridge_quote() tried to quote against
             # a gas-less real address -- technically accurate but meaningless
             # to read, and the same class of bug the Solana check above was
             # already written to avoid.
@@ -7578,7 +7524,7 @@ def _execute_cross_chain_bridge(user_id: int, wallet: str, origin_chain: str, de
         decimals = _BRIDGE_SUPPORTED_TOKENS[origin_chain][origin_token]
         amount_raw = int(round(amount * (10 ** decimals)))
 
-        quote = get_0x_bridge_quote(origin_chain, origin_token, amount_raw, dest_chain, dest_token,
+        quote = _disabled_bridge_quote(origin_chain, origin_token, amount_raw, dest_chain, dest_token,
                                      origin_address, dest_address)
         if not quote['ok']:
             return False, quote['msg'], None
@@ -7597,7 +7543,7 @@ def _execute_cross_chain_bridge(user_id: int, wallet: str, origin_chain: str, de
                 (user_id, wallet, origin_chain, dest_chain, origin_token, dest_token, amount,
                  'initiated', initiated_by, '0x', quote.get('quote_id'), quote.get('route_name'),
                  quote.get('expected_amount_out'),
-                 None,  # 0x's cross-chain fee schema has no single USD total (see get_0x_bridge_quote's 'fees' dict)
+                 None,  # the retired bridge fee schema has no single USD total (see _disabled_bridge_quote's 'fees' dict)
                  quote.get('estimated_seconds'),
                  auto_buy_token_address or '', auto_buy_requested_usdc,
                  'pending' if auto_buy_token_address else ''))
@@ -8437,71 +8383,16 @@ _ERC20_FULL_ABI = _ERC20_MIN_ABI + [
 SWAP_REVERTED_MSG = 'Swap transaction reverted on-chain'
 SWAP_UNCONFIRMED_PREFIX = 'UNCONFIRMED'
 
-def _get_0x_quote(sell_token: str, buy_token: str, sell_amount_raw: int, taker: str, chain: str = 'bsc', apply_platform_fee: bool = False) -> dict:
-    """sell_amount_raw is already in the sell token's smallest unit (respect
-    its own decimals -- see the 18-vs-6-decimal USDC note earlier). 0x's
-    Swap API v2 (this same allowance-holder endpoint) covers every chain in
-    EVM_CHAINS -- Base, Arbitrum and Polygon included -- so adding a chain
-    there is enough for this one function to route a swap on it too; no
-    separate DEX-router integration needed per chain. `chain` defaults to
-    'bsc' so every pre-existing call site (which never passed this argument)
-    keeps quoting on BSC exactly as before."""
-    if chain not in ACTIVE_EVM_CHAINS:
-        raise RuntimeError(f'{chain} trading is temporarily disabled on OrcAgent')
-    if not ZEROX_API_KEY:
-        raise RuntimeError('ZEROX_API_KEY not configured')
-    _params = {
-        'chainId': EVM_CHAINS[chain]['zerox_chain_id'],
-        'sellToken': sell_token,
-        'buyToken': buy_token,
-        'sellAmount': str(sell_amount_raw),
-        'taker': taker,
-    }
-    if apply_platform_fee:
-        _fee_token = EVM_CHAINS[chain]['usdc']
-        _params.update({
-            'swapFeeRecipient': EVM_CHAIN_FEE_WALLET,
-            'swapFeeBps': str(int(round(FEE_RATE_TXN * 10000))),
-            'swapFeeToken': _fee_token,
-        })
-    r = requests.get(
-        'https://api.0x.org/swap/allowance-holder/quote',
-        params=_params,
-        headers={'0x-api-key': ZEROX_API_KEY, '0x-version': 'v2'},
-        timeout=15,
-    )
-    r.raise_for_status()
-    return r.json()
+def _disabled_evm_quote(sell_token: str, buy_token: str, sell_amount_raw: int,
+                  taker: str, chain: str = 'bsc',
+                  apply_platform_fee: bool = False) -> dict:
+    raise RuntimeError('EVM trading is disabled — OrcAgent supports Solana only')
 
-def _get_0x_price(sell_token: str, buy_token: str, sell_amount_raw: int,
+
+def _disabled_evm_price(sell_token: str, buy_token: str, sell_amount_raw: int,
                   chain: str = 'bsc') -> dict:
-    """What one asset is worth in another, with no transaction attached.
+    raise RuntimeError('EVM pricing is disabled — OrcAgent supports Solana only')
 
-    Separate from _get_0x_quote because /quote builds a swap for a specific
-    wallet and REQUIRES a valid taker, while /price answers the question
-    "what is this worth" and does not. Asking /quote for a price meant
-    inventing a taker, and the value invented for it -- the native-token
-    sentinel 0xEeee...EEeE -- is not an address at all, so 0x answered 400
-    for every chain. It never showed up in development because 0x is
-    unreachable from there.
-    """
-    if chain not in ACTIVE_EVM_CHAINS:
-        raise RuntimeError(f'{chain} pricing is temporarily disabled on OrcAgent')
-    if not ZEROX_API_KEY:
-        raise RuntimeError('ZEROX_API_KEY not configured')
-    r = requests.get(
-        'https://api.0x.org/swap/allowance-holder/price',
-        params={
-            'chainId': EVM_CHAINS[chain]['zerox_chain_id'],
-            'sellToken': sell_token,
-            'buyToken': buy_token,
-            'sellAmount': str(sell_amount_raw),
-        },
-        headers={'0x-api-key': ZEROX_API_KEY, '0x-version': 'v2'},
-        timeout=15,
-    )
-    r.raise_for_status()
-    return r.json()
 
 # ── TRADE ENGINE: quoting ───────────────────────────────────────────────────
 # Read-only. This prices a trade and nothing else -- it signs nothing, sends
@@ -8568,9 +8459,9 @@ def _te_native_price_usd(chain: str) -> Decimal:
     _te_ensure_decimals(chain)
     cfg = EVM_CHAINS[chain]
     # /price, not /quote: this is a valuation, not a swap for anybody. See
-    # _get_0x_price -- passing the native sentinel as a taker to /quote is
+    # _disabled_evm_price -- passing the native sentinel as a taker to /quote is
     # what made every chain answer 400.
-    quote = _get_0x_price(BNB_NATIVE_ADDR, cfg['usdc'], 10 ** 18, chain)
+    quote = _disabled_evm_price(BNB_NATIVE_ADDR, cfg['usdc'], 10 ** 18, chain)
     buy = quote.get('buyAmount')
     if not buy:
         raise TeQuoteError(f'no {cfg["native_symbol"]} price available on {chain}')
@@ -8628,10 +8519,10 @@ def _te_needs_sponsored_gas(chain: str, address: str) -> bool:
         return True
 
 def _te_swap_provider(chain: str):
-    """The aggregator that serves this chain, wrapping the app's own call."""
+    """OrcAgent's only active aggregator: Jupiter on Solana."""
     if te_registry.get_chain(chain).kind == 'svm':
         return JupiterProvider(lambda sell, buy, amount: _jupiter_quote(sell, buy, amount))
-    return ZeroExProvider(_get_0x_quote)
+    raise TeProviderError('OrcAgent supports Solana only')
 
 def _jupiter_quote(input_mint: str, output_mint: str, amount_raw: int) -> dict:
     """Jupiter's quote endpoint, through the same proxy the swap path uses."""
@@ -8685,7 +8576,7 @@ def _te_build_and_store_quote(*, uid, wallet, source_chain, dest_chain, token_ad
     return quote
 
 
-@app.route('/api/trade/quote', methods=['POST'])
+@_disabled_legacy_route('/api/trade/quote', methods=['POST'])
 @rate_limit(30, 60)
 def api_trade_quote():
     """Price a trade against a hard spend ceiling. Executes nothing.
@@ -8925,7 +8816,7 @@ def _te_run_evm_trade(*, quote_id, idem, available, wallet, enc_blob, evm_addres
     return result
 
 
-@app.route('/api/trade/execute', methods=['POST'])
+@_disabled_legacy_route('/api/trade/execute', methods=['POST'])
 @rate_limit(10, 60)
 def api_trade_execute():
     """Execute a quote that was already given, once.
@@ -9058,14 +8949,13 @@ def api_trade_status(trade_id):
     })
 
 
-# ── CROSS-CHAIN BRIDGE (0x Cross-Chain API) ─────────────────────────────────
+# ── LEGACY CROSS-CHAIN BRIDGE (DISABLED) ─────────────────────────────────
 # Superseded a first-draft Solana<->BSC bridge built on Mayan Finance's
 # JS-only swap-sdk (bridge/mayan_execute.js, never run end-to-end -- no
 # package.json/node_modules were ever installed for it). 0x's Cross-Chain
 # API covers the same ground over plain REST, the same way its same-chain
-# Swap API already does for every chain in EVM_CHAINS (_get_0x_quote above)
-# -- same api.0x.org host, same ZEROX_API_KEY, no Node subprocess, no
-# second SDK to trust. Chains: every EVM chain in EVM_CHAINS plus Solana
+# This retired implementation is retained only for historical code compatibility.
+# OrcAgent no longer connects to any EVM/cross-chain swap provider. Chains: every EVM chain in EVM_CHAINS plus Solana
 # (0x's own announcement: "now available across EVM, Solana, HyperCore, and
 # Tron chains").
 #
@@ -9087,115 +8977,16 @@ def api_trade_status(trade_id):
 # Still recommended: one small real bridge end-to-end before this carries
 # real user-scale amounts, since example code is not a live-traffic
 # guarantee.
-def _zerox_chain_param(chain: str) -> str:
-    """0x's Cross-Chain API originChain/destinationChain value for `chain`.
-    EVM chains use their numeric chain ID as a string (confirmed by the
-    worked example: originChain='8453' for Base) -- this reuses
-    EVM_CHAINS[chain]['zerox_chain_id'], the exact same value _get_0x_quote()
-    already sends for same-chain swaps on that chain. 'solana' is passed
-    through as the literal string 'solana' -- verified against
-    0x-examples/cross-chain-headless-example's config.ts (CHAIN_IDS.solana =
-    "solana"). Note this differs from the STATUS response's numeric
-    pseudo-chain-id for Solana (999999999991, STATUS_CHAIN_IDS.solana) --
-    that field is only read out of transactions[].chainId, never sent."""
-    if chain == 'solana':
-        return 'solana'
-    return str(EVM_CHAINS[chain]['zerox_chain_id'])
+def _disabled_chain_param(chain: str) -> str:
+    raise RuntimeError('Cross-chain routing is disabled — OrcAgent supports Solana only')
 
-def get_0x_bridge_quote(origin_chain: str, origin_token: str, origin_amount_raw: int,
-                         dest_chain: str, dest_token: str,
-                         origin_address: str, dest_address: str) -> dict:
-    """Quote-only -- no signing, no funds move. origin_amount_raw is already
-    in origin_token's smallest unit (mirrors _get_0x_quote's sell_amount_raw
-    convention). Returns a normalized dict the API route / frontend can
-    render directly (spec's required quote fields), or {'ok': False, 'msg':
-    ...} on any failure -- never raises, so a caller can always show the
-    user *something* rather than a stack trace."""
-    if not ZEROX_API_KEY:
-        return {'ok': False, 'msg': 'ZEROX_API_KEY not configured'}
-    try:
-        r = requests.get(
-            'https://api.0x.org/cross-chain/quotes',
-            params={
-                'originChain':        _zerox_chain_param(origin_chain),
-                'destinationChain':   _zerox_chain_param(dest_chain),
-                'sellToken':          origin_token,
-                'buyToken':           dest_token,
-                'sellAmount':         str(origin_amount_raw),
-                'sortQuotesBy':       'price',
-                'originAddress':      origin_address,
-                'destinationAddress': dest_address,
-                'maxNumQuotes':       1,
-            },
-            # '0x-version': 'v2' -- same header _get_0x_quote() (the same-chain
-            # Swap API call) already sends and this call was missing; added
-            # defensively while diagnosing the "no route" reports below, on
-            # the chance the Cross-Chain API defaults to an older response
-            # shape/behavior without it. Harmless if this endpoint ignores it.
-            headers={'0x-api-key': ZEROX_API_KEY, '0x-version': 'v2'},
-            timeout=15,
-        )
-    except requests.exceptions.RequestException as e:
-        return {'ok': False, 'msg': f'{type(e).__name__}: {e}'}
-    if r.status_code == 429:
-        return {'ok': False, 'msg': 'Bridge quote service is rate-limited — try again shortly', 'rate_limited': True}
-    if r.status_code != 200:
-        print(f'[bridge-quote] HTTP {r.status_code} for {origin_chain}->{dest_chain}: {r.text[:500]}', flush=True)
-        return {'ok': False, 'msg': f'HTTP {r.status_code}: {r.text[:300]}'}
-    try:
-        data = r.json()
-    except Exception as e:
-        return {'ok': False, 'msg': f'unparseable response: {e}'}
-    # Verified against 0x-examples/cross-chain-headless-example's schemas.ts:
-    # CrossChainQuotesResponseSchema is a discriminated union on
-    # liquidityAvailable. When true, the quotes are an ARRAY (`quotes`), not
-    # a single object -- take the first (only requested via maxNumQuotes=1).
-    #
-    # This whole integration was built from 0x's example code (docs.0x.org
-    # was unreachable from the dev environment at the time -- see the module
-    # comment above) and had never been exercised against the live API until
-    # a real "No bridge route found" report came back identically for both a
-    # brand-new chain (Robinhood) and a long-established, high-liquidity one
-    # (Base) -- two completely different liquidity situations producing the
-    # exact same generic error strongly suggests the request itself, not
-    # actual liquidity, so the FULL raw response is logged here (previously
-    # discarded entirely) to see whatever real reason 0x's API is giving.
-    if not data.get('liquidityAvailable'):
-        print(f'[bridge-quote] no liquidity for {origin_chain}({origin_token})->{dest_chain}({dest_token}) '
-              f'amount_raw={origin_amount_raw}: full response={json.dumps(data)[:1500]}', flush=True)
-        extra = data.get('reason') or data.get('message') or (data.get('errors') and str(data['errors'])[:200])
-        msg = 'No bridge route found for this pair/amount' + (f' ({extra})' if extra else '')
-        return {'ok': False, 'msg': msg}
-    quotes = data.get('quotes')
-    if not isinstance(quotes, list) or not quotes:
-        print(f'[bridge-quote] liquidityAvailable=True but no quotes[] for {origin_chain}->{dest_chain}: '
-              f'full response={json.dumps(data)[:1500]}', flush=True)
-        return {'ok': False, 'msg': 'No bridge route found for this pair/amount'}
-    quote = quotes[0]
-    try:
-        # FeesSchema has no total-USD field; each fee sub-object carries its
-        # own {amount, token} in that token's own units, not USD -- surfaced
-        # as-is rather than inventing a USD figure the API doesn't provide.
-        fees = quote.get('fees') or {}
-        bridge_step = next((s for s in (quote.get('steps') or []) if s.get('type') == 'bridge'), None)
-        return {
-            'ok': True,
-            'quote_id':               quote.get('quoteId'),
-            'origin_chain':           origin_chain,
-            'origin_token':           origin_token,
-            'origin_amount_raw':      origin_amount_raw,
-            'dest_chain':             dest_chain,
-            'dest_token':             dest_token,
-            'expected_amount_out':    quote.get('buyAmount'),
-            'min_amount_out':         quote.get('minBuyAmount'),
-            'route_name':             bridge_step.get('provider') if bridge_step else None,
-            'estimated_seconds':      quote.get('estimatedTimeSeconds'),
-            'fees':                   fees,
-            'needs_allowance':        bool((quote.get('issues') or {}).get('allowance')),
-            'raw_quote':              quote,  # kept for _execute_cross_chain_bridge() -- it needs the live object, not just the displayed numbers
-        }
-    except Exception as e:
-        return {'ok': False, 'msg': f'malformed quote response: {e}'}
+
+def _disabled_bridge_quote(origin_chain: str, origin_token: str, origin_amount_raw: int,
+                        dest_chain: str, dest_token: str,
+                        origin_address: str, dest_address: str) -> dict:
+    return {'ok': False,
+            'msg': 'Cross-chain bridging is disabled — OrcAgent supports Solana only'}
+
 
 def _evm_tx_fee_fields(w3, chain: str, quoted_gas_price=None) -> dict:
     """Return fee fields that stay valid while the next block's base fee moves.
@@ -9313,9 +9104,9 @@ def _execute_evm_swap(wallet: str, private_key: str, action: str, token_address:
         sell_amount_raw = int(float(amount_str) * (10 ** sell_decimals))
 
         try:
-            quote = _get_0x_quote(sell_token, buy_token, sell_amount_raw, wallet_cs, chain, apply_platform_fee=True)
+            quote = _disabled_evm_quote(sell_token, buy_token, sell_amount_raw, wallet_cs, chain, apply_platform_fee=True)
         except RuntimeError as e:
-            # _get_0x_quote's own "ZEROX_API_KEY not configured" is already specific
+            # The disabled EVM quote path returns a Solana-only error
             print(f'[{chain}-swap] {e}', flush=True)
             return False, str(e), ''
 
@@ -9341,7 +9132,7 @@ def _execute_evm_swap(wallet: str, private_key: str, action: str, token_address:
                 return False, msg, ''
             # Re-quote after approving -- the first quote's tx.data assumed the
             # allowance issue was still open; a stale quote can revert on-chain.
-            quote = _get_0x_quote(sell_token, buy_token, sell_amount_raw, wallet_cs, chain, apply_platform_fee=True)
+            quote = _disabled_evm_quote(sell_token, buy_token, sell_amount_raw, wallet_cs, chain, apply_platform_fee=True)
 
         txn = quote.get('transaction')
         if not txn:
@@ -9440,7 +9231,7 @@ def _execute_evm_gas_topup(wallet: str, private_key: str, chain: str, usdc_amoun
         usdc_decimals = usdc_contract.functions.decimals().call()
         sell_amount_raw = int(usdc_amount * (10 ** usdc_decimals))
 
-        quote = _get_0x_quote(usdc_addr, BNB_NATIVE_ADDR, sell_amount_raw, wallet_cs, chain)
+        quote = _disabled_evm_quote(usdc_addr, BNB_NATIVE_ADDR, sell_amount_raw, wallet_cs, chain)
 
         issues = quote.get('issues') or {}
         balance_issue = issues.get('balance')
@@ -9463,7 +9254,7 @@ def _execute_evm_gas_topup(wallet: str, private_key: str, chain: str, usdc_amoun
                 print(f'[{chain}-gas-topup] {msg}', flush=True)
                 return False, msg, ''
             # Re-quote after approving -- same reasoning as _execute_evm_swap().
-            quote = _get_0x_quote(usdc_addr, BNB_NATIVE_ADDR, sell_amount_raw, wallet_cs, chain)
+            quote = _disabled_evm_quote(usdc_addr, BNB_NATIVE_ADDR, sell_amount_raw, wallet_cs, chain)
 
         txn = quote.get('transaction')
         if not txn:
@@ -9518,7 +9309,7 @@ def _execute_evm_native_to_usdc(wallet: str, private_key: str, chain: str, nativ
         wallet_cs = w3.to_checksum_address(acct.address)
 
         sell_amount_raw = int(native_amount * (10 ** 18))  # every native gas asset here (BNB/ETH/POL) is 18 decimals
-        quote = _get_0x_quote(BNB_NATIVE_ADDR, usdc_addr, sell_amount_raw, wallet_cs, chain)
+        quote = _disabled_evm_quote(BNB_NATIVE_ADDR, usdc_addr, sell_amount_raw, wallet_cs, chain)
 
         issues = quote.get('issues') or {}
         balance_issue = issues.get('balance')
@@ -10060,7 +9851,7 @@ def _bootstrap_evm_gas_via_bridge(user_id: int, wallet: str, evm_address: str, c
     one way around that WITHOUT the platform fronting any money: bridge a
     small, fixed amount of the user's OWN SOL (their Solana trading wallet,
     which every user of this app already needs anyway) straight into
-    `chain`'s native gas token, via the exact same 0x Cross-Chain bridge
+    `chain`'s native gas token, through the retired cross-chain bridge path
     the app's own Bridge feature already uses (_execute_cross_chain_bridge).
     The user only ever pays gas on the ORIGIN (Solana) side of that bridge,
     in SOL they already hold -- the destination-chain arrival is delivered
@@ -13387,7 +13178,7 @@ def profile():
 def profile_view(wallet_address: str):
     """Public profile page for any wallet address."""
     session_wallet = _current_wallet()
-    is_wallet = is_valid_solana_address(wallet_address) or is_valid_evm_address(wallet_address)
+    is_wallet = is_valid_solana_address(wallet_address)
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     try:
@@ -14671,12 +14462,7 @@ def live_market():
                            # the rate the fee box quotes is the rate the fee
                            # code charges.
                            fee_rate_txn=FEE_RATE_TXN,
-                           tx_explorers={
-                               **{c: EVM_CHAINS[c]['explorer'] + '/tx/'
-                                  for c in EVM_CHAINS
-                                  if EVM_CHAINS[c].get('explorer')},
-                               'solana': 'https://solscan.io/tx/',
-                           })
+                           tx_explorers={'solana': 'https://solscan.io/tx/'})
 
 
 @app.route('/live-market/pro')
@@ -14824,6 +14610,7 @@ def _fetch_open_bot_positions(wallet):
                 '''SELECT mint_address, symbol, amount, buy_price, opened_at,
                           sl_price, tp_price, trailing_enabled, chain, base_currency
                    FROM open_positions WHERE user_id=? AND source IN ('bot','narrative')
+                     AND LOWER(COALESCE(chain,'solana'))='solana'
                    ORDER BY opened_at DESC''',
                 (user_id,)
             )
@@ -14937,6 +14724,7 @@ def _fetch_closed_bot_trades(wallet: str, limit: int = 30) -> list:
                    FROM trades
                    WHERE user_id=? AND COALESCE(source,'bot') IN ('bot','narrative')
                      AND side IS NULL AND exit_price IS NOT NULL AND entry_price > 0
+                     AND LOWER(COALESCE(chain,'solana'))='solana'
                    ORDER BY id DESC LIMIT ?''', (row[0], int(limit))).fetchall()
         finally:
             conn.close()
@@ -15042,22 +14830,11 @@ def wallet_page():
         # never the connected session wallet -- those are different keypairs by design
         # (see wallet_set_key's "paste a separate, dedicated trading wallet" guidance).
         deposit_address = None
-        bsc_deposit_address = None
         conn = sqlite3.connect(DB_FILE)
         try:
             row = conn.execute(
                 'SELECT id, encrypted_private_key FROM users WHERE wallet_address=?', (wallet_address,)
             ).fetchone()
-            if row:
-                uid = row[0]
-                try:
-                    # Address only here -- fast, local DB operation. Balances are
-                    # fetched client-side via /api/bsc/balance after page load,
-                    # same pattern as the SOL balance elsewhere in this app, so a
-                    # slow/down BSC RPC never blocks the page itself from rendering.
-                    bsc_deposit_address = ensure_bsc_wallet(conn, uid, wallet_address)
-                except Exception as e:
-                    print(f'[wallet] BSC wallet creation error for {wallet_short}: {type(e).__name__}: {e}', flush=True)
         finally:
             conn.close()
         if row and row[1]:
@@ -15074,7 +14851,6 @@ def wallet_page():
             'wallet.html',
             wallet_address=wallet_address,
             deposit_address=deposit_address,
-            bsc_deposit_address=bsc_deposit_address,
             csrf_token=_get_csrf_token(),
             client_secret=API_SHARED_SECRET,
         )
@@ -15085,7 +14861,7 @@ def wallet_page():
         return '<h1>Wallet is temporarily unavailable. Please try again.</h1>', 500
 
 
-@app.route('/api/bsc/balance', methods=['GET'])
+@_disabled_legacy_route('/api/bsc/balance', methods=['GET'])
 @rate_limit(20, 60)
 def api_bsc_balance():
     # _authenticated_wallet(): this is first-person balance data, same
@@ -15110,7 +14886,7 @@ def api_bsc_balance():
         'error': balances['error'],
     })
 
-@app.route('/api/evm/convert-to-usdc', methods=['POST'])
+@_disabled_legacy_route('/api/evm/convert-to-usdc', methods=['POST'])
 @rate_limit(5, 60)
 def api_evm_convert_to_usdc():
     """Converts this wallet's own native gas token (BNB/ETH/POL) on `chain`
@@ -15219,14 +14995,14 @@ def _bridge_row_to_dict(row: sqlite3.Row) -> dict:
         pass
     return d
 
-@app.route('/api/bridge/quote', methods=['GET'])
+@_disabled_legacy_route('/api/bridge/quote', methods=['GET'])
 @rate_limit(30, 60)
 def api_bridge_quote():
     """Quote-only, read-only -- no auth required since nothing here touches
     a specific user's funds or identity, same as any other public price
     lookup elsewhere in this app. Spec's required quote fields (origin/dest
     chain+token+amount, estimated destination amount, route, ETA, fees,
-    quote id, price impact) all come straight from get_0x_bridge_quote()'s
+    quote id, price impact) all come straight from _disabled_bridge_quote()'s
     normalized response.
 
     origin_address/dest_address are optional here (0x's quote needs a taker
@@ -15321,7 +15097,7 @@ def api_bridge_quote():
                 f'automatically (right away on your next Buy/Sell there, or within a few minutes on its own) — '
                 f'then try this bridge again'}), 400
 
-    result = get_0x_bridge_quote(origin_chain, origin_token, amount_raw, dest_chain, dest_token,
+    result = _disabled_bridge_quote(origin_chain, origin_token, amount_raw, dest_chain, dest_token,
                                   request.args.get('origin_address') or _real_origin or _placeholder_origin,
                                   request.args.get('dest_address') or _real_dest or _placeholder_dest)
     if not result['ok']:
@@ -15329,7 +15105,7 @@ def api_bridge_quote():
         return jsonify(result), status_code
     return jsonify(result)
 
-@app.route('/api/bridge/execute', methods=['POST'])
+@_disabled_legacy_route('/api/bridge/execute', methods=['POST'])
 @rate_limit(10, 60)
 def api_bridge_execute():
     """Signs and broadcasts the ORIGIN leg of a real cross-chain bridge via
@@ -15379,7 +15155,7 @@ def api_bridge_execute():
     return jsonify({'ok': True, 'bridge_id': bridge_id, 'status': 'origin_tx_pending',
                      'status_label': BRIDGE_STATUS_LABELS['origin_tx_pending'], 'tx_hash': result})
 
-@app.route('/api/bridge/status/<int:bridge_id>', methods=['GET'])
+@_disabled_legacy_route('/api/bridge/status/<int:bridge_id>', methods=['GET'])
 @rate_limit(60, 60)
 def api_bridge_status(bridge_id):
     """Cheap, DB-only status read for one bridge (no live 0x call here --
@@ -15417,7 +15193,7 @@ def api_bridge_status(bridge_id):
                      'dest_tx_hash': d['dest_tx_hash'],
                      'auto_buy_status': auto_buy_status, 'auto_buy_result': auto_buy_result})
 
-@app.route('/api/bridge/transaction/<int:bridge_id>', methods=['GET'])
+@_disabled_legacy_route('/api/bridge/transaction/<int:bridge_id>', methods=['GET'])
 @rate_limit(60, 60)
 def api_bridge_transaction(bridge_id):
     """Full detail for one bridge transaction (spec's persistence
@@ -15437,7 +15213,7 @@ def api_bridge_transaction(bridge_id):
         return jsonify({'ok': False, 'msg': 'Bridge transaction not found'}), 404
     return jsonify({'ok': True, 'transaction': _bridge_row_to_dict(row)})
 
-@app.route('/api/bridge/transactions', methods=['GET'])
+@_disabled_legacy_route('/api/bridge/transactions', methods=['GET'])
 @rate_limit(30, 60)
 def api_bridge_transactions_list():
     """This user's bridge history, most recent first -- what the Wallet
@@ -15455,7 +15231,7 @@ def api_bridge_transactions_list():
         conn.close()
     return jsonify({'ok': True, 'transactions': [_bridge_row_to_dict(r) for r in rows]})
 
-@app.route('/api/evm/<chain>/balance', methods=['GET'])
+@_disabled_legacy_route('/api/evm/<chain>/balance', methods=['GET'])
 @rate_limit(20, 60)
 def api_evm_balance(chain):
     """Base/Arbitrum/Polygon sibling of /api/bsc/balance -- same wallet (see
@@ -15489,7 +15265,7 @@ def api_evm_balance(chain):
         'error': balances['error'],
     })
 
-@app.route('/api/evm/trade/buy', methods=['POST'])
+@_disabled_legacy_route('/api/evm/trade/buy', methods=['POST'])
 @rate_limit(10, 60)
 def api_evm_trade_buy():
     """Manual buy on Base, Arbitrum, Polygon or BSC -- chain in the body."""
@@ -15503,7 +15279,7 @@ def api_evm_trade_buy():
     return _evm_buy_flow(wallet, data, chain)
 
 
-@app.route('/api/bsc/trade/buy', methods=['POST'])
+@_disabled_legacy_route('/api/bsc/trade/buy', methods=['POST'])
 @rate_limit(10, 60)
 def api_bsc_trade_buy():
     """The BSC route, kept because the frontend still calls it by this path.
@@ -15747,7 +15523,7 @@ def _legacy_evm_trade_buy(wallet, enc_blob, user_id, evm_address, chain,
                     'token_address': token_address, 'entry_price': entry_price,
                     'symbol': symbol, 'tx_hash': buy_tx_hash})
 
-@app.route('/api/evm/trade/sell', methods=['POST'])
+@_disabled_legacy_route('/api/evm/trade/sell', methods=['POST'])
 @rate_limit(10, 60)
 def api_evm_trade_sell():
     """Manual sell on Base, Arbitrum or Polygon -- chain in the body."""
@@ -15761,7 +15537,7 @@ def api_evm_trade_sell():
     return _evm_sell_flow(wallet, data, chain)
 
 
-@app.route('/api/bsc/trade/sell', methods=['POST'])
+@_disabled_legacy_route('/api/bsc/trade/sell', methods=['POST'])
 @rate_limit(10, 60)
 def api_bsc_trade_sell():
     """The BSC sell, kept because the frontend still calls it by this path.
@@ -16246,38 +16022,6 @@ def promote_page():
     )
 
 
-@app.route('/admin/bridge-test')
-def admin_bridge_test():
-    """Manual test harness for _execute_cross_chain_bridge() -- deliberately not
-    linked from any nav. Guard is stricter than /admin's (which lets any
-    non-'user' role in): exact role=='admin' only, no executive/moderator/
-    analyst, since this page triggers real signed cross-chain swaps rather
-    than just admin visibility."""
-    if session.get('readonly') and session.get('wallet'):
-        _log_security_event('readonly_privileged_attempt', session.get('wallet', ''),
-                             f'GET {request.path}')
-    wallet = _authenticated_wallet()
-    if not wallet or get_user_role(wallet) != 'admin':
-        return redirect('/')
-
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        rows = conn.execute(
-            'SELECT status, source_tx_hash, created_at FROM bridge_transactions '
-            'WHERE wallet=? ORDER BY id DESC LIMIT 10', (wallet,)
-        ).fetchall()
-    finally:
-        conn.close()
-    bridge_rows = [{'status': r[0], 'tx_hash': r[1], 'created_at': r[2]} for r in rows]
-
-    return render_template(
-        'bridge_test.html',
-        wallet=wallet,
-        csrf_token=_get_csrf_token(),
-        bridge_rows=bridge_rows,
-    )
-
-
 @app.route('/admin/narrative-test', methods=['POST'])
 def admin_narrative_test():
     """Manual, synchronous trigger for _narrative_agent_cycle() -- same
@@ -16311,13 +16055,9 @@ def admin_narrative_test():
 
     mint = str((request.get_json(silent=True) or {}).get('mint', '')).strip()
     if mint:
-        if is_valid_solana_address(mint):
-            chain = 'solana'
-        elif is_valid_evm_address(mint):
-            chain = 'bsc'
-        else:
-            return jsonify({'ok': False, 'msg': 'mint is not a valid Solana or BSC address'}), 400
-        _narrative_agent_process_candidate(user_id, wallet, mint, chain, NARRATIVE_MAX_PER_TX)
+        if not is_valid_solana_address(mint):
+            return jsonify({'ok': False, 'msg': 'mint is not a valid Solana address'}), 400
+        _narrative_agent_process_candidate(user_id, wallet, mint, 'solana', NARRATIVE_MAX_PER_TX)
     else:
         _narrative_agent_cycle(user_id, wallet)
 
@@ -20499,7 +20239,7 @@ CALL_NOTE_MAX = 280
 FEED_CALL_MARKER = '__CALL__'
 _FEED_EMBED_MARKERS = ('__CHART__', '__TRADE__', FEED_CALL_MARKER)
 
-_CALL_LOOKUP_EVM_CHAINS = ('base', 'bsc', 'arbitrum')
+_CALL_LOOKUP_EVM_CHAINS = ()
 
 
 def _call_token_row(mint, symbol, name, chain, price, mcap=0.0, image_url='', change_24h=None):
@@ -20713,8 +20453,8 @@ def api_make_call():
     # a generic "Invalid token address" 400, even though get_token_data()
     # below and every downstream read of this row (peak-price refresh,
     # leaderboard, profile feed) is already chain-agnostic.
-    if not (is_valid_solana_address(mint) or is_valid_evm_address(mint)):
-        return jsonify({'ok': False, 'msg': 'Invalid token address'}), 400
+    if not is_valid_solana_address(mint):
+        return jsonify({'ok': False, 'msg': 'Invalid Solana token address'}), 400
     # Optional: the caller's reason, and whether to post the call to the home
     # feed (the Call button on Home does; the /calls page doesn't).
     note = _sanitize(str(data.get('note', '') or ''))
@@ -20724,9 +20464,7 @@ def api_make_call():
     if len(note) > CALL_NOTE_MAX:
         return jsonify({'ok': False, 'msg': f'Keep your reason under {CALL_NOTE_MAX} characters'}), 400
     post_to_feed = data.get('post_to_feed') is True
-    want_chain = str(data.get('chain', '') or '').strip().lower()
-    if want_chain not in _MARKET_LIVE_CHAINS:
-        want_chain = None
+    want_chain = 'solana'
 
     conn = sqlite3.connect(DB_FILE)
     try:
@@ -20743,7 +20481,7 @@ def api_make_call():
 
         # Always fetch the price fresh server-side -- never trust a client-submitted
         # price, which anyone could forge to fake a huge multiplier from the start.
-        td = get_token_data(mint, chain=want_chain) if want_chain else get_token_data(mint)
+        td = get_token_data(mint, chain='solana')
         if not td or not td.get('price'):
             # DexScreener rate-limited, or a token it has not indexed: every
             # other source this app has (still a server-side price).
@@ -20755,7 +20493,7 @@ def api_make_call():
         symbol = td.get('symbol', '') or mint[:8]
         name = td.get('name', '') or symbol
         mcap = float(td.get('market_cap', 0) or 0)
-        chain = str(td.get('chain', '') or want_chain or ('solana' if is_valid_solana_address(mint) else ''))
+        chain = 'solana'
         image_url = _call_token_row(mint, '', '', '', 0, 0, td.get('image_url'))['image_url']
 
         cur = conn.execute(
@@ -22218,8 +21956,8 @@ def api_wallet_convert_quote():
 
     chain = str(request.args.get('chain', 'solana')).strip().lower()
     direction = str(request.args.get('direction', '')).strip().lower()
-    if chain != 'solana' and chain not in ACTIVE_EVM_CHAINS:
-        return jsonify({'ok': False, 'msg': f'Unsupported chain {chain!r}'}), 400
+    if chain != 'solana':
+        return jsonify({'ok': False, 'msg': 'OrcAgent supports Solana only'}), 400
     if direction not in ('native_to_stable', 'stable_to_native'):
         return jsonify({'ok': False, 'msg': 'Invalid conversion direction'}), 400
     try:
@@ -22266,52 +22004,6 @@ def api_wallet_convert_quote():
                 'network_reserve_native': SOL_NETWORK_RESERVE,
             })
 
-        cfg = EVM_CHAINS[chain]
-        conn = sqlite3.connect(DB_FILE)
-        try:
-            row = conn.execute(
-                'SELECT bsc_wallet_address FROM users WHERE wallet_address=?',
-                (wallet,)
-            ).fetchone()
-        finally:
-            conn.close()
-        if not row or not row[0]:
-            return jsonify({'ok': False, 'msg': 'No EVM trading wallet configured'}), 400
-        evm_address = row[0]
-
-        w3 = _get_web3(chain)
-        stable_contract = w3.eth.contract(
-            address=w3.to_checksum_address(cfg['usdc']), abi=_ERC20_MIN_ABI)
-        stable_decimals = int(stable_contract.functions.decimals().call())
-        if direction == 'native_to_stable':
-            sell_token, buy_token = BNB_NATIVE_ADDR, cfg['usdc']
-            sell_raw = int(amount * (10 ** 18))
-            out_decimals = stable_decimals
-        else:
-            sell_token, buy_token = cfg['usdc'], BNB_NATIVE_ADDR
-            sell_raw = int(amount * (10 ** stable_decimals))
-            out_decimals = 18
-
-        quote = _get_0x_quote(
-            sell_token, buy_token, sell_raw,
-            w3.to_checksum_address(evm_address), chain)
-        out_raw = int(quote.get('buyAmount', 0) or 0)
-        min_raw = int(quote.get('minBuyAmount', 0) or 0)
-        if out_raw <= 0:
-            return jsonify({'ok': False, 'msg': 'No route found'}), 502
-        gas_reserve = float(w3.from_wei(
-            w3.eth.gas_price * GAS_CONVERT_RESERVE_UNITS, 'ether'))
-        return jsonify({
-            'ok': True,
-            'chain': chain,
-            'direction': direction,
-            'from_symbol': cfg['native_symbol'] if direction == 'native_to_stable' else user_currency_label(chain),
-            'to_symbol': user_currency_label(chain) if direction == 'native_to_stable' else cfg['native_symbol'],
-            'out_amount': out_raw / (10 ** out_decimals),
-            'min_out_amount': (min_raw / (10 ** out_decimals)) if min_raw > 0 else 0,
-            'price_impact_pct': float(quote.get('priceImpactPct', 0) or 0),
-            'network_reserve_native': gas_reserve,
-        })
     except Exception as e:
         return jsonify({'ok': False, 'msg': _redact_keys(str(e))[:180]}), 502
 
@@ -22326,8 +22018,8 @@ def api_wallet_convert():
     data = request.get_json(silent=True) or {}
     chain = str(data.get('chain', 'solana')).strip().lower()
     direction = str(data.get('direction', '')).strip().lower()
-    if chain != 'solana' and chain not in ACTIVE_EVM_CHAINS:
-        return jsonify({'ok': False, 'msg': f'Unsupported chain {chain!r}'}), 400
+    if chain != 'solana':
+        return jsonify({'ok': False, 'msg': 'OrcAgent supports Solana only'}), 400
     if direction not in ('native_to_stable', 'stable_to_native'):
         return jsonify({'ok': False, 'msg': 'Invalid conversion direction'}), 400
     try:
@@ -22392,57 +22084,6 @@ def api_wallet_convert():
                         'from_symbol': from_sym, 'to_symbol': to_sym,
                         'amount_in': amount, 'amount_out': amount_out,
                         'tx_hash': sig})
-
-    cfg = EVM_CHAINS[chain]
-    conn = sqlite3.connect(DB_FILE)
-    try:
-        row = conn.execute(
-            'SELECT encrypted_private_key_bsc, bsc_wallet_address FROM users WHERE wallet_address=?',
-            (wallet,)
-        ).fetchone()
-    finally:
-        conn.close()
-    if not row or not row[0] or not row[1]:
-        return jsonify({'ok': False, 'msg': 'No EVM trading wallet configured'}), 400
-    enc_blob, evm_address = row
-    try:
-        w3 = _get_web3(chain)
-        native_bal = get_evm_native_balance(evm_address, chain)
-        stable_bal = get_evm_usdc_balance(evm_address, chain)
-        reserve_native = float(w3.from_wei(
-            w3.eth.gas_price * GAS_CONVERT_RESERVE_UNITS, 'ether'))
-    except Exception as e:
-        return jsonify({'ok': False, 'msg': f'Balance check failed: {_redact_keys(str(e))[:140]}'}), 502
-
-    native_symbol = cfg['native_symbol']
-    stable_label = user_currency_label(chain)
-    with _use_key(enc_blob, wallet) as pk:
-        if direction == 'native_to_stable':
-            max_convert = max(0.0, native_bal - reserve_native)
-            if amount > max_convert + 1e-12:
-                return jsonify({'ok': False, 'msg':
-                    f'Keep enough {native_symbol} for network fees. Maximum now: {max_convert:.8f} {native_symbol}'}), 400
-            ok, err, tx_hash = _execute_evm_native_to_usdc(
-                wallet, pk, chain, amount)
-            from_sym, to_sym = native_symbol, stable_label
-        else:
-            if amount > stable_bal + 1e-9:
-                return jsonify({'ok': False, 'msg':
-                    f'Not enough {stable_label} — available {stable_bal:.2f}'}), 400
-            if native_bal <= 0:
-                return jsonify({'ok': False, 'msg':
-                    f'A small amount of {native_symbol} is needed to pay the network fee for this conversion'}), 400
-            ok, err, tx_hash = _execute_evm_gas_topup(
-                wallet, pk, chain, amount)
-            from_sym, to_sym = stable_label, native_symbol
-    if not ok or not tx_hash:
-        return jsonify({'ok': False, 'msg': err or 'Conversion failed'}), 502
-    _log_security_event('wallet_convert', wallet,
-                        f'{chain}:{direction} amount={amount} tx={tx_hash[:16]}...')
-    add_user_log(wallet, f'Converted {amount:.6f} {from_sym} to {to_sym} on {chain}')
-    return jsonify({'ok': True, 'chain': chain, 'direction': direction,
-                    'from_symbol': from_sym, 'to_symbol': to_sym,
-                    'amount_in': amount, 'tx_hash': tx_hash})
 
 
 
@@ -25731,10 +25372,11 @@ def api_dex_search():
     r = _dex_get('https://api.dexscreener.com/latest/dex/search?q=' + requests.utils.quote(q, safe=''))
     search_ok = bool(r and r.status_code == 200)
     pairs = (r.json().get('pairs') or []) if search_ok else []
-    if not pairs and (is_valid_solana_address(q) or is_valid_evm_address(q)):
+    pairs = [p for p in pairs if p.get('chainId') == 'solana']
+    if not pairs and is_valid_solana_address(q):
         r2 = _dex_get('https://api.dexscreener.com/latest/dex/tokens/' + requests.utils.quote(q, safe=''))
         if r2 and r2.status_code == 200:
-            pairs = r2.json().get('pairs') or []
+            pairs = [p for p in (r2.json().get('pairs') or []) if p.get('chainId') == 'solana']
     if pairs:
         return jsonify({'pairs': pairs})
     if search_ok:
@@ -25753,18 +25395,15 @@ def api_token_info(mint_address):
     # ambiguity in auto-detecting which one this is -- no explicit chain
     # param needed on this URL.
     mint = _sanitize(mint_address.strip())
-    is_evm = is_valid_evm_address(mint)
-    if not mint or not (is_evm or is_valid_solana_address(mint)):
-        return jsonify({'ok': False, 'msg': 'Invalid address'}), 400
+    if not mint or not is_valid_solana_address(mint):
+        return jsonify({'ok': False, 'msg': 'Invalid Solana address'}), 400
     try:
-        launch = None
-        if not is_evm:
-            from launched_token_market import lookup as _launch_market_lookup
-            launch = _launch_market_lookup(DB_FILE, BASE, mint, _sol_price_usd)
-            if launch and not launch.get('curve_complete'):
-                response = jsonify(launch)
-                response.headers['Cache-Control'] = 'no-store'
-                return response
+        from launched_token_market import lookup as _launch_market_lookup
+        launch = _launch_market_lookup(DB_FILE, BASE, mint, _sol_price_usd)
+        if launch and not launch.get('curve_complete'):
+            response = jsonify(launch)
+            response.headers['Cache-Control'] = 'no-store'
+            return response
         url = 'https://api.dexscreener.com/latest/dex/tokens/' + requests.utils.quote(mint, safe='')
         try:
             r = _dex_get(url, timeout=8)
@@ -25782,7 +25421,9 @@ def api_token_info(mint_address):
         # deployed) on a chain OrcAgent doesn't trade, and a Solana address
         # only ever has Solana pairs anyway. Highest liquidity among those is
         # the most representative pair to show.
-        pairs_supported = [p for p in pairs if p.get('chainId') in _MARKET_LIVE_CHAINS] or pairs
+        pairs_supported = [p for p in pairs if p.get('chainId') == 'solana']
+        if not pairs_supported:
+            return jsonify({'ok': False, 'msg': 'Token not found on Solana'}), 404
         p    = max(pairs_supported, key=lambda x: float((x.get('liquidity') or {}).get('usd') or 0))
         base = p.get('baseToken') or {}
         info = p.get('info') or {}
@@ -26512,101 +26153,39 @@ def _get_solana_usdc_balance(address: str) -> float:
 @app.route('/api/wallet/usdc-summary', methods=['GET'])
 @rate_limit(30, 60)
 def api_wallet_usdc_summary():
-    """One combined USDC figure across every chain this app trades on --
-    the 'single balance, many chains' view apps like fomo.family show,
-    except here it's an honest SUM of real, separate on-chain balances (each
-    chain's own dedicated trading wallet), not an actual pooled cross-chain
-    balance: buying on Solana always spends the Solana USDC figure, buying
-    on any EVM chain always spends that chain's own. Nothing here bridges
-    funds between chains on its own -- see /api/bridge/quote+execute for
-    the (separate, manual) bridge if a user wants to move USDC from one
-    chain's balance to another's.
-
-    Every EVM chain in EVM_CHAINS shares the SAME wallet/address (see
-    ensure_bsc_wallet's comment), so this only derives that address once and
-    reads each chain's own USDC balance from it -- 'bsc_usdc'/'bsc_address'
-    keep their original key names for the Wallet page's existing JS; the new
-    chains ride along under 'evm_chains' instead of also getting hardcoded
-    top-level keys that would need a frontend change per future chain."""
+    """Return the authenticated user's Solana USDC trading balance."""
     wallet = _authenticated_wallet()
     if not wallet:
         return jsonify({'ok': False, 'msg': 'No wallet connected'}), 401
-
     solana_wallet = _get_trading_wallet_address(wallet) or wallet
-
-    evm_address = ''
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        uid  = _get_uid(conn, wallet)
-        if uid:
-            evm_address = ensure_bsc_wallet(conn, uid, wallet)
-        conn.close()
-    except Exception as e:
-        print(f'[wallet] usdc-summary EVM wallet lookup failed for {wallet[:8]}...: {e}', flush=True)
-
-    # ── read every chain AT ONCE ──
-    # This used to be a loop: Solana, then bsc, then base, then arbitrum, then
-    # polygon, then robinhood -- six round trips to six different networks, one
-    # after the other, with the page showing nothing until the last one landed.
-    # The wait was the SUM of them, so one slow RPC held up the whole balance.
-    #
-    # They have nothing to do with each other, so they go together and the wait
-    # is the slowest single one instead. Six sequential half-seconds become
-    # about one.
-    #
-    # The refresh button sends bust=1 -- somebody who just deposited is asking
-    # precisely because they expect the number to have changed, and serving
-    # them a cached one would look broken.
     bust = request.args.get('bust') == '1'
-
-    def _read(kind, chain=None):
-        key = ('sol', solana_wallet) if kind == 'sol' else ('evm', evm_address, chain)
-        if not bust:
-            hit = _usdc_cache_get(key)
-            if hit is not None:
-                return hit
-        val = 0.0
-        try:
-            val = (_get_solana_usdc_balance(solana_wallet) if kind == 'sol'
-                   else get_evm_usdc_balance(evm_address, chain))
-        except Exception as e:
-            print(f'[wallet] usdc-summary {kind}/{chain or "solana"} failed '
-                  f'for {wallet[:8]}...: {e}', flush=True)
-            # A chain that will not answer reads as zero for this response, but
-            # is NOT cached as zero -- otherwise one flaky RPC would hide real
-            # money for the whole TTL.
-            return 0.0
-        _usdc_cache_put(key, val)
-        return val
-
-    jobs = {'solana': ('sol', None)}
-    for chain in ACTIVE_EVM_CHAINS:
-        jobs[chain] = ('evm', chain)
-
-    results = {}
-    with ThreadPoolExecutor(max_workers=len(jobs)) as ex:
-        futures = {ex.submit(_read, kind, ch): name for name, (kind, ch) in jobs.items()}
-        for fut, name in futures.items():
+    key = ('sol', solana_wallet)
+    if not bust:
+        hit = _usdc_cache_get(key)
+        if hit is not None:
+            solana_usdc = hit
+        else:
             try:
-                results[name] = fut.result(timeout=12)
+                solana_usdc = _get_solana_usdc_balance(solana_wallet)
+                _usdc_cache_put(key, solana_usdc)
             except Exception as e:
-                print(f'[wallet] usdc-summary {name} timed out: {e}', flush=True)
-                results[name] = 0.0
-
-    solana_usdc = results.get('solana', 0.0)
-    evm_chains  = {c: round(results.get(c, 0.0), 4) for c in ACTIVE_EVM_CHAINS}
-    evm_total   = sum(results.get(c, 0.0) for c in ACTIVE_EVM_CHAINS)
-
+                print(f'[wallet] usdc-summary solana failed for {wallet[:8]}...: {e}', flush=True)
+                solana_usdc = 0.0
+    else:
+        try:
+            solana_usdc = _get_solana_usdc_balance(solana_wallet)
+            _usdc_cache_put(key, solana_usdc)
+        except Exception as e:
+            print(f'[wallet] usdc-summary solana failed for {wallet[:8]}...: {e}', flush=True)
+            solana_usdc = 0.0
     return jsonify({
-        'ok':             True,
-        'solana_usdc':    round(solana_usdc, 4),
-        'bsc_usdc':       evm_chains.get('bsc', 0.0),
-        'total_usdc':     round(solana_usdc + evm_total, 4),
+        'ok': True,
+        'solana_usdc': round(solana_usdc, 4),
+        'total_usdc': round(solana_usdc, 4),
         'solana_address': solana_wallet,
-        'bsc_address':    evm_address,
-        'evm_address':    evm_address,
-        'evm_chains':     evm_chains,
+        'evm_chains': {},
     })
+
 
 
 @app.route('/api/portfolio-summary', methods=['GET'])
@@ -26744,6 +26323,7 @@ def api_friends_positions():
             JOIN users u ON u.id = op.user_id
             WHERE op.user_id IN ({placeholders})
               AND op.amount > 0 AND op.buy_price > 0
+              AND LOWER(COALESCE(op.chain,'solana'))='solana'
         ''', following_ids)
         rows = c.fetchall()
         conn.close()
@@ -29184,7 +28764,7 @@ def _get_evm_withdraw_lock(wallet: str, chain: str) -> threading.Lock:
         return lock
 
 
-@app.route('/api/withdraw/evm', methods=['POST'])
+@_disabled_legacy_route('/api/withdraw/evm', methods=['POST'])
 @rate_limit(10, 60)
 def api_withdraw_evm():
     """Send this user's own stablecoin out to an address they name.
@@ -30055,10 +29635,8 @@ def api_market_tokens_search():
 _market_live_cache: dict = {'ts': 0.0, 'data': []}
 # Live Market's own discovery pipeline (api_market_live) is intentionally
 # separate from token_loop()/state['tokens'], which also feeds the automated
-# bot's scanning -- so widening this to include BSC only affects what's
-# *displayed*, and can never cause the bot to start scanning/trading BSC on
-# its own. Bot-side BSC scanning is a distinct, not-yet-built feature.
-_MARKET_LIVE_CHAINS = {'solana', 'bsc', 'base', 'arbitrum'}
+# bot. OrcAgent exposes only Solana market pairs.
+_MARKET_LIVE_CHAINS = {'solana'}
 _market_live_lock         = threading.Lock()
 
 # Both discovery pipelines below fall back to DexScreener's pair SEARCH
@@ -30997,7 +30575,7 @@ def api_market_token_prices():
             continue
         # Validated for shape before it is pasted into an outbound URL: this
         # builds a request out of something a caller controls.
-        if not (_SOLANA_ADDR_RE.match(a) or is_valid_evm_address(a)):
+        if not _SOLANA_ADDR_RE.match(a):
             continue
         seen.add(a.lower())
         wanted.append(a)
@@ -31025,6 +30603,8 @@ def api_market_token_prices():
             # a dead pool would quote a price this token does not really have.
             best = {}
             for p in (data.get('pairs') or []):
+                if p.get('chainId') != 'solana':
+                    continue
                 addr = ((p.get('baseToken') or {}).get('address') or '').lower()
                 if not addr:
                     continue
@@ -31351,15 +30931,15 @@ def api_chart(mint):
     # 'solana' so every pre-existing caller that never sent it keeps
     # behaving exactly as before) now picks the right address format and
     # the right per-chain API network slug for every step below.
-    chain = request.args.get('chain', 'solana').strip().lower()
-    if chain not in EVM_CHAINS and chain != 'solana':
-        return jsonify({'candles': [], 'error': f'Unsupported chain {chain!r}'})
-    addr_ok = is_valid_evm_address(mint) if chain in EVM_CHAINS else _SOLANA_ADDR_RE.match(mint or '')
-    if not addr_ok:
+    requested_chain = request.args.get('chain', 'solana').strip().lower()
+    if requested_chain != 'solana':
+        return jsonify({'candles': [], 'error': 'OrcAgent supports Solana only'})
+    chain = 'solana'
+    if not _SOLANA_ADDR_RE.match(mint or ''):
         return jsonify({'candles': [], 'error': 'invalid mint'})
-    dex_chain_id = EVM_CHAINS[chain]['dex_chain'] if chain in EVM_CHAINS else 'solana'
-    gt_network   = _GECKOTERMINAL_NETWORK.get(chain)
-    gt_token     = _gt_token_param(chain, mint)
+    dex_chain_id = 'solana'
+    gt_network   = _GECKOTERMINAL_NETWORK.get('solana')
+    gt_token     = _gt_token_param('solana', mint)
     tf   = request.args.get('tf', '5m')
     _TF  = _CHART_TF_CFG
     # Young tokens often don't have enough daily/4h/1h candles yet -- fall
@@ -31375,7 +30955,7 @@ def api_chart(mint):
         # a cold (uncached) chart load. Falls back to resolving it ourselves for
         # callers that don't have it yet (deep links, global search).
         pair_address = request.args.get('pair', '').strip()
-        pair_addr_ok = is_valid_evm_address(pair_address) if chain in EVM_CHAINS else _SOLANA_ADDR_RE.match(pair_address or '')
+        pair_addr_ok = _SOLANA_ADDR_RE.match(pair_address or '')
         if not (pair_address and pair_addr_ok):
             r = _dex_get('https://api.dexscreener.com/latest/dex/tokens/' + mint, timeout=8)
             pairs = r.json().get('pairs', []) if (r and r.status_code == 200) else []
@@ -31384,7 +30964,7 @@ def api_chart(mint):
             # only trust a pair that's actually on the chain this chart was
             # requested for, same filtering every other multi-chain lookup
             # in this app already does.
-            pairs = [p for p in pairs if p.get('chainId') == dex_chain_id] or pairs
+            pairs = [p for p in pairs if p.get('chainId') == 'solana']
             if not pairs:
                 return jsonify({'candles': [], 'error': 'no pairs'})
             # Deepest pool, not whichever DexScreener listed first -- see
@@ -32015,163 +31595,79 @@ def admin_compact_images():
 @app.route('/api/admin/gas-sponsor')
 @rate_limit(20, 60)
 def admin_gas_sponsor():
-    """Everything the owner needs to see about the gas sponsor wallet at a
-    glance: what's actually in it right now on each chain, how much fee
-    income has been routed into it instead of the normal fee wallet, and
-    what it has handed out to users.
-
-    Live balances come straight from each chain's RPC, so one unreachable
-    chain reports its own error rather than failing the whole panel."""
+    """Owner view of the Solana gas sponsor wallet and subsidy state."""
     _log_readonly_attempt()
     wallet = _authenticated_wallet()
     if not wallet or not _is_owner(wallet):
         return _owner_denied(wallet, 'The gas sponsor panel')
 
-    sponsor_address = _gas_sponsor_address()
     sol_sponsor_address = _sol_gas_sponsor_address()
-    if not sponsor_address and not sol_sponsor_address:
-        return jsonify({'ok': True, 'enabled': False, 'sponsor_address': '', 'sol_sponsor_address': '',
-                        'fee_wallet': EVM_CHAIN_FEE_WALLET or '', 'chains': [],
-                        'totals': {'fees_to_sponsor': 0.0, 'fees_to_fee_wallet': 0.0,
-                                   'granted_count': 0, 'users_helped': 0},
-                        # Same shape whether sponsorship is configured or not,
-                        # so the panel never has to guess whether the field exists.
-                        'subsidy': {'granted_usd': '0', 'recovered_usd': '0',
-                                    'outstanding_usd': '0', 'tracked_grants': 0,
-                                    'legacy_unrecoverable_usd': '0', 'legacy_grants': 0,
-                                    'zero_subsidy': True}})
+    if not sol_sponsor_address:
+        return jsonify({
+            'ok': True, 'enabled': False, 'sol_sponsor_address': '', 'chains': [],
+            'totals': {'fees_to_sponsor': 0.0, 'fees_to_fee_wallet': 0.0,
+                       'granted_count': 0, 'users_helped': 0},
+            'subsidy': {'granted_usd': '0', 'recovered_usd': '0',
+                        'outstanding_usd': '0', 'tracked_grants': 0,
+                        'legacy_unrecoverable_usd': '0', 'legacy_grants': 0,
+                        'zero_subsidy': True}
+        })
 
     ok_filter = "(status IS NULL OR status='ok') AND (fee_tx IS NULL OR fee_tx NOT LIKE 'FAILED:%')"
-    per_chain_fees, per_chain_grants, per_chain_refill = {}, {}, {}
-    totals = {'fees_to_sponsor': 0.0, 'fees_to_fee_wallet': 0.0, 'granted_count': 0, 'users_helped': 0}
-    sponsor_recipients = [a for a in (sponsor_address, sol_sponsor_address) if a]
+    totals = {'fees_to_sponsor': 0.0, 'fees_to_fee_wallet': 0.0,
+              'granted_count': 0, 'users_helped': 0}
+    sol_grants = {'count': 0, 'native': 0.0}
     try:
         conn = sqlite3.connect(DB_FILE)
         try:
-            _ph = ','.join('?' * len(sponsor_recipients)) or "''"
-            for chain, amount in conn.execute(
-                    f'SELECT chain, COALESCE(SUM(fee_amount),0) FROM fees '
-                    f'WHERE {ok_filter} AND recipient IN ({_ph}) GROUP BY chain', sponsor_recipients):
-                per_chain_fees[chain] = round(float(amount or 0), 6)
-                # Solana's figure is SOL and the EVM ones are USDC, so only the
-                # EVM chains are added into the single USDC headline total --
-                # the Solana row carries its own SOL figure instead.
-                if chain != 'solana':
-                    totals['fees_to_sponsor'] += float(amount or 0)
-            # When each chain's gas wallet last had to convert fee income back
-            # into gas -- the "when was this actually needed" history.
-            for chain, ts in conn.execute(
-                    "SELECT chain, MAX(created_at) FROM gas_sponsorships WHERE status='refill' GROUP BY chain"):
-                per_chain_refill[chain] = ts
             row = conn.execute(
-                f'SELECT COALESCE(SUM(fee_amount),0) FROM fees WHERE {ok_filter} '
-                f"AND chain!='solana' AND (recipient IS NULL OR recipient!=?)", (sponsor_address,)).fetchone()
-            totals['fees_to_fee_wallet'] = round(float((row or (0,))[0] or 0), 6)
-            for chain, cnt, amt in conn.execute(
-                    "SELECT chain, COUNT(*), COALESCE(SUM(amount_native),0) FROM gas_sponsorships "
-                    "WHERE status='sent' GROUP BY chain"):
-                per_chain_grants[chain] = {'count': cnt, 'native': float(amt or 0)}
-                totals['granted_count'] += cnt
+                f"SELECT COALESCE(SUM(fee_amount),0) FROM fees WHERE {ok_filter} "
+                "AND chain='solana' AND recipient=?", (sol_sponsor_address,)).fetchone()
+            totals['fees_to_sponsor'] = round(float((row or (0,))[0] or 0), 6)
+            row = conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(amount_native),0) FROM gas_sponsorships "
+                "WHERE status='sent' AND chain='solana'").fetchone()
+            sol_grants = {'count': int((row or (0, 0))[0] or 0),
+                          'native': float((row or (0, 0))[1] or 0)}
+            totals['granted_count'] = sol_grants['count']
             totals['users_helped'] = conn.execute(
-                "SELECT COUNT(DISTINCT user_id) FROM gas_sponsorships WHERE status='sent'").fetchone()[0]
-            # What OrcAgent has paid for users and not got back.
-            # outstanding_usd is the figure that has to reach zero. The
-            # legacy total is reported separately because grants made before
-            # recovery existed cannot be recovered, and folding an
-            # unrecoverable historical loss into a live counter would leave
-            # it permanently non-zero and therefore useless as a signal.
+                "SELECT COUNT(DISTINCT user_id) FROM gas_sponsorships "
+                "WHERE status='sent' AND chain='solana'").fetchone()[0]
             subsidy = te_subsidy.subsidy_report(conn)
         finally:
             conn.close()
     except Exception as e:
         return jsonify({'error': f'could not read sponsorship totals: {e}'}), 500
-    totals['fees_to_sponsor'] = round(totals['fees_to_sponsor'], 6)
 
-    chains = []
-    # The two sponsors are configured independently, so an EVM row is only
-    # meaningful when an EVM sponsor exists -- otherwise these would be
-    # balance lookups against an empty address.
-    for chain, cfg in (ACTIVE_EVM_CHAINS.items() if sponsor_address else []):
-        grants = per_chain_grants.get(chain, {'count': 0, 'native': 0.0})
-        entry = {
-            'chain':          chain,
-            'native_symbol':  cfg['native_symbol'],
-            'usdc_symbol':    cfg.get('usdc_symbol', 'USDC'),
-            'fees_received':  per_chain_fees.get(chain, 0.0),
-            'fees_currency':  cfg.get('usdc_symbol', 'USDC'),
-            'granted_count':  grants['count'],
-            'granted_native': round(grants['native'], 8),
-            'native_balance': None,
-            'usdc_balance':   None,
-            'grants_left':    None,
-            'last_refill':    (per_chain_refill.get(chain) or 'never')[:16],
-            'status':         'ok',
-            'error':          '',
-        }
-        try:
-            w3 = _get_web3(chain)
-            bal_wei = w3.eth.get_balance(w3.to_checksum_address(sponsor_address))
-            one_grant = w3.eth.gas_price * GAS_TOPUP_TX_GAS_UNITS * GAS_SPONSOR_TX_MULTIPLIER
-            entry['native_balance'] = float(w3.from_wei(bal_wei, 'ether'))
-            entry['grants_left'] = int(bal_wei // one_grant) if one_grant else 0
-            entry['usdc_balance'] = round(get_evm_usdc_balance(sponsor_address, chain), 6)
-            # Same thresholds the fee router and the self-refill use, so the
-            # panel explains itself rather than showing an unexplained state.
-            if bal_wei <= 0:
-                entry['status'] = 'empty'
-            elif entry['grants_left'] < GAS_SPONSOR_REFILL_BELOW_GRANTS:
-                entry['status'] = 'low'
-            elif entry['grants_left'] < GAS_SPONSOR_TARGET_GRANTS:
-                entry['status'] = 'filling'
-        except Exception as e:
-            entry['status'] = 'unreachable'
-            entry['error'] = f'{type(e).__name__}'
-        chains.append(entry)
-
-    # Solana sits in the same table rather than a separate panel -- it's the
-    # same question ("can this wallet still pay users' fees?"), just funded in
-    # SOL rather than an EVM chain's native token. Its fee income needs no
-    # conversion step at all: Solana's trading fees are charged in SOL, which
-    # already IS the gas token, so 'fees_received' here is SOL rather than the
-    # USDC the EVM rows report.
-    if sol_sponsor_address:
-        sol_grants = per_chain_grants.get('solana', {'count': 0, 'native': 0.0})
-        sol_entry = {
-            'chain': 'solana', 'native_symbol': 'SOL', 'usdc_symbol': 'SOL',
-            'fees_received': per_chain_fees.get('solana', 0.0),
-            'fees_currency': 'SOL',
-            'granted_count': sol_grants['count'],
-            'granted_native': round(sol_grants['native'], 8),
-            'native_balance': None, 'usdc_balance': None, 'grants_left': None,
-            'last_refill': 'n/a — fees already arrive as SOL',
-            'status': 'ok', 'error': '',
-        }
-        try:
-            sol_bal = _get_user_sol(sol_sponsor_address)
-            sol_entry['native_balance'] = sol_bal
-            sol_entry['grants_left'] = int(max(sol_bal - SOL_GAS_SPONSOR_MIN_RESERVE, 0) / SOL_GAS_SPONSOR_GRANT)
-            if sol_bal <= 0:
-                sol_entry['status'] = 'empty'
-            elif sol_entry['grants_left'] < GAS_SPONSOR_REFILL_BELOW_GRANTS:
-                sol_entry['status'] = 'low'
-            elif sol_entry['grants_left'] < GAS_SPONSOR_TARGET_GRANTS:
-                sol_entry['status'] = 'filling'
-        except Exception as e:
-            sol_entry['status'] = 'unreachable'
-            sol_entry['error'] = f'{type(e).__name__}'
-        chains.append(sol_entry)
+    entry = {
+        'chain': 'solana', 'native_symbol': 'SOL', 'usdc_symbol': 'SOL',
+        'fees_received': totals['fees_to_sponsor'], 'fees_currency': 'SOL',
+        'granted_count': sol_grants['count'],
+        'granted_native': round(sol_grants['native'], 8),
+        'native_balance': None, 'usdc_balance': None, 'grants_left': None,
+        'last_refill': 'n/a — fees already arrive as SOL',
+        'status': 'ok', 'error': '',
+    }
+    try:
+        sol_bal = _get_user_sol(sol_sponsor_address)
+        entry['native_balance'] = sol_bal
+        entry['grants_left'] = int(max(sol_bal - SOL_GAS_SPONSOR_MIN_RESERVE, 0) / SOL_GAS_SPONSOR_GRANT)
+        if sol_bal <= 0:
+            entry['status'] = 'empty'
+        elif entry['grants_left'] < GAS_SPONSOR_REFILL_BELOW_GRANTS:
+            entry['status'] = 'low'
+        elif entry['grants_left'] < GAS_SPONSOR_TARGET_GRANTS:
+            entry['status'] = 'filling'
+    except Exception as e:
+        entry['status'] = 'unreachable'
+        entry['error'] = type(e).__name__
 
     return jsonify({
-        'ok': True,
-        'enabled': True,
-        'sponsor_address': sponsor_address,
-        'sol_sponsor_address': sol_sponsor_address,
-        'fee_wallet': EVM_CHAIN_FEE_WALLET or '',
-        'chains': chains,
-        'totals': totals,
-        'target_grants': GAS_SPONSOR_TARGET_GRANTS,
-        'subsidy': subsidy,
+        'ok': True, 'enabled': True, 'sol_sponsor_address': sol_sponsor_address,
+        'chains': [entry], 'totals': totals,
+        'target_grants': GAS_SPONSOR_TARGET_GRANTS, 'subsidy': subsidy,
     })
+
 
 @app.route('/api/admin/collect-fees', methods=['POST'])
 @rate_limit(5, 60)
@@ -34179,20 +33675,15 @@ def _heartbeat_loop():
 threading.Thread(target=_heartbeat_loop,       daemon=True).start()
 threading.Thread(target=token_loop,            daemon=True).start()
 threading.Thread(target=_fast_poll_loop,       daemon=True).start()
-threading.Thread(target=_bridge_status_loop,   daemon=True).start()
 threading.Thread(target=_calls_peak_loop,      daemon=True).start()
-threading.Thread(target=bsc_token_loop,        daemon=True).start()
 threading.Thread(target=totd_loop,             daemon=True).start()
 threading.Thread(target=_cleanup_loop,         daemon=True).start()
 threading.Thread(target=_audit_loop,           daemon=True).start()
 threading.Thread(target=_security_check_loop,  daemon=True).start()
-import gas_manager
-threading.Thread(target=gas_manager.gas_sweep_loop, daemon=True).start()
 import surge_radar
 threading.Thread(target=surge_radar.surge_loop, daemon=True).start()
-# Tells the operator, at a glance, which address to keep funded with native
-# gas on each EVM chain (or that sponsorship is simply off). Never prints the
-# key itself -- only the public address derived from it.
+# Startup ownership and Solana gas status. EVM sponsorship is disabled because
+# OrcAgent is Solana-only.
 if not OWNER_WALLETS:
     print('[startup] ⚠ no owner wallet configured — every owner-only admin action '
           '(Collect Fees, key rotation, the gas sponsor panel) will refuse for everyone, '
@@ -34204,11 +33695,6 @@ else:
     # with. Addresses only; nothing secret is involved in owning one.
     print('[startup] owner wallets (full admin rights): '
           + ', '.join(sorted(OWNER_WALLETS)), flush=True)
-_gs_addr = _gas_sponsor_address()
-print(f'[startup] gas sponsor wallet (EVM): {_gs_addr} — keep this funded with native gas on each EVM chain'
-      if _gs_addr else
-      '[startup] EVM gas sponsorship DISABLED (no GAS_SPONSOR_PRIVATE_KEY) — empty EVM wallets fall back to a SOL bootstrap bridge',
-      flush=True)
 _gs_sol_addr = _sol_gas_sponsor_address()
 print(f'[startup] gas sponsor wallet (Solana): {_gs_sol_addr} — keep this funded with SOL'
       if _gs_sol_addr else

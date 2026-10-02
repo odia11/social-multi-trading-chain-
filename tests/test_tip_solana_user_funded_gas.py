@@ -27,7 +27,7 @@ def test_tip_preserves_requested_amount_and_only_spends_spare_usdc_for_gas():
 
 
 def test_low_sol_solana_is_still_a_tip_candidate_for_bootstrap():
-    b=block(TIP,'def _tip_solana_ready','def _tip_evm_candidates')
+    b=block(TIP,'def _tip_solana_ready','def _needs_sol_message')
     assert "_tip_required_lamports" in b
     assert "'native_ready': lamports >= required_lamports" in b
     assert "Cannot verify the SOL network-fee balance" in b
@@ -51,7 +51,7 @@ def test_native_sol_helper_uses_rpc_fallbacks():
 
 
 def test_tip_readiness_uses_validated_transfer_sources():
-    b=block(TIP,'def _tip_solana_ready','def _tip_evm_candidates')
+    b=block(TIP,'def _tip_solana_ready','def _needs_sol_message')
     assert '_solana_source_accounts(d, owner, str(d.USDC_MINT))' in b
     assert 'Your balance is unknown, not zero' in b
 

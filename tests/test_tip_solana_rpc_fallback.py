@@ -25,14 +25,14 @@ def test_rpc_any_skips_broken_or_empty_token_account_provider():
 
 
 def test_tip_readiness_does_not_use_single_rpc():
-    b=block('def _tip_solana_ready', '\ndef _tip_evm_candidates')
+    b=block('def _tip_solana_ready', '\ndef _needs_sol_message')
     assert '_rpc_call_any' in b
     assert '_rpc_call(url' not in b
     assert 'getBalance' in b
 
 
 def test_solana_tip_transfer_fails_over_for_token_account_and_reads():
-    b=block('def _solana_transfer', '\ndef _evm_transfer')
+    b=block('def _solana_transfer', '\ndef _explorer')
     assert "_solana_source_accounts(d, owner_text, token_address)" in b
     assert "_rpc_call_any(d, 'getAccountInfo'" in b
     assert "_rpc_call_any(" in b and "'getBalance'" in b

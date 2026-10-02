@@ -1,13 +1,7 @@
 """Shared navbar stablecoin balance.
 
-The compact amount pill in OrcAgent's top bar used to show the Solana/native
-balance returned by /api/me.  The product now treats stablecoins as the user's
-spending balance, so this exposes one read-only aggregate across supported
-chains and injects a tiny shared client that keeps the pill fresh.
-
-Display policy: show one dollar figure (e.g. $124.58).  Under the hood this is
-USDC on Solana/BSC/Base/Arbitrum. No conversion, transfer or bridge is
-performed here; this endpoint only reads on-chain balances.
+The compact amount pill shows the user's spendable Solana USDC balance.
+OrcAgent is Solana-only; no EVM balance is queried or included.
 """
 from __future__ import annotations
 
@@ -19,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 _CACHE = {}
 _CACHE_LOCK = threading.Lock()
 _CACHE_TTL = 12.0
-_CHAINS = ('bsc', 'base', 'arbitrum')
+_CHAINS = ()
 
 
 def _safe_float(value):
@@ -36,45 +30,22 @@ def install(d):
     d._orca_header_stable_balance_installed = True
     app = d.app
 
-    def _wallet_row(wallet):
-        conn = sqlite3.connect(d.DB_FILE)
-        try:
-            return conn.execute(
-                'SELECT id, bsc_wallet_address FROM users WHERE wallet_address=?',
-                (wallet,),
-            ).fetchone()
-        finally:
-            conn.close()
-
     def _read_total(wallet):
-        row = _wallet_row(wallet)
-        evm_address = str(row[1] or '').strip() if row else ''
         try:
             sol_address = d._get_trading_wallet_address(wallet) or ''
         except Exception:
             sol_address = ''
 
-        balances = {'solana': 0.0, 'bsc': 0.0, 'base': 0.0,
-                    'arbitrum': 0.0}
+        balances = {'solana': 0.0}
         errors = []
+        if sol_address:
+            try:
+                balances['solana'] = _safe_float(d._get_solana_usdc_balance(sol_address))
+            except Exception as exc:
+                errors.append('solana')
+                app.logger.debug('navbar stable balance read failed on solana: %s', exc)
 
-        jobs = {}
-        with ThreadPoolExecutor(max_workers=6) as pool:
-            if sol_address:
-                jobs[pool.submit(d._get_solana_usdc_balance, sol_address)] = 'solana'
-            if evm_address:
-                for chain in _CHAINS:
-                    jobs[pool.submit(d.get_evm_usdc_balance, evm_address, chain)] = chain
-
-            for future in as_completed(jobs):
-                chain = jobs[future]
-                try:
-                    balances[chain] = _safe_float(future.result())
-                except Exception as exc:
-                    errors.append(chain)
-                    app.logger.debug('navbar stable balance read failed on %s: %s', chain, exc)
-
-        total = round(sum(balances.values()), 6)
+        total = round(balances['solana'], 6)
         return total, balances, errors
 
     @app.route('/api/header/stable-balance', methods=['GET'])

@@ -4,7 +4,7 @@
 if((location.pathname.replace(/\/+$/,'')||'/')!=='/wallet')return;
 
 var state={assets:[],selected:null,busy:false};
-var CHAIN={solana:'Solana',bsc:'BNB Chain',base:'Base',arbitrum:'Arbitrum',polygon:'Polygon',robinhood:'Robinhood'};
+var CHAIN={solana:'Solana'};
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function n(v){v=Number(v||0);return isFinite(v)&&v>0?v:0}
 function fmtAmount(v){v=n(v);if(v>=1e6)return(v/1e6).toFixed(2)+'M';if(v>=1e3)return v.toLocaleString('en-US',{maximumFractionDigits:2});if(v>=1)return v.toLocaleString('en-US',{maximumFractionDigits:6});return v.toLocaleString('en-US',{maximumFractionDigits:9})}

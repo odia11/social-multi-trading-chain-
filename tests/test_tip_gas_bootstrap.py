@@ -19,7 +19,7 @@ def between(a, b):
 
 
 def test_portfolio_withdraw_opts_in():
-    transfer = between('def _solana_transfer', 'def _evm_transfer')
+    transfer = between('def _solana_transfer', 'def _explorer')
     withdraw = between("@app.post('/api/wallet/send-token')", "marker = 'data-orca-token-withdraw")
     assert 'allow_user_funded_gas=False' in transfer
     assert 'allow_user_funded_gas=True' in withdraw
@@ -33,7 +33,7 @@ def test_tip_owns_its_own_bootstrap_not_double_topup():
 
 
 def test_sol_network_budget_reserves_outgoing_usdc():
-    transfer = between('def _solana_transfer', 'def _evm_transfer')
+    transfer = between('def _solana_transfer', 'def _explorer')
     assert "reserved = amount if token_address == d.USDC_MINT else Decimal('0')" in transfer
     assert 'spare = usdc_balance - reserved' in transfer
     assert "spare < Decimal('0.20')" in transfer
@@ -42,7 +42,7 @@ def test_sol_network_budget_reserves_outgoing_usdc():
 
 
 def test_account_rent_fee_is_part_of_gas_target():
-    transfer = between('def _solana_transfer', 'def _evm_transfer')
+    transfer = between('def _solana_transfer', 'def _explorer')
     assert "getMinimumBalanceForRentExemption" in transfer
     assert "required_lamports + 500_000" in transfer
     assert "lamports < required_lamports" in transfer

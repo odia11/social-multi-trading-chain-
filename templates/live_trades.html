@@ -91,7 +91,7 @@ function _ltUsd(v, signed){
 }
 function _ltPct(v){ return v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(2) + '%'; }
 function _ltCls(v){ return v == null ? 'fl' : (v >= 0 ? 'up' : 'dn'); }
-function _ltChain(c){ return {solana:'SOL', bsc:'BSC', base:'BASE', arbitrum:'ARB', polygon:'POLY', robinhood:'HOOD'}[c] || String(c || 'SOL').toUpperCase(); }
+function _ltChain(c){ return 'SOL'; }
 function _ltAgo(ts){
   if(!ts) return '';
   var s = Math.max(0, Date.now() / 1000 - ts);

@@ -32,12 +32,10 @@ _FULL_KEY_EXPORT_PATHS = {
     '/api/wallet/generate-trading-wallet',
 }
 _FULL_KEY_EXPORT_FIELDS = {
-    'ok', 'solana_address', 'solana_private_key',
-    'evm_address', 'evm_private_key', 'warning',
+    'ok', 'solana_address', 'solana_private_key', 'warning',
 }
 _FULL_KEY_REQUIRED_FIELDS = {
     'ok', 'solana_address', 'solana_private_key',
-    'evm_address', 'evm_private_key',
 }
 
 def _is_secret_field(key: object) -> bool:
@@ -87,7 +85,7 @@ def _valid_full_key_export(payload) -> bool:
     if not keys.issubset(_FULL_KEY_EXPORT_FIELDS):
         return False
     return all(isinstance(payload.get(k), str) and payload.get(k)
-               for k in ('solana_address', 'solana_private_key', 'evm_address', 'evm_private_key'))
+               for k in ('solana_address', 'solana_private_key'))
 
 
 def _mark_no_store(response):

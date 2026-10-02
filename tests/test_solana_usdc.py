@@ -107,11 +107,11 @@ LM = (REPO / 'static/live-market-pro.js').read_text(encoding='utf-8')
 # in-card panel's markup into openBuySheet(). Same statement, same currency,
 # read where it is actually written today.
 check('Live Market labels a Solana buy in USDC, not SOL',
-      "isEvm ? evmCurrencyLabel(t.chain) : 'USDC'" in LM)
+      "_sheetEl('pt-sheet-cur').textContent = 'USDC';" in LM)
 check('...and sends amount_usdc, with amount_sol alongside for an older deploy',
       'amount_usdc:amt, amount_sol:amt' in LM)
 check('...and reports back in the currency the server names',
-      "(d.currency || 'USDC')" in LM)
+      "var cur = d.currency || 'USDC';" in LM)
 
 # Settings (on Home) offers no base-currency choice: there is nothing to choose.
 HOME = (REPO / 'dashboard.html').read_text(encoding='utf-8') + (REPO / 'static/dashboard.js').read_text(encoding='utf-8')
@@ -125,7 +125,7 @@ check('Settings offers no SOL/USDC base-currency switch and sends no field the s
 W = (REPO / 'templates/wallet.html').read_text(encoding='utf-8')
 
 check('the headline balance is what a trade is funded from',
-      'Available to trade' in W and 'USDC across all chains' in W)
+      'Available to trade' in W and 'USDC on Solana' in W)
 check('...and is filled from the USDC summary, not the SOL balance',
       "_availEl.textContent=_tot" in W)
 check('SOL is shown as the network fee it now is, not as a balance',

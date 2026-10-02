@@ -345,8 +345,9 @@ check('...and refusing to arm for more than that',
 check('the quick shares fill the figure in rather than replacing it, so one '
       'row drives one number in both modes',
       re.search(r"var part = _sheetAvail \* \(pct / 100\);", JS) is not None)
-check('a sale is not sent to the quote route, which prices a purchase',
-      re.search(r"_sheetMode !== 'sell' && t && EVM_TRADE_CHAINS", JS) is not None)
+check('sell sheet has no EVM quote scheduler or EVM trade router',
+      'EVM_TRADE_CHAINS' not in JS and '/api/evm/trade/' not in JS
+      and '/api/bsc/trade/' not in JS)
 # Closing a position is how a loss gets cut.
 check('a holding lookup that cannot be reached still leaves the whole '
       'position sellable, because that is how somebody cuts a loss',
@@ -369,15 +370,12 @@ check('...with the total on the folded row, so it says what it costs '
       and 'pt-fees-amt' in JS)
 check('...folded again for the next token, rather than staying open from the '
       'last one', 'box.open = false' in JS)
-check('the buy breakdown still renders into the id scheduleQuote() writes '
-      'to, unchanged', 'id="pt-quote-sheet"' in HTML)
-check('...and the total shown is the quote\'s own spend minus what it buys, '
-      'not a figure of the page\'s own',
-      re.search(r'spend - gets', JS) is not None)
-check('a stale total is cleared when the amount changes, so the folded row '
-      'never quotes the previous amount',
-      re.search(r"feeAmt && _sheetMode !== 'sell'\) feeAmt\.textContent = ''", JS)
-      is not None)
+check('Solana buys do not call the retired EVM quote endpoint',
+      '/api/trade/quote' not in JS and 'scheduleQuote' not in JS)
+check('the folded buy fee total starts blank because instant-trade is authoritative',
+      "if(mode !== 'sell'){ if(amtEl) amtEl.textContent = ''; return; }" in JS)
+check('no stale EVM quote cache can survive an amount change',
+      '_quotes' not in JS and 'fetchQuote' not in JS and 'renderQuote' not in JS)
 # A sell is not quoted -- what it returns is known when it settles.
 check('the sell box states the rates that apply rather than inventing a '
       'total for a swap that has not happened',

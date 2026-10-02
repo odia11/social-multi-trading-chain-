@@ -1,10 +1,8 @@
-"""Withdraw any token shown in Portfolio to another wallet.
+"""Withdraw Solana SPL/Token-2022 tokens from Portfolio to another wallet.
 
-Supports Solana SPL/Token-2022 tokens and ERC-20 tokens on every EVM chain
-OrcAgent already trades.  The server derives the source trading wallet from
-the authenticated user, re-reads the token balance on-chain, validates the
-recipient, serialises sends per wallet+chain, and never accepts a caller-
-supplied sender/private key.
+The server derives the source trading wallet from the authenticated user,
+re-reads the token balance on-chain, validates the recipient, serialises sends,
+and never accepts a caller-supplied sender/private key.
 """
 from __future__ import annotations
 
@@ -13,7 +11,6 @@ import sqlite3
 import threading
 import time
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from flask import jsonify, request
@@ -46,8 +43,8 @@ def _wallet_keys(d, wallet):
     conn = sqlite3.connect(d.DB_FILE, timeout=8.0)
     try:
         return conn.execute(
-            'SELECT encrypted_private_key, encrypted_private_key_bsc, bsc_wallet_address '
-            'FROM users WHERE wallet_address=? LIMIT 1', (wallet,)
+            'SELECT encrypted_private_key FROM users WHERE wallet_address=? LIMIT 1',
+            (wallet,)
         ).fetchone()
     finally:
         conn.close()
@@ -467,91 +464,28 @@ def _solana_transfer(d, wallet, token_address, to_address, amount,
     return str(sig), float(Decimal(send_raw) / scale)
 
 
-def _evm_transfer(d, wallet, chain, token_address, to_address, amount):
-    from web3 import Web3
-
-    if chain not in getattr(d, 'ACTIVE_EVM_CHAINS', {}):
-        raise ValueError('Unsupported network')
-    if not Web3.is_address(to_address) or not Web3.is_address(token_address):
-        raise ValueError('Invalid EVM wallet or token address')
-
-    row = _wallet_keys(d, wallet)
-    enc = str(row[1] or '').strip() if row else ''
-    source_text = str(row[2] or '').strip() if row else ''
-    if not enc or not source_text:
-        raise RuntimeError('EVM trading wallet is not configured')
-    if to_address.lower() == source_text.lower():
-        raise ValueError('Destination is the same as your trading wallet')
-
-    w3 = d._get_web3(chain)
-    source = w3.to_checksum_address(source_text)
-    dest = w3.to_checksum_address(to_address)
-    token = w3.to_checksum_address(token_address)
-    abi = [
-        {'constant':True,'inputs':[{'name':'a','type':'address'}],'name':'balanceOf','outputs':[{'name':'','type':'uint256'}],'type':'function'},
-        {'constant':True,'inputs':[],'name':'decimals','outputs':[{'name':'','type':'uint8'}],'type':'function'},
-        {'constant':False,'inputs':[{'name':'to','type':'address'},{'name':'v','type':'uint256'}],'name':'transfer','outputs':[{'name':'','type':'bool'}],'type':'function'},
-    ]
-    contract = w3.eth.contract(address=token, abi=abi)
-    decimals = int(contract.functions.decimals().call())
-    raw_balance = int(contract.functions.balanceOf(source).call())
-    scale = Decimal(10) ** decimals
-    send_raw = int((amount * scale).to_integral_value(rounding=ROUND_DOWN))
-    if send_raw <= 0:
-        raise ValueError('Amount is too small')
-    if send_raw > raw_balance:
-        raise ValueError('Amount is higher than your on-chain token balance')
-
-    fn = contract.functions.transfer(dest, send_raw)
-    nonce = w3.eth.get_transaction_count(source, 'pending')
-    gas = int(fn.estimate_gas({'from':source}) * 1.20)
-    gas_price = int(w3.eth.gas_price)
-    gas_needed = gas * gas_price
-    if int(w3.eth.get_balance(source)) < gas_needed:
-        sym = str(getattr(d, 'EVM_CHAINS', {}).get(chain, {}).get('native_symbol') or 'native gas token')
-        raise ValueError('Not enough %s in your trading wallet to pay the network fee' % sym)
-
-    tx = fn.build_transaction({
-        'from': source, 'nonce': nonce, 'gas': gas, 'gasPrice': gas_price,
-        'chainId': int(w3.eth.chain_id),
-    })
-    with d._use_key(enc, wallet) as private_key:
-        signed = w3.eth.account.sign_transaction(tx, private_key=private_key)
-        raw = getattr(signed, 'raw_transaction', None) or getattr(signed, 'rawTransaction')
-        tx_hash = w3.eth.send_raw_transaction(raw)
-    receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=90)
-    if int(getattr(receipt, 'status', receipt.get('status', 0))) != 1:
-        raise RuntimeError('Token transfer was reverted by the network')
-    return tx_hash.hex(), float(Decimal(send_raw) / scale)
 
 
 def _explorer(chain, tx_hash):
-    bases = {
-        'solana':'https://solscan.io/tx/', 'bsc':'https://bscscan.com/tx/',
-        'base':'https://basescan.org/tx/', 'arbitrum':'https://arbiscan.io/tx/',
-        'polygon':'https://polygonscan.com/tx/',
-        'robinhood':'https://explorer.testnet.chain.robinhood.com/tx/',
-    }
-    base = bases.get(chain)
-    return base + tx_hash if base and tx_hash else ''
+    return 'https://solscan.io/tx/' + tx_hash if chain == 'solana' and tx_hash else ''
 
 
 def _user_tip_wallets(d, user_id):
     conn = sqlite3.connect(d.DB_FILE, timeout=8.0)
     try:
         row = conn.execute(
-            'SELECT wallet_address, COALESCE(bsc_wallet_address, "") FROM users WHERE id=?',
+            'SELECT wallet_address FROM users WHERE id=?',
             (int(user_id),)).fetchone()
     finally:
         conn.close()
     if not row:
         return None
-    session_wallet, evm_wallet = str(row[0] or ''), str(row[1] or '')
+    session_wallet = str(row[0] or '')
     try:
         solana_wallet = str(d._get_trading_wallet_address(session_wallet) or session_wallet)
     except Exception:
         solana_wallet = session_wallet
-    return {'session': session_wallet, 'solana': solana_wallet, 'evm': evm_wallet}
+    return {'session': session_wallet, 'solana': solana_wallet}
 
 
 # Solana rejects any transaction that leaves the fee payer holding more than
@@ -671,49 +605,6 @@ def _needs_sol_message(sol, amount):
     return text
 
 
-def _tip_evm_candidates(d, sender_wallet, amount, recipient_evm):
-    if not recipient_evm:
-        return [], []
-    row = _wallet_keys(d, sender_wallet)
-    source = str(row[2] or '').strip() if row else ''
-    if not source:
-        return [], []
-
-    chains = [
-        (chain, cfg) for chain, cfg in getattr(d, 'ACTIVE_EVM_CHAINS', {}).items()
-        if str(cfg.get('usdc_symbol') or 'USDC').upper() == 'USDC'
-    ]
-
-    def inspect(item):
-        chain, cfg = item
-        balance = Decimal(str(d.get_evm_usdc_balance(source, chain)))
-        if balance < amount:
-            return None
-        native = Decimal(str(d.get_evm_native_balance(source, chain)))
-        return ({
-            'chain':chain, 'balance':balance,
-            'token':str(cfg.get('usdc') or ''), 'source':source,
-        }, native > 0)
-
-    # Independent chains must never be checked serially: one throttled Polygon
-    # RPC used to hold the entire tip request open while BSC/Base were already
-    # known. The slowest provider now costs one timeout, not the sum of five.
-    ready, needs_gas = [], []
-    with ThreadPoolExecutor(max_workers=max(1, len(chains))) as pool:
-        futures = {pool.submit(inspect, item): item[0] for item in chains}
-        for future in as_completed(futures):
-            try:
-                result = future.result()
-            except Exception:
-                continue
-            if not result:
-                continue
-            item, has_native = result
-            (ready if has_native else needs_gas).append(item)
-
-    ready.sort(key=lambda x: x['balance'], reverse=True)
-    needs_gas.sort(key=lambda x: x['balance'], reverse=True)
-    return ready, needs_gas
 
 
 def _record_tip(d, sender_wallet, sender_user_id, recipient_user_id,
@@ -780,8 +671,6 @@ def install(d):
         if not lock.acquire(blocking=False):
             return jsonify({'ok':False,'error':'Another tip is already in progress'}), 409
         try:
-            ready_evm, gasless_evm = _tip_evm_candidates(
-                d, sender_wallet, amount, recipient.get('evm'))
             solana_error = ''
             try:
                 sol = _tip_solana_ready(
@@ -791,48 +680,31 @@ def install(d):
                 solana_error = str(exc)
                 app.logger.warning('Solana tip readiness unavailable: %s', solana_error)
 
-            candidates = list(ready_evm)
-            if sol and sol.get('native_ready'):
-                candidates.append(sol)
-            candidates.sort(key=lambda x: x['balance'], reverse=True)
-
             tx_hash = ''
             sent = 0.0
-            chain = ''
-            recipient_address = ''
+            chain = 'solana'
+            recipient_address = recipient['solana']
             solana_gas_shortfall = False
 
-            for candidate in candidates:
-                chain = candidate['chain']
+            if sol and sol.get('native_ready'):
                 try:
-                    if chain == 'solana':
-                        recipient_address = recipient['solana']
-                        tx_hash, sent = _solana_transfer(
-                            d, sender_wallet, d.USDC_MINT,
-                            recipient_address, amount)
-                    else:
-                        recipient_address = recipient['evm']
-                        tx_hash, sent = _evm_transfer(
-                            d, sender_wallet, chain, candidate['token'],
-                            recipient_address, amount)
-                    if tx_hash:
-                        break
+                    tx_hash, sent = _solana_transfer(
+                        d, sender_wallet, d.USDC_MINT,
+                        recipient_address, amount)
                 except Exception as exc:
                     safe = str(exc)
                     try:
                         safe = d._redact_keys(safe)
                     except Exception:
                         pass
-                    if chain == 'solana':
-                        solana_gas_shortfall = (
-                            isinstance(exc, _SolanaPreflightError) and exc.gas_shortfall
-                        ) or (isinstance(exc, ValueError) and str(exc).startswith(
-                            'Not enough SOL in your trading wallet'))
-                        solana_error = safe[:220]
-                        app.logger.warning(
-                            'solana tip direct transfer failed wallet=%s error=%s reason=%s',
-                            sender_wallet[:8] + '…', type(exc).__name__, solana_error)
-                    tx_hash = ''
+                    solana_gas_shortfall = (
+                        isinstance(exc, _SolanaPreflightError) and exc.gas_shortfall
+                    ) or (isinstance(exc, ValueError) and str(exc).startswith(
+                        'Not enough SOL in your trading wallet'))
+                    solana_error = safe[:220]
+                    app.logger.warning(
+                        'solana tip direct transfer failed wallet=%s error=%s reason=%s',
+                        sender_wallet[:8] + '…', type(exc).__name__, solana_error)
 
             # A marginal SOL balance can pass a pre-read and still fail
             # preflight once the exact recipient ATA/rent/fee is known. If a
@@ -880,28 +752,6 @@ def install(d):
                         app.logger.warning(
                             'solana tip gas bootstrap unavailable wallet=%s error=%s reason=%s',
                             sender_wallet[:8] + '…', type(exc).__name__, solana_error)
-                        tx_hash = ''
-
-            if not tx_hash:
-                topup_amount = Decimal(str(getattr(d, 'GAS_TOPUP_USDC_AMOUNT', 2.0)))
-                for candidate in gasless_evm:
-                    if candidate['balance'] < amount + topup_amount:
-                        continue
-                    chain = candidate['chain']
-                    try:
-                        row = _wallet_keys(d, sender_wallet)
-                        enc = str(row[1] or '').strip() if row else ''
-                        topup = getattr(d, '_gasless_evm_native_topup', None)
-                        if not enc or not callable(topup):
-                            continue
-                        with d._use_key(enc, sender_wallet) as private_key:
-                            topup(private_key, chain)
-                        recipient_address = recipient['evm']
-                        tx_hash, sent = _evm_transfer(
-                            d, sender_wallet, chain, candidate['token'],
-                            recipient_address, amount)
-                        break
-                    except Exception:
                         tx_hash = ''
 
             if not tx_hash and sol and (
@@ -981,8 +831,8 @@ def install(d):
         token_address = str(body.get('token_address') or '').strip()
         to_address = str(body.get('to_address') or '').strip()
         amount = _amount(body.get('amount'))
-        if chain != 'solana' and chain not in getattr(d, 'ACTIVE_EVM_CHAINS', {}):
-            return jsonify({'ok':False,'error':'Unsupported network'}), 400
+        if chain != 'solana':
+            return jsonify({'ok':False,'error':'OrcAgent supports Solana only'}), 400
         if not token_address or not to_address or amount is None:
             return jsonify({'ok':False,'error':'Token, recipient and a positive amount are required'}), 400
 
@@ -997,12 +847,9 @@ def install(d):
         if not lock.acquire(blocking=False):
             return jsonify({'ok':False,'error':'Another withdrawal is already in progress'}), 409
         try:
-            if chain == 'solana':
-                tx_hash, sent = _solana_transfer(
-                    d, wallet, token_address, to_address, amount,
-                    allow_user_funded_gas=True)
-            else:
-                tx_hash, sent = _evm_transfer(d, wallet, chain, token_address, to_address, amount)
+            tx_hash, sent = _solana_transfer(
+                d, wallet, token_address, to_address, amount,
+                allow_user_funded_gas=True)
             with _RECENT_GUARD:
                 _RECENT[key] = time.time()
             try:

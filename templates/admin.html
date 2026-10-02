@@ -669,13 +669,12 @@ aside{background:#0a0b0e;border-right-color:#161a20}
       </div>
 
       <div class="sec-hdr">
-        <div class="sec-title">Gas sponsor wallets</div>
+        <div class="sec-title">Solana gas sponsor</div>
         <div class="sec-count" id="gs-address">—</div>
       </div>
       <div id="gs-disabled" class="tbl-empty" style="display:none">
-        Gas sponsorship is off — set GAS_SPONSOR_PRIVATE_KEY (EVM chains) and/or
-        SOL_GAS_SPONSOR_PRIVATE_KEY (Solana) in /etc/orcagent.env on the server,
-        then restart, to enable it.
+        Solana gas sponsorship is off — set SOL_GAS_SPONSOR_PRIVATE_KEY in
+        /etc/orcagent.env on the server, then restart to enable it.
       </div>
       <div id="gs-panel" style="display:none">
         <div class="stat-grid">
@@ -692,7 +691,7 @@ aside{background:#0a0b0e;border-right-color:#161a20}
           <div class="stat-card">
             <div class="stat-lbl">Fees to your fee wallet</div>
             <div class="stat-val pos" id="gs-fees-normal">—</div>
-            <div class="stat-sub">All other EVM fee income</div>
+            <div class="stat-sub">Fee income kept in the normal fee wallet</div>
           </div>
           <div class="stat-card">
             <div class="stat-lbl">Gas given to users</div>
@@ -1803,9 +1802,7 @@ async function loadGasSponsor() {
     if (off) {
       // Set explicitly rather than relying on the markup's default -- the
       // error branch above may have replaced this text on an earlier load.
-      off.textContent = 'Gas sponsorship is off — set GAS_SPONSOR_PRIVATE_KEY (EVM chains) and/or '
-                      + 'SOL_GAS_SPONSOR_PRIVATE_KEY (Solana) in /etc/orcagent.env on the server, '
-                      + 'then restart, to enable it.';
+      off.textContent = 'Solana gas sponsorship is off — set SOL_GAS_SPONSOR_PRIVATE_KEY in /etc/orcagent.env on the server, then restart to enable it.';
       off.style.display = '';
     }
     document.getElementById('gs-address').textContent = 'not configured';
@@ -1813,12 +1810,7 @@ async function loadGasSponsor() {
   }
   if (off) off.style.display = 'none';
   if (panel) panel.style.display = '';
-  // Two wallets can be configured independently (EVM and Solana), so name
-  // whichever ones are actually live rather than implying a single address.
-  var addrs = [];
-  if (r.sponsor_address) addrs.push('EVM ' + r.sponsor_address);
-  if (r.sol_sponsor_address) addrs.push('SOL ' + r.sol_sponsor_address);
-  document.getElementById('gs-address').textContent = addrs.join('  ·  ') || 'not configured';
+  document.getElementById('gs-address').textContent = r.sol_sponsor_address || 'not configured';
 
   var chains = r.chains || [], t = r.totals || {};
   // "Top-ups left" summed across chains is the number that actually answers
@@ -1855,7 +1847,7 @@ async function loadGasSponsor() {
       '<div class="mono-sm" style="color:var(--txt3)">' + _escHtml(c.last_refill || 'never') + '</div>' +
       '<div><span class="gs-pill ' + st[0] + '">' + st[1] + '</span></div>' +
       '</div>';
-  }).join('') : '<div class="tbl-empty">No EVM chains configured</div>';
+  }).join('') : '<div class="tbl-empty">No Solana gas sponsor configured</div>';
 }
 
 async function loadRevenue() {

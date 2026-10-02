@@ -74,8 +74,8 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
   ensureScript('/static/feed-action-icons.js?v=6','feed-action-icons.js');
 })();
 
-var _NB_LIVE_CHAINS=['solana','bsc','base','arbitrum'];
-var _NB_CHAIN_LABELS={solana:'SOL',bsc:'BSC',base:'BASE',arbitrum:'ARB',polygon:'POLY',robinhood:'HOOD'};
+var _NB_LIVE_CHAINS=['solana'];
+var _NB_CHAIN_LABELS={solana:'SOL'};
 
 (function(){
   var DEFAULT_FETCH_TIMEOUT_MS=15000,UPLOAD_FETCH_TIMEOUT_MS=60000,_origFetch=window.fetch.bind(window);
@@ -130,7 +130,7 @@ document.addEventListener('DOMContentLoaded',function(){
   function runSearch(q){var seq=++_searchSeq;Promise.allSettled([fetch('/api/dexscreener/search?q='+encodeURIComponent(q)).then(function(r){if(!r.ok)throw new Error('token search');return r.json()}),fetch('/api/users/search?q='+encodeURIComponent(q),{credentials:'include'}).then(function(r){if(!r.ok)throw new Error('user search');return r.json()})]).then(function(results){if(seq!==_searchSeq||searchIn.value.trim()!==q)return;var tokRes=results[0].status==='fulfilled'?results[0].value:null,userRes=results[1].status==='fulfilled'?results[1].value:null,pairs=((tokRes&&tokRes.pairs)||[]).filter(function(p){return p&&p.baseToken&&_NB_LIVE_CHAINS.indexOf(p.chainId)!==-1}).slice(0,6),users=(userRes&&userRes.ok&&userRes.users)||[],html='';if(pairs.length)html+='<div class="pt-nb-sr-hd">Tokens</div>'+pairs.map(function(p){var sym=p.baseToken.symbol||'TOKEN',addr=p.baseToken.address||'',img=p.info&&p.info.imageUrl,chainLbl=_NB_CHAIN_LABELS[p.chainId]||p.chainId;return'<div class="pt-nb-sr-row" data-action="tok" data-mint="'+esc(addr)+'" data-chain="'+esc(p.chainId)+'">'+logoTile(img,sym,'pt-nb-sr-logo','pt-nb-sr-logo-ph')+'<div class="pt-nb-sr-name">$'+esc(sym)+' <span class="pt-nb-sr-chain">'+esc(chainLbl)+'</span></div><div class="pt-nb-sr-sub">'+fmtPrice(p.priceUsd)+'</div></div>'}).join('');if(users.length)html+='<div class="pt-nb-sr-hd">Traders</div>'+users.slice(0,5).map(function(u){return'<div class="pt-nb-sr-row" data-action="trader" data-wallet="'+esc(u.wallet)+'">'+logoTile(u.avatar_url,u.username,'pt-nb-sr-logo','pt-nb-sr-logo-ph')+'<div class="pt-nb-sr-name">'+esc(u.username||'Unknown trader')+'</div></div>'}).join('');if(searchRes){searchRes.innerHTML=html||'<div class="pt-nb-sr-empty">No tokens or traders found</div>';searchRes.classList.add('open')}})}
   if(searchRes)searchRes.addEventListener('click',function(e){var tok=e.target.closest('[data-action="tok"]');if(tok){window.location.href='/live-market?mint='+encodeURIComponent(tok.dataset.mint);return}var trader=e.target.closest('[data-action="trader"]');if(trader)window.location.href='/profile/'+encodeURIComponent(trader.dataset.wallet)});
   // #pt-nb-sol-balance itself is header-stable-balance.js's to write --
-  // that script owns the total multi-chain portfolio value shown there now.
+  // that script owns the total Solana portfolio value shown there now.
   // This fetch used to also write a raw SOL number into the same element,
   // racing header-stable-balance.js's own /api/wallet/* fetches: whichever
   // resolved last won, so the chip could flicker between an unformatted SOL

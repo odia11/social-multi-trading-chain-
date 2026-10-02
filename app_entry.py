@@ -1,11 +1,7 @@
 """Production WSGI entry point.
 
-OrcAgent never subsidizes user gas. EVM BUYs use 0x Gasless and Solana
-USDC BUYs use Jupiter gasless support, so a user can trade without first
-holding the chain's native gas token when the provider offers a gasless route.
-Where no gasless route exists (e.g. Robinhood Chain), the sponsor wallet fronts
-the gas and the user pays it back in the same trade (sponsored_gas.py) -- float,
-not a subsidy.
+OrcAgent is Solana-only. Trading and swaps use the Solana/Jupiter paths;
+legacy EVM data remains readable but no EVM/0x runtime module is installed.
 """
 import os
 
@@ -17,8 +13,6 @@ from tip_experience import install as _install_tip_experience
 from portfolio_wallet_activity import install as _install_portfolio_wallet_activity
 from profile_portfolio_balance import install as _install_profile_portfolio_balance
 from search_seo import install as _install_search_seo
-from evm_to_solana_bridge import install as _install_evm_to_solana_bridge
-from wallet_deposit_guidance import install as _install_wallet_deposit_guidance
 from app_performance import install as _install_app_performance
 from x_post_preview_fix import install as _install_x_post_preview_fix
 from x_share_cache_bust import install as _install_x_share_cache_bust
@@ -30,8 +24,6 @@ from share_token_card import install as _install_share_token_card
 from messages_premium_ui import install as _install_messages_premium_ui
 from auto_trading_bot_route import install as _install_auto_trading_bot_route
 from bot_learning import install as _install_bot_learning
-from multichain_auto_bot import install as _install_multichain_auto_bot
-from live_market_pooled_buy_balance import install as _install_live_market_pooled_buy_balance
 from canonical_domain import install as _install_canonical_domain
 from browser_shared_secret_hardening import install as _install_browser_shared_secret_hardening
 from secret_hygiene import install as _install_secret_hygiene
@@ -46,11 +38,7 @@ from financial_authorization_hardening import install as _install_financial_auth
 from owner_money_hardening import install as _install_owner_money_hardening
 from abuse_rate_hardening import install as _install_abuse_rate_hardening
 from upload_hardening import install as _install_upload_hardening
-from bsc_gasless_trading import install as _install_evm_gasless_trading
 from solana_gasless_trading import install as _install_solana_gasless_trading
-from sponsored_gas import install as _install_sponsored_gas
-from cross_chain_budget_guard import install as _install_cross_chain_budget_guard
-from solana_source_bridge_gasless import install as _install_solana_source_bridge_gasless
 from header_stable_balance import install as _install_header_stable_balance
 from portfolio_multichain_holdings import install as _install_portfolio_multichain_holdings
 from video_uploads import install as _install_video_uploads
@@ -71,8 +59,6 @@ from backup_scheduler import install as _install_backup_scheduler
 # Register SEO first so its response pass runs last, after preview decorators.
 _install_search_seo(_dashboard)
 
-_install_evm_to_solana_bridge(_dashboard)
-_install_wallet_deposit_guidance(_dashboard)
 _install_app_performance(_dashboard)
 _install_x_post_preview_fix(_dashboard)
 _install_x_share_cache_bust(_dashboard)
@@ -110,22 +96,8 @@ _install_owner_money_hardening(_dashboard)
 _install_abuse_rate_hardening(_dashboard)
 _install_upload_hardening(_dashboard)
 
-# Every EVM BUY (BNB Chain, Base, Arbitrum, Polygon, Robinhood Chain) uses
-# 0x Gasless: native BNB/ETH/POL is not a prerequisite for a stablecoin-funded
-# buy, and OrcAgent does not front it.
-_install_evm_gasless_trading(_dashboard)
-
-# Where 0x Gasless cannot take the trade (a chain it does not cover, such as
-# Robinhood Chain, or a token without a gasless route), the sponsor wallet
-# fronts exactly the gas the trade needs and the user's wallet pays it back
-# in USDC/USDG in the same trade, out of the amount they entered.
-_install_sponsored_gas(_dashboard)
-
-# The autonomous bot used to perform its own native-gas precheck before the
-# shared EVM BUY flow, which meant a USDC-only wallet never reached 0x Gasless.
-# Patch the bot entry scanner after installing the gasless execution layer so
-# Start Trading can autonomously enter every supported EVM chain using USDC.
-_install_multichain_auto_bot(_dashboard)
+# Solana-only product: no EVM gasless, sponsor or cross-chain execution layer
+# is installed. The base bot follows the Solana scanner/trading path only.
 
 # Solana USDC BUYs use Jupiter's automatic gasless path when configured. The
 # network fee/rent is recovered by Jupiter from the swap instead of requiring
@@ -150,30 +122,9 @@ _orca_reconcile_threading.Thread(
 # card (/api/trending-card/<chain>/<token>.png) and opens it in the app.
 _install_trending_share(_dashboard)
 
-# Cross-chain buying follows the same economic invariant: the number entered
-# by the user is the absolute all-in ceiling. It also lets settled EVM->Solana
-# buys continue through Jupiter gasless without demanding a separate SOL
-# reserve after the USDC has arrived.
-_install_cross_chain_budget_guard(_dashboard)
-
-# If an EVM-destination buy is funded by USDC sitting on Solana while that
-# trading wallet has zero SOL, use Jupiter Ultra gasless to turn a small slice
-# of the SAME user-entered USDC ceiling into SOL, then continue the bridge with
-# the remainder. OrcAgent still fronts nothing.
-_install_solana_source_bridge_gasless(_dashboard)
-
-# The Live Market BUY sheet must use the same pooled spending balance as the
-# automatic bridge backend. Otherwise Robinhood (and every empty destination
-# chain) is disabled in the browser before the auto-bridge can even start.
-_install_live_market_pooled_buy_balance(_dashboard)
-
-# The compact amount pill in the shared top bar shows the user's aggregate
-# stablecoin spending balance across every supported chain, formatted as USD.
+# Shared balance and Portfolio snapshot are Solana-only. Legacy module names
+# remain for compatibility, but neither adapter queries EVM state.
 _install_header_stable_balance(_dashboard)
-
-# Portfolio must show positions from every chain OrcAgent can trade, not only
-# SPL accounts on Solana. This extends the existing token feed read-only and
-# labels EVM assets with their chain in the UI.
 _install_portfolio_multichain_holdings(_dashboard)
 
 # Portfolio transaction history: collapsible BUY/SELL ledger with calendar
@@ -201,7 +152,7 @@ _install_mobile_footer_visibility_fix(_dashboard)
 # Generated/imported wallet keys are encrypted before storage and never logged.
 _install_wallet_onboarding(_dashboard)
 
-# Existing authenticated users can still create a dedicated trading-wallet pair
+# Existing authenticated users can still create a dedicated Solana trading wallet
 # from Settings/Manage Wallet without replacing any funded wallet.
 _install_trading_wallet_generator(_dashboard)
 

@@ -47,6 +47,7 @@ def test_public_balance_is_for_profile_user_not_viewer():
         with patch('portfolio_multichain_holdings._portfolio_snapshot',
                    return_value={'total_usd': 1.39,
                                  'available_to_trade_usdc': 0.13,
+                                 'stable': {'solana_usdc': 0.13, 'evm_chains': {}},
                                  'stale': False}) as snapshot:
             response = client.get('/api/profile/1/portfolio-balance')
             assert response.status_code == 200
@@ -89,33 +90,25 @@ def test_zero_real_usdc_can_coexist_with_other_token_portfolio_value():
         temp.cleanup()
 
 
-def test_actual_usdc_excludes_usdg_robinhood_stablecoin():
+def test_profile_available_usdc_is_solana_only():
     temp, client, viewer = setup()
     try:
-        # USDG is in the buying-power total but MUST NOT be called USDC.
-        # The installed view closes over the dashboard adapter.
-        view = client.application.view_functions['profile_portfolio_balance']
-        d = next((cell.cell_contents for cell in view.__closure__ or ()
-                  if hasattr(cell.cell_contents, '_authenticated_wallet')), None)
-        assert d is not None
-        d.EVM_CHAINS = {
-            'base': {'usdc_symbol': 'USDC'},
-            'robinhood': {'usdc_symbol': 'USDG'}
-        }
+        # Legacy snapshot fields may still exist in historical fixtures, but
+        # the active profile balance must only expose Solana USDC.
         with patch('portfolio_multichain_holdings._portfolio_snapshot',
                    return_value={
                        'total_usd': 1.6,
                        'available_to_trade_usdc': 1.6,
                        'stable': {
                            'solana_usdc': 0.5,
-                           'evm_chains': {'base': 0.2, 'robinhood': 0.9}
+                           'evm_chains': {'legacy': 1.1}
                        }, 'stale': False,
                    }):
             response = client.get('/api/profile/1/portfolio-balance')
             assert response.status_code == 200
             assert response.json['portfolio_value_usdc_approx'] == 1.6
-            assert response.json['available_usdc'] == 0.7
-            assert response.json['other_assets_usdc_approx'] == 0.9
+            assert response.json['available_usdc'] == 0.5
+            assert response.json['other_assets_usdc_approx'] == 1.1
     finally:
         temp.cleanup()
 
@@ -131,6 +124,7 @@ def test_private_profile_never_exposes_other_user_balance():
             viewer[0] = 'user-two'
             snapshot.return_value = {'total_usd': 3,
                                      'available_to_trade_usdc': 2,
+                                     'stable': {'solana_usdc': 2, 'evm_chains': {}},
                                      'stale': True}
             response = client.get('/api/profile/2/portfolio-balance')
             assert response.status_code == 200
