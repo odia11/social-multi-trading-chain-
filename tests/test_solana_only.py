@@ -45,6 +45,11 @@ check('Home and full Live Market share one Solana discovery universe',
       and "https://api.dexscreener.com/tokens/v1/solana/" in dash)
 check('Home Live Market no longer caps its discovered token list at 30',
       'if len(result) >= 30' not in dash)
+check('Live Market enforces a hard $30K market-cap visibility floor',
+      '_LIVE_MARKET_MIN_MCAP_USD = 30_000' in dash
+      and "token.get('mcap', 0) >= _LIVE_MARKET_MIN_MCAP_USD" in dash
+      and "tok.get('market_cap', 0) >= _LIVE_MARKET_MIN_MCAP_USD" in dash
+      and "t.get('market_cap', 0) < _LIVE_MARKET_MIN_MCAP_USD" in dash)
 check('Live Market scanner no longer truncates discovery to 80/45/30 tokens',
       'return out[:80]' not in dash
       and 'safety_subset = filtered[:45]' not in dash
