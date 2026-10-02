@@ -66,8 +66,19 @@ check('a trending token appears automatically', r['token'] and r['token']['symbo
 check('...a scam-flagged token is never promoted, however big', r['token']['mint'] != 'ScamMint1111111111111111111111111111111pump')
 check('...with the card data the UI needs', all(k in r['token'] for k in
       ('price_usd', 'price_change_24h', 'volume_24h', 'buys_24h', 'sells_24h', 'chain', 'pair_address')))
-check('...returns every current trending token as carousel slides',
+check('...returns every current Live Market trending token as carousel slides',
       len(r.get('slides') or []) == 2 and {x['token']['symbol'] for x in r['slides']} == {'WOJAK', 'PEPE'})
+# Slider discovery is deliberately broader than notification eligibility: the
+# old +25%/$50K-volume hero gate must never make the carousel empty.
+scanner[:] = [tok(PEPE, 'PEPE', change=3, vol=5_000, liq=5_000, mcap=45_000)]
+r_broad = hero()
+check('...carousel does not inherit the old strict hero thresholds',
+      len(r_broad.get('slides') or []) == 1 and r_broad['slides'][0]['token']['symbol'] == 'PEPE')
+scanner[:] = [tok('TinyMint11111111111111111111111111111111pump', 'TINY', change=500, vol=9_000_000, mcap=29_999)]
+check('...carousel still enforces the $30K Live Market floor', not hero().get('slides'))
+scanner[:] = [tok('ScamMint1111111111111111111111111111111pump', 'SCAM', vol=9_000_000), tok(WOJAK, 'WOJAK'),
+              tok(PEPE, 'PEPE', vol=60_000)]
+r = hero()
 check('...carries the DexScreener token banner for the slide background',
       r['token'].get('banner_url','').startswith('https://cdn.dexscreener.com/banner/'))
 check('...with when it started trending (the post time)',
@@ -80,9 +91,11 @@ check('the current hero stays while still trending (no flicker)', hero()['token'
 # WOJAK cools off completely -> the next trending token takes over.
 scanner[:] = [tok(PEPE, 'PEPE', vol=5_000_000), tok(WOJAK, 'WOJAK', change=4, vol=10_000)]
 check('when it stops trending the next one takes over', hero()['token']['symbol'] == 'PEPE')
-# Nothing trends any more -> the card disappears.
-scanner[:] = [tok(PEPE, 'PEPE', change=3, vol=5_000)]
-check('when nothing trends the card disappears', hero()['token'] is None)
+# The alert hero can cool off while the broad Live Market carousel keeps the
+# token visible. The carousel disappears only when nothing clears its $30K floor.
+scanner[:] = [tok(PEPE, 'PEPE', change=3, vol=5_000, mcap=29_999)]
+check('when no Live Market token clears the $30K floor the carousel disappears',
+      hero()['token'] is None)
 
 # ── votes and likes ──
 scanner[:] = [tok(WOJAK, 'WOJAK')]
