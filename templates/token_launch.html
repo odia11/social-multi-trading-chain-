@@ -62,9 +62,6 @@
                 <label class="tl-option"><input type="radio" name="tl-asset" value="USDC" checked><span class="tl-choice"><span class="tl-asset-icon tl-usdc" aria-hidden="true">$</span> USDC Pair <span class="tl-radio-indicator" aria-hidden="true"></span></span></label>
                 <label class="tl-option"><input type="radio" name="tl-asset" value="SOL" {% if pilot_creator_only %}disabled{% endif %}><span class="tl-choice"><span class="tl-asset-icon tl-sol" aria-hidden="true"><i></i></span> SOL Pair <span class="tl-radio-indicator" aria-hidden="true"></span></span></label>
               </div>
-              <label class="tl-label" for="tl-initial-buy">Initial buy <span class="tl-optional">(optional)</span></label>
-              <input id="tl-initial-buy" class="tl-input" type="number" min="0" step="0.01" value="0" inputmode="decimal" aria-describedby="tl-initial-buy-help">
-              <small id="tl-initial-buy-help">0 = skip. Your first buy is included in the same Phantom launch approval.</small>
             </fieldset>
             <details class="tl-rewards"><summary><span class="tl-rewards-play" aria-hidden="true">▶</span><strong id="tl-reward-summary">Rewards: 100% creator</strong><span class="tl-chevron" aria-hidden="true">⌄</span></summary><fieldset class="tl-fieldset">
               <legend class="tl-label">Reward mode <span class="tl-info" title="Who receives eligible creator fees" aria-label="Who receives eligible creator fees">i</span></legend>
@@ -95,14 +92,13 @@
         <div class="tl-recent-status" id="tl-recent-status" hidden><strong>Recent launch status</strong><div id="tl-recent-items"></div></div>
         <div class="tl-status" id="tl-status" role="status" aria-live="polite"></div>
         <button id="tl-save" class="tl-btn tl-btn-primary tl-btn-block" type="button">{% if launch_enabled %}Continue to approve →{% else %}Save launch draft →{% endif %}</button>
-        <p class="tl-footnote">Your details are saved before wallet approval. Nothing is created or spent until you approve in Phantom. Token creation, your optional initial buy and the creator-fee split are prepared together so the launch needs one Phantom approval.</p>
+        <p class="tl-footnote">Your details are saved before wallet approval. Nothing is created or spent until you approve in Phantom. Your token creation and creator-fee split are prepared together so the launch needs one Phantom approval.</p>
       </div>
       <aside class="tl-preview-panel" aria-label="Live token preview">
         <span class="tl-preview-heading">LIVE PREVIEW</span>
         <div class="tl-preview-card">
           <div class="tl-token"><div class="tl-token-icon" id="tl-preview-logo">▲</div><div><div class="tl-symbol" id="tl-preview-symbol">TOKEN / USDC</div><div class="tl-name" id="tl-preview-name">Your token name</div></div></div>
           <div class="tl-line"><span>Pair</span><strong id="tl-review-pair">USDC</strong></div>
-          <div class="tl-line"><span>Initial buy</span><strong id="tl-review-initial-buy">Skip</strong></div>
           <div class="tl-line"><span>Rewards</span><strong id="tl-review-mode">Creator</strong></div>
           <div class="tl-line"><span>Your earnings</span><strong id="tl-review-creator">100%</strong></div>
           <div class="tl-line"><span>Community share</span><strong id="tl-review-community">—</strong></div>

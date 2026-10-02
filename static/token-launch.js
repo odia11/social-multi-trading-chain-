@@ -18,17 +18,6 @@ function dom(tag,cls,value){var el=document.createElement(tag);if(cls)el.classNa
 function choice(name){var el=document.querySelector('input[name="'+name+'"]:checked');return el?el.value:''}
 function money(n){return String(Number((Number(n)||0).toFixed(2)))+'%'}
 function toBps(v){var n=Number(v);if(!Number.isFinite(n)||n<=0||n>=100)return 0;var bps=Math.round(n*100);return bps>0&&bps<10000&&Math.abs(bps/100-n)<.000001?bps:0}
-function decimalToRaw(value,decimals){
- var input=String(value==null?'':value).trim();if(!input||input==='0')return 0;
- if(!/^\d+(?:\.\d+)?$/.test(input))throw Error('Enter a valid initial buy amount.');
- var parts=input.split('.'),fraction=(parts[1]||'');
- if(fraction.length>decimals)throw Error('Initial buy has too many decimal places.');
- var raw=BigInt(parts[0])*10n**BigInt(decimals)+BigInt((fraction+'0'.repeat(decimals)).slice(0,decimals)||'0');
- if(raw>100000000000n)throw Error('Initial buy amount is too large.');
- if(raw>BigInt(Number.MAX_SAFE_INTEGER))throw Error('Initial buy amount is too large.');
- return Number(raw);
-}
-function initialBuyRaw(){var asset=choice('tl-asset')||'USDC';return decimalToRaw($('tl-initial-buy').value,asset==='SOL'?9:6)}
 function rawAmount(raw,asset){
  try{
   var value=BigInt(raw||'0'),base=asset==='SOL'?1000000000n:1000000n;
@@ -129,10 +118,6 @@ function renderPreview(){
  var bps=toBps($('tl-community-share').value);
  text('tl-preview-name',name);text('tl-preview-symbol',symbol+' / '+asset);
  text('tl-review-pair',asset);
- var initialInput=$('tl-initial-buy'),initialText=initialInput&&Number(initialInput.value)>0?initialInput.value+' '+asset:'Skip';
- text('tl-review-initial-buy',initialText);
- if(initialInput){initialInput.max=asset==='SOL'?'100':'100000';initialInput.step=asset==='SOL'?'0.000001':'0.01'}
- text('tl-initial-buy-help','0 = skip. Your first buy in '+asset+' is included in the same Phantom launch approval.');
  text('tl-review-mode',{creator:'Creator',community:'Creator + Community'}[mode]);
  var orc=orcBps;
  text('tl-review-creator',money((10000-orc-(mode==='community'?bps:0))/100));
@@ -342,13 +327,12 @@ async function launchStage(row,stage){
  busy=true;
  var create=stage==='create';
  var title=create?'Approve token launch':'Lock the creator-fee split';
- var initial=Number(row.initial_buy_raw||0)>0?' Initial buy: '+rawAmount(row.initial_buy_raw,row.quote_asset)+'.':'';
  var details=create
-  ? 'Create '+row.symbol+' / '+row.quote_asset+' on Solana.'+initial+' OrcAgent prepares token creation, your optional first buy and creator-fee split together, then Phantom asks for one approval. OrcAgent adds no launch fee.'
+  ? 'Create '+row.symbol+' / '+row.quote_asset+' on Solana. OrcAgent prepares the token and your creator-fee split together, then Phantom asks for one approval. OrcAgent adds no launch fee.'
   : 'This is a legacy saved launch that still needs its creator-fee split. Final split of the creator fees: '+splitText(row)+'.';
  try{
    var result=await dialog(title,details,async function(){
-     text('tl-dialog-status',create?'Preparing your Orc token address…':'Building your launch transaction…');
+     text('tl-dialog-status',create?'Preparing your orc token address; this can take up to 90 seconds…':'Building your launch transaction…');
      var path='/api/token-launch/'+row.id+'/'+(create?'prepare':'prepare-finalize');
      var prepared=await call(path,{});
      if(cfg.pilotCreatorOnly){
@@ -357,23 +341,20 @@ async function launchStage(row,stage){
          throw Error('The 0.025 SOL launch reserve check failed. No transaction was sent.');
      }else{
        var publicCost=prepared.pilot_estimated_max_sol_lamports;
-       var solBuy=row.quote_asset==='SOL'?(Number(row.initial_buy_raw)||0):0;
-       var publicLimit=50000000+solBuy;
-       if(!Number.isSafeInteger(publicCost)||publicCost<=0||publicCost>publicLimit)
-         throw Error('The launch SOL safety check failed. Nothing was sent.');
+       if(!Number.isSafeInteger(publicCost)||publicCost<=0||publicCost>50000000)
+         throw Error('The public 0.05 SOL launch safety check failed. Nothing was sent.');
      }
      var bundle=null;
      if(create&&prepared.needs_finalization){
        text('tl-dialog-status','Preparing token + creator-fee split for one Phantom approval…');
        bundle=await call('/api/token-launch/'+row.id+'/prepare-one-approval',{});
        var combined=Number(bundle.estimated_max_sol_lamports)||0;
-       var costLabel=solBuy?'Maximum SOL debit including your initial buy and launch costs':'Maximum reserved network/rent budget';
-       text('tl-dialog-status','Ready. '+costLabel+': '+
+       text('tl-dialog-status','Ready. Maximum reserved network/rent budget: '+
          (combined/1e9).toFixed(6)+' SOL. Phantom will show one approval for this launch.');
      }else{
        var shown=Number(prepared.pilot_estimated_max_sol_lamports)||0;
-       var shownLabel=solBuy?'Estimated maximum SOL debit including your initial buy and launch costs':'Estimated maximum network and rent cost';
-       text('tl-dialog-status',shownLabel+': '+(shown/1e9).toFixed(6)+' SOL. Confirm the final amount in Phantom.');
+       text('tl-dialog-status','Estimated maximum network and rent cost: '+
+         (shown/1e9).toFixed(6)+' SOL. Confirm the final amount in Phantom.');
      }
      var injected=(window.phantom&&window.phantom.solana&&window.phantom.solana.isPhantom
         &&window.phantom.solana)||
@@ -760,7 +741,7 @@ async function saveDraft(){
    name:$('tl-name').value.trim(),symbol:$('tl-symbol').value.trim(),
    description:$('tl-description').value.trim(),image_data:icon,
    website_url:$('tl-website').value.trim(),x_url:$('tl-x-url').value.trim(),
-   telegram_url:$('tl-telegram').value.trim(),initial_buy_raw:initialBuyRaw(),
+   telegram_url:$('tl-telegram').value.trim(),
    quote_asset:choice('tl-asset'),reward_mode:mode,
    community_wallet:mode==='community'?$('tl-community-wallet').value.trim():'',
    community_bps:mode==='community'?bps:0};
@@ -778,7 +759,7 @@ async function saveDraft(){
    await launchStage(readyToApprove,'create');
  }
 }
-['tl-name','tl-symbol','tl-description','tl-website','tl-x-url','tl-telegram','tl-initial-buy','tl-community-share','tl-community-wallet'].forEach(function(id){$(id).addEventListener('input',function(){renderPreview();$('tl-save').disabled=false})});
+['tl-name','tl-symbol','tl-description','tl-website','tl-x-url','tl-telegram','tl-community-share','tl-community-wallet'].forEach(function(id){$(id).addEventListener('input',function(){renderPreview();$('tl-save').disabled=false})});
 document.querySelectorAll('input[name="tl-asset"],input[name="tl-mode"]').forEach(function(i){i.addEventListener('change',function(){renderPreview();$('tl-save').disabled=false})});
 $('tl-image').addEventListener('change',async function(){
  try{

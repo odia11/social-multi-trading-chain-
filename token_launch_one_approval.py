@@ -158,7 +158,6 @@ def install(d, *, lookup, shared, build_tx, pilot_sol_preflight, pilot_wallet,
             return fail('This launch only needs one transaction; use normal approval',409)
         try:
             ceiling=pilot_max if pilot_wallet(wallet) else public_max
-            if row.get('quote_asset')=='SOL':ceiling+=max(0,int(row.get('initial_buy_raw') or 0))
             create_cost=pilot_sol_preflight(row,row['prepare_tx_b64'],
                                             max_lamports=ceiling,enforce_public=True)
             balance=rpc('getBalance',[wallet,{'commitment':'confirmed'}],launch_read=True)
