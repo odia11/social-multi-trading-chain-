@@ -56,7 +56,7 @@ def _shared(row):
     return row.get('reward_mode')=='community' or _orc_bps(row)>0
 
 
-def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=None,claim_wrapper_ok=None):
+def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=None,claim_wrapper_ok=None,one_approval_submit=None):
     app=d.app
     fernet=Fernet(os.environ['ENCRYPTION_KEY'].encode())
     with sqlite3.connect(d.DB_FILE) as db:
@@ -146,14 +146,26 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
             'redirect_link':redirect_link(flow,'connect')})
 
     def sign_url(flow,sk,phantom_pk,session):
-        row,raw=current(flow)
-        if raw is None:raise ValueError('Launch approval expired or changed. Open the saved launch again.')
-        transaction=b58enc(base64.b64decode(raw,validate=True))
-        # Phantom mobile rejects signAndSendTransaction with -32601 on iOS.
-        # Sign only; the callback verifies the exact transaction and relays its
-        # identical signed bytes with preflight and RPC failover.
-        nonce,payload=encode({'transaction':transaction,'session':session},sk,phantom_pk)
-        return 'https://phantom.app/ul/v1/signTransaction?'+urlencode({
+        if flow['stage']=='bundle':
+            row=lookup(flow['launch_id'],flow['wallet'])
+            if (not row or row['status']!='prepared' or not row['prepare_tx_b64']
+                    or not row['finalize_tx_b64']):
+                raise ValueError('Launch approval expired or changed. Open the saved launch again.')
+            digest=hashlib.sha256((row['prepare_tx_b64']+'\0'+row['finalize_tx_b64']).encode()).hexdigest()
+            if digest!=flow['digest']:
+                raise ValueError('Launch approval changed. Open the saved launch again.')
+            transactions=[b58enc(base64.b64decode(x,validate=True)) for x in
+                          (row['prepare_tx_b64'],row['finalize_tx_b64'])]
+            nonce,payload=encode({'transactions':transactions,'session':session},sk,phantom_pk)
+            method='signAllTransactions'
+        else:
+            row,raw=current(flow)
+            if raw is None:raise ValueError('Launch approval expired or changed. Open the saved launch again.')
+            nonce,payload=encode({'transaction':b58enc(base64.b64decode(raw,validate=True)),
+                                  'session':session},sk,phantom_pk)
+            method='signTransaction'
+        # Sign only: OrcAgent validates exact signed bytes before RPC relay.
+        return 'https://phantom.app/ul/v1/'+method+'?'+urlencode({
             'dapp_encryption_public_key':b58enc(bytes(PrivateKey(sk).public_key)),
             'nonce':nonce,'redirect_link':redirect_link(flow,'sign'),
             'payload':payload})
@@ -179,11 +191,20 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
         if not row:return fail('Launch not found',404)
         body=request.get_json(silent=True) or {}
         stage=body.get('stage')
-        if stage not in ('create','finalize'):return fail('Invalid launch stage')
-        field='prepare_tx_b64' if stage=='create' else 'finalize_tx_b64'
-        valid_status='prepared' if stage=='create' else 'finalize_prepared'
-        if row['status']!=valid_status or not row[field]:
-            return fail('Prepare your saved token launch before requesting Phantom',409)
+        if stage not in ('create','finalize','bundle'):return fail('Invalid launch stage')
+        if stage=='bundle':
+            if one_approval_submit is None:
+                return fail('One-approval launch is unavailable',503)
+            if (row['status']!='prepared' or not row['prepare_tx_b64']
+                    or not row['finalize_tx_b64']):
+                return fail('Prepare your saved one-approval launch before requesting Phantom',409)
+            digest=hashlib.sha256((row['prepare_tx_b64']+'\0'+row['finalize_tx_b64']).encode()).hexdigest()
+        else:
+            field='prepare_tx_b64' if stage=='create' else 'finalize_tx_b64'
+            valid_status='prepared' if stage=='create' else 'finalize_prepared'
+            if row['status']!=valid_status or not row[field]:
+                return fail('Prepare your saved token launch before requesting Phantom',409)
+            digest=hashlib.sha256(row[field].encode()).hexdigest()
         # Never resume a different action from an already-submitted launch.
         nonce=secrets.token_hex(32)
         sk=bytes(PrivateKey.generate())
@@ -191,7 +212,7 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
         if cached:
             sk,pk,session=cached
         flow={'token':nonce,'launch_id':launch_id,'wallet':wallet,'stage':stage,
-              'digest':hashlib.sha256(row[field].encode()).hexdigest(),
+              'digest':digest,
               'secret':fernet.encrypt(sk),'created_at':int(time.time()),
               'status':'sign' if cached else 'connect',
               'return_to_pwa':int(body.get('return_to_pwa') is True)}
@@ -413,6 +434,31 @@ def install(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid=N
             if not record or record[0]!=sk:
                 return fail('Phantom session changed. Try the saved launch again.',409)
             decoded=decrypt(sk,record[1],data['nonce'],data['data'])
+            if flow['stage']=='bundle':
+                if one_approval_submit is None:
+                    return fail('One-approval launch is unavailable',503)
+                row=lookup(flow['launch_id'],flow['wallet'])
+                transactions=decoded.get('transactions')
+                if (not row or row['status']!='prepared' or
+                        not isinstance(transactions,list) or len(transactions)!=2 or
+                        not all(isinstance(value,str) for value in transactions)):
+                    return fail('Phantom returned an invalid one-approval launch',409)
+                digest=hashlib.sha256((row['prepare_tx_b64']+'\0'+row['finalize_tx_b64']).encode()).hexdigest()
+                if digest!=flow['digest']:
+                    return fail('Prepared launch changed. Check the saved token first.',409)
+                signed_b64=[]
+                for value in transactions:
+                    raw=b58dec(value)
+                    if not 1<=len(raw)<=1232:raise ValueError('Invalid transaction size')
+                    signed_b64.append(base64.b64encode(raw).decode())
+                result=one_approval_submit(row,signed_b64)
+                with sqlite3.connect(d.DB_FILE,timeout=8) as db:
+                    cur=db.execute("""UPDATE phantom_launch_links SET status='submitted',signature=?
+                        WHERE token=? AND status='sign'""",
+                        (result.get('create_signature',''),flow['token']))
+                    if cur.rowcount!=1:
+                        return fail('This one-approval launch was already processed',409)
+                return jsonify(**result),(200 if result.get('live') else 202)
             row,original_b64=current(flow)
             if original_b64 is None:return fail('Prepared transaction changed. Check the saved token first.',409)
             original=Transaction.from_bytes(base64.b64decode(original_b64,validate=True))

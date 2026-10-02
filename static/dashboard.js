@@ -4905,6 +4905,7 @@ async function _onBotToggle(el){
 async function _onPushToggle(cb){
   cb.disabled=true;
   if(cb.checked){
+    try{ localStorage.removeItem('oa_push_opt_out'); }catch(_){}
     if(typeof _enablePushNotifications!=='function'){
       cb.checked=false; cb.disabled=false; return;
     }
@@ -4914,6 +4915,7 @@ async function _onPushToggle(cb){
       openAlertModal({text:'Could not enable phone notifications: '+(r.msg||'unknown error')});
     }
   } else if(typeof _disablePushNotifications==='function'){
+    try{ localStorage.setItem('oa_push_opt_out','1'); }catch(_){}
     await _disablePushNotifications();
   }
   cb.disabled=false;

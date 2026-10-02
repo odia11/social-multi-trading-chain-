@@ -16,6 +16,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from urllib.parse import urlparse
 from contextlib import closing
 from PIL import Image, ImageOps
 from solders.pubkey import Pubkey
@@ -49,6 +50,22 @@ _SIG=re.compile(r'^[1-9A-HJ-NP-Za-km-z]{85,90}$')
 _DRAFT_ID=re.compile(r'^[0-9a-f]{32}$')
 
 
+def _optional_https_url(value,label,hosts=None):
+    if value in (None,''):return ''
+    if not isinstance(value,str):raise ValueError(label+' link is invalid')
+    value=value.strip()
+    if not value:return ''
+    if len(value)>220:raise ValueError(label+' link is too long')
+    try:parsed=urlparse(value)
+    except ValueError as exc:raise ValueError(label+' link is invalid') from exc
+    if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError(label+' must be a secure https:// link')
+    host=parsed.hostname.lower().rstrip('.')
+    if hosts and host not in hosts:
+        raise ValueError(label+' must use '+', '.join(sorted(hosts)))
+    return value
+
+
 def _validate_form(d, data, wallet, orc_bps=0):
     if not isinstance(data,dict):raise ValueError('Invalid token details')
     name=data.get('name'); symbol=data.get('symbol'); desc=data.get('description','')
@@ -73,7 +90,19 @@ def _validate_form(d, data, wallet, orc_bps=0):
             raise ValueError('Community share must be 1–9999 basis points')
     else:
         community=''; bps=0
-    return name.strip(),symbol.upper(),desc.strip(),mode,quote,community,bps
+    website=_optional_https_url(data.get('website_url',''),'Website')
+    x_url=_optional_https_url(data.get('x_url',''),'X',
+        {'x.com','www.x.com','twitter.com','www.twitter.com'})
+    telegram=_optional_https_url(data.get('telegram_url',''),'Telegram',
+        {'t.me','www.t.me','telegram.me','www.telegram.me'})
+    initial_buy=data.get('initial_buy_raw',0)
+    if isinstance(initial_buy,bool) or not isinstance(initial_buy,int) or initial_buy<0:
+        raise ValueError('Initial buy amount is invalid')
+    # Large enough for normal launches, bounded to catch malformed/fat-finger payloads.
+    limit=100_000_000_000 if quote=='USDC' else 100_000_000_000
+    if initial_buy>limit:raise ValueError('Initial buy amount is too large')
+    return (name.strip(),symbol.upper(),desc.strip(),mode,quote,community,bps,
+            website,x_url,telegram,initial_buy)
 
 
 def _clean_icon(value):
@@ -112,6 +141,10 @@ def install(d):
             name TEXT NOT NULL,
             symbol TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
+            website_url TEXT NOT NULL DEFAULT '',
+            x_url TEXT NOT NULL DEFAULT '',
+            telegram_url TEXT NOT NULL DEFAULT '',
+            initial_buy_raw INTEGER NOT NULL DEFAULT 0,
             icon_webp BLOB NOT NULL,
             reward_mode TEXT NOT NULL,
             quote_asset TEXT NOT NULL,
@@ -129,7 +162,24 @@ def install(d):
             created_at INTEGER NOT NULL,
             UNIQUE(wallet,client_nonce)
         )''')
+        launch_columns={r[1] for r in conn.execute('PRAGMA table_info(token_launches)')}
+        for column,ddl in (
+            ('website_url',"TEXT NOT NULL DEFAULT ''"),
+            ('x_url',"TEXT NOT NULL DEFAULT ''"),
+            ('telegram_url',"TEXT NOT NULL DEFAULT ''"),
+            ('initial_buy_raw','INTEGER NOT NULL DEFAULT 0')):
+            if column not in launch_columns:
+                conn.execute(f'ALTER TABLE token_launches ADD COLUMN {column} {ddl}')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_token_launch_owner ON token_launches(wallet,created_at)')
+        # One Phantom approval may sign both launch steps. Persist the exact
+        # signed bytes so RPC uncertainty never requires a second signature.
+        conn.execute('''CREATE TABLE IF NOT EXISTS token_launch_one_approval (
+            launch_id TEXT PRIMARY KEY, wallet TEXT NOT NULL,
+            create_signature TEXT NOT NULL, finalize_signature TEXT NOT NULL,
+            create_signed BLOB NOT NULL, finalize_signed BLOB NOT NULL,
+            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+            FOREIGN KEY(launch_id) REFERENCES token_launches(id)
+        )''')
         # Launches from before the OrcAgent creator-fee share keep 0.
         if 'orcagent_bps' not in {r[1] for r in conn.execute('PRAGMA table_info(token_launches)')}:
             conn.execute('ALTER TABLE token_launches ADD COLUMN orcagent_bps INTEGER NOT NULL DEFAULT 0')
@@ -177,13 +227,18 @@ def install(d):
             and bool(w) and w in {x.strip() for x in
                 os.getenv('ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_WALLETS','').split(',') if x.strip()})
 
-    # Fixed pilot ceilings. The 2 USDC test trade is a SEPARATE wallet action;
-    # the token launch NEVER debits a wallet's USDC or buys a token by itself.
+    # Fixed pilot ceilings. An initial buy is always explicit in the saved
+    # draft and visible before Phantom approval; zero means no buy.
     PILOT_MAX_SOL_LAMPORTS=30_000_000
     PILOT_MAX_LAUNCH_SOL_LAMPORTS=25_000_000  # Keep >=0.005 SOL for the test trade/claim
     PILOT_MAX_FOLLOWUP_SOL_LAMPORTS=5_000_000
     PILOT_MAX_TRADE_USDC_MICRO=2_000_000
-    PUBLIC_MAX_LAUNCH_SOL_LAMPORTS=50_000_000  # 0.05 SOL hard cap for one launch transaction
+    PUBLIC_MAX_LAUNCH_SOL_LAMPORTS=50_000_000  # network/rent ceiling, excluding an explicit SOL first buy
+
+    def launch_sol_cap(row,wallet):
+        base=PILOT_MAX_LAUNCH_SOL_LAMPORTS if pilot_wallet(wallet) else PUBLIC_MAX_LAUNCH_SOL_LAMPORTS
+        initial=int(row.get('initial_buy_raw') or 0) if row.get('quote_asset')=='SOL' else 0
+        return base+max(0,initial)
 
     def fail(message,status=400):
         return jsonify(ok=False,msg=str(message)[:220]),status
@@ -204,9 +259,10 @@ def install(d):
         return dict(row) if row else None
 
     def public_row(row):
-        out={k:row[k] for k in ('id','name','symbol','description','reward_mode',
-                   'quote_asset','community_wallet','community_bps','status','mint',
-                   'launch_signature','finalize_signature','created_at','error')}
+        out={k:row[k] for k in ('id','name','symbol','description','website_url',
+                   'x_url','telegram_url','initial_buy_raw','reward_mode','quote_asset',
+                   'community_wallet','community_bps','status','mint','launch_signature',
+                   'finalize_signature','created_at','error')}
         out['orcagent_bps']=orc_bps(row)
         out['creator_bps']=10000-orc_bps(row)-(int(row['community_bps'] or 0) if row['reward_mode']=='community' else 0)
         return out
@@ -261,7 +317,7 @@ def install(d):
             raise RuntimeError('This RPC method is not permitted in claim preflight')
         if launch_read and (verification or method not in (
                 'getLatestBlockhash','getBalance','getFeeForMessage',
-                'simulateTransaction','isBlockhashValid')):
+                'simulateTransaction','isBlockhashValid','getTokenAccountsByOwner')):
             raise RuntimeError('This RPC method is not permitted in launch preflight')
         can_fallback=verification or claim_read or launch_read
         # The history lookup required for a pending creator claim is
@@ -358,15 +414,17 @@ def install(d):
         blockhash=((block or {}).get('value') or {}).get('blockhash')
         if not blockhash:raise RuntimeError('No recent Solana blockhash')
         data={k:row[k] for k in ('wallet','name','symbol','reward_mode',
-                                  'quote_asset','community_wallet','community_bps')}
-        data.update(orcagent_bps=orc_bps(row),orcagent_wallet=orc_wallet() if orc_bps(row) else '')
+                                  'quote_asset','community_wallet','community_bps','initial_buy_raw')}
+        data.update(orcagent_bps=orc_bps(row),orcagent_wallet=orc_wallet() if orc_bps(row) else '',
+                    rpc_url=(os.getenv('ORCA_LAUNCH_RPC','') or
+                             getattr(d,'SOLANA_RPC_URL','') or getattr(d,'SOLANA_RPC','')))
         data.update(stage=stage,blockhash=blockhash,mint=row['mint'],
                     uri='https://orcagent.fun/token-launch/metadata/'+row['id'])
         if mint_secret:data['mint_secret']=mint_secret
         path=os.path.join(d.BASE,'pump_adapter','build-launch.cjs')
         try:
             r=subprocess.run(['/bin/bash',os.path.join(d.BASE,'pump_adapter','run-node.sh'),path],input=json.dumps(data),text=True,
-                capture_output=True,timeout=14,cwd=os.path.join(d.BASE,'pump_adapter'),
+                capture_output=True,timeout=24,cwd=os.path.join(d.BASE,'pump_adapter'),
                 check=False)
         except (OSError,subprocess.TimeoutExpired) as exc:
             raise RuntimeError('Token builder unavailable') from exc
@@ -887,6 +945,19 @@ def install(d):
         return str(max(int(os.stat(os.path.join(d.BASE,'static',name)).st_mtime)
                        for name in names))
 
+    # Pump-style UX: prepare the create + fee-share transactions together,
+    # then let Phantom sign both in one wallet approval.
+    from token_launch_one_approval import install as install_one_approval
+    submit_one_approval=install_one_approval(d,
+        lookup=lookup,shared=shared,build_tx=build_tx,
+        pilot_sol_preflight=pilot_sol_preflight,pilot_wallet=pilot_wallet,
+        blockhash_valid=blockhash_valid,check_signature=check_signature,
+        mint_exists=mint_exists,row_sharing_ok=row_sharing_ok,
+        enabled=enabled,identity=identity,csrf=csrf,fail=fail,rpc=rpc,
+        public_max=PUBLIC_MAX_LAUNCH_SOL_LAMPORTS,
+        pilot_max=PILOT_MAX_LAUNCH_SOL_LAMPORTS,
+        followup_max=PILOT_MAX_FOLLOWUP_SOL_LAMPORTS)
+
     @app.get('/token-launch')
     def token_launch_page():
         wallet=identity()
@@ -931,9 +1002,12 @@ def install(d):
         # address, pinned by tests/test_token_launch_orcagent_always_20.py.)
         new_orc=0 if (pilot_wallet(wallet) or not d.is_valid_solana_address(orc_wallet() or '')) else ORCAGENT_CREATOR_FEE_BPS
         try:
-            name,symbol,desc,mode,quote,community,bps=_validate_form(d,body,wallet,new_orc)
+            (name,symbol,desc,mode,quote,community,bps,website,x_url,telegram,
+             initial_buy)=_validate_form(d,body,wallet,new_orc)
             if pilot_wallet(wallet) and (mode!='creator' or quote!='USDC'):
                 raise ValueError('Pilot allows USDC / 100% Creator Rewards only')
+            if pilot_wallet(wallet) and initial_buy>PILOT_MAX_TRADE_USDC_MICRO:
+                raise ValueError('Pilot initial buy is limited to 2 USDC')
             nonce=body.get('client_nonce')
             if not isinstance(nonce,str) or not re.fullmatch('[a-zA-Z0-9_-]{16,80}',nonce):
                 raise ValueError('Invalid launch request identifier')
@@ -953,10 +1027,12 @@ def install(d):
             if drafts>=20:
                 return fail('You have 20 saved drafts. Launching more tokens requires clearing old drafts.',409)
             conn.execute('''INSERT INTO token_launches
-              (id,wallet,client_nonce,name,symbol,description,icon_webp,reward_mode,
-               quote_asset,community_wallet,community_bps,orcagent_bps,created_at)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-              (launch_id,wallet,nonce,name,symbol,desc,icon,mode,quote,community,bps,
+              (id,wallet,client_nonce,name,symbol,description,website_url,x_url,
+               telegram_url,initial_buy_raw,icon_webp,reward_mode,quote_asset,
+               community_wallet,community_bps,orcagent_bps,created_at)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+              (launch_id,wallet,nonce,name,symbol,desc,website,x_url,telegram,
+               initial_buy,icon,mode,quote,community,bps,
                new_orc if mode in ('creator','community') else 0,int(time.time())))
         return jsonify(ok=True,draft=public_row(lookup(launch_id,wallet))),201
 
@@ -965,12 +1041,13 @@ def install(d):
     def launch_metadata(launch_id):
         if not _DRAFT_ID.fullmatch(launch_id):abort(404)
         with closing(sqlite3.connect(d.DB_FILE)) as conn:
-            row=conn.execute('SELECT name,symbol,description FROM token_launches WHERE id=?',
-                             (launch_id,)).fetchone()
+            row=conn.execute('''SELECT name,symbol,description,website_url,x_url,telegram_url
+                                FROM token_launches WHERE id=?''',(launch_id,)).fetchone()
         if not row:abort(404)
+        external=row[3] or ('https://orcagent.fun/token-launch/'+launch_id)
         resp=jsonify(name=row[0],symbol=row[1],description=row[2],
                    image='https://orcagent.fun/token-launch/icon/'+launch_id,
-                   external_url='https://orcagent.fun/token-launch')
+                   external_url=external,website=row[3],twitter=row[4],telegram=row[5])
         resp.headers['Cache-Control']='public,max-age=300'
         return resp
 
@@ -1145,8 +1222,7 @@ def install(d):
             # mint transaction while its blockhash might still be valid.
             if time.time()-row['prepared_at']<45:
                 try:pilot_cost=pilot_sol_preflight(row,row['prepare_tx_b64'],
-                    max_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS if pilot_wallet(wallet)
-                        else PUBLIC_MAX_LAUNCH_SOL_LAMPORTS,enforce_public=True)
+                    max_lamports=launch_sol_cap(row,wallet),enforce_public=True)
                 except RuntimeError as exc:return fail(exc,503)
                 return jsonify(ok=True,mint=row['mint'],transaction_b64=row['prepare_tx_b64'],
                     quote_asset=row['quote_asset'],reward_mode=row['reward_mode'],
@@ -1155,8 +1231,7 @@ def install(d):
             try:
                 if blockhash_valid(row['prepare_tx_b64']):
                     pilot_cost=pilot_sol_preflight(row,row['prepare_tx_b64'],
-                    max_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS if pilot_wallet(wallet)
-                        else PUBLIC_MAX_LAUNCH_SOL_LAMPORTS,enforce_public=True)
+                    max_lamports=launch_sol_cap(row,wallet),enforce_public=True)
                     return jsonify(ok=True,mint=row['mint'],transaction_b64=row['prepare_tx_b64'],
                         quote_asset=row['quote_asset'],reward_mode=row['reward_mode'],
                         needs_finalization=shared(row),
@@ -1181,15 +1256,34 @@ def install(d):
             available=(starting or {}).get('value')
             if type(available) is not int or available<0:
                 raise RuntimeError('Could not verify your SOL balance. Keep this saved draft and retry later.')
-            if available<10_000_000:
+            sol_buy=int(row.get('initial_buy_raw') or 0) if row.get('quote_asset')=='SOL' else 0
+            minimum=10_000_000+sol_buy
+            if available<minimum:
                 return fail('Insufficient SOL: Phantom has '
-                    f'{available/1_000_000_000:.6f} SOL. Keep at least 0.01 SOL '
-                    'for creation/rent. Add SOL or use Fund launch with USDC '
-                    'on this draft (gasless quote required). No token was created.',409)
+                    f'{available/1_000_000_000:.6f} SOL. This launch needs at least '
+                    f'{minimum/1_000_000_000:.6f} SOL including the selected initial buy. '
+                    'Add SOL or use Fund launch with USDC on this saved draft. No token was created.',409)
+            usdc_buy=int(row.get('initial_buy_raw') or 0) if row.get('quote_asset')=='USDC' else 0
+            if usdc_buy:
+                token_accounts=rpc('getTokenAccountsByOwner',[wallet,{'mint':USDC_MINT},
+                    {'encoding':'jsonParsed','commitment':'confirmed'}],launch_read=True)
+                entries=(token_accounts or {}).get('value')
+                if not isinstance(entries,list):
+                    raise RuntimeError('Could not verify your USDC balance. Keep this saved draft and retry later.')
+                usdc_have=0
+                try:
+                    for entry in entries:
+                        info=entry['account']['data']['parsed']['info'];amount=info['tokenAmount']
+                        if info.get('mint')==USDC_MINT and info.get('owner')==wallet and amount.get('decimals')==6:
+                            raw=amount.get('amount')
+                            if isinstance(raw,str) and raw.isdecimal():usdc_have+=int(raw)
+                except (KeyError,TypeError,ValueError):
+                    raise RuntimeError('Could not verify your USDC balance. Keep this saved draft and retry later.')
+                if usdc_have<usdc_buy:
+                    return fail(f'Insufficient USDC for the selected initial buy. Wallet has {usdc_have/1_000_000:.6f} USDC; initial buy is {usdc_buy/1_000_000:.6f} USDC. Nothing was sent.',409)
             built=build_tx(row,'create')
             pilot_cost=pilot_sol_preflight(row,built['transaction_b64'],
-                max_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS if pilot_wallet(wallet)
-                    else PUBLIC_MAX_LAUNCH_SOL_LAMPORTS,enforce_public=True)
+                max_lamports=launch_sol_cap(row,wallet),enforce_public=True)
         except RuntimeError as exc:return fail(exc,503)
         with sqlite3.connect(d.DB_FILE,timeout=8) as conn:
             conn.execute('BEGIN IMMEDIATE')
@@ -1293,7 +1387,8 @@ def install(d):
                 old_mint TEXT NOT NULL,old_signature TEXT NOT NULL,
                 recovered_at INTEGER NOT NULL)""")
             update=db.execute("""UPDATE token_launches SET status='draft',
-               mint=NULL,prepare_tx_b64='',launch_signature='',prepared_at=0,
+               mint=NULL,prepare_tx_b64='',finalize_tx_b64='',
+               launch_signature='',finalize_signature='',prepared_at=0,
                error='Previous signed launch expired unconfirmed; new Phantom approval required'
                WHERE id=? AND wallet=? AND status='submitted'
                  AND launch_signature=? AND mint=?""",
@@ -1305,6 +1400,8 @@ def install(d):
                   (launch_id,old_mint,old_signature,recovered_at)
                   VALUES (?,?,?,?)""",
                   (launch_id,row['mint'],row['launch_signature'],int(time.time())))
+            db.execute('DELETE FROM token_launch_one_approval WHERE launch_id=? AND wallet=?',
+                       (launch_id,wallet))
         return jsonify(ok=True,recovered=True,
             msg='The old transaction expired without a confirmed token. Your original draft is ready for a NEW Phantom approval. No transaction was sent by recovery.')
 
@@ -1626,4 +1723,4 @@ def install(d):
     if os.getenv('ENCRYPTION_KEY'):
         from phantom_launch_mobile import install as install_phantom_launch_mobile
         install_phantom_launch_mobile(d,lookup,check_signature,mint_exists,sharing_check,blockhash_valid,
-                                      phantom_claim_wrapper_ok)
+                                      phantom_claim_wrapper_ok,submit_one_approval)

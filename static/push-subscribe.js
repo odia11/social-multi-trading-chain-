@@ -31,11 +31,14 @@ async function _pushCsrfHeaders() {
 }
 // 'ok' | 'ios-browser' (iPhone/iPad Safari: push only works once OrcAgent is
 // added to the Home Screen and opened from there) | 'unsupported'.
+function _pushIsStandalone() {
+  return window.navigator.standalone === true ||
+    !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+}
 function _pushEnvironment() {
   var ua = navigator.userAgent || '';
   var ios = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  var standalone = window.navigator.standalone === true ||
-    (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  var standalone = _pushIsStandalone();
   var supported = ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window);
   if (supported) return 'ok';
   if (ios && !standalone) return 'ios-browser';
@@ -123,6 +126,10 @@ async function _isPushSubscribed() {
 async function _syncPushSubscription() {
   if (_pushEnvironment() !== 'ok' || Notification.permission !== 'granted') return;
   try {
+    // Settings opt-out wins even though the browser-level permission remains
+    // granted. Without this guard, the next app load would silently subscribe
+    // the device again immediately after the user switched notifications off.
+    if (localStorage.getItem('oa_push_opt_out') === '1') return;
     var reg = await navigator.serviceWorker.getRegistration('/sw.js') ||
               await navigator.serviceWorker.register('/sw.js');
     await navigator.serviceWorker.ready;
@@ -157,6 +164,9 @@ function _mountPushPrompt() {
   } catch (_) {}
   var env = _pushEnvironment(), perm = ('Notification' in window) ? Notification.permission : 'default';
   var text = '', button = '';
+  // Installed OrcAgent PWAs use default-on push: the first normal tap opens
+  // the one OS/browser permission prompt. No extra in-app "Turn on" step.
+  if (_pushIsStandalone() && perm === 'default') return;
   if (env === 'ios-browser') text = _PUSH_IOS_HINT;
   else if (env !== 'ok' || perm === 'granted') return;
   else if (perm === 'denied') text = 'Notifications are blocked for OrcAgent. Allow them in your browser or phone settings to get DMs and replies.';
@@ -194,8 +204,20 @@ function _mountPushPrompt() {
   card.appendChild(x);
   host.appendChild(card);
 }
+function _armPwaDefaultPush() {
+  if (_pushEnvironment() !== 'ok' || !_pushIsStandalone() || Notification.permission !== 'default') return;
+  try { if (localStorage.getItem('oa_push_opt_out') === '1') return; } catch (_) {}
+  var fired = false;
+  var start = function(ev) {
+    if (fired || (ev && ev.isTrusted === false)) return;
+    fired = true;
+    ['pointerup','touchend','click'].forEach(function(t){ document.removeEventListener(t,start,true); });
+    _enablePushNotifications().catch(function(){});
+  };
+  ['pointerup','touchend','click'].forEach(function(t){ document.addEventListener(t,start,{capture:true,passive:true}); });
+}
 (function() {
-  function boot() { _syncPushSubscription(); _mountPushPrompt(); }
+  function boot() { _syncPushSubscription(); _armPwaDefaultPush(); _mountPushPrompt(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
 })();

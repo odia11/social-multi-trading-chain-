@@ -247,6 +247,27 @@ html,body{background:#0a0b0e;color:#eef1f5;font-family:'Geist',system-ui,sans-se
   .msgs-new-btn{width:34px;height:34px;min-height:0;display:inline-flex;align-items:center;justify-content:center}
   html,body{overflow-x:clip}  /* clip, not hidden: hidden makes the root a scroll container, which breaks the sticky navbar */
 }
+
+/* Instagram-style DM long-press: Safari must not turn the gesture into
+   Copy/Look Up/Translate.  Keep vertical panning native so chat scrolling
+   stays fluid while only text-selection/callout is suppressed. */
+#msgs-area .msg-wrap[data-mid],
+#msgs-area .msg-wrap[data-mid] .msg-bubble,
+#msgs-area .msg-wrap[data-mid] .msg-bubble *{
+  -webkit-touch-callout:none;
+  -webkit-user-select:none;
+  user-select:none;
+}
+#msgs-area .msg-wrap[data-mid]{touch-action:pan-y}
+.dm-reaction-pills{display:flex;gap:4px;margin-top:3px;flex-wrap:wrap;-webkit-user-select:none;user-select:none}
+.msg-wrap.mine .dm-reaction-pills{justify-content:flex-end}
+.dm-reaction-pill{border:1px solid #2b313b;background:#11161e;color:#eef1f5;border-radius:999px;padding:2px 7px;font:600 12px/1.45 system-ui;cursor:pointer;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;touch-action:manipulation}
+.dm-reaction-pill.mine{border-color:rgba(247,185,85,.7);background:rgba(247,185,85,.12)}
+.dm-reaction-pill span{font-size:10px;color:#9aa4b2;margin-left:2px}
+.dm-reaction-menu{position:fixed;z-index:9999;display:flex;align-items:center;gap:3px;padding:7px;background:#151a22;border:1px solid #303743;border-radius:999px;box-shadow:0 14px 42px rgba(0,0,0,.48);touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.dm-reaction-menu button{width:38px;height:38px;border:0;background:transparent;border-radius:50%;font-size:22px;line-height:38px;padding:0;cursor:pointer;transition:transform .12s,background .12s;touch-action:manipulation;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.dm-reaction-menu button:hover,.dm-reaction-menu button:focus-visible{background:#242b36;transform:scale(1.14);outline:none}
+
 </style>
 </head>
 <body>
@@ -1094,7 +1115,7 @@ function _renderMessages(msgs, forceScroll) {
   // Skip the (expensive, flicker-causing) full re-render on the 5s poll when
   // nothing actually changed — this was rebuilding the whole DOM every cycle
   // regardless, which is what made the thread feel like it stutters.
-  var sig = msgs.length + '|' + msgs.map(function(m){ return m.id+':'+(m.edited_at||'')+':'+(m.is_read?1:0); }).join(',');
+  var sig = msgs.length + '|' + msgs.map(function(m){ return m.id+':'+(m.edited_at||'')+':'+(m.is_read?1:0)+':'+JSON.stringify(m.reactions||[]); }).join(',');
   if (sig === _lastMsgsSig && !forceScroll) return;
   // Do not destroy the input the user is currently editing on an async poll.
   if (!forceScroll && area.querySelector('.msg-edit-input')) return;
@@ -1156,6 +1177,7 @@ function _renderMessages(msgs, forceScroll) {
         + (canEdit ? '<button onclick="_startEditMsg('+m.id+')">Edit</button>' : '')
         + '<button class="danger" onclick="_deleteMsg('+m.id+')">Delete</button></div>';
     }
+    var reactionHtml = _dmReactionPills(m.reactions || []);
     var editedTag = m.edited_at ? '<span class="msg-edited-tag">(edited)</span>' : '';
     var seenTag = (mine && m.is_read) ? '<span class="msg-seen-tag"> · Seen</span>' : '';
     return divider
@@ -1164,6 +1186,7 @@ function _renderMessages(msgs, forceScroll) {
       +   menu
       +   bubble
       + '</div>'
+      + reactionHtml
       + '<span class="msg-time">'+_esc(_timeAgo(m.created_at))+editedTag+seenTag+'</span>'
       + '</div>';
   }).join('');
@@ -1175,6 +1198,158 @@ function _renderMessages(msgs, forceScroll) {
   var conv = _conversations.find(function(c){ return c.peer_id === _activePeerId; });
   if (conv && conv.unread > 0) { conv.unread = 0; _renderConvList(); }
 }
+
+
+var _DM_REACTION_CHOICES=['❤️','😂','😮','😢','😡','👍','🔥'];
+var _dmReactionTimer=null, _dmReactionStart=null, _dmReactionMenu=null;
+function _dmReactionPills(reactions){
+  if(!reactions||!reactions.length)return '';
+  var grouped={};
+  reactions.forEach(function(r){
+    var e=String(r.emoji||''); if(!e)return;
+    if(!grouped[e])grouped[e]={count:0,mine:false};
+    grouped[e].count++;
+    if(Number(r.user_id)===Number(_myUserId))grouped[e].mine=true;
+  });
+  var html=Object.keys(grouped).map(function(e){
+    var g=grouped[e];
+    return '<button type="button" class="dm-reaction-pill'+(g.mine?' mine':'')+'" data-emoji="'+_esc(e)+'" aria-label="'+_esc(e)+' reaction">'+_esc(e)+(g.count>1?' <span>'+g.count+'</span>':'')+'</button>';
+  }).join('');
+  return html?'<div class="dm-reaction-pills">'+html+'</div>':'';
+}
+function _closeDmReactionMenu(){
+  if(_dmReactionMenu&&_dmReactionMenu.parentNode)_dmReactionMenu.parentNode.removeChild(_dmReactionMenu);
+  _dmReactionMenu=null;
+}
+function _openDmReactionMenu(wrap,x,y){
+  if(!wrap)return;
+  _closeDmReactionMenu();
+  var mid=parseInt(wrap.dataset.mid,10); if(!mid)return;
+  var menu=document.createElement('div');
+  menu.className='dm-reaction-menu';
+  menu.setAttribute('role','menu');
+  _DM_REACTION_CHOICES.forEach(function(emoji){
+    var b=document.createElement('button'); b.type='button'; b.textContent=emoji; b.setAttribute('aria-label','React '+emoji);
+    // iOS can delay/suppress the synthetic click that follows a long-press.
+    // Commit on pointerup instead; keep click as keyboard/older-browser fallback
+    // and guard it so one tap can never toggle the reaction twice.
+    var committed=false;
+    var choose=function(ev){
+      ev.preventDefault(); ev.stopPropagation();
+      if(committed)return;
+      committed=true;
+      _setDmReaction(mid,emoji);
+      _closeDmReactionMenu();
+    };
+    b.addEventListener('pointerup',choose);
+    b.addEventListener('click',choose);
+    menu.appendChild(b);
+  });
+  document.body.appendChild(menu); _dmReactionMenu=menu;
+  var r=menu.getBoundingClientRect(), vw=document.documentElement.clientWidth, vh=document.documentElement.clientHeight;
+  var left=Math.max(8,Math.min((x||vw/2)-r.width/2,vw-r.width-8));
+  var top=Math.max(8,Math.min((y||vh/2)-r.height-14,vh-r.height-8));
+  menu.style.left=left+'px'; menu.style.top=top+'px';
+}
+var _dmReactionSeq=Object.create(null);
+function _dmPaintReactions(mid,reactions){
+  var wrap=document.querySelector('.msg-wrap[data-mid="'+mid+'"]');
+  if(!wrap)return;
+  var existing=wrap.querySelector('.dm-reaction-pills');
+  var html=_dmReactionPills(reactions||[]);
+  if(existing){
+    if(html)existing.outerHTML=html;
+    else existing.remove();
+    return;
+  }
+  if(!html)return;
+  var time=wrap.querySelector('.msg-time');
+  if(time)time.insertAdjacentHTML('beforebegin',html);
+  else wrap.insertAdjacentHTML('beforeend',html);
+}
+function _dmOptimisticReaction(current,emoji){
+  current=(current||[]).map(function(r){return {user_id:Number(r.user_id),emoji:String(r.emoji||'')};});
+  var mine=current.find(function(r){return Number(r.user_id)===Number(_myUserId);});
+  var next=current.filter(function(r){return Number(r.user_id)!==Number(_myUserId);});
+  if(!mine||mine.emoji!==emoji)next.push({user_id:Number(_myUserId),emoji:emoji});
+  return next;
+}
+async function _setDmReaction(mid,emoji){
+  mid=Number(mid);
+  var msg=_renderedMessages.find(function(m){return Number(m.id)===mid;});
+  var previous=msg?(msg.reactions||[]).map(function(r){return {user_id:Number(r.user_id),emoji:String(r.emoji||'')};}):[];
+  var optimistic=_dmOptimisticReaction(previous,emoji);
+  var seq=(_dmReactionSeq[mid]||0)+1;
+  _dmReactionSeq[mid]=seq;
+
+  // Instagram-style optimistic UI: paint first, sync second.  The user's tap
+  // is visible in the same frame instead of waiting for network + reload.
+  if(msg)msg.reactions=optimistic;
+  _dmPaintReactions(mid,optimistic);
+
+  try{
+    var r=await fetch('/api/messages/'+mid+'/reaction',{
+      method:'POST',credentials:'include',
+      headers:{'Content-Type':'application/json','X-CSRF-Token':_csrfToken},
+      body:JSON.stringify({emoji:emoji})
+    });
+    var d=await r.json();
+    if(!r.ok||!d.ok)throw Error(d.msg||'Reaction failed');
+    if(_dmReactionSeq[mid]!==seq)return;
+    var confirmed=d.reactions||[];
+    if(msg)msg.reactions=confirmed;
+    _dmPaintReactions(mid,confirmed);
+  }catch(e){
+    if(_dmReactionSeq[mid]===seq){
+      if(msg)msg.reactions=previous;
+      _dmPaintReactions(mid,previous);
+    }
+    console.error('[messages] reaction error',e);
+  }
+}
+function _installDmReactionGestures(){
+  var area=document.getElementById('msgs-area'); if(!area||area.dataset.reactionsInstalled==='1')return;
+  area.dataset.reactionsInstalled='1';
+  area.addEventListener('contextmenu',function(e){
+    var wrap=e.target.closest('.msg-wrap[data-mid]'); if(!wrap)return;
+    e.preventDefault(); _openDmReactionMenu(wrap,e.clientX,e.clientY);
+  });
+  // WebKit may still try to create a selection range even when its touch
+  // callout is hidden. Block that only inside actual message rows.
+  area.addEventListener('selectstart',function(e){
+    if(e.target.closest('.msg-wrap[data-mid]'))e.preventDefault();
+  });
+  area.addEventListener('dragstart',function(e){
+    if(e.target.closest('.msg-wrap[data-mid]'))e.preventDefault();
+  });
+  area.addEventListener('pointerdown',function(e){
+    if(e.pointerType==='mouse'&&e.button!==0)return;
+    var wrap=e.target.closest('.msg-wrap[data-mid]'); if(!wrap||e.target.closest('button,a,input'))return;
+    _dmReactionStart={x:e.clientX,y:e.clientY,wrap:wrap};
+    clearTimeout(_dmReactionTimer);
+    _dmReactionTimer=setTimeout(function(){
+      if(_dmReactionStart){
+        try{var sel=window.getSelection&&window.getSelection();if(sel)sel.removeAllRanges();}catch(_){}
+        _openDmReactionMenu(_dmReactionStart.wrap,_dmReactionStart.x,_dmReactionStart.y);
+        _dmReactionStart=null;
+      }
+    },360);
+  },{passive:true});
+  area.addEventListener('pointermove',function(e){
+    if(!_dmReactionStart)return;
+    if(Math.abs(e.clientX-_dmReactionStart.x)>10||Math.abs(e.clientY-_dmReactionStart.y)>10){
+      clearTimeout(_dmReactionTimer);_dmReactionStart=null;
+    }
+  },{passive:true});
+  ['pointerup','pointercancel'].forEach(function(t){area.addEventListener(t,function(){clearTimeout(_dmReactionTimer);_dmReactionStart=null;},{passive:true});});
+  area.addEventListener('click',function(e){
+    var pill=e.target.closest('.dm-reaction-pill'); if(!pill)return;
+    var wrap=pill.closest('.msg-wrap[data-mid]'); if(wrap)_setDmReaction(parseInt(wrap.dataset.mid,10),pill.dataset.emoji||pill.textContent.trim());
+  });
+  document.addEventListener('click',function(e){if(_dmReactionMenu&&!_dmReactionMenu.contains(e.target))_closeDmReactionMenu();});
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_installDmReactionGestures);
+else _installDmReactionGestures();
 
 /* Tip messages ("Tipped 15.00 USDC — note", sent after a confirmed tip). */
 function _isTipText(text) {

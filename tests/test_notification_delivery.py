@@ -101,7 +101,7 @@ np = open(os.path.join(ROOT, 'static', 'notif-poll.js'), encoding='utf-8').read(
 dj = open(os.path.join(ROOT, 'static', 'dashboard.js'), encoding='utf-8').read()
 check('every app load re-registers an already-subscribed phone with the server (main app)',
       'function _syncPushSubscription()' in ps and "Notification.permission !== 'granted') return;" in ps
-      and 'boot() { _syncPushSubscription(); _mountPushPrompt(); }' in ps)
+      and 'boot() { _syncPushSubscription(); _armPwaDefaultPush(); _mountPushPrompt(); }' in ps)
 check('...and on the standalone pages, where it used to stop as soon as the phone had a subscription',
       'if(sub) return;' not in np and "sessionStorage.getItem('oa_push_synced')" in np
       and "body:JSON.stringify(sub.toJSON())" in np)

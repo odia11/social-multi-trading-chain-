@@ -18,6 +18,17 @@ function dom(tag,cls,value){var el=document.createElement(tag);if(cls)el.classNa
 function choice(name){var el=document.querySelector('input[name="'+name+'"]:checked');return el?el.value:''}
 function money(n){return String(Number((Number(n)||0).toFixed(2)))+'%'}
 function toBps(v){var n=Number(v);if(!Number.isFinite(n)||n<=0||n>=100)return 0;var bps=Math.round(n*100);return bps>0&&bps<10000&&Math.abs(bps/100-n)<.000001?bps:0}
+function decimalToRaw(value,decimals){
+ var input=String(value==null?'':value).trim();if(!input||input==='0')return 0;
+ if(!/^\d+(?:\.\d+)?$/.test(input))throw Error('Enter a valid initial buy amount.');
+ var parts=input.split('.'),fraction=(parts[1]||'');
+ if(fraction.length>decimals)throw Error('Initial buy has too many decimal places.');
+ var raw=BigInt(parts[0])*10n**BigInt(decimals)+BigInt((fraction+'0'.repeat(decimals)).slice(0,decimals)||'0');
+ if(raw>100000000000n)throw Error('Initial buy amount is too large.');
+ if(raw>BigInt(Number.MAX_SAFE_INTEGER))throw Error('Initial buy amount is too large.');
+ return Number(raw);
+}
+function initialBuyRaw(){var asset=choice('tl-asset')||'USDC';return decimalToRaw($('tl-initial-buy').value,asset==='SOL'?9:6)}
 function rawAmount(raw,asset){
  try{
   var value=BigInt(raw||'0'),base=asset==='SOL'?1000000000n:1000000n;
@@ -118,6 +129,10 @@ function renderPreview(){
  var bps=toBps($('tl-community-share').value);
  text('tl-preview-name',name);text('tl-preview-symbol',symbol+' / '+asset);
  text('tl-review-pair',asset);
+ var initialInput=$('tl-initial-buy'),initialText=initialInput&&Number(initialInput.value)>0?initialInput.value+' '+asset:'Skip';
+ text('tl-review-initial-buy',initialText);
+ if(initialInput){initialInput.max=asset==='SOL'?'100':'100000';initialInput.step=asset==='SOL'?'0.000001':'0.01'}
+ text('tl-initial-buy-help','0 = skip. Your first buy in '+asset+' is included in the same Phantom launch approval.');
  text('tl-review-mode',{creator:'Creator',community:'Creator + Community'}[mode]);
  var orc=orcBps;
  text('tl-review-creator',money((10000-orc-(mode==='community'?bps:0))/100));
@@ -157,11 +172,12 @@ async function call(path,body){
 function selectedWallet(){
  var adapter=window.OrcAgentWalletAdapter;
  var provider=adapter?adapter.connected(cfg.wallet):((window.phantom&&window.phantom.solana&&window.phantom.solana.isPhantom)?window.phantom.solana:((window.solana&&window.solana.isPhantom)?window.solana:window.solflare));
- if(!provider||typeof provider.signAndSendTransaction!=='function')throw Error('Open OrcAgent in Phantom or connect a compatible Solana wallet first.');
+ if(!provider)throw Error('Open OrcAgent in Phantom or connect a compatible Solana wallet first.');
  return provider;
 }
 async function signWithWallet(tx_b64){
  var provider=selectedWallet();
+ if(typeof provider.signAndSendTransaction!=='function')throw Error('This wallet cannot submit a Solana transaction here. Update Phantom and try again.');
  if(!provider.publicKey&&typeof provider.connect==='function')await provider.connect();
  if(!provider.publicKey||provider.publicKey.toString()!==cfg.wallet){
     throw Error('Connected Phantom wallet does not match your signed-in OrcAgent wallet.');
@@ -178,6 +194,33 @@ async function signWithWallet(tx_b64){
  if(typeof sig!=='string'||sig.length<85)throw Error('Wallet did not return a valid transaction signature. Check Phantom history.');
  return sig;
 }
+function txBytesToBase64(bytes){
+ var chars='';
+ for(var i=0;i<bytes.length;i++)chars+=String.fromCharCode(bytes[i]);
+ return btoa(chars);
+}
+async function signAllWithWallet(transactions_b64){
+ var provider=selectedWallet();
+ if(!provider.publicKey&&typeof provider.connect==='function')await provider.connect();
+ if(!provider.publicKey||provider.publicKey.toString()!==cfg.wallet)
+   throw Error('Connected Phantom wallet does not match your signed-in OrcAgent wallet.');
+ if(typeof provider.signAllTransactions!=='function')
+   throw Error('Update Phantom to launch with one approval. Your saved token has not been sent.');
+ if(!window.OrcAgentSolana||!window.OrcAgentSolana.Transaction)
+   throw Error('Solana wallet transaction library has not loaded. Reload and try again.');
+ if(!Array.isArray(transactions_b64)||transactions_b64.length!==2)
+   throw Error('The one-approval launch bundle is incomplete.');
+ var txs=transactions_b64.map(function(raw){
+   var bytes=Uint8Array.from(atob(raw),function(c){return c.charCodeAt(0)});
+   return window.OrcAgentSolana.Transaction.from(bytes);
+ });
+ var signed=await provider.signAllTransactions(txs);
+ if(!Array.isArray(signed)||signed.length!==2)
+   throw Error('Phantom did not return both signed launch transactions. Nothing was submitted.');
+ return signed.map(function(tx){
+   return txBytesToBase64(tx.serialize({requireAllSignatures:true,verifySignatures:true}));
+ });
+}
 function dialog(title,details,onApprove,options){
  return new Promise(function(resolve){
   var root=$('tl-dialog');
@@ -185,7 +228,7 @@ function dialog(title,details,onApprove,options){
   text('tl-dialog-status','');root.classList.add('open');
   var okay=$('tl-dialog-confirm'),cancel=$('tl-dialog-cancel');
   okay.disabled=false;cancel.disabled=false;cancel.textContent='Cancel';
-  okay.textContent='Approve in Phantom';
+  okay.textContent=options&&options.approveLabel||'Approve in Phantom';
   function cleanup(){root.classList.remove('open');okay.onclick=null;cancel.onclick=null}
   cancel.onclick=function(){cleanup();resolve(false)};
   okay.onclick=async function(){
@@ -198,7 +241,7 @@ function dialog(title,details,onApprove,options){
       var needsFunding=/Insufficient SOL/i.test(message);
       var blocked=needsFunding||/SOL budget|transaction simulation failed/i.test(message);
       okay.disabled=blocked;
-      okay.textContent=blocked?'Approval unavailable':'Approve in Phantom';
+      okay.textContent=blocked?'Approval unavailable':(options&&options.approveLabel||'Approve in Phantom');
       cancel.disabled=false;
       if(needsFunding&&options&&options.fundId){
         cancel.textContent='See funding options';
@@ -299,57 +342,81 @@ async function launchStage(row,stage){
  busy=true;
  var create=stage==='create';
  var title=create?'Approve token launch':'Lock the creator-fee split';
+ var initial=Number(row.initial_buy_raw||0)>0?' Initial buy: '+rawAmount(row.initial_buy_raw,row.quote_asset)+'.':'';
  var details=create
-  ? 'Create '+row.symbol+' / '+row.quote_asset+' on Solana. Estimated network and rent costs are checked before Phantom opens. Review the final transaction in your wallet. OrcAgent adds no launch fee.'
-  : 'The token is already created. Its initial creator fee goes 100% to your wallet UNTIL this second transaction is confirmed. Final split of the creator fees: '+splitText(row)+'. This final allocation is irreversible.';
+  ? 'Create '+row.symbol+' / '+row.quote_asset+' on Solana.'+initial+' OrcAgent prepares token creation, your optional first buy and creator-fee split together, then Phantom asks for one approval. OrcAgent adds no launch fee.'
+  : 'This is a legacy saved launch that still needs its creator-fee split. Final split of the creator fees: '+splitText(row)+'.';
  try{
    var result=await dialog(title,details,async function(){
-     text('tl-dialog-status',create?'Preparing your orc token address; this can take up to 90 seconds…':'Building your launch transaction…');
+     text('tl-dialog-status',create?'Preparing your Orc token address…':'Building your launch transaction…');
      var path='/api/token-launch/'+row.id+'/'+(create?'prepare':'prepare-finalize');
      var prepared=await call(path,{});
      if(cfg.pilotCreatorOnly){
        var max=prepared.pilot_estimated_max_sol_lamports;
        if(!Number.isSafeInteger(max)||max<=0||max>25000000)
          throw Error('The 0.025 SOL launch reserve check failed. No transaction was sent.');
-       text('tl-dialog-status','Read-only Solana simulation: estimated maximum launch charge '+
-         (max/1e9).toFixed(6)+' SOL (includes a conservative fee allowance). Your separate test trade must be 2 USDC or less. Review this amount again in Phantom.');
      }else{
        var publicCost=prepared.pilot_estimated_max_sol_lamports;
-       if(!Number.isSafeInteger(publicCost)||publicCost<=0||publicCost>50000000)
-         throw Error('The public 0.05 SOL launch safety check failed. Nothing was sent.');
-       text('tl-dialog-status','Estimated maximum network and rent cost: '+
-         (publicCost/1e9).toFixed(6)+' SOL. Confirm the final amount in Phantom.');
+       var solBuy=row.quote_asset==='SOL'?(Number(row.initial_buy_raw)||0):0;
+       var publicLimit=50000000+solBuy;
+       if(!Number.isSafeInteger(publicCost)||publicCost<=0||publicCost>publicLimit)
+         throw Error('The launch SOL safety check failed. Nothing was sent.');
      }
-     // Safari/Chrome/PWA on mobile are not injected with Phantom's provider.
-     // Use Phantom's encrypted Connect -> signTransaction Universal Links;
-     // return to this SAME saved launch without signing in again or browsing
-     // OrcAgent inside Phantom. The original browser session stays intact.
+     var bundle=null;
+     if(create&&prepared.needs_finalization){
+       text('tl-dialog-status','Preparing token + creator-fee split for one Phantom approval…');
+       bundle=await call('/api/token-launch/'+row.id+'/prepare-one-approval',{});
+       var combined=Number(bundle.estimated_max_sol_lamports)||0;
+       var costLabel=solBuy?'Maximum SOL debit including your initial buy and launch costs':'Maximum reserved network/rent budget';
+       text('tl-dialog-status','Ready. '+costLabel+': '+
+         (combined/1e9).toFixed(6)+' SOL. Phantom will show one approval for this launch.');
+     }else{
+       var shown=Number(prepared.pilot_estimated_max_sol_lamports)||0;
+       var shownLabel=solBuy?'Estimated maximum SOL debit including your initial buy and launch costs':'Estimated maximum network and rent cost';
+       text('tl-dialog-status',shownLabel+': '+(shown/1e9).toFixed(6)+' SOL. Confirm the final amount in Phantom.');
+     }
      var injected=(window.phantom&&window.phantom.solana&&window.phantom.solana.isPhantom
         &&window.phantom.solana)||
         (window.solana&&window.solana.isPhantom&&window.solana)||window.solflare;
-     if((!injected||typeof injected.signAndSendTransaction!=='function') &&
-         (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
-          (/Macintosh/i.test(navigator.userAgent)&&navigator.maxTouchPoints>1))){
-       text('tl-dialog-status','Opening Phantom to approve your saved token launch…');
-       var handoff=await call('/api/token-launch/'+row.id+'/phantom/start',{stage:stage,
+     var mobile=/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
+          (/Macintosh/i.test(navigator.userAgent)&&navigator.maxTouchPoints>1);
+     var canInjected=bundle
+       ?(injected&&typeof injected.signAllTransactions==='function')
+       :(injected&&typeof injected.signAndSendTransaction==='function');
+     if(!canInjected&&mobile){
+       text('tl-dialog-status','Opening Phantom for your single launch approval…');
+       var handoff=await call('/api/token-launch/'+row.id+'/phantom/start',{
+         stage:bundle?'bundle':stage,
          return_to_pwa:!!(navigator.standalone===true ||
            (window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches))});
        window.location.assign(handoff.url);
        return {handoff:true};
      }
+     if(bundle){
+       text('tl-dialog-status','Approve this token launch once in Phantom…');
+       var signed=await signAllWithWallet(bundle.transactions_b64);
+       text('tl-dialog-status','Approval received. Confirming the token on Solana…');
+       var bundled=await call('/api/token-launch/'+row.id+'/one-approval/submit',{transactions_b64:signed});
+       return {bundle:true,result:bundled};
+     }
      var sig=await signWithWallet(prepared.transaction_b64);
-     // Store transaction ID only for recovery if Safari suspends the web app.
      try{sessionStorage.setItem('orca-token-launch:'+row.id+':'+stage,sig)}catch(e){}
      text('tl-dialog-status','Verifying the transaction on Solana…');
      var confirmed=await confirmStage(row.id,stage,sig);
      return {sig:sig,result:confirmed};
-   },{fundId:row.id});
+   },{fundId:row.id,approveLabel:create?'Approve once in Phantom':'Approve in Phantom'});
    if(!result||result.handoff)return;
-   if(result.result.confirmed){
-     status(create&&(row.reward_mode==='community'||row.orcagent_bps>0)
-       ? 'Token created. Approve the creator-fee split now to complete the launch.'
-       : 'Transaction confirmed on Solana.');
+   if(result.bundle){
+     status(result.result.msg||(result.result.live?'Token is live on OrcAgent.':'Launch submitted. Confirming on Solana…'),!result.result.live&&!result.result.submitted);
+   }else if(result.result.confirmed){
+     status('Transaction confirmed on Solana.');
    }else status('Transaction submitted. Confirmation is still pending. Use Check transaction if needed.');
+   if(result.bundle&&result.result.live&&result.result.mint){
+     window.location.assign(tokenPath(result.result.mint));return;
+   }
+   if(create&&!result.bundle&&result.result.confirmed&&result.result.draft&&result.result.draft.mint){
+     window.location.assign(tokenPath(result.result.draft.mint));return;
+   }
    await loadMine();
  }catch(e){status(e.message||'Unable to prepare launch',true)}
  finally{busy=false}
@@ -538,8 +605,22 @@ function drawMine(){
   if(row.status==='prepared')action(cfg.enabled?'Retry wallet approval':'Approval in preflight',function(){launchStage(row,'create')});
   if(row.status==='prepared'&&!cfg.enabled)actions.lastElementChild.disabled=true;
   var verification=dom('p','tl-helper');verification.setAttribute('role','status');
-  if(row.status==='prepared'||row.status==='submitted'){
+  var bundled=!!row.finalize_signature;
+  if(row.status==='prepared'||(row.status==='submitted'&&!bundled)){
     var createCheck=action('Check transaction',function(){checkKnown(row,'create',createCheck,verification)});
+  }
+  if(bundled&&['submitted','pending_shares','finalize_submitted'].includes(row.status)){
+    action('Check launch',async function(){
+      if(busy)return;busy=true;
+      try{
+        verification.textContent='Checking your single Phantom approval on Solana…';
+        var checked=await call('/api/token-launch/'+row.id+'/one-approval/retry',{});
+        verification.textContent=checked.msg||'Launch status updated.';
+        status(verification.textContent);
+        await loadMine();
+      }catch(e){verification.textContent=e.message||'Launch check unavailable';status(verification.textContent,true)}
+      finally{busy=false}
+    });
   }
   if(row.status==='submitted'){
     el.appendChild(dom('p','tl-helper','Pending? Phantom may have signed the token without reaching Solana. Do not create a new token. Recovery checks the original signature, expired blockhash and mint on two RPCs before reusing this draft.'));
@@ -555,11 +636,11 @@ function drawMine(){
       finally{busy=false}
     });
   }
-  if(row.status==='pending_shares')action(cfg.enabled?'Finalize shares':'Finalize after preflight',function(){launchStage(row,'finalize')});
-  if(row.status==='pending_shares'&&!cfg.enabled)actions.lastElementChild.disabled=true;
-  if(row.status==='finalize_prepared')action(cfg.enabled?'Retry wallet approval':'Approval in preflight',function(){launchStage(row,'finalize')});
-  if(row.status==='finalize_prepared'&&!cfg.enabled)actions.lastElementChild.disabled=true;
-  if(row.status==='finalize_prepared'||row.status==='finalize_submitted')var splitCheck=action('Check fee split',function(){checkKnown(row,'finalize',splitCheck,verification)});
+  if(!bundled&&row.status==='pending_shares')action(cfg.enabled?'Finalize shares':'Finalize after preflight',function(){launchStage(row,'finalize')});
+  if(!bundled&&row.status==='pending_shares'&&!cfg.enabled)actions.lastElementChild.disabled=true;
+  if(!bundled&&row.status==='finalize_prepared')action(cfg.enabled?'Retry wallet approval':'Approval in preflight',function(){launchStage(row,'finalize')});
+  if(!bundled&&row.status==='finalize_prepared'&&!cfg.enabled)actions.lastElementChild.disabled=true;
+  if(!bundled&&(row.status==='finalize_prepared'||row.status==='finalize_submitted'))var splitCheck=action('Check fee split',function(){checkKnown(row,'finalize',splitCheck,verification)});
   if(row.status==='live'&&row.reward_mode!=='holder'){
     if(row.reward_mode==='creator'&&row.quote_asset==='USDC'&&!row.orcagent_bps){
       action('Refresh available',async function(){
@@ -642,9 +723,13 @@ async function loadMine(){
   if(pending){
    autoVerified[pending.id]=true;
    status('Checking your previously submitted token on Solana…');
-   confirmStage(pending.id,'create',pending.launch_signature).then(function(result){
-    if(result.confirmed){status('Token verified on Solana. Your launch is now live.');loadMine()}
-    else status('Transaction not confirmed by Solana RPC yet. You can use Check transaction later.');
+   var verify=pending.finalize_signature
+     ?call('/api/token-launch/'+pending.id+'/one-approval/retry',{})
+     :confirmStage(pending.id,'create',pending.launch_signature);
+   verify.then(function(result){
+    if(result.live&&result.mint){status(result.msg||'Token verified on Solana. Opening it now…');window.location.assign(tokenPath(result.mint));return}
+    if(result.live||result.confirmed){status(result.msg||'Token verified on Solana. Your launch is live.');loadMine()}
+    else status(result.msg||'Transaction not confirmed by Solana RPC yet. You can use Check launch later.');
    }).catch(function(error){status((error.message||'Verification unavailable')+' Your submitted token is preserved; do not launch it again.',true)});
   }
  }catch(e){text('tl-mine','Could not load your launch history.')}
@@ -674,6 +759,8 @@ async function saveDraft(){
   var req={client_nonce:nonce,
    name:$('tl-name').value.trim(),symbol:$('tl-symbol').value.trim(),
    description:$('tl-description').value.trim(),image_data:icon,
+   website_url:$('tl-website').value.trim(),x_url:$('tl-x-url').value.trim(),
+   telegram_url:$('tl-telegram').value.trim(),initial_buy_raw:initialBuyRaw(),
    quote_asset:choice('tl-asset'),reward_mode:mode,
    community_wallet:mode==='community'?$('tl-community-wallet').value.trim():'',
    community_bps:mode==='community'?bps:0};
@@ -691,7 +778,7 @@ async function saveDraft(){
    await launchStage(readyToApprove,'create');
  }
 }
-['tl-name','tl-symbol','tl-description','tl-community-share','tl-community-wallet'].forEach(function(id){$(id).addEventListener('input',function(){renderPreview();$('tl-save').disabled=false})});
+['tl-name','tl-symbol','tl-description','tl-website','tl-x-url','tl-telegram','tl-initial-buy','tl-community-share','tl-community-wallet'].forEach(function(id){$(id).addEventListener('input',function(){renderPreview();$('tl-save').disabled=false})});
 document.querySelectorAll('input[name="tl-asset"],input[name="tl-mode"]').forEach(function(i){i.addEventListener('change',function(){renderPreview();$('tl-save').disabled=false})});
 $('tl-image').addEventListener('change',async function(){
  try{

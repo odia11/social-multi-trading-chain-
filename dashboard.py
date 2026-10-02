@@ -2462,6 +2462,16 @@ def init_db():
     )''')
     c.execute('CREATE INDEX IF NOT EXISTS idx_dm_receiver ON direct_messages(receiver_id)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_dm_sender ON direct_messages(sender_id)')
+    c.execute('''CREATE TABLE IF NOT EXISTS direct_message_reactions (
+        message_id INTEGER NOT NULL,
+        user_id    INTEGER NOT NULL,
+        emoji      TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (message_id, user_id),
+        FOREIGN KEY (message_id) REFERENCES direct_messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_dm_reactions_message ON direct_message_reactions(message_id)')
     c.execute('''CREATE TABLE IF NOT EXISTS messages (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
         sender_wallet   TEXT NOT NULL,
@@ -2859,6 +2869,16 @@ def init_db():
 
 def run_migrations():
     con = sqlite3.connect(DB_FILE)
+    con.execute('''CREATE TABLE IF NOT EXISTS direct_message_reactions (
+        message_id INTEGER NOT NULL,
+        user_id    INTEGER NOT NULL,
+        emoji      TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (message_id, user_id),
+        FOREIGN KEY (message_id) REFERENCES direct_messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )''')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_dm_reactions_message ON direct_message_reactions(message_id)')
     # SECURITY FIX (see commit): WebAuthn/Face ID login previously never verified
     # the cryptographic assertion at all -- the server trusted any submitted
     # credential_id blindly, with no challenge, signature, or public-key check.
@@ -26840,6 +26860,14 @@ def get_dm_history(peer_id):
             'ORDER BY created_at ASC LIMIT 200',
             (me, peer_id, peer_id, me)
         ).fetchall()
+        reaction_map = {}
+        if rows:
+            ids = [int(r[0]) for r in rows]
+            qmarks = ','.join('?' for _ in ids)
+            for mid, uid, emoji in conn.execute(
+                    f'SELECT message_id, user_id, emoji FROM direct_message_reactions '
+                    f'WHERE message_id IN ({qmarks}) ORDER BY created_at ASC', ids).fetchall():
+                reaction_map.setdefault(int(mid), []).append({'user_id': int(uid), 'emoji': emoji})
         print(f'[dm_get] found {len(rows)} messages', flush=True)
         conn.execute(
             'UPDATE direct_messages SET is_read=1 '
@@ -26863,9 +26891,55 @@ def get_dm_history(peer_id):
     return jsonify({'ok': True, 'messages': [
         {'id': r[0], 'sender_id': r[1], 'receiver_id': r[2],
          'message': r[3], 'created_at': r[4], 'is_read': bool(r[5]),
-         'message_type': r[6], 'edited_at': r[7]}
+         'message_type': r[6], 'edited_at': r[7],
+         'reactions': reaction_map.get(int(r[0]), [])}
         for r in rows
     ]})
+
+_DM_REACTION_EMOJIS = frozenset({'❤️', '😂', '😮', '😢', '😡', '👍', '🔥'})
+
+@app.route('/api/messages/<int:message_id>/reaction', methods=['POST'])
+@rate_limit(60, 60)
+def react_dm(message_id):
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'msg': 'No wallet connected'}), 401
+    emoji = str((request.get_json(silent=True) or {}).get('emoji', '')).strip()
+    if emoji not in _DM_REACTION_EMOJIS:
+        return jsonify({'ok': False, 'msg': 'Unsupported reaction'}), 400
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        me = _get_uid(conn, wallet)
+        if not me:
+            return jsonify({'ok': False, 'msg': 'User not found'}), 404
+        row = conn.execute('SELECT sender_id, receiver_id FROM direct_messages WHERE id=?', (int(message_id),)).fetchone()
+        if not row or me not in (int(row[0]), int(row[1])):
+            return jsonify({'ok': False, 'msg': 'Message not found'}), 404
+        current = conn.execute(
+            'SELECT emoji FROM direct_message_reactions WHERE message_id=? AND user_id=?',
+            (int(message_id), me)
+        ).fetchone()
+        if current and current[0] == emoji:
+            conn.execute('DELETE FROM direct_message_reactions WHERE message_id=? AND user_id=?', (int(message_id), me))
+            active = False
+        else:
+            conn.execute(
+                'INSERT INTO direct_message_reactions (message_id,user_id,emoji) VALUES (?,?,?) '
+                'ON CONFLICT(message_id,user_id) DO UPDATE SET emoji=excluded.emoji, created_at=CURRENT_TIMESTAMP',
+                (int(message_id), me, emoji)
+            )
+            active = True
+        conn.commit()
+        reactions = [
+            {'user_id': int(uid), 'emoji': em}
+            for uid, em in conn.execute(
+                'SELECT user_id, emoji FROM direct_message_reactions WHERE message_id=? ORDER BY created_at ASC',
+                (int(message_id),)
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+    return jsonify({'ok': True, 'active': active, 'reactions': reactions})
 
 @app.route('/api/messages/upload-image', methods=['POST'])
 @rate_limit(10, 60)
@@ -27375,6 +27449,9 @@ def delete_dm(message_id):
             return jsonify({'ok': False, 'msg': 'Message not found'}), 404
         if row[0] != me:
             return jsonify({'ok': False, 'msg': 'Not your message'}), 403
+        # Do not rely on SQLite foreign-key cascades being enabled on every
+        # connection: remove reactions explicitly before deleting the message.
+        conn.execute('DELETE FROM direct_message_reactions WHERE message_id=?', (message_id,))
         conn.execute('DELETE FROM direct_messages WHERE id=?', (message_id,))
         conn.commit()
     except Exception as e:

@@ -52,8 +52,14 @@ small{color:#9ca6b4;display:block;overflow-wrap:anywhere}
      return;
    }
    done(r.msg||(claim?'Claim submitted. Check Claim history.':'Phantom transaction submitted. Check your token status.'));
-   if(r.signature)help.textContent='Transaction: '+r.signature+
-     (pwa?'. Switch back to the installed OrcAgent app; its saved launch refreshes automatically.':'. Return to your original OrcAgent tab and use Check transaction if pending.');
+   var txsig=r.signature||r.create_signature;
+   if(txsig)help.textContent='Transaction: '+txsig+
+     (pwa?'. Switch back to the installed OrcAgent app; its saved launch refreshes automatically.':'. Returning to OrcAgent…');
+   if(!claim&&!pwa){
+     var target=(r.live&&r.mint)?('/token/'+encodeURIComponent(r.mint)):'/token-launch';
+     status.textContent=r.live?'Launch complete. Opening your token on OrcAgent…':'Launch submitted. Returning to OrcAgent…';
+     setTimeout(function(){location.replace(target)},450);
+   }
  })
  .catch(function(){done('Could not reach OrcAgent. Check your saved token before retrying.');});
 })();
