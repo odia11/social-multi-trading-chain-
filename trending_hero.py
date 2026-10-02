@@ -166,10 +166,18 @@ def current_trending(d) -> list[dict]:
     except Exception:
         candidates = []
     surges = _surging(d)
-    pool = [t for t in candidates if qualifies(t, ENTER)]
+    # The Home carousel mirrors the Live Market's broad Solana trending/discovery
+    # universe. The notification hero above intentionally keeps its stricter
+    # ENTER/STAY thresholds, but slides must not disappear just because no token
+    # happens to be +25% with $50K volume at this exact moment. Live Market has
+    # already enforced Solana-only + the hard $30K market-cap floor.
+    pool = [t for t in candidates
+            if (t.get('chain') or 'solana') == 'solana'
+            and _f(t.get('price_usd')) > 0
+            and _f(t.get('market_cap')) >= 30_000]
     pool.sort(key=lambda t: (t.get('mint') in surges,
                              _f((surges.get(t.get('mint')) or {}).get('score')),
-                             _f(t.get('volume_24h')) * _buy_share(t)), reverse=True)
+                             _f(t.get('volume_24h'))), reverse=True)
     tokens, seen = [], set()
     if hero and hero.get('mint'):
         tokens.append(dict(hero))
