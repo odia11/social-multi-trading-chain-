@@ -8,8 +8,9 @@
  */
 (function(){
 'use strict';
-var POLL_MS = 20000;
-var host = null, current = null, busy = false, chartFor = '', sparkHtml = '';
+var POLL_MS = 20000, AUTOPLAY_MS = 6500, SLIDE_MS = 850;
+var host = null, current = null, busy = false, slides = [], slideIndex = 0, autoplayTimer = null;
+var sparkCache = Object.create(null), sparkLoaded = Object.create(null);
 
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function fmtPrice(n){
@@ -66,52 +67,143 @@ function ago(sec){
 var ORC_MARK='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 21 19H3Z" fill="#111318"/></svg>';
 var VERIFIED='<svg class="oa-th-verified" viewBox="0 0 24 24" aria-label="Verified"><circle cx="12" cy="12" r="12" fill="#f7b955"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#0a0b0e" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-function render(t,s){
-  var h=ensureHost();if(!h)return;
+function tokenText(t){
   var chain=CHAINS[t.chain]||[t.chain.charAt(0).toUpperCase(),'#6f7b88',t.chain];
-  var up=t.price_change_24h>=0, total=(t.buys_24h+t.sells_24h)||1;
-  var buyPct=Math.round(t.buys_24h/total*100), sellPct=100-buyPct;
-  // Only http(s) logos; a broken one falls back to the letter underneath.
-  var logo=/^https?:\/\//.test(t.image_url||'')?'<img src="'+esc(t.image_url)+'" alt="" loading="lazy">':'';
-  var sym=esc(t.symbol||'?');
-  var chg=(up?'+':'')+t.price_change_24h.toFixed(1)+'%';
-  h.innerHTML=
-    '<div class="fc-avatar oa-th-avatar">'+ORC_MARK+'</div>'
-    +'<div class="fc-body">'
-      +'<div class="fc-header">'
-        +'<span class="fc-name">OrcAgent</span>'+VERIFIED
-        +'<span class="oa-th-tag"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c1 4 5 5.5 5 11a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.3C9.8 10 11 10.5 11.5 12c1.3-2.6.5-6 .5-10Z"/></svg>'+(t.surging?'Surging':'Trending')+'</span>'
-        +'<span class="fc-sep">·</span><span class="fc-time" id="oa-th-time">'+ago(t.trending_since)+'</span>'
-        +'<span class="oa-th-live" title="Live"><i></i>LIVE</span>'
+  var up=Number(t.price_change_24h)>=0;
+  var chg=(up?'+':'')+(Number(t.price_change_24h)||0).toFixed(1)+'%';
+  return '<b>$'+esc(t.symbol||'?')+'</b> is trending on '+esc(chain[2])+' 🔥 '
+    +'<span class="'+(up?'b':'s')+'">'+chg+'</span> in 24h with '+fmtUsd(t.volume_24h)+' volume.';
+}
+function slideHtml(entry,idx,clone){
+  var t=entry.token,chain=CHAINS[t.chain]||[t.chain.charAt(0).toUpperCase(),'#6f7b88',t.chain];
+  var up=Number(t.price_change_24h)>=0,total=(Number(t.buys_24h)+Number(t.sells_24h))||1;
+  var buyPct=Math.round(Number(t.buys_24h)/total*100);
+  var logo=/^https:\/\//.test(t.image_url||'')?'<img src="'+esc(t.image_url)+'" alt="" loading="lazy" decoding="async">':'';
+  var banner=/^https:\/\//.test(t.banner_url||'')?t.banner_url:(/^https:\/\//.test(t.image_url||'')?t.image_url:'');
+  var sym=esc(t.symbol||'?'),chg=(up?'+':'')+(Number(t.price_change_24h)||0).toFixed(1)+'%';
+  return '<div class="oa-th-embed oa-th-slide'+(clone?' oa-th-clone':'')+'" data-slide-index="'+idx+'" data-mint="'+esc(t.mint)+'" data-banner="'+esc(banner)+'">'
+    +'<div class="oa-th-slide-shade" aria-hidden="true"></div>'
+    +'<div class="oa-th-slide-content">'
+      +'<div class="oa-th-head">'
+        +'<div class="oa-th-logo"><span>'+esc((t.symbol||'?').charAt(0).toUpperCase())+'</span>'+logo
+          +'<b style="background:'+chain[1]+'" title="'+esc(chain[2])+'">'+esc(chain[0])+'</b></div>'
+        +'<div class="oa-th-id"><strong>$'+sym+'</strong><small>'+esc(t.name||t.symbol)+'</small></div>'
+        +'<div class="oa-th-px"><strong>'+fmtPrice(t.price_usd)+'</strong>'
+          +'<span class="oa-th-chg '+(up?'up':'down')+'">'+(up?'↗ ':'↘ ')+chg+'</span></div>'
       +'</div>'
-      +'<div class="oa-th-text"><b>$'+sym+'</b> is trending on '+esc(chain[2])+' 🔥 '
-        +'<span class="'+(up?'b':'s')+'">'+chg+'</span> in 24h with '+fmtUsd(t.volume_24h)+' volume.</div>'
-      +'<div class="oa-th-embed">'
-        +'<div class="oa-th-head">'
-          +'<div class="oa-th-logo"><span>'+esc((t.symbol||'?').charAt(0).toUpperCase())+'</span>'+logo
-            +'<b style="background:'+chain[1]+'" title="'+esc(chain[2])+'">'+esc(chain[0])+'</b></div>'
-          +'<div class="oa-th-id"><strong>$'+sym+'</strong><small>'+esc(t.name||t.symbol)+' · '+esc(chain[2])+'</small></div>'
-          +'<div class="oa-th-px"><strong>'+fmtPrice(t.price_usd)+'</strong>'
-            +'<span class="oa-th-chg '+(up?'up':'down')+'">'+(up?'↗ ':'↘ ')+chg+'</span></div>'
-        +'</div>'
-        // The 20s refresh re-renders the post; keep the already-drawn
-        // sparkline instead of blanking it until the next chart fetch.
-        +'<svg class="oa-th-spark'+(chartFor===t.mint&&!sparkHtml?' empty':'')+'" id="oa-th-spark" viewBox="0 0 300 90" preserveAspectRatio="none" aria-hidden="true">'+(chartFor===t.mint?sparkHtml:'')+'</svg>'
-        +'<div class="oa-th-pressure"><span>Buy pressure</span><span><em class="b">'+buyPct+'% buy</em> · <em class="s">'+sellPct+'% sell</em></span></div>'
-        +'<div class="oa-th-bar"><i style="width:'+buyPct+'%"></i></div>'
+      +'<svg class="oa-th-spark" viewBox="0 0 300 72" preserveAspectRatio="none" aria-hidden="true"></svg>'
+      +'<div class="oa-th-slide-bottom">'
         +'<div class="oa-th-stats">'
           +'<div><strong class="b">'+fmtInt(t.buys_24h)+'</strong><small>Buys</small></div>'
           +'<div><strong>'+fmtUsd(t.volume_24h)+'</strong><small>Vol · 24h</small></div>'
           +'<div><strong class="s">'+fmtInt(t.sells_24h)+'</strong><small>Sells</small></div>'
         +'</div>'
-        +'<a class="oa-th-trade" href="/live-market?mint='+encodeURIComponent(t.mint)+'">Trade $'+sym+' <span aria-hidden="true">→</span></a>'
+        +'<a class="oa-th-trade" href="/live-market?mint='+encodeURIComponent(t.mint)+'" aria-label="Trade $'+sym+'">Trade <span aria-hidden="true">→</span></a>'
       +'</div>'
+      +'<div class="oa-th-pressure-mini"><span style="width:'+buyPct+'%"></span></div>'
+    +'</div>'
+  +'</div>';
+}
+function stopAutoplay(){if(autoplayTimer){clearInterval(autoplayTimer);autoplayTimer=null;}}
+function moveVisual(index,animate){
+  var track=document.getElementById('oa-th-track');if(!track)return;
+  var cards=track.children,card=cards[index];if(!card)return;
+  track.style.transition=animate?'transform '+SLIDE_MS+'ms cubic-bezier(.22,.72,.22,1)':'none';
+  track.style.transform='translate3d(-'+card.offsetLeft+'px,0,0)';
+}
+function paintBackgrounds(){
+  if(!host)return;
+  host.querySelectorAll('.oa-th-slide').forEach(function(card){
+    var url=card.dataset.banner||'';
+    if(/^https:\/\//.test(url))card.style.backgroundImage='url('+JSON.stringify(url)+')';
+    var img=card.querySelector('.oa-th-logo img');
+    if(img)img.addEventListener('error',function(){img.remove()},{once:true});
+  });
+}
+function sparkNodes(mint){
+  if(!host)return [];
+  return Array.prototype.filter.call(host.querySelectorAll('.oa-th-slide'),function(card){return card.dataset.mint===mint})
+    .map(function(card){return card.querySelector('.oa-th-spark')}).filter(Boolean);
+}
+function paintSpark(mint){
+  var html=sparkCache[mint]||'';
+  sparkNodes(mint).forEach(function(svg){svg.innerHTML=html;svg.classList.toggle('empty',!html)});
+}
+function loadSpark(t){
+  if(!t||!t.mint)return;
+  if(sparkLoaded[t.mint]){paintSpark(t.mint);return;}
+  sparkLoaded[t.mint]=true;
+  var qs='?tf=5m'+(t.pair_address?'&pair='+encodeURIComponent(t.pair_address):'')+'&chain='+encodeURIComponent(t.chain);
+  fetch('/api/chart/'+encodeURIComponent(t.mint)+qs,{credentials:'same-origin'})
+    .then(function(r){return r.json()}).then(function(d){
+      var c=(d&&d.candles||[]).map(function(x){return Number(x.c)}).filter(function(v){return v>0});
+      var last=c[c.length-1],ratio=last/Number(t.price_usd||0);
+      if(c.length<2||!(ratio<10&&ratio>0.1)){sparkCache[t.mint]='';paintSpark(t.mint);return;}
+      c=c.slice(-40);var min=Math.min.apply(null,c),max=Math.max.apply(null,c);if(max===min){max*=1.01;min*=0.99}
+      var pts=c.map(function(v,i){return [(i/(c.length-1))*300,6+(1-(v-min)/(max-min))*58]});
+      var line=pts.map(function(p,i){return(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)}).join(' ');
+      var up=Number(t.price_change_24h)>=0,col=up?'#5fd39b':'#f07178',lp=pts[pts.length-1];
+      var gid='oaThG'+String(t.mint).slice(0,8).replace(/[^a-zA-Z0-9]/g,'');
+      sparkCache[t.mint]='<defs><linearGradient id="'+gid+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="'+col+'" stop-opacity=".38"/><stop offset="1" stop-color="'+col+'" stop-opacity="0"/></linearGradient></defs>'
+        +'<path d="'+line+' L300 72 L0 72Z" fill="url(#'+gid+')"/><path d="'+line+'" fill="none" stroke="'+col+'" stroke-width="2.3" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>'
+        +'<circle cx="'+lp[0].toFixed(1)+'" cy="'+lp[1].toFixed(1)+'" r="3.5" fill="'+col+'"/>';
+      paintSpark(t.mint);
+    }).catch(function(){sparkLoaded[t.mint]=false});
+}
+function syncActive(index){
+  if(!slides.length)return;
+  slideIndex=Math.max(0,Math.min(index,slides.length-1));
+  current=slides[slideIndex].token;
+  var text=document.getElementById('oa-th-text');if(text)text.innerHTML=tokenText(current);
+  var tm=document.getElementById('oa-th-time');if(tm)tm.textContent=ago(current.trending_since);
+  var tag=document.getElementById('oa-th-tag-label');if(tag)tag.textContent=current.surging?'Surging':'Trending';
+  renderSocial(slides[slideIndex].social);
+  var dots=document.querySelectorAll('#oa-th-dots i');
+  dots.forEach(function(dot,i){dot.classList.toggle('active',i===slideIndex)});
+  loadSpark(current);
+  if(slides.length>1)loadSpark(slides[(slideIndex+1)%slides.length].token);
+}
+function advance(){
+  if(document.hidden||slides.length<2)return;
+  var n=slides.length,next=slideIndex+1;
+  if(next<n){syncActive(next);moveVisual(next,true);return;}
+  // The extra first-card clone makes the last -> first movement continue left;
+  // after it lands, snap invisibly back to the real first card.
+  syncActive(0);moveVisual(n,true);
+  setTimeout(function(){if(slides.length)moveVisual(0,false)},SLIDE_MS+40);
+}
+function startAutoplay(){
+  stopAutoplay();
+  if(slides.length<2||document.hidden)return;
+  if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  autoplayTimer=setInterval(advance,AUTOPLAY_MS);
+}
+function render(slideData){
+  var h=ensureHost();if(!h)return;
+  var previous=current&&current.mint;
+  slides=(slideData||[]).filter(function(x){return x&&x.token&&x.token.mint});
+  if(!slides.length){current=null;hide();return;}
+  var found=slides.findIndex(function(x){return x.token.mint===previous});
+  slideIndex=found>=0?found:0;current=slides[slideIndex].token;
+  var cards=slides.map(function(x,i){return slideHtml(x,i,false)}).join('');
+  if(slides.length>1)cards+=slideHtml(slides[0],0,true);
+  h.innerHTML=
+    '<div class="fc-avatar oa-th-avatar">'+ORC_MARK+'</div>'
+    +'<div class="fc-body">'
+      +'<div class="fc-header"><span class="fc-name">OrcAgent</span>'+VERIFIED
+        +'<span class="oa-th-tag"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c1 4 5 5.5 5 11a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.3C9.8 10 11 10.5 11.5 12c1.3-2.6.5-6 .5-10Z"/></svg><span id="oa-th-tag-label">Trending</span></span>'
+        +'<span class="fc-sep">·</span><span class="fc-time" id="oa-th-time"></span>'
+        +'<span class="oa-th-live" title="Live"><i></i>LIVE</span></div>'
+      +'<div class="oa-th-text" id="oa-th-text"></div>'
+      +'<div class="oa-th-carousel"><div class="oa-th-track" id="oa-th-track">'+cards+'</div></div>'
+      +'<div class="oa-th-dots" id="oa-th-dots">'+slides.map(function(_,i){return '<i'+(i===slideIndex?' class="active"':'')+'></i>'}).join('')+'</div>'
       +'<div class="oa-th-social" id="oa-th-social"></div>'
     +'</div>';
-  var img=h.querySelector('.oa-th-logo img');
-  if(img)img.addEventListener('error',function(){img.remove()},{once:true});
-  renderSocial(s);
-  if(chartFor!==t.mint){chartFor=t.mint;loadSpark(t,up);}
+  paintBackgrounds();
+  slides.forEach(function(x){if(sparkLoaded[x.token.mint])paintSpark(x.token.mint)});
+  syncActive(slideIndex);
+  requestAnimationFrame(function(){moveVisual(slideIndex,false)});
+  startAutoplay();
   h.classList.remove('oa-th-leaving');
   requestAnimationFrame(function(){h.classList.add('oa-th-in')});
 }
@@ -280,32 +372,6 @@ document.addEventListener('click',function(e){
   if(m&&!m.contains(e.target)&&!(e.target.closest&&e.target.closest('.oa-th-share')))closeShare();
 });
 
-function loadSpark(t,up){
-  var qs='?tf=5m'+(t.pair_address?'&pair='+encodeURIComponent(t.pair_address):'')+'&chain='+encodeURIComponent(t.chain);
-  fetch('/api/chart/'+encodeURIComponent(t.mint)+qs,{credentials:'same-origin'})
-    .then(function(r){return r.json()})
-    .then(function(d){
-      var svg=document.getElementById('oa-th-spark');
-      if(!svg||!current||current.mint!==t.mint)return;
-      var c=(d&&d.candles||[]).map(function(x){return Number(x.c)}).filter(function(v){return v>0});
-      // Candles 10x+ away from the live price are the other side of the pool,
-      // not this token; never draw them (same guard as Live Market).
-      var last=c[c.length-1], ratio=last/t.price_usd;
-      if(c.length<2||!(ratio<10&&ratio>0.1)){sparkHtml='';svg.innerHTML='';svg.classList.add('empty');return;}
-      c=c.slice(-40);
-      var min=Math.min.apply(null,c),max=Math.max.apply(null,c);if(max===min){max*=1.01;min*=0.99}
-      var pts=c.map(function(v,i){return [(i/(c.length-1))*300, 8+(1-(v-min)/(max-min))*74]});
-      var line=pts.map(function(p,i){return (i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)}).join(' ');
-      var col=up?'#5fd39b':'#f07178', lp=pts[pts.length-1];
-      svg.classList.remove('empty');
-      sparkHtml='<defs><linearGradient id="oaThG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="'+col+'" stop-opacity=".32"/><stop offset="1" stop-color="'+col+'" stop-opacity="0"/></linearGradient></defs>'
-        +'<path d="'+line+' L300 90 L0 90Z" fill="url(#oaThG)"/>'
-        +'<path d="'+line+'" fill="none" stroke="'+col+'" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>'
-        +'<circle cx="'+lp[0].toFixed(1)+'" cy="'+lp[1].toFixed(1)+'" r="4" fill="'+col+'"/>';
-      svg.innerHTML=sparkHtml;
-    }).catch(function(){});
-}
-
 // ── trending alert: arriving from it, and clearing it once seen ─────────
 // The push/in-app alert links to /?trending=1#trending. Arriving that way,
 // scroll the card into view (below the sticky header) and pulse it once.
@@ -371,7 +437,8 @@ window.OrcAgentClearTrendingAlert=clearTrendingAlert;
 function hide(){
   if(!host||!document.body.contains(host))return;
   if(observer){observer.disconnect();observer=null;}
-  var h=host;host=null;chartFor='';sparkHtml='';
+  stopAutoplay();
+  var h=host;host=null;slides=[];current=null;slideIndex=0;
   h.classList.add('oa-th-leaving');h.classList.remove('oa-th-in');
   setTimeout(function(){if(h.parentNode)h.parentNode.removeChild(h)},420);
 }
@@ -383,9 +450,9 @@ function refresh(){
     .then(function(r){return r.json()})
     .then(function(d){
       if(!d||!d.ok)return;
-      if(!d.token){current=null;hide();return;}
-      if(current&&current.mint!==d.token.mint){chartFor='';sparkHtml='';}
-      current=d.token;render(d.token,d.social);
+      var incoming=(Array.isArray(d.slides)&&d.slides.length)?d.slides:(d.token?[{token:d.token,social:d.social}]:[]);
+      if(!incoming.length){hide();return;}
+      render(incoming);
       afterRender();
     }).catch(function(){})
     .then(function(){busy=false});
@@ -421,7 +488,10 @@ function boot(){
   watchTabs();
   refresh();
   setInterval(refresh,POLL_MS);
-  document.addEventListener('visibilitychange',function(){if(!document.hidden)refresh()});
+  document.addEventListener('visibilitychange',function(){
+    if(document.hidden)stopAutoplay();else{refresh();startAutoplay()}
+  });
+  window.addEventListener('resize',function(){if(slides.length)moveVisual(slideIndex,false)},{passive:true});
 }
 window.OrcAgentRefreshTrendingHero=refresh;
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
