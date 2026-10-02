@@ -2077,18 +2077,28 @@ function _updateDashProfileBar(){
   if(avDiv){
     avDiv.style.background=bg;
     avDiv.style.color='#fff';
-    avDiv.innerHTML=p.avatar_url
-      ?`<img src="${esc(p.avatar_url)}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.style.display='none'"><span style="position:relative;z-index:1">${ini}</span>`
-      :ini;
+    avDiv.replaceChildren();
+    const fallback=document.createElement('span');
+    fallback.style.position='relative';fallback.style.zIndex='1';fallback.textContent=displayName[0].toUpperCase();
+    const avatar=safeImageUrl(p.avatar_url||'');
+    if(avatar){
+      const img=document.createElement('img');
+      img.alt='';img.src=avatar;
+      img.style.cssText='position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%';
+      img.addEventListener('error',function(){img.remove()},{once:true});
+      avDiv.append(img,fallback);
+    }else avDiv.append(fallback);
   }
   if(nameEl) nameEl.textContent=displayName;
   const todayPnl=+(p.today_pnl??0);
   const todayPos=todayPnl>=0;
   const pnlColor=todayPos?'var(--green)':'var(--red)';
   const pnlStr=(todayPos?'+':'')+todayPnl.toFixed(4)+' SOL';
+  const followers=Math.max(0,Number(p.follower_count)||0);
+  const following=Math.max(0,Number(p.following_count)||0);
   if(chipsEl) chipsEl.innerHTML=`
-    <span class="dpb-chip"><strong>${p.follower_count??0}</strong> Followers</span>
-    <span class="dpb-chip"><strong>${p.following_count??0}</strong> Following</span>
+    <span class="dpb-chip"><strong>${followers}</strong> Followers</span>
+    <span class="dpb-chip"><strong>${following}</strong> Following</span>
     <span class="dpb-chip" style="color:${pnlColor}"><strong style="color:inherit">${esc(pnlStr)}</strong> today</span>`;
   bar.style.display='flex';
 }
