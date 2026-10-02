@@ -6,7 +6,7 @@ import urllib.parse
 import calendar
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 import bcrypt as _bcrypt
 try:
     import nacl.public as _nacl_public
@@ -33940,6 +33940,17 @@ def _shrink_image_data_uri(data_uri: str, max_edge: int = IMAGE_MAX_EDGE,
         if getattr(img, 'is_animated', False):
             return data_uri
 
+        # iPhone camera JPEGs commonly store portrait orientation in EXIF while
+        # the underlying pixels are landscape. Pillow does not apply that flag
+        # automatically. Re-encoding without this transpose strips the EXIF flag
+        # and permanently stores the photo sideways in DMs. Normalize the actual
+        # pixels first, then save without an orientation dependency.
+        try:
+            exif_orientation = int((img.getexif() or {}).get(274, 1) or 1)
+        except Exception:
+            exif_orientation = 1
+        orientation_changed = exif_orientation not in (0, 1)
+        img = ImageOps.exif_transpose(img)
         img.load()
         # Transparency has to survive, so anything with an alpha channel stays
         # PNG. Everything else becomes JPEG, which is what makes the saving.
@@ -33966,9 +33977,11 @@ def _shrink_image_data_uri(data_uri: str, max_edge: int = IMAGE_MAX_EDGE,
             mime = 'image/jpeg'
 
         out = buf.getvalue()
-        if len(out) >= len(raw):
+        if len(out) >= len(raw) and not orientation_changed:
             # Already smaller than anything we would produce. Re-encoding it
-            # would only lose quality for nothing.
+            # would only lose quality for nothing. EXIF-rotated phone photos
+            # are the exception: the transpose MUST be persisted even when the
+            # normalized bytes happen to be a little larger than the original.
             return data_uri
         return 'data:' + mime + ';base64,' + base64.b64encode(out).decode('ascii')
     except Exception as e:
@@ -33990,7 +34003,7 @@ def _shrink_image_bytes(data: bytes, ext: str) -> tuple:
         uri = 'data:image/' + ('jpeg' if ext in ('jpg', 'jpeg') else ext) + \
               ';base64,' + base64.b64encode(data).decode('ascii')
         out = _shrink_image_data_uri(uri)
-        if out is uri or not out.startswith('data:image/'):
+        if out == uri or not out.startswith('data:image/'):
             return data, ext
         header, _, b64_part = out.partition(',')
         new_ext = 'jpg' if 'jpeg' in header else ('png' if 'png' in header else ext)

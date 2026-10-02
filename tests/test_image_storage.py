@@ -23,7 +23,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from PIL import Image                                             # noqa: E402
+from PIL import Image, ImageOps                                   # noqa: E402
 
 checks = []
 def check(name, cond):
@@ -61,7 +61,7 @@ SRC = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 tree = ast.parse(SRC)
 wanted = {'_shrink_image_data_uri', '_shrink_image_bytes'}
 mod = types.ModuleType('shrinker')
-mod.__dict__.update({'base64': base64, 'io': io, 'Image': Image, 'print': print,
+mod.__dict__.update({'base64': base64, 'io': io, 'Image': Image, 'ImageOps': ImageOps, 'print': print,
                      'IMAGE_MAX_EDGE': 1600, 'IMAGE_TARGET_KB': 400,
                      'IMAGE_AVATAR_EDGE': 512})
 for node in tree.body:

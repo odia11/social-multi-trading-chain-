@@ -152,8 +152,8 @@ html,body{background:#0a0b0e;color:#eef1f5;font-family:'Geist',system-ui,sans-se
 .msg-edit-input{background:#0a0b0e;border:1px solid #f7b955;border-radius:12px;padding:8px 12px;font-size:14px;color:#eef1f5;width:200px;font-family:inherit}
 .msg-edit-actions{display:flex;gap:8px;margin-top:6px}
 .msg-edit-actions button{background:none;border:none;color:#f7b955;font-size:12px;cursor:pointer;padding:2px 6px}
-.msg-bubble.msg-image{padding:0;background:none!important;border:none!important;max-width:220px;line-height:0}
-.msg-bubble.msg-image img{display:block;width:100%;border-radius:14px;cursor:pointer}
+.msg-bubble.msg-image{padding:0;background:none!important;border:none!important;max-width:min(320px,72vw);line-height:0}
+.msg-bubble.msg-image img{display:block;width:auto;height:auto;max-width:100%;max-height:70vh;object-fit:contain;border-radius:14px;cursor:pointer}
 .msg-bubble.msg-pending{opacity:.6}
 .msgs-attach-btn{background:none;border:1px solid #21252c;border-radius:11px;width:44px;height:44px;flex-shrink:0;color:#8a919c;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:border-color .15s,color .15s}
 .msgs-attach-btn:hover{border-color:#f7b955;color:#f7b955}
