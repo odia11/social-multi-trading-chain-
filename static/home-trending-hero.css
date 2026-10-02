@@ -145,8 +145,8 @@
    One compact banner-backed token card is in focus while the next card peeks
    in on the right. JS advances the track calmly right -> left every 6.5s. */
 .oa-th-carousel{width:100%;overflow:hidden;margin-top:2px;touch-action:pan-y;overscroll-behavior-x:contain}
-.oa-th-track{display:flex;width:100%;gap:10px;align-items:stretch;will-change:transform;transform:translate3d(0,0,0)}
-.oa-th-slide{position:relative;isolation:isolate;overflow:hidden;flex:0 0 calc(100% - 46px);min-width:0;min-height:250px;
+.oa-th-track{display:flex;width:100%;gap:12px;align-items:stretch;will-change:transform;transform:translate3d(0,0,0)}
+.oa-th-slide{position:relative;isolation:isolate;overflow:hidden;flex:0 0 82%;max-width:420px;min-width:0;min-height:250px;
   margin:0;padding:14px;border:1px solid rgba(247,185,85,.36);border-radius:18px;background-color:#10161e;background-size:cover;background-position:center;
   box-shadow:inset 0 0 0 1px rgba(255,255,255,.025),0 12px 28px rgba(0,0,0,.18)}
 .oa-th-slide-shade{position:absolute;inset:0;z-index:0;pointer-events:none;
@@ -173,14 +173,14 @@
 .oa-th-dots i{display:block;width:6px;height:6px;border-radius:50%;background:#39424e;transition:width .25s ease,background .25s ease}
 .oa-th-dots i.active{width:17px;border-radius:99px;background:#f7b955;box-shadow:0 0 10px rgba(247,185,85,.24)}
 @media(max-width:480px){
-  .oa-th-slide{flex-basis:calc(100% - 36px);min-height:236px;padding:12px}
+  .oa-th-slide{flex-basis:82%;max-width:none;min-height:236px;padding:12px}
   .oa-th-slide-content{min-height:210px}
   .oa-th-slide .oa-th-spark{height:60px;margin:12px 0 8px}
   .oa-th-slide .oa-th-trade{flex-basis:75px;min-height:49px;font-size:13px}
   .oa-th-slide .oa-th-stats strong{font-size:12px}
 }
 @media(max-width:380px){
-  .oa-th-slide{flex-basis:calc(100% - 30px)}
+  .oa-th-slide{flex-basis:84%}
   .oa-th-slide .oa-th-trade{flex-basis:68px}
   .oa-th-slide .oa-th-stats div:nth-child(3){display:none}
   .oa-th-slide .oa-th-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
