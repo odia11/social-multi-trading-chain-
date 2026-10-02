@@ -48,7 +48,6 @@ import re
 import sqlite3
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 
 from flask import jsonify, request
@@ -182,15 +181,16 @@ def current_trending(d) -> list[dict]:
     if hero and hero.get('mint'):
         tokens.append(dict(hero))
         seen.add(hero['mint'])
-    remaining = [t for t in pool if t.get('mint') and t.get('mint') not in seen]
-    safe_flags = []
-    if remaining:
-        with ThreadPoolExecutor(max_workers=min(8, len(remaining))) as ex:
-            safe_flags = list(ex.map(lambda token: _safe(d, token), remaining))
-    for t, is_safe in zip(remaining, safe_flags):
-        if not is_safe:
+    # Do not apply another mandatory safety RPC here. The default Live Market
+    # feed intentionally exposes the complete Solana discovery universe after
+    # its hard product gates (including market cap >= $30K); safety is an
+    # optional user filter there. Re-running it here made Home silently empty
+    # whenever RPC safety data was unavailable. The notification hero above
+    # remains strict and still uses _safe().
+    for t in pool:
+        mint = t.get('mint')
+        if not mint or mint in seen:
             continue
-        mint = t['mint']
         tokens.append(_public(t, surges.get(mint)))
         seen.add(mint)
     with _lock:
