@@ -8,6 +8,7 @@ entry = (ROOT / 'app_entry.py').read_text()
 wallet = (ROOT / 'templates' / 'wallet.html').read_text()
 navbar = (ROOT / 'static' / 'navbar.js').read_text()
 market = (ROOT / 'static' / 'live-market-pro.js').read_text()
+market_template = (ROOT / 'templates' / 'live_market_pro.html').read_text()
 onboard_py = (ROOT / 'wallet_onboarding.py').read_text()
 onboard_js = (ROOT / 'static' / 'wallet-onboarding.js').read_text()
 gen_py = (ROOT / 'trading_wallet_generator.py').read_text()
@@ -48,9 +49,15 @@ check('Live Market scanner no longer truncates discovery to 80/45/30 tokens',
       'return out[:80]' not in dash
       and 'safety_subset = filtered[:45]' not in dash
       and 'tokens = tokens[:30]' not in dash)
-check('Live Market frontend does not hide low-liquidity Solana tokens by default',
+check('Live Market frontend shows the complete Solana discovery feed by default',
       "sort: 'trending', minLiquidity: 0" in market
-      and 'var _LIQ_DEFAULT = 0;' in market)
+      and 'hideHoneypots: false' in market
+      and 'var _LIQ_DEFAULT = 0;' in market
+      and 'id="pt-liq-slider" min="0" max="500000" step="5000" value="0"' in market_template)
+check('Live Market safety filters do not truncate the candidate universe',
+      'filtered[:40]' not in dash
+      and 'safety_subset = filtered[:45]' not in dash
+      and 'tokens = tokens[:30]' not in dash)
 check('Live Market has no extra-chain discovery top-up',
       '_EXTRA_CHAIN_SEARCH_TERMS' not in dash)
 check('legacy EVM/bridge URLs are not registered with Flask',
