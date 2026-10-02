@@ -90,8 +90,16 @@ async function _silentPushResubscribeCheck(){
     var synced='';
     try{ synced=sessionStorage.getItem('oa_push_synced')||''; }catch(_){}
     if(synced===sub.endpoint) return;
-    var res = await fetch('/api/push/subscribe', {method:'POST', credentials:'include', headers:await _notifCsrfHeaders(), body:JSON.stringify(sub.toJSON())}).then(function(r){return r.json();});
-    if(res && res.ok){ try{ sessionStorage.setItem('oa_push_synced', sub.endpoint); }catch(_){} }
+    var payload=sub.toJSON();
+    try{
+      var previous=localStorage.getItem('oa_push_endpoint')||'';
+      if(previous && previous!==sub.endpoint) payload.previous_endpoint=previous;
+    }catch(_){}
+    var res = await fetch('/api/push/subscribe', {method:'POST', credentials:'include', headers:await _notifCsrfHeaders(), body:JSON.stringify(payload)}).then(function(r){return r.json();});
+    if(res && res.ok){
+      try{ sessionStorage.setItem('oa_push_synced', sub.endpoint); }catch(_){}
+      try{ localStorage.setItem('oa_push_endpoint', sub.endpoint); }catch(_){}
+    }
   }catch(e){}
 }
 _silentPushResubscribeCheck();

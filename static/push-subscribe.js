@@ -46,14 +46,20 @@ function _pushEnvironment() {
 }
 var _PUSH_IOS_HINT = 'On iPhone, notifications only work from the OrcAgent app on your Home Screen: tap Share → Add to Home Screen, open OrcAgent from there and turn notifications on.';
 async function _pushRegisterWithServer(sub) {
+  var payload = sub.toJSON();
+  try {
+    var previous = localStorage.getItem('oa_push_endpoint') || '';
+    if (previous && previous !== sub.endpoint) payload.previous_endpoint = previous;
+  } catch (_) {}
   var res = await fetch('/api/push/subscribe', {
     method: 'POST',
     credentials: 'include',
     headers: await _pushCsrfHeaders(),
-    body: JSON.stringify(sub.toJSON())
+    body: JSON.stringify(payload)
   }).then(function(r) { return r.json(); });
   if (res && res.ok) {
     try { sessionStorage.setItem('oa_push_synced', sub.endpoint); } catch (_) {}
+    try { localStorage.setItem('oa_push_endpoint', sub.endpoint); } catch (_) {}
   }
   return res;
 }
@@ -105,6 +111,7 @@ async function _disablePushNotifications() {
       await sub.unsubscribe();
     }
     try { sessionStorage.removeItem('oa_push_synced'); } catch (_) {}
+    try { localStorage.removeItem('oa_push_endpoint'); } catch (_) {}
     return { ok: true };
   } catch (e) {
     return { ok: false, msg: String(e) };

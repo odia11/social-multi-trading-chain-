@@ -2912,6 +2912,15 @@ def run_migrations():
         "ALTER TABLE users ADD COLUMN referred_by TEXT DEFAULT NULL",
         "ALTER TABLE users ADD COLUMN referral_balance REAL NOT NULL DEFAULT 0",
         "ALTER TABLE direct_messages ADD COLUMN message_type TEXT DEFAULT 'text'",
+        # Push delivery health. A 400 is not automatically an expired subscription,
+        # so keep a small failure history and quarantine only repeated failures.
+        # Re-registering the device clears the quarantine immediately.
+        "ALTER TABLE push_subscriptions ADD COLUMN last_seen_at TIMESTAMP DEFAULT NULL",
+        "ALTER TABLE push_subscriptions ADD COLUMN last_success_at TIMESTAMP DEFAULT NULL",
+        "ALTER TABLE push_subscriptions ADD COLUMN last_failure_at TIMESTAMP DEFAULT NULL",
+        "ALTER TABLE push_subscriptions ADD COLUMN last_failure_status INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE push_subscriptions ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE push_subscriptions ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE users ADD COLUMN webauthn_ready INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN password_hash TEXT DEFAULT NULL",
         "ALTER TABLE user_tokens ADD COLUMN avg_price REAL NOT NULL DEFAULT 0",
@@ -3223,7 +3232,13 @@ def run_migrations():
         endpoint   TEXT NOT NULL UNIQUE,
         p256dh     TEXT NOT NULL,
         auth       TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_success_at TIMESTAMP DEFAULT NULL,
+        last_failure_at TIMESTAMP DEFAULT NULL,
+        last_failure_status INTEGER NOT NULL DEFAULT 0,
+        failure_count INTEGER NOT NULL DEFAULT 0,
+        disabled INTEGER NOT NULL DEFAULT 0
     )''')
     # admin_roles table — separate from users so it survives account deletion
     con.execute('''CREATE TABLE IF NOT EXISTS admin_roles (
@@ -17851,19 +17866,63 @@ def notifications_mark_read():
         conn.close()
     return jsonify({'ok': True})
 
+def _push_provider(endpoint):
+    """Provider hostname only -- enough for diagnostics, never log the endpoint."""
+    try:
+        return (urllib.parse.urlparse(str(endpoint or '')).hostname or 'unknown')[:120]
+    except Exception:
+        return 'unknown'
+
+def _push_record_success(sub_id):
+    try:
+        with sqlite3.connect(DB_FILE, timeout=5) as conn:
+            conn.execute("""UPDATE push_subscriptions
+                SET last_success_at=CURRENT_TIMESTAMP, failure_count=0,
+                    last_failure_status=0, last_failure_at=NULL, disabled=0
+                WHERE id=?""", (sub_id,))
+    except Exception:
+        pass
+
+def _push_record_failure(sub_id, status):
+    """Return (consecutive_failures, quarantined).
+
+    HTTP 400 can mean a malformed request as well as an invalid subscription,
+    so one 400 is never deleted. Three consecutive 400s quarantine only that
+    endpoint; opening OrcAgent on that device re-registers it and clears the
+    quarantine. 404/410 are handled separately as expired subscriptions.
+    """
+    try:
+        with sqlite3.connect(DB_FILE, timeout=5) as conn:
+            conn.execute("""UPDATE push_subscriptions
+                SET failure_count=failure_count+1,
+                    last_failure_status=?, last_failure_at=CURRENT_TIMESTAMP
+                WHERE id=?""", (int(status or 0), sub_id))
+            row = conn.execute(
+                'SELECT failure_count FROM push_subscriptions WHERE id=?', (sub_id,)
+            ).fetchone()
+            failures = int(row[0] or 0) if row else 0
+            quarantine = int(status or 0) == 400 and failures >= 3
+            if quarantine:
+                conn.execute('UPDATE push_subscriptions SET disabled=1 WHERE id=?', (sub_id,))
+            return failures, quarantine
+    except Exception:
+        return 0, False
+
 def _send_push_notification_sync(user_id, title, body, url='/', icon='', tag=''):
     if not _PYWEBPUSH_OK or not VAPID_PRIVATE_KEY:
         return
     try:
         conn = sqlite3.connect(DB_FILE)
         rows = conn.execute(
-            'SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id=?', (user_id,)
+            """SELECT id, endpoint, p256dh, auth FROM push_subscriptions
+               WHERE user_id=? AND COALESCE(disabled,0)=0""", (user_id,)
         ).fetchall()
         conn.close()
     except Exception as e:
         print(f"[push] failed to fetch subscriptions for user {user_id}: {e}", flush=True)
         return
     for sub_id, endpoint, p256dh, auth in rows:
+        provider = _push_provider(endpoint)
         try:
             webpush(
                 subscription_info={'endpoint': endpoint, 'keys': {'p256dh': p256dh, 'auth': auth}},
@@ -17876,21 +17935,25 @@ def _send_push_notification_sync(user_id, title, body, url='/', icon='', tag='')
                 vapid_claims=dict(VAPID_CLAIMS),
                 timeout=5
             )
-            print(f"[push] sent OK to user {user_id}", flush=True)
+            _push_record_success(sub_id)
+            print(f"[push] sent OK to user {user_id} via {provider}", flush=True)
         except WebPushException as ex:
-            if ex.response is not None and ex.response.status_code in (404, 410):
-                print(f"[push] subscription {sub_id} for user {user_id} expired ({ex.response.status_code}) -- deleting", flush=True)
+            status = int(ex.response.status_code) if ex.response is not None else 0
+            if status in (404, 410):
+                print(f"[push] subscription {sub_id} for user {user_id} expired ({status}) via {provider} -- deleting", flush=True)
                 try:
-                    c2 = sqlite3.connect(DB_FILE)
-                    c2.execute('DELETE FROM push_subscriptions WHERE id=?', (sub_id,))
-                    c2.commit()
-                    c2.close()
+                    with sqlite3.connect(DB_FILE, timeout=5) as c2:
+                        c2.execute('DELETE FROM push_subscriptions WHERE id=?', (sub_id,))
                 except Exception:
                     pass
             else:
-                print(f"[push] failed for user {user_id}: {ex}", flush=True)
+                failures, quarantined = _push_record_failure(sub_id, status)
+                suffix = ' -- quarantined until this device re-registers' if quarantined else ''
+                print(f"[push] failed for user {user_id} via {provider}: HTTP {status or '?'} "
+                      f"(consecutive={failures}){suffix}", flush=True)
         except Exception as e:
-            print(f"[push] failed for user {user_id}: {e}", flush=True)
+            _push_record_failure(sub_id, 0)
+            print(f"[push] failed for user {user_id} via {provider}: {type(e).__name__}", flush=True)
 
 def _send_push_notification(user_id, title, body, url='/', icon='', tag=''):
     threading.Thread(
@@ -18268,20 +18331,39 @@ def push_subscribe():
     if not wallet:
         return jsonify({'ok': False, 'msg': 'Not logged in'}), 401
     data = request.get_json(silent=True) or {}
-    endpoint = data.get('endpoint', '')
-    keys = data.get('keys', {})
-    p256dh = keys.get('p256dh', '')
-    auth = keys.get('auth', '')
-    if not endpoint or not p256dh or not auth:
+    endpoint = str(data.get('endpoint', '') or '').strip()
+    previous_endpoint = str(data.get('previous_endpoint', '') or '').strip()
+    keys = data.get('keys', {}) if isinstance(data.get('keys', {}), dict) else {}
+    p256dh = str(keys.get('p256dh', '') or '').strip()
+    auth = str(keys.get('auth', '') or '').strip()
+    try:
+        parsed = urllib.parse.urlparse(endpoint)
+        endpoint_ok = parsed.scheme == 'https' and bool(parsed.hostname)
+    except Exception:
+        endpoint_ok = False
+    if (not endpoint_ok or len(endpoint) > 4096 or not p256dh or not auth
+            or len(p256dh) > 512 or len(auth) > 256):
         return jsonify({'ok': False, 'msg': 'Invalid subscription'}), 400
     conn = sqlite3.connect(DB_FILE)
     try:
         uid = _get_uid(conn, wallet)
         conn.execute(
-            'INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth) VALUES (?,?,?,?) '
-            'ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id, p256dh=excluded.p256dh, auth=excluded.auth',
+            '''INSERT INTO push_subscriptions
+               (user_id, endpoint, p256dh, auth, last_seen_at, failure_count,
+                last_failure_status, last_failure_at, disabled)
+               VALUES (?,?,?,?,CURRENT_TIMESTAMP,0,0,NULL,0)
+               ON CONFLICT(endpoint) DO UPDATE SET
+                 user_id=excluded.user_id, p256dh=excluded.p256dh, auth=excluded.auth,
+                 last_seen_at=CURRENT_TIMESTAMP, failure_count=0,
+                 last_failure_status=0, last_failure_at=NULL, disabled=0''',
             (uid, endpoint, p256dh, auth)
         )
+        # Browser push endpoints can rotate. The client remembers the endpoint
+        # it last registered and names it here; only delete it when it belongs
+        # to this same account, so another user's subscription is untouchable.
+        if previous_endpoint and previous_endpoint != endpoint and len(previous_endpoint) <= 4096:
+            conn.execute('DELETE FROM push_subscriptions WHERE endpoint=? AND user_id=?',
+                         (previous_endpoint, uid))
         conn.commit()
     finally:
         conn.close()
@@ -18321,11 +18403,13 @@ def push_status():
     conn = sqlite3.connect(DB_FILE)
     try:
         uid = _get_uid(conn, wallet)
-        devices = conn.execute('SELECT COUNT(*) FROM push_subscriptions WHERE user_id=?',
+        devices = conn.execute('''SELECT COUNT(*) FROM push_subscriptions
+                                  WHERE user_id=? AND COALESCE(disabled,0)=0''',
                                (uid,)).fetchone()[0] if uid else 0
         endpoint = str(request.args.get('endpoint', ''))[:2048]
         this_device = bool(endpoint and uid and conn.execute(
-            'SELECT 1 FROM push_subscriptions WHERE user_id=? AND endpoint=?',
+            '''SELECT 1 FROM push_subscriptions
+               WHERE user_id=? AND endpoint=? AND COALESCE(disabled,0)=0''',
             (uid, endpoint)).fetchone())
     finally:
         conn.close()
@@ -18344,7 +18428,8 @@ def push_test():
     conn = sqlite3.connect(DB_FILE)
     try:
         uid = _get_uid(conn, wallet)
-        devices = conn.execute('SELECT COUNT(*) FROM push_subscriptions WHERE user_id=?',
+        devices = conn.execute('''SELECT COUNT(*) FROM push_subscriptions
+                                  WHERE user_id=? AND COALESCE(disabled,0)=0''',
                                (uid,)).fetchone()[0] if uid else 0
     finally:
         conn.close()
