@@ -51,7 +51,7 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/live-market')return;
   ensureStyle('/static/live-market-redesign.css?v=9','live-market-redesign.css');
-  ensureScript('/static/live-market-redesign.js?v=5','live-market-redesign.js');
+  ensureScript('/static/live-market-redesign.js?v=6','live-market-redesign.js');
 })();
 
 (function(){
@@ -90,8 +90,9 @@ var _NB_CHAIN_LABELS={solana:'SOL'};
 })();
 
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function safeImgUrl(v){var raw=String(v||'').trim();if(!raw)return'';if(/^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(raw))return raw;try{var u=new URL(raw,location.origin);return(u.protocol==='http:'||u.protocol==='https:')?u.href:''}catch(_){return''}}
 function fmtPrice(n){n=Number(n);if(n==null||isNaN(n))return'—';if(n===0)return'$0.00';if(n>=1)return'$'+n.toFixed(2);if(n>=.01)return'$'+n.toFixed(4);if(n>=.0001)return'$'+n.toFixed(6);return'$'+n.toFixed(8)}
-function logoTile(imgUrl,label,cls,phCls){var initials=esc((label||'?').slice(0,2).toUpperCase());if(!imgUrl)return'<div class="'+phCls+'">'+initials+'</div>';return'<img class="'+cls+'" src="'+esc(imgUrl)+'" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">'+'<div class="'+phCls+'" style="display:none">'+initials+'</div>'}
+function logoTile(imgUrl,label,cls,phCls){var initials=esc((label||'?').slice(0,2).toUpperCase()),safe=safeImgUrl(imgUrl);if(!safe)return'<div class="'+phCls+'">'+initials+'</div>';return'<img class="'+cls+'" src="'+esc(safe)+'" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">'+'<div class="'+phCls+'" style="display:none">'+initials+'</div>'}
 function closeAllOverlays(){var nav=document.getElementById('pt-nb-nav'),more=document.getElementById('pt-nb-more-dd'),scrim=document.getElementById('pt-nb-scrim'),results=document.getElementById('pt-nb-search-results');if(nav)nav.classList.remove('mobile-open');if(more)more.classList.remove('open');if(scrim)scrim.classList.remove('show');if(results)results.classList.remove('open')}
 function markCurrentNavItem(){var here=location.pathname.replace(/\/+$/,'')||'/';document.querySelectorAll('.pt-nb-more-item[href]').forEach(function(a){var href=(a.getAttribute('href')||'').replace(/\/+$/,'')||'/';a.classList.toggle('current',href===here)})}
 
