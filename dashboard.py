@@ -26011,7 +26011,7 @@ def _sum_usdc_from_entries(entries) -> float:
     return total
 
 
-def _get_solana_usdc_balance(address: str) -> float:
+def _get_solana_usdc_balance(address: str, *, allow_stale: bool = False) -> float:
     """Canonical Solana USDC balance with two independent RPC read strategies.
 
     Some Solana providers have returned an empty result for the mint-filtered
@@ -26144,6 +26144,16 @@ def _get_solana_usdc_balance(address: str) -> float:
     except Exception:
         pass
 
+    # Read-only portfolio surfaces may show the last confirmed
+    # balance briefly during a provider outage instead of flashing $0/503.
+    # Money-moving routes keep the default allow_stale=False and therefore
+    # still fail closed on an unavailable RPC.
+    if allow_stale:
+        with _sol_usdc_balance_lock:
+            stale = _sol_usdc_balance_cache.get(key)
+        if stale and time.time() - stale[0] <= 120:
+            return stale[1]
+
     raise RuntimeError(
         'Solana USDC balance unavailable'
         + (f' ({last_error})' if last_error else '')
@@ -26166,18 +26176,18 @@ def api_wallet_usdc_summary():
             solana_usdc = hit
         else:
             try:
-                solana_usdc = _get_solana_usdc_balance(solana_wallet)
+                solana_usdc = _get_solana_usdc_balance(solana_wallet, allow_stale=True)
                 _usdc_cache_put(key, solana_usdc)
             except Exception as e:
                 print(f'[wallet] usdc-summary solana failed for {wallet[:8]}...: {e}', flush=True)
-                solana_usdc = 0.0
+                return jsonify({'ok': False, 'msg': 'Solana USDC balance temporarily unavailable'}), 503
     else:
         try:
-            solana_usdc = _get_solana_usdc_balance(solana_wallet)
+            solana_usdc = _get_solana_usdc_balance(solana_wallet, allow_stale=True)
             _usdc_cache_put(key, solana_usdc)
         except Exception as e:
             print(f'[wallet] usdc-summary solana failed for {wallet[:8]}...: {e}', flush=True)
-            solana_usdc = 0.0
+            return jsonify({'ok': False, 'msg': 'Solana USDC balance temporarily unavailable'}), 503
     return jsonify({
         'ok': True,
         'solana_usdc': round(solana_usdc, 4),
@@ -32020,15 +32030,15 @@ def _snapshot_portfolios(triggered_by: str = 'manual') -> dict:
     # per wallet, so there's no shared-state concurrency to worry about here.
     _balances = {}
     _bal_lock = threading.Lock()
-    _sem      = threading.Semaphore(10)
+    _sem      = threading.Semaphore(3)
 
     def _fetch_balance(user_id, wallet):
         with _sem:
             try:
-                r = requests.post(SOLANA_RPC, json={
-                    'jsonrpc': '2.0', 'id': 1, 'method': 'getBalance', 'params': [wallet]
-                }, timeout=8)
-                sol_balance = r.json()['result']['value'] / 1e9
+                # Use the canonical provider-failover reader. The old direct
+                # public-RPC call indexed ['result'] blindly, so a 429/error
+                # body turned the whole hourly snapshot into KeyError('result').
+                sol_balance = _get_user_sol(wallet)
                 with _bal_lock:
                     _balances[user_id] = (wallet, sol_balance, None)
             except Exception as e:
