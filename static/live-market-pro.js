@@ -145,8 +145,10 @@ function closeMobileOverlays(){
 
 /* ── state ── */
 var ST = {
-  sort: 'trending', minLiquidity: 25000, age: 'any',
-  lpLocked: false, mintRevoked: false, hideHoneypots: true, verifiedSocials: false,
+  // Show the full Solana discovery feed by default. Liquidity remains an
+  // optional user filter instead of silently hiding DexScreener-home tokens.
+  sort: 'trending', minLiquidity: 0, age: 'any',
+  lpLocked: false, mintRevoked: false, hideHoneypots: false, verifiedSocials: false,
   tokens: [], counts: {}
 };
 var watchSet = new Set();
@@ -1184,7 +1186,7 @@ function toggleFilter(row){
 // Without it, folding the block hides whether anything is on — which is worse
 // than the clutter it replaced, because a feed narrowed by a forgotten filter
 // looks like a feed with nothing in it.
-var _LIQ_DEFAULT = 25000;
+var _LIQ_DEFAULT = 0;
 function updateAdvCount(){
   var n = 0;
   for(var k in _FILTER_KEYS){ if(ST[_FILTER_KEYS[k]]) n++; }

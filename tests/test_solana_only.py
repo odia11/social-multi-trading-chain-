@@ -33,6 +33,26 @@ check('Live Market has no EVM trade routes',
       'EVM_TRADE_CHAINS' not in market
       and '/api/bsc/trade/' not in market and '/api/evm/trade/' not in market
       and '/api/bridge/' not in market and '/api/trade/quote' not in market)
+check('Live Market discovers every public DexScreener Solana home surface',
+      'https://api.dexscreener.com/token-boosts/top/v1' in dash
+      and 'https://api.dexscreener.com/token-boosts/latest/v1' in dash
+      and 'https://api.dexscreener.com/token-profiles/latest/v1' in dash
+      and 'https://api.dexscreener.com/community-takeovers/latest/v1' in dash
+      and 'https://api.dexscreener.com/ads/latest/v1' in dash)
+check('Home and full Live Market share one Solana discovery universe',
+      'boost_addrs = _dexscreener_solana_discovery_addresses()' in dash
+      and "https://api.dexscreener.com/tokens/v1/solana/" in dash)
+check('Home Live Market no longer caps its discovered token list at 30',
+      'if len(result) >= 30' not in dash)
+check('Live Market scanner no longer truncates discovery to 80/45/30 tokens',
+      'return out[:80]' not in dash
+      and 'safety_subset = filtered[:45]' not in dash
+      and 'tokens = tokens[:30]' not in dash)
+check('Live Market frontend does not hide low-liquidity Solana tokens by default',
+      "sort: 'trending', minLiquidity: 0" in market
+      and 'var _LIQ_DEFAULT = 0;' in market)
+check('Live Market has no extra-chain discovery top-up',
+      '_EXTRA_CHAIN_SEARCH_TERMS' not in dash)
 check('legacy EVM/bridge URLs are not registered with Flask',
       all(("@app.route('" + route + "'") not in dash for route in (
           '/api/trade/quote', '/api/trade/execute', '/api/bsc/balance',

@@ -1,4 +1,4 @@
-"""Focused policy tests for the default Live Market scam filter."""
+"""Focused policy tests for the Solana-only Live Market scam filter."""
 import ast
 import os
 
@@ -19,22 +19,20 @@ def token(chain='solana', liquidity=150000, volume=300000, buys=60, sells=40):
 
 sol_safe = {'ok': True, 'mint_authority_active': False,
             'freeze_authority_active': False}
+
+# Healthy Solana mints stay discoverable regardless of market-size/activity.
+# Those are optional Live Market filters now, not hidden scam heuristics.
 assert passes(token(), sol_safe)
+assert passes(token(liquidity=100), sol_safe)
+assert passes(token(volume=0, buys=0, sells=0), sol_safe)
+
+# Concrete Solana authority risks still fail closed.
+assert not passes(token(), {**sol_safe, 'ok': False})
 assert not passes(token(), {**sol_safe, 'mint_authority_active': True})
 assert not passes(token(), {**sol_safe, 'freeze_authority_active': True})
-assert not passes(token(liquidity=24999), sol_safe)
-assert not passes(token(buys=100, sells=0), sol_safe)
-assert not passes(token(buys=99, sells=1), sol_safe)
 
-evm_safe = {'ok': True, 'is_honeypot': False, 'buy_tax': 2, 'sell_tax': 3}
-assert passes(token('bsc'), evm_safe)
-assert not passes(token('bsc'), {**evm_safe, 'is_honeypot': True})
-assert not passes(token('bsc'), {**evm_safe, 'sell_tax': 20})
-assert not passes(token('base'), {**evm_safe, 'risk_level': 'very high'})
+# OrcAgent is Solana-only; stale/non-Solana scanner entries never pass.
+for chain in ('bsc', 'base', 'arbitrum', 'polygon', 'robinhood'):
+    assert not passes(token(chain), sol_safe)
 
-unknown = {'ok': False, 'is_honeypot': True, 'no_provider': True}
-assert passes(token('robinhood'), unknown)
-assert not passes(token('robinhood', liquidity=90000), unknown)
-assert not passes(token('robinhood', sells=5, buys=95), unknown)
-
-print('live market scam-filter tests passed')
+print('live market Solana scam-filter tests passed')

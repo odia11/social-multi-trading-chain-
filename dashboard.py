@@ -29680,140 +29680,124 @@ def _is_market_major_or_impersonator(symbol: str, address: str) -> bool:
         return True
     return (symbol or '').strip().lower() in _MARKET_MAJOR_SYMBOLS
 
+def _dexscreener_solana_discovery_addresses() -> list:
+    """Return every unique Solana mint exposed by DexScreener's public
+    discovery/home surfaces that are available through the supported REST API.
+
+    DexScreener's exact web screener ranking is delivered through a
+    Cloudflare-protected WebSocket, so OrcAgent does not depend on that private
+    transport. Instead we union every public discovery surface and resolve all
+    of those mints to live Solana pairs below.
+    """
+    endpoints = (
+        'https://api.dexscreener.com/token-boosts/top/v1',
+        'https://api.dexscreener.com/token-boosts/latest/v1',
+        'https://api.dexscreener.com/token-profiles/latest/v1',
+        'https://api.dexscreener.com/community-takeovers/latest/v1',
+        'https://api.dexscreener.com/ads/latest/v1',
+    )
+    seen, addresses = set(), []
+    for url in endpoints:
+        r = _dex_get(url, timeout=8)
+        if not r or r.status_code != 200:
+            continue
+        try:
+            data = r.json()
+            rows = data if isinstance(data, list) else [data]
+        except Exception:
+            continue
+        for item in rows:
+            if not isinstance(item, dict) or item.get('chainId') != 'solana':
+                continue
+            address = str(item.get('tokenAddress') or '').strip()
+            if not address or address in seen:
+                continue
+            seen.add(address)
+            addresses.append(address)
+    return addresses
+
+
 def _get_narrative_candidates() -> list:
-    """Boosted + trending DexScreener pairs (Solana + BSC per
-    _MARKET_LIVE_CHAINS), extracted from api_market_live() -- same four
-    steps, same return shape, just callable on its own now. Behavior is
-    unchanged: boosted tokens first (batch-fetched, highest-liquidity pair
-    per address), then trending as fallback/top-up, capped at 30 total."""
+    """Broad Solana-only DexScreener discovery feed for the Home Live Market.
+
+    It includes every unique Solana mint returned by the public DexScreener
+    discovery/home endpoints, resolves all of them in batches of 30, keeps the
+    deepest live Solana pair for each mint and does not truncate the result.
+    """
     def _f(v):
         try:
             return float(v) if v not in (None, '', 'null') else 0.0
         except (TypeError, ValueError):
             return 0.0
 
-    def _extract(p, addr_override=None):
-        base  = p.get('baseToken') or {}
-        addr  = base.get('address', '') or addr_override or ''
+    def _extract(pair):
+        base = pair.get('baseToken') or {}
+        addr = str(base.get('address') or '').strip()
         if not addr:
             return None
-        info  = p.get('info') or {}
-        pc    = p.get('priceChange') or {}
-        vol   = p.get('volume') or {}
-        liq   = p.get('liquidity') or {}
-        txns  = p.get('txns') or {}
-        h24t  = txns.get('h24') or {}
+        info = pair.get('info') or {}
+        pc = pair.get('priceChange') or {}
+        vol = pair.get('volume') or {}
+        liq = pair.get('liquidity') or {}
+        txns = pair.get('txns') or {}
+        h24t = txns.get('h24') or {}
         return {
-            'symbol':            base.get('symbol', ''),
-            'name':              base.get('name', ''),
-            'address':           addr,
-            'chain':             p.get('chainId', 'solana'),  # 'solana' or 'bsc' -- lets the frontend badge each row and route the Trade button to the right chain
-            'price':             _f(p.get('priceUsd')),
-            'mcap':              _f(p.get('marketCap')),
-            'volume_24h':        _f(vol.get('h24')),
-            'liquidity':         _f(liq.get('usd')),
-            'txns_24h':          int(_f(h24t.get('buys')) + _f(h24t.get('sells'))),
-            'traders_24h':       int(_f(h24t.get('buys')) + _f(h24t.get('sells'))),
-            'price_change_5m':   _f(pc.get('m5')),
-            'price_change_1h':   _f(pc.get('h1')),
-            'price_change_6h':   _f(pc.get('h6')),
-            'price_change_24h':  _f(pc.get('h24')),
-            'pair_created_at':   int(p.get('pairCreatedAt')) if p.get('pairCreatedAt') else None,
-            'image_url':         info.get('imageUrl'),
+            'symbol': base.get('symbol', ''),
+            'name': base.get('name', ''),
+            'address': addr,
+            'chain': 'solana',
+            'price': _f(pair.get('priceUsd')),
+            'mcap': _f(pair.get('marketCap')) or _f(pair.get('fdv')),
+            'volume_24h': _f(vol.get('h24')),
+            'liquidity': _f(liq.get('usd')),
+            'txns_24h': int(_f(h24t.get('buys')) + _f(h24t.get('sells'))),
+            'traders_24h': int(_f(h24t.get('buys')) + _f(h24t.get('sells'))),
+            'price_change_5m': _f(pc.get('m5')),
+            'price_change_1h': _f(pc.get('h1')),
+            'price_change_6h': _f(pc.get('h6')),
+            'price_change_24h': _f(pc.get('h24')),
+            'pair_created_at': int(pair.get('pairCreatedAt')) if pair.get('pairCreatedAt') else None,
+            'image_url': info.get('imageUrl'),
         }
 
-    seen        = set()
-    result      = []
-    boost_addrs = []
-
-    # ── Step 1: boosted token addresses ──────────────────────────────────────
-    r = _dex_get('https://api.dexscreener.com/token-boosts/top/v1')
-    if r and r.status_code == 200:
-        try:
-            for item in (r.json() if isinstance(r.json(), list) else []):
-                if item.get('chainId') in _MARKET_LIVE_CHAINS:
-                    a = item.get('tokenAddress', '')
-                    if a and a not in seen:
-                        seen.add(a)
-                        boost_addrs.append(a)
-        except Exception:
-            pass
-
-    # ── Step 2: batch-fetch pair data for boosted tokens (≤30 per call) ──────
-    best_pair: dict = {}   # addr → best pair dict
-    for i in range(0, min(len(boost_addrs), 30), 30):
-        batch = boost_addrs[i:i + 30]
+    addresses = _dexscreener_solana_discovery_addresses()
+    best_pair = {}
+    for i in range(0, len(addresses), 30):
+        batch = addresses[i:i + 30]
         if not batch:
-            break
-        url_b = 'https://api.dexscreener.com/latest/dex/tokens/' + ','.join(batch)
-        rb = _dex_get(url_b, timeout=10)
-        if rb and rb.status_code == 200:
-            try:
-                for p in (rb.json().get('pairs') or []):
-                    if p.get('chainId') not in _MARKET_LIVE_CHAINS:
-                        continue
-                    a = (p.get('baseToken') or {}).get('address', '')
-                    if not a:
-                        continue
-                    # keep the pair with highest liquidity for this token
-                    existing = best_pair.get(a)
-                    cur_liq  = _f((p.get('liquidity') or {}).get('usd'))
-                    old_liq  = _f((existing.get('liquidity') or {}).get('usd')) if existing else -1
-                    if cur_liq > old_liq:
-                        best_pair[a] = p
-            except Exception:
-                pass
-
-    # ── Step 3: trending search as fallback / top-up ─────────────────────────
-    trending_pairs = []
-    rt = _dex_get('https://api.dexscreener.com/latest/dex/search?q=solana&rankBy=trendingScoreH6')
-    if rt and rt.status_code == 200:
+            continue
+        # Official chain-scoped DexScreener endpoint; max 30 addresses/call.
+        url = 'https://api.dexscreener.com/tokens/v1/solana/' + ','.join(batch)
+        r = _dex_get(url, timeout=10)
+        if not r or r.status_code != 200:
+            continue
         try:
-            d = rt.json()
-            for p in (d.get('pairs') if isinstance(d, dict) else (d if isinstance(d, list) else [])):
-                if p.get('chainId') == 'solana':
-                    trending_pairs.append(p)
+            data = r.json()
+            pairs = data if isinstance(data, list) else (data.get('pairs') or [])
         except Exception:
-            pass
-    time.sleep(0.3)  # stagger -- same pattern as discover_tokens()
-    rt_bsc = _dex_get('https://api.dexscreener.com/latest/dex/search?q=bnb&rankBy=trendingScoreH6')
-    if rt_bsc and rt_bsc.status_code == 200:
-        try:
-            d = rt_bsc.json()
-            for p in (d.get('pairs') if isinstance(d, dict) else (d if isinstance(d, list) else [])):
-                if p.get('chainId') == 'bsc':
-                    trending_pairs.append(p)
-        except Exception:
-            pass
+            continue
+        for pair in pairs:
+            if not isinstance(pair, dict) or pair.get('chainId') != 'solana':
+                continue
+            addr = str((pair.get('baseToken') or {}).get('address') or '').strip()
+            if not addr:
+                continue
+            current = best_pair.get(addr)
+            current_liq = _f((pair.get('liquidity') or {}).get('usd'))
+            old_liq = _f((current.get('liquidity') or {}).get('usd')) if current else -1
+            if current_liq > old_liq:
+                best_pair[addr] = pair
 
-    # ── Step 4: assemble result — boosted first, then trending ───────────────
-    # Trending is sorted by volume_24h before capping (real, already-fetched
-    # signal) rather than kept in the search response's own order, so when
-    # there's more than 30 candidates the ones that actually top up boosted
-    # results are the highest-volume ones, not whatever DexScreener's search
-    # ranking happened to return first.
-    trending_pairs.sort(key=lambda p: _f((p.get('volume') or {}).get('h24')), reverse=True)
-
-    added = set()
-    for addr in boost_addrs:
-        if len(result) >= 30:
-            break
-        p = best_pair.get(addr)
-        if p:
-            tok = _extract(p)
-            if tok and tok['address'] not in added and not _is_market_major_or_impersonator(tok['symbol'], tok['address']):
-                result.append(tok)
-                added.add(tok['address'])
-
-    for p in trending_pairs:
-        if len(result) >= 30:
-            break
-        tok = _extract(p)
-        if tok and tok['address'] not in added and not _is_market_major_or_impersonator(tok['symbol'], tok['address']):
-            result.append(tok)
-            added.add(tok['address'])
-
+    result = []
+    for addr in addresses:
+        pair = best_pair.get(addr)
+        if not pair:
+            continue
+        token = _extract(pair)
+        if token and not _is_market_major_or_impersonator(token['symbol'], token['address']):
+            result.append(token)
     return result
+
 
 @app.route('/api/market/live', methods=['GET'])
 @rate_limit(60, 60)
@@ -29892,9 +29876,13 @@ def _is_recent_graduation(t: dict):
 
 
 def _get_scanner_candidates() -> list:
-    """Boosted + trending Solana + BSC pairs (_MARKET_LIVE_CHAINS), richer
-    than _get_narrative_candidates() (keeps the buys/sells split, pair
-    address and socials presence the scanner's filters/badges need)."""
+    """Build the broad Solana discovery pool used by Live Market.
+
+    The source union is shared with Home Live Market and covers every public
+    DexScreener discovery/home surface available through the supported REST
+    API, plus the Solana search fallback. Nothing admits another chain and the
+    result is not truncated before Live Market filters it.
+    """
     def _f(v):
         try:
             return float(v) if v not in (None, '', 'null') else 0.0
@@ -29955,57 +29943,31 @@ def _get_scanner_candidates() -> list:
             'website_url':      website_url,
         }
 
-    # Solana + BSC, same _MARKET_LIVE_CHAINS set _get_narrative_candidates()
-    # already uses for the home feed's market rail -- this scanner just adds
-    # the same second chain, via the exact same boosted/trending DexScreener
-    # sourcing, rather than inventing a separate BSC discovery path. Safety
-    # filters below (LP-lock, mint-revoked) stay Solana-specific and fail
-    # closed for a BSC address (see _check_mint_safety/_check_lp_locked),
-    # which just means a BSC token never passes those two opt-in filters
-    # yet -- not a crash, and not silently treated as "safe".
-    seen, boost_addrs = set(), []
-    r = _dex_get('https://api.dexscreener.com/token-boosts/top/v1')
-    if r and r.status_code == 200:
-        try:
-            for item in (r.json() if isinstance(r.json(), list) else []):
-                if item.get('chainId') in _MARKET_LIVE_CHAINS:
-                    a = item.get('tokenAddress', '')
-                    if a and a not in seen:
-                        seen.add(a)
-                        boost_addrs.append(a)
-        except Exception:
-            pass
-
-    r2 = _dex_get('https://api.dexscreener.com/token-profiles/latest/v1')
-    if r2 and r2.status_code == 200:
-        try:
-            for item in (r2.json() if isinstance(r2.json(), list) else []):
-                if item.get('chainId') in _MARKET_LIVE_CHAINS:
-                    a = item.get('tokenAddress', '')
-                    if a and a not in seen:
-                        seen.add(a)
-                        boost_addrs.append(a)
-        except Exception:
-            pass
+    # Reuse the exact same broad Solana discovery union as Home Live Market.
+    # This prevents Home and /live-market from drifting into two different
+    # token universes.
+    boost_addrs = _dexscreener_solana_discovery_addresses()
 
     best_pair: dict = {}
     for i in range(0, len(boost_addrs), 30):
         batch = boost_addrs[i:i + 30]
-        rb = _dex_get('https://api.dexscreener.com/latest/dex/tokens/' + ','.join(batch), timeout=10)
+        rb = _dex_get('https://api.dexscreener.com/tokens/v1/solana/' + ','.join(batch), timeout=10)
         if rb and rb.status_code == 200:
             try:
-                for p in (rb.json().get('pairs') or []):
-                    if p.get('chainId') not in _MARKET_LIVE_CHAINS:
+                data = rb.json()
+                pairs = data if isinstance(data, list) else (data.get('pairs') or [])
+                for pair in pairs:
+                    if not isinstance(pair, dict) or pair.get('chainId') != 'solana':
                         continue
-                    a = (p.get('baseToken') or {}).get('address', '')
-                    if not a:
+                    address = str((pair.get('baseToken') or {}).get('address') or '').strip()
+                    if not address:
                         continue
-                    cur_liq  = _f((p.get('liquidity') or {}).get('usd'))
-                    pair_key = (p.get('chainId'), a.lower())
-                    existing = best_pair.get(pair_key)
-                    old_liq  = _f((existing.get('liquidity') or {}).get('usd')) if existing else -1
-                    if cur_liq > old_liq:
-                        best_pair[pair_key] = p
+                    key = ('solana', address.lower())
+                    existing = best_pair.get(key)
+                    current_liq = _f((pair.get('liquidity') or {}).get('usd'))
+                    old_liq = _f((existing.get('liquidity') or {}).get('usd')) if existing else -1
+                    if current_liq > old_liq:
+                        best_pair[key] = pair
             except Exception:
                 pass
 
@@ -30022,27 +29984,6 @@ def _get_scanner_candidates() -> list:
         except Exception:
             pass
 
-    # One trending-search top-up per additional chain -- same pattern as the
-    # solana/bsc ones above, just keyed by each chain's own search hint term
-    # (DexScreener's search is a plain keyword match, not a chain filter, so
-    # this needs one query per chain rather than a single combined one).
-    _EXTRA_CHAIN_SEARCH_TERMS = {'bsc': 'bnb', 'base': 'base', 'arbitrum': 'arbitrum',
-                                  'robinhood': 'robinhood'}
-    for _chain, _term in _EXTRA_CHAIN_SEARCH_TERMS.items():
-        time.sleep(0.3)  # stagger -- same pattern _get_narrative_candidates()/discover_tokens() use
-        rt_extra = _dex_get(f'https://api.dexscreener.com/latest/dex/search?q={_term}&rankBy=trendingScoreH6')
-        if rt_extra and rt_extra.status_code == 200:
-            try:
-                d = rt_extra.json()
-                for p in (d.get('pairs') if isinstance(d, dict) else (d if isinstance(d, list) else [])):
-                    if p.get('chainId') == _chain:
-                        a = (p.get('baseToken') or {}).get('address', '')
-                        key = (_chain, a.lower()) if a else None
-                        if key and key not in best_pair:
-                            best_pair[key] = p
-            except Exception:
-                pass
-
     out = []
     for addr in best_pair:
         tok = _extract(best_pair[addr])
@@ -30055,7 +29996,7 @@ def _get_scanner_candidates() -> list:
     # highest-volume tokens instead of whatever order the upstream calls
     # happened to return.
     out.sort(key=lambda t: t.get('volume_24h', 0), reverse=True)
-    return out[:80]
+    return out
 
 
 def _get_scanner_cached() -> list:
@@ -30118,17 +30059,15 @@ def _scanner_get_safety(mint: str, chain: str = 'solana', include_lp: bool = Fal
             'no_provider':             False,
         }
     else:
-        hp = _check_evm_honeypot(mint, chain)
+        # Live Market is Solana-only. Fail closed if a stale/legacy caller ever
+        # tries to ask the scanner to score another chain.
         result = {
-            'ok':            bool(hp.get('ok')),
-            'is_honeypot':  bool(hp.get('is_honeypot', True)),
-            'risk_level':   hp.get('risk_level'),
-            'buy_tax':      float(hp.get('buy_tax') or 0),
-            'sell_tax':     float(hp.get('sell_tax') or 0),
-            'no_provider':  bool(hp.get('no_provider')),
+            'ok': False,
+            'is_honeypot': True,
+            'no_provider': True,
             'lp_locked_pct': 0,
-            'mint_authority_active': False,
-            'freeze_authority_active': False,
+            'mint_authority_active': True,
+            'freeze_authority_active': True,
         }
     with _scanner_safety_lock:
         _scanner_safety_cache[cache_key] = (time.time(), result)
@@ -30136,40 +30075,18 @@ def _scanner_get_safety(mint: str, chain: str = 'solana', include_lp: bool = Fal
 
 
 def _scanner_token_passes_scam_filter(token: dict, safety: dict) -> bool:
-    """Conservative default gate for Live Market discovery.
+    """Solana-only scam gate without hiding healthy low-liquidity tokens.
 
-    This removes tokens with concrete scam/rug indicators. It deliberately
-    does not promise that an unknown contract is safe: unsupported chains are
-    admitted only with substantially deeper, active two-sided liquidity.
+    Discovery should mirror the broad DexScreener home feed, so liquidity,
+    volume and transaction-count thresholds belong to optional UI filters —
+    not the default discovery gate. We only remove tokens that fail OrcAgent's
+    concrete Solana mint/freeze-authority safety checks.
     """
-    liquidity = float(token.get('liquidity_usd') or 0)
-    volume = float(token.get('volume_24h') or 0)
-    buys = int(token.get('buys_24h') or 0)
-    sells = int(token.get('sells_24h') or 0)
-    total = buys + sells
-    if liquidity < 25000 or volume <= 0 or total < 20 or sells <= 0:
+    if (token.get('chain') or 'solana') != 'solana':
         return False
-    sell_ratio = sells / total
-    if sell_ratio < 0.05 or sell_ratio > 0.95:
-        return False
-
-    chain = token.get('chain') or 'solana'
-    if chain == 'solana':
-        return bool(safety.get('ok')) \
-            and not safety.get('mint_authority_active') \
-            and not safety.get('freeze_authority_active')
-
-    if safety.get('no_provider'):
-        # No free sell simulator covers this chain yet. Unknown is not called
-        # "safe": require strong, expensive-to-fake two-sided market depth.
-        return liquidity >= 125000 and volume >= 100000 \
-            and sells >= 20 and 0.15 <= sell_ratio <= 0.85
-    if not safety.get('ok') or safety.get('is_honeypot'):
-        return False
-    if float(safety.get('buy_tax') or 0) > 15 or float(safety.get('sell_tax') or 0) > 15:
-        return False
-    risk = str(safety.get('risk_level') or '').strip().lower().replace(' ', '_')
-    return risk not in {'high', 'very_high', 'critical', 'honeypot'}
+    return bool(safety.get('ok')) \
+        and not safety.get('mint_authority_active') \
+        and not safety.get('freeze_authority_active')
 
 
 def _scanner_score(tok: dict, safety: dict | None) -> int:
@@ -30246,24 +30163,25 @@ def api_market_scanner():
 
     filtered = [dict(t) for t in candidates if _passes_fast(t)]
 
-    # Scam filtering is ON by default. The old "hide honeypots" switch only
-    # checked whether sells were exactly zero, so obvious sell-blocking tokens
-    # with one dust sell still passed. Run the real chain-aware checks in
-    # parallel and cache them for ten minutes; cap the candidate batch so one
-    # page load cannot fan out without bound.
-    safety_subset = filtered[:45]
-    if safety_subset:
+    # The default feed is the complete DexScreener Solana discovery set.
+    # Safety checks are opt-in filters: run them only when the user actually
+    # enables Hide honeypots / LP locked / Mint revoked. This keeps the broad
+    # feed instant and prevents a safety RPC fan-out from silently hiding new
+    # or low-liquidity tokens. Results are still cached for ten minutes.
+    needs_safety = hide_honeypots or lp_locked or mint_revoked
+    if needs_safety and filtered:
+        safety_subset = filtered
         with ThreadPoolExecutor(max_workers=12) as ex:
             safety_list = list(ex.map(
                 lambda t: _scanner_get_safety(t['mint'], t.get('chain') or 'solana', lp_locked),
                 safety_subset))
         for t, s in zip(safety_subset, safety_list):
             t['_safety'] = s
-        filtered = [t for t in safety_subset if _scanner_token_passes_scam_filter(t, t['_safety'])]
+        if hide_honeypots:
+            filtered = [t for t in safety_subset
+                        if _scanner_token_passes_scam_filter(t, t['_safety'])]
 
     if lp_locked or mint_revoked:
-        subset = filtered[:40]
-
         def _passes_safety(t):
             s = t.get('_safety')
             if s is None:
@@ -30274,9 +30192,7 @@ def api_market_scanner():
                 return False
             return True
 
-        filtered = [t for t in subset if _passes_safety(t)]
-    else:
-        pass
+        filtered = [t for t in filtered if _passes_safety(t)]
 
     gainers_set = [t for t in filtered if t.get('price_change_24h', 0) > 0]
     new_set     = [t for t in filtered
@@ -30347,7 +30263,6 @@ def api_market_scanner():
     else:
         tokens = filtered
 
-    tokens = tokens[:30]
     for t in tokens:
         t['score'] = _scanner_score(t, t.get('_safety'))
         t.pop('_safety', None)

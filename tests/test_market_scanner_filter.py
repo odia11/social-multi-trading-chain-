@@ -28,6 +28,7 @@ _TREE = ast.parse(_SRC)
 
 _WANTED_FUNCS = {
     '_is_market_major_or_impersonator',
+    '_dexscreener_solana_discovery_addresses',
     '_get_scanner_candidates',
     '_get_narrative_candidates',
 }
@@ -83,17 +84,19 @@ FAKE_TRENDING_SOLANA = [
 
 
 def _fake_dex_get(url, timeout=8):
-    if 'token-boosts/top' in url:
-        return _FakeResp([])
     if 'token-profiles/latest' in url:
+        return _FakeResp([
+            {'chainId': 'solana', 'tokenAddress': p['baseToken']['address']}
+            for p in FAKE_TRENDING_SOLANA
+        ])
+    if any(x in url for x in ('token-boosts/top', 'token-boosts/latest',
+                               'community-takeovers/latest', 'ads/latest')):
         return _FakeResp([])
+    if 'tokens/v1/solana/' in url:
+        return _FakeResp(FAKE_TRENDING_SOLANA)
     if 'search?q=solana' in url:
         return _FakeResp({'pairs': FAKE_TRENDING_SOLANA})
-    if 'search?q=bnb' in url:
-        return _FakeResp({'pairs': []})
-    if 'latest/dex/tokens/' in url:
-        return _FakeResp({'pairs': []})
-    return _FakeResp({'pairs': []})
+    return _FakeResp([])
 
 
 namespace = {
@@ -106,6 +109,7 @@ exec(_const_src['_MARKET_LIVE_CHAINS'], namespace)
 exec(_const_src['_MARKET_MAJOR_ADDRESSES'], namespace)
 exec(_const_src['_MARKET_MAJOR_SYMBOLS'], namespace)
 exec(_func_src['_is_market_major_or_impersonator'], namespace)
+exec(_func_src['_dexscreener_solana_discovery_addresses'], namespace)
 exec(_func_src['_get_scanner_candidates'], namespace)
 exec(_func_src['_get_narrative_candidates'], namespace)
 
@@ -160,11 +164,22 @@ FAKE_TRENDING_SOLANA_VOL_TEST = [
     _pair('HIGHVOL', 'HIGHVOL111111111111111111111111111111111', volume_h24=9_000_000, liquidity_usd=200_000),
 ]
 def _fake_dex_get_vol(url, timeout=8):
+    if 'token-profiles/latest' in url:
+        return _FakeResp([
+            {'chainId': 'solana', 'tokenAddress': p['baseToken']['address']}
+            for p in FAKE_TRENDING_SOLANA_VOL_TEST
+        ])
+    if any(x in url for x in ('token-boosts/top', 'token-boosts/latest',
+                               'community-takeovers/latest', 'ads/latest')):
+        return _FakeResp([])
+    if 'tokens/v1/solana/' in url:
+        return _FakeResp(FAKE_TRENDING_SOLANA_VOL_TEST)
     if 'search?q=solana' in url:
         return _FakeResp({'pairs': FAKE_TRENDING_SOLANA_VOL_TEST})
-    return _FakeResp({'pairs': []}) if 'search?q=bnb' not in url else _FakeResp({'pairs': []})
+    return _FakeResp([])
 namespace2 = dict(namespace)
 namespace2['_dex_get'] = _fake_dex_get_vol
+exec(_func_src['_dexscreener_solana_discovery_addresses'], namespace2)
 exec(_func_src['_get_scanner_candidates'], namespace2)
 vol_out = namespace2['_get_scanner_candidates']()
 check('highest-volume token sorted first', vol_out and vol_out[0]['symbol'] == 'HIGHVOL', detail=str(vol_out))
