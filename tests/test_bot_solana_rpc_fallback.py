@@ -149,7 +149,14 @@ def test_portfolio_rpc_429_recovers_only_provable_spendable_usdc():
     try:ns['_get_solana_usdc_balance'](OWNER)
     except RuntimeError as exc:assert 'unavailable' in str(exc)
     else:raise AssertionError('RPC outage gave false balance')
-    print('PASS an absent ATA or unavailable RPC cannot masquerade as aggregate-wallet zero')
+    # Read-only Portfolio may reuse a recent confirmed value while providers
+    # are throttled; money-moving callers keep the default fail-closed path.
+    ns['_sol_usdc_balance_cache'][OWNER]=(time.time()-30,4.25)
+    assert ns['_get_solana_usdc_balance'](OWNER,allow_stale=True)==4.25
+    try:ns['_get_solana_usdc_balance'](OWNER)
+    except RuntimeError:pass
+    else:raise AssertionError('money-moving balance read accepted stale RPC data')
+    print('PASS unavailable RPC never becomes zero; stale fallback is read-only opt-in')
 
 
 def test_native_sol_read_tries_verified_publicnode_first():
