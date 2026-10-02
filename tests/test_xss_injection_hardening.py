@@ -51,6 +51,7 @@ def test_money_and_social_clients_send_csrf_tokens():
 def test_high_risk_dom_sinks_escape_or_avoid_untrusted_html():
     js=_read("static/dashboard.js"); traders=_read("templates/traders.html")
     profile=_read("templates/profile.html"); live=_read("static/live-market-pro.js")
+    live_redesign=_read("static/live-market-redesign.js"); navbar=_read("static/navbar.js")
     messages=_read("templates/messages.html")
     assert "function safeImageUrl(value)" in js
     assert 'onclick="selectUserTag' not in js
@@ -70,6 +71,13 @@ def test_high_risk_dom_sinks_escape_or_avoid_untrusted_html():
     assert "esc(u.avatar_url)" in profile and "esc(ini)+img" in profile
     assert ".replace(/'/g,'&#39;')" in messages
     assert "var side = String(r.side||'').toLowerCase()==='sell' ? 'sell' : 'buy';" in live
+    # Token symbols and avatar/image URLs are external data. Keep them out of
+    # raw HTML execution contexts even if the global runtime guard regresses.
+    assert "function setTradeNote(note,sell,sym)" in live_redesign
+    assert "note.innerHTML=sell?" not in live_redesign
+    assert "b.textContent=(sell?'selling $':'buying $')" in live_redesign
+    assert "avDiv.replaceChildren()" in js and "img.src=avatar" in js
+    assert "function safeImgUrl(v)" in navbar and "safe=safeImgUrl(imgUrl)" in navbar
 
 def test_shell_command_injection_primitives_are_not_used():
     for path in ROOT.glob("*.py"):
