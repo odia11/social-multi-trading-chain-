@@ -27,7 +27,8 @@ PEPE = 'PepeMint11111111111111111111111111111111pump'
 def tok(mint, sym, change=184.2, vol=482_000, liq=90_000, mcap=1_800_000, buys=1204, sells=38, price=0.00184):
     return {'mint': mint, 'symbol': sym, 'name': sym + ' Coin', 'chain': 'solana', 'pair_address': 'Pair' + mint[:30],
             'price_usd': price, 'price_change_24h': change, 'volume_24h': vol, 'liquidity_usd': liq,
-            'market_cap': mcap, 'buys_24h': buys, 'sells_24h': sells, 'image_url': ''}
+            'market_cap': mcap, 'buys_24h': buys, 'sells_24h': sells, 'image_url': '',
+            'banner_url': 'https://cdn.dexscreener.com/banner/'+sym.lower()}
 
 scanner = []
 d._get_scanner_cached = lambda: scanner
@@ -36,6 +37,7 @@ d._scanner_token_passes_scam_filter = lambda t, s: not s.get('scam')
 th._surging = lambda _d: {}
 def fresh():
     th._state['at'] = 0.0
+    th._state['carousel_at'] = 0.0
 
 # ── selection rules (pure) ──
 check('a hot, liquid, buy-heavy token qualifies', th.qualifies(tok(WOJAK, 'WOJAK')))
@@ -64,6 +66,10 @@ check('a trending token appears automatically', r['token'] and r['token']['symbo
 check('...a scam-flagged token is never promoted, however big', r['token']['mint'] != 'ScamMint1111111111111111111111111111111pump')
 check('...with the card data the UI needs', all(k in r['token'] for k in
       ('price_usd', 'price_change_24h', 'volume_24h', 'buys_24h', 'sells_24h', 'chain', 'pair_address')))
+check('...returns every current trending token as carousel slides',
+      len(r.get('slides') or []) == 2 and {x['token']['symbol'] for x in r['slides']} == {'WOJAK', 'PEPE'})
+check('...carries the DexScreener token banner for the slide background',
+      r['token'].get('banner_url','').startswith('https://cdn.dexscreener.com/banner/'))
 check('...with when it started trending (the post time)',
       isinstance(r['token'].get('trending_since'), int) and abs(r['token']['trending_since'] - __import__('time').time()) < 60)
 check('...and zeroed social counts', r['social'] == {'bull': 0, 'bear': 0, 'likes': 0, 'my_vote': 0, 'liked': False})
@@ -124,5 +130,10 @@ check('...placed in the feed, right before the posts',
       "document.getElementById('center-feed')" in js and 'feed.parentNode.insertBefore(host,feed)' in js)
 check('...with the token card as its attachment and votes/like as its action row',
       'oa-th-embed' in js and 'oa-th-act oa-th-vote bull' in js and 'oa-th-act oa-th-like' in js)
+check('...autoplays the carousel calmly from right to left',
+      'AUTOPLAY_MS = 6500' in js and 'setInterval(advance,AUTOPLAY_MS)' in js
+      and 'translate3d(-' in js and 'oa-th-clone' in js)
+check('...uses each token banner as the full card background',
+      'data-banner=' in js and 'card.style.backgroundImage' in js)
 check('...only on the For You tab', "active.dataset.tab!=='foryou'" in js)
 raise SystemExit(0 if all(checks) else 1)
