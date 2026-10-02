@@ -148,5 +148,8 @@ check('...autoplays the carousel calmly from right to left',
       and 'translate3d(-' in js and 'oa-th-clone' in js)
 check('...uses each token banner as the full card background',
       'data-banner=' in js and 'card.style.backgroundImage' in js)
+css=open(os.path.join(os.path.dirname(__file__), '..', 'static', 'home-trending-hero.css')).read()
+check('...keeps trending slides narrow so the next card is visibly peeking in',
+      'flex:0 0 82%' in css and 'max-width:420px' in css and 'gap:12px' in css)
 check('...only on the For You tab', "active.dataset.tab!=='foryou'" in js)
 raise SystemExit(0 if all(checks) else 1)
