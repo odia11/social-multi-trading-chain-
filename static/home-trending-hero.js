@@ -1,3 +1,5 @@
+[Reading 493 lines from start (total: 493 lines, 0 remaining)]
+
 /* Home feed "Trending now" card, shown as a post from OrcAgent.
  *
  * Shows the one token /api/home/trending-hero says is trending right now
@@ -84,24 +86,19 @@ function slideHtml(entry,idx,clone){
   return '<div class="oa-th-embed oa-th-slide'+(clone?' oa-th-clone':'')+'" data-slide-index="'+idx+'" data-mint="'+esc(t.mint)+'" data-banner="'+esc(banner)+'">'
     +'<div class="oa-th-slide-shade" aria-hidden="true"></div>'
     +'<div class="oa-th-slide-content">'
-      +'<div class="oa-th-head">'
+      +'<div class="oa-th-strip-id">'
         +'<div class="oa-th-logo"><span>'+esc((t.symbol||'?').charAt(0).toUpperCase())+'</span>'+logo
           +'<b style="background:'+chain[1]+'" title="'+esc(chain[2])+'">'+esc(chain[0])+'</b></div>'
         +'<div class="oa-th-id"><strong>$'+sym+'</strong><small>'+esc(t.name||t.symbol)+'</small></div>'
-        +'<div class="oa-th-px"><strong>'+fmtPrice(t.price_usd)+'</strong>'
-          +'<span class="oa-th-chg '+(up?'up':'down')+'">'+(up?'↗ ':'↘ ')+chg+'</span></div>'
       +'</div>'
+      +'<div class="oa-th-px"><strong>'+fmtPrice(t.price_usd)+'</strong>'
+        +'<span class="oa-th-chg '+(up?'up':'down')+'">'+(up?'↗ ':'↘ ')+chg+'</span></div>'
       +'<svg class="oa-th-spark" viewBox="0 0 300 72" preserveAspectRatio="none" aria-hidden="true"></svg>'
-      +'<div class="oa-th-slide-bottom">'
-        +'<div class="oa-th-stats">'
-          +'<div><strong class="b">'+fmtInt(t.buys_24h)+'</strong><small>Buys</small></div>'
-          +'<div><strong>'+fmtUsd(t.volume_24h)+'</strong><small>Vol · 24h</small></div>'
-          +'<div><strong class="s">'+fmtInt(t.sells_24h)+'</strong><small>Sells</small></div>'
-        +'</div>'
-        +'<a class="oa-th-trade" href="/live-market?mint='+encodeURIComponent(t.mint)+'" aria-label="Trade $'+sym+'">Trade <span aria-hidden="true">→</span></a>'
-      +'</div>'
-      +'<div class="oa-th-pressure-mini"><span style="width:'+buyPct+'%"></span></div>'
+      +'<div class="oa-th-strip-stat oa-th-strip-vol"><strong>'+fmtUsd(t.volume_24h)+'</strong><small>Vol 24h</small></div>'
+      +'<div class="oa-th-strip-stat oa-th-strip-flow"><strong class="'+(up?'b':'s')+'">'+fmtInt(up?t.buys_24h:t.sells_24h)+'</strong><small>'+(up?'Buys':'Sells')+'</small></div>'
+      +'<a class="oa-th-trade" href="/live-market?mint='+encodeURIComponent(t.mint)+'" aria-label="Trade $'+sym+'">Trade <span aria-hidden="true">→</span></a>'
     +'</div>'
+    +'<div class="oa-th-pressure-mini" aria-hidden="true"><span style="width:'+buyPct+'%"></span></div>'
   +'</div>';
 }
 function stopAutoplay(){if(autoplayTimer){clearInterval(autoplayTimer);autoplayTimer=null;}}
@@ -496,3 +493,5 @@ function boot(){
 window.OrcAgentRefreshTrendingHero=refresh;
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
+
+[executed on device: orcagent-srv001 (c9150a05-2aaf-4129-b814-0c2e85e68396)]
