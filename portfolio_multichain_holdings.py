@@ -1,7 +1,7 @@
 """Add every supported-chain open position to the Portfolio token feed.
 
 The legacy /api/wallet/tokens endpoint is Solana/SPL-oriented. OrcAgent now
-trades BSC, Base, Arbitrum, Polygon and Robinhood Chain too, so successful EVM
+trades BSC, Base and Arbitrum too, so successful active-chain EVM
 positions must not disappear from Portfolio just because they are not SPL
 accounts. This adapter keeps the existing endpoint and appends the user's
 recorded non-Solana open positions in the same shape the wallet UI already
@@ -52,7 +52,7 @@ def _merge_evm_positions(d, wallet, tokens):
     except Exception:
         rows = []
 
-    supported = set(getattr(d, 'EVM_CHAINS', {}).keys())
+    supported = set(getattr(d, 'ACTIVE_EVM_CHAINS', {}).keys())
     for address, symbol, amount, buy_price, spend, chain, opened_at in rows:
         chain = str(chain or '').lower()
         token_address = str(address or '').strip()
@@ -122,7 +122,7 @@ def _portfolio_snapshot(d, wallet, bust=False):
     jobs = {'tokens': lambda: d._fetch_wallet_tokens(wallet, onchain_wallet),
             'solana_usdc': lambda: d._get_solana_usdc_balance(onchain_wallet)}
     if evm_address:
-        for chain in getattr(d, 'EVM_CHAINS', {}):
+        for chain in getattr(d, 'ACTIVE_EVM_CHAINS', {}):
             jobs['stable:' + chain] = (lambda ch=chain: d.get_evm_usdc_balance(evm_address, ch))
 
     results = {}
@@ -160,7 +160,7 @@ def _portfolio_snapshot(d, wallet, bust=False):
 
     solana_usdc = _num(results.get('solana_usdc'))
     evm_chains = {chain: round(_num(results.get('stable:' + chain)), 6)
-                  for chain in getattr(d, 'EVM_CHAINS', {})}
+                  for chain in getattr(d, 'ACTIVE_EVM_CHAINS', {})}
     stable_total = solana_usdc + sum(evm_chains.values())
 
     sol_row = next((t for t in assets if str(t.get('symbol') or '').upper() == 'SOL'

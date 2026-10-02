@@ -153,7 +153,7 @@ def main():
     section('EVM chains — RPC')
     import dashboard as d
 
-    for chain in list(d.EVM_CHAINS):
+    for chain in list(getattr(d, 'ACTIVE_EVM_CHAINS', d.EVM_CHAINS)):
         def rpc(chain=chain):
             try:
                 w3 = d._get_web3(chain)
@@ -175,7 +175,7 @@ def main():
     if not os.getenv('ZEROX_API_KEY'):
         report(BAD, '0x', 'ZEROX_API_KEY is not set — no EVM trade can be priced')
     else:
-        for chain in list(d.EVM_CHAINS):
+        for chain in list(getattr(d, 'ACTIVE_EVM_CHAINS', d.EVM_CHAINS)):
             def price(chain=chain):
                 usd = d._te_native_price_usd(chain)
                 return f'1 {d.EVM_CHAINS[chain]["native_symbol"]} = ${usd}'
@@ -266,7 +266,7 @@ def main():
     # refused, identically, on all five chains. A token cannot be routed to
     # itself; native is the one pair guaranteed to exist everywhere.
     priced_any = False
-    for chain, cfg_ in d.EVM_CHAINS.items():
+    for chain, cfg_ in getattr(d, 'ACTIVE_EVM_CHAINS', d.EVM_CHAINS).items():
         token = d.BNB_NATIVE_ADDR      # the native-token sentinel, valid as a BUY token
         if not os.getenv('ZEROX_API_KEY') or not taker:
             continue
@@ -358,7 +358,7 @@ def main():
                            'have. Set the key, or set ORCAGENT_FRONTS_GAS=0 if '
                            'users really are meant to fund their own gas')
         out, empty, dead, unreadable = [], [], [], []
-        for chain in d.EVM_CHAINS:
+        for chain in getattr(d, 'ACTIVE_EVM_CHAINS', d.EVM_CHAINS):
             try:
                 bal = d.get_evm_native_balance(addr, chain)
                 sym = d.EVM_CHAINS[chain]['native_symbol']

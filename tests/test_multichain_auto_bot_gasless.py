@@ -20,7 +20,7 @@ from flask import Flask, jsonify
 import multichain_auto_bot as patch
 
 
-EVM_CHAINS = ('bsc', 'base', 'arbitrum', 'polygon', 'robinhood')
+EVM_CHAINS = ('bsc', 'base', 'arbitrum')
 
 
 def make_dashboard(chain):

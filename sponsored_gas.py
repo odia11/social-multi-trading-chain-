@@ -421,7 +421,8 @@ def install(d):
 
     def execute(wallet, private_key, action, token_address, amount_str, chain='bsc'):
         ok, msg, tx_hash = gasless_execute(wallet, private_key, action, token_address, amount_str, chain)
-        if ok or tx_hash or not enabled(d) or chain not in getattr(d, 'EVM_CHAINS', {}):
+        active_chains = getattr(d, 'ACTIVE_EVM_CHAINS', getattr(d, 'EVM_CHAINS', {}))
+        if ok or tx_hash or not enabled(d) or chain not in active_chains:
             return ok, msg, tx_hash
         low = str(msg or '').lower()
         action = str(action).lower()

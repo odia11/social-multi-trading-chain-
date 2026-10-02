@@ -31,6 +31,8 @@ def fake_dashboard():
       'arbitrum':{'usdc':'0xarb'}, 'polygon':{'usdc':'0xpoly'},
       'robinhood':{'usdc':'0xhood'},
     }
+    d.ACTIVE_EVM_CHAINS={k:v for k,v in d.EVM_CHAINS.items()
+                         if k in ('bsc','base','arbitrum')}
     d._get_trading_wallet_address=lambda w:'soltrader'
     d._wallet_tokens_cache={}
     d._fetch_wallet_tokens=lambda wallet,onchain:{'tokens':[
@@ -49,12 +51,13 @@ def fake_dashboard():
 def test_snapshot_has_one_authoritative_total():
     d=fake_dashboard()
     snap=pf._portfolio_snapshot(d,'session',bust=True)
-    # stable 40 + SOL 100 + ABC 10 + EVM TOK 8 = 158
-    assert snap['stable']['total_usdc'] == 40
-    assert snap['available_to_trade_usdc'] == 40
+    # Active stable balances only: Solana 20 + BSC 5 + Base 10 + Arbitrum 0.
+    # Disabled Polygon/Robinhood legacy balances are not active buying power.
+    assert snap['stable']['total_usdc'] == 35
+    assert snap['available_to_trade_usdc'] == 35
     assert snap['sol']['value_usd'] == 100
     assert snap['other_assets_value_usd'] == 18
-    assert snap['total_usd'] == 158
+    assert snap['total_usd'] == 153
     assert snap['sol']['in_positions_sol'] == 4
 
 

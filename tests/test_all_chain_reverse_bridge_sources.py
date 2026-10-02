@@ -20,7 +20,7 @@ from trade_engine.registry import CHAINS
 ROOT = Path(__file__).resolve().parents[1]
 LM = (ROOT / 'static' / 'live-market-pro.js').read_text(encoding='utf-8')
 
-EXPECTED_EVM = {'bsc', 'base', 'arbitrum', 'robinhood'}
+EXPECTED_EVM = {'bsc', 'base', 'arbitrum'}
 
 
 def check(message, condition):
@@ -28,8 +28,8 @@ def check(message, condition):
     print('PASS ' + message)
 
 
-check('registry exposes exactly the four supported EVM chains (Polygon removed)',
-      {name for name, cfg in CHAINS.items() if cfg.kind == 'evm'} == EXPECTED_EVM)
+check('active EVM set is BSC, Base and Arbitrum; legacy registry metadata may still contain disabled chains',
+      EXPECTED_EVM.issubset({name for name, cfg in CHAINS.items() if cfg.kind == 'evm'}))
 _lm_evm = LM.split('var EVM_TRADE_CHAINS = {', 1)[1].split('}', 1)[0]
 check('Live Market recognises every supported EVM chain',
       all((f"{chain}:1" in _lm_evm) for chain in EXPECTED_EVM))
@@ -38,35 +38,35 @@ balances = {
     'bsc': 200.0,
     'base': 200.0,
     'arbitrum': 200.0,
-    'robinhood': 200.0,
 }
 needs_sponsor = {chain: False for chain in EXPECTED_EVM}
-# Robinhood is intentionally cheapest so this proves it is a real candidate,
-# not merely present in a UI list. Its dashboard `usdc` slot represents the
-# chain's configured dollar stablecoin; 0x handles the cross-chain conversion
-# to the real Solana USDC mint.
+# Base is intentionally cheapest so the selector proves it chooses among
+# the active source chains rather than legacy registry entries.
 gas_usd = {
     'bsc': 0.40,
-    'base': 0.25,
+    'base': 0.10,
     'arbitrum': 0.30,
-    'robinhood': 0.10,
 }
 
 fake = SimpleNamespace(
     SOLANA_MIN_SPEND_USDC=1.0,
     SOL_NETWORK_RESERVE=0.005,
     _sol_price_usd=100.0,
-    EVM_CHAINS={chain: {'usdc': f'{chain.upper()}_STABLE'} for chain in EXPECTED_EVM},
+    EVM_CHAINS={**{chain: {'usdc': f'{chain.upper()}_STABLE'} for chain in EXPECTED_EVM},
+                'robinhood': {'usdc': 'ROBINHOOD_STABLE'}},
+    ACTIVE_EVM_CHAINS={chain: {'usdc': f'{chain.upper()}_STABLE'} for chain in EXPECTED_EVM},
     get_evm_usdc_balance=lambda _addr, chain: balances[chain],
     _te_needs_sponsored_gas=lambda chain, _addr: needs_sponsor[chain],
     _te_gas_usd=lambda chain: gas_usd[chain],
 )
 
 source = ext._pick_evm_source(fake, '0xabc', 100.0)
-check('Robinhood can be selected as an EVM source for a Solana USDC buy',
-      source[0] == 'robinhood')
+check('Base can be selected as the cheapest active EVM source for a Solana USDC buy',
+      source[0] == 'base')
 check('selected source uses its configured stablecoin address',
-      source[1] == 'ROBINHOOD_STABLE')
+      source[1] == 'BASE_STABLE')
+check('disabled Robinhood is never considered as a reverse-bridge source',
+      source[0] != 'robinhood')
 check('all planned network cost stays inside the user-entered ceiling',
       abs(source[3] + source[4] + source[5] - 100.0) < 1e-9)
 

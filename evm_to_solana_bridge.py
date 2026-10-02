@@ -153,7 +153,7 @@ def _pick_evm_source(appmod, evm_address: str, max_spend_usd: float) \
         return None
     min_bridge = float(getattr(appmod, 'SOLANA_MIN_SPEND_USDC', 1.0) or 1.0)
     candidates = []
-    for chain, cfg in getattr(appmod, 'EVM_CHAINS', {}).items():
+    for chain, cfg in getattr(appmod, 'ACTIVE_EVM_CHAINS', {}).items():
         if _source_needs_sponsored_gas(appmod, chain, evm_address):
             print(f'[evm->solana] skipping {chain}: source wallet cannot pay its own bridge gas', flush=True)
             continue

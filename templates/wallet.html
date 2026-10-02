@@ -800,7 +800,6 @@ html,body{background:#080e11}
             <option value="base">Base</option>
             <option value="bsc">BNB Chain</option>
             <option value="arbitrum">Arbitrum</option>
-            <option value="robinhood">Robinhood</option>
           </select>
           <span class="oa-h-select-chevron" aria-hidden="true">⌄</span>
         </label>
@@ -835,7 +834,7 @@ html,body{background:#080e11}
       <div class="sol-usdc-head">
         <div>
           <div class="sol-usdc-title">Convert assets</div>
-          <div class="sol-usdc-copy">Swap between the native gas token and the trading stablecoin on Solana, BSC, Base, Arbitrum or Robinhood Chain.</div>
+          <div class="sol-usdc-copy">Swap between the native gas token and the trading stablecoin on Solana, BSC, Base or Arbitrum.</div>
         </div>
       </div>
       <div class="sol-usdc-balances">
@@ -919,7 +918,7 @@ html,body{background:#080e11}
               <a class="dep-btn dep-scan" href="https://bscscan.com/address/{{ bsc_deposit_address }}" target="_blank" rel="noopener">View on BscScan ↗</a>
             </div>
             <div style="font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5">
-              This is one shared EVM wallet — the same address also receives USDC on Base and Arbitrum. You only need USDC here: OrcAgent puts up the network fee for your first trade on a new chain, charges it to that trade, and after that the wallet tops up its own gas from your USDC. If it ever tells you it can't, sending a few cents of that chain's own gas token here (ETH for Base/Arbitrum/Robinhood, BNB for BSC) unblocks it immediately.
+              This is one shared EVM wallet — the same address also receives USDC on Base and Arbitrum. You only need USDC here: OrcAgent puts up the network fee for your first trade on a new chain, charges it to that trade, and after that the wallet tops up its own gas from your USDC. If it ever tells you it can't, sending a few cents of that chain's own gas token here (ETH for Base/Arbitrum, BNB for BSC) unblocks it immediately.
             </div>
           </div>
         </div>
@@ -1278,8 +1277,6 @@ var _RX_USDC_MARK='<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" c
 // wallet are separate addresses; the EVM one used to be on the old deposit
 // card only, which the portfolio redesign hides -- so nobody could find where
 // to send USDC on an EVM chain. Users deposit USDC only (see
-// test_one_currency.py): Robinhood Chain has no USDC, so it is not a deposit
-// chain -- the app bridges USDC there itself when a trade needs it.
 var _RX_EVM_CHAINS=['Base','BSC','Arbitrum']
 var _rxNet='sol'
 function _rxAddr(){ return _rxNet==='evm'?_bscAddr:_walletAddr }
@@ -1331,7 +1328,6 @@ function _modalDeposit(net){
     +'</div>'
     +'<div class="rx-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>'
       +'<span>'+warn+'</span></div>'
-    +(evm?'<div class="rx-note">No gas needed. Trading on Robinhood Chain? OrcAgent moves your USDC there automatically.</div>':'')
     +(canShare?'<a class="rx-scan" href="'+scanUrl+'" target="_blank" rel="noopener">View on '+scanName+' ↗</a>':'')
   )
   var box=document.querySelector('#w-modal .w-modal-box'); if(box) box.classList.add('sx-box')
@@ -1373,7 +1369,6 @@ var _SEND_CHAINS=[
   {v:'bsc',      label:'BSC (USDC)',            sym:'USDC', evm:true},
   {v:'base',     label:'Base (USDC)',           sym:'USDC', evm:true},
   {v:'arbitrum', label:'Arbitrum (USDC)',       sym:'USDC', evm:true},
-  {v:'robinhood',label:'Robinhood Chain (USDC)',sym:'USDC', evm:true},
 ]
 function _sendChain(){
   var v=(document.getElementById('send-chain')||{}).value||'solana'
@@ -1531,7 +1526,6 @@ var _CONVERT_CHAINS=[
   {v:'bsc',label:'BSC',native:'BNB',stable:'USDC'},
   {v:'base',label:'Base',native:'ETH',stable:'USDC'},
   {v:'arbitrum',label:'Arbitrum',native:'ETH',stable:'USDC'},
-  {v:'robinhood',label:'Robinhood Chain',native:'ETH',stable:'USDC'}
 ]
 var _convertQuote=null
 var _convertBalance=null
@@ -1947,7 +1941,6 @@ var _BRIDGE_CHAINS=[
   {v:'bsc',      label:'BSC'},
   {v:'base',     label:'Base'},
   {v:'arbitrum', label:'Arbitrum'},
-  {v:'robinhood',label:'Robinhood Chain'},
 ]
 var _bridgeQuote=null   // the last quote fetched, kept so Confirm doesn't need to re-derive anything
 var _bridgeStatusTimer=null

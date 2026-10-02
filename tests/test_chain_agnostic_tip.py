@@ -49,6 +49,7 @@ def test_evm_selector_prefers_funded_actual_usdc_chains():
         'bsc': {'usdc':'0xbsc', 'usdc_symbol':'USDC'},
         'robinhood': {'usdc':'0xusdg', 'usdc_symbol':'USDG'},
     }
+    d.ACTIVE_EVM_CHAINS = {k:v for k,v in d.EVM_CHAINS.items() if k != 'robinhood'}
     d.get_evm_usdc_balance = lambda addr, chain: {'base':5, 'bsc':20, 'robinhood':100}[chain]
     d.get_evm_native_balance = lambda addr, chain: {'base':0, 'bsc':0.01, 'robinhood':1}[chain]
     old = tip._wallet_keys

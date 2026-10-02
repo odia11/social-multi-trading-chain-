@@ -6,8 +6,7 @@ spending balance, so this exposes one read-only aggregate across supported
 chains and injects a tiny shared client that keeps the pill fresh.
 
 Display policy: show one dollar figure (e.g. $124.58).  Under the hood this is
-USDC on Solana/BSC/Base/Arbitrum and the configured stable asset on
-Robinhood Chain (currently USDG).  No conversion, transfer or bridge is
+USDC on Solana/BSC/Base/Arbitrum. No conversion, transfer or bridge is
 performed here; this endpoint only reads on-chain balances.
 """
 from __future__ import annotations
@@ -20,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 _CACHE = {}
 _CACHE_LOCK = threading.Lock()
 _CACHE_TTL = 12.0
-_CHAINS = ('bsc', 'base', 'arbitrum', 'robinhood')
+_CHAINS = ('bsc', 'base', 'arbitrum')
 
 
 def _safe_float(value):
@@ -56,7 +55,7 @@ def install(d):
             sol_address = ''
 
         balances = {'solana': 0.0, 'bsc': 0.0, 'base': 0.0,
-                    'arbitrum': 0.0, 'robinhood': 0.0}
+                    'arbitrum': 0.0}
         errors = []
 
         jobs = {}

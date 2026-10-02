@@ -62,7 +62,7 @@ def install(d):
                 return original(*args, **kwargs)
 
             chain = str(quote.get('destination_chain') or '').strip().lower()
-            if chain not in getattr(d, 'EVM_CHAINS', {}):
+            if chain not in getattr(d, 'ACTIVE_EVM_CHAINS', {}):
                 return original(*args, **kwargs)
             if not evm_address:
                 return original(*args, **kwargs)

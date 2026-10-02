@@ -470,7 +470,7 @@ def _solana_transfer(d, wallet, token_address, to_address, amount,
 def _evm_transfer(d, wallet, chain, token_address, to_address, amount):
     from web3 import Web3
 
-    if chain not in getattr(d, 'EVM_CHAINS', {}):
+    if chain not in getattr(d, 'ACTIVE_EVM_CHAINS', {}):
         raise ValueError('Unsupported network')
     if not Web3.is_address(to_address) or not Web3.is_address(token_address):
         raise ValueError('Invalid EVM wallet or token address')
@@ -680,7 +680,7 @@ def _tip_evm_candidates(d, sender_wallet, amount, recipient_evm):
         return [], []
 
     chains = [
-        (chain, cfg) for chain, cfg in getattr(d, 'EVM_CHAINS', {}).items()
+        (chain, cfg) for chain, cfg in getattr(d, 'ACTIVE_EVM_CHAINS', {}).items()
         if str(cfg.get('usdc_symbol') or 'USDC').upper() == 'USDC'
     ]
 
@@ -981,7 +981,7 @@ def install(d):
         token_address = str(body.get('token_address') or '').strip()
         to_address = str(body.get('to_address') or '').strip()
         amount = _amount(body.get('amount'))
-        if chain != 'solana' and chain not in getattr(d, 'EVM_CHAINS', {}):
+        if chain != 'solana' and chain not in getattr(d, 'ACTIVE_EVM_CHAINS', {}):
             return jsonify({'ok':False,'error':'Unsupported network'}), 400
         if not token_address or not to_address or amount is None:
             return jsonify({'ok':False,'error':'Token, recipient and a positive amount are required'}), 400

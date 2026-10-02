@@ -1126,6 +1126,14 @@ EVM_CHAINS = {
         'explorer': 'https://robinhoodchain.blockscout.com', 'dex_chain': 'robinhood', 'zerox_chain_id': 4663,
     },
 }
+
+# Robinhood Chain is kept here only so old history/addresses remain readable.
+# It is NOT an active OrcAgent chain until its routing is reliable enough for
+# production. Every new discovery, quote, trade, bridge and balance surface
+# must use ACTIVE_EVM_CHAINS instead of EVM_CHAINS.
+DISABLED_EVM_CHAINS = frozenset({'robinhood'})
+ACTIVE_EVM_CHAINS = {k: v for k, v in EVM_CHAINS.items() if k not in DISABLED_EVM_CHAINS}
+
 EVM_CHAIN_FEE_WALLET = BSC_FEE_WALLET  # same EVM address works as the fee recipient on every chain above
 
 # What a user is told they are spending. Always USDC, on every chain.
@@ -1359,7 +1367,7 @@ def _chain_tradeable(chain) -> bool:
     forever: its tokens stay in the user's own wallet, reachable with the
     revealed key in any wallet app."""
     chain = chain or 'solana'
-    return chain == 'solana' or chain in EVM_CHAINS
+    return chain == 'solana' or chain in ACTIVE_EVM_CHAINS
 
 
 def _rpc_candidates(chain: str) -> list:
@@ -1606,7 +1614,7 @@ def is_valid_evm_address(addr: str) -> bool:
 # there then shows up everywhere this list is offered, instead of quietly
 # going missing. This codebase has twice been bitten by a second copy of a
 # chain/rule list drifting out of step with the first.
-TOKEN_CHAINS = ('solana',) + tuple(EVM_CHAINS.keys())
+TOKEN_CHAINS = ('solana',) + tuple(ACTIVE_EVM_CHAINS.keys())
 
 CHAIN_DISPLAY_NAMES = {
     'solana':    'Solana',
@@ -3961,7 +3969,7 @@ def _fast_poll_loop():
                          if t.get('mint') and _bot_gainers_eligible(t)]
             with _scanner_lock:
                 scanner = list(_scanner_cache.get('data') or [])
-            for chain in EVM_CHAINS:
+            for chain in ACTIVE_EVM_CHAINS:
                 eligible = [t for t in scanner if t.get('chain') == chain
                             and t.get('mint') and _bot_gainers_eligible(t)]
                 eligible.sort(key=lambda t: t.get('price_change_24h', 0), reverse=True)
@@ -7386,7 +7394,7 @@ def _bot_scan_evm_entry(user_id: int, wallet: str, positions: dict, chain: str, 
 # native asset" -- reused here on the assumption the Cross-Chain API follows
 # the same convention as the same-chain Swap API (both being 0x products).
 _BRIDGE_SUPPORTED_TOKENS = {'solana': {SOL_MINT: 9, USDC_MINT: 6}}
-for _bc, _bcfg in EVM_CHAINS.items():
+for _bc, _bcfg in ACTIVE_EVM_CHAINS.items():
     _BRIDGE_SUPPORTED_TOKENS[_bc] = {BNB_NATIVE_ADDR: 18, _bcfg['usdc']: (18 if _bc == 'bsc' else 6)}
 
 def _bridge_validate_pair(origin_chain: str, origin_token: str, dest_chain: str, dest_token: str) -> str:
@@ -7689,7 +7697,7 @@ def _find_bridge_source_chain(wallet: str, evm_address: str, dest_chain: str, ne
     except Exception as e:
         print(f'[auto-bridge] solana balance check failed: {e}', flush=True)
     if evm_address:
-        for chain in EVM_CHAINS:
+        for chain in ACTIVE_EVM_CHAINS:
             if chain == dest_chain:
                 continue
             try:
@@ -8423,6 +8431,8 @@ def _get_0x_quote(sell_token: str, buy_token: str, sell_amount_raw: int, taker: 
     separate DEX-router integration needed per chain. `chain` defaults to
     'bsc' so every pre-existing call site (which never passed this argument)
     keeps quoting on BSC exactly as before."""
+    if chain not in ACTIVE_EVM_CHAINS:
+        raise RuntimeError(f'{chain} trading is temporarily disabled on OrcAgent')
     if not ZEROX_API_KEY:
         raise RuntimeError('ZEROX_API_KEY not configured')
     _params = {
@@ -8460,6 +8470,8 @@ def _get_0x_price(sell_token: str, buy_token: str, sell_amount_raw: int,
     for every chain. It never showed up in development because 0x is
     unreachable from there.
     """
+    if chain not in ACTIVE_EVM_CHAINS:
+        raise RuntimeError(f'{chain} pricing is temporarily disabled on OrcAgent')
     if not ZEROX_API_KEY:
         raise RuntimeError('ZEROX_API_KEY not configured')
     r = requests.get(
@@ -8631,6 +8643,10 @@ def _te_build_and_store_quote(*, uid, wallet, source_chain, dest_chain, token_ad
     re-pricing, because the point of an expiry is that the number does not
     move once a user has been given it.
     """
+    if dest_chain != 'solana' and dest_chain not in ACTIVE_EVM_CHAINS:
+        raise TeQuoteError(f'{chain_display_name(dest_chain)} is temporarily unavailable on OrcAgent')
+    if source_chain != 'solana' and source_chain not in ACTIVE_EVM_CHAINS:
+        raise TeQuoteError(f'{chain_display_name(source_chain)} is temporarily unavailable on OrcAgent')
     _te_ensure_decimals(dest_chain)
     quote = build_quote(
         QuoteRequest(
@@ -8671,6 +8687,8 @@ def api_trade_quote():
 
     dest_chain = str(data.get('chain') or data.get('destination_chain') or '').strip().lower()
     token_address = str(data.get('token_address') or data.get('mint') or '').strip()
+    if dest_chain != 'solana' and dest_chain not in ACTIVE_EVM_CHAINS:
+        return jsonify({'ok': False, 'msg': f'{chain_display_name(dest_chain)} is temporarily unavailable on OrcAgent'}), 400
     source_chain = str(data.get('source_chain') or dest_chain).strip().lower()
     try:
         # str() first: a JSON number arrives as a float, and a float is
@@ -8928,7 +8946,7 @@ def api_trade_execute():
         return jsonify({'ok': False, 'msg': 'That quote is not yours'}), 403
 
     chain = quote_row['destination_chain']
-    if chain not in EVM_CHAINS:
+    if chain not in ACTIVE_EVM_CHAINS:
         # Solana, bridges and copy trading still run on their existing paths.
         # Refusing is honest; silently falling back to a legacy path would
         # execute a trade the engine's guarantees do not cover.
@@ -9240,6 +9258,8 @@ def _ensure_bsc_allowance(w3, owner_address: str, private_key: str, token_addres
 
 def _execute_evm_swap(wallet: str, private_key: str, action: str, token_address: str,
                        amount_str: str, chain: str = 'bsc') -> tuple:
+    if chain not in ACTIVE_EVM_CHAINS:
+        return False, f'{chain} trading is temporarily disabled on OrcAgent', ''
     """EVM equivalent of _execute_user_swap(), generalized across every chain
     in EVM_CHAINS (originally BSC-only -- see _execute_bsc_swap() below for
     the exact-same-behavior alias every pre-existing caller still uses).
@@ -9621,7 +9641,7 @@ def _sponsor_evm_gas(user_id: int, wallet: str, evm_address: str, chain: str) ->
         return False, 'this deployment does not front gas — the user funds their own', ''
     if not GAS_SPONSOR_PRIVATE_KEY:
         return False, 'gas sponsorship not configured', ''
-    if chain not in EVM_CHAINS:
+    if chain not in ACTIVE_EVM_CHAINS:
         return False, f'unknown chain {chain}', ''
 
     # Anti-farming gate: real trading capital on this exact chain, or an
@@ -9891,7 +9911,7 @@ def _refill_gas_sponsor(chain: str) -> tuple:
     Returns (refilled, msg). Never raises. A no-op when sponsorship isn't
     configured, when the sponsor still has plenty of gas, or when no fees
     have accumulated on this chain yet."""
-    if not GAS_SPONSOR_PRIVATE_KEY or chain not in EVM_CHAINS:
+    if not GAS_SPONSOR_PRIVATE_KEY or chain not in ACTIVE_EVM_CHAINS:
         return False, 'sponsorship not configured'
     sponsor_address = _gas_sponsor_address()
     if not sponsor_address:
@@ -10325,7 +10345,7 @@ def _gas_sponsor_needs_funding(chain: str) -> bool:
     if cached and (time.time() - cached[0]) < _SPONSOR_NEED_TTL:
         return cached[1]
     sponsor_address = _gas_sponsor_address()
-    if not sponsor_address or chain not in EVM_CHAINS:
+    if not sponsor_address or chain not in ACTIVE_EVM_CHAINS:
         return False
     try:
         w3 = _get_web3(chain)
@@ -12263,7 +12283,7 @@ def user_trader_loop(stop_event, config, wallet: str):
                 # so 5 EVM chains can't crowd out Solana or each other.
                 if (_enc_blob_evm and not stop_event.is_set()
                         and not _pc_locked and not _streak_paused):
-                    for _evm_chain in EVM_CHAINS:
+                    for _evm_chain in ACTIVE_EVM_CHAINS:
                         if stop_event.is_set():
                             break
                         if open_pos_by_chain.get(_evm_chain, 0) >= max_positions:
@@ -15091,7 +15111,7 @@ def api_evm_convert_to_usdc():
         return jsonify({'ok': False, 'msg': 'No wallet connected'}), 401
     data  = request.get_json(silent=True) or {}
     chain = str(data.get('chain', '')).strip().lower()
-    if chain not in EVM_CHAINS:
+    if chain not in ACTIVE_EVM_CHAINS:
         return jsonify({'ok': False, 'msg': f'Unsupported chain {chain!r}'}), 400
     conn = sqlite3.connect(DB_FILE)
     try:
@@ -15429,7 +15449,7 @@ def api_evm_balance(chain):
     one of EVM_CHAINS's keys; BSC itself keeps using its own dedicated
     /api/bsc/balance route rather than being migrated to this one, so
     nothing about its already-working behavior changes."""
-    if chain not in EVM_CHAINS:
+    if chain not in ACTIVE_EVM_CHAINS:
         return jsonify({'ok': False, 'msg': f'Unsupported chain {chain!r}'}), 400
     wallet = _authenticated_wallet()
     if not wallet:
@@ -15463,7 +15483,7 @@ def api_evm_trade_buy():
         return jsonify({'ok': False, 'msg': 'No wallet connected'}), 401
     data = request.get_json(silent=True) or {}
     chain = str(data.get('chain', '')).strip().lower()
-    if chain not in EVM_CHAINS:
+    if chain not in ACTIVE_EVM_CHAINS:
         return jsonify({'ok': False, 'msg': f'Unsupported chain {chain!r}'}), 400
     return _evm_buy_flow(wallet, data, chain)
 
@@ -15487,6 +15507,8 @@ def api_bsc_trade_buy():
 
 def _evm_buy_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM',
                   is_copy: bool = False):
+    if chain not in ACTIVE_EVM_CHAINS:
+        return jsonify({'ok': False, 'msg': f'{chain_display_name(chain)} is temporarily unavailable on OrcAgent'}), 400
     """One manual buy on one EVM chain, for both /api/evm/trade/buy and
     /api/bsc/trade/buy.
 
@@ -15716,7 +15738,7 @@ def api_evm_trade_sell():
     """Manual sell on Base, Arbitrum or Polygon -- chain in the body."""
     data  = request.get_json(silent=True) or {}
     chain = str(data.get('chain', '')).strip().lower()
-    if chain not in EVM_CHAINS:
+    if chain not in ACTIVE_EVM_CHAINS:
         return jsonify({'ok': False, 'msg': f'Unsupported chain {chain!r}'}), 400
     wallet = _authenticated_wallet()
     if not wallet:
@@ -15859,6 +15881,8 @@ def _get_sell_lock(wallet: str, token: str, chain: str) -> threading.Lock:
 
 def _evm_sell_flow(wallet: str, data: dict, chain: str, wallet_label: str = 'EVM',
                    is_copy: bool = False):
+    if chain not in ACTIVE_EVM_CHAINS:
+        return jsonify({'ok': False, 'msg': f'{chain_display_name(chain)} is temporarily unavailable on OrcAgent'}), 400
     """Close a position on one EVM chain, for both sell routes.
 
     THREE THINGS THAT WERE WRONG IN BOTH COPIES
@@ -20390,7 +20414,7 @@ CALL_NOTE_MAX = 280
 FEED_CALL_MARKER = '__CALL__'
 _FEED_EMBED_MARKERS = ('__CHART__', '__TRADE__', FEED_CALL_MARKER)
 
-_CALL_LOOKUP_EVM_CHAINS = ('base', 'bsc', 'arbitrum', 'robinhood')
+_CALL_LOOKUP_EVM_CHAINS = ('base', 'bsc', 'arbitrum')
 
 
 def _call_token_row(mint, symbol, name, chain, price, mcap=0.0, image_url='', change_24h=None):
@@ -22109,7 +22133,7 @@ def api_wallet_convert_quote():
 
     chain = str(request.args.get('chain', 'solana')).strip().lower()
     direction = str(request.args.get('direction', '')).strip().lower()
-    if chain != 'solana' and chain not in EVM_CHAINS:
+    if chain != 'solana' and chain not in ACTIVE_EVM_CHAINS:
         return jsonify({'ok': False, 'msg': f'Unsupported chain {chain!r}'}), 400
     if direction not in ('native_to_stable', 'stable_to_native'):
         return jsonify({'ok': False, 'msg': 'Invalid conversion direction'}), 400
@@ -22217,7 +22241,7 @@ def api_wallet_convert():
     data = request.get_json(silent=True) or {}
     chain = str(data.get('chain', 'solana')).strip().lower()
     direction = str(data.get('direction', '')).strip().lower()
-    if chain != 'solana' and chain not in EVM_CHAINS:
+    if chain != 'solana' and chain not in ACTIVE_EVM_CHAINS:
         return jsonify({'ok': False, 'msg': f'Unsupported chain {chain!r}'}), 400
     if direction not in ('native_to_stable', 'stable_to_native'):
         return jsonify({'ok': False, 'msg': 'Invalid conversion direction'}), 400
@@ -26471,7 +26495,7 @@ def api_wallet_usdc_summary():
         return val
 
     jobs = {'solana': ('sol', None)}
-    for chain in EVM_CHAINS:
+    for chain in ACTIVE_EVM_CHAINS:
         jobs[chain] = ('evm', chain)
 
     results = {}
@@ -26485,8 +26509,8 @@ def api_wallet_usdc_summary():
                 results[name] = 0.0
 
     solana_usdc = results.get('solana', 0.0)
-    evm_chains  = {c: round(results.get(c, 0.0), 4) for c in EVM_CHAINS}
-    evm_total   = sum(results.get(c, 0.0) for c in EVM_CHAINS)
+    evm_chains  = {c: round(results.get(c, 0.0), 4) for c in ACTIVE_EVM_CHAINS}
+    evm_total   = sum(results.get(c, 0.0) for c in ACTIVE_EVM_CHAINS)
 
     return jsonify({
         'ok':             True,
@@ -29108,7 +29132,7 @@ def api_withdraw_evm():
     except (TypeError, ValueError):
         return jsonify({'ok': False, 'error': 'Invalid amount'}), 400
 
-    if chain not in EVM_CHAINS:
+    if chain not in ACTIVE_EVM_CHAINS:
         return jsonify({'ok': False, 'error': 'Unknown chain'}), 400
     if not is_valid_evm_address(to_address):
         return jsonify({'ok': False, 'error': 'Destination must be a 0x address'}), 400
@@ -29949,7 +29973,7 @@ _market_live_cache: dict = {'ts': 0.0, 'data': []}
 # bot's scanning -- so widening this to include BSC only affects what's
 # *displayed*, and can never cause the bot to start scanning/trading BSC on
 # its own. Bot-side BSC scanning is a distinct, not-yet-built feature.
-_MARKET_LIVE_CHAINS = {'solana', 'bsc', 'base', 'arbitrum', 'robinhood'}
+_MARKET_LIVE_CHAINS = {'solana', 'bsc', 'base', 'arbitrum'}
 _market_live_lock         = threading.Lock()
 
 # Both discovery pipelines below fall back to DexScreener's pair SEARCH
@@ -31982,7 +32006,7 @@ def admin_gas_sponsor():
     # The two sponsors are configured independently, so an EVM row is only
     # meaningful when an EVM sponsor exists -- otherwise these would be
     # balance lookups against an empty address.
-    for chain, cfg in (EVM_CHAINS.items() if sponsor_address else []):
+    for chain, cfg in (ACTIVE_EVM_CHAINS.items() if sponsor_address else []):
         grants = per_chain_grants.get(chain, {'count': 0, 'native': 0.0})
         entry = {
             'chain':          chain,

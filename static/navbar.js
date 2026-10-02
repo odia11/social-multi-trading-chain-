@@ -74,7 +74,7 @@ ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.j
   ensureScript('/static/feed-action-icons.js?v=6','feed-action-icons.js');
 })();
 
-var _NB_LIVE_CHAINS=['solana','bsc','base','arbitrum','robinhood'];
+var _NB_LIVE_CHAINS=['solana','bsc','base','arbitrum'];
 var _NB_CHAIN_LABELS={solana:'SOL',bsc:'BSC',base:'BASE',arbitrum:'ARB',polygon:'POLY',robinhood:'HOOD'};
 
 (function(){

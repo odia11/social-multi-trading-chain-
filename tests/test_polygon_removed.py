@@ -22,11 +22,11 @@ check('no Polygon entry in EVM_CHAINS, so the deploy check, bridge, balances and
       "'polygon'" not in evm and 'POLYGON_RPC_URL' not in src)
 check('the trade engine registry has no Polygon chain', 'polygon' not in CHAINS)
 check('Live Market discovery, call lookups and GeckoTerminal charts skip Polygon',
-      "_MARKET_LIVE_CHAINS = {'solana', 'bsc', 'base', 'arbitrum', 'robinhood'}" in src
-      and "_CALL_LOOKUP_EVM_CHAINS = ('base', 'bsc', 'arbitrum', 'robinhood')" in src
+      "_MARKET_LIVE_CHAINS = {'solana', 'bsc', 'base', 'arbitrum'}" in src
+      and "_CALL_LOOKUP_EVM_CHAINS = ('base', 'bsc', 'arbitrum')" in src
       and "'polygon': 'polygon_pos'" not in src and "'polygon': 'polygon'," not in src)
 check('header balance and pooled buying power no longer read Polygon',
-      "_CHAINS = ('bsc', 'base', 'arbitrum', 'robinhood')" in read('header_stable_balance.py')
+      "_CHAINS = ('bsc', 'base', 'arbitrum')" in read('header_stable_balance.py')
       and "'polygon'" not in read('live_market_pooled_buy_balance.py'))
 check('Live Market and the navbar no longer trade or list Polygon',
       'polygon:1' not in read('static', 'live-market-pro.js')
@@ -36,7 +36,7 @@ check('the wallet page offers no Polygon send, convert, bridge or filter option'
       'value="polygon"' not in wallet and "{v:'polygon'" not in wallet
       and 'Polygon' not in read('templates', 'info.html') and 'POLYGON' not in read('deploy', 'env.example'))
 guard = src[src.index('def _chain_tradeable'):src.index('def _rpc_candidates')]
-check('a chain outside EVM_CHAINS is not tradeable', "chain == 'solana' or chain in EVM_CHAINS" in guard)
+check('a chain outside ACTIVE_EVM_CHAINS is not tradeable', "chain == 'solana' or chain in ACTIVE_EVM_CHAINS" in guard)
 exit_fn = src[src.index('def _bot_execute_exit'):]
 exit_fn = exit_fn[:exit_fn.index('enc_blob = enc_blob_solana')]
 check('the bot never tries to sell a leftover Polygon position (no retry every second)',

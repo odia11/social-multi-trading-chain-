@@ -34,7 +34,7 @@ def install(d):
   window.__orcaPooledBuyFetchInstalled = true;
 
   var originalFetch = window.fetch.bind(window);
-  var CHAINS = ['bsc','base','arbitrum','robinhood'];
+  var CHAINS = ['bsc','base','arbitrum'];
 
   function pooledTotal(d){
     var total = Number(d && d.total_usdc);

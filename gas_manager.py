@@ -225,7 +225,7 @@ def sweep_once():
         return
     logger.info('[gas-manager] sweep starting -- %d user(s) with an EVM key configured', len(users))
     for user_id, wallet, evm_address, enc_blob in users:
-        for chain in _app.EVM_CHAINS:
+        for chain in _app.ACTIVE_EVM_CHAINS:
             try:
                 _sweep_user_chain(user_id, wallet, evm_address, enc_blob, chain)
             except Exception as e:

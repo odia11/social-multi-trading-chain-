@@ -78,16 +78,15 @@ def create(chain, address, name='group'):
 # ── 1. the offered chains are the platform's own, not a second list ───────
 check('the group chain list is every EVM chain the platform trades, plus '
       'Solana -- derived from EVM_CHAINS, not typed out again',
-      set(m.TOKEN_CHAINS) == {'solana'} | set(m.EVM_CHAINS.keys()))
+      set(m.TOKEN_CHAINS) == {'solana'} | set(m.ACTIVE_EVM_CHAINS.keys()))
 check('...with Solana first, so the default selection is the one most '
       'groups will want',
       m.TOKEN_CHAINS[0] == 'solana')
 
 src = open(REPO + '/dashboard.py', encoding='utf-8').read()
 decl = re.search(r'^TOKEN_CHAINS\s*=\s*(.+)$', src, re.M)
-check('TOKEN_CHAINS is built from EVM_CHAINS in the source, so a chain added '
-      'there cannot go missing from the group form',
-      decl is not None and 'EVM_CHAINS' in decl.group(1))
+check('TOKEN_CHAINS is built from ACTIVE_EVM_CHAINS, so disabled legacy chains stay out of the group form',
+      decl is not None and 'ACTIVE_EVM_CHAINS' in decl.group(1))
 
 # ── 2. every chain can actually have a group ─────────────────────────────
 created = {}
