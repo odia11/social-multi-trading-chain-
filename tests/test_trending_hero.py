@@ -66,14 +66,22 @@ check('a trending token appears automatically', r['token'] and r['token']['symbo
 check('...a scam-flagged token is never promoted, however big', r['token']['mint'] != 'ScamMint1111111111111111111111111111111pump')
 check('...with the card data the UI needs', all(k in r['token'] for k in
       ('price_usd', 'price_change_24h', 'volume_24h', 'buys_24h', 'sells_24h', 'chain', 'pair_address')))
-check('...returns every current Live Market trending token as carousel slides',
-      len(r.get('slides') or []) == 2 and {x['token']['symbol'] for x in r['slides']} == {'WOJAK', 'PEPE'})
+check('...returns every token in the default Live Market carousel pool',
+      len(r.get('slides') or []) == 3 and {x['token']['symbol'] for x in r['slides']} == {'SCAM', 'WOJAK', 'PEPE'})
 # Slider discovery is deliberately broader than notification eligibility: the
 # old +25%/$50K-volume hero gate must never make the carousel empty.
 scanner[:] = [tok(PEPE, 'PEPE', change=3, vol=5_000, liq=5_000, mcap=45_000)]
 r_broad = hero()
 check('...carousel does not inherit the old strict hero thresholds',
       len(r_broad.get('slides') or []) == 1 and r_broad['slides'][0]['token']['symbol'] == 'PEPE')
+# Live Market safety is optional by default. A safety RPC failure must not blank
+# the Home carousel; strict notification promotion is tested separately above.
+d._scanner_get_safety = lambda *a, **k: (_ for _ in ()).throw(RuntimeError('RPC unavailable'))
+fresh()
+r_rpc = hero()
+check('...carousel stays populated when optional safety RPC is unavailable',
+      len(r_rpc.get('slides') or []) == 1 and r_rpc['slides'][0]['token']['symbol'] == 'PEPE')
+d._scanner_get_safety = lambda mint, chain='solana', include_lp=False: {'ok': True, 'scam': mint.startswith('Scam')}
 scanner[:] = [tok('TinyMint11111111111111111111111111111111pump', 'TINY', change=500, vol=9_000_000, mcap=29_999)]
 check('...carousel still enforces the $30K Live Market floor', not hero().get('slides'))
 scanner[:] = [tok('ScamMint1111111111111111111111111111111pump', 'SCAM', vol=9_000_000), tok(WOJAK, 'WOJAK'),
