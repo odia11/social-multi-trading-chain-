@@ -1,3 +1,5 @@
+[Reading 164 lines from start (total: 164 lines, 0 remaining)]
+
 """Home feed "Trending now" hero card (trending_hero.py + home-trending-hero.js).
 
 - a token appears automatically when it trends (real volume, liquidity,
@@ -157,7 +159,10 @@ check('...autoplays the carousel calmly from right to left',
 check('...uses each token banner as the full card background',
       'data-banner=' in js and 'card.style.backgroundImage' in js)
 css=open(os.path.join(os.path.dirname(__file__), '..', 'static', 'home-trending-hero.css')).read()
-check('...keeps trending slides narrow so the next card is visibly peeking in',
-      'flex:0 0 82%' in css and 'max-width:420px' in css and 'gap:12px' in css)
+check('...uses the approved thin strip layout with the next card visibly peeking in',
+      'height:68px' in css and 'flex-basis:95%' in css and 'oa-th-strip-id' in css
+      and 'oa-th-strip-stat' in css and 'gap:10px' in css)
 check('...only on the For You tab', "active.dataset.tab!=='foryou'" in js)
 raise SystemExit(0 if all(checks) else 1)
+
+[executed on device: orcagent-srv001 (c9150a05-2aaf-4129-b814-0c2e85e68396)]
