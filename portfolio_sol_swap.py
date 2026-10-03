@@ -63,12 +63,34 @@ def install(d):
             raise PermissionError('Not authenticated')
         return wallet
 
-    def balances(wallet):
+    def balances(wallet, *, read_only=False):
         address = d._get_trading_wallet_address(wallet)
         if not address:
             raise ValueError('No Solana trading wallet configured')
+
+        # Prefer the same exact-account read Portfolio already uses. It reads
+        # native SOL + the canonical USDC ATA from one healthy RPC and does not
+        # depend on indexed getTokenAccountsByOwner, which can be 429 while the
+        # ordinary account methods are healthy. The old swap modal skipped this
+        # path, so Portfolio could show SOL correctly while Swap said
+        # "Balance unavailable".
+        direct = getattr(d, '_get_bot_solana_balances', None)
+        if callable(direct):
+            try:
+                pair = direct(address)
+                sol = Decimal(str(pair[0]))
+                usdc = Decimal(str(pair[1]))
+                if sol.is_finite() and usdc.is_finite() and min(sol, usdc) >= 0:
+                    return sol, usdc
+            except Exception:
+                pass
+
+        # Independent fallbacks keep execution fail-closed. The read-only modal
+        # may reuse the last recently verified USDC amount during a short RPC
+        # hiccup; quote/execute calls always request a fresh spendable amount.
         sol = Decimal(str(d._get_user_sol(address)))
-        usdc = Decimal(str(d._get_solana_usdc_balance(address)))
+        usdc = Decimal(str(d._get_solana_usdc_balance(
+            address, allow_stale=bool(read_only))))
         if not sol.is_finite() or not usdc.is_finite() or min(sol, usdc) < 0:
             raise ValueError('Balance unavailable; please retry')
         return sol, usdc
@@ -84,7 +106,7 @@ def install(d):
     @d.rate_limit(30, 60)
     def portfolio_sol_swap_balance():
         try:
-            sol, usdc = balances(identity())
+            sol, usdc = balances(identity(), read_only=True)
             reserve = Decimal(str(d.SOL_NETWORK_RESERVE))
             maximum = max(Decimal(0), sol - reserve).quantize(Decimal('0.000000001'), rounding=ROUND_DOWN)
             return jsonify(ok=True, sol=str(sol), usdc=str(usdc),
