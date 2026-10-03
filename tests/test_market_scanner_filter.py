@@ -104,6 +104,9 @@ namespace = {
     'threading': threading,
     'ThreadPoolExecutor': __import__('concurrent.futures', fromlist=['ThreadPoolExecutor']).ThreadPoolExecutor,
     '_dex_get': _fake_dex_get,
+    '_DEX_SOLANA_DISCOVERY_META_LOCK': threading.Lock(),
+    '_DEX_SOLANA_DISCOVERY_META': {},
+    '_LIVE_MARKET_MIN_MCAP_USD': 30000,
 }
 exec(_const_src['_MARKET_LIVE_CHAINS'], namespace)
 exec(_const_src['_MARKET_MAJOR_ADDRESSES'], namespace)
