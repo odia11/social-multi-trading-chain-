@@ -45,7 +45,8 @@ class ReconcileCommitmentTests(unittest.TestCase):
              patch.object(eng.time, 'sleep') as sleep:
             raw, changed = eng._reconciled_token_balance(eng.USDC_MINT, 'increase', 0)
         self.assertFalse(changed)
-        self.assertEqual(sleep.call_count, 7)
+        self.assertEqual(sleep.call_count, 11)
+        self.assertTrue(all(call.args[0] == 0.4 for call in sleep.call_args_list))
 
 
 if __name__ == '__main__':
