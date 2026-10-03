@@ -1583,6 +1583,7 @@ function _sxClearQuote(){
 }
 // keepQuote: a balance refresh shouldn't drop a quote that is still valid.
 function _sxInput(keepQuote){
+  if(_sx&&_sx.uncertain){ _sxSetCta('Check Activity before retrying',false); return }
   if(!_sx||!_sxEl('cv-amount')) return
   var el=_sxEl('cv-amount')
   // Dutch keyboards type a comma; the amount must still parse.
@@ -1643,6 +1644,7 @@ function _sxToggleDetails(){
 }
 function _sxSwap(){
   if(_convertBusy) return
+  if(_sx.uncertain) return
   if(_sx.retry){ _sx.retry=false; _sxInput(); return }
   var q=_sx.quote
   if(!q) return
@@ -1661,6 +1663,7 @@ function _sxSwap(){
     if(_convertBusy) return
     clearInterval(wait)
     var m=_sxEl('cv-quote')
+    if(_sx&&_sx.uncertain){ _sxSetCta('Check Activity before retrying',false); return }
     if(m&&_sxOpen()){ var why=m.innerHTML; _sx.quote=null; _sxInput(); m.innerHTML=why }
   },250)
 }
@@ -1793,10 +1796,39 @@ function _convertGetQuote(){
     .catch(function(){out.innerHTML='<div class="w-modal-note" style="color:var(--red)">Network error — try again</div>'})
     .finally(function(){btn.disabled=false;btn.textContent='Get Quote'})
 }
+function _refreshAfterConfirmedSwap(){
+  // One authoritative forced snapshot refreshes SOL, USDC, total and holdings
+  // together. The old flow fired several balance/token requests 1.5s later,
+  // which both felt slow and could briefly paint values from different RPC
+  // moments. If an older snapshot request is already in flight, let it finish
+  // and then force one post-confirmation snapshot.
+  var prior=_portfolioSnapshotPromise
+  function fresh(){
+    _portfolioSnapshotAt=0
+    _portfolioSnapshotData=null
+    return _getPortfolioSnapshot(true).then(function(snap){
+      _paintPortfolioSnapshotInstant(snap)
+      // These repaint from the snapshot cache above; they do not trigger a
+      // second network request because it was just refreshed.
+      loadBalance();loadUsdcSummary()
+      return snap
+    })
+  }
+  var p=prior?prior.catch(function(){return null}).then(fresh):fresh()
+  p.catch(function(){
+    // Keep the confirmed transaction successful even if the display refresh
+    // itself has a transient problem; normal background refresh will recover.
+    loadBalance();loadUsdcSummary()
+  })
+  if(typeof _loadActivity==='function')_loadActivity()
+  return p
+}
+
 function _convertConfirm(){
   if(!_convertQuote||_convertBusy) return
   if(Date.now()>_convertQuote.expires_at){_convertInvalidate();_convertGetQuote();return}
   var quote=_convertQuote
+  var acknowledged=false
   _convertQuote=null
   _convertBusy=true
   var controls=document.querySelectorAll('#w-modal button,#w-modal input,#w-modal select')
@@ -1812,14 +1844,15 @@ function _convertConfirm(){
       out.innerHTML='<div class="w-modal-note" style="color:var(--red)">'+esc(d.msg||'Conversion failed')+'</div>'
       return
     }
-    _wToast('✓ Conversion confirmed',true)
+    acknowledged=true
     _convertBusy=false
     _closeModal()
-    setTimeout(function(){
-      loadBalance();loadUsdcSummary();loadTokens(true);_loadActivity()
-    },1500)
+    _wToast('✓ Conversion confirmed',true)
+    _refreshAfterConfirmedSwap()
   }).catch(function(){
-    out.innerHTML='<div class="w-modal-note" style="color:var(--red)">Network error — check your activity before retrying.</div>'
+    if(acknowledged) return
+    if(_sx) _sx.uncertain=true
+    out.innerHTML='<div class="w-modal-note" style="color:var(--red)">Confirmation unavailable. This swap may already be completed. Check Activity and your balance before making another swap.</div>'
   }).finally(function(){_convertBusy=false;controls.forEach(function(el){el.disabled=false})})
 }
 
