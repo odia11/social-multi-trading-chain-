@@ -76,6 +76,7 @@ def _portfolio_snapshot(d, wallet, bust=False):
         raise RuntimeError('portfolio snapshot incomplete: ' + ','.join(sorted(errors.keys())))
 
     token_data = results.get('tokens') or {'tokens': []}
+    inventory_complete = bool(token_data.get('inventory_complete', True))
     assets = _merge_evm_positions(d, wallet, token_data.get('tokens') or [])
     for t in assets:
         if 'usd_value' not in t:
@@ -136,9 +137,10 @@ def _portfolio_snapshot(d, wallet, bust=False):
         'other_assets_value_usd': round(other_value, 4),
         'assets': assets,
         'asset_count': len(assets),
+        'inventory_complete': inventory_complete,
         'partial': False,
         'stale': False,
-        'unavailable': [],
+        'unavailable': [] if inventory_complete else ['full_token_index'],
     }
     with _SNAPSHOT_LOCK:
         _SNAPSHOT_CACHE[wallet] = (now, snapshot)
