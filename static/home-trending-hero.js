@@ -1,5 +1,3 @@
-[Reading 493 lines from start (total: 493 lines, 0 remaining)]
-
 /* Home feed "Trending now" card, shown as a post from OrcAgent.
  *
  * Shows the one token /api/home/trending-hero says is trending right now
@@ -37,12 +35,20 @@ var CHAINS={solana:['S','#9945ff','Solana']};
 // Like as its action row. It sits right before #center-feed rather than
 // inside it, so the feed's own re-renders never wipe it.
 function ensureHost(){
-  if(host&&document.body.contains(host))return host;
-  var feed=document.getElementById('center-feed');
-  if(!feed||!feed.parentNode)return null;
-  host=document.createElement('article');
-  host.id='oa-trend-hero';host.className='fc-card oa-th-post';host.setAttribute('aria-label','Trending token');
-  feed.parentNode.insertBefore(host,feed);
+  if(!host||!document.body.contains(host)){
+    var feed=document.getElementById('center-feed');
+    if(!feed||!feed.parentNode)return null;
+    host=document.createElement('article');
+    host.id='oa-trend-hero';host.className='fc-card oa-th-post';host.setAttribute('aria-label','Trending token');
+    feed.parentNode.insertBefore(host,feed);
+  }
+  // Mobile Home builds its visible For You/Following tab bar after this script
+  // may already have booted. Keep the trending strip immediately below that
+  // visible tab bar instead of leaving it behind the hidden legacy tabs.
+  var mobileTabs=document.getElementById('oa-m-feed-label');
+  if(mobileTabs&&mobileTabs.parentNode&&mobileTabs.nextElementSibling!==host){
+    mobileTabs.insertAdjacentElement('afterend',host);
+  }
   syncTab();
   return host;
 }
@@ -493,5 +499,3 @@ function boot(){
 window.OrcAgentRefreshTrendingHero=refresh;
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
-
-[executed on device: orcagent-srv001 (c9150a05-2aaf-4129-b814-0c2e85e68396)]
