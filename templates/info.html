@@ -82,6 +82,42 @@ html,body{min-height:100vh;min-height:100dvh;background:var(--bg);font-family:va
 .info-body .callout{background:var(--accent-dim);border:1px solid var(--accent-border);border-radius:10px;padding:14px 16px;color:var(--accent);font-size:13px;margin-bottom:14px}
 .info-body .callout strong{color:var(--accent)}
 
+/* ── ABOUT ── */
+.about-hero{
+  position:relative;overflow:hidden;
+  margin-bottom:18px;padding:24px;
+  border:1px solid var(--accent-border);border-radius:16px;
+  background:
+    radial-gradient(circle at 92% 8%,rgba(247,185,85,.13),transparent 34%),
+    linear-gradient(145deg,#12151a 0%,#0d0f13 100%);
+}
+.about-hero:after{
+  content:"";position:absolute;right:-44px;bottom:-64px;width:180px;height:180px;
+  border:1px solid rgba(247,185,85,.08);border-radius:50%;pointer-events:none;
+}
+.about-kicker{display:flex;align-items:center;gap:7px;margin-bottom:12px;color:var(--accent);font:700 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase}
+.about-kicker-dot{width:7px;height:7px;border-radius:50%;background:#58d68d;box-shadow:0 0 12px rgba(88,214,141,.55)}
+.about-headline{max-width:620px;margin:0 0 10px!important;font-family:var(--title-font)!important;font-size:24px!important;line-height:1.28!important;letter-spacing:-.01em!important}
+.about-lead{max-width:650px;margin:0!important;color:#aeb5c0!important;font-size:14.5px;line-height:1.7}
+.about-pills{display:flex;flex-wrap:wrap;gap:7px;margin-top:18px}
+.about-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 9px;border:1px solid #252a32;border-radius:999px;background:rgba(8,10,13,.58);color:#aeb5c0;font:600 10px/1 var(--mono)}
+.about-pill b{color:var(--text);font-weight:700}
+.about-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:18px 0}
+.about-card{min-width:0;padding:15px;border:1px solid #20242b;border-radius:12px;background:var(--bg3)}
+.about-card-icon{display:flex;align-items:center;justify-content:center;width:30px;height:30px;margin-bottom:10px;border:1px solid var(--accent-border);border-radius:9px;background:var(--accent-dim);font-size:14px}
+.about-card h3{margin:0 0 5px!important;font-size:13px!important}
+.about-card p{margin:0!important;color:#7f8793!important;font-size:12px;line-height:1.55}
+.about-flow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0 18px;counter-reset:aboutstep}
+.about-step{position:relative;padding:13px 12px 12px 40px;border:1px solid #20242b;border-radius:11px;background:#101318;color:#8e96a1;font-size:11.5px;line-height:1.5}
+.about-step:before{counter-increment:aboutstep;content:counter(aboutstep);position:absolute;left:12px;top:13px;width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:var(--accent-dim);color:var(--accent);font:700 10px/1 var(--mono)}
+.about-step strong{display:block;color:var(--text);font-size:11.5px;margin-bottom:2px}
+@media(max-width:600px){
+  .about-hero{padding:18px;border-radius:14px}
+  .about-headline{font-size:20px!important}
+  .about-grid{grid-template-columns:1fr}
+  .about-flow{grid-template-columns:1fr}
+}
+
 /* ── FEE STAT ROW ── */
 .fee-stat-row{display:flex;gap:12px;margin-bottom:18px;flex-wrap:wrap}
 .fee-stat{flex:1;min-width:140px;background:var(--bg3);border:1px solid #21252c;border-radius:10px;padding:14px 16px}
@@ -131,47 +167,65 @@ html,body{min-height:100vh;min-height:100dvh;background:var(--bg);font-family:va
   <section class="info-section" id="about">
     <div class="section-title"><span class="section-icon">◆</span> About</div>
     <div class="info-body">
-      <p>OrcAgent is a social trading platform for meme coins across Solana,
-      Solana. Connect a
-      dedicated wallet, follow traders you trust, and let a rules-based bot
-      execute your strategy automatically — or trade manually whenever you want
-      full control.</p>
+      <div class="about-hero">
+        <div class="about-kicker"><span class="about-kicker-dot"></span> Built on Solana</div>
+        <h2 class="about-headline">Trade it. Share it.<br>All in one place.</h2>
+        <p class="about-lead">OrcAgent is a <strong>Solana social trading platform</strong>
+        that brings live markets, automated trading, copy trading, token launches
+        and the social feed into one fast app. Trade with USDC, discover what the
+        community is watching, and keep your portfolio, messages and activity
+        together.</p>
+        <div class="about-pills">
+          <span class="about-pill"><b>Solana</b> network</span>
+          <span class="about-pill"><b>USDC</b> trading</span>
+          <span class="about-pill"><b>Live</b> market data</span>
+          <span class="about-pill"><b>Social</b> by design</span>
+        </div>
+      </div>
 
-      <p>You fund it with <strong>USDC</strong>, and that is the only currency
-      you ever choose. Moving it to whichever chain a trade needs is handled
-      for you.</p>
+      <div class="about-grid">
+        <div class="about-card">
+          <div class="about-card-icon">↗</div>
+          <h3>Live Market</h3>
+          <p>Discover trending and newly moving Solana tokens, open a token and trade without leaving OrcAgent.</p>
+        </div>
+        <div class="about-card">
+          <div class="about-card-icon">◎</div>
+          <h3>Auto Trading</h3>
+          <p>Set your own position size, take-profit and stop-loss rules while OrcAgent scans for qualifying opportunities.</p>
+        </div>
+        <div class="about-card">
+          <div class="about-card-icon">◉</div>
+          <h3>Social &amp; Copy Trading</h3>
+          <p>Follow traders, share calls and trades, react to posts and choose whose entries you want to copy.</p>
+        </div>
+        <div class="about-card">
+          <div class="about-card-icon">✦</div>
+          <h3>Launch Tokens</h3>
+          <p>Create a Solana token from OrcAgent, add its details and track creator-fee activity from the same app.</p>
+        </div>
+        <div class="about-card">
+          <div class="about-card-icon">✉</div>
+          <h3>Messages</h3>
+          <p>Chat directly, share token cards and photos, forward content and tip other OrcAgent users.</p>
+        </div>
+        <div class="about-card">
+          <div class="about-card-icon">◇</div>
+          <h3>One Portfolio</h3>
+          <p>See your Solana trading balance, positions and recent activity from one dedicated portfolio view.</p>
+        </div>
+      </div>
 
-      <h3>How it works</h3>
-      <ol>
-        <li><strong>Connect a wallet.</strong> OrcAgent generates a separate,
-        dedicated <strong>trading wallet</strong> for your bot and manual
-        trades — this is not the same wallet you sign in with, and your seed
-        phrase never leaves your own wallet app.</li>
-        <li><strong>Set your rules.</strong> Choose a breakout trigger, take
-        profit, stop loss, and how many positions the bot can hold at once.</li>
-        <li><strong>The bot scans the market.</strong> It continuously checks
-        live tokens on every supported chain against your rules, runs basic
-        safety checks (mint/freeze authority, rug-pull signals) before
-        entering, and exits automatically when your take-profit or stop-loss
-        is hit.</li>
-        <li><strong>Follow the social layer.</strong> See a live feed of trades
-        and posts from traders you follow, message them directly, and
-        optionally copy their trades at your own position size.</li>
-      </ol>
+      <h3>Start in three steps</h3>
+      <div class="about-flow">
+        <div class="about-step"><strong>Connect</strong>Sign in with a supported wallet. OrcAgent keeps trading funds in a separate dedicated trading wallet.</div>
+        <div class="about-step"><strong>Fund</strong>Add USDC to your OrcAgent trading wallet and choose whether you want to trade manually or use automation.</div>
+        <div class="about-step"><strong>Trade &amp; share</strong>Use Live Market, follow traders, post your calls and keep control of your own settings and risk.</div>
+      </div>
 
-      <h3>What you can do</h3>
-      <ul>
-        <li>Automate entries and exits with your own breakout / TP / SL rules</li>
-        <li>Trade manually in <a href="/live-market">Live Market</a> using the
-        same live token data the bot sees</li>
-        <li>Follow other traders and copy their trades in real time</li>
-        <li>Track a live feed of trades and posts from people you follow</li>
-        <li>Chat directly with other traders, share images and trade cards</li>
-      </ul>
-
-      <div class="callout"><strong>OrcAgent is a tool for automating your own
-      trading rules.</strong> It is not investment advice, and no automated
-      strategy removes the risk of loss.</div>
+      <div class="callout"><strong>You stay in control.</strong> OrcAgent provides
+      trading and automation tools; it does not guarantee returns or remove the
+      risk of loss. Only use funds you are prepared to put at risk.</div>
     </div>
   </section>
 
@@ -185,8 +239,8 @@ html,body{min-height:100vh;min-height:100dvh;background:var(--bg);font-family:va
         isn't holding your main savings.</li>
         <li>Fund your dedicated <strong>trading wallet</strong> (shown on the
         <a href="/wallet">Wallet</a> page) with <strong>USDC</strong> — that
-        is what every trade spends, on every chain. Network fees are handled
-        for you; you do not need to hold the gas token of each chain.</li>
+        is the trading balance OrcAgent uses on Solana. Keep a small amount of
+        SOL available for Solana network and token-account costs.</li>
         <li>Under <a href="/settings">Bot Settings</a>, set:
           <ul style="margin-top:6px">
             <li><strong>Breakout Trigger</strong> — the minimum price move
@@ -223,12 +277,10 @@ html,body{min-height:100vh;min-height:100dvh;background:var(--bg);font-family:va
       wallet at any time from the same page. Keeping trading funds in this
       dedicated wallet (rather than your main wallet) limits what the bot can
       ever touch.</p>
-      <p>USDC is the one currency you deposit and spend, on every chain. A
-      trade on a chain where your balance is not yet sitting will bridge it
-      there first and then complete on its own — you do not have to move
-      anything by hand. Solana also needs a small amount of SOL for its own
-      network fees, which is why the Wallet page shows that separately from
-      what you have to trade with.</p>
+      <p>USDC is the trading balance OrcAgent uses for Solana buys and sells.
+      Solana also needs a small amount of SOL for network fees and token-account
+      creation, which is why the Wallet page shows SOL separately from the USDC
+      you have available to trade.</p>
 
       <h3>Copy trading</h3>
       <p>Enable copy trading on a trader's profile to automatically mirror
@@ -311,9 +363,8 @@ html,body{min-height:100vh;min-height:100dvh;background:var(--bg);font-family:va
       <p>Connecting a wallet, deposits, withdrawals and token sends, tips,
       token calls and holding a position cost nothing from OrcAgent. Only the
       network's own fee applies.</p>
-      <p>Moving funds between chains through the in-app bridge pays the bridge
-      provider's fee and slippage, which come out of the bridged amount and are
-      shown before you confirm. OrcAgent adds nothing on top.</p>
+      <p>OrcAgent currently supports Solana only; there is no active
+      cross-chain bridge in the product.</p>
 
       <div class="callout"><strong>Fee rates are configurable and may
       change.</strong> The rate shown above is read live and is always the
