@@ -1209,6 +1209,7 @@ var PT_TX_EXPLORERS = {{ tx_explorers|default({})|tojson }};
 // rate the fee code does not charge.
 var PT_FEE_RATE_TXN = {{ fee_rate_txn|default(0.0075) }};
 </script>
+<script type="application/json" id="pt-initial-feed">{{ {'tokens': initial_market_tokens|default([]), 'counts': initial_market_counts|default({})}|tojson }}</script>
 <script src="/static/live-market-pro.js?v={{ app_version }}" defer></script>
 <script src="/static/pull-to-refresh.js?v={{ app_version }}"></script>
 <script>
