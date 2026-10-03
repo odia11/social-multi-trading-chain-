@@ -78,8 +78,23 @@ var _NB_LIVE_CHAINS=['solana'];
 var _NB_CHAIN_LABELS={solana:'SOL'};
 
 (function(){
-  var DEFAULT_FETCH_TIMEOUT_MS=15000,UPLOAD_FETCH_TIMEOUT_MS=60000,_origFetch=window.fetch.bind(window);
-  window.fetch=function(input,init){if(init&&init.signal)return _origFetch(input,init);var isUpload=!!(init&&typeof FormData!=='undefined'&&init.body instanceof FormData),ctl=new AbortController(),timer=setTimeout(function(){ctl.abort()},isUpload?UPLOAD_FETCH_TIMEOUT_MS:DEFAULT_FETCH_TIMEOUT_MS),opts=Object.assign({},init||{},{signal:ctl.signal});return _origFetch(input,opts).finally(function(){clearTimeout(timer)})};
+  var DEFAULT_FETCH_TIMEOUT_MS=15000, UPLOAD_FETCH_TIMEOUT_MS=60000;
+  var TRANSACTION_FETCH_TIMEOUT_MS=180000;
+  var original=window.fetch.bind(window);
+  window.fetch=function(input,init){
+    if((init&&init.signal)||(typeof Request!=='undefined'&&input instanceof Request&&input.signal&&input.signal.aborted))
+      return original(input,init);
+    var method=String((init&&init.method)||(input&&input.method)||'GET').toUpperCase();
+    var isUpload=!!(init&&typeof FormData!=='undefined'&&init.body instanceof FormData);
+    // Mutations can wait for blockchain confirmation; aborting the browser
+    // request does not cancel server-side signing or broadcast. Never retry.
+    var timeout=(method!=='GET'&&method!=='HEAD')?TRANSACTION_FETCH_TIMEOUT_MS:
+      (isUpload?UPLOAD_FETCH_TIMEOUT_MS:DEFAULT_FETCH_TIMEOUT_MS);
+    if(isUpload) timeout=UPLOAD_FETCH_TIMEOUT_MS;
+    var ctl=new AbortController(),timer=setTimeout(function(){ctl.abort()},timeout);
+    var opts=Object.assign({},init||{},{signal:ctl.signal});
+    return original(input,opts).finally(function(){clearTimeout(timer)});
+  };
 })();
 
 (function(){
