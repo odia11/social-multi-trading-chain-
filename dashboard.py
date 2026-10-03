@@ -3389,6 +3389,13 @@ def _encrypt_legacy_x_tokens() -> None:
 
 # ── ROLE HELPERS ──
 
+_PRIVILEGED_ROLES = frozenset({'admin', 'executive', 'moderator', 'analyst'})
+
+def _normalized_privileged_role(value) -> str:
+    """Return only a real staff role; unknown/legacy values are ordinary users."""
+    role = str(value or '').strip().lower()
+    return role if role in _PRIVILEGED_ROLES else 'user'
+
 def get_user_role(wallet: str) -> str:
     """Return role for a wallet: 'admin', 'executive', 'moderator', 'analyst', or 'user'."""
     if not wallet:
@@ -3408,14 +3415,14 @@ def get_user_role(wallet: str) -> str:
         ).fetchone()
         if row:
             conn.close()
-            return row[0].lower()
+            return _normalized_privileged_role(row[0])
         # fall back to users table role column
         row = conn.execute(
             'SELECT role FROM users WHERE wallet_address=?', (wallet,)
         ).fetchone()
         conn.close()
         if row and row[0]:
-            return row[0].lower()
+            return _normalized_privileged_role(row[0])
     except Exception:
         pass
     return 'user'
@@ -3437,15 +3444,17 @@ def _team_roles_for_wallets(wallets) -> dict:
         ph = ','.join('?' * len(wallets))
         for w, r in conn.execute(
                 f'SELECT wallet_address, role FROM admin_roles WHERE wallet_address IN ({ph})', wallets):
-            if r:
-                roles[w] = r.lower()
+            role = _normalized_privileged_role(r)
+            if role != 'user':
+                roles[w] = role
         remaining = [w for w in wallets if w not in roles]
         if remaining:
             ph2 = ','.join('?' * len(remaining))
             for w, r in conn.execute(
                     f'SELECT wallet_address, role FROM users WHERE wallet_address IN ({ph2})', remaining):
-                if r and r.lower() != 'user':
-                    roles[w] = r.lower()
+                role = _normalized_privileged_role(r)
+                if role != 'user':
+                    roles[w] = role
         conn.close()
     except Exception:
         pass
@@ -18653,7 +18662,7 @@ _NAVBAR_MORE_LINKS = [
     # each other and made the menu look busier than it is.
     ('/profile', 'Profile', 'profile'),
     ('/settings', 'Settings', 'settings'),
-    ('/admin', 'Admin Console', 'admin', 'pt-nb-admin-link', 'display:none'),
+    ('/admin', 'Admin Console', 'admin', 'pt-nb-admin-link', 'display:none', 'hidden aria-hidden="true"'),
     ('/info', 'About', 'about'),
 ]
 
@@ -18674,8 +18683,9 @@ def _navbar_more_items_html(extra_class: str = '') -> str:
         icon      = _nav_icon(entry[2]) if len(entry) > 2 else ''
         extra_cls = (' ' + entry[3]) if len(entry) > 3 else ''
         style     = (' style="%s"' % entry[4]) if len(entry) > 4 else ''
-        parts.append('<a class="pt-nb-more-item%s%s" href="%s"%s>%s<span>%s</span></a>'
-                     % (cls_suffix, extra_cls, href, style, icon, label))
+        attrs     = (' ' + entry[5]) if len(entry) > 5 else ''
+        parts.append('<a class="pt-nb-more-item%s%s" href="%s"%s%s>%s<span>%s</span></a>'
+                     % (cls_suffix, extra_cls, href, style, attrs, icon, label))
     parts.append('<div class="pt-nb-more-sep%s"></div>' % cls_suffix)
     parts.append('<button class="pt-nb-more-item%s danger pt-nb-disconnect-btn">%s<span>Disconnect Wallet</span></button>'
                  % (cls_suffix, _nav_icon('disconnect')))
@@ -24335,6 +24345,8 @@ def api_me():
     avatar_url = row[2] if row else None
     us      = get_user_state(wallet)
     balance = us.get('sol', 0.0)
+    role    = get_user_role(wallet)
+    can_access_admin = role in _PRIVILEGED_ROLES
     return jsonify({
         'ok':       True,
         'user_id':  user_id,
@@ -24342,11 +24354,11 @@ def api_me():
         'username': username or '',
         'avatar':   avatar_url or '',
         'balance':  balance,
-        # Same gate /admin itself uses (get_user_role(wallet) == 'user' → redirect) --
-        # _is_owner(wallet) alone would hide the nav link from anyone holding an
-        # assigned admin/executive/moderator/analyst role (admin_roles table),
-        # even though they can already reach /admin directly by URL.
-        'is_admin': get_user_role(wallet) != 'user',
+        # Keep is_admin for legacy callers, but expose the explicit capability
+        # used by navigation. Only the four staff roles may ever see /admin.
+        'role': role,
+        'is_admin': can_access_admin,
+        'can_access_admin': can_access_admin,
     })
 
 
