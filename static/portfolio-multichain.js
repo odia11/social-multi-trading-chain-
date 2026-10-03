@@ -86,6 +86,7 @@ function refreshValue(forceFresh){
            sol:num(s.sol&&s.sol.value_usd),
            other:num(s.other_assets_value_usd),
            total:num(s.total_usd)});
+    if(typeof window.OrcAgentPaintPortfolioBreakdown==='function')window.OrcAgentPaintPortfolioBreakdown(s);
     decorate();return true;
   }).catch(function(){return false}).finally(function(){_busy=false});
 }
