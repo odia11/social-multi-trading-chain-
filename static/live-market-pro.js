@@ -1197,6 +1197,45 @@ function updateAdvCount(){
 }
 
 /* ── feed loading ── */
+var _FEED_CACHE_KEY='orcaLiveMarketFeedV2';
+function _defaultFeedState(){
+  return ST.sort==='trending' && Number(ST.minLiquidity)===0 && ST.age==='any'
+    && !ST.lpLocked && !ST.mintRevoked && !ST.hideHoneypots && !ST.verifiedSocials;
+}
+function cacheDefaultFeed(){
+  if(!_defaultFeedState() || !ST.tokens.length) return;
+  try{
+    sessionStorage.setItem(_FEED_CACHE_KEY,JSON.stringify({
+      ts:Date.now(),tokens:ST.tokens.slice(0,30),counts:ST.counts||{}
+    }));
+  }catch(_){}
+}
+function hydrateInitialFeed(){
+  if(ST.tokens.length) return true;
+  var payload=null,el=document.getElementById('pt-initial-feed');
+  try{ if(el&&el.textContent) payload=JSON.parse(el.textContent); }catch(_){}
+  if(!payload || !Array.isArray(payload.tokens) || !payload.tokens.length){
+    try{
+      var cached=JSON.parse(sessionStorage.getItem(_FEED_CACHE_KEY)||'null');
+      if(cached && Date.now()-Number(cached.ts||0)<300000) payload=cached;
+    }catch(_){}
+  }
+  if(!payload || !Array.isArray(payload.tokens) || !payload.tokens.length) return false;
+  ST.tokens=payload.tokens.slice(0,30);
+  ST.counts=payload.counts||{};
+  renderSortList();
+  renderStoryRail();
+  renderFeedList();
+  updateHeaderCounts();
+  return true;
+}
+function patchWatchButtons(){
+  document.querySelectorAll('.pt-watch-btn[data-mint]').forEach(function(btn){
+    var active=watchSet.has(btn.dataset.mint);
+    btn.classList.toggle('active',active);
+    btn.textContent=active?'★':'☆';
+  });
+}
 function updateHeaderCounts(){
   var n = ST.tokens.length;
   var el;
@@ -1746,6 +1785,7 @@ function loadFeed(isPoll){
         renderFeedList();
       }
       updateHeaderCounts();
+      cacheDefaultFeed();
     })
     .catch(function(){})
     .finally(function(){
@@ -3104,6 +3144,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
   _prefetchBalances();
   renderSortList();
+  var _hydratedFeed=hydrateInitialFeed();
   // Deep links must paint the requested token before the full scanner feed.
   // The feed is only a background numbers refresh once that profile exists.
   // ?addr= is the older spelling that token cards in DMs and shared trades
@@ -3130,10 +3171,12 @@ document.addEventListener('DOMContentLoaded', function(){
     });
     prependSearchedToken(_qMint,'','').finally(function(){
       if(!ST.tokens.some(function(t){return t.mint===_qMint;})) _pendingDeepLinkMint=_qMint;
-      loadWatchlistSet().then(function(){ loadFeed(true); });
+      loadFeed(true);
+      loadWatchlistSet().then(patchWatchButtons);
     });
   } else {
-    loadWatchlistSet().then(function(){ loadFeed(); });
+    loadFeed(_hydratedFeed);
+    loadWatchlistSet().then(patchWatchButtons);
   }
   loadSurges();
   loadLaunches();
