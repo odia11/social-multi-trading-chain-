@@ -1,89 +1,51 @@
-"""Regression coverage for automatic USDC profile tips."""
-import os
-import sys
-import types
-from decimal import Decimal
+"""Current Solana-only USDC tip contract."""
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-import portfolio_token_withdraw as tip
-
 BACKEND = (ROOT / 'portfolio_token_withdraw.py').read_text()
 PROFILE = (ROOT / 'templates' / 'profile.html').read_text()
+LEDGER = (ROOT / 'tip_experience.py').read_text()
 
+checks = []
+def check(label, condition):
+    checks.append(bool(condition))
+    print(('PASS ' if condition else 'FAIL ') + label)
 
-def test_profile_no_longer_hardcodes_solana_tip_route():
-    section = PROFILE[PROFILE.index('function _sendTip()'):PROFILE.index('</script>', PROFILE.index('function _sendTip()'))]
-    assert "fetch('/api/tip'" in section
-    assert "chain:'solana'" not in section
-    assert '_tipMint' not in PROFILE
-    assert '_tipRecipient' not in PROFILE
-    assert 'Automatic USDC routing' in PROFILE
+tip = BACKEND[BACKEND.index("@app.post('/api/tip')"):
+              BACKEND.index("@app.post('/api/wallet/send-token')")]
 
+check('profile sends immutable recipient id, not a wallet address',
+      "fetch('/api/tip'" in PROFILE
+      and 'recipient_user_id:_tipPeerId' in PROFILE
+      and '_tipRecipient' not in PROFILE)
+check('server resolves the recipient wallet itself',
+      '_user_tip_wallets(d, recipient_user_id)' in tip
+      and "body.get('to_address')" not in tip)
+check('recipient resolver is Solana-only',
+      "SELECT wallet_address FROM users WHERE id=?" in BACKEND
+      and "return {'session': session_wallet, 'solana': solana_wallet}" in BACKEND)
+check('tips transfer real Solana USDC',
+      "_solana_transfer(" in tip and 'd.USDC_MINT' in tip)
+check('tip amount is never silently reduced for gas',
+      'Never reduce the tip amount.' in tip
+      and "spare = sol['balance'] - amount" in tip)
+check('low gas can bootstrap only from spare user USDC',
+      "_gasless_solana_native_topup" in tip
+      and "spare >= Decimal('0.20')" in tip)
+check('duplicate submissions are guarded independent of RPC',
+      "key = ('tip', sender_wallet, recipient_user_id, str(amount.normalize()))" in tip
+      and "_RECENT.get(key, 0) < 45" in tip)
+check('tip mutation is authenticated, CSRF checked and rate limited',
+      'd._authenticated_wallet()' in tip
+      and '_csrf_ok(d)' in tip
+      and "_rate_ok('tip_wallet:' + sender_wallet" in tip)
+check('successful submission is persisted before notification workflow',
+      '_record_tip(' in tip and "status':'submitted'" in tip
+      and 'record_submitted' in BACKEND)
+check('ledger only counts a confirmed tip as delivered',
+      "state == 'confirmed'" in LEDGER
+      and 'tip_transactions' in LEDGER)
+check('tip response exposes the Solana explorer receipt',
+      "'explorer':_explorer(chain, tx_hash)" in tip)
 
-def test_browser_sends_identity_not_recipient_address():
-    section = PROFILE[PROFILE.index('function _sendTip()'):PROFILE.index('</script>', PROFILE.index('function _sendTip()'))]
-    assert 'recipient_user_id:_tipPeerId' in section
-    assert 'to_address' not in section
-    assert 'token_address' not in section
-
-
-def test_backend_resolves_recipient_server_side():
-    assert "@app.post('/api/tip')" in BACKEND
-    assert '_user_tip_wallets(d, recipient_user_id)' in BACKEND
-    assert "SELECT wallet_address, COALESCE(bsc_wallet_address" in BACKEND
-    assert "body.get('to_address')" not in BACKEND[BACKEND.index("@app.post('/api/tip')"):BACKEND.index("@app.post('/api/wallet/send-token')")]
-
-
-def test_duplicate_guard_is_chain_independent():
-    route = BACKEND[BACKEND.index("@app.post('/api/tip')"):BACKEND.index("@app.post('/api/wallet/send-token')")]
-    assert "key = ('tip', sender_wallet, recipient_user_id, str(amount.normalize()))" in route
-    assert "_RECENT.get(key, 0) < 45" in route
-
-
-def test_evm_selector_prefers_funded_actual_usdc_chains():
-    d = types.SimpleNamespace()
-    d.EVM_CHAINS = {
-        'base': {'usdc':'0xbase', 'usdc_symbol':'USDC'},
-        'bsc': {'usdc':'0xbsc', 'usdc_symbol':'USDC'},
-        'robinhood': {'usdc':'0xusdg', 'usdc_symbol':'USDG'},
-    }
-    d.ACTIVE_EVM_CHAINS = {k:v for k,v in d.EVM_CHAINS.items() if k != 'robinhood'}
-    d.get_evm_usdc_balance = lambda addr, chain: {'base':5, 'bsc':20, 'robinhood':100}[chain]
-    d.get_evm_native_balance = lambda addr, chain: {'base':0, 'bsc':0.01, 'robinhood':1}[chain]
-    old = tip._wallet_keys
-    try:
-        tip._wallet_keys = lambda d, wallet: ('solenc','evmenc','0xsender')
-        ready, needs = tip._tip_evm_candidates(d, 'sender', Decimal('4'), '0xrecipient')
-    finally:
-        tip._wallet_keys = old
-    assert [x['chain'] for x in ready] == ['bsc']
-    assert [x['chain'] for x in needs] == ['base']
-    assert all(x['chain'] != 'robinhood' for x in ready + needs)
-
-
-def test_zero_gas_fallback_uses_sender_own_stablecoin():
-    route = BACKEND[BACKEND.index("@app.post('/api/tip')"):BACKEND.index("@app.post('/api/wallet/send-token')")]
-    assert "candidate['balance'] < amount + topup_amount" in route
-    assert "getattr(d, '_gasless_evm_native_topup', None)" in route
-    assert 'with d._use_key(enc, sender_wallet) as private_key:' in route
-    assert 'topup(private_key, chain)' in route
-
-
-def test_success_is_audited_and_notifies_recipient():
-    ledger = (ROOT / 'tip_experience.py').read_text()
-    assert 'CREATE TABLE IF NOT EXISTS tip_transactions' in ledger
-    assert "VALUES (?,?,?,?,?,?,?,'submitted',?)" in ledger
-    assert "_record_tip(d, sender_wallet" in BACKEND
-    assert "status='submitted'" in ledger
-    assert "state == 'confirmed'" in ledger
-    assert "'tip', content" in ledger
-    assert "sender_user_id" in ledger and "recipient_user_id" in ledger
-
-
-if __name__ == '__main__':
-    for name in sorted(n for n in globals() if n.startswith('test_')):
-        globals()[name]()
-        print('PASS', name)
-    print('ALL CHAIN-AGNOSTIC TIP REGRESSIONS PASSED')
+raise SystemExit(0 if all(checks) else 1)
