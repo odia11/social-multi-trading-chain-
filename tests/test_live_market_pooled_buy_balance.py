@@ -1,45 +1,26 @@
-"""Live Market pooled buying power must reach the automatic bridge backend."""
+"""Live Market buying power follows the current Solana-only product."""
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-HOTFIX = (ROOT / 'live_market_pooled_buy_balance.py').read_text(encoding='utf-8')
-CROSS = (ROOT / 'live_market_cross_chain_execute.py').read_text(encoding='utf-8')
-ENTRY = (ROOT / 'app_entry.py').read_text(encoding='utf-8')
+ROOT=Path(__file__).resolve().parents[1]
+ENTRY=(ROOT/'app_entry.py').read_text()
+DASH=(ROOT/'dashboard.py').read_text()
+JS=(ROOT/'static/live-market-pro.js').read_text()
 
+checks=[]
+def check(label,cond):
+    checks.append(bool(cond)); print(('PASS ' if cond else 'FAIL ')+label)
 
-def check(message, condition):
-    assert condition, message
-    print('PASS ' + message)
+check('retired multichain pooled-balance patch is not installed',
+      'live_market_pooled_buy_balance import install' not in ENTRY)
+check('backend declares Solana-only live trading',
+      'SOLANA_ONLY = True' in DASH and 'ACTIVE_EVM_CHAINS = {}' in DASH)
+check('Live Market buy sends USDC amount to the Solana instant-trade route',
+      "'/api/instant-trade'" in JS and 'amount_usdc' in JS)
+check('Live Market no longer routes buys through EVM or bridge endpoints',
+      "'/api/evm/trade/buy'" not in JS
+      and "'/api/bsc/trade/buy'" not in JS
+      and 'pending_bridge' not in JS)
+check('buy sheet reads the shared Solana trading balance',
+      'ptPooledTotal' in JS or 'PT_USDC_TOTAL' in JS or 'pt-sheet-avail' in JS)
 
-
-check('production installs the pooled Live Market balance fix',
-      'from live_market_pooled_buy_balance import install' in ENTRY
-      and '_install_live_market_pooled_buy_balance(_dashboard)' in ENTRY)
-check('pooled balance install also installs cross-chain execute routing',
-      'from live_market_cross_chain_execute import install' in HOTFIX
-      and '_install_cross_chain_execute(d)' in HOTFIX)
-check('BUY availability reads the wallet-wide total returned by the summary endpoint',
-      'body.total_usdc' in HOTFIX and 'pooledTotal(body)' in HOTFIX)
-check('the fallback totals Solana plus every supported EVM stable balance',
-      'd.solana_usdc' in HOTFIX
-      and all(c in HOTFIX for c in ('bsc','base','arbitrum'))
-      and 'robinhood' not in HOTFIX and 'polygon' not in HOTFIX)
-check('every Live Market EVM balance slot receives pooled buying power',
-      'CHAINS.forEach(function(c){ body.evm_chains[c] = total; })' in HOTFIX)
-check('underfunded destination execution invokes the established auto bridge',
-      "app.view_functions.get(endpoint)" in CROSS
-      and 'd._maybe_start_auto_bridge_for_buy(' in CROSS
-      and "bridge.get('started')" in CROSS)
-check('cross-chain execute keeps quote ownership checks before moving money',
-      "quote.get('user_id')" in CROSS and "quote.get('wallet')" in CROSS)
-check('already-funded destination still uses the original trade engine endpoint',
-      "destination_balance + Decimal('0.000001') >= required" in CROSS
-      and 'return original(*args, **kwargs)' in CROSS)
-check('automatic funding returns the pending bridge contract Live Market expects',
-      "'pending': True" in CROSS and "'bridge_id': bridge.get('bridge_id')" in CROSS)
-check('browser patch has no signing or private-key code',
-      'private_key' not in HOTFIX and 'requests.' not in HOTFIX)
-check('injected HTML is no-cache so mobile cannot retain the old veto',
-      'Cache-Control' in HOTFIX and 'no-store' in HOTFIX)
-
-print('\n11/11 checks passed')
+raise SystemExit(0 if all(checks) else 1)
