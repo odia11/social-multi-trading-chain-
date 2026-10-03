@@ -25687,6 +25687,145 @@ _WALLET_CACHE_TTL = 30            # seconds
 
 TOKEN_PROGRAM_ID      = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
 TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
+_ASSOC_TOKEN_PROGRAM_ID = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'
+
+
+def _rpc_multiple_accounts(pubkeys):
+    """Read ordinary Solana accounts without relying on indexed RPC methods."""
+    if not pubkeys:
+        return []
+    endpoints = []
+    for endpoint in [_BOT_SOL_READ_RPC, SOLANA_RPC_URL, HELIUS_RPC, SOLANA_RPC] + list(_PROXY_RPCS):
+        if endpoint and endpoint not in endpoints:
+            endpoints.append(endpoint)
+    values = []
+    for start in range(0, len(pubkeys), 100):
+        chunk = pubkeys[start:start + 100]
+        found = None
+        last_error = 'no valid RPC response'
+        for endpoint in endpoints:
+            try:
+                r = requests.post(endpoint, json={
+                    'jsonrpc': '2.0', 'id': 1, 'method': 'getMultipleAccounts',
+                    'params': [chunk, {'encoding': 'base64', 'commitment': 'confirmed'}],
+                }, timeout=10)
+                if r.status_code != 200:
+                    last_error = f'HTTP {r.status_code}'
+                    continue
+                try:
+                    body = r.json()
+                except ValueError:
+                    last_error = 'non-JSON response'
+                    continue
+                result = body.get('result') if isinstance(body, dict) else None
+                candidate = result.get('value') if isinstance(result, dict) else None
+                if (not isinstance(body, dict) or body.get('error')
+                        or not isinstance(candidate, list) or len(candidate) != len(chunk)):
+                    last_error = 'invalid RPC result'
+                    continue
+                found = candidate
+                break
+            except Exception as exc:
+                last_error = type(exc).__name__
+        if found is None:
+            raise RuntimeError('getMultipleAccounts unavailable: ' + last_error)
+        values.extend(found)
+    return values
+
+
+def _known_wallet_token_accounts(wallet, onchain_wallet):
+    """Verify OrcAgent-known token mints directly from their associated accounts.
+
+    This fallback is used only when indexed getTokenAccountsByOwner providers
+    are unavailable. Database rows supply candidate mint addresses and display
+    hints only; amounts are always read from verified on-chain account bytes.
+    """
+    import base64
+    import binascii
+    from solders.pubkey import Pubkey
+
+    hints = {}
+    conn = sqlite3.connect(DB_FILE, timeout=8.0)
+    try:
+        uid_row = conn.execute('SELECT id FROM users WHERE wallet_address=?', (wallet,)).fetchone()
+        if not uid_row:
+            return []
+        uid = int(uid_row[0])
+        for mint, symbol, avg_price in conn.execute(
+                'SELECT token_address, symbol, avg_price FROM user_tokens WHERE user_id=?',
+                (uid,)).fetchall():
+            if mint:
+                hints[str(mint)] = {'symbol_hint': str(symbol or ''),
+                                    'avg_price': float(avg_price or 0)}
+        for mint, symbol, buy_price in conn.execute(
+                'SELECT mint_address, symbol, buy_price FROM open_positions WHERE user_id=?',
+                (uid,)).fetchall():
+            if not mint:
+                continue
+            item = hints.setdefault(str(mint), {})
+            item.setdefault('symbol_hint', str(symbol or ''))
+            if not item.get('avg_price'):
+                item['avg_price'] = float(buy_price or 0)
+    finally:
+        conn.close()
+
+    owner = Pubkey.from_string(str(onchain_wallet))
+    mint_names, mint_keys = [], []
+    for mint in hints:
+        try:
+            pk = Pubkey.from_string(mint)
+        except Exception:
+            continue
+        mint_names.append(mint)
+        mint_keys.append(str(pk))
+    if not mint_keys:
+        return []
+
+    mint_accounts = _rpc_multiple_accounts(mint_keys)
+    ata_program = Pubkey.from_string(_ASSOC_TOKEN_PROGRAM_ID)
+    metadata, ata_keys = [], []
+    for mint, account in zip(mint_names, mint_accounts):
+        if not isinstance(account, dict):
+            continue
+        program_id = str(account.get('owner') or '')
+        if program_id not in (TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID):
+            continue
+        try:
+            raw_mint = base64.b64decode(account['data'][0], validate=True)
+            if len(raw_mint) < 46 or raw_mint[45] != 1:
+                continue
+            decimals = int(raw_mint[44])
+            mint_pk = Pubkey.from_string(mint)
+            program_pk = Pubkey.from_string(program_id)
+            ata, _ = Pubkey.find_program_address(
+                [bytes(owner), bytes(program_pk), bytes(mint_pk)], ata_program)
+        except (KeyError, TypeError, ValueError, binascii.Error):
+            continue
+        metadata.append((mint, program_id, decimals, mint_pk))
+        ata_keys.append(str(ata))
+
+    accounts = _rpc_multiple_accounts(ata_keys)
+    rows = []
+    for (mint, program_id, decimals, mint_pk), account in zip(metadata, accounts):
+        if account is None or account.get('owner') != program_id:
+            continue
+        try:
+            raw = base64.b64decode(account['data'][0], validate=True)
+            if (len(raw) < 165 or raw[:32] != bytes(mint_pk)
+                    or raw[32:64] != bytes(owner) or raw[108] not in (1, 2)):
+                continue
+            raw_amount = int.from_bytes(raw[64:72], 'little')
+            amount = raw_amount / (10 ** decimals)
+        except (KeyError, TypeError, ValueError, binascii.Error, OverflowError):
+            continue
+        if amount < 0.000001:
+            continue
+        hint = hints.get(mint) or {}
+        rows.append({'mint': mint, 'amount': amount, 'decimals': decimals,
+                     'symbol_hint': hint.get('symbol_hint', ''),
+                     'avg_price': float(hint.get('avg_price') or 0)})
+    return rows
+
 
 def _fetch_wallet_tokens(wallet: str, onchain_wallet: str = None) -> dict:
     """Fetch all SPL tokens + SOL for wallet, price each via DexScreener. Cached 30 s.
@@ -25762,6 +25901,7 @@ def _fetch_wallet_tokens(wallet: str, onchain_wallet: str = None) -> dict:
     _seen_mints: set = set()
     _raw_by_mint: dict = {}
     _rpcs_to_try = [SOLANA_RPC] + [ep for ep in _PROXY_RPCS if ep != SOLANA_RPC]
+    _indexed_incomplete = False
     for _prog_id in (TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID):
         _prog_accounts = None
         _last_rpc_error = 'no valid RPC response'
@@ -25800,12 +25940,10 @@ def _fetch_wallet_tokens(wallet: str, onchain_wallet: str = None) -> dict:
                 print(f'[wallet-tokens] prog={_prog_id[:8]} rpc={_rpc_label(_rpc_url)} error: '
                       f'{_scrub_url_secrets(_rpc_err)}', flush=True)
         if _prog_accounts is None:
-            # Do not fabricate chain holdings from the local trade ledger. The
-            # Portfolio snapshot layer will retain its last complete confirmed
-            # value while RPCs recover.
-            raise RuntimeError(
-                f'SPL token accounts unavailable for {_prog_id[:8]} ({_last_rpc_error})'
-            )
+            _indexed_incomplete = True
+            print(f'[wallet-tokens] prog={_prog_id[:8]} indexed scan unavailable; '
+                  f'using verified known-mint fallback', flush=True)
+            continue
         for acc in _prog_accounts:
             info     = (acc.get('account') or {}).get('data', {}).get('parsed', {}).get('info') or {}
             mint     = info.get('mint', '')
@@ -25823,7 +25961,25 @@ def _fetch_wallet_tokens(wallet: str, onchain_wallet: str = None) -> dict:
             _seen_mints.add(mint)
             raw_accounts.append(row)
             mints_needed.append(mint)
-    print(f'[wallet-tokens] total SPL accounts after merge: {len(raw_accounts)}', flush=True)
+    if _indexed_incomplete:
+        try:
+            for row in _known_wallet_token_accounts(wallet, onchain_wallet):
+                mint = row['mint']
+                existing = _raw_by_mint.get(mint)
+                if existing is not None:
+                    # Indexed data wins for discovery, but direct ATA data is
+                    # the stronger amount read if both are available.
+                    existing.update(row)
+                    continue
+                _raw_by_mint[mint] = row
+                _seen_mints.add(mint)
+                raw_accounts.append(row)
+                mints_needed.append(mint)
+        except Exception as exc:
+            print('[wallet-tokens] verified known-mint fallback unavailable: '
+                  + type(exc).__name__, flush=True)
+
+    print(f'[wallet-tokens] total verified SPL accounts: {len(raw_accounts)}', flush=True)
 
     # ── Batch DexScreener price lookup (max 30 per request) ──
     price_map: dict = {}
@@ -25896,7 +26052,9 @@ def _fetch_wallet_tokens(wallet: str, onchain_wallet: str = None) -> dict:
     result.sort(key=lambda x: x['value_usd'], reverse=True)
 
     total_sol = round(total_usd / sol_price_usd, 4) if sol_price_usd else 0.0
-    out = {'ts': time.time(), 'tokens': result, 'total_usd': round(total_usd, 4), 'total_sol': total_sol}
+    out = {'ts': time.time(), 'tokens': result, 'total_usd': round(total_usd, 4),
+           'total_sol': total_sol, 'inventory_complete': not _indexed_incomplete,
+           'verified_fallback': bool(_indexed_incomplete)}
     _wallet_tokens_cache[wallet] = out
     return out
 
@@ -25914,7 +26072,9 @@ def api_wallet_tokens():
         data = _fetch_wallet_tokens(wallet, onchain_wallet)
         tokens = [{**t, 'usd_value': t['value_usd']} for t in data['tokens']]
         print(f'[wallet-tokens] tokens found: {len(tokens)}', flush=True)
-        return jsonify({'ok': True, 'tokens': tokens, 'cached': False})
+        return jsonify({'ok': True, 'tokens': tokens, 'cached': False,
+                        'inventory_complete': bool(data.get('inventory_complete', True)),
+                        'verified_fallback': bool(data.get('verified_fallback', False))})
     except Exception as e:
         return jsonify({'ok': False, 'msg': _server_error_msg(e, '/api/wallet/tokens')}), 500
 
