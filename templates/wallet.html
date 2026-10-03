@@ -783,6 +783,20 @@ html,body{background:#080e11}
     </div>
 
     <div class="portfolio-tabs" role="tablist" aria-label="Portfolio sections"><button class="selected" type="button" role="tab" aria-selected="true" data-portfolio-tab="assets">Assets</button><button type="button" role="tab" aria-selected="false" data-portfolio-tab="history">History</button></div>
+
+    <section class="oa-pf-breakdown" id="oa-pf-breakdown" aria-label="Portfolio breakdown">
+      <div class="oa-pf-breakdown-head">
+        <div><strong>Portfolio breakdown</strong><span id="oa-pf-scope">Everything in your Solana trading wallet</span></div>
+        <span class="oa-pf-count" id="oa-pf-count">— assets</span>
+      </div>
+      <div class="oa-pf-breakdown-grid">
+        <div class="oa-pf-breakdown-item total"><span>Total portfolio</span><strong id="oa-pf-break-total">—</strong></div>
+        <div class="oa-pf-breakdown-item"><span>USDC</span><strong id="oa-pf-break-usdc">—</strong></div>
+        <div class="oa-pf-breakdown-item"><span>SOL</span><strong id="oa-pf-break-sol">—</strong><small id="oa-pf-break-sol-amount">—</small></div>
+        <div class="oa-pf-breakdown-item"><span>Other tokens</span><strong id="oa-pf-break-other">—</strong></div>
+      </div>
+    </section>
+
     <!-- The approved OrcAgent History mockup, rendered from actual tip,
          Live Market and read-only wallet events. Never synthetic demo rows. -->
     <section id="oa-history-page" class="oa-h-page" aria-label="Portfolio transaction history">
@@ -885,15 +899,19 @@ html,body{background:#080e11}
     </div>
 
     <!-- holdings -->
+    <div class="oa-assets-head" id="oa-assets-head">
+      <div><strong>Your assets</strong><span>Each balance shown separately</span></div>
+      <span id="oa-assets-count">—</span>
+    </div>
     <div class="holdings" id="portfolio-holdings">
       <div class="holdings-hdr">
-        <span class="holdings-title">Holdings</span>
+        <span class="holdings-title">Your assets</span>
         <div style="display:flex;align-items:center;gap:12px">
           <button class="hide-small-btn" id="hide-small-btn" onclick="_toggleHideSmall()">Hide small balances</button>
           <button onclick="loadTokens(true)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:0" title="Refresh">↻</button>
         </div>
       </div>
-      <div class="pf-asset-static"><div class="pf-asset-coin usdc">$</div><div class="pf-asset-description"><b>USDC</b><small>Solana</small></div><div class="pf-asset-amount"><b id="pf-usdc-asset">—</b><small>Stablecoin</small></div></div><div class="pf-asset-static"><div class="pf-asset-coin sol"><span>≋</span></div><div class="pf-asset-description"><b>SOL</b><small>Solana</small></div><div class="pf-asset-amount"><b id="pf-sol-asset">—</b><small id="pf-sol-price">—</small></div></div><div class="tok-list" id="tokens"><div class="state-msg">Loading…</div></div>
+      <div class="pf-asset-static"><div class="pf-asset-coin usdc">$</div><div class="pf-asset-description"><b>USDC</b><small>Solana · available to trade</small></div><div class="pf-asset-amount"><b id="pf-usdc-asset">—</b><small id="pf-usdc-value">—</small></div></div><div class="pf-asset-static"><div class="pf-asset-coin sol"><span>≋</span></div><div class="pf-asset-description"><b>SOL</b><small>Solana · network asset</small></div><div class="pf-asset-amount"><b id="pf-sol-asset">—</b><small id="pf-sol-value">—</small></div></div><div class="tok-list" id="tokens"><div class="state-msg">Loading…</div></div>
     </div>
 
     <!-- recent activity -->
@@ -2438,6 +2456,8 @@ function _rememberPortfolioSnapshot(snap){
     other_assets_value_usd:Number(snap.other_assets_value_usd||0),
     stable:snap.stable||null,sol:snap.sol||null,
     assets:Array.isArray(snap.assets)?snap.assets.slice(0,250):[],
+    asset_count:Number(snap.asset_count||0),
+    inventory_complete:snap.inventory_complete!==false,
     generated_at:snap.generated_at||null,stale:!!snap.stale
   }
   _portfolioCacheWrite(_PORTFOLIO_CACHE_KEY,safe)
@@ -2553,13 +2573,52 @@ setInterval(function(){ if(!document.hidden) loadUsdcSummary() }, 8000)
 var _hideSmall=false
 var _allSpl=[]
 
+function _pfMoney(v){
+  v=Number(v||0);return '$'+(Number.isFinite(v)?v:0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})
+}
+function _paintPortfolioBreakdown(snap){
+  if(!snap)return false
+  var stable=Number(snap.stable&&snap.stable.total_usdc||0)
+  var sol=Number(snap.sol&&snap.sol.value_usd||0)
+  var solAmount=Number(snap.sol&&snap.sol.amount||0)
+  var solPrice=Number(snap.sol&&snap.sol.price_usd||0)
+  var other=Number(snap.other_assets_value_usd||0)
+  var total=Number(snap.total_usd||0)
+  var assets=Array.isArray(snap.assets)?snap.assets:[]
+  var seen={}
+  assets.forEach(function(x){
+    var sym=String(x.symbol||'').toUpperCase(),mint=String(x.mint||x.token_address||sym)
+    if(sym!=='USDC'&&sym!=='SOL'&&Number(x.amount||0)>0)seen[mint]=1
+  })
+  var count=Object.keys(seen).length+(stable>0?1:0)+(solAmount>0?1:0)
+  function set(id,val){var e=document.getElementById(id);if(e)e.textContent=val}
+  set('oa-pf-break-total',_pfMoney(total))
+  set('oa-pf-break-usdc',_pfMoney(stable))
+  set('oa-pf-break-sol',_pfMoney(sol))
+  set('oa-pf-break-sol-amount',solAmount.toLocaleString('en-US',{maximumFractionDigits:6})+' SOL')
+  set('oa-pf-break-other',_pfMoney(other))
+  set('oa-pf-count',count+' '+(count===1?'asset':'assets'))
+  set('oa-assets-count',count+' '+(count===1?'asset':'assets'))
+  set('pf-usdc-asset',stable.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:6})+' USDC')
+  set('pf-usdc-value',_pfMoney(stable))
+  set('pf-sol-asset',solAmount.toLocaleString('en-US',{maximumFractionDigits:8})+' SOL')
+  set('pf-sol-value',_pfMoney(sol)+(solPrice>0?' · '+_pfMoney(solPrice)+'/SOL':''))
+  set('oa-pf-scope',snap.inventory_complete===false
+    ?'Verified balances · full token scan retrying'
+    :'Everything in your Solana trading wallet')
+  return true
+}
+window.OrcAgentPaintPortfolioBreakdown=_paintPortfolioBreakdown
+
 function _paintPortfolioAssetsInstant(assets){
   if(!Array.isArray(assets))return false
   var solToken=assets.find(function(x){return String(x.symbol||'').toUpperCase()==='SOL'})
   if(solToken){
     var solUsd=Number(solToken.usd_value!=null?solToken.usd_value:solToken.value_usd)
-    if(Number.isFinite(solUsd))document.getElementById('pf-sol-asset').textContent='$'+solUsd.toFixed(2)
-    if(Number.isFinite(Number(solToken.price_usd)))document.getElementById('pf-sol-price').textContent='$'+Number(solToken.price_usd).toFixed(2)
+    var solAmt=Number(solToken.amount||0),solPx=Number(solToken.price_usd||0)
+    if(Number.isFinite(solAmt))document.getElementById('pf-sol-asset').textContent=solAmt.toLocaleString('en-US',{maximumFractionDigits:8})+' SOL'
+    var solValEl=document.getElementById('pf-sol-value')
+    if(solValEl&&Number.isFinite(solUsd))solValEl.textContent=_pfMoney(solUsd)+(solPx>0?' · '+_pfMoney(solPx)+'/SOL':'')
     window._wSolPrice=Number(solToken.price_usd||0)
   }
   var spl=assets.filter(function(x){return String(x.symbol||'').toUpperCase()!=='SOL'})
@@ -2585,6 +2644,7 @@ function _paintPortfolioSnapshotInstant(snap){
     var ip=document.getElementById('inpos');if(ip)ip.textContent=Number(snap.sol.in_positions_sol).toFixed(4)+' SOL'
   }
   window.__orcaPortfolioValue=total
+  _paintPortfolioBreakdown(snap)
   _paintPortfolioAssetsInstant(snap.assets||[])
   var top=document.getElementById('pt-nb-sol-balance');if(top)top.textContent='$'+total.toFixed(2)
   return true
