@@ -7002,7 +7002,8 @@ def _parse_swap_realized_amounts(action: str, amount_str: str, stdout: str) -> t
     return token_amount, sol_amount
 
 def _execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str,
-                          amount_str: str, base: str = 'SOL', capture: dict = None) -> tuple:
+                          amount_str: str, base: str = 'SOL', capture: dict = None,
+                          known_sol_balance: float = None) -> tuple:
     """Same subprocess call as _execute_user_swap(), but also returns the
     transaction signature -- parsed from orcagent_solana.py's own stdout
     (a 'TX:<sig>' token), same parsing /api/instant-trade already does.
@@ -7037,7 +7038,8 @@ def _execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str,
     # to be guaranteed -- the exact role _ensure_evm_gas plays for the EVM
     # chains. A no-op unless a Solana gas sponsor is configured, and it never
     # blocks a trade on a flaky balance read (see _ensure_solana_gas).
-    _sol_gas_ok, _sol_gas_msg = _ensure_solana_gas(wallet, private_key)
+    _sol_gas_ok, _sol_gas_msg = _ensure_solana_gas(
+        wallet, private_key, known_sol_balance=known_sol_balance)
     if not _sol_gas_ok:
         return False, '', _sol_gas_msg, 0.0, 0.0
     try:
@@ -9717,7 +9719,8 @@ def _sponsor_solana_gas(user_id: int, wallet: str, trading_address: str) -> tupl
           flush=True)
     return True, '', tx_sig
 
-def _ensure_solana_gas(wallet: str, private_key: str) -> tuple:
+def _ensure_solana_gas(wallet: str, private_key: str,
+                       known_sol_balance: float = None) -> tuple:
     """Solana counterpart of _ensure_evm_gas: makes sure this user's Solana
     trading wallet can actually pay for the swap it's about to make, topping
     it up from the platform sponsor wallet when it can't. Returns (ok, msg)
@@ -9734,11 +9737,26 @@ def _ensure_solana_gas(wallet: str, private_key: str) -> tuple:
         trading_address = str(_KP.from_base58_string(private_key).pubkey())
     except Exception:
         return True, ''  # can't derive it -- let the swap itself report the real problem
-    try:
-        if _get_user_sol(trading_address) >= SOL_GAS_MIN_BALANCE:
-            return True, ''
-    except Exception:
-        return True, ''  # balance unknown -- don't block a trade on a flaky RPC read
+    # Callers that just performed a fresh balance check can pass it through.
+    # That avoids another RPC round-trip immediately before the same swap while
+    # keeping the sponsor path safe: a low balance is rechecked once under the
+    # sponsorship lock before any grant is sent.
+    _known_checked = False
+    if known_sol_balance is not None:
+        try:
+            _known = float(known_sol_balance)
+            if math.isfinite(_known) and _known >= 0:
+                _known_checked = True
+                if _known >= SOL_GAS_MIN_BALANCE:
+                    return True, ''
+        except (TypeError, ValueError):
+            pass
+    if not _known_checked:
+        try:
+            if _get_user_sol(trading_address) >= SOL_GAS_MIN_BALANCE:
+                return True, ''
+        except Exception:
+            return True, ''  # balance unknown -- don't block a trade on a flaky RPC read
 
     conn = None
     try:
@@ -21935,10 +21953,11 @@ def _instant_trade_cors(resp):
     return resp
 
 def _get_token_decimals_rpc(mint: str) -> int:
-    """On-chain decimals for `mint` via getTokenSupply. Defaults to 6 (the
-    common SPL default) on any RPC failure -- mirrors orcagent_solana.py's
-    own get_token_decimals(), which runs in a separate process and so can't
-    be imported/shared directly."""
+    """Known SOL/USDC decimals are constants; other mints use getTokenSupply."""
+    if mint == SOL_MINT:
+        return 9
+    if mint == USDC_MINT:
+        return 6
     try:
         r = requests.post(SOLANA_RPC, json={
             'jsonrpc': '2.0', 'id': 1,
@@ -22124,7 +22143,8 @@ def api_wallet_convert():
                     f'Maximum now: {max_convert:.6f} SOL'}), 400
             with _use_key(enc_blob, wallet) as pk:
                 ok, sig, err, received, spent = _execute_user_swap_ex(
-                    wallet, pk, 'buy', USDC_MINT, str(amount), base='SOL')
+                    wallet, pk, 'buy', USDC_MINT, str(amount), base='SOL',
+                    known_sol_balance=current_sol)
             from_sym, to_sym = 'SOL', 'USDC'
             amount_out = received
         else:
@@ -22137,7 +22157,8 @@ def api_wallet_convert():
                     f'At least {SOL_NETWORK_RESERVE:.3f} SOL is needed for network fees before converting USDC to SOL'}), 400
             with _use_key(enc_blob, wallet) as pk:
                 ok, sig, err, sold_amount, received_sol = _execute_user_swap_ex(
-                    wallet, pk, 'sell', USDC_MINT, str(amount), base='SOL')
+                    wallet, pk, 'sell', USDC_MINT, str(amount), base='SOL',
+                    known_sol_balance=current_sol)
             from_sym, to_sym = 'USDC', 'SOL'
             amount_out = received_sol
         if not ok or not sig:
@@ -22214,7 +22235,7 @@ def api_wallet_convert_sol_usdc():
         with _use_key(enc_blob, wallet) as pk:
             ok, sig, err_msg, usdc_received, sol_spent = _execute_user_swap_ex(
                 wallet, pk, 'buy', USDC_MINT, str(amount_sol),
-                base='SOL', capture=capture
+                base='SOL', capture=capture, known_sol_balance=current_sol
             )
         if not ok or not sig:
             _recent_solana_buys.pop((wallet, USDC_MINT), None)
