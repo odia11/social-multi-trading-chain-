@@ -13,6 +13,8 @@ function ensureScript(src, marker, id){
 
 // Shared across routes; do not restrict this to Home or portrait widths.
 ensureScript('/static/mobile-overscroll-guard.js?v=3','mobile-overscroll-guard.js','oa-scroll-guard');
+ensureStyle('/static/in-app-notifications.css?v=1','in-app-notifications.css');
+ensureScript('/static/in-app-notifications.js?v=1','in-app-notifications.js','oa-in-app-notifications');
 
 (function(){
   if(location.pathname.replace(/\/+$/,'')!=='/wallet') return;

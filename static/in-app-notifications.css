@@ -1,0 +1,111 @@
+/* Foreground personal-notification banner, visually aligned with OrcAgent. */
+#oa-live-notification-root{
+  position:fixed;
+  top:var(--oa-live-notification-top,72px);
+  left:50%;
+  width:min(440px,calc(100vw - 24px));
+  transform:translateX(-50%);
+  z-index:6200;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  pointer-events:none;
+  box-sizing:border-box;
+  font-family:'Geist',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+}
+.oa-live-notification{
+  pointer-events:auto;
+  position:relative;
+  display:grid;
+  grid-template-columns:44px minmax(0,1fr) 30px;
+  align-items:center;
+  gap:11px;
+  min-height:68px;
+  padding:11px 12px;
+  border:1px solid rgba(247,185,85,.28);
+  border-radius:17px;
+  background:rgba(12,18,24,.96);
+  box-shadow:0 16px 44px rgba(0,0,0,.48),0 1px 0 rgba(255,255,255,.035) inset;
+  -webkit-backdrop-filter:blur(22px) saturate(135%);
+  backdrop-filter:blur(22px) saturate(135%);
+  color:#eef1f5;
+  opacity:0;
+  transform:translate3d(0,-18px,0) scale(.985);
+  transition:opacity .18s ease,transform .22s cubic-bezier(.2,.8,.2,1);
+  cursor:pointer;
+  overflow:hidden;
+  -webkit-tap-highlight-color:transparent;
+}
+.oa-live-notification::before{
+  content:'';
+  position:absolute;
+  left:0;top:10px;bottom:10px;
+  width:3px;
+  border-radius:0 3px 3px 0;
+  background:#f7b955;
+}
+.oa-live-notification.is-visible{opacity:1;transform:translate3d(0,0,0) scale(1)}
+.oa-live-notification.is-leaving{opacity:0;transform:translate3d(0,-12px,0) scale(.99)}
+.oa-live-notification-avatar{
+  width:44px;height:44px;border-radius:50%;
+  object-fit:cover;display:block;flex:none;
+  background:#121922;border:1px solid #28323d;
+}
+.oa-live-notification-avatar-fallback{
+  display:flex;align-items:center;justify-content:center;
+  color:#0a0d11;background:#f7b955;border-color:rgba(247,185,85,.58);
+  font-size:16px;font-weight:850;
+}
+.oa-live-notification-type-message{background:#dce9ff;color:#0a0d11}
+.oa-live-notification-type-tip{background:#f7b955;color:#0a0d11}
+.oa-live-notification-copy{min-width:0;align-self:center}
+.oa-live-notification-title{
+  margin:0 0 3px;
+  color:#f7b955;
+  font-size:12px;font-weight:800;
+  letter-spacing:.015em;
+}
+.oa-live-notification-body{
+  color:#eef1f5;
+  font-size:13.5px;font-weight:600;
+  line-height:1.34;
+  overflow:hidden;
+  display:-webkit-box;
+  -webkit-line-clamp:2;
+  -webkit-box-orient:vertical;
+  overflow-wrap:anywhere;
+}
+.oa-live-notification-close{
+  width:30px;height:30px;padding:0;border:0;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  background:transparent;color:#7f8996;
+  font:400 23px/1 system-ui,-apple-system,sans-serif;
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+}
+.oa-live-notification-close:hover,.oa-live-notification-close:focus-visible{
+  background:#18202a;color:#eef1f5;outline:none;
+}
+.oa-live-notification-dot{
+  position:absolute;right:10px;bottom:9px;
+  width:5px;height:5px;border-radius:50%;background:#f7b955;
+}
+@media(max-width:600px){
+  #oa-live-notification-root{
+    width:calc(100vw - 20px);
+  }
+  .oa-live-notification{
+    min-height:66px;
+    grid-template-columns:42px minmax(0,1fr) 28px;
+    gap:10px;
+    padding:10px 11px;
+    border-radius:16px;
+  }
+  .oa-live-notification-avatar{width:42px;height:42px}
+  .oa-live-notification-body{font-size:13px}
+}
+@media(prefers-reduced-motion:reduce){
+  .oa-live-notification{transition:opacity .12s linear;transform:none}
+  .oa-live-notification.is-visible{transform:none}
+  .oa-live-notification.is-leaving{transform:none}
+}

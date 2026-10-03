@@ -17648,6 +17648,14 @@ def notifications_mine():
     if not wallet:
         return jsonify({'ok': False, 'msg': 'Not logged in'}), 401
     category = request.args.get('category', 'all')
+    try:
+        after_id = max(0, int(request.args.get('after_id', 0) or 0))
+    except (TypeError, ValueError):
+        after_id = 0
+    try:
+        limit = max(1, min(int(request.args.get('limit', 30) or 30), 30))
+    except (TypeError, ValueError):
+        limit = 30
     conn = sqlite3.connect(DB_FILE)
     try:
         me = _get_uid(conn, wallet)
@@ -17663,14 +17671,17 @@ def notifications_mine():
         else:
             type_filter = ''
             type_params = ()
+        after_filter = ' AND n.id>?' if after_id else ''
+        order = 'ASC' if after_id else 'DESC'
+        params = (me,) + type_params + ((after_id,) if after_id else ()) + (limit,)
         rows = conn.execute(
             '''SELECT n.id, n.type, n.content, n.link, n.is_read, n.created_at,
                       u.avatar_url, u.username, u.is_verified
                FROM notifications n
                LEFT JOIN users u ON u.wallet_address = n.actor_wallet
-               WHERE n.user_id=?''' + type_filter + '''
-               ORDER BY n.created_at DESC LIMIT 30''',
-            (me,) + type_params
+               WHERE n.user_id=?''' + type_filter + after_filter + f'''
+               ORDER BY n.id {order} LIMIT ?''',
+            params
         ).fetchall()
     finally:
         conn.close()
