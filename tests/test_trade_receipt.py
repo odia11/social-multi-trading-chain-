@@ -113,8 +113,8 @@ for field in ['tx_hash', 'tx', 'sig', 'signature']:
     check(f'the receipt reads a transaction sent back as {field}',
           'd.' + field in JS.split('function _showTxReceipt(')[1].split('\n}')[0])
 
-# ── 4. the explorers come from the chains themselves ─────────────────────
-check('the page is handed an explorer per chain by the server',
+# ── 4. Solana-only explorer contract ─────────────────────────────────────
+check('the page is handed an explorer table by the server',
       'var PT_TX_EXPLORERS' in html)
 found = re.search(r'var PT_TX_EXPLORERS = (\{.*?\});', html)
 table = {}
@@ -124,18 +124,12 @@ if found:
         table = json.loads(found.group(1))
     except ValueError:
         table = {}
-for chain in m.TOKEN_CHAINS:
-    check(f'{m.chain_display_name(chain)} has an explorer to link to',
-          bool(table.get(chain)))
-check('the explorer addresses are derived from EVM_CHAINS rather than typed '
-      'out a second time, so a link cannot send somebody to the wrong '
-      'network', "EVM_CHAINS[c]['explorer']" in SRC)
-for chain in m.EVM_CHAINS:
-    check(f'...{m.chain_display_name(chain)} points at its own explorer',
-          table.get(chain, '').startswith(m.EVM_CHAINS[chain]['explorer']))
-check('a chain with no explorer configured is simply absent, rather than '
-      'taking the whole page down with a KeyError',
-      ".get('explorer')" in SRC)
+check('Solana receipt links to Solscan',
+      table.get('solana') == 'https://solscan.io/tx/')
+check('inactive EVM chains are not exposed in the live receipt table',
+      set(table) == {'solana'})
+check('server owns the one active explorer mapping',
+      "tx_explorers={'solana': 'https://solscan.io/tx/'}" in SRC)
 
 # ── 5. what the receipt must not do ──────────────────────────────────────
 check('a bought trade leaves the slider disarmed, so "Bought" never sits '
