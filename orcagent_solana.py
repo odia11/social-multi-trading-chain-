@@ -14,10 +14,28 @@ TAKE_PROFIT    = float(os.getenv('TAKE_PROFIT', 0.12))
 INTERVAL       = int(os.getenv('INTERVAL', 30))
 
 SOLANA_RPC    = 'https://api.mainnet-beta.solana.com'
-SOLANA_RPCS   = [
-    'https://api.mainnet-beta.solana.com',
-    'https://rpc.ankr.com/solana',
-]
+
+def _build_solana_rpcs():
+    """Prefer configured production RPCs, then fall back to public nodes."""
+    urls = []
+    configured = [
+        os.getenv('SOLANA_RPC_URL', '').strip(),
+        os.getenv('HELIUS_RPC', '').strip(),
+    ]
+    helius_key = os.getenv('HELIUS_API_KEY', '').strip()
+    if helius_key:
+        configured.append('https://mainnet.helius-rpc.com/?api-key=' + helius_key)
+    configured.extend([
+        'https://solana-rpc.publicnode.com',
+        SOLANA_RPC,
+        'https://rpc.ankr.com/solana',
+    ])
+    for url in configured:
+        if url and url not in urls:
+            urls.append(url)
+    return urls
+
+SOLANA_RPCS = _build_solana_rpcs()
 USDC_MINT     = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 SOL_MINT      = 'So11111111111111111111111111111111111111112'
 # Every swap in this file is BASE<->memecoin: one side is always one of these
@@ -98,25 +116,78 @@ if _PROXY_SECRET:
     _JUP_HEADERS['X-Proxy-Secret'] = _PROXY_SECRET
 
 
+def _rpc_retryable_error(error) -> bool:
+    """True only for provider/transport pressure, never transaction rejection."""
+    if not error:
+        return False
+    if isinstance(error, dict):
+        code = error.get('code')
+        message = str(error.get('message') or '')
+    else:
+        code = None
+        message = str(error)
+    # Providers use different codes for the same rate-limit condition. In
+    # particular "Connection rate limits exceeded" has appeared with codes
+    # other than Solana's usual -32005, so the message is authoritative too.
+    if code in (-32005, -32009, -32429, 429):
+        return True
+    msg = message.lower()
+    return any(marker in msg for marker in (
+        'rate limit', 'too many requests', 'connection rate limits',
+        'node is unhealthy', 'node is behind', 'service unavailable',
+        'temporarily unavailable', 'try again later',
+    ))
+
+
 def _rpc_post(payload: dict, timeout: int = 30) -> dict:
-    """Try each RPC endpoint in order; return first success or raise. This is
-    now the ONLY way this file talks to a Solana RPC (every getBalance/
-    getAccountInfo/getLatestBlockhash/getTokenAccountsByOwner/getTokenSupply
-    call below routes through here) -- previously only sendTransaction used
-    this failover and everything else hit the single hardcoded SOLANA_RPC
-    with no fallback, so a blip on the public mainnet-beta endpoint could
-    fail an otherwise-healthy trade for no on-chain reason at all."""
-    last_err: object = None
-    for rpc in SOLANA_RPCS:
-        try:
-            result = requests.post(rpc, json=payload, timeout=timeout).json()
-            # Retry on node-overload codes; return on any other response
-            if 'error' not in result or result['error'].get('code') not in (-32005, -32009):
+    """Use production RPC failover without masking real transaction errors.
+
+    A signed Solana transaction has one deterministic signature, so submitting
+    that exact same payload to a second RPC after a transport/rate-limit failure
+    is idempotent. Simulation/program failures are returned immediately instead
+    of being retried against every provider.
+    """
+    method = str(payload.get('method') or '')
+    last_err = 'no RPC response'
+    # sendTransaction gets one short second pass because transient provider
+    # throttling is common and re-broadcasting the same signed tx is safe.
+    rounds = 2 if method == 'sendTransaction' else 1
+    for round_no in range(rounds):
+        for rpc in SOLANA_RPCS:
+            try:
+                response = requests.post(rpc, json=payload, timeout=timeout)
+                if response.status_code == 429 or response.status_code >= 500:
+                    last_err = f'HTTP {response.status_code}'
+                    continue
+                try:
+                    result = response.json()
+                except ValueError:
+                    last_err = 'non-JSON RPC response'
+                    continue
+                if not isinstance(result, dict):
+                    last_err = 'invalid RPC response'
+                    continue
+                error = result.get('error')
+                if not error:
+                    return result
+                if _rpc_retryable_error(error):
+                    if isinstance(error, dict):
+                        last_err = str(error.get('message') or error.get('code') or 'rate limited')[:120]
+                    else:
+                        last_err = str(error)[:120]
+                    continue
+                # Real preflight/program errors must reach the caller unchanged.
                 return result
-            last_err = result
-        except Exception as e:
-            last_err = e
-    raise Exception(f'All RPC endpoints failed. Last: {last_err}')
+            except requests.RequestException as exc:
+                last_err = type(exc).__name__
+            except Exception as exc:
+                last_err = type(exc).__name__
+        if round_no + 1 < rounds:
+            time.sleep(0.45)
+    raise RuntimeError(
+        'Solana RPCs are temporarily busy. Please retry in a few seconds. '
+        f'Last provider result: {last_err}'
+    )
 
 
 # Solana's recent-blockhash validity window is ~150 blocks (~60-90s under
