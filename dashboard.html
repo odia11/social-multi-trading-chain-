@@ -703,7 +703,19 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
 .oa-home-trade-footer{display:flex;justify-content:flex-end;gap:10px;align-items:center;margin-top:17px;padding-top:11px;border-top:1px solid rgba(255,255,255,.14);font-family:system-ui,sans-serif;font-size:13px;font-weight:650;color:#eef1f5}
 .oa-home-trade-card:focus-visible{outline:2px solid #f7b955;outline-offset:2px}
 #composer-trade-preview,#composer-trade-card{box-sizing:border-box;min-width:0;max-width:100%;width:100%}
-#composer-trade-preview>button{z-index:4!important;background:rgba(10,12,17,.84)!important;border-radius:50%;width:25px;height:25px;top:13px!important;right:10px!important;color:#eef1f5!important}
+/* Keep removal controls in their own row, outside the attachment content.
+   Global mobile buttons have min-height:44px; set both dimensions explicitly. */
+#feed-composer .composer-preview-remove{
+  position:relative!important;inset:auto!important;display:flex!important;
+  align-items:center;justify-content:center;box-sizing:border-box;
+  width:32px!important;min-width:32px!important;max-width:32px!important;
+  height:32px!important;min-height:32px!important;max-height:32px!important;
+  margin:0 0 8px auto!important;padding:0!important;flex:none;
+  border:1px solid #38414b!important;border-radius:50%!important;
+  background:#0a0c11!important;color:#eef1f5!important;
+  font-size:16px;line-height:1;cursor:pointer;touch-action:manipulation;
+}
+#feed-composer .composer-preview-remove:focus-visible{outline:2px solid #f7b955;outline-offset:2px}
 @container (max-width:420px){
  .oa-home-trade-content{padding:13px 14px 10px}
  .oa-home-trade-title{gap:7px;margin-bottom:10px;padding-right:22px}
@@ -4045,7 +4057,7 @@ __IMAGE_LIGHTBOX__
 
     <!-- chart preview (shown after selection) -->
     <div id="composer-chart-preview" style="display:none;margin-bottom:10px;background:#101216;border:1px solid #21252c;border-radius:14px;padding:14px;position:relative" onclick="event.stopPropagation()">
-      <button onclick="_clearComposerChart()" style="position:absolute;top:10px;right:10px;background:none;border:none;color:#565d68;cursor:pointer;font-size:15px;line-height:1">&#10005;</button>
+      <button type="button" class="composer-preview-remove" onclick="_clearComposerChart()" aria-label="Remove chart" title="Remove chart">&#10005;</button>
       <div id="composer-chart-card"></div>
     </div>
 
@@ -4062,7 +4074,7 @@ __IMAGE_LIGHTBOX__
 
     <!-- trade preview (shown after selection) -->
     <div id="composer-trade-preview" style="display:none;margin-bottom:10px;position:relative" onclick="event.stopPropagation()">
-      <button onclick="_clearComposerTrade()" style="position:absolute;top:6px;right:6px;background:none;border:none;color:#565d68;cursor:pointer;font-size:15px;line-height:1;z-index:1">&#10005;</button>
+      <button type="button" class="composer-preview-remove" onclick="_clearComposerTrade()" aria-label="Remove trade" title="Remove trade">&#10005;</button>
       <div id="composer-trade-card"></div>
     </div>
 
@@ -4073,7 +4085,7 @@ __IMAGE_LIGHTBOX__
          Shrinking the wrapper to the image puts it back on the corner it
          belongs to, and stops a portrait photo sitting in a wide empty band. -->
     <div id="composer-image-preview" style="display:none;margin-bottom:10px;position:relative;width:fit-content;max-width:100%" onclick="event.stopPropagation()">
-      <button onclick="_clearComposerImage()" aria-label="Remove image" title="Remove image" style="position:absolute;top:8px;right:8px;background:rgba(10,11,14,.78);border:1px solid rgba(255,255,255,.18);border-radius:50%;width:28px;height:28px;color:#eef1f5;cursor:pointer;font-size:14px;line-height:1;z-index:1;display:flex;align-items:center;justify-content:center">&#10005;</button>
+      <button type="button" class="composer-preview-remove" onclick="_clearComposerImage()" aria-label="Remove image" title="Remove image">&#10005;</button>
       <!-- contain, not cover: this is the last look before posting, so it has
            to show the whole picture rather than a centre crop of it. -->
       <img id="composer-image-preview-img" src="" alt="Selected image" style="max-width:100%;max-height:240px;border-radius:14px;display:block;object-fit:contain">
