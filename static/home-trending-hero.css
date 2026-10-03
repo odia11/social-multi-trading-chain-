@@ -1,10 +1,9 @@
-[Reading 214 lines from start (total: 214 lines, 0 remaining)]
-
 /* Home feed "Trending now" card, shown as a post from OrcAgent
    (home-trending-hero.js). The outer shell is the feed's own .fc-card; this
    file only adds what a normal post does not have. */
-.oa-th-post{opacity:0;transform:translateY(6px);transition:opacity .35s ease,transform .35s cubic-bezier(.2,.8,.2,1);
+.oa-th-post{opacity:1;transform:none;transition:opacity .35s ease,transform .35s cubic-bezier(.2,.8,.2,1);
   cursor:default;content-visibility:visible!important;contain-intrinsic-size:none!important}
+body.oa-home-mobile .oa-th-post{display:flex!important;width:100%!important;box-sizing:border-box!important;margin:0 0 8px!important;visibility:visible!important}
 .oa-th-post.oa-th-in{opacity:1;transform:none}
 .oa-th-post.oa-th-leaving{opacity:0;transform:translateY(-6px)}
 .oa-th-post[hidden]{display:none!important}
@@ -214,5 +213,3 @@
   .oa-th-slide .oa-th-trade{width:52px}
 }
 @media(prefers-reduced-motion:reduce){.oa-th-track{transition:none!important}}
-
-[executed on device: orcagent-srv001 (c9150a05-2aaf-4129-b814-0c2e85e68396)]
