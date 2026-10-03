@@ -3,6 +3,10 @@ const w=fs.readFileSync(path.join(__dirname,'../templates/wallet.html'),'utf8');
 
 assert(w.includes('function _modalSolUsdcSwap()'));
 assert(w.includes("fetch('/api/wallet/sol-swap/balance'"));
+assert(w.includes('function _sxSeedPortfolioBalance()'));
+assert(w.includes("_portfolioSnapshotData"));
+assert(w.includes("cache:'no-store'"));
+assert(w.includes('_sx.balanceAttempt<3'));
 assert(w.includes("'/api/wallet/sol-swap/quote?"));
 assert(w.includes("'/api/wallet/sol-swap/execute'"));
 assert(w.includes("quote.quote_id?'/api/wallet/sol-swap/execute':'/api/wallet/convert'"));
