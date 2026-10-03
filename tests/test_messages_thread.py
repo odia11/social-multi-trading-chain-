@@ -86,6 +86,25 @@ r = A.delete(f'/api/messages/{tip_id}', headers=H, base_url=BASE)
 # legacy `messages` table instead of direct_messages.
 check('a tip can be deleted by its sender', r.status_code == 200 and r.get_json()['ok'])
 
+# ── photo download stays same-origin and authorized (important on iOS) ──
+png_data = ('data:image/png;base64,'
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zs1EAAAAASUVORK5CYII=')
+c = sqlite3.connect(d.DB_FILE)
+photo_id = c.execute(
+    "INSERT INTO direct_messages (sender_id, receiver_id, message, message_type) VALUES (?,?,?, 'image')",
+    (me, peer, png_data)
+).lastrowid
+c.commit(); c.close()
+r = A.get(f'/api/messages/{photo_id}/photo-download', headers=H, base_url=BASE)
+check('DM photo download is a real image attachment for a conversation member',
+      r.status_code == 200 and r.headers.get('Content-Type') == 'image/png'
+      and 'attachment;' in r.headers.get('Content-Disposition', '')
+      and 'private' in r.headers.get('Cache-Control', '')
+      and 'no-store' in r.headers.get('Cache-Control', ''))
+_outsider, C = member('charlie')
+r = C.get(f'/api/messages/{photo_id}/photo-download', headers=H, base_url=BASE)
+check('someone outside the conversation cannot download the DM photo', r.status_code == 404)
+
 # ── fits the screen ──
 rule = lambda sel: (re.search(re.escape(sel) + r'\{([^}]*)\}', CSS) or [None, ''])[1]
 check('the chat cannot be panned sideways', 'overflow-x:hidden' in rule('#msgs-area') and 'touch-action:pan-y' in rule('#msgs-area'))
