@@ -142,6 +142,9 @@ def test_portfolio_rpc_429_recovers_only_provable_spendable_usdc():
     print('PASS indexed RPC 429 recovers verified positive canonical spending USDC, cached briefly')
     ns['_sol_usdc_balance_cache'].clear()
     ns['_get_bot_solana_balances']=lambda addr:(0.03,0.0)
+    indexed_before=len(calls)
+    assert ns['_get_solana_usdc_balance'](OWNER,allow_stale=True)==0.0
+    assert len(calls)==indexed_before, 'read-only Portfolio should not hit indexed RPC'
     try:ns['_get_solana_usdc_balance'](OWNER)
     except RuntimeError as exc:assert 'unavailable' in str(exc)
     else:raise AssertionError('indexed failure with absent ATA fabricated whole-wallet zero')
