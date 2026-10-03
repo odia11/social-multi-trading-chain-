@@ -194,7 +194,6 @@ chmod 640 "$ENV_FILE"
 
 say "Installing the systemd services"
 cp "$REPO_DIR/deploy/orcagent.service"           /etc/systemd/system/orcagent.service
-cp "$REPO_DIR/deploy/orcagent.socket"            /etc/systemd/system/orcagent.socket
 cp "$REPO_DIR/deploy/orcagent-monitor.service"   /etc/systemd/system/orcagent-monitor.service
 cp "$REPO_DIR/deploy/orcagent-backup.service"    /etc/systemd/system/orcagent-backup.service
 cp "$REPO_DIR/deploy/orcagent-backup.timer"      /etc/systemd/system/orcagent-backup.timer
@@ -202,7 +201,6 @@ chmod 755 "$APP_DIR/deploy/backup.sh" "$APP_DIR/deploy/security-smoke.sh"
 
 if ! systemd-analyze verify \
     /etc/systemd/system/orcagent.service \
-    /etc/systemd/system/orcagent.socket \
     /etc/systemd/system/orcagent-monitor.service \
     /etc/systemd/system/orcagent-backup.service \
     /etc/systemd/system/orcagent-backup.timer >/tmp/orcagent-systemd-verify.log 2>&1; then
@@ -212,11 +210,11 @@ fi
 echo "  systemd unit verification passed"
 
 systemctl daemon-reload
-# Do not start the socket here on the one-time migration from the old direct
-# Gunicorn bind: port 8080 is still owned by the running service. update.sh
-# performs the handoff safely. On every later deploy the socket is already
-# active and remains open across the application restart.
-systemctl enable orcagent.socket orcagent orcagent-monitor >/dev/null
+# A short-lived socket-handoff experiment was retired: Gunicorn did not receive
+# the descriptor under the production unit sandbox. Disable the stale unit but
+# do not stop it here; update.sh owns the restart boundary.
+systemctl disable orcagent.socket >/dev/null 2>&1 || true
+systemctl enable orcagent orcagent-monitor >/dev/null
 systemctl enable --now orcagent-backup.timer >/dev/null
 
 say "Verifying backup protection"

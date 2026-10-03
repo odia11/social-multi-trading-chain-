@@ -7,7 +7,6 @@ NAV = (ROOT / 'static' / 'navbar.js').read_text(encoding='utf-8')
 INSTALL = (ROOT / 'deploy' / 'install.sh').read_text(encoding='utf-8')
 UPDATE = (ROOT / 'deploy' / 'update.sh').read_text(encoding='utf-8')
 SERVICE = (ROOT / 'deploy' / 'orcagent.service').read_text(encoding='utf-8')
-SOCKET = (ROOT / 'deploy' / 'orcagent.socket').read_text(encoding='utf-8')
 SMOKE = (ROOT / 'deploy' / 'security-smoke.sh').read_text(encoding='utf-8')
 
 checks = {
@@ -32,16 +31,13 @@ checks = {
     'web assets activate together only at the end of install':
         'Activating web assets for the restart' in INSTALL
         and 'rsync -a --delete-delay --delay-updates "$REPO_DIR/static/" "$APP_DIR/static/"' in INSTALL,
-    'systemd owns the listener across worker restarts':
-        'Requires=orcagent.socket' in SERVICE
-        and '--bind fd://3' in SERVICE
-        and 'ListenStream=127.0.0.1:8080' in SOCKET,
-    'deploy restart does not restart an already-active handoff socket':
-        'systemctl is-active --quiet orcagent.socket' in UPDATE
-        and 'handoff socket stays open while Gunicorn restarts' in UPDATE,
-    'security smoke validates fd handoff and loopback listener':
-        '--bind fd://3' in SMOKE
-        and "ListenStream=127\\.0\\.0\\.1:8080" in SMOKE,
+    'production service uses the proven loopback bind':
+        '--bind 127.0.0.1:8080' in SERVICE and '--bind fd://3' not in SERVICE,
+    'a stale handoff socket is retired before restart':
+        'systemctl stop orcagent.socket' in UPDATE
+        and 'systemctl restart orcagent' in UPDATE,
+    'security smoke validates direct loopback binding':
+        '--bind 127\\.0\\.0\\.1:8080' in SMOKE,
 }
 
 failed = [name for name, ok in checks.items() if not ok]

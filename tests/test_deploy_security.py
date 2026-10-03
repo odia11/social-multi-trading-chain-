@@ -2,7 +2,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 service = (ROOT/'deploy/orcagent.service').read_text()
-socket = (ROOT/'deploy/orcagent.socket').read_text()
 monitor = (ROOT/'deploy/orcagent-monitor.service').read_text()
 backup = (ROOT/'deploy/orcagent-backup.service').read_text()
 install = (ROOT/'deploy/install.sh').read_text()
@@ -24,7 +23,7 @@ for name, text in [('app', service), ('monitor', monitor), ('backup', backup)]:
     check(name+' blocks capability inheritance', 'CapabilityBoundingSet=' in text and 'AmbientCapabilities=' in text)
     check(name+' restricts namespaces', 'RestrictNamespaces=true' in text)
 
-check('app is loopback only', '--bind fd://3' in service and 'ListenStream=127.0.0.1:8080' in socket)
+check('app is loopback only', '--bind 127.0.0.1:8080' in service)
 check('app startup executes security smoke check', 'ExecStartPost=/bin/bash /opt/orcagent/deploy/security-smoke.sh' in service)
 check('app uses owner-only umask', 'UMask=0077' in service)
 check('backup runs unprivileged', 'User=orcagent' in backup and 'Group=orcagent' in backup and 'User=root' not in backup)
@@ -41,7 +40,7 @@ check('installer repairs data directory ownership', 'chown -R "$APP_USER:$APP_US
 check('installer strips group/world access from data directories', 'find "$DATA_DIR" -xdev -type d -exec chmod 700' in install)
 check('installer strips group/world access from data files', 'find "$DATA_DIR" -xdev -type f -exec chmod 600' in install)
 check('smoke validates CSP', 'Content-Security-Policy' in smoke and "frame-ancestors 'none'" in smoke)
-check('smoke validates loopback binding', 'orcagent.socket exposes port 8080 publicly' in smoke and '--bind fd://3' in smoke)
+check('smoke validates loopback binding', 'gunicorn port 8080 is publicly bound' in smoke and r'--bind 127\.0\.0\.1:8080' in smoke)
 check('smoke validates env permissions', '/etc/orcagent.env permissions' in smoke)
 check('smoke validates persistent state permissions', 'persistent application state is owner-only' in smoke and '/data permissions are' in smoke)
 check('smoke validates backup timer', 'orcagent-backup.timer' in smoke)

@@ -215,25 +215,11 @@ say "Restarting"
 # skipped, so the failure is captured and handled rather than fatal.
 RESTART_OK=1
 if systemctl is-active --quiet orcagent.socket; then
-  echo "  handoff socket stays open while Gunicorn restarts"
-  # The listening socket belongs to systemd, so connections arriving between
-  # the old worker exiting and the new worker accepting are queued in-kernel.
-  # Do NOT restart the socket here: that would throw away the whole benefit.
+  echo "  retiring stale handoff socket before direct Gunicorn bind"
+  systemctl stop orcagent.socket || RESTART_OK=0
+fi
+if [ "$RESTART_OK" = "1" ]; then
   systemctl restart orcagent || RESTART_OK=0
-else
-  # One-time migration from the historical direct Gunicorn bind. The old app
-  # keeps serving until stop completes; immediately claim 8080 with the
-  # persistent socket, then start the new fd://3 worker. Future deploys take
-  # the branch above and have no listener gap at all.
-  echo "  enabling persistent handoff socket (one-time migration)"
-  systemctl stop orcagent || RESTART_OK=0
-  if [ "$RESTART_OK" = "1" ]; then
-    systemctl reset-failed orcagent.socket >/dev/null 2>&1 || true
-    systemctl start orcagent.socket || RESTART_OK=0
-  fi
-  if [ "$RESTART_OK" = "1" ]; then
-    systemctl start orcagent || RESTART_OK=0
-  fi
 fi
 if [ "$RESTART_OK" = "1" ]; then
   systemctl restart orcagent-monitor || RESTART_OK=0

@@ -46,20 +46,15 @@ fi
 # Do not use `ss` here. This script runs as ExecStartPost inside the same
 # hardened systemd unit as Gunicorn. ProtectProc=invisible / ProcSubset=pid can
 # hide the kernel socket table from the control process, causing false negatives.
-# The listener intentionally belongs to systemd, not Gunicorn: it stays open
-# across app restarts so requests queue instead of failing during a deploy.
+# Verify the service is configured for the loopback-only upstream nginx uses.
 UNIT_TEXT="$(systemctl cat orcagent.service 2>/dev/null || true)"
-SOCKET_TEXT="$(systemctl cat orcagent.socket 2>/dev/null || true)"
 [ -n "$UNIT_TEXT" ] || fail "could not read installed orcagent.service"
-[ -n "$SOCKET_TEXT" ] || fail "could not read installed orcagent.socket"
-printf '%s\n' "$UNIT_TEXT" | grep -q -- '--bind fd://3' \
-  || fail "gunicorn is not consuming the systemd handoff socket"
-printf '%s\n' "$SOCKET_TEXT" | grep -q '^ListenStream=127\.0\.0\.1:8080$' \
-  || fail "orcagent.socket is not loopback-only on port 8080"
-if printf '%s\n' "$SOCKET_TEXT" | grep -Eq '^ListenStream=(0\.0\.0\.0|\[::\]|::):8080$'; then
-  fail "orcagent.socket exposes port 8080 publicly"
+printf '%s\n' "$UNIT_TEXT" | grep -q -- '--bind 127\.0\.0\.1:8080' \
+  || fail "gunicorn service is not configured for loopback-only port 8080"
+if printf '%s\n' "$UNIT_TEXT" | grep -Eq -- '--bind (0\.0\.0\.0|\[::\]|::):8080'; then
+  fail "gunicorn port 8080 is publicly bound"
 fi
-ok "systemd handoff socket is loopback-only and app answered through it"
+ok "gunicorn configured for loopback only and app answered on loopback"
 
 SHELL_PATH="$(getent passwd orcagent | cut -d: -f7 || true)"
 case "$SHELL_PATH" in
