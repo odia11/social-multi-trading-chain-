@@ -1263,18 +1263,21 @@ function _dmPhotoAsDataUrl(msg){
     return new Promise(function(resolve,reject){var fr=new FileReader();fr.onload=function(){resolve(String(fr.result||''))};fr.onerror=reject;fr.readAsDataURL(blob);});
   });
 }
-async function _downloadDmPhoto(mid){
+function _downloadDmPhoto(mid){
   var msg=_dmPhotoMessage(mid);if(!msg)return;
-  try{
-    var res=await fetch(msg.message),blob=await res.blob();
-    if(!/^image\//.test(blob.type))throw new Error('Not an image');
-    var ext={'image/jpeg':'jpg','image/png':'png','image/gif':'gif','image/webp':'webp'}[blob.type]||'jpg';
-    var url=URL.createObjectURL(blob),a=document.createElement('a');
-    a.href=url;a.download='orcagent-photo-'+Number(mid)+'.'+ext;a.rel='noopener';
-    document.body.appendChild(a);a.click();a.remove();
-    setTimeout(function(){URL.revokeObjectURL(url)},1500);
-    _toast('Photo downloaded');_closeDmPhotoSheet();
-  }catch(err){openAlertModal({text:'Could not download this photo.'});}
+  var id=Number(mid);if(!id)return;
+  // Keep the original tap gesture intact on iOS Safari. Fetching a data:image
+  // URI is blocked by our connect-src CSP, and awaiting a Blob can make Safari
+  // drop the user gesture before the download starts. The authenticated server
+  // endpoint verifies message ownership and returns Content-Disposition:
+  // attachment, so Safari/Chrome can hand it to the native download manager.
+  var a=document.createElement('a');
+  a.href='/api/messages/'+encodeURIComponent(id)+'/photo-download';
+  a.download='orcagent-photo-'+id;
+  a.rel='noopener';
+  a.style.display='none';
+  document.body.appendChild(a);a.click();a.remove();
+  _toast('Downloading photo…');_closeDmPhotoSheet();
 }
 function _dmForwardUsersFromConversations(){
   var seen={};
