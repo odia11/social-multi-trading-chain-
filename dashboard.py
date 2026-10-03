@@ -26654,6 +26654,94 @@ def react_dm(message_id):
         conn.close()
     return jsonify({'ok': True, 'active': active, 'reactions': reactions})
 
+
+@app.route('/api/messages/<int:message_id>/photo-download', methods=['GET'])
+@rate_limit(60, 60)
+def download_dm_photo(message_id):
+    """Download a DM image through an authenticated same-origin attachment.
+
+    iOS Safari blocks fetch(data:image:...) under our strict connect-src CSP,
+    and async blob downloads can also lose the original tap gesture. Serving
+    the already-authorized message as an attachment avoids both problems.
+    """
+    wallet = _authenticated_wallet()
+    if not wallet:
+        return jsonify({'ok': False, 'msg': 'No wallet connected'}), 401
+
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        me = _get_uid(conn, wallet)
+        if not me:
+            return jsonify({'ok': False, 'msg': 'User not found'}), 404
+        row = conn.execute(
+            'SELECT sender_id, receiver_id, message, COALESCE(message_type, "text") '
+            'FROM direct_messages WHERE id=?',
+            (int(message_id),)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if not row or me not in (int(row[0]), int(row[1])) or row[3] != 'image':
+        return jsonify({'ok': False, 'msg': 'Photo not found'}), 404
+
+    src = str(row[2] or '')
+    data = b''
+    mime = ''
+    ext = ''
+
+    # Current DMs store the compressed image as a data URI.
+    m = re.fullmatch(
+        r'data:image/(jpeg|jpg|png|gif|webp);base64,([A-Za-z0-9+/=]+)',
+        src, re.IGNORECASE,
+    )
+    if m:
+        kind = m.group(1).lower()
+        try:
+            data = base64.b64decode(m.group(2), validate=True)
+        except (ValueError, binascii.Error):
+            return jsonify({'ok': False, 'msg': 'Photo not found'}), 404
+        ext = 'jpg' if kind in ('jpeg', 'jpg') else kind
+        mime = 'image/jpeg' if ext == 'jpg' else f'image/{ext}'
+    elif src.startswith('/static/dm_images/'):
+        # Backward compatibility for older uploaded-file DMs. Never accept an
+        # arbitrary filesystem path from the message body.
+        filename = src.rsplit('/', 1)[-1]
+        if not filename or secure_filename(filename) != filename:
+            return jsonify({'ok': False, 'msg': 'Photo not found'}), 404
+        path = os.path.realpath(os.path.join(DM_IMAGES_DIR, filename))
+        root = os.path.realpath(DM_IMAGES_DIR) + os.sep
+        if not path.startswith(root) or not os.path.isfile(path):
+            return jsonify({'ok': False, 'msg': 'Photo not found'}), 404
+        try:
+            with open(path, 'rb') as fh:
+                data = fh.read(5 * 1024 * 1024 + 1)
+        except OSError:
+            return jsonify({'ok': False, 'msg': 'Photo not found'}), 404
+        if len(data) > 5 * 1024 * 1024:
+            return jsonify({'ok': False, 'msg': 'Photo too large'}), 413
+        ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+        mime = {
+            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+            'gif': 'image/gif', 'webp': 'image/webp',
+        }.get(ext, '')
+        if ext == 'jpeg':
+            ext = 'jpg'
+    else:
+        return jsonify({'ok': False, 'msg': 'Photo not found'}), 404
+
+    if not data or len(data) > 5 * 1024 * 1024 or not mime or not _verify_image_magic(data):
+        return jsonify({'ok': False, 'msg': 'Photo not found'}), 404
+
+    resp = make_response(data)
+    resp.headers['Content-Type'] = mime
+    resp.headers['Content-Disposition'] = (
+        f'attachment; filename="orcagent-photo-{int(message_id)}.{ext}"'
+    )
+    resp.headers['Cache-Control'] = 'private, no-store'
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    return resp
+
+
 @app.route('/api/messages/upload-image', methods=['POST'])
 @rate_limit(10, 60)
 def upload_dm_image():
