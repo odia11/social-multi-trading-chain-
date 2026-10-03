@@ -6,7 +6,7 @@ const assert=require('assert');
 const source=fs.readFileSync('static/tip-experience.js','utf8');
 const nodes={};
 for(const id of ['oa-profile-balance-value','oa-profile-balance-available',
-                 'oa-profile-balance-other']){
+                 'oa-profile-balance-other','oa-profile-balance-unit']){
   nodes[id]={textContent:''};
 }
 const cssClasses=new Set();
@@ -39,15 +39,23 @@ vm.runInNewContext(source,{
  assert(source.includes('},15000);'));
  console.log('PASS market value and actual USDC remain distinct; refresh stays background-only');
 
+ response={ok:true,user_id:42,portfolio_value_usdc_approx:7.5,
+   available_usdc:7.5,other_assets_usdc_approx:null,partial:true,stale:false};
+ await win.OrcAgentRefreshProfileBalance();
+ assert.strictEqual(nodes['oa-profile-balance-value'].textContent,'7.50 USDC');
+ assert.strictEqual(nodes['oa-profile-balance-available'].textContent,'7.50 USDC');
+ assert.strictEqual(nodes['oa-profile-balance-other'].textContent,'—');
+ assert.strictEqual(nodes['oa-profile-balance-unit'].textContent,'Live Solana USDC balance');
+ console.log('PASS indexed-token outage still shows the real live USDC balance');
+
  networkError=true;
  await win.OrcAgentRefreshProfileBalance();
- assert(nodes['oa-profile-balance-value'].textContent.includes('0.106 USDC'));
- assert(nodes['oa-profile-balance-value'].textContent.includes('0.106 USDC'));
+ assert.strictEqual(nodes['oa-profile-balance-value'].textContent,'7.50 USDC');
  console.log('PASS RPC failure preserves last known real balance without status text');
 
  networkError=false;response={...response,user_id:999,portfolio_value_usdc_approx:50};
  await win.OrcAgentRefreshProfileBalance();
- assert(nodes['oa-profile-balance-value'].textContent.includes('0.106 USDC'));
+ assert.strictEqual(nodes['oa-profile-balance-value'].textContent,'7.50 USDC');
  console.log('PASS wrong profile response cannot overwrite visible balance');
  console.log('ALL LIVE PROFILE BALANCE UI REGRESSIONS PASSED');
 })().catch(e=>{console.error(e);process.exitCode=1});
