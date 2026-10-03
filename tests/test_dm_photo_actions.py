@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 html = (ROOT / 'templates' / 'messages.html').read_text(encoding='utf-8')
+dashboard = (ROOT / 'dashboard.py').read_text(encoding='utf-8')
 
 checks = []
 def check(name, cond):
@@ -15,9 +16,16 @@ check('photo action sheet exposes download, forward and Home feed post',
       'data-photo-action="download"' in html
       and 'data-photo-action="forward"' in html
       and 'data-photo-action="post"' in html)
-check('download uses an image blob and a real download filename',
-      "URL.createObjectURL(blob)" in html
-      and "a.download='orcagent-photo-'" in html)
+check('download uses the authenticated same-origin attachment route',
+      "'/api/messages/'+encodeURIComponent(id)+'/photo-download'" in html
+      and "a.download='orcagent-photo-'" in html
+      and "fetch(msg.message)" not in html[html.index('function _downloadDmPhoto'):html.index('function _dmForwardUsersFromConversations')])
+check('download endpoint verifies DM membership and returns an attachment',
+      "@app.route('/api/messages/<int:message_id>/photo-download'" in dashboard
+      and "me not in (int(row[0]), int(row[1]))" in dashboard
+      and "row[3] != 'image'" in dashboard
+      and "Content-Disposition" in dashboard
+      and "Cache-Control" in dashboard)
 check('forward reuses the secured DM image route',
       "fetch('/api/messages/'+peerId" in html
       and "'X-CSRF-Token':_csrfToken" in html
