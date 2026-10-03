@@ -1450,7 +1450,7 @@ function _modalSolUsdcSwap(){
   _convertInvalidate()
   if(_sx&&_sx.timer) clearTimeout(_sx.timer)
   if(_sx&&_sx.refresh) clearInterval(_sx.refresh)
-  _sx={dir:'native_to_stable',bal:null,seq:0,timer:null,refresh:null,quote:null,loading:false}
+  _sx={dir:'native_to_stable',bal:null,seq:0,timer:null,refresh:null,quote:null,loading:false,balanceAttempt:0}
   _showModal(
     '<div class="sx-hd"><div class="sx-title">Swap</div><span class="sx-net"><i></i>Solana</span></div>'
     // Kept for _convertCfg()/_convertDirection(), which _convertConfirm uses.
@@ -1507,17 +1507,46 @@ function _sxPaintBalance(){
   _convertBalance=Number(f==='SOL'?_sx.bal.sol:_sx.bal.usdc)
   _convertMax=f==='SOL'?_sx.bal.max_sol:_sx.bal.max_usdc
 }
+function _sxSeedPortfolioBalance(){
+  if(!_sx||_sx.bal) return false
+  var snap=(typeof _portfolioSnapshotData!=='undefined'&&_portfolioSnapshotData)?_portfolioSnapshotData:null
+  if(!snap||!snap.sol||!snap.stable) return false
+  var sol=Number(snap.sol.amount), usdc=Number(snap.stable.solana_usdc)
+  if(!Number.isFinite(sol)||sol<0||!Number.isFinite(usdc)||usdc<0) return false
+  _sx.bal={
+    sol:sol,usdc:usdc,
+    max_sol:Math.max(0,sol-SOL_FEE_RESERVE),
+    max_usdc:usdc
+  }
+  _sxPaintBalance()
+  return true
+}
 function _sxLoadBalance(){
+  if(!_sx) return
+  _sxSeedPortfolioBalance()
   _sx.balErr=false
-  fetch('/api/wallet/sol-swap/balance',{credentials:'include'})
-    .then(function(r){return r.json()})
-    .then(function(d){
+  _sx.balanceAttempt=Number(_sx.balanceAttempt||0)+1
+  fetch('/api/wallet/sol-swap/balance',{credentials:'include',cache:'no-store'})
+    .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d}})})
+    .then(function(x){
       if(!_sxEl('sx-bal')) return
-      if(!d.ok) throw new Error(d.msg||'Balance unavailable')
+      if(!x.ok||!x.d.ok) throw new Error(x.d.msg||'Balance unavailable')
+      var d=x.d
+      _sx.balanceAttempt=0
+      _sx.balErr=false
       _sx.bal={sol:Number(d.sol)||0,usdc:Number(d.usdc)||0,max_sol:Number(d.max_sol)||0,max_usdc:Number(d.max_usdc)||0}
       _sxPaintBalance(); _sxInput(true)
     })
-    .catch(function(){ if(_sxEl('sx-bal')){ _sx.balErr=true; _sxPaintBalance() } })
+    .catch(function(){
+      if(!_sxEl('sx-bal')||!_sxOpen()) return
+      if(_sx.balanceAttempt<3){
+        setTimeout(function(){if(_sxOpen())_sxLoadBalance()},700*_sx.balanceAttempt)
+        return
+      }
+      // A fresh Portfolio snapshot is still useful for the display; the quote
+      // and execution endpoints re-check spendable funds server-side.
+      if(!_sx.bal){_sx.balErr=true;_sxPaintBalance()}
+    })
 }
 function _sxMax(){ return _sx.bal?(_sxFrom()==='SOL'?_sx.bal.max_sol:_sx.bal.max_usdc):0 }
 function _sxOver(){
