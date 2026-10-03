@@ -41,11 +41,16 @@ function refreshProfileBalance(){
     try{
       var cached=JSON.parse(localStorage.getItem('orcaProfileBalance:'+userId)||'null');
       if(cached&&Number.isFinite(Number(cached.at))&&Date.now()-Number(cached.at)<86400000){
-        var cv=Number(cached.value),ca=Number(cached.available),co=Number(cached.other);
-        if(Number.isFinite(cv)&&cv>=0&&Number.isFinite(ca)&&ca>=0&&Number.isFinite(co)&&co>=0){
-          $('oa-profile-balance-value').textContent='≈ '+money(cv)+' USDC';
+        var cv=Number(cached.value),ca=Number(cached.available),cp=!!cached.partial;
+        var coRaw=cached.other,co=(coRaw===null||coRaw===undefined)?null:Number(coRaw);
+        if(Number.isFinite(cv)&&cv>=0&&Number.isFinite(ca)&&ca>=0&&
+           (co===null||(Number.isFinite(co)&&co>=0))){
+          $('oa-profile-balance-value').textContent=(cp?'':'≈ ')+money(cv)+' USDC';
           $('oa-profile-balance-available').textContent=money(ca)+' USDC';
-          $('oa-profile-balance-other').textContent='≈ '+money(co)+' USDC';
+          $('oa-profile-balance-other').textContent=co===null?'—':'≈ '+money(co)+' USDC';
+          if($('oa-profile-balance-unit'))$('oa-profile-balance-unit').textContent=cp
+            ?'Live Solana USDC balance'
+            :'Estimated value of USDC and other tokens';
           profileBalanceLastGood=true;
           card.classList.add('is-stale');
         }
@@ -68,24 +73,33 @@ function refreshProfileBalance(){
     if(!d.ok||Number(d.user_id)!==Number(userId))throw new Error('Balance unavailable');
     var value=Number(d.portfolio_value_usdc_approx);
     var available=Number(d.available_usdc);
-    var other=Number(d.other_assets_usdc_approx);
+    var partial=!!d.partial;
+    var rawOther=d.other_assets_usdc_approx;
+    var other=(rawOther===null||rawOther===undefined)?null:Number(rawOther);
     if(!Number.isFinite(value)||value<0||!Number.isFinite(available)||available<0||
-       !Number.isFinite(other)||other<0)throw new Error('Balance unavailable');
-    $('oa-profile-balance-value').textContent='≈ '+money(value)+' USDC';
+       (other!==null&&(!Number.isFinite(other)||other<0)))throw new Error('Balance unavailable');
+    $('oa-profile-balance-value').textContent=(partial?'':'≈ ')+money(value)+' USDC';
     $('oa-profile-balance-available').textContent=money(available)+' USDC';
-    $('oa-profile-balance-other').textContent='≈ '+money(other)+' USDC';
+    $('oa-profile-balance-other').textContent=other===null?'—':'≈ '+money(other)+' USDC';
+    if($('oa-profile-balance-unit')){
+      $('oa-profile-balance-unit').textContent=partial
+        ?'Live Solana USDC balance'
+        :'Estimated value of USDC and other tokens';
+    }
     profileBalanceLastGood=true;
     if(card.dataset.own==='1'){
       try{
         localStorage.setItem('orcaProfileBalance:'+userId,JSON.stringify({
-          at:Date.now(),value:value,available:available,other:other
+          at:Date.now(),value:value,available:available,other:other,partial:partial
         }));
-        localStorage.setItem('orcaPortfolioLastConfirmedTotal',String(value));
-        localStorage.setItem('orcaPortfolioLastConfirmedTotalAt',String(Date.now()));
+        if(!partial){
+          localStorage.setItem('orcaPortfolioLastConfirmedTotal',String(value));
+          localStorage.setItem('orcaPortfolioLastConfirmedTotalAt',String(Date.now()));
+        }
       }catch(e){}
       // Repaint the shared top-bar balance from the exact same authoritative
       // profile snapshot instead of waiting for a separate RPC round-trip.
-      document.dispatchEvent(new CustomEvent('orca:portfolio-value',{detail:{total:value}}));
+      if(!partial)document.dispatchEvent(new CustomEvent('orca:portfolio-value',{detail:{total:value}}));
     }
     // Refresh state stays internal; users only see the balance values.
     card.classList.toggle('is-stale',!!d.stale);
