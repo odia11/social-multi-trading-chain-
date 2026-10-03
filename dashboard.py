@@ -22141,7 +22141,16 @@ def api_wallet_convert():
             from_sym, to_sym = 'USDC', 'SOL'
             amount_out = received_sol
         if not ok or not sig:
-            return jsonify({'ok': False, 'msg': (err or 'Conversion failed')[-200:]}), 502
+            raw_err = _redact_keys(_scrub_url_secrets(str(err or '')))
+            low_err = raw_err.lower()
+            if any(marker in low_err for marker in (
+                    'rate limit', 'too many requests', 'temporarily busy',
+                    'connection rate limits', 'all rpc endpoints failed')):
+                message = ('Solana RPC is temporarily busy. No swap was confirmed. '
+                           'Please retry in a few seconds.')
+            else:
+                message = raw_err[-180:] if raw_err else 'Conversion failed'
+            return jsonify({'ok': False, 'msg': message}), 502
         _log_security_event('wallet_convert', wallet,
                             f'{chain}:{direction} amount={amount} tx={sig[:16]}...')
         add_user_log(wallet, f'Converted {amount:.6f} {from_sym} to {to_sym}')
