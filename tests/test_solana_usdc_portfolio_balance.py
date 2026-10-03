@@ -37,6 +37,28 @@ def test_wallet_token_scanner_aggregates_duplicate_mints():
     assert 'mint in _seen_mints' not in b[b.index('for acc in _prog_accounts:'):b.index("print(f'[wallet-tokens] total SPL")]
 
 
+def test_verified_empty_token_scan_is_authoritative_and_does_not_hit_stale_db():
+    b=section('def _fetch_wallet_tokens', "@app.route('/api/wallet/tokens'")
+    assert "_prog_accounts = _rpc_value" in b
+    assert "if _prog_accounts:" not in b
+    assert "RPC empty — falling back to user_tokens DB" not in b
+    assert "SELECT token_address, symbol, amount, avg_price FROM user_tokens" not in b
+
+
+def test_wallet_token_scan_fails_closed_only_when_every_rpc_is_invalid():
+    b=section('def _fetch_wallet_tokens', "@app.route('/api/wallet/tokens'")
+    assert "_prog_accounts = None" in b
+    assert "if _prog_accounts is None:" in b
+    assert "SPL token accounts unavailable" in b
+    assert "non-JSON response" in b and "invalid result shape" in b
+
+
+def test_wallet_token_logs_do_not_print_full_wallet_address():
+    b=section('def _fetch_wallet_tokens', "@app.route('/api/wallet/tokens'")
+    assert "_short_onchain" in b
+    assert "onchain_wallet={onchain_wallet!r}" not in b
+
+
 def test_total_rpc_failure_raises_instead_of_false_zero():
     b=section('def _get_solana_usdc_balance', "@app.route('/api/wallet/usdc-summary'")
     assert 'if fallback_valid or saw_valid:' in b
