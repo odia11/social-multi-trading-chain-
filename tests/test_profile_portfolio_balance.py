@@ -36,6 +36,9 @@ def setup():
         DB_FILE=path,
         rate_limit=lambda *_: lambda function: function,
         _authenticated_wallet=lambda: viewer[0],
+        _get_trading_wallet_address=lambda wallet: wallet,
+        _get_bot_solana_balances=lambda wallet: (_ for _ in ()).throw(RuntimeError('rpc down')),
+        _get_solana_usdc_balance=lambda wallet, **kwargs: (_ for _ in ()).throw(RuntimeError('rpc down')),
     )
     mod.install(d)
     return tmp, app.test_client(), viewer
@@ -133,6 +136,58 @@ def test_private_profile_never_exposes_other_user_balance():
         temp.cleanup()
 
 
+def test_public_profile_uses_fast_direct_usdc_without_indexed_snapshot():
+    temp, client, viewer = setup()
+    try:
+        viewer[0] = 'some-other-viewer'
+        app = client.application
+        endpoint = next(k for k in app.view_functions if k.endswith('profile_portfolio_balance'))
+        view = app.view_functions[endpoint]
+        d = next(c.cell_contents for c in view.__closure__
+                 if hasattr(c.cell_contents, '_get_bot_solana_balances'))
+        d._get_trading_wallet_address = lambda wallet: 'profile-trading-wallet'
+        d._get_bot_solana_balances = lambda wallet: (0.01, 4.2)
+        with patch('portfolio_multichain_holdings._portfolio_snapshot') as snapshot:
+            response = client.get('/api/profile/1/portfolio-balance')
+            assert response.status_code == 200
+            assert response.json['available_usdc'] == 4.2
+            assert response.json['portfolio_value_usdc_approx'] == 4.2
+            assert response.json['partial'] is True
+            assert snapshot.call_count == 0
+    finally:
+        temp.cleanup()
+
+
+def test_snapshot_indexer_outage_still_returns_live_profile_usdc():
+    temp, client, viewer = setup()
+    try:
+        app = client.application
+        # Reconfigure the installed route's backing dashboard namespace via the
+        # closure object used by the module install test helper.
+        endpoint = next(k for k in app.view_functions if k.endswith('profile_portfolio_balance'))
+        view = app.view_functions[endpoint]
+        # rate_limit is a no-op in this fixture, so the dashboard namespace is
+        # the first closure cell containing the expected direct balance helper.
+        d = next(c.cell_contents for c in view.__closure__
+                 if hasattr(c.cell_contents, '_get_bot_solana_balances'))
+        d._get_trading_wallet_address = lambda wallet: 'trading-wallet'
+        d._get_bot_solana_balances = lambda wallet: (0.02, 12.345678)
+        with patch('portfolio_multichain_holdings._portfolio_snapshot',
+                   side_effect=RuntimeError('indexed provider down')):
+            response = client.get('/api/profile/1/portfolio-balance')
+            assert response.status_code == 200
+            data = response.json
+            assert data['ok'] is True
+            assert data['partial'] is True
+            assert data['scope'] == 'solana_usdc'
+            assert data['portfolio_value_usdc_approx'] == 12.345678
+            assert data['available_usdc'] == 12.345678
+            assert data['other_assets_usdc_approx'] is None
+            assert data['approximate'] is False
+    finally:
+        temp.cleanup()
+
+
 def test_rpc_failure_or_bad_snapshot_is_not_false_zero():
     temp, client, viewer = setup()
     try:
@@ -176,6 +231,10 @@ def test_display_uses_named_profile_id_and_privacy_template_flag():
     assert 'oa-profile-balance-other' in profile
     assert 'Actual USDC balance' in profile
     assert 'Other assets · estimated USDC equivalent' in profile
+    assert 'oa-profile-balance-chain">Solana<' in profile
+    assert 'id="oa-profile-balance-unit"' in profile
+    assert "Live Solana USDC balance" in script
+    assert "partial=!!d.partial" in script
     assert 'other_assets_usdc_approx' in script
     assert '15000' in script
     assert 'visibilitychange' in script
