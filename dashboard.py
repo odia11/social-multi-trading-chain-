@@ -1556,7 +1556,13 @@ def get_bsc_balances(address: str) -> dict:
 
 # ── PERFORMANCE FEE COLLECTION ──
 def send_sol_fee(from_privkey: str, to_wallet_str: str, amount_sol: float) -> str:
-    """Native SOL transfer via System Program — no ATA, no SPL, just lamports."""
+    """Native SOL transfer with RPC failover.
+
+    This helper is also used by the Portfolio Send action. A single public RPC
+    used to make a perfectly valid send fail whenever that provider returned
+    429/non-JSON. The same signed transaction may safely be submitted to a
+    fallback RPC because a Solana signature is idempotent.
+    """
     from solders.keypair import Keypair as _KP
     from solders.pubkey import Pubkey
     from solders.instruction import Instruction, AccountMeta
@@ -1567,9 +1573,12 @@ def send_sol_fee(from_privkey: str, to_wallet_str: str, amount_sol: float) -> st
     keypair  = _KP.from_base58_string(from_privkey)
     sender   = keypair.pubkey()
     receiver = Pubkey.from_string(to_wallet_str)
-    lamports = int(amount_sol * 1_000_000_000)
+    lamports = int(float(amount_sol) * 1_000_000_000)
+    if lamports <= 0:
+        raise ValueError('SOL amount must be greater than zero')
+    if receiver == sender:
+        raise ValueError('Destination is the same as your trading wallet')
 
-    # System Program Transfer: u32 discriminant=2 + u64 lamports (little-endian)
     ix = Instruction(
         program_id=SYS_PROG,
         accounts=[
@@ -1579,20 +1588,74 @@ def send_sol_fee(from_privkey: str, to_wallet_str: str, amount_sol: float) -> st
         data=struct.pack('<IQ', 2, lamports),
     )
 
-    bh = requests.post(SOLANA_RPC, json={
-        'jsonrpc': '2.0', 'id': 1, 'method': 'getLatestBlockhash', 'params': [],
-    }, timeout=10).json()['result']['value']['blockhash']
+    rpcs = []
+    for rpc in (list(globals().get('CLAIM_SOL_RPCS', []) or [])
+                + [globals().get('SOLANA_RPC_URL'), globals().get('SOLANA_RPC')]
+                + list(globals().get('_PROXY_RPCS', []) or [])):
+        if rpc and rpc not in rpcs:
+            rpcs.append(rpc)
+    if not rpcs:
+        raise RuntimeError('No Solana RPC is configured')
 
-    tx = Transaction.new_signed_with_payer([ix], sender, [keypair], SolHash.from_string(bh))
+    blockhash = ''
+    preferred = None
+    last_error = 'No Solana RPC available'
+    for rpc in rpcs:
+        try:
+            resp = requests.post(rpc, json={
+                'jsonrpc': '2.0', 'id': 1, 'method': 'getLatestBlockhash',
+                'params': [{'commitment': 'confirmed'}],
+            }, timeout=10)
+            if resp.status_code != 200:
+                last_error = f'RPC HTTP {resp.status_code}'
+                continue
+            body = resp.json()
+            value = (body.get('result') or {}).get('value') if isinstance(body, dict) else None
+            if isinstance(body, dict) and not body.get('error') and isinstance(value, dict) and value.get('blockhash'):
+                blockhash = value['blockhash']
+                preferred = rpc
+                break
+            last_error = 'RPC returned no blockhash'
+        except Exception as exc:
+            last_error = type(exc).__name__
+    if not blockhash:
+        raise RuntimeError('Could not get a recent Solana blockhash: ' + last_error)
 
+    tx = Transaction.new_signed_with_payer(
+        [ix], sender, [keypair], SolHash.from_string(blockhash))
     encoded = base64.b64encode(bytes(tx)).decode()
-    res = requests.post(SOLANA_RPC, json={
-        'jsonrpc': '2.0', 'id': 1, 'method': 'sendTransaction',
-        'params': [encoded, {'encoding': 'base64', 'skipPreflight': False}],
-    }, timeout=30).json()
-    if 'error' in res:
-        raise Exception('Fee TX: ' + str(res['error']))
-    return res.get('result', str(res))
+
+    ordered = ([preferred] if preferred else []) + [rpc for rpc in rpcs if rpc != preferred]
+    for rpc in ordered:
+        try:
+            resp = requests.post(rpc, json={
+                'jsonrpc': '2.0', 'id': 1, 'method': 'sendTransaction',
+                'params': [encoded, {
+                    'encoding': 'base64', 'skipPreflight': False,
+                    'preflightCommitment': 'confirmed', 'maxRetries': 3,
+                }],
+            }, timeout=30)
+            if resp.status_code != 200:
+                last_error = f'RPC HTTP {resp.status_code}'
+                continue
+            body = resp.json()
+            if isinstance(body, dict) and body.get('result'):
+                return str(body['result'])
+            error = body.get('error') if isinstance(body, dict) else None
+            # A real preflight/program rejection will be identical at every
+            # provider. Do not hide it behind a later provider's transport error.
+            if error:
+                msg = str(error.get('message') if isinstance(error, dict) else error)
+                if 'simulation failed' in msg.lower() or 'insufficient' in msg.lower():
+                    raise RuntimeError(msg[:220])
+                last_error = msg[:220] or 'RPC rejected transaction'
+            else:
+                last_error = 'RPC returned no transaction signature'
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            last_error = type(exc).__name__
+    raise RuntimeError('SOL transfer could not be submitted: ' + last_error)
 
 # ── OPTIONAL, SELF-DECLARED PROFILE FLAG ──
 # ISO 3166-1 country/territory names and flags are checked in as static data.
@@ -21379,7 +21442,8 @@ def wallet_send():
         return jsonify({'ok': False, 'error': 'Invalid destination address'})
     if amount <= 0 or amount > 500:
         return jsonify({'ok': False, 'error': 'Amount must be > 0 and ≤ 500 SOL'})
-    if to_addr == wallet:
+    trading_wallet = _get_trading_wallet_address(wallet) or wallet
+    if to_addr in (wallet, trading_wallet):
         return jsonify({'ok': False, 'error': 'Cannot send to yourself'})
     conn = sqlite3.connect(DB_FILE)
     try:
@@ -21394,8 +21458,9 @@ def wallet_send():
         with _use_key(row[0], wallet) as raw_key:
             sig = send_sol_fee(raw_key, to_addr, amount)
     except Exception as e:
-        _log_security_event('send_failed', wallet, str(e)[:200])
-        return jsonify({'ok': False, 'error': f'Send failed: {str(e)[:120]}'}), 500
+        safe = _redact_keys(_scrub_url_secrets(str(e)))[:200]
+        _log_security_event('send_failed', wallet, safe)
+        return jsonify({'ok': False, 'error': 'Send failed: ' + safe[:120]}), 500
     _log_security_event('sol_sent', wallet, f'to={to_addr[:8]}... amount={amount}')
     add_user_log(wallet, f'Sent {amount} SOL to {to_addr[:8]}...')
     return jsonify({'ok': True, 'signature': sig})
