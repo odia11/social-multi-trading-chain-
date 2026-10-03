@@ -31,7 +31,7 @@ function modal(){
  return m;
 }
 function note(text,kind){var e=document.getElementById('oa-st-note');if(!e)return;e.className='oa-st-note'+(kind?' '+kind:'');e.textContent=text}
-function close(){var m=document.getElementById('oa-send-token-modal');if(!m)return;m.classList.remove('open');m.setAttribute('aria-hidden','true');state.busy=false}
+function close(){if(state.busy)return;var m=document.getElementById('oa-send-token-modal');if(!m)return;m.classList.remove('open');m.setAttribute('aria-hidden','true');state.busy=false}
 function normalize(t){
  var chain=String(t.chain||'solana').toLowerCase();
  var sym=String(t.symbol||t.ticker||'TOKEN').replace(/^\$/,'');
@@ -63,13 +63,14 @@ function send(){
  if(!a){note('Choose an asset first.','err');return}if(!to){note('Enter the recipient wallet address.','err');return}if(!(amount>0)){note('Enter an amount greater than zero.','err');return}if(amount>a.amount+1e-12){note('Amount is higher than your portfolio balance.','err');return}
  state.busy=true;if(btn){btn.disabled=true;btn.textContent='Sending…'};note('Submitting transfer…','');
  var url,body;if(a.isNative){url='/api/wallet/send';body={to:to,amount_sol:amount}}else{url='/api/wallet/send-token';body={chain:a.chain,token_address:a.token,to_address:to,amount:amount}}
- fetch(url,{method:'POST',credentials:'include',headers:authHeaders(),body:JSON.stringify(body)}).then(function(r){return r.json().catch(function(){return{}}).then(function(d){if(!r.ok||d.ok===false)throw new Error(d.error||d.msg||'Transfer failed');return d})}).then(function(d){
-   var sent=Number(d.amount_sent!=null?d.amount_sent:amount);note('Sent '+fmtAmount(sent)+' '+a.symbol+'.','ok');
+ fetch(url,{method:'POST',credentials:'include',headers:authHeaders(),body:JSON.stringify(body)}).then(function(r){return r.json().catch(function(){return{}}).then(function(d){if(!r.ok||d.ok!==true)throw new Error(d.error||d.msg||'Transfer failed');return d})}).then(function(d){
+   var sent=Number(d.amount_sent!=null?d.amount_sent:amount);note('Transfer submitted: '+fmtAmount(sent)+' '+a.symbol+'. Awaiting network confirmation.','ok');
    try{document.dispatchEvent(new CustomEvent('orca:portfolio-changed'))}catch(e){}try{document.dispatchEvent(new CustomEvent('orca:trade-complete'))}catch(e){};
    setTimeout(function(){close();if(typeof window.OrcAgentRefreshPortfolio==='function')window.OrcAgentRefreshPortfolio()},850)
- }).catch(function(err){note(err.message||'Transfer failed.','err')}).finally(function(){state.busy=false;if(btn){btn.disabled=false;btn.textContent='Withdraw'}})
+ }).catch(function(err){note(err.message||'Confirmation unavailable. Check Activity before sending again.','err')}).finally(function(){state.busy=false;if(btn){btn.disabled=false;btn.textContent='Withdraw'}})
 }
 function open(){
+ if(state.busy)return;
  styles();var m=modal();m.classList.add('open');m.setAttribute('aria-hidden','false');
  var to=document.getElementById('oa-st-to'),am=document.getElementById('oa-st-amount');if(to)to.value='';if(am)am.value='';
  loadAssets();
