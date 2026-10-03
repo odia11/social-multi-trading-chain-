@@ -14521,9 +14521,38 @@ def live_market():
     session_wallet = _current_wallet()
     wallet_short = ((session_wallet[:4] + '...' + session_wallet[-4:])
                     if len(session_wallet) >= 8 else '')
+    # Paint the first Live Market cards from the already-warm scanner
+    # cache in the HTML response. Do not refresh upstream here: navigation
+    # should never wait on DexScreener. The browser immediately paints this
+    # snapshot and refreshes it in the background.
+    initial_market_tokens = []
+    initial_market_counts = {}
+    try:
+        with _scanner_lock:
+            cached_tokens = [dict(t) for t in (_scanner_cache.get('data') or [])]
+        if cached_tokens:
+            initial_market_tokens = cached_tokens[:30]
+            now = time.time()
+            initial_market_counts = {
+                'trending': len(cached_tokens),
+                'gainers': sum(1 for t in cached_tokens if t.get('price_change_24h', 0) > 0),
+                'uptrend': sum(1 for t in cached_tokens
+                               if t.get('price_change_24h', 0) >= 5
+                               and t.get('market_cap', 0) >= 30000),
+                'new': sum(1 for t in cached_tokens
+                           if t.get('pair_created_at')
+                           and (now - t['pair_created_at'] / 1000.0) <= 86400),
+                'volume': len(cached_tokens),
+            }
+    except Exception:
+        initial_market_tokens = []
+        initial_market_counts = {}
+
     return _render_no_cache('live_market_pro.html',
                            wallet_short=wallet_short,
                            csrf_token=_get_csrf_token(),
+                           initial_market_tokens=initial_market_tokens,
+                           initial_market_counts=initial_market_counts,
                            client_secret=API_SHARED_SECRET,
                            # The buy sheet greys its own button out below this
                            # and says why. Handed over rather than written in
