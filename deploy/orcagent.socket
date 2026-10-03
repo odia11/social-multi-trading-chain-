@@ -1,0 +1,14 @@
+[Unit]
+Description=OrcAgent HTTP handoff socket
+
+[Socket]
+# systemd owns the loopback listener across app restarts. During a deploy,
+# nginx can keep connecting and the kernel queues requests until the new
+# single Gunicorn worker is ready, instead of exposing a 502/connection reset.
+ListenStream=127.0.0.1:8080
+NoDelay=true
+Backlog=2048
+Service=orcagent.service
+
+[Install]
+WantedBy=sockets.target

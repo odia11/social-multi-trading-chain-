@@ -4,6 +4,9 @@ Loads route-critical styles before first paint and keeps page-specific scripts
 deferred. The browser should never render legacy markup and restyle it later.
 """
 
+import hashlib
+import re
+
 
 def install(appmod) -> None:
     if getattr(appmod, '_app_performance_installed', False):
@@ -26,6 +29,20 @@ def install(appmod) -> None:
             tags = []
             if 'name="oa-app-version"' not in html:
                 tags.append(f'<meta name="oa-app-version" content="{version}">')
+
+            # The header avatar must not flash to a placeholder when gunicorn is
+            # restarting. Give the browser a per-account, non-identifying cache
+            # key so navbar.js may paint the last confirmed public avatar before
+            # /api/me answers. A different wallet gets a different key, so one
+            # account can never briefly inherit another account's picture.
+            if 'name="oa-user-cache-key"' not in html:
+                try:
+                    wallet = appmod._authenticated_wallet() or ''
+                except Exception:
+                    wallet = ''
+                if wallet:
+                    cache_key = hashlib.sha256(str(wallet).encode('utf-8')).hexdigest()[:20]
+                    tags.append(f'<meta name="oa-user-cache-key" content="{cache_key}">')
 
             def style(asset, href, extra=''):
                 if asset not in html:
@@ -147,10 +164,20 @@ def install(appmod) -> None:
                     '</style>'
                 )
 
+            # Every static asset in the delivered HTML belongs to THIS deploy.
+            # nginx intentionally caches /static for seven days; leaving old
+            # hand-maintained ?v=7/?v=13 numbers in markup lets Safari combine
+            # fresh HTML with a week-old JS/CSS bundle after a deploy. Normalize
+            # all of them to the git/version hash carried by this response.
             if tags:
                 html = html.replace('</head>', '\n'.join(tags) + '\n</head>', 1)
-                response.set_data(html)
-                response.headers['Content-Length'] = str(len(response.get_data()))
+            html = re.sub(
+                r'(/static/[A-Za-z0-9_./-]+)\?v=[A-Za-z0-9_.-]+',
+                lambda m: m.group(1) + '?v=' + version,
+                html,
+            )
+            response.set_data(html)
+            response.headers['Content-Length'] = str(len(response.get_data()))
         except Exception as exc:
             print(f'[performance] asset injection skipped: {exc}', flush=True)
         return response

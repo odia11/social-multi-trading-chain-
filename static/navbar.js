@@ -2,13 +2,20 @@
 (function(){
 'use strict';
 
+var _oaVersionMeta=document.querySelector('meta[name="oa-app-version"]');
+var _OA_ASSET_VERSION=(_oaVersionMeta&&_oaVersionMeta.content)||'1';
+function deployAsset(url){
+  var raw=String(url||'');
+  if(raw.indexOf('/static/')!==0)return raw;
+  try{var u=new URL(raw,location.origin);u.searchParams.set('v',_OA_ASSET_VERSION);return u.pathname+u.search+u.hash}catch(_){return raw}
+}
 function ensureStyle(href, marker){
   if(document.querySelector('link[href*="'+marker+'"]'))return;
-  var el=document.createElement('link');el.rel='stylesheet';el.href=href;document.head.appendChild(el);
+  var el=document.createElement('link');el.rel='stylesheet';el.href=deployAsset(href);document.head.appendChild(el);
 }
 function ensureScript(src, marker, id){
   if((id&&document.getElementById(id))||document.querySelector('script[src*="'+marker+'"]'))return;
-  var el=document.createElement('script');if(id)el.id=id;el.src=src;el.defer=true;document.head.appendChild(el);
+  var el=document.createElement('script');if(id)el.id=id;el.src=deployAsset(src);el.defer=true;document.head.appendChild(el);
 }
 
 // Shared across routes; do not restrict this to Home or portrait widths.
@@ -82,20 +89,34 @@ var _NB_CHAIN_LABELS={solana:'SOL'};
 (function(){
   var DEFAULT_FETCH_TIMEOUT_MS=15000, UPLOAD_FETCH_TIMEOUT_MS=60000;
   var TRANSACTION_FETCH_TIMEOUT_MS=180000;
+  var DEPLOY_RETRY_DELAYS=[250,600,1200,2000,3000];
   var original=window.fetch.bind(window);
+  function sameOrigin(input){
+    try{var raw=(typeof input==='string')?input:(input&&input.url)||'';return new URL(raw,location.href).origin===location.origin}catch(_){return false}
+  }
+  function wait(ms){return new Promise(function(resolve){setTimeout(resolve,ms)})}
   window.fetch=function(input,init){
     if((init&&init.signal)||(typeof Request!=='undefined'&&input instanceof Request&&input.signal&&input.signal.aborted))
       return original(input,init);
     var method=String((init&&init.method)||(input&&input.method)||'GET').toUpperCase();
     var isUpload=!!(init&&typeof FormData!=='undefined'&&init.body instanceof FormData);
-    // Mutations can wait for blockchain confirmation; aborting the browser
-    // request does not cancel server-side signing or broadcast. Never retry.
+    // Mutations can wait for blockchain confirmation; aborting or replaying a
+    // transaction request can be dangerous. Only idempotent same-origin reads
+    // get the brief deploy shield below.
     var timeout=(method!=='GET'&&method!=='HEAD')?TRANSACTION_FETCH_TIMEOUT_MS:
       (isUpload?UPLOAD_FETCH_TIMEOUT_MS:DEFAULT_FETCH_TIMEOUT_MS);
     if(isUpload) timeout=UPLOAD_FETCH_TIMEOUT_MS;
     var ctl=new AbortController(),timer=setTimeout(function(){ctl.abort()},timeout);
     var opts=Object.assign({},init||{},{signal:ctl.signal});
-    return original(input,opts).finally(function(){clearTimeout(timer)});
+    var retryable=(method==='GET'||method==='HEAD')&&sameOrigin(input);
+    function attempt(n){
+      return original(input,opts).then(function(resp){
+        if(retryable&&n<DEPLOY_RETRY_DELAYS.length&&(resp.status===502||resp.status===503||resp.status===504))
+          return wait(DEPLOY_RETRY_DELAYS[n]).then(function(){return attempt(n+1)});
+        return resp;
+      });
+    }
+    return attempt(0).finally(function(){clearTimeout(timer)});
   };
 })();
 
@@ -112,9 +133,13 @@ function fmtPrice(n){n=Number(n);if(n==null||isNaN(n))return'—';if(n===0)retur
 function logoTile(imgUrl,label,cls,phCls){var initials=esc((label||'?').slice(0,2).toUpperCase()),safe=safeImgUrl(imgUrl);if(!safe)return'<div class="'+phCls+'">'+initials+'</div>';return'<img class="'+cls+'" src="'+esc(safe)+'" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">'+'<div class="'+phCls+'" style="display:none">'+initials+'</div>'}
 function closeAllOverlays(){var nav=document.getElementById('pt-nb-nav'),more=document.getElementById('pt-nb-more-dd'),scrim=document.getElementById('pt-nb-scrim'),results=document.getElementById('pt-nb-search-results');if(nav)nav.classList.remove('mobile-open');if(more)more.classList.remove('open');if(scrim)scrim.classList.remove('show');if(results)results.classList.remove('open')}
 function markCurrentNavItem(){var here=location.pathname.replace(/\/+$/,'')||'/';document.querySelectorAll('.pt-nb-more-item[href]').forEach(function(a){var href=(a.getAttribute('href')||'').replace(/\/+$/,'')||'/';a.classList.toggle('current',href===here)})}
+function navIdentityStorageKey(){var m=document.querySelector('meta[name="oa-user-cache-key"]');return m&&m.content?'oa-nav-identity-v1:'+m.content:''}
+function paintNavAvatar(raw){var avatar=safeImgUrl(raw),img=document.getElementById('pt-nb-avatar'),ph=document.getElementById('pt-nb-avatar-ph');if(!avatar||!img)return false;img.src=avatar;img.style.display='block';if(ph)ph.style.display='none';return true}
+function restoreNavIdentity(){var key=navIdentityStorageKey();if(!key)return;var raw='';try{raw=sessionStorage.getItem(key)||localStorage.getItem(key)||''}catch(_){}if(!raw)return;try{var d=JSON.parse(raw);if(d&&d.avatar)paintNavAvatar(d.avatar)}catch(_){}}
+function rememberNavIdentity(d){var key=navIdentityStorageKey();if(!key||!d)return;var avatar=safeImgUrl(d.avatar||'');if(!avatar)return;var raw=JSON.stringify({avatar:avatar,username:String(d.username||''),saved_at:Date.now()});try{sessionStorage.setItem(key,raw)}catch(_){}try{localStorage.setItem(key,raw)}catch(_){}}
 
 document.addEventListener('DOMContentLoaded',function(){
-  var root=document.querySelector('.pt-nb-topbar');if(!root)return;markCurrentNavItem();
+  var root=document.querySelector('.pt-nb-topbar');if(!root)return;markCurrentNavItem();restoreNavIdentity();
   if(location.pathname.replace(/\/+$/,'')==='/wallet')document.querySelectorAll('a[href="/wallet"],a[href^="/wallet?"]').forEach(function(a){if(/wallet/i.test(a.textContent||''))a.textContent=(a.textContent||'').replace(/wallet/ig,'Portfolio')});
   var menuBtn=document.getElementById('pt-nb-menu-btn'),navEl=document.getElementById('pt-nb-nav'),moreBtn=document.getElementById('pt-nb-more-btn'),moreDd=document.getElementById('pt-nb-more-dd'),scrimEl=document.getElementById('pt-nb-scrim'),searchIn=document.getElementById('pt-nb-search-input'),searchRes=document.getElementById('pt-nb-search-results'),searchWrap=searchIn&&searchIn.closest('.pt-nb-search-wrap'),searchClose=document.getElementById('pt-nb-search-close');
   if(searchIn){searchIn.type='search';searchIn.setAttribute('inputmode','search');searchIn.setAttribute('aria-label','Search tokens and traders')}
@@ -156,7 +181,7 @@ document.addEventListener('DOMContentLoaded',function(){
   // every load, and old cached HTML without header-stable-balance.js at all
   // would be stuck on the wrong-shaped number permanently. Kept here only
   // for the avatar and admin-link bits nothing else fetches this info for.
-  fetch('/api/me',{credentials:'include',cache:'no-store'}).then(function(r){return r.json()}).then(function(d){if(!d||!d.ok)return;if(d.avatar){var img=document.getElementById('pt-nb-avatar'),ph=document.getElementById('pt-nb-avatar-ph');if(img){img.src=d.avatar;img.style.display='block'}if(ph)ph.style.display='none'}var allowAdmin=d.can_access_admin===true;document.querySelectorAll('.pt-nb-admin-link').forEach(function(x){if(allowAdmin){x.hidden=false;x.removeAttribute('hidden');x.setAttribute('aria-hidden','false');x.style.display='flex'}else{x.hidden=true;x.setAttribute('aria-hidden','true');x.style.display='none'}});document.dispatchEvent(new CustomEvent('orca:admin-access-changed',{detail:{allowed:allowAdmin}}))}).catch(function(){});
+  fetch('/api/me',{credentials:'include',cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('me '+r.status);return r.json()}).then(function(d){if(!d||!d.ok)return;if(d.avatar){paintNavAvatar(d.avatar);rememberNavIdentity(d)}var allowAdmin=d.can_access_admin===true;document.querySelectorAll('.pt-nb-admin-link').forEach(function(x){if(allowAdmin){x.hidden=false;x.removeAttribute('hidden');x.setAttribute('aria-hidden','false');x.style.display='flex'}else{x.hidden=true;x.setAttribute('aria-hidden','true');x.style.display='none'}});document.dispatchEvent(new CustomEvent('orca:admin-access-changed',{detail:{allowed:allowAdmin}}))}).catch(function(){});
   function refreshBadges(){fetch('/api/messages/unread_count',{credentials:'include'}).then(function(r){return r.json()}).then(function(d){var n=(d&&d.count)||0;['pt-nb-msg-badge','pt-nb-more-msg-badge'].forEach(function(id){var el=document.getElementById(id);if(!el)return;el.textContent=n>99?'99+':String(n);el.classList.toggle('show',n>0)})}).catch(function(){});fetch('/api/notifications/mine/unread_count',{credentials:'include'}).then(function(r){return r.json()}).then(function(d){var n=(d&&d.ok&&d.unread)||0;['pt-nb-notif-badge','pt-nb-more-notif-badge'].forEach(function(id){var el=document.getElementById(id);if(!el)return;el.textContent=n>99?'99+':String(n);el.classList.toggle('show',n>0)})}).catch(function(){})}
   refreshBadges();setInterval(refreshBadges,30000);
 });

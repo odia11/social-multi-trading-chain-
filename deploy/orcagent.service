@@ -1,6 +1,7 @@
 [Unit]
 Description=OrcAgent — multi-chain social trading platform
-After=network-online.target
+Requires=orcagent.socket
+After=network-online.target orcagent.socket
 Wants=network-online.target
 
 [Service]
@@ -30,8 +31,12 @@ UMask=0077
 # requests are I/O-bound (they wait, holding no lock), SQLite runs in WAL mode
 # with a busy timeout, and it is still one process -- so this adds waiting
 # room, not a second copy of anything.
+# fd 3 is the loopback listener owned by orcagent.socket. The socket stays
+# open while this service restarts, so nginx connections queue instead of
+# failing during a deploy. There is still exactly one worker/process running
+# the trading/background loops at any point.
 ExecStart=/opt/orcagent/venv/bin/gunicorn app_entry:app \
-    --bind 127.0.0.1:8080 \
+    --bind fd://3 \
     --workers 1 \
     --threads 16 \
     --timeout 120 \

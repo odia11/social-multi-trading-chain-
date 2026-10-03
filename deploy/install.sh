@@ -30,8 +30,14 @@ id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --create-home --shell /usr
 
 say "Installing the application into $APP_DIR"
 if command -v rsync >/dev/null 2>&1; then
-  rsync -a --delete --exclude '.git' --exclude '__pycache__' --exclude '*.db' \
-        --exclude 'venv' --exclude '**/node_modules' --exclude '.secret_key' --exclude '/models' "$REPO_DIR"/ "$APP_DIR"/
+  # Keep the currently served UI intact while the slow install work runs.
+  # static/, templates/ and dashboard.html are activated together at the very
+  # end of this script, immediately before update.sh restarts gunicorn. This
+  # prevents old backend code from serving half of a new frontend for minutes.
+  rsync -a --delete-delay --delay-updates --exclude '.git' --exclude '__pycache__' --exclude '*.db' \
+        --exclude 'venv' --exclude '**/node_modules' --exclude '.secret_key' --exclude '/models' \
+        --exclude '/static' --exclude '/templates' --exclude '/dashboard.html' \
+        "$REPO_DIR"/ "$APP_DIR"/
   if [ -e "$REPO_DIR/.git" ]; then
     git -C "$REPO_DIR" rev-parse --short HEAD > "$APP_DIR/VERSION" 2>/dev/null || true
   fi
@@ -48,8 +54,10 @@ chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 # able to traverse the app dir and read the public static assets; the rest of
 # the tree keeps whatever the clone has (the service reads it as its owner).
 chmod 755 "$APP_DIR"
-find "$APP_DIR/static" -type d -exec chmod 755 {} +
-find "$APP_DIR/static" -type f -exec chmod 644 {} +
+if [ -d "$APP_DIR/static" ]; then
+  find "$APP_DIR/static" -type d -exec chmod 755 {} +
+  find "$APP_DIR/static" -type f -exec chmod 644 {} +
+fi
 
 say "Creating and locking down the data directory ($DATA_DIR)"
 mkdir -p "$DATA_DIR/backups"
@@ -186,6 +194,7 @@ chmod 640 "$ENV_FILE"
 
 say "Installing the systemd services"
 cp "$REPO_DIR/deploy/orcagent.service"           /etc/systemd/system/orcagent.service
+cp "$REPO_DIR/deploy/orcagent.socket"            /etc/systemd/system/orcagent.socket
 cp "$REPO_DIR/deploy/orcagent-monitor.service"   /etc/systemd/system/orcagent-monitor.service
 cp "$REPO_DIR/deploy/orcagent-backup.service"    /etc/systemd/system/orcagent-backup.service
 cp "$REPO_DIR/deploy/orcagent-backup.timer"      /etc/systemd/system/orcagent-backup.timer
@@ -193,6 +202,7 @@ chmod 755 "$APP_DIR/deploy/backup.sh" "$APP_DIR/deploy/security-smoke.sh"
 
 if ! systemd-analyze verify \
     /etc/systemd/system/orcagent.service \
+    /etc/systemd/system/orcagent.socket \
     /etc/systemd/system/orcagent-monitor.service \
     /etc/systemd/system/orcagent-backup.service \
     /etc/systemd/system/orcagent-backup.timer >/tmp/orcagent-systemd-verify.log 2>&1; then
@@ -202,7 +212,11 @@ fi
 echo "  systemd unit verification passed"
 
 systemctl daemon-reload
-systemctl enable orcagent orcagent-monitor >/dev/null
+# Do not start the socket here on the one-time migration from the old direct
+# Gunicorn bind: port 8080 is still owned by the running service. update.sh
+# performs the handoff safely. On every later deploy the socket is already
+# active and remains open across the application restart.
+systemctl enable orcagent.socket orcagent orcagent-monitor >/dev/null
 systemctl enable --now orcagent-backup.timer >/dev/null
 
 say "Verifying backup protection"
@@ -273,6 +287,24 @@ printf '%s' "$NGINX_DUMP" | grep -q 'server_tokens off' \
 printf '%s' "$NGINX_DUMP" | grep -q 'proxy_set_header X-Forwarded-For[[:space:]]*\$remote_addr' \
   || die "nginx is not enforcing a trusted forwarded client IP"
 echo "  nginx edge hardening active"
+
+# UI files are the last thing activated. Everything expensive above (apt/pip,
+# backup verification, systemd/nginx validation) completed while nginx kept
+# serving the previous, internally consistent frontend. rsync's delayed-update
+# mode writes temporary files first and only renames them into place after the
+# whole transfer is ready, shrinking the mixed-version window to the few
+# milliseconds before update.sh restarts gunicorn.
+say "Activating web assets for the restart"
+mkdir -p "$APP_DIR/static" "$APP_DIR/templates"
+rsync -a --delete-delay --delay-updates "$REPO_DIR/static/" "$APP_DIR/static/"
+rsync -a --delete-delay --delay-updates "$REPO_DIR/templates/" "$APP_DIR/templates/"
+install -o "$APP_USER" -g "$APP_USER" -m 644 "$REPO_DIR/dashboard.html" "$APP_DIR/dashboard.html"
+chown -R "$APP_USER:$APP_USER" "$APP_DIR/static" "$APP_DIR/templates"
+find "$APP_DIR/static" -type d -exec chmod 755 {} +
+find "$APP_DIR/static" -type f -exec chmod 644 {} +
+find "$APP_DIR/templates" -type d -exec chmod 755 {} +
+find "$APP_DIR/templates" -type f -exec chmod 644 {} +
+echo "  web assets switched as one deploy batch"
 
 cat <<EOF
 
