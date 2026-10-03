@@ -16901,7 +16901,9 @@ def api_group_post_delete(group_id, post_id):
         is_mod_or_owner = role in ('owner', 'mod')
         if row[0] != uid and not _is_owner(wallet) and not is_mod_or_owner:
             return jsonify({'ok': False, 'msg': 'Not your post'}), 403
+        post_link = _group_post_link(group_id, post_id)
         _delete_feed_post_interactions(conn, 'g' + str(post_id))
+        _delete_post_notifications(conn, post_link)
         conn.execute('DELETE FROM group_posts WHERE id=?', (post_id,))
         conn.commit()
         return jsonify({'ok': True})
@@ -22953,7 +22955,9 @@ def feed_post_delete(post_id):
             return jsonify({'ok': False, 'msg': 'Post not found'}), 404
         if row[0] != wallet:
             return jsonify({'ok': False, 'msg': 'Forbidden'}), 403
+        post_link = '/#post-p' + str(post_id)
         _delete_feed_post_interactions(conn, 'p' + str(post_id))
+        _delete_post_notifications(conn, post_link)
         conn.execute('DELETE FROM feed_posts WHERE id=?', (post_id,))
         conn.commit()
         return jsonify({'ok': True})
@@ -23010,7 +23014,9 @@ def feed_post_delete_v2(post_id):
             return jsonify({'ok': False, 'msg': 'Post not found'}), 404
         if row[0] != wallet and not is_admin:
             return jsonify({'ok': False, 'msg': 'Forbidden'}), 403
+        post_link = '/#post-p' + str(post_id)
         _delete_feed_post_interactions(conn, 'p' + str(post_id))
+        _delete_post_notifications(conn, post_link)
         conn.execute('DELETE FROM feed_posts WHERE id=?', (post_id,))
         conn.commit()
         return jsonify({'ok': True})
@@ -23477,6 +23483,20 @@ def _delete_feed_post_interactions(conn, post_id):
     conn.execute('DELETE FROM post_likes WHERE post_id=?', (post_id,))
     conn.execute('DELETE FROM post_reactions WHERE post_id=?', (post_id,))
     conn.execute('DELETE FROM feed_reposts WHERE post_id=?', (post_id,))
+
+
+def _delete_post_notifications(conn, link):
+    """Delete every in-app notification that points at a post being removed.
+
+    Post notifications are deliberately reversible: if someone posts, deletes,
+    reposts, deletes again, followers must not accumulate ghost alerts for
+    content that no longer exists. A final post that remains gets its normal
+    notification; deleted attempts leave no badge/list residue.
+    """
+    if not link:
+        return 0
+    cur = conn.execute('DELETE FROM notifications WHERE link=?', (link,))
+    return int(cur.rowcount or 0)
 
 
 def _notify_reply_mentions(conn, message, me, wallet, owner_uid, post_id):
@@ -27180,9 +27200,10 @@ def send_dm(peer_id):
             preview = '📊 Shared a trade'
         else:
             preview = text[:60] + ('…' if len(text) > 60 else '')
+        notification_link = '/messages/' + wallet + '?mid=' + str(message_id)
         conn.execute(
             'INSERT INTO notifications (user_id, type, content, link, actor_wallet) VALUES (?,?,?,?,?)',
-            (peer_id, 'message', sender_name + ': ' + preview, '/messages/' + wallet, wallet)
+            (peer_id, 'message', sender_name + ': ' + preview, notification_link, wallet)
         )
         conn.commit()
         # Only once the message is really stored. One tag per sender: a burst
@@ -27556,12 +27577,20 @@ def delete_dm(message_id):
         if not me:
             return jsonify({'ok': False, 'msg': 'User not found'}), 404
         row = conn.execute(
-            'SELECT sender_id FROM direct_messages WHERE id=?', (message_id,)
+            'SELECT sender_id, receiver_id FROM direct_messages WHERE id=?', (message_id,)
         ).fetchone()
         if not row:
             return jsonify({'ok': False, 'msg': 'Message not found'}), 404
         if row[0] != me:
             return jsonify({'ok': False, 'msg': 'Not your message'}), 403
+        receiver_id = int(row[1])
+        # The notification belongs to this exact DM. Removing the message must
+        # remove the alert too, so repeated send/delete cycles never leave a
+        # stack of ghost notifications behind for the recipient.
+        conn.execute(
+            "DELETE FROM notifications WHERE user_id=? AND type='message' AND actor_wallet=? AND link=?",
+            (receiver_id, wallet, '/messages/' + wallet + '?mid=' + str(message_id))
+        )
         # Do not rely on SQLite foreign-key cascades being enabled on every
         # connection: remove reactions explicitly before deleting the message.
         conn.execute('DELETE FROM direct_message_reactions WHERE message_id=?', (message_id,))
@@ -32666,6 +32695,7 @@ def admin_ban_user():
         for (pid,) in conn.execute(
                 'SELECT id FROM feed_posts WHERE wallet=?', (target,)).fetchall():
             _delete_feed_post_interactions(conn, 'p' + str(pid))
+            _delete_post_notifications(conn, '/#post-p' + str(pid))
         conn.execute('DELETE FROM users WHERE wallet_address=?', (target,))
         conn.execute('DELETE FROM feed_posts WHERE wallet=?', (target,))
         conn.commit()
@@ -32705,6 +32735,7 @@ def admin_ban_v2():
         for (pid,) in conn.execute(
                 'SELECT id FROM feed_posts WHERE wallet=?', (target,)).fetchall():
             _delete_feed_post_interactions(conn, 'p' + str(pid))
+            _delete_post_notifications(conn, '/#post-p' + str(pid))
         conn.execute('DELETE FROM users WHERE wallet_address=?', (target,))
         conn.execute('DELETE FROM feed_posts WHERE wallet=?', (target,))
         conn.commit()
@@ -32727,6 +32758,7 @@ def admin_delete_post():
         if not row:
             return jsonify({'ok': False, 'msg': 'Post not found'}), 404
         _delete_feed_post_interactions(conn, 'p' + str(post_id))
+        _delete_post_notifications(conn, '/#post-p' + str(post_id))
         conn.execute('DELETE FROM feed_posts WHERE id=?', (post_id,))
         conn.commit()
         return jsonify({'ok': True})
