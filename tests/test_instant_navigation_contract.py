@@ -31,8 +31,10 @@ checks={
       "url.pathname.indexOf('/static/')!==0" in SW
       and "url.origin!==self.location.origin" in SW
       and "req.method!=='GET'" in SW,
-  'service worker never caches navigation documents':
-      "event.request.mode==='navigate'" not in SW,
+  'service worker retries navigation through deploys without caching HTML':
+      "if(req.mode==='navigate')" in SW
+      and 'event.respondWith(oaFetchThroughDeploy(req,0))' in SW
+      and "url.pathname.indexOf('/static/')!==0" in SW,
   'this performance contract is enforced by update and install':
       'check-performance-contract.sh' in UPDATE
       and 'check-performance-contract.sh' in INSTALL,

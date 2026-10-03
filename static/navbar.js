@@ -87,9 +87,13 @@ var _NB_LIVE_CHAINS=['solana'];
 var _NB_CHAIN_LABELS={solana:'SOL'};
 
 (function(){
-  var DEFAULT_FETCH_TIMEOUT_MS=15000, UPLOAD_FETCH_TIMEOUT_MS=60000;
+  var DEFAULT_FETCH_TIMEOUT_MS=30000, UPLOAD_FETCH_TIMEOUT_MS=60000;
   var TRANSACTION_FETCH_TIMEOUT_MS=180000;
-  var DEPLOY_RETRY_DELAYS=[250,600,1200,2000,3000];
+  // A production restart currently takes roughly 10–12s from old worker exit
+  // to the new worker answering. Keep active screens stable through that gap:
+  // safe same-origin reads stay pending and retry for ~20s instead of surfacing
+  // transient 502/503/504 responses. Mutations are never replayed below.
+  var DEPLOY_RETRY_DELAYS=[250,500,1000,1500,2000,2500,3000,3500,4000];
   var original=window.fetch.bind(window);
   function sameOrigin(input){
     try{var raw=(typeof input==='string')?input:(input&&input.url)||'';return new URL(raw,location.href).origin===location.origin}catch(_){return false}

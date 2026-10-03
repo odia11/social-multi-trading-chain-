@@ -22,6 +22,9 @@ checks = {
         "DEPLOY_RETRY_DELAYS" in NAV
         and "(method==='GET'||method==='HEAD')&&sameOrigin(input)" in NAV
         and "resp.status===502||resp.status===503||resp.status===504" in NAV,
+    'active PWA navigation waits through the backend restart without caching HTML':
+        "if(req.mode==='navigate')" in (ROOT / 'static' / 'sw.js').read_text(encoding='utf-8')
+        and 'oaFetchThroughDeploy(req,0)' in (ROOT / 'static' / 'sw.js').read_text(encoding='utf-8'),
     'mutations are never replayed by the deploy retry shield':
         "method!=='GET'&&method!=='HEAD'" in NAV and 'TRANSACTION_FETCH_TIMEOUT_MS' in NAV,
     'slow install work preserves the currently served UI':

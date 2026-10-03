@@ -1,7 +1,27 @@
 // OrcAgent service worker — public app-shell cache + Web Push.
 // SECURITY INVARIANT: only /static/ GETs are cached. Authenticated HTML,
 // API responses, balances, feeds and wallet data are always network-only.
-var OA_STATIC_CACHE = 'orcagent-static-v10';
+var OA_STATIC_CACHE = 'orcagent-static-v11';
+var OA_DEPLOY_RETRY_DELAYS = [250,500,1000,1500,2000,2500,3000,3500,4000];
+function oaWait(ms){ return new Promise(function(resolve){ setTimeout(resolve, ms); }); }
+function oaFetchThroughDeploy(req, attempt){
+  return fetch(req.clone()).then(function(resp){
+    if(attempt < OA_DEPLOY_RETRY_DELAYS.length &&
+       (resp.status===502 || resp.status===503 || resp.status===504)){
+      return oaWait(OA_DEPLOY_RETRY_DELAYS[attempt]).then(function(){
+        return oaFetchThroughDeploy(req, attempt+1);
+      });
+    }
+    return resp;
+  }).catch(function(err){
+    if(attempt < OA_DEPLOY_RETRY_DELAYS.length){
+      return oaWait(OA_DEPLOY_RETRY_DELAYS[attempt]).then(function(){
+        return oaFetchThroughDeploy(req, attempt+1);
+      });
+    }
+    throw err;
+  });
+}
 var OA_STATIC_BOOT = [
   '/static/app-ux.css?v=9',
   '/static/app-ux.js?v=11',
@@ -31,7 +51,18 @@ self.addEventListener('fetch', function(event) {
   if(req.method!=='GET') return;
   var url;
   try{ url=new URL(req.url); }catch(_){ return; }
-  if(url.origin!==self.location.origin || url.pathname.indexOf('/static/')!==0) return;
+  if(url.origin!==self.location.origin) return;
+
+  // Never cache authenticated HTML, but keep an already-open OrcAgent PWA from
+  // falling onto nginx's 502 page when a user taps a route during the short
+  // Gunicorn restart window. The old document stays visible while this GET is
+  // retried; as soon as the backend answers, normal navigation continues.
+  if(req.mode==='navigate'){
+    event.respondWith(oaFetchThroughDeploy(req,0));
+    return;
+  }
+
+  if(url.pathname.indexOf('/static/')!==0) return;
   event.respondWith(
     caches.open(OA_STATIC_CACHE).then(function(cache){
       return cache.match(req).then(function(hit){
