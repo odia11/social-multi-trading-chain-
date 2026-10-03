@@ -32,8 +32,11 @@ class SwapTests(unittest.TestCase):
             JUPITER_PROXY='', PROXY_SECRET='', USDC_MINT='usdc', SOL_MINT='sol',
             _authenticated_wallet=lambda:self.wallet, _validate_csrf=lambda v:v=='valid',
             _get_trading_wallet_address=lambda w:'trading', _get_user_sol=lambda a:self.sol,
-            _get_solana_usdc_balance=lambda a:self.usdc, _use_key=lambda b,w:contextlib.nullcontext('test-key'),
+            _get_solana_usdc_balance=lambda a, **kw:self.usdc,
+            _get_bot_solana_balances=lambda a:(self.sol,self.usdc),
+            _use_key=lambda b,w:contextlib.nullcontext('test-key'),
             _redact_keys=str, rate_limit=lambda *a:lambda f:f)
+        self.d=d
         swap.install(d)
         self.client=self.app.test_client()
     def tearDown(self):
@@ -56,6 +59,22 @@ class SwapTests(unittest.TestCase):
         self.sol='0.123456789'
         b=self.client.get('/api/wallet/sol-swap/balance').json
         self.assertEqual(b['max_sol'],'0.118456789')
+    def test_balance_prefers_verified_direct_pair_over_indexed_reads(self):
+        self.sol='0.179013'
+        self.usdc='4.25'
+        self.d._get_user_sol=Mock(side_effect=RuntimeError('indexed SOL unavailable'))
+        self.d._get_solana_usdc_balance=Mock(side_effect=RuntimeError('indexed USDC unavailable'))
+        r=self.client.get('/api/wallet/sol-swap/balance')
+        self.assertEqual(r.status_code,200,r.json)
+        self.assertEqual(Decimal(r.json['sol']),Decimal('0.179013'))
+        self.assertEqual(Decimal(r.json['usdc']),Decimal('4.25'))
+        self.d._get_user_sol.assert_not_called()
+        self.d._get_solana_usdc_balance.assert_not_called()
+    def test_balance_falls_back_when_direct_pair_is_temporarily_unavailable(self):
+        self.d._get_bot_solana_balances=Mock(side_effect=RuntimeError('direct RPC unavailable'))
+        r=self.client.get('/api/wallet/sol-swap/balance')
+        self.assertEqual(r.status_code,200,r.json)
+        self.assertEqual(r.json['max_usdc'],'20.088712')
     def test_funded_wallet_uses_normal_swap_instead_of_requiring_gasless(self):
         self.sol='0.005'
         response=types.SimpleNamespace(status_code=200, json=lambda:{
