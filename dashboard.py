@@ -26031,6 +26031,20 @@ def _get_solana_usdc_balance(address: str, *, allow_stale: bool = False) -> floa
         if hit and now - hit[0] < _SOL_USDC_BALANCE_TTL:
             return hit[1]
 
+    # Read-only Portfolio surfaces need the amount OrcAgent can actually spend,
+    # not an expensive wallet-wide index scan. The canonical USDC ATA can be
+    # verified with ordinary getAccountInfo, which stays available even when
+    # indexed getTokenAccountsByOwner is throttled. A verified missing/zero ATA
+    # is therefore a real 0 for OrcAgent's spendable balance. Money-moving
+    # callers do not set allow_stale and keep the stricter aggregate/fail-closed
+    # path below.
+    if allow_stale:
+        try:
+            _, spendable = _get_bot_solana_balances(key)
+            return float(spendable)
+        except Exception:
+            pass
+
     rpcs = _solana_balance_rpc_pool()
     last_error = None
     saw_valid = False
