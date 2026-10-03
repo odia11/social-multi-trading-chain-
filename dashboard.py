@@ -25750,14 +25750,21 @@ def _fetch_wallet_tokens(wallet: str, onchain_wallet: str = None) -> dict:
     })
 
     # ── SPL token accounts (legacy Token Program + Token-2022) ──
-    print(f'[wallet-tokens] onchain_wallet={onchain_wallet!r} len={len(onchain_wallet)}', flush=True)
+    # A valid JSON-RPC response with value=[] is authoritative: the wallet has
+    # no accounts for that token program. The old code treated [] as a provider
+    # failure, needlessly retried Helius (which can return a non-JSON error body)
+    # and then resurrected stale user_tokens DB rows as if they were on-chain
+    # holdings. Portfolio balances must come from verified chain state only.
+    _short_onchain = (onchain_wallet[:6] + '…' + onchain_wallet[-4:]) if len(onchain_wallet) >= 12 else onchain_wallet
+    print(f'[wallet-tokens] onchain_wallet={_short_onchain}', flush=True)
     mints_needed: list = []
     raw_accounts: list = []
     _seen_mints: set = set()
     _raw_by_mint: dict = {}
     _rpcs_to_try = [SOLANA_RPC] + [ep for ep in _PROXY_RPCS if ep != SOLANA_RPC]
     for _prog_id in (TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID):
-        _prog_accounts: list = []
+        _prog_accounts = None
+        _last_rpc_error = 'no valid RPC response'
         for _rpc_url in _rpcs_to_try:
             try:
                 _rpc_r = requests.post(_rpc_url, json={
@@ -25765,15 +25772,40 @@ def _fetch_wallet_tokens(wallet: str, onchain_wallet: str = None) -> dict:
                     'method': 'getTokenAccountsByOwner',
                     'params': [onchain_wallet, {'programId': _prog_id}, {'encoding': 'jsonParsed'}],
                 }, timeout=12)
-                _rpc_raw = _rpc_r.json()
-                _prog_accounts = _rpc_raw.get('result', {}).get('value') or []
+                if _rpc_r.status_code != 200:
+                    _last_rpc_error = f'HTTP {_rpc_r.status_code}'
+                    continue
+                try:
+                    _rpc_raw = _rpc_r.json()
+                except ValueError:
+                    _last_rpc_error = 'non-JSON response'
+                    continue
+                if not isinstance(_rpc_raw, dict) or _rpc_raw.get('error'):
+                    _err = (_rpc_raw.get('error') if isinstance(_rpc_raw, dict) else None) or {}
+                    _last_rpc_error = str(_err.get('message') or 'RPC error')
+                    continue
+                _rpc_result = _rpc_raw.get('result')
+                _rpc_value = _rpc_result.get('value') if isinstance(_rpc_result, dict) else None
+                if not isinstance(_rpc_value, list):
+                    _last_rpc_error = 'invalid result shape'
+                    continue
+                _prog_accounts = _rpc_value
                 print(f'[wallet-tokens] prog={_prog_id[:8]} rpc={_rpc_label(_rpc_url)}: {len(_prog_accounts)} accounts', flush=True)
-                if _prog_accounts:
-                    break
+                # Empty is a successful, authoritative result; do not hit another
+                # provider simply because this wallet owns no accounts.
+                break
             except Exception as _rpc_err:
+                _last_rpc_error = type(_rpc_err).__name__
                 # Never log the RPC URL itself: its query string carries the API key.
                 print(f'[wallet-tokens] prog={_prog_id[:8]} rpc={_rpc_label(_rpc_url)} error: '
                       f'{_scrub_url_secrets(_rpc_err)}', flush=True)
+        if _prog_accounts is None:
+            # Do not fabricate chain holdings from the local trade ledger. The
+            # Portfolio snapshot layer will retain its last complete confirmed
+            # value while RPCs recover.
+            raise RuntimeError(
+                f'SPL token accounts unavailable for {_prog_id[:8]} ({_last_rpc_error})'
+            )
         for acc in _prog_accounts:
             info     = (acc.get('account') or {}).get('data', {}).get('parsed', {}).get('info') or {}
             mint     = info.get('mint', '')
@@ -25792,33 +25824,6 @@ def _fetch_wallet_tokens(wallet: str, onchain_wallet: str = None) -> dict:
             raw_accounts.append(row)
             mints_needed.append(mint)
     print(f'[wallet-tokens] total SPL accounts after merge: {len(raw_accounts)}', flush=True)
-
-    # ── DB fallback: if RPC returned no SPL tokens, read user_tokens table ──
-    if not raw_accounts:
-        print(f'[wallet-tokens] RPC empty — falling back to user_tokens DB', flush=True)
-        try:
-            _fb_conn = sqlite3.connect(DB_FILE)
-            _uid_row = _fb_conn.execute(
-                'SELECT id FROM users WHERE wallet_address=?', (wallet,)
-            ).fetchone()
-            if _uid_row:
-                _fb_rows = _fb_conn.execute(
-                    'SELECT token_address, symbol, amount, avg_price FROM user_tokens'
-                    ' WHERE user_id=? AND amount > 0',
-                    (_uid_row[0],)
-                ).fetchall()
-                for _ta, _sym, _amt, _avg in _fb_rows:
-                    if not _ta or _ta in _seen_mints:
-                        continue
-                    _seen_mints.add(_ta)
-                    raw_accounts.append({'mint': _ta, 'amount': float(_amt),
-                                         'decimals': 0, 'symbol_hint': _sym,
-                                         'avg_price': float(_avg or 0)})
-                    mints_needed.append(_ta)
-                print(f'[wallet-tokens] DB fallback: {len(_fb_rows)} rows, {len(raw_accounts)} usable', flush=True)
-            _fb_conn.close()
-        except Exception as _fb_err:
-            print(f'[wallet-tokens] DB fallback error: {_fb_err}', flush=True)
 
     # ── Batch DexScreener price lookup (max 30 per request) ──
     price_map: dict = {}
