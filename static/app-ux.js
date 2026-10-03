@@ -14,7 +14,7 @@ function closestLink(e){var n=e.target;return n&&n.closest?n.closest('a[href]'):
    entry. Warm ONLY versioned public route assets (never API or wallet data).
    Cross-document View Transitions keep the old page painted during navigation. */
 var ROUTE_ASSETS={
-  '/':['home-mobile.css?v=14','home-mobile-polish.css?v=8','home-composer-mobile.css?v=7','home-desktop.css?v=1','home-mobile.js?v=12','home-desktop.js?v=1'],
+  '/':['home-mobile.css?v=14','home-mobile-polish.css?v=8','home-composer-mobile.css?v=7','home-desktop.css?v=1','home-mobile.js?v=13','home-desktop.js?v=1'],
   '/wallet':['portfolio-redesign.css?v={app}','portfolio-history-redesign.css?v={app}','portfolio-redesign.js?v={app}','portfolio-history-redesign.js?v={app}','approved-portfolio.js?v={app}','portfolio-assets.js?v=1'],
   '/live-market':['live-market-redesign.css?v=9','live-market-final.css?v=6','live-market-redesign.js?v=5','live-market-hotfix.js?v=8'],
   '/groups':['groups-redesign.css?v=1','groups-redesign.js?v=1'],
