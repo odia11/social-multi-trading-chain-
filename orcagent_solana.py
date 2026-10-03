@@ -202,7 +202,10 @@ def _rpc_post(payload: dict, timeout: int = 30) -> dict:
 # it) or permanently dead (blockhash expired, can never confirm) -- there is
 # no ambiguous middle state left for a second transaction to collide with.
 CONFIRM_TIMEOUT_S = 90.0
-CONFIRM_POLL_INTERVAL_S = 1.5
+# First confirmation should feel instant without hammering RPCs for the entire
+# blockhash window. Poll quickly while a normal Solana transaction is expected
+# to land; _confirm_transaction backs off to 1s after the first few seconds.
+CONFIRM_POLL_INTERVAL_S = 0.4
 
 
 def _confirm_transaction(sig: str, timeout_s: float = CONFIRM_TIMEOUT_S) -> dict:
@@ -234,7 +237,8 @@ def _confirm_transaction(sig: str, timeout_s: float = CONFIRM_TIMEOUT_S) -> dict
                             'status': conf, 'confirmation_time_s': round(time.time() - start, 2)}
         except Exception as e:
             print(f'[confirm] status poll error for {sig[:12]}...: {e}', flush=True)
-        time.sleep(CONFIRM_POLL_INTERVAL_S)
+        elapsed = time.time() - start
+        time.sleep(CONFIRM_POLL_INTERVAL_S if elapsed < 5.0 else 1.0)
     return {'confirmed': False, 'err': 'confirmation timeout (blockhash validity window elapsed)',
             'status': 'timeout', 'confirmation_time_s': round(time.time() - start, 2)}
 
@@ -255,7 +259,10 @@ def _log_exec_meta(meta: dict) -> None:
 
 
 def get_token_decimals(mint: str) -> int:
-    """Fetch actual on-chain decimals via getTokenSupply; default 6 on error."""
+    """Known base mints are local constants; other mints use getTokenSupply."""
+    known = BASE_MINT_DECIMALS.get(mint)
+    if known is not None:
+        return known
     try:
         r = _rpc_post({
             'jsonrpc': '2.0', 'id': 1,
@@ -579,7 +586,7 @@ def _get_sol_balance_raw(owner: str) -> int:
 
 
 def _reconciled_token_balance(mint: str, expect_change: str, baseline_raw: int,
-                               attempts: int = 8, delay_s: float = 1.5) -> tuple:
+                               attempts: int = 12, delay_s: float = 0.4) -> tuple:
     """Poll get_token_balance_raw(mint) until it reflects a change from
     baseline_raw in the expected direction ('increase' or 'decrease'), or
     give up after `attempts` reads. RPC reads can lag a couple seconds behind
@@ -661,8 +668,12 @@ def _execute_swap_inner(input_mint: str, output_mint: str, amount_lamports: int,
     # success. Reading this is best-effort: a lookup failure here just means
     # reconciliation later can't run (treated as its own failure there, not
     # swallowed silently).
-    _recon_mint = output_mint if direction == 'BUY' else input_mint
-    _recon_dir  = 'increase'  if direction == 'BUY' else 'decrease'
+    # Jupiter unwraps SOL into native lamports: there is no output SPL
+    # account to reconcile for USDC -> SOL. Verify the spent SPL input,
+    # then measure native SOL received. Keep fee routing independent.
+    reconcile_output = direction == 'BUY' and output_mint != SOL_MINT
+    _recon_mint = output_mint if reconcile_output else input_mint
+    _recon_dir  = 'increase' if reconcile_output else 'decrease'
     try:
         _, baseline_raw = get_token_balance_raw(_recon_mint)
     except Exception:
@@ -676,7 +687,7 @@ def _execute_swap_inner(input_mint: str, output_mint: str, amount_lamports: int,
     # the same get_token_balance_raw() the BUY side already relies on.
     output_is_native_sol = (output_mint == SOL_MINT)
     out_baseline = None
-    if direction == 'SELL':
+    if not reconcile_output:
         try:
             if output_is_native_sol:
                 out_baseline = _get_sol_balance_raw(pubkey)
@@ -943,7 +954,7 @@ def _execute_swap_inner(input_mint: str, output_mint: str, amount_lamports: int,
     # than network/priority fees, so a implausibly small or negative reading
     # means the read raced ahead of/behind reality, not that nothing was
     # received.
-    if direction == 'BUY':
+    if reconcile_output:
         actual_delta = abs(post_raw - baseline_raw)
     else:
         actual_delta = None
