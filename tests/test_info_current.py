@@ -28,30 +28,32 @@ def check(name, cond):
     print(('PASS ' if cond else 'FAIL ') + name)
 
 
-# ── the page must name the chains the app actually trades ─────────────────
-chains = re.search(r'SURGE_ALERT_CHAIN_NAMES = \{(.*?)\}', SRC, re.S).group(1)
-names = re.findall(r":\s*'([^']+)'", chains)
-missing = [n for n in names if n not in INFO]
-check(f'every chain the app trades is named on the page'
-      f'{"" if not missing else ": " + ", ".join(missing) + " missing"}', not missing)
-check('...and it no longer calls itself Solana-only, which it was when the page '
-      'was written', 'platform for Solana meme coins' not in INFO)
+# ── About follows the product that is actually active ──────────────────────
+about = INFO[INFO.index('<section class="info-section" id="about">'):
+             INFO.index('<!-- ═══════════ DOCS ═══════════ -->')]
+check('the active product is explicitly Solana-only in code',
+      'SOLANA_ONLY = True' in SRC and 'ACTIVE_EVM_CHAINS = {}' in SRC)
+check('About describes OrcAgent as a Solana social trading platform',
+      'Solana social trading platform' in about)
+check('About no longer contains the old duplicated or multichain copy',
+      'Solana, Solana' not in about.replace('\n      ', ' ')
+      and 'every supported chain' not in about
+      and 'whichever chain' not in about)
+check('the refreshed About hero carries the current product line',
+      'Trade it. Share it.' in about and 'Built on Solana' in about)
+for feature in ('Live Market', 'Auto Trading', 'Social &amp; Copy Trading',
+                'Launch Tokens', 'Messages', 'One Portfolio'):
+    check(f'About includes {feature}', feature in about)
 
 # ── the funding currency ──────────────────────────────────────────────────
 base = re.search(r"SOLANA_BASE_CURRENCY = '([A-Z]+)'", SRC).group(1)
-check(f'the page tells you to fund the wallet in {base}, which is what the code '
-      f'settled on', f'Deposit\n      <strong>{base}</strong>' in INFO
-      or f'<strong>{base}</strong> to fund trading' in INFO)
-check('...and no longer says to deposit SOL for that, which stopped being true '
-      'when one currency was chosen',
-      'Deposit\n      SOL to its address to fund trading' not in INFO
-      and 'SOL to its address to fund trading' not in INFO)
-check('...while still explaining that Solana needs a little SOL of its own for '
-      'network fees, because that part did not change',
-      'SOL for its own' in INFO.replace('\n      ', ' '))
-check('...and that a chain without your balance on it is bridged for you, since '
-      'that is what makes one currency work at all',
-      'bridge it there' in INFO.replace('\n      ', ' '))
+check(f'the page tells you to fund the trading wallet in {base}',
+      f'<strong>{base}</strong> to fund trading' in INFO)
+check('the docs explain that SOL is still needed for Solana network costs',
+      'SOL available for Solana network and token-account costs' in INFO)
+check('the page no longer advertises an active cross-chain bridge',
+      'there is no active cross-chain bridge in the product'
+      in INFO.replace('\n      ', ' '))
 
 # ── the fee, which is the reason anyone reads this page ───────────────────
 flat = INFO.replace('\n      ', ' ').replace('\n', ' ')
@@ -64,14 +66,13 @@ check('...and that the fee, network fee and slippage reserve come OUT of it '
       'rather than being added to it',
       'come out of it' in flat and 'what remains is what buys the token' in flat)
 
-# ── network fees, and who provides the gas ────────────────────────────────
-check('network fees are described per chain rather than as Solana\'s',
-      'standard Solana network and' not in flat and 'the chain it happens on' in flat)
-check('...and the page says you never need to hold a chain\'s gas token',
-      'never have to hold' in flat)
-check('...while being explicit that the gas is still CHARGED to you — calling '
-      'it free would be the one dishonest sentence on the page',
-      'charged to you, not subsidised' in flat)
+# ── network scope ─────────────────────────────────────────────────────────
+check('fees describe Solana/Jupiter costs instead of inactive EVM chains',
+      'Every trade runs on Solana' in flat
+      and 'OrcAgent supports Solana only' in flat)
+check('the docs distinguish USDC trading balance from SOL network costs',
+      'USDC is the trading balance OrcAgent uses for Solana buys and sells' in flat
+      and 'small amount of SOL for network fees' in flat)
 
 # ── it must still be well-formed ──────────────────────────────────────────
 VOID = {'img','br','hr','input','meta','link','source','area','base','col'}
