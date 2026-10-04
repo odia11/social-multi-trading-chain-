@@ -185,7 +185,8 @@ def budget_function():
     source = Path('orcagent_solana.py').read_text()
     node = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == '_assert_native_budget')
     namespace = {'base64': base64, '_BUY_MAX_OUTFLOW_LAMPORTS': 10_000_000}
-    exec(compile(ast.Module(body=[node], type_ignores=[]), '<budget>', 'exec'), namespace)
+    error = next(n for n in ast.parse(source).body if isinstance(n,ast.ClassDef) and n.name=='NativeBuyBudgetExceeded')
+    exec(compile(ast.Module(body=[error,node], type_ignores=[]), '<budget>', 'exec'), namespace)
     return namespace
 
 
