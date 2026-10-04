@@ -6533,7 +6533,7 @@ def _live_market_fee_rate(wallet):
 
 def _charge_txn_fee(private_key: str, wallet: str, user_id: int, symbol: str,
                      sol_amount: float, kind: str, trade_ts: str = None, gross_profit: float = 0.0,
-                     bundled: bool = False, applied_fee_rate: float = None):
+                     bundled: bool = False, applied_fee_rate: float = None, trade_signature: str = None):
     """Charge FEE_RATE_TXN (0.75%) on a swap's SOL amount and transfer it to FEE_WALLET
     in the background. `kind` is 'buy' or 'sell' -- a full round-trip trade calls this
     twice (once per leg), so it pays 1.5% total split across two separate transfers,
@@ -6568,7 +6568,7 @@ def _charge_txn_fee(private_key: str, wallet: str, user_id: int, symbol: str,
         tx_sig  = None
         err_msg = None
         if bundled:
-            tx_sig = 'bundled-in-swap'
+            tx_sig = 'bundled:' + trade_signature if trade_signature else 'bundled-in-swap'
             print(f'[fee] ✓ {sw} {sym} {kind_} {fee:.6f} SOL already collected via the swap\'s own '
                   f'platform fee — no separate transfer needed', flush=True)
         else:
@@ -6598,6 +6598,11 @@ def _charge_txn_fee(private_key: str, wallet: str, user_id: int, symbol: str,
             status = 'ok' if tx_sig else 'failed'
             fee_tx = tx_sig if tx_sig else ('FAILED: ' + (err_msg or 'unknown')[:80])
             conn2  = sqlite3.connect(DB_FILE)
+            if trade_signature:
+                conn2.execute('BEGIN IMMEDIATE')
+                if conn2.execute('SELECT 1 FROM fees WHERE fee_tx=?', (fee_tx,)).fetchone():
+                    conn2.close()
+                    return
             conn2.execute(
                 'INSERT INTO fees (user_wallet, token, gross_profit, fee_amount, fee_tx, status, kind, recipient) '
                 'VALUES (?,?,?,?,?,?,?,?)',
@@ -7151,6 +7156,7 @@ def _execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str,
             marker = ('[fee] buy: requesting quote' if action == 'buy'
                       else 'bps platform fee)')
             capture['fee_bundled'] = (marker in out) and not failed
+            capture['fee_confirmed'] = bool(re.search(r'SUCCESS \(confirmation=(confirmed|finalized),', out))
             capture['fee_rate'] = execution_fee_rate
             capture['spent'] = sol_amount
             fee_base_match = re.search(r'fee_base:([0-9.]+)', out)
@@ -10325,12 +10331,17 @@ def _record_bundled_stable_fee(wallet: str, user_id: int, symbol: str,
                                applied_fee_rate: float = None):
     """Record a stablecoin fee that was already collected atomically in the swap."""
     fee_rate = _validated_execution_fee_rate(applied_fee_rate)
-    fee = round(float(gross_amount or 0) * fee_rate, 6)
+    fee = (int(Decimal(str(gross_amount or 0)) * Decimal(str(fee_rate)) * 1_000_000) / 1_000_000
+           if str(tx_hash).startswith('bundled:') else round(float(gross_amount or 0) * fee_rate, 6))
     if fee <= 0:
         return 0.0
     recipient = FEE_WALLET if chain == 'solana' else EVM_CHAIN_FEE_WALLET
     conn = sqlite3.connect(DB_FILE)
     try:
+        if str(tx_hash).startswith('bundled:'):
+            conn.execute('BEGIN IMMEDIATE')
+            if conn.execute('SELECT 1 FROM fees WHERE fee_tx=?', (tx_hash,)).fetchone():
+                return 0.0
         conn.execute(
             'INSERT INTO fees (user_wallet, token, gross_profit, fee_amount, fee_tx, status, kind, chain, recipient) '
             'VALUES (?,?,?,?,?,?,?,?,?)',
@@ -22443,6 +22454,13 @@ def api_instant_trade():
         symbol        = str(data.get('symbol', '')).strip().upper()
         token_address = str(data.get('token_address', '')).strip()
         side          = str(data.get('side', '')).strip().lower()
+        creator_context = None
+        creator_hook = getattr(app, '_orca_creator_context', None)
+        if side == 'buy' and callable(creator_hook):
+            try:
+                creator_context = creator_hook(wallet, token_address, data.get('creator_context'))
+            except Exception:
+                app.logger.warning('Creator context unavailable; trade continues')
         # The field is still called amount_sol because that is what every
         # existing caller sends. What it MEANS is now the funding currency --
         # USDC -- so amount_usdc is accepted too and wins when both are sent.
@@ -22697,16 +22715,25 @@ def api_instant_trade():
                               else ((sol_recorded / (1.0 - execution_fee_rate)) if sol_recorded > 0 else 0.0))
                     _record_bundled_stable_fee(
                         wallet, uid, symbol, _gross, side, 'solana',
-                        tx_hash='bundled-in-swap', applied_fee_rate=execution_fee_rate)
+                        tx_hash='bundled:' + sig, applied_fee_rate=execution_fee_rate)
                 else:
                     with _use_key(enc_blob, wallet) as pk:
                         _gross = (swap_info.get('fee_base', amount_sol) if side == 'buy'
                                   else ((sol_recorded / (1.0 - execution_fee_rate)) if sol_recorded > 0 else 0.0))
-                        _charge_txn_fee(pk, wallet, uid, symbol, _gross, side, bundled=True, applied_fee_rate=execution_fee_rate)
+                        _charge_txn_fee(pk, wallet, uid, symbol, _gross, side, bundled=True, applied_fee_rate=execution_fee_rate, trade_signature=sig)
             else:
                 print(f'[fee] {wallet[:6]}... {symbol} {side}: the platform fee was NOT '
                       f'collected inside the swap, so nothing is recorded for it',
                       flush=True)
+
+            # Creator shares require signed call context, explicit chain
+            # confirmation and the matching committed fee receipt.
+            if (side == 'buy' and creator_context and token_amount > 0 and sol_amount > 0
+                    and swap_info.get('fee_bundled') and swap_info.get('fee_confirmed')):
+                try:
+                    app._orca_creator_record(wallet, creator_context, sig, SOLANA_BASE_CURRENCY)
+                except Exception:
+                    app.logger.warning('Creator fee-share bookkeeping unavailable')
 
             # Track it: a buy becomes a position whose stop loss / take profit
             # is watched every second (by the bot, or by the position guardian

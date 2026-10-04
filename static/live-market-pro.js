@@ -2555,6 +2555,8 @@ function confirmBuy(idx){
   var body = {symbol:t.symbol, token_address:t.mint, pair_address:t.pair_address,
               side:'buy', currency:'SOL', amount_sol:amt,
               max_platform_fee_bps:Math.round(PT_FEE_RATE_TXN*10000)};
+  var creatorContext = new URLSearchParams(location.search).get('creator_context');
+  if(creatorContext) body.creator_context = creatorContext;
   // The stop loss / take profit this buy is protected with (every chain).
   var prot = _protectionChoice();
   if(prot.error){
