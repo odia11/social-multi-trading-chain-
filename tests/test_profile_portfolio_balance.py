@@ -252,3 +252,42 @@ if __name__ == '__main__':
         globals()[name]()
         print('PASS', name)
     print('ALL PROFILE PORTFOLIO BALANCE REGRESSIONS PASSED')
+
+
+
+def test_all_staff_balances_are_private_for_other_viewers():
+    for role in ['admin','executive','moderator','analyst']:
+        temp,client,viewer=setup()
+        try:
+            file=os.path.join(temp.name,'profile-balance.sqlite')
+            with sqlite3.connect(file) as db:
+                db.execute('ALTER TABLE users ADD COLUMN role TEXT')
+                db.execute('UPDATE users SET role=? WHERE id=1',(role,))
+            with patch.object(mod,'_live_sol_fallback') as live,patch('portfolio_multichain_holdings._portfolio_snapshot',return_value={'total_sol':1,'available_to_trade_sol':.1}) as snapshot:
+                for visitor in [None,'user-two','another-admin']:
+                    viewer[0]=visitor
+                    response=client.get('/api/profile/1/portfolio-balance')
+                    assert response.status_code==403,(role,visitor)
+                    assert response.json=={'ok':False,'error':'Portfolio balance is private'}
+                    assert response.headers['Cache-Control']=='private, no-store'
+                live.assert_not_called();snapshot.assert_not_called()
+                viewer[0]='user-one'
+                assert client.get('/api/profile/1/portfolio-balance').status_code==200
+        finally:temp.cleanup()
+
+
+def test_role_grants_owner_and_role_lookup_failure_are_private():
+    temp,client,viewer=setup()
+    try:
+        file=os.path.join(temp.name,'profile-balance.sqlite')
+        with sqlite3.connect(file) as db:
+            db.execute('CREATE TABLE admin_roles(wallet_address TEXT,role TEXT)')
+            db.execute("INSERT INTO admin_roles VALUES ('user-one','analyst')")
+        viewer[0]='user-two'
+        assert client.get('/api/profile/1/portfolio-balance').status_code==403
+        d=SimpleNamespace(DB_FILE=file,OWNER_WALLETS={'owner'},ADMIN_WALLET='admin')
+        assert not mod.can_view_profile_balance(d,'owner','viewer')
+        assert not mod.can_view_profile_balance(d,'admin',None)
+        d.DB_FILE='/nonexistent/role-check.db'
+        assert not mod.can_view_profile_balance(d,'possibly-staff','viewer')
+    finally:temp.cleanup()

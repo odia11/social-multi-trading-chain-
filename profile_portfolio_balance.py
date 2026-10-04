@@ -54,6 +54,35 @@ def _live_sol_fallback(d, wallet: str, user_id: int):
     }
 
 
+STAFF_ROLES = frozenset({'admin','executive','moderator','analyst'})
+
+
+def can_view_profile_balance(d, wallet, viewer):
+    """A team balance is visible only to its authenticated owner."""
+    if viewer and viewer == wallet:
+        return True
+    try:
+        if wallet == getattr(d,'ADMIN_WALLET',None) or wallet in getattr(d,'OWNER_WALLETS',()):
+            return False
+        with sqlite3.connect(d.DB_FILE,timeout=8.0) as conn:
+            columns={r[1] for r in conn.execute('PRAGMA table_info(users)')}
+            role=None
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='admin_roles'").fetchone():
+                row=conn.execute('SELECT role FROM admin_roles WHERE wallet_address=?',(wallet,)).fetchone()
+                if row:
+                    role=row[0]
+            if role is None and 'role' in columns:
+                row=conn.execute('SELECT role FROM users WHERE wallet_address=?',(wallet,)).fetchone()
+                role=row[0] if row else None
+        if str(role or '').strip().lower() in STAFF_ROLES:
+            return False
+        lookup=getattr(d,'get_user_role',None)
+        return not callable(lookup) or str(lookup(wallet)).strip().lower() not in STAFF_ROLES
+    except Exception:
+        # Role lookup failure must not expose a possibly privileged wallet.
+        return False
+
+
 def install(d):
     app = d.app
     if getattr(app, '_orca_profile_portfolio_balance_installed', False):
@@ -82,8 +111,10 @@ def install(d):
         if not wallet:
             return jsonify({'ok': False, 'error': 'Portfolio unavailable'}), 503
         viewer = d._authenticated_wallet()
-        if viewer != wallet and any(bool(row[name]) for name in selected[1:]):
-            return jsonify({'ok': False, 'error': 'Portfolio balance is private'}), 403
+        if not can_view_profile_balance(d,wallet,viewer) or (viewer != wallet and any(bool(row[name]) for name in selected[1:])):
+            response=jsonify({'ok':False,'error':'Portfolio balance is private'})
+            response.headers['Cache-Control']='private, no-store'
+            return response,403
 
         # Public profile views need one fast, dependable number. Do not make a
         # visitor wait for the wallet-wide indexed token scan just to show the
