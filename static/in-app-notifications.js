@@ -56,6 +56,7 @@ function labelFor(type){
   if(type==='repost')return'New repost';
   if(type==='group_post')return'Group update';
   if(type==='trade')return'Trade update';
+  if(type==='price_alert')return'Your price alert';
   if(type==='bridge')return'Bridge update';
   if(type==='admin_invite')return'Account update';
   return'New notification';
@@ -69,6 +70,7 @@ function glyphFor(type){
   if(type==='like'||type==='reply_like'||type==='reaction')return'♥';
   if(type==='reply'||type==='repost'||type==='group_post')return'↗';
   if(type==='trade')return'↗';
+  if(type==='price_alert')return'🔔';
   if(type==='bridge')return'⇄';
   return'●';
 }
