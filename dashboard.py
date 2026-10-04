@@ -43,7 +43,7 @@ try:
 except ImportError:
     _COMPRESS_OK = False
 from contextlib import contextmanager
-from flask import Flask, jsonify, request, session, render_template, redirect, make_response, send_from_directory, g
+from flask import Flask, jsonify, request, session, render_template, redirect, make_response, send_from_directory, g, has_request_context
 from markupsafe import Markup, escape
 import gzip
 import shutil
@@ -3870,30 +3870,29 @@ def _generate_referral_code(cursor) -> str:
     return secrets.token_hex(6).upper()  # pathological-collision fallback
 
 def get_or_create_user(wallet: str, ref_code: str = None) -> int:
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    # pref_solana_base_currency defaults to SOL for every brand-new account --
-    # the column's own SQLite DEFAULT stays 'SOL' for backward compatibility
-    # (ALTER TABLE can't change an existing column's default), so it's set
-    # explicitly here instead. INSERT OR IGNORE never touches this for a
-    # wallet that already has a row, so an existing user's own saved
-    # preference (SOL or USDC) is never silently overwritten.
-    c.execute("INSERT OR IGNORE INTO users (wallet_address, pref_solana_base_currency) VALUES (?, 'SOL')", (wallet,))
-    conn.commit()
-    c.execute('SELECT id, referral_code, referred_by FROM users WHERE wallet_address=?', (wallet,))
-    row = c.fetchone()
-    if row and not row[1]:
-        code = _generate_referral_code(c)
-        c.execute('UPDATE users SET referral_code=? WHERE wallet_address=?', (code, wallet))
+    # Serialize creation and referral assignment. Only a genuinely new row
+    # may be attributed; returning users can never be reassigned by a link.
+    conn = sqlite3.connect(DB_FILE, timeout=10)
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        c = conn.cursor()
+        c.execute("INSERT OR IGNORE INTO users (wallet_address, pref_solana_base_currency) VALUES (?, 'SOL')", (wallet,))
+        created = c.rowcount == 1
+        row = c.execute('SELECT id, referral_code, referred_by FROM users WHERE wallet_address=?', (wallet,)).fetchone()
+        if row and not row[1]:
+            c.execute('UPDATE users SET referral_code=? WHERE wallet_address=?', (_generate_referral_code(c), wallet))
+        invitation_hook = getattr(app, '_orca_invitation_user_created', None)
+        if row and created and callable(invitation_hook):
+            invitation_hook(conn, row[0], wallet, ref_code)
+        elif row and created and not row[2] and ref_code and has_request_context() and _authenticated_wallet() == wallet:
+            ref_row = c.execute('SELECT wallet_address FROM users WHERE referral_code=?', (ref_code,)).fetchone()
+            if ref_row and ref_row[0] != wallet:
+                c.execute('UPDATE users SET referred_by=? WHERE wallet_address=?', (ref_row[0], wallet))
         conn.commit()
-    if row and not row[2] and ref_code:
-        c.execute('SELECT wallet_address FROM users WHERE referral_code=?', (ref_code,))
-        ref_row = c.fetchone()
-        if ref_row and ref_row[0] != wallet:
-            c.execute('UPDATE users SET referred_by=? WHERE wallet_address=?', (ref_row[0], wallet))
-            conn.commit()
-    conn.close()
-    return row[0] if row else None
+        return row[0] if row else None
+    finally:
+        conn.close()
+
 
 def _current_wallet() -> str:
     """Returns the wallet address for the current session only.

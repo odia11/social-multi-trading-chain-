@@ -50,7 +50,7 @@ _PRIVATE_PREFIXES = (
     "/api/", "/admin", "/messages", "/notifications", "/wallet",
     "/settings", "/phantom", "/solflare", "/callback", "/logout",
 )
-_PUBLIC_PREVIEW_IMAGE_PREFIXES = ("/api/trade-card/", "/api/post-og-image/", "/api/trending-card/", "/static/og-")
+_PUBLIC_PREVIEW_IMAGE_PREFIXES = ("/api/trade-card/", "/api/post-og-image/", "/api/trending-card/", "/api/call-card/", "/static/og-")
 _TITLE_RE = re.compile(r"<title\b[^>]*>.*?</title>", re.I | re.S)
 _DESCRIPTION_RE = re.compile(
     r"<meta\b(?=[^>]*\bname\s*=\s*[\"']description[\"'])[^>]*>\s*",
@@ -74,6 +74,8 @@ def _path() -> str:
 def _public_meta(path: str):
     if path in _PAGE_META:
         return _PAGE_META[path]
+    if re.fullmatch(r"/call/[0-9]+", path):
+        return ("Solana Token Call | OrcAgent", "Read this token call, explore its Solana chart and view the trader on OrcAgent.")
     if path.startswith("/post/"):
         return (
             "Crypto Trading Post | OrcAgent",
