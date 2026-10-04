@@ -6517,9 +6517,23 @@ def _close_open_position(user_id: int, wallet: str, mint: str, chain: str = 'sol
     if not _was_copy and notify_copiers:
         _trigger_copy_sell(wallet, mint, chain=_pos_chain, fraction=1.0)
 
+def _validated_execution_fee_rate(rate=None):
+    # Only rates issued by this server are accepted. A browser's fee ceiling
+    # is checked separately and never determines the transaction's fee.
+    rate = FEE_RATE_TXN if rate is None else float(rate)
+    if rate not in (FEE_RATE_TXN, 0.0070):
+        raise ValueError('Unsupported execution fee rate')
+    return rate
+
+
+def _live_market_fee_rate(wallet):
+    from trader_rewards import manual_trade_fee_bps
+    return manual_trade_fee_bps(DB_FILE, wallet) / 10000
+
+
 def _charge_txn_fee(private_key: str, wallet: str, user_id: int, symbol: str,
                      sol_amount: float, kind: str, trade_ts: str = None, gross_profit: float = 0.0,
-                     bundled: bool = False):
+                     bundled: bool = False, applied_fee_rate: float = None):
     """Charge FEE_RATE_TXN (0.75%) on a swap's SOL amount and transfer it to FEE_WALLET
     in the background. `kind` is 'buy' or 'sell' -- a full round-trip trade calls this
     twice (once per leg), so it pays 1.5% total split across two separate transfers,
@@ -6535,14 +6549,16 @@ def _charge_txn_fee(private_key: str, wallet: str, user_id: int, symbol: str,
     just records it in `fees` and pays the referral cut, without the 12s wait
     or a real transfer signature.
     """
-    fee_amount = round(sol_amount * FEE_RATE_TXN, 9)
+    fee_rate = _validated_execution_fee_rate(applied_fee_rate)
+    fee_amount = (int(Decimal(str(sol_amount)) * Decimal(str(fee_rate)) * 1_000_000_000) / 1_000_000_000
+                  if applied_fee_rate is not None else round(sol_amount * fee_rate, 9))
     short_w = (wallet[:6] + '...' + wallet[-4:]) if len(wallet) >= 10 else wallet
     # Solana fees are charged in SOL, which is already the gas token -- so
     # while the Solana gas sponsor wallet is below target this fee simply
     # goes there instead, and no conversion is needed at all.
     fee_recipient = _sol_fee_recipient()
     print(f'[fee] {short_w} {symbol} {kind} fee owed = {fee_amount:.6f} SOL '
-          f'({FEE_RATE_TXN * 100:.2f}% of {sol_amount:.6f} SOL {kind})', flush=True)
+          f'({fee_rate * 100:.2f}% of {sol_amount:.6f} SOL {kind})', flush=True)
     if not (wallet and private_key) or fee_amount <= 0:
         print(f'[fee] {short_w} {symbol} {kind} no fee — no private key or nothing to collect', flush=True)
         return
@@ -7016,7 +7032,7 @@ def _parse_swap_realized_amounts(action: str, amount_str: str, stdout: str) -> t
 
 def _execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str,
                           amount_str: str, base: str = 'SOL', capture: dict = None,
-                          known_sol_balance: float = None) -> tuple:
+                          known_sol_balance: float = None, fee_rate: float = None) -> tuple:
     """Same subprocess call as _execute_user_swap(), but also returns the
     transaction signature -- parsed from orcagent_solana.py's own stdout
     (a 'TX:<sig>' token), same parsing /api/instant-trade already does.
@@ -7060,6 +7076,7 @@ def _execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str,
     if not _sol_gas_ok:
         return False, '', _sol_gas_msg, 0.0, 0.0
     try:
+        execution_fee_rate = _validated_execution_fee_rate(fee_rate)
         # orcagent_solana.py's execute_single_swap() has accepted an optional
         # 4th CLI arg (BASE: 'SOL' or 'USDC') since it was built -- every
         # caller here just never passed it, so every Solana buy/sell has
@@ -7076,7 +7093,7 @@ def _execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str,
         # platformFeeBps) lands wherever this points, so the Solana gas
         # sponsor wallet is fed by those too while it's below target.
         env['FEE_WALLET']         = _sol_fee_recipient()
-        env['FEE_RATE_TXN']       = str(FEE_RATE_TXN)
+        env['FEE_RATE_TXN']       = str(execution_fee_rate)
         _ext_hit('jupiter')
         result = subprocess.run(
             [sys.executable, os.path.join(BASE, 'orcagent_solana.py'), action, mint, amount_str, _base],
@@ -7134,6 +7151,7 @@ def _execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str,
             marker = ('[fee] buy: requesting quote' if action == 'buy'
                       else 'bps platform fee)')
             capture['fee_bundled'] = (marker in out) and not failed
+            capture['fee_rate'] = execution_fee_rate
             capture['spent'] = sol_amount
             fee_base_match = re.search(r'fee_base:([0-9.]+)', out)
             capture['fee_base'] = float(fee_base_match.group(1)) if fee_base_match else sol_amount
@@ -7148,6 +7166,15 @@ def _execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str,
                                        reward_amount, _base, _sol_price_usd)
             except Exception as reward_error:
                 print(f'[rewards] trade evidence unavailable: {type(reward_error).__name__}', flush=True)
+        if ok and token_amount > 0 and sol_amount > 0 and capture and capture.get('fee_bundled'):
+            try:
+                from trader_rewards import record_fee_discount
+                gross_base = (capture['fee_base'] if action == 'buy'
+                              else sol_amount / (1.0 - execution_fee_rate))
+                record_fee_discount(DB_FILE, wallet, tx_hash, gross_base, _base,
+                                    int(round(execution_fee_rate * 10000)), _sol_price_usd)
+            except Exception as reward_error:
+                print(f'[rewards] discount receipt unavailable: {type(reward_error).__name__}', flush=True)
         return ok, tx_hash, err_msg, token_amount, sol_amount
     except subprocess.TimeoutExpired:
         add_user_log(wallet, 'Swap error: timed out after 120s')
@@ -10294,9 +10321,11 @@ def _evm_fee_recipient(chain: str) -> str:
 
 def _record_bundled_stable_fee(wallet: str, user_id: int, symbol: str,
                                gross_amount: float, kind: str, chain: str,
-                               trade_ts: str = None, tx_hash: str = 'bundled-in-swap'):
+                               trade_ts: str = None, tx_hash: str = 'bundled-in-swap',
+                               applied_fee_rate: float = None):
     """Record a stablecoin fee that was already collected atomically in the swap."""
-    fee = round(float(gross_amount or 0) * FEE_RATE_TXN, 6)
+    fee_rate = _validated_execution_fee_rate(applied_fee_rate)
+    fee = round(float(gross_amount or 0) * fee_rate, 6)
     if fee <= 0:
         return 0.0
     recipient = FEE_WALLET if chain == 'solana' else EVM_CHAIN_FEE_WALLET
@@ -14174,9 +14203,10 @@ def page_security():
 # changes in a way that requires every user to accept again. Old acceptance
 # rows stay in tos_acceptances for the audit trail; only the latest row per
 # user is compared against this constant.
-TOS_VERSION = '1.3'   # 1.1: Fees section. 1.2: OrcAgent's share of new tokens' creator fees,
+TOS_VERSION = '1.4'   # 1.1: Fees section. 1.2: OrcAgent's share of new tokens' creator fees,
                       # third-party protocols, OrcAgent as an independent platform.
                       # 1.3: every fee summarised first, under "Fees at a glance".
+                      # 1.4: earned Pro discounts on manual Live Market trades.
 
 # OrcAgent's share of a NEW token's creator fees, in basis points -- the same
 # setting token_launch.py installs on-chain (ORCAGENT_CREATOR_FEE_BPS).
@@ -14195,7 +14225,7 @@ _TOS_SHARE = _tos_fee_pct(ORCAGENT_CREATOR_FEE_BPS / 10000)
 _TOS_CREATOR = _tos_fee_pct(1 - ORCAGENT_CREATOR_FEE_BPS / 10000)
 _TOS_CONTENT_HTML = f'''
     <h2>Fees at a glance</h2>
-    <p>Trading: {_tos_fee_pct(FEE_RATE_TXN)}% of every buy and every sell made through OrcAgent.</p>
+    <p>Trading: {_tos_fee_pct(FEE_RATE_TXN)}% of every buy and every sell made through OrcAgent at the standard rate. Earned Pro Trader status reduces manual Live Market trading fees to 0.70% per leg while active.</p>
     <p>Launching a token: $0. OrcAgent charges no launch fee.</p>
     <p>Creator fees of a token launched through OrcAgent: the creator earns
     {_TOS_CREATOR}% of them, paid to the creator's wallet, and OrcAgent's platform fee is
@@ -14216,7 +14246,8 @@ _TOS_CONTENT_HTML = f'''
     and every sell made through OrcAgent, whether you place the trade yourself
     or your bot does, on every supported chain. It is calculated on the amount
     of that swap, not on profit, and it is taken from the trade itself. A full
-    round trip (buy and sell) therefore costs {_tos_fee_pct(FEE_RATE_TXN * 2)}% in platform fees.</p>
+    round trip (buy and sell) therefore costs {_tos_fee_pct(FEE_RATE_TXN * 2)}% in platform fees at the standard rate.</p>
+    <p>Earned Pro Trader status reduces the platform fee on manual Live Market buys and sells to 0.70% per leg while that status is active. Automated and copy trades retain the standard rate. The displayed maximum fee is checked before execution; an expired discount requires refreshing the quote before a higher fee can be charged. Recorded savings are reduced fees, not cash rewards or a withdrawable balance. Network and provider costs are unchanged.</p>
     <p>OrcAgent charges no fee for connecting a wallet, deposits, withdrawals
     and token sends, tips, token calls, or holding a position.</p>
     <p>Network fees, token-account rent, swap and bridge provider fees and
@@ -14609,7 +14640,7 @@ def live_market():
                            # Handed over rather than written into the JS, so
                            # the rate the fee box quotes is the rate the fee
                            # code charges.
-                           fee_rate_txn=FEE_RATE_TXN,
+                           fee_rate_txn=_live_market_fee_rate(_authenticated_wallet()),
                            tx_explorers={'solana': 'https://solscan.io/tx/'})
 
 
@@ -22387,6 +22418,16 @@ def api_instant_trade():
             return jsonify({'error': 'not logged in', 'logged_in': False}), 401
 
         data          = request.get_json(silent=True) or {}
+        from trader_rewards import validate_fee_ceiling
+        execution_fee_rate = _live_market_fee_rate(wallet)
+        try:
+            fee_allowed = validate_fee_ceiling(data.get('max_platform_fee_bps'),
+                                              int(round(execution_fee_rate * 10000)))
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+        if not fee_allowed:
+            return jsonify({'error': 'Your platform fee changed. Refresh Live Market before trading.',
+                            'fee_changed': True}), 409
         symbol        = str(data.get('symbol', '')).strip().upper()
         token_address = str(data.get('token_address', '')).strip()
         side          = str(data.get('side', '')).strip().lower()
@@ -22540,7 +22581,7 @@ def api_instant_trade():
                 # actually rode along.
                 ok, sig, err_msg, token_amount, sol_amount = _execute_user_swap_ex(
                     wallet, pk, side, token_address, amount_str,
-                    base=SOLANA_BASE_CURRENCY, capture=swap_info)
+                    base=SOLANA_BASE_CURRENCY, capture=swap_info, fee_rate=execution_fee_rate)
 
             if not ok:
                 if side == 'buy':
@@ -22641,15 +22682,15 @@ def api_instant_trade():
             if swap_info.get('fee_bundled'):
                 if SOLANA_BASE_CURRENCY == 'USDC':
                     _gross = (swap_info.get('fee_base', amount_sol) if side == 'buy'
-                              else ((sol_recorded / (1.0 - FEE_RATE_TXN)) if sol_recorded > 0 else 0.0))
+                              else ((sol_recorded / (1.0 - execution_fee_rate)) if sol_recorded > 0 else 0.0))
                     _record_bundled_stable_fee(
                         wallet, uid, symbol, _gross, side, 'solana',
-                        tx_hash='bundled-in-swap')
+                        tx_hash='bundled-in-swap', applied_fee_rate=execution_fee_rate)
                 else:
                     with _use_key(enc_blob, wallet) as pk:
                         _gross = (swap_info.get('fee_base', amount_sol) if side == 'buy'
-                                  else ((sol_recorded / (1.0 - FEE_RATE_TXN)) if sol_recorded > 0 else 0.0))
-                        _charge_txn_fee(pk, wallet, uid, symbol, _gross, side, bundled=True)
+                                  else ((sol_recorded / (1.0 - execution_fee_rate)) if sol_recorded > 0 else 0.0))
+                        _charge_txn_fee(pk, wallet, uid, symbol, _gross, side, bundled=True, applied_fee_rate=execution_fee_rate)
             else:
                 print(f'[fee] {wallet[:6]}... {symbol} {side}: the platform fee was NOT '
                       f'collected inside the swap, so nothing is recorded for it',
@@ -22724,6 +22765,7 @@ def api_instant_trade():
             # False means the swap went through without the platform fee, so
             # the fees table has no row for this trade.
             'fee_collected':  bool(swap_info.get('fee_bundled')),
+            'platform_fee_bps': int(round(execution_fee_rate * 10000)) if swap_info.get('fee_bundled') else 0,
             'protection':     _protection_summary(wallet, token_address),
         })
 

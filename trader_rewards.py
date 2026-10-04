@@ -20,6 +20,11 @@ CREATE TABLE IF NOT EXISTS reward_trades (
  side TEXT NOT NULL, volume_usdc REAL NOT NULL, executed_at REAL NOT NULL,
  eligibility TEXT NOT NULL DEFAULT 'eligible');
 CREATE INDEX IF NOT EXISTS reward_trades_user_time ON reward_trades(user_id,executed_at);
+CREATE TABLE IF NOT EXISTS reward_fee_discounts (
+ signature TEXT PRIMARY KEY, user_id INTEGER NOT NULL, saved_base TEXT NOT NULL,
+ currency TEXT NOT NULL, saved_usdc TEXT NOT NULL, charged_bps INTEGER NOT NULL,
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS reward_fee_discounts_user ON reward_fee_discounts(user_id);
 '''
 
 
@@ -130,16 +135,27 @@ def install(d):
         if not wallet:return d.redirect('/')
         value=progress(d.DB_FILE,wallet)
         if not value:return d.redirect('/')
-        return d._render_no_cache('rewards.html',reward=value,wallet=wallet,csrf_token=d._get_csrf_token())
+        return d._render_no_cache('rewards.html',reward=value,benefit=benefits(d.DB_FILE,wallet),wallet=wallet,csrf_token=d._get_csrf_token())
 
     @d.app.route('/api/rewards/progress')
     def rewards_progress():
         wallet=d._authenticated_wallet()
         if not wallet:return d.jsonify(ok=False,error='Authentication required'),401
         # No wallet/user parameter: caller can only read their own trading volume.
-        response=d.jsonify(ok=True,reward=progress(d.DB_FILE,wallet))
+        response=d.jsonify(ok=True,reward=progress(d.DB_FILE,wallet),benefit=benefits(d.DB_FILE,wallet))
         response.headers['Cache-Control']='private, no-store'
         return response
+
+    @d.app.route('/admin/rewards')
+    def rewards_review_page():
+        err=d._require_role('admin','executive')
+        if err:return err
+        with sqlite3.connect(d.DB_FILE,timeout=8) as c:
+            c.row_factory=sqlite3.Row
+            rows=c.execute("SELECT r.signature,r.side,r.volume_usdc,r.mint,u.username "
+                           "FROM reward_trades r JOIN users u ON u.id=r.user_id "
+                           "WHERE r.eligibility='review' ORDER BY r.executed_at DESC LIMIT 100").fetchall()
+        return d._render_no_cache('rewards_review.html',reviews=rows,csrf_token=d._get_csrf_token())
 
     @d.app.route('/api/admin/rewards/review',methods=['POST'])
     def review_reward_trade():
@@ -155,3 +171,64 @@ def install(d):
         if not result.rowcount:return d.jsonify(ok=False,error='Review not found'),404
         d._log_security_event('reward_trade_review',d._authenticated_wallet(),f'{signature}: {decision}')
         return d.jsonify(ok=True)
+
+
+NORMAL_FEE_BPS = 75
+PRO_FEE_BPS = 70
+
+
+def manual_trade_fee_bps(db, wallet, now=None):
+    """Server-earned Pro benefit, exclusively for manual Live Market trades.
+
+    Unknown status never authorizes a discount. The caller binds the displayed
+    maximum fee to execution, so fallback cannot silently exceed that maximum.
+    """
+    try:
+        value = progress(db, wallet, now)
+        return PRO_FEE_BPS if value and value['status'] == 'Pro Trader' else NORMAL_FEE_BPS
+    except sqlite3.Error:
+        return NORMAL_FEE_BPS
+
+
+def validate_fee_ceiling(value, actual_bps):
+    if value is None:
+        value = NORMAL_FEE_BPS  # Old clients display the normal maximum.
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= NORMAL_FEE_BPS:
+        raise ValueError('Invalid maximum platform fee')
+    return actual_bps <= value
+
+
+def record_fee_discount(db, wallet, signature, gross_base, currency, charged_bps, sol_price):
+    """Execution-only receipt: savings are a lower fee, never a cash balance.
+
+    Called only after a confirmed fill with positive evidence of bundled fee
+    collection. No client can submit a receipt or spend a saved-fee amount.
+    """
+    if not SIG.fullmatch(str(signature)) or charged_bps != PRO_FEE_BPS or currency not in ('SOL', 'USDC'):
+        return False
+    gross = Decimal(str(gross_base))
+    rate = Decimal(str(sol_price or 0)) if currency == 'SOL' else Decimal(1)
+    if not gross.is_finite() or gross <= 0 or not rate.is_finite() or rate <= 0:
+        return False
+    units = Decimal(1000000000 if currency == 'SOL' else 1000000)
+    normal_fee_raw = int(gross * units * Decimal(NORMAL_FEE_BPS) / Decimal(10000))
+    charged_fee_raw = int(gross * units * Decimal(charged_bps) / Decimal(10000))
+    saved = Decimal(normal_fee_raw - charged_fee_raw) / units
+    if saved <= 0:
+        return False
+    with sqlite3.connect(db, timeout=8) as c:
+        result = c.execute('INSERT OR IGNORE INTO reward_fee_discounts '
+            '(signature,user_id,saved_base,currency,saved_usdc,charged_bps) '
+            'SELECT ?,id,?,?,?,? FROM users WHERE wallet_address=?',
+            (signature,str(saved),currency,str(saved*rate),charged_bps,wallet))
+    return bool(result.rowcount)
+
+
+def benefits(db, wallet, now=None):
+    bps = manual_trade_fee_bps(db, wallet, now)
+    with sqlite3.connect(db, timeout=8) as c:
+        values = c.execute('SELECT r.saved_usdc FROM reward_fee_discounts r JOIN users u ON u.id=r.user_id WHERE u.wallet_address=?', (wallet,)).fetchall()
+    savings = sum((Decimal(row[0]) for row in values), Decimal(0))
+    return {'manual_fee_bps':bps,'manual_fee_pct':bps/100,
+            'standard_fee_pct':NORMAL_FEE_BPS/100,'saved_fees_usdc':str(savings.quantize(Decimal('0.01'),rounding=ROUND_DOWN)),
+            'discount_active':bps==PRO_FEE_BPS,'scope':'manual_live_market','cash_payout':False}

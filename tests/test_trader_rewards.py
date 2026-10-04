@@ -136,7 +136,7 @@ def test_execution_hook_records_only_successful_real_fills(db):
     from unittest.mock import patch
     source=Path('dashboard.py').read_text()
     tree=ast.parse(source)
-    nodes=[node for node in tree.body if isinstance(node,ast.FunctionDef) and node.name in ('_execute_user_swap_ex','_parse_swap_realized_amounts')]
+    nodes=[node for node in tree.body if isinstance(node,ast.FunctionDef) and node.name in ('_execute_user_swap_ex','_parse_swap_realized_amounts','_validated_execution_fee_rate')]
     captured={}
     namespace=dict(os=os,sys=sys,re=re,subprocess=subprocess,BASE='.',DB_FILE=db,FEE_RATE_TXN=.0075,
         _sol_price_usd=100,get_user_state=lambda wallet:{'positions':{}},
@@ -162,3 +162,21 @@ def test_rounding_cannot_unlock_badge_early(db):
     for i in range(5):trade(db,i,day=i%3,amount=49.9999)
     assert r.progress(db,'alice',NOW)['volume_usdc']==249.99
     assert r.progress(db,'alice',NOW)['status']=='New Member'
+
+
+def test_review_page_is_role_scoped_and_escapes_profile_text(db):
+    with sqlite3.connect(db) as c:
+        c.execute("ALTER TABLE users ADD COLUMN username TEXT DEFAULT ''")
+        c.execute('UPDATE users SET username=? WHERE id=1',('<img src=x onerror=alert(1)>',))
+    trade(db,0,mint='one');trade(db,1,mint='one',side='sell')
+    app,viewer,role=setup_app(db)
+    with app.test_client() as client:
+        assert client.get('/admin/rewards').status_code==403
+        role[0]='analyst'
+        assert client.get('/admin/rewards').status_code==403
+        role[0]='admin'
+        response=client.get('/admin/rewards')
+        assert response.status_code==200
+        assert b'&lt;img src=x' in response.data
+        assert b'<img src=x' not in response.data
+        assert b'data-decision="eligible"' in response.data
