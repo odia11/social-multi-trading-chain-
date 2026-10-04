@@ -98,7 +98,7 @@ def install(d):
     @d.app.before_request
     def record_activity():
         # Authenticated page visits, never anonymous requests, assets or API polls.
-        if d.request.method!='GET' or d.request.path not in ('/','/profile','/live-market','/portfolio','/rewards','/referrals'):
+        if d.request.method!='GET' or d.request.path not in ('/','/profile','/live-market','/wallet','/rewards','/referrals'):
             return
         wallet=d._authenticated_wallet()
         if not wallet:return
