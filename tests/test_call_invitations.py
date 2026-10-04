@@ -39,6 +39,7 @@ def post(c,path,body=None,headers=h):return c.post(path,json=body,headers=header
 assert post(client,f'/api/calls/{call}/share',headers={}).status_code==403
 shared=post(client,f'/api/calls/{call}/share').json;assert shared['ok'];url=shared['url'];path=url.replace(origin,'')
 assert post(client,f'/api/calls/{call}/share').json['url']==url
+assert '.png?v=2&via=' in shared['card_url']
 assert post(client,f'/api/calls/{evm}/share').status_code==404
 assert get(client,'/api/invitations?user_id=999').json['share_links']==1
 assert 'no-store' in get(client,'/api/invitations').headers['Cache-Control']
@@ -51,6 +52,7 @@ page=get(visitor,path);assert page.status_code==200
 assert '<script>alert(1)</script>' not in page.text and '&lt;script&gt;' in page.text
 assert '<img src=x onerror' not in page.text and '&lt;img' in page.text
 assert '/live-market?mint=So11111111111111111111111111111111111111112' in page.text
+assert '.png?v=2&amp;via=' in page.text
 assert f'/u/{actor}' in page.text and 'og:image' in page.text and f'/call/{call}' in page.text
 assert any('orca_invite=' in value and 'HttpOnly' in value and 'Secure' in value for value in page.headers.getlist('Set-Cookie'))
 # A later valid invitation cannot overwrite the first one.
@@ -107,14 +109,14 @@ class Invitations(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.db=str(Path(self.tmp.name)/'db')
         with sqlite3.connect(self.db) as c:
             c.executescript('''CREATE TABLE users(id INTEGER PRIMARY KEY,wallet_address TEXT,username TEXT,referred_by TEXT,referral_code TEXT,is_verified INTEGER DEFAULT 0);
-            CREATE TABLE token_calls(id INTEGER PRIMARY KEY,user_id INTEGER,mint TEXT,symbol TEXT,note TEXT,price_at_call REAL,timestamp TEXT,post_id INTEGER,chain TEXT);
+            CREATE TABLE token_calls(id INTEGER PRIMARY KEY,user_id INTEGER,mint TEXT,symbol TEXT,note TEXT,price_at_call REAL,timestamp TEXT,post_id INTEGER,chain TEXT,token_name TEXT,image_url TEXT);
             CREATE TABLE reward_trades(signature TEXT PRIMARY KEY,user_id INTEGER,volume_usdc REAL,executed_at REAL,eligibility TEXT,side TEXT);
             INSERT INTO users(id,wallet_address,username,referred_by,referral_code) VALUES(1,'actor','actor',NULL,'ACTOR234');
             INSERT INTO users(id,wallet_address,username,referred_by,referral_code) VALUES(2,'visitor','visitor',NULL,NULL);
             INSERT INTO users(id,wallet_address,username,referred_by,referral_code) VALUES(3,'other','other',NULL,'OTHER234');''')
         inv.initialize(self.db)
         with sqlite3.connect(self.db) as c:
-            c.execute('INSERT INTO token_calls VALUES(1,1,?,?,?,1,?,NULL,?)',(MINT,'TEST','analysis','2026-10-04 16:00:00','solana'))
+            c.execute('INSERT INTO token_calls VALUES(1,1,?,?,?,1,?,NULL,?,NULL,NULL)',(MINT,'TEST','analysis','2026-10-04 16:00:00','solana'))
             c.execute('INSERT INTO call_share_links VALUES(?,?,?,?)',(TOKEN,1,1,100))
             c.execute('INSERT INTO invitation_accounts(user_id,created_at) VALUES(2,100)')
         self.invite=dict(referrer_id=1,share_token=TOKEN,call_id=1)
