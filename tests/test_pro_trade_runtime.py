@@ -25,6 +25,7 @@ assert r.progress(d.DB_FILE,wallet)['status']=='Pro Trader'
 d._authenticated_wallet=lambda:wallet
 d._get_trading_wallet_address=lambda w:'TRADING_TEST'
 d._get_user_sol=lambda w:1.0
+d.fetch_user_balances=lambda w:None
 d._sol_price_usd=100
 d._PROXY_RPCS=[]
 d._dex_get=lambda *a,**kw:None
