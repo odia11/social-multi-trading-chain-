@@ -18,18 +18,18 @@ _BASE_URL = "https://orcagent.fun"
 _LOGO_URL = _BASE_URL + "/static/icon-512.png"
 # The link preview X / Telegram / Discord / WhatsApp show for a page without a
 # preview of its own: 1200x630, rendered by tools/make_og_image.py.
-_SHARE_IMAGE_URL = _BASE_URL + "/static/og-orcagent.png"
-_SHARE_IMAGE_ALT = "OrcAgent — Trade it. Share it. Multi-chain social trading with USDC."
+_SHARE_IMAGE_URL = _BASE_URL + "/static/og-orcagent.png?v=solana-usdc"
+_SHARE_IMAGE_ALT = "OrcAgent — Trade it. Share it. Solana social trading with USDC."
 _X_HANDLE = "@Orcagent"
 
 _PAGE_META = {
     "/": (
-        "OrcAgent — Multi-Chain Social Trading Platform",
-        "Trade smarter together with OrcAgent. Discover live crypto markets, automate strategies, follow traders and share trades across multiple chains.",
+        "OrcAgent — Solana Social Trading with USDC",
+        "Trade smarter together with OrcAgent. Trade Solana tokens with USDC, discover live markets, automate strategies, follow traders and share trades.",
     ),
     "/live-market": (
         "Live Crypto Market & Meme Coin Charts | OrcAgent",
-        "Explore live crypto markets, meme coin charts and real-time token opportunities across the chains supported by OrcAgent.",
+        "Explore live Solana token markets, meme coin charts and real-time opportunities. Buy and sell Solana tokens with USDC on OrcAgent.",
     ),
     "/auto-trading-bot": (
         "Automated Crypto Trading Bot | OrcAgent",
@@ -41,7 +41,7 @@ _PAGE_META = {
     ),
     "/info": (
         "About, Security & Privacy | OrcAgent",
-        "Learn what OrcAgent is, how its multi-chain social trading platform works, how security and privacy are handled, current fees, contact details and terms.",
+        "Learn what OrcAgent is, how its Solana social trading platform uses USDC to buy and sell Solana tokens, how security and privacy are handled, current fees, contact details and terms.",
     ),
 }
 _SITEMAP_PATHS = tuple(_PAGE_META)
