@@ -21,7 +21,7 @@ class PostMentions(unittest.TestCase):
         with sqlite3.connect(self.db) as c:
             reply=c.execute('SELECT user_id,post_id,parent_reply_id,message FROM feed_replies').fetchone()
             self.assertEqual(reply[:3],(1,'p'+str(pid),None))
-            self.assertIn("I'm ready to help",reply[3])
+            self.assertIn("I'm doing well, thanks",reply[3])
             self.assertEqual(c.execute('SELECT COUNT(*) FROM notifications').fetchone()[0],1)
         for text in ['@orcagent hello','@orcagent hoe gaat het?','@orcagent how are you?']:
             self.assertEqual(p.answer(text)[0],'welcome')

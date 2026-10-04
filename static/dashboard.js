@@ -1045,6 +1045,7 @@ async function launchApp(){
   document.getElementById('onboard').classList.add('hide');
   document.getElementById('app').style.display='block';
   if(/^#post-[pt]\d+(?:-reply-\d+)?$/.test(location.hash)) _handleNotifDeepLink();
+  _openPlatformHelpLink(location.hash);
   if(location.hash==='#settings'){
     history.replaceState(null,'',location.pathname+location.search);
     _sbNav('settings');
@@ -1582,14 +1583,15 @@ function _fcLinkHtml(url){
   // enough path to recognise it, exactly as the platforms people came from do.
   var label = url.replace(/^https?:\/\//i,'').replace(/\/$/,'');
   if(label.length > 42) label = label.slice(0, 41) + '…';
-  var isOrcaPost=false;
+  var isOrcaPost=false,platformHash='';
   try{
     var parsed=new URL(href,location.origin);
     isOrcaPost=(parsed.hostname==='orcagent.fun'||parsed.hostname==='www.orcagent.fun'
                 ||parsed.origin===location.origin) && /^\/post\/[pt]\d+$/.test(parsed.pathname);
+    if((parsed.hostname==='orcagent.fun'||parsed.hostname==='www.orcagent.fun'||parsed.origin===location.origin) && parsed.pathname==='/' && /^#app-(portfolio|market|home)$/.test(parsed.hash))platformHash=parsed.hash;
   }catch(e){}
-  return '<a href="'+esc(href)+'"'+(isOrcaPost?'':' target="_blank" rel="noopener noreferrer nofollow"')+' '
-       + 'onclick="event.stopPropagation()" '
+  return '<a href="'+esc(href)+'"'+(isOrcaPost||platformHash?'':' target="_blank" rel="noopener noreferrer nofollow"')+' '
+       + (platformHash?'onclick="event.stopPropagation();event.preventDefault();_openPlatformHelpLink(\''+platformHash+'\')" ':'onclick="event.stopPropagation()" ')
        + 'style="color:#f7b955;text-decoration:none;word-break:break-word">'+esc(label)+'</a>'
        + esc(trail);
 }
@@ -4018,6 +4020,13 @@ function _sbNav(section){
 }
 
 /* unified nav alias — maps external section names to _sbNav keys */
+function _openPlatformHelpLink(hash){
+  var routes={'#app-portfolio':'wallet','#app-market':'market','#app-home':'dashboard'};
+  if(!routes[hash])return false;
+  _sbNav(routes[hash]);return true;
+}
+window.addEventListener('hashchange',function(){_openPlatformHelpLink(location.hash)});
+
 function showSection(name){
   var map={'live-market':'market','home':'dashboard'};
   _sbNav(map[name]||name);
@@ -7350,7 +7359,11 @@ function _mentionPosition(){
   var bottom = (vv ? vv.offsetTop : 0) + (vv ? vv.height : window.innerHeight);
   // The keyboard and nested/document scrolling can move the field entirely
   // offscreen. Never leave its suggestions floating over unrelated content.
-  if(!el.isConnected || rect.bottom<=top || rect.top>=bottom){ _mentionHide(); return; }
+  if(!el.isConnected){ _mentionHide(); return; }
+  // Keyboard animation can temporarily push a focused field outside the visual
+  // viewport. Suspend the list without losing its search/selection state.
+  if(rect.bottom<=top || rect.top>=bottom){box.style.visibility='hidden';return;}
+  box.style.visibility='visible';
   var above = Math.max(0, rect.top-top-8);
   var below = Math.max(0, bottom-rect.bottom-8);
   box.style.width = Math.max(0,Math.min(rect.width,320,width-16))+'px';
@@ -7361,7 +7374,7 @@ function _mentionPosition(){
   var available = useBelow ? below : above;
   if(available<36){
     available=Math.min(200,bottom-top-16);
-    if(available<36){_mentionHide();return;}
+    if(available<36){box.style.visibility='hidden';return;}
     box.style.maxHeight=Math.min(wanted,available)+'px';
     box.style.left=Math.max(left+8,Math.min(rect.left,left+width-box.offsetWidth-8))+'px';
     box.style.top=Math.max(top+8,Math.min(rect.top,bottom-box.offsetHeight-8))+'px';
@@ -7413,6 +7426,7 @@ function _mentionQuery(el){
       box.appendChild(row);
     });
     box.style.display='block';
+    box.style.visibility='visible';
     _mentionPosition();
   }).catch(function(){ if(requestId===_mentionRequest) _mentionHide(); });
 }
@@ -10314,6 +10328,10 @@ function _renderReplyRow(r, postId, depth){
     ? 'event.stopPropagation();_showAvatarLightbox('+esc(JSON.stringify(r.avatar_url))+')'
     : (r.wallet ? 'event.stopPropagation();location.href=\'/profile/'+encodeURIComponent(r.wallet)+'\'' : '');
   var msgHtml = _fcRichText(r.message);
+  var tokenQuestion=String(r.message||'').match(/^Automated · Do you mean \$([A-Z][A-Z0-9_]{1,19})\?/);
+  if(tokenQuestion && r.verified && String(r.username||'').toLowerCase()==='orcagent'){
+    msgHtml+='<div class="fc-assistant-token-choices"><button type="button" style="margin-top:8px;padding:10px 14px;border:1px solid #39434d;border-radius:12px;background:#131c23;color:#f7b955" onclick="event.stopPropagation();_assistantTokenChoices(this,\''+tokenQuestion[1]+'\','+Number(r.id)+',\''+esc(postId)+'\')">Choose $'+tokenQuestion[1]+' token</button></div>';
+  }
   var longReply=String(r.message||'').length>280;
   var indentStyle = ''; // CSS applies one bounded indent at every nested depth.
   // Keep author and actions separate from the full-width message.
@@ -10334,6 +10352,47 @@ function _renderReplyRow(r, postId, depth){
     +'</div>'
     +'<div class="fc-ri-nested-box" id="rnbox-'+r.id+'" style="display:none"></div>'
     +'</div>';
+}
+
+async function _assistantTokenChoices(btn,symbol,replyId,postId){
+  var host=btn.parentElement;
+  if(btn.disabled)return;
+  btn.disabled=true;btn.textContent='Finding tokens…';
+  try{
+    var res=await fetch('/api/dexscreener/search?q='+encodeURIComponent(symbol));
+    if(!res.ok)throw new Error('search');
+    var data=await res.json(),seen=new Set();
+    var pairs=(data.pairs||[]).filter(function(p){
+      var t=p.baseToken||{},key=p.chainId+':'+t.address;
+      if(p.chainId!=='solana'||String(t.symbol||'').toUpperCase()!==symbol||!safeMint(t.address)||seen.has(key))return false;
+      seen.add(key);return true;
+    }).slice(0,5);
+    if(!host.isConnected)return;
+    host.replaceChildren();
+    if(!pairs.length){host.textContent='No matching Solana token found. Reply with its contract address.';return;}
+    pairs.forEach(function(pair){
+      var token=pair.baseToken,choice=document.createElement('button');
+      choice.type='button';
+      choice.style.cssText='display:flex;align-items:center;gap:8px;width:100%;padding:10px;margin:5px 0;border:1px solid #29343d;border-radius:12px;background:#131c23;color:#edf2f6;text-align:left;cursor:pointer';
+      var logo=safeImageUrl(pair.info && pair.info.imageUrl);
+      if(logo){var img=document.createElement('img');img.src=logo;img.alt='';img.width=28;img.height=28;img.style.borderRadius='50%';choice.appendChild(img);}
+      var label=document.createElement('span');label.textContent='$'+token.symbol+' · '+token.name+' · Solana · '+token.address.slice(0,6)+'…'+token.address.slice(-4);choice.appendChild(label);
+      choice.addEventListener('click',function(e){
+        e.stopPropagation();
+        var replyBtn=host.closest('.fc-reply-item').querySelector('.fc-ri-reply-btn');
+        var box=document.getElementById('rnbox-'+replyId);
+        if(box && box.style.display==='none')_feedToggleNestedReply(replyId,postId,replyBtn);
+        var input=document.getElementById('rninp-'+replyId);
+        if(input){input.value='@orcagent $'+token.symbol+' ('+token.address+') ';input.focus();input.setSelectionRange(input.value.length,input.value.length);input.dispatchEvent(new Event('input',{bubbles:true}));}
+        host.replaceChildren();
+        var selected=document.createElement('button');selected.type='button';selected.textContent='Open $'+token.symbol+' chart · '+token.address.slice(0,6)+'…'+token.address.slice(-4);
+        selected.style.cssText=choice.style.cssText;
+        selected.onclick=function(ev){ev.stopPropagation();showTokenCard(token.symbol,token.address)};
+        host.appendChild(selected);
+      });
+      host.appendChild(choice);
+    });
+  }catch(e){if(host.isConnected){btn.disabled=false;btn.textContent='Retry token search';}}
 }
 
 function _feedToggleNestedReply(parentId, postId, btn){
