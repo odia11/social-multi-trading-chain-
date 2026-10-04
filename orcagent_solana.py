@@ -1023,28 +1023,15 @@ SOL_BUY_COST_RESERVE_LAMPORTS = 3_000_000
 
 
 def _native_buy_cost_allowance(output_mint):
-    """Canonical USDC conversion needs its real account rent, not a token-buy buffer."""
     if output_mint != USDC_MINT:
         return SOL_BUY_COST_RESERVE_LAMPORTS
-    account = _rpc_post({'jsonrpc':'2.0','id':1,'method':'getAccountInfo',
-        'params':[_get_ata(WALLET_ADDRESS, USDC_MINT),
-                  {'encoding':'base64','commitment':'confirmed'}]}, timeout=15)
-    if account.get('error') or not isinstance(account.get('result'), dict) or 'value' not in account['result']:
-        raise RuntimeError('Cannot verify USDC account rent; conversion not sent')
-    info = account['result']['value']
-    # Cover capped priority/signature fees and the spend guard's conservative
-    # second fee count (simulation may already include the fee).
-    allowance = 220_000
-    if info is None:
-        rent = _rpc_post({'jsonrpc':'2.0','id':1,'method':'getMinimumBalanceForRentExemption',
-                         'params':[165]}, timeout=15)
-        value = rent.get('result')
-        if rent.get('error') or not isinstance(value, int) or value <= 0:
+    from sol_native_payments import sol_usdc_cost_allowance
+    def read(method, params):
+        body = _rpc_post({'jsonrpc':'2.0','id':1,'method':method,'params':params}, timeout=15)
+        if body.get('error') or 'result' not in body:
             raise RuntimeError('Cannot verify USDC account rent; conversion not sent')
-        allowance += value
-    elif not isinstance(info, dict) or info.get('owner') != TOKEN_PROGRAM:
-        raise RuntimeError('Invalid USDC token account; conversion not sent')
-    return allowance
+        return body['result']
+    return sol_usdc_cost_allowance(WALLET_ADDRESS, read)
 
 
 def _assert_native_budget(encoded, transaction):

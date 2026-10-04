@@ -22,6 +22,29 @@ def lamports(value):
     return int(amount * LAMPORTS)
 
 
+def sol_usdc_cost_allowance(owner, read):
+    """Shared quote/execution reserve for canonical USDC account rent and fees."""
+    from solders.pubkey import Pubkey
+    token = Pubkey.from_string('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+    mint = Pubkey.from_string('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')
+    ata, _ = Pubkey.find_program_address([bytes(Pubkey.from_string(owner)),bytes(token),bytes(mint)],
+        Pubkey.from_string('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'))
+    account = read('getAccountInfo',[str(ata),{'encoding':'base64','commitment':'confirmed'}])
+    if not isinstance(account, dict) or 'value' not in account:
+        raise RuntimeError('Cannot verify USDC account rent; conversion not sent')
+    info = account['value']
+    # Capped priority/signature fees plus the spend guard's conservative second fee count.
+    allowance = 220_000
+    if info is None:
+        value = read('getMinimumBalanceForRentExemption',[165])
+        if not isinstance(value, int) or value <= 0:
+            raise RuntimeError('Cannot verify USDC account rent; conversion not sent')
+        allowance += value
+    elif not isinstance(info, dict) or info.get('owner') != str(token):
+        raise RuntimeError('Invalid USDC token account; conversion not sent')
+    return allowance
+
+
 def native_transfer(d, wallet, recipient, ceiling, request_id):
     from solders.keypair import Keypair
     from solders.pubkey import Pubkey

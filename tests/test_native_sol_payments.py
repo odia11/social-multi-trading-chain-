@@ -237,7 +237,7 @@ def test_small_sol_usdc_conversion_accounts_for_actual_rent(existing,expected):
     def rpc(payload, **kw):
         calls.append(payload['method'])
         return {'result': {'value': {'owner':engine.TOKEN_PROGRAM} if existing else None}} if payload['method']=='getAccountInfo' else {'result':2039280}
-    with patch.object(engine,'_get_ata',return_value='ata'),patch.object(engine,'_rpc_post',side_effect=rpc):
+    with patch.object(engine,'WALLET_ADDRESS',str(Keypair().pubkey())),patch.object(engine,'_rpc_post',side_effect=rpc):
         allowance=engine._native_buy_cost_allowance(engine.USDC_MINT)
         assert allowance==expected
         assert 2909000-allowance>0  # screenshot's small wallet can quote a remainder
@@ -247,7 +247,7 @@ def test_small_sol_usdc_conversion_accounts_for_actual_rent(existing,expected):
 
 def test_conversion_unknown_rent_fails_before_swap():
     import orcagent_solana as engine
-    with patch.object(engine,'_get_ata',return_value='ata'),patch.object(engine,'_rpc_post',return_value={'error':{'code':429}}):
+    with patch.object(engine,'WALLET_ADDRESS',str(Keypair().pubkey())),patch.object(engine,'_rpc_post',return_value={'error':{'code':429}}):
         with pytest.raises(RuntimeError,match='not sent'):
             engine._native_buy_cost_allowance(engine.USDC_MINT)
 
@@ -282,3 +282,24 @@ def test_tip_http_signed_payment_or_explicit_rejection(tmp_path,rejected):
         with sqlite3.connect(d.DB_FILE) as db:
             row=db.execute('SELECT amount,currency,status FROM tip_transactions').fetchone()
         assert row==(0.001995,'SOL','submitted')
+
+
+def test_conversion_quote_uses_same_cost_allowance_as_execution():
+    import math, requests
+    from flask import Flask,jsonify,request
+    from unittest.mock import Mock
+    source=Path(__file__).resolve().parents[1].joinpath('dashboard.py').read_text()
+    node=next(n for n in ast.parse(source).body if isinstance(n,ast.FunctionDef) and n.name=='api_wallet_convert_quote')
+    node.decorator_list=[]
+    ns=dict(_authenticated_wallet=lambda:'sender',_get_trading_wallet_address=lambda _:str(Keypair().pubkey()),
+        request=request,jsonify=jsonify,math=math,requests=requests,JUPITER_PROXY='',PROXY_SECRET='',
+        SOL_MINT='So11111111111111111111111111111111111111112',USDC_MINT='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',SOL_NETWORK_RESERVE=.005,__name__=__name__,_redact_keys=str)
+    exec(compile(ast.Module(body=[node],type_ignores=[]),'<conversion-quote>','exec'),ns)
+    response=Mock(status_code=200)
+    response.json.return_value={'outAmount':'78000','otherAmountThreshold':'76000'}
+    app=Flask(__name__)
+    with app.test_request_context('/?direction=native_to_stable&amount=0.002909'),patch.object(pay,'sol_usdc_cost_allowance',return_value=2259280),patch.object(requests,'get',return_value=response) as quote:
+        result=ns['api_wallet_convert_quote']().json
+    assert quote.call_args.kwargs['params']['amount']==649720
+    assert result['cost_allowance_sol']==.002259280
+    assert result['swap_input_amount']==.000649720
