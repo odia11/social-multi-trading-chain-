@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Referrals — OrcAgent</title>
 <link rel="manifest" href="/app.webmanifest" crossorigin="use-credentials">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -10,105 +10,35 @@
 <meta name="apple-mobile-web-app-title" content="OrcAgent">
 <link rel="apple-touch-icon" href="/static/icon-180.png?v=6">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=2">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Geist:wght@400;500;600;700;800&display=swap" media="print" onload="this.media='all'">
-<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Geist:wght@400;500;600;700;800&display=swap"></noscript>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#080d11;--panel:#0d1318;--panel2:#111820;--line:#202832;--line2:#2b3440;--gold:#f7b955;--green:#3ad29b;--text:#f2f4f7;--sub:#9aa3af;--muted:#5f6875;--mono:'JetBrains Mono',monospace;--ui:'Geist',sans-serif}
-html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--ui);-webkit-font-smoothing:antialiased}
-body{overflow-x:clip}
-#app{display:flex;justify-content:center}
-.ref-page{width:min(100%,920px);padding:28px 28px 48px}
 
-.ref-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin:0 0 20px}
-.ref-kicker{display:flex;align-items:center;gap:12px}
-.back-link{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:10px;color:var(--text);text-decoration:none;font-size:24px}
-.ref-title{font-size:28px;line-height:1.05;font-weight:800;letter-spacing:-.03em}
-.ref-lead{font-size:15px;color:var(--sub);margin-top:10px;line-height:1.5}
-.ref-lead strong{font-weight:500;color:#cfd5dc}
-.net-pill{display:inline-flex;align-items:center;gap:8px;margin-top:4px;padding:8px 14px;border:1px solid rgba(58,210,155,.42);border-radius:999px;color:var(--green);font:700 11px var(--mono);letter-spacing:.08em;white-space:nowrap}
-.net-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 14px rgba(58,210,155,.55)}
-
-.hero{position:relative;min-height:250px;overflow:hidden;padding:34px 36px;border:1px solid rgba(247,185,85,.28);border-radius:24px;background:radial-gradient(circle at 72% 48%,rgba(247,185,85,.09),transparent 38%),linear-gradient(140deg,#10161b,#090f13 68%);margin-bottom:18px}
-.hero-copy{position:relative;z-index:3;max-width:52%}
-.hero h1{font-size:38px;line-height:1.02;letter-spacing:-.045em;font-weight:800}.hero h1 span{display:block;color:var(--gold)}
-.hero p{margin-top:18px;color:#a8b0bb;line-height:1.52;font-size:15px;max-width:470px}
-.hero-art{position:absolute;right:22px;bottom:-14px;width:310px;height:230px}
-.hero-rings{position:absolute;right:20px;top:18px;width:210px;height:210px;border:2px solid rgba(247,185,85,.52);border-radius:50%;box-shadow:inset 0 0 0 20px rgba(12,18,24,.85),inset 0 0 0 22px #2a3440}
-.hero-face{position:absolute;right:54px;top:52px;width:142px;height:170px;border-radius:48% 48% 44% 44%;background:#020405;border:2px solid #202a35;box-shadow:0 0 0 10px #111923}
-.hero-face:before,.hero-face:after{content:'';position:absolute;top:56px;width:40px;height:18px;background:#eef1f4;border-radius:50% 50% 70% 70%}.hero-face:before{left:20px;transform:rotate(7deg)}.hero-face:after{right:20px;transform:rotate(-7deg)}
-.hero-smile{position:absolute;left:37px;top:106px;width:70px;height:34px;border-radius:0 0 70px 70px;background:#e9edf1}.hero-smile:after{content:'';position:absolute;left:8px;top:0;width:54px;height:13px;border-radius:0 0 50px 50px;background:#050708}
-.hero-bars{position:absolute;left:5px;bottom:0;display:flex;gap:10px;align-items:flex-end}.hero-bars i{display:block;width:13px;border-radius:4px 4px 0 0;background:linear-gradient(#f5c05e,#a56b13)}.hero-bars i:nth-child(1){height:45px}.hero-bars i:nth-child(2){height:82px}.hero-bars i:nth-child(3){height:105px}.hero-bars i:nth-child(4){height:70px}
-.hero-note{position:absolute;right:0;top:18px;color:var(--gold);font:700 15px/1.18 var(--mono);transform:rotate(-7deg);text-align:center}
-
-.card{background:linear-gradient(180deg,#10161c,#0d1217);border:1px solid var(--line);border-radius:22px}
-.ref-card{padding:26px;margin-bottom:18px}
-.card-top{display:flex;align-items:center;justify-content:space-between;gap:12px}.card-title{font-size:18px;font-weight:750}.fee-share{color:var(--gold);font:700 12px var(--mono);letter-spacing:.08em}
-.code-row{display:flex;align-items:center;gap:12px;margin:20px 0 14px}.ref-code{font:800 32px var(--mono);letter-spacing:.07em;color:var(--gold);word-break:break-all}
-.icon-copy{width:42px;height:42px;border:1px solid var(--line2);border-radius:12px;background:#111820;color:#d7dce2;cursor:pointer;font-size:20px}
-.field-label{font-size:12px;color:var(--sub);margin-bottom:8px}
-.link-field{display:flex;align-items:center;gap:10px;background:#121820;border:1px solid var(--line2);border-radius:14px;padding:13px 14px;margin-bottom:14px}.link-text{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9da6b3;font:13px var(--mono)}.link-copy{border:0;background:transparent;color:#d9dfe6;cursor:pointer;font-size:19px}
-.primary{width:100%;height:54px;border:0;border-radius:14px;background:linear-gradient(90deg,#ffc85f,#f5b64c);color:#0a0d10;font-size:16px;font-weight:800;cursor:pointer}.primary:active{transform:translateY(1px)}
-.share-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}.share-btn{display:flex;align-items:center;justify-content:center;gap:8px;height:46px;border:1px solid var(--line);border-radius:13px;background:#10171d;color:#e2e6ea;text-decoration:none;font-size:13px;font-weight:600;cursor:pointer}.share-btn span:first-child{font-size:17px}
-
-.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}.stat{display:flex;align-items:center;gap:14px;padding:19px 18px;min-width:0}.stat-icon{width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:0 0 46px;background:rgba(247,185,85,.12);color:var(--gold);font-size:22px}.stat-value{font-size:20px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.stat-label{margin-top:4px;color:var(--sub);font-size:12px}
-
-.tabs{display:flex;gap:32px;border-bottom:1px solid var(--line);margin-bottom:0}.tab{appearance:none;border:0;background:transparent;color:var(--sub);font:650 14px var(--ui);padding:0 6px 14px;cursor:pointer;position:relative}.tab.active{color:var(--text)}.tab.active:after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:3px;border-radius:3px;background:var(--gold)}
-.tab-panel{display:none}.tab-panel.active{display:block}
-.list{border-bottom:1px solid var(--line)}
-.person{display:flex;align-items:center;gap:13px;padding:17px 4px;border-bottom:1px solid rgba(32,40,50,.7)}.person:last-child{border-bottom:0}.avatar{width:50px;height:50px;border-radius:50%;object-fit:cover;background:#123650;border:1px solid #28333e;flex:0 0 50px}.avatar-fallback{display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;color:white}.person-main{min-width:0;flex:1}.person-name{font-size:15px;font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.person-sub{font:11px var(--mono);color:var(--muted);margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.person-right{text-align:right;min-width:82px}.earned{color:var(--green);font:700 13px var(--mono)}.earned.zero{color:var(--muted)}.earned-label{font-size:11px;color:var(--sub);margin-top:4px}.profile-arrow{color:#7d8794;text-decoration:none;font-size:24px;margin-left:2px}
-.earning-row{display:grid;grid-template-columns:1.2fr 1fr auto;align-items:center;gap:12px;padding:17px 4px;border-bottom:1px solid rgba(32,40,50,.7)}.earning-row:last-child{border-bottom:0}.earning-user{font:700 12px var(--mono)}.earning-date{font:11px var(--mono);color:var(--muted)}
-.empty{text-align:center;padding:42px 20px;color:var(--sub)}.empty-icon{font-size:38px;margin-bottom:12px}.empty strong{display:block;color:var(--text);font-size:16px;margin-bottom:7px}.empty p{font-size:13px;line-height:1.5}
-
-.invite{display:flex;align-items:center;gap:16px;padding:20px;margin-top:20px;border-color:rgba(247,185,85,.34)}.invite-icon{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(247,185,85,.12);color:var(--gold);font-size:24px}.invite-copy{flex:1;min-width:0}.invite-title{font-weight:750;font-size:15px}.invite-sub{color:var(--sub);font-size:12px;margin-top:4px}.invite-btn{height:44px;padding:0 22px;border:0;border-radius:12px;background:var(--gold);color:#090c0f;font-weight:800;cursor:pointer}
-.ppl-total{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:13px 4px;border-bottom:1px solid var(--line)}.ppl-total-lbl{font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.08em}.ppl-total-val{font:700 14px var(--mono);color:var(--green)}.ppl-total-sub{color:var(--muted);font-weight:500}
-.share-bar{height:4px;border-radius:3px;background:#182029;margin-top:8px;overflow:hidden}.share-fill{height:100%;background:var(--green);border-radius:3px}
-.w-toast{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);z-index:99999;padding:12px 18px;border-radius:12px;background:#0b251a;border:1px solid var(--green);color:var(--green);font-size:13px;font-weight:700;box-shadow:0 12px 30px rgba(0,0,0,.35);white-space:nowrap;transition:opacity .2s}
-
-@media(max-width:700px){
- .ref-page{padding:22px 22px 28px}.ref-heading{margin-bottom:18px}.ref-title{font-size:26px}.ref-lead{font-size:14px;margin-top:9px}.net-pill{font-size:10px;padding:7px 12px}
- .hero{min-height:238px;padding:28px 28px;border-radius:22px}.hero-copy{max-width:59%}.hero h1{font-size:33px}.hero p{font-size:13px;margin-top:14px}.hero-art{right:4px;width:260px;height:220px;opacity:.96}.hero-rings{width:190px;height:190px;right:5px;top:24px}.hero-face{right:36px;top:58px;width:130px;height:155px}.hero-note{display:none}
- .ref-card{padding:22px;border-radius:20px}.ref-code{font-size:28px}.stats{gap:10px}.stat{padding:16px 13px;gap:10px}.stat-icon{width:40px;height:40px;flex-basis:40px;font-size:19px}.stat-value{font-size:17px}.stat-label{font-size:10px}.share-btn{font-size:12px}
-}
-@media(max-width:520px){
- .ref-page{padding:18px 14px 24px}.ref-heading{align-items:center}.back-link{display:none}.ref-kicker{display:block}.ref-title{font-size:24px}.ref-lead strong{display:block}.net-pill{font-size:9px;letter-spacing:.06em;padding:7px 10px}
- .hero{padding:25px 22px;min-height:220px}.hero-copy{max-width:66%}.hero h1{font-size:29px}.hero p{font-size:12px;max-width:92%}.hero-art{right:-40px;bottom:-24px;transform:scale(.86)}
- .card-title{font-size:16px}.fee-share{font-size:10px}.code-row{margin:18px 0 12px}.ref-code{font-size:25px}.icon-copy{width:38px;height:38px}.link-field{padding:12px}.primary{height:50px}
- .share-grid{grid-template-columns:repeat(4,1fr);gap:8px}.share-btn{font-size:0}.share-btn span:first-child{font-size:19px}
- .stats{grid-template-columns:repeat(3,1fr)}.stat{display:block;text-align:center;padding:14px 7px}.stat-icon{margin:0 auto 8px}.stat-value{font-size:15px}.stat-label{font-size:9px;line-height:1.2}
- .tabs{gap:22px}.person{gap:10px}.avatar{width:44px;height:44px;flex-basis:44px}.person-name{font-size:13px}.person-sub{font-size:10px}.person-right{min-width:66px}.earned{font-size:11px}.invite{padding:15px;gap:10px}.invite-icon{width:42px;height:42px}.invite-sub{display:none}.invite-btn{padding:0 16px;font-size:12px}
-}
-</style>
+<link rel="stylesheet" href="/static/referrals.css?v={{ app_version }}">
+<script src="/static/referrals.js?v={{ app_version }}" defer></script>
 </head>
 <body>
+{% macro icon(name) -%}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+{% if name=='copy' %}<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>
+{% elif name=='share' %}<path d="M12 16V3m-4 4 4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/>
+{% elif name=='users' %}<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m20 0v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/><circle cx="9" cy="7" r="4"/>
+{% elif name=='coins' %}<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.66 3.58 3 8 3s8-1.34 8-3V6M4 12v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/>
+{% elif name=='percent' %}<path d="m5 19 14-14"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>
+{% elif name=='arrow' %}<path d="M5 12h14m-6-6 6 6-6 6"/>
+{% elif name=='x' %}<path d="m4 3 16 18h-5L4 3h5l11 18M20 3 4 21"/>
+{% elif name=='telegram' %}<path d="m21 3-4 18-6-6-4 3 1-6L3 9Z"/><path d="m8 12 9-5-6 8"/>
+{% elif name=='mail' %}<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 6 9 7 9-7"/>
+{% elif name=='logo' %}<path d="m12 3 10 18H2Z" fill="currentColor" stroke="none"/>
+{% endif %}</svg>{%- endmacro %}
+
 {{ navbar_html('referrals') }}
 <div id="app">
 <main class="ref-page">
-  <p style="margin-bottom:16px"><a href="/invitations" style="color:#f7b955">Invitations &amp; shared calls: view account and trading conversions →</a></p>
   <header class="ref-heading">
-    <div class="ref-kicker">
-      <a class="back-link" href="/" aria-label="Back">‹</a>
-      <div>
-        <h1 class="ref-title">Referrals</h1>
-        <div class="ref-lead"><strong>Invite friends. Earn rewards.</strong> Earn 20% of the trading fees from people you invite.</div>
-      </div>
-    </div>
-    <div class="net-pill"><span class="net-dot"></span>SOLANA · MAINNET</div>
+    <div><h1 class="ref-title">Referrals</h1><p class="ref-lead">Bring your community to OrcAgent.<br>Earn a share of the trading fees they generate.</p></div>
+    <span class="net-pill">SOLANA</span>
   </header>
-
   <section class="hero" aria-label="Referral rewards">
-    <div class="hero-copy">
-      <h1>Trade Together.<span>Earn Together.</span></h1>
-      <p>Invite your friends to OrcAgent and earn 20% of the trading fees they generate. The more you invite, the more you earn.</p>
-    </div>
-    <div class="hero-art" aria-hidden="true">
-      <div class="hero-bars"><i></i><i></i><i></i><i></i></div>
-      <div class="hero-rings"></div>
-      <div class="hero-face"><div class="hero-smile"></div></div>
-      <div class="hero-note">GOOD<br>TRADERS<br>BRING<br>GOOD PEOPLE</div>
-    </div>
+    <div class="hero-copy"><span class="hero-tag">Your community. Shared rewards.</span><h2>Invite your circle.</h2><p>Receive 20% of the trading fees from people you invite. Your link keeps the connection.</p></div>
+    <div class="hero-mark" aria-hidden="true">{{ icon('logo') }}</div>
   </section>
-
   <section class="card ref-card">
     <div class="card-top">
       <div class="card-title">Your referral code</div>
@@ -116,40 +46,40 @@ body{overflow-x:clip}
     </div>
     <div class="code-row">
       <div class="ref-code" id="ref-code-big">{{ referral_code or '—' }}</div>
-      <button class="icon-copy" type="button" onclick="_copyText(_refCode,'Referral code copied')" aria-label="Copy referral code">▣</button>
+      <button class="icon-copy" type="button" onclick="_copyReferralText(_refCode,'Referral code copied')" aria-label="Copy referral code">{{ icon('copy') }}<span>Copy</span></button>
     </div>
     <div class="field-label">Shareable link</div>
     <div class="link-field">
       <div class="link-text" id="ref-link">{{ referral_link }}</div>
-      <button class="link-copy" type="button" onclick="_copyRefLink()" aria-label="Copy referral link">▣</button>
+      <button class="link-copy" type="button" onclick="_copyRefLink()" aria-label="Copy referral link">{{ icon('copy') }}</button>
     </div>
-    <button class="primary" type="button" onclick="_shareReferral()">⌯ &nbsp; Share Link</button>
+    <button class="primary" type="button" onclick="_shareReferral()">{{ icon('share') }}<span>Share invitation</span></button>
     <div class="share-grid">
-      <a class="share-btn" id="share-x" target="_blank" rel="noopener"><span>𝕏</span><span>Twitter</span></a>
-      <a class="share-btn" href="https://discord.com/app" target="_blank" rel="noopener"><span>◉</span><span>Discord</span></a>
-      <a class="share-btn" id="share-telegram" target="_blank" rel="noopener"><span>➤</span><span>Telegram</span></a>
-      <a class="share-btn" id="share-email"><span>✉</span><span>Email</span></a>
+      <a class="share-btn" id="share-x" target="_blank" rel="noopener noreferrer" aria-label="Share invitation on X">{{ icon('x') }}<span>X</span></a>
+      <a class="share-btn" id="share-telegram" target="_blank" rel="noopener noreferrer" aria-label="Share invitation on Telegram">{{ icon('telegram') }}<span>Telegram</span></a>
+      <a class="share-btn" id="share-email" aria-label="Share invitation by email">{{ icon('mail') }}<span>Email</span></a>
     </div>
+    <p class="ref-help">Your reward is a share of collected trading fees, not the trade amount.</p>
   </section>
 
   <section class="stats">
-    <div class="card stat"><div class="stat-icon">♟</div><div><div class="stat-value">{{ referred_count }}</div><div class="stat-label">Referred Users</div></div></div>
+    <div class="card stat"><div class="stat-icon">{{ icon('users') }}</div><div><div class="stat-value">{{ referred_count }}</div><div class="stat-label">Referred Users</div></div></div>
     {# "Total Earned" is what it says: every fee ever split to this referrer.
        It used to show referral_balance, which is what is still UNCLAIMED, so
        somebody who had been paid out read $0.00 with their earnings listed
        right underneath. Both numbers matter, so both are here -- the total on
        the card, the unclaimed amount under it when there is any. #}
-    <div class="card stat"><div class="stat-icon">◉</div><div><div class="stat-value">{% if referral_earned_total_usd is not none %}${{ '%.2f'|format(referral_earned_total_usd) }}{% else %}{{ '%.4f'|format(referral_earned_total) }} SOL{% endif %}</div><div class="stat-label">Total Earned{% if referral_balance and referral_balance > 0 %} · {{ '%.4f'|format(referral_balance) }} SOL unclaimed{% endif %}</div></div></div>
-    <div class="card stat"><div class="stat-icon">▥</div><div><div class="stat-value">20%</div><div class="stat-label">Fee Share</div></div></div>
+    <div class="card stat"><div class="stat-icon">{{ icon('coins') }}</div><div><div class="stat-value">{% if referral_earned_total_usd is not none %}${{ '%.2f'|format(referral_earned_total_usd) }}{% else %}{{ '%.4f'|format(referral_earned_total) }} SOL{% endif %}</div><div class="stat-label">Total Earned{% if referral_balance and referral_balance > 0 %} · {{ '%.4f'|format(referral_balance) }} SOL unclaimed{% endif %}</div></div></div>
+    <div class="card stat"><div class="stat-icon">{{ icon('percent') }}</div><div><div class="stat-value">20%</div><div class="stat-label">Fee Share</div></div></div>
   </section>
 
   <section class="ref-data">
     <div class="tabs" role="tablist">
-      <button class="tab active" type="button" data-tab="users">Referred Users</button>
-      <button class="tab" type="button" data-tab="earnings">Earnings History</button>
+      <button class="tab active" type="button" data-tab="users" id="ref-tab-users" role="tab" aria-controls="tab-users" aria-selected="true">Referred Users</button>
+      <button class="tab" type="button" data-tab="earnings" id="ref-tab-earnings" role="tab" aria-controls="tab-earnings" aria-selected="false" tabindex="-1">Earnings History</button>
     </div>
 
-    <div class="tab-panel active" id="tab-users">
+    <div class="tab-panel active" id="tab-users" role="tabpanel" aria-labelledby="ref-tab-users">
       {% if referred_people %}
       <div class="ppl-total">
         <span class="ppl-total-lbl">Earned from these users</span>
@@ -168,16 +98,16 @@ body{overflow-x:clip}
             <div class="earned{{ ' zero' if not p.earned_sol }}">{{ '%.6f'|format(p.earned_sol) }} SOL</div>
             <div class="earned-label">{% if p.earned_usd is not none and p.earned_sol %}≈ ${{ '%.2f'|format(p.earned_usd) }}{% else %}Earnings{% endif %}</div>
           </div>
-          <a class="profile-arrow" href="{{ p.profile_url }}" aria-label="View profile">›</a>
+          <a class="profile-arrow" href="{{ p.profile_url }}" aria-label="View profile">{{ icon('arrow') }}</a>
         </div>
         {% endfor %}
       </div>
       {% else %}
-      <div class="empty"><div class="empty-icon">♟</div><strong>No referrals yet</strong><p>Share your link and start earning rewards when your friends trade.</p></div>
+      <div class="empty"><div class="empty-icon">{{ icon('users') }}</div><strong>No referrals yet</strong><p>Share your link and start earning rewards when your friends trade.</p></div>
       {% endif %}
     </div>
 
-    <div class="tab-panel" id="tab-earnings">
+    <div class="tab-panel" id="tab-earnings" role="tabpanel" aria-labelledby="ref-tab-earnings">
       {% if earnings %}
       <div class="list">
         {% for e in earnings %}
@@ -189,31 +119,21 @@ body{overflow-x:clip}
         {% endfor %}
       </div>
       {% else %}
-      <div class="empty"><div class="empty-icon">◉</div><strong>No earnings yet</strong><p>Your referral rewards will appear here after invited users start trading.</p></div>
+      <div class="empty"><div class="empty-icon">{{ icon('coins') }}</div><strong>No earnings yet</strong><p>Your referral rewards will appear here after invited users start trading.</p></div>
       {% endif %}
     </div>
   </section>
 
   <section class="card invite">
-    <div class="invite-icon">♙</div>
+
     <div class="invite-copy"><div class="invite-title">Invite more friends</div><div class="invite-sub">Grow the community and increase your earnings.</div></div>
-    <button class="invite-btn" type="button" onclick="_shareReferral()">Invite Now &nbsp;→</button>
+    <button class="invite-btn" type="button" onclick="_shareReferral()">Invite friends {{ icon('arrow') }}</button>
   </section>
+<a class="conversion-link" href="/invitations"><span>View invitation and trading conversions</span>{{ icon('arrow') }}</a>
 </main>
 </div>
 
-<script>
-var _refLink={{ referral_link|tojson }};
-var _refCode={{ (referral_code or '')|tojson }};
-var _shareText='Join me on OrcAgent — trade together and earn together.';
-
-function _refToast(msg,ok){var t=document.createElement('div');t.className='w-toast';t.style.background=ok?'#0b251a':'#2a0f11';t.style.color=ok?'#3ad29b':'#f76b62';t.style.borderColor=ok?'#3ad29b':'#f76b62';t.textContent=msg;document.body.appendChild(t);setTimeout(function(){t.style.opacity='0';setTimeout(function(){t.remove()},220)},2200)}
-function _copyText(text,msg){if(!text)return;var fallback=function(){var el=document.createElement('textarea');el.value=text;el.style.cssText='position:fixed;opacity:0';document.body.appendChild(el);el.select();try{document.execCommand('copy');_refToast(msg,true)}catch(e){_refToast('Copy failed',false)}el.remove()};if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){_refToast(msg,true)}).catch(fallback)}else fallback()}
-function _copyRefLink(){_copyText(_refLink,'Referral link copied to clipboard')}
-function _shareReferral(){if(!_refLink)return;if(navigator.share){navigator.share({title:'OrcAgent',text:_shareText,url:_refLink}).catch(function(e){if(e&&e.name!=='AbortError')_copyRefLink()})}else _copyRefLink()}
-(function(){var encLink=encodeURIComponent(_refLink||'');var encText=encodeURIComponent(_shareText);document.getElementById('share-x').href='https://x.com/intent/post?text='+encText+'%20'+encLink;document.getElementById('share-telegram').href='https://t.me/share/url?url='+encLink+'&text='+encText;document.getElementById('share-email').href='mailto:?subject='+encodeURIComponent('Join me on OrcAgent')+'&body='+encText+'%0A%0A'+encLink;document.querySelectorAll('.tab').forEach(function(btn){btn.addEventListener('click',function(){document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active')});document.querySelectorAll('.tab-panel').forEach(function(x){x.classList.remove('active')});btn.classList.add('active');document.getElementById('tab-'+btn.dataset.tab).classList.add('active')})})})();
-</script>
-<script src="/static/auto-refresh.js?v={{ app_version }}"></script>
+<script type="application/json" id="referral-config">{{ {'link':referral_link,'code':referral_code or ''}|tojson }}</script>
 <script src="/static/pull-to-refresh.js?v={{ app_version }}"></script>
 <script>initPullToRefresh();</script>
 </body>
