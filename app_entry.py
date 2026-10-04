@@ -166,4 +166,7 @@ _install_sol_native_payments(_dashboard)
 from trader_rewards import install as _install_trader_rewards
 _install_trader_rewards(_dashboard)
 
+from watchlist_alerts import install as _install_watchlist_alerts
+_install_watchlist_alerts(_dashboard)
+
 app = _dashboard.app
