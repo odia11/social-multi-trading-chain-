@@ -1,10 +1,10 @@
 """Fail-closed CSRF enforcement for authenticated legacy mutation routes.
 
 Some older OrcAgent handlers are decorated csrf_exempt because they predate the
-current browser CSRF plumbing.  Their callers now have a session token, so those
+current browser CSRF plumbing. Their callers now have a session token, so those
 exemptions must not weaken authenticated state changes or money movement.
 
-This layer intentionally does not touch login/session-bootstrap endpoints.  It
+This layer intentionally does not touch login/session-bootstrap endpoints. It
 only covers authenticated routes whose route-level decorator would otherwise
 skip dashboard._csrf_check().
 """
@@ -37,6 +37,31 @@ def _protected(path: str) -> bool:
     )
 
 
+def _strip_admin_mutation_exemptions(app) -> int:
+    """Remove legacy @csrf_exempt markers from state-changing admin views.
+
+    The before-request guard below still remains as a second independent CSRF
+    boundary. Removing the route-level exemption means dashboard._csrf_check()
+    protects these endpoints too, so a future import/order regression cannot
+    silently turn an admin mutation back into a tokenless request.
+    """
+    changed = 0
+    for rule in app.url_map.iter_rules():
+        if not rule.rule.startswith("/api/admin/"):
+            continue
+        if not (_MUTATING & set(rule.methods or ())):
+            continue
+        view = app.view_functions.get(rule.endpoint)
+        if view is None or not getattr(view, "_csrf_exempt", False):
+            continue
+        try:
+            delattr(view, "_csrf_exempt")
+        except (AttributeError, TypeError):
+            setattr(view, "_csrf_exempt", False)
+        changed += 1
+    return changed
+
+
 def install(dashboard_module) -> None:
     app = dashboard_module.app
     if getattr(app, "_orca_authenticated_csrf_hardening_installed", False):
@@ -47,6 +72,10 @@ def install(dashboard_module) -> None:
     auth = getattr(dashboard_module, "_authenticated_wallet", None)
     if not callable(validate) or not callable(auth):
         raise RuntimeError("Authenticated CSRF hardening requires dashboard auth + CSRF helpers")
+
+    stripped = _strip_admin_mutation_exemptions(app)
+    if stripped:
+        app.logger.info("removed csrf_exempt from %d admin mutation route(s)", stripped)
 
     @app.before_request
     def _authenticated_legacy_csrf_guard():
@@ -60,7 +89,7 @@ def install(dashboard_module) -> None:
             wallet = auth()
         except Exception:
             wallet = None
-        # The route itself still owns the normal 401 response.  CSRF is a
+        # The route itself still owns the normal 401 response. CSRF is a
         # session-bound invariant and therefore applies once a wallet session
         # has actually been authenticated.
         if not wallet:

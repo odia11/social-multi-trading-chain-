@@ -5,6 +5,9 @@ actually need. Everywhere else, database/internal credential fields are stripped
 recursively before JSON leaves the process. If redaction itself ever fails, the
 response is replaced with a generic error instead of leaking the original payload.
 
+All API 5xx responses are also normalized to a generic client-facing error. Internal
+SQL/provider/path details belong in server logs, never in a browser response.
+
 One legacy authenticated trading-wallet generator has a deliberately narrow,
 validated one-time export exception. Guest onboarding generates keys in the browser,
 so onboarding responses never need a secret-field exception.
@@ -37,6 +40,8 @@ _FULL_KEY_EXPORT_FIELDS = {
 _FULL_KEY_REQUIRED_FIELDS = {
     'ok', 'solana_address', 'solana_private_key',
 }
+_GENERIC_5XX_ERROR = 'Something went wrong on our side'
+
 
 def _is_secret_field(key: object) -> bool:
     low = str(key).strip().lower()
@@ -66,14 +71,32 @@ def _clean(value, allow_auth=False):
     return value
 
 
-def _replace_with_blocked(response):
-    body = b'{"error":"Response blocked by privacy guard"}'
+def _generic_5xx_payload(payload):
+    """Keep only non-sensitive control flags from failed API responses."""
+    out = {}
+    if isinstance(payload, dict):
+        if isinstance(payload.get('ok'), bool):
+            out['ok'] = payload['ok']
+        if isinstance(payload.get('retryable'), bool):
+            out['retryable'] = payload['retryable']
+    out['error'] = _GENERIC_5XX_ERROR
+    return out
+
+
+def _write_json(response, payload):
+    body = json.dumps(
+        payload, separators=(',', ':'), ensure_ascii=False, default=str
+    ).encode('utf-8')
     response.set_data(body)
-    response.status_code = 500
     response.headers['Content-Type'] = 'application/json; charset=utf-8'
     response.headers['Cache-Control'] = 'no-store'
     response.content_length = len(body)
     return response
+
+
+def _replace_with_blocked(response):
+    response.status_code = 500
+    return _write_json(response, {'error': 'Response blocked by privacy guard'})
 
 
 def _valid_full_key_export(payload) -> bool:
@@ -110,15 +133,19 @@ def install(dashboard_module):
             if payload is None:
                 return response
 
+            if response.status_code >= 500:
+                app.logger.error(
+                    'redacted API 5xx response path=%s status=%s',
+                    request.path, response.status_code,
+                )
+                return _write_json(response, _generic_5xx_payload(payload))
+
             if request.path in _FULL_KEY_EXPORT_PATHS and _valid_full_key_export(payload):
                 return _mark_no_store(response)
+
             cleaned = _clean(payload, request.path in _AUTH_ALLOWED_PATHS)
             if cleaned != payload:
-                body = json.dumps(cleaned, separators=(',', ':'), ensure_ascii=False, default=str).encode('utf-8')
-                response.set_data(body)
-                response.headers['Content-Type'] = 'application/json; charset=utf-8'
-                response.headers['Cache-Control'] = 'no-store'
-                response.content_length = len(body)
+                return _write_json(response, cleaned)
         except Exception as exc:
             app.logger.error('API response privacy filter blocked response: %s', type(exc).__name__)
             return _replace_with_blocked(response)
