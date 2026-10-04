@@ -12,8 +12,8 @@
 <form id="platform-settings">
 <label><input type="checkbox" name="posts" {% if state.posts %}checked{% endif %} style="width:auto"> Automatic feed theses</label>
 <p class="muted">09:00, 15:00 and 21:00 · Europe/Amsterdam. One post per slot; missed slots older than 30 minutes are skipped. Reviewed copy rotates through 30 theses.</p>
-<label><input type="checkbox" name="replies" {% if state.replies %}checked{% endif %} style="width:auto"> Replies to @orcagent in homefeed comments</label>
-<p class="muted">Always English. Platform questions only, with a clarification reply for unknown topics. No private group replies, market predictions, account access or transaction execution.</p>
+<label><input type="checkbox" name="replies" {% if state.replies %}checked{% endif %} style="width:auto"> Replies to @orcagent in homefeed posts and comments</label>
+<p class="muted">Always English. Tagged posts receive a comment; tagged comments receive a nested reply. Short greetings receive an English introduction to OrcAgent. Platform questions only, with a clarification reply for unknown topics. No private group replies, market predictions, account access or transaction execution.</p>
 <p class="muted">Limits: two replies per user per 15 minutes, eight per user per 24 hours, 120 across the platform per 24 hours. A saved comment gets at most one automated reply.</p>
 <label><input type="checkbox" name="learning" {% if state.learning %}checked{% endif %} style="width:auto"> Learn platform question wording and conversation context</label>
 <p class="muted">Follow-up context stays within the same user's public reply thread. New wording is associated with an existing reviewed English answer after three distinct users clarify the same topic. Conflicting clarifications return it to review. No model training, new product facts or external AI costs. Automatic observations expire after 90 days.</p>

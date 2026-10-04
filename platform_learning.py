@@ -52,6 +52,11 @@ def prior(c, d, source, author_id):
             question = c.execute('SELECT id,user_id,post_id,message FROM feed_replies WHERE id=?',(row[4],)).fetchone()
             if event and question and question[1:3] == source[:2]:
                 return event[0], question[0], question[3]
+            if event and row[4] is None and source[1][:1]=='p':
+                post = c.execute('SELECT p.content FROM feed_posts p JOIN users u ON u.wallet_address=p.wallet WHERE p.id=? AND u.id=?',(source[1][1:],source[0])).fetchone()
+                if post:
+                    text = d._feed_text_part(post[0]) if hasattr(d,'_feed_text_part') else post[0].split('__CHART__')[0].split('__TRADE__')[0]
+                    return event[0], None, text
             return None
         parent = row[4]
     return None
@@ -103,7 +108,7 @@ def observe(c,d,source_id,source,explicit_topic,previous,mention,topics,now):
  VALUES(?,?,?) ON CONFLICT(question_key) DO UPDATE SET
  sample_reply_id=excluded.sample_reply_id,seen=seen+1,updated_at=excluded.updated_at""",(question_key,source_id,now))
     clarified = previous and (previous[0]=='scope' or re.search(r'i mean|meant|actually|bedoel|clarify|talking about',source[2],re.I))
-    if clarified and explicit_topic in topics and not UNSAFE.search(source[2]):
+    if clarified and previous[1] is not None and explicit_topic in topics and not UNSAFE.search(source[2]):
         old_key = key(previous[2],mention)
         if old_key and c.execute('SELECT 1 FROM platform_assistant_questions WHERE question_key=?',(old_key,)).fetchone():
             c.execute("""INSERT INTO platform_assistant_votes VALUES(?,?,?,?,?,?)

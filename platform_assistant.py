@@ -76,6 +76,8 @@ def answer(message):
     for topic, pattern, english in FAQ:
         if re.search(pattern, clean, re.I):
             return topic, LABEL + english
+    if re.fullmatch(r'\s*(?:hi|hello|hey|hello there|how are you|how are you doing|hoe gaat het|hallo|hoi)[\s!?.,]*',clean):
+        return 'welcome', LABEL + "I'm here to help you explore OrcAgent. Ask me about connecting Phantom, sharing calls, your portfolio, trading tools or platform fees. What would you like to do?"
     return 'scope', LABEL + (
         'I can explain OrcAgent features: Phantom connection, calls, sharing, portfolio, fees and Creator Rewards. '
         'Which feature do you mean, and what are you trying to do? '
@@ -143,6 +145,43 @@ def publish_due(db, now=None):
                   (key,'post',None,post_id,None,topic,now))
         return post_id
 
+def within_reply_limits(c,user_id,now):
+    recent = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND source_user_id=? AND created_at>?",(user_id,now-900)).fetchone()[0]
+    daily = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND source_user_id=? AND created_at>?",(user_id,now-86400)).fetchone()[0]
+    total = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND created_at>?",(now-86400,)).fetchone()[0]
+    return recent<2 and daily<8 and total<120
+
+def reply_to_post(d,post_number,wallet,now=None):
+    # Only a successfully authenticated NEW post; no edits, reposts or backfill.
+    if type(post_number) is not int or post_number<=0:
+        return None
+    now = time.time() if now is None else now
+    with sqlite3.connect(d.DB_FILE,timeout=8) as c:
+        c.execute('BEGIN IMMEDIATE')
+        if not enabled(c,'replies'):
+            return None
+        author = identity(c)
+        if not author:
+            return None
+        post = c.execute('SELECT wallet,content FROM feed_posts WHERE id=?',(post_number,)).fetchone()
+        member = c.execute('SELECT id FROM users WHERE wallet_address=?',(wallet,)).fetchone()
+        if not post or post[0]!=wallet or not member or member[0]==author[0]:
+            return None
+        text = d._feed_text_part(post[1]) if hasattr(d,'_feed_text_part') else re.split(r'__(?:CHART|TRADE|CALL)__',post[1],maxsplit=1)[0]
+        response = answer(text)
+        key = 'post-reply:'+str(post_number)
+        if not response or c.execute('SELECT 1 FROM platform_assistant_events WHERE event_key=?',(key,)).fetchone() or not within_reply_limits(c,member[0],now):
+            return None
+        topic,message = response
+        post_id = 'p'+str(post_number)
+        cur = c.execute('INSERT INTO feed_replies(user_id,post_id,message,created_at,parent_reply_id) VALUES(?,?,?,?,NULL)',
+                        (author[0],post_id,message,utcstamp(now)))
+        c.execute('INSERT INTO platform_assistant_events VALUES(?,?,?,?,?,?,?)',
+                  (key,'reply',member[0],post_id,cur.lastrowid,topic,now))
+        c.execute('INSERT INTO notifications(user_id,type,content,link,actor_wallet) VALUES(?,?,?,?,?)',
+                  (member[0],'reply','OrcAgent answered your platform question',d._post_link(c,post_id),author[1]))
+        return cur.lastrowid
+
 def reply_to(d, source_id, wallet, now=None):
     now = time.time() if now is None else now
     with sqlite3.connect(d.DB_FILE, timeout=8) as c:
@@ -177,11 +216,7 @@ def reply_to(d, source_id, wallet, now=None):
         key = 'reply:' + str(source_id)
         if not response or c.execute('SELECT 1 FROM platform_assistant_events WHERE event_key=?', (key,)).fetchone():
             return None
-        # Limit assistant amplification, independently of ordinary comment limits.
-        recent = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND source_user_id=? AND created_at>?", (source[0],now-900)).fetchone()[0]
-        daily = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND source_user_id=? AND created_at>?", (source[0],now-86400)).fetchone()[0]
-        total = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND created_at>?", (now-86400,)).fetchone()[0]
-        if recent >= 2 or daily >= 8 or total >= 120:
+        if not within_reply_limits(c,source[0],now):
             return None
         if use_learning:
             observed = explicit[0] if explicit[0]!='scope' or response[0]=='scope' else None
@@ -204,7 +239,7 @@ def install(d):
 
     @app.after_request
     def mentioned(response):
-        if request.path != '/api/feed/reply' or request.method != 'POST' or response.status_code != 200 or not response.is_json:
+        if request.path not in ('/api/feed/reply','/api/feed/post') or request.method != 'POST' or response.status_code != 200 or not response.is_json:
             return response
         data = response.get_json(silent=True)
         if not isinstance(data,dict) or not data.get('ok') or type(data.get('id')) is not int:
@@ -212,7 +247,7 @@ def install(d):
         try:
             wallet = d._authenticated_wallet()
             if wallet:
-                reply_id = reply_to(d,data['id'],wallet)
+                reply_id = reply_to_post(d,data['id'],wallet) if request.path=='/api/feed/post' else reply_to(d,data['id'],wallet)
                 if reply_id:
                     data['platform_reply_id'] = reply_id
                     response.set_data(app.json.dumps(data))
