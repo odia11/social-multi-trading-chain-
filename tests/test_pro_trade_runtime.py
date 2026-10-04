@@ -48,29 +48,29 @@ def execute(w,pk,side,mint,amount,base='SOL',capture=None,fee_rate=None):
  return True,('8'*86+str(len(calls))), '',20,.05 if side=='buy' else .0993
 d._execute_user_swap_ex=execute
 client=d.app.test_client()
-with client.session_transaction() as session:
+with client.session_transaction(base_url='https://orcagent.fun') as session:
  session['wallet']=wallet;session['user_id']=uid;session['csrf_token']='x'*40
 headers={'X-CSRF-Token':'x'*40,'Origin':'https://orcagent.fun'}
 body=dict(symbol='TOKEN',token_address='So11111111111111111111111111111111111111112',side='buy',currency='SOL',amount_sol=.05,max_platform_fee_bps=70)
-response=client.post('/api/instant-trade',json=body,headers=headers)
+response=client.post('/api/instant-trade',json=body,headers=headers,base_url='https://orcagent.fun')
 assert response.status_code==200,(response.status_code,response.json)
 assert response.json['platform_fee_bps']==70
 with sqlite3.connect(d.DB_FILE) as c:
  fee=c.execute('SELECT fee_amount FROM fees ORDER BY id DESC LIMIT 1').fetchone()[0]
 assert fee==.00035,fee
 body.update(side='sell',amount_sol=0,sell_pct=100)
-response=client.post('/api/instant-trade',json=body,headers=headers)
+response=client.post('/api/instant-trade',json=body,headers=headers,base_url='https://orcagent.fun')
 assert response.status_code==200,(response.status_code,response.json)
 with sqlite3.connect(d.DB_FILE) as c:
  fee=c.execute('SELECT fee_amount FROM fees ORDER BY id DESC LIMIT 1').fetchone()[0]
 assert fee==.0007,fee
 assert calls==[.007,.007],calls
 with sqlite3.connect(d.DB_FILE) as c:c.execute("UPDATE reward_trades SET eligibility='excluded'")
-response=client.post('/api/instant-trade',json=body,headers=headers)
+response=client.post('/api/instant-trade',json=body,headers=headers,base_url='https://orcagent.fun')
 assert response.status_code==409,(response.status_code,response.json)
 assert calls==[.007,.007]
 body.update(max_platform_fee_bps=75,is_pro=True)
-response=client.post('/api/instant-trade',json=body,headers=headers)
+response=client.post('/api/instant-trade',json=body,headers=headers,base_url='https://orcagent.fun')
 assert response.status_code==200,(response.status_code,response.json)
 assert response.json['platform_fee_bps']==75
 assert calls[-1]==.0075
