@@ -2553,7 +2553,8 @@ function confirmBuy(idx){
   }
   var url = '/api/instant-trade';
   var body = {symbol:t.symbol, token_address:t.mint, pair_address:t.pair_address,
-              side:'buy', currency:'SOL', amount_sol:amt};
+              side:'buy', currency:'SOL', amount_sol:amt,
+              max_platform_fee_bps:Math.round(PT_FEE_RATE_TXN*10000)};
   // The stop loss / take profit this buy is protected with (every chain).
   var prot = _protectionChoice();
   if(prot.error){
@@ -2638,7 +2639,8 @@ function handleSell(idx, btn){
     how = {sell_sol: usd};
   }
   var body = Object.assign({symbol:t.symbol, token_address:t.mint,
-                            pair_address:t.pair_address, side:'sell', amount_sol:0}, how);
+                            pair_address:t.pair_address, side:'sell', amount_sol:0,
+                            max_platform_fee_bps:Math.round(PT_FEE_RATE_TXN*10000)}, how);
   fetch(url, {
     method:'POST', credentials:'include', headers: authHeaders(),
     body: JSON.stringify(body)

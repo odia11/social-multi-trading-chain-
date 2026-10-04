@@ -14,6 +14,12 @@
 <tr><td>Active Trader</td><td>Account 14 days old; 5 trades across 3 trading days; 250 USDC qualifying volume in the last 30 days.</td></tr>
 <tr><td>Pro Trader</td><td>Account 14 days old; 5 trades across 7 trading days; 2,500 USDC qualifying volume in the last 30 days.</td></tr></tbody></table>
 <p>Status updates automatically and can expire when activity leaves the 30-day window. Your volume and progress are visible only to you; your earned badge is visible on your profile.</p></section>
+<section class="card"><h2>Your trading benefit</h2>
+<p class="badge">{{ 'Pro discount active' if benefit.discount_active else 'Earn Pro Trader to unlock your discount' }}</p>
+<div class="metrics"><div>Manual Live Market fee<strong>{{ '%.2f'|format(benefit.manual_fee_pct) }}%</strong></div><div>Recorded fee savings<strong>{{ benefit.saved_fees_usdc }} USDC</strong></div></div>
+<p>Pro Traders pay 0.70% instead of the normal 0.75% on each manual Live Market buy or sell. The discount applies automatically to new trades while Pro status is active. Automated and copy trades retain the normal 0.75% fee; network and routing costs are unchanged.</p>
+<p>Recorded savings are fees you did not pay, measured at execution time. They are not a wallet balance, cashback claim or withdrawable reward.</p>
+</section>
 <section class="card"><h2>Make the most of OrcAgent</h2><div class="actions"><a href="/live-market">Live Market</a><a href="/profile">Portfolio statistics</a><a href="/referrals">Referral earnings</a></div>
 <p>Referral earnings come from collected platform fees under the existing referral program. Deposits and sign-ups alone do not earn trading rewards.</p></section>
 <p class="notice">Only confirmed executions through OrcAgent count, valued at execution time in USDC equivalent. Each transaction counts once. Network fees, deposits, transfers, tips and failed transactions are excluded. Trades below 1 USDC do not count. Repeated trades in the same token within 10 minutes are excluded; opposite trades within 30 minutes are held for review. Activity tracking begins when this feature is enabled. Historical trades without execution-time evidence are not reconstructed.</p>

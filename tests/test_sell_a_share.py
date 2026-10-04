@@ -382,7 +382,8 @@ check('the sell box states the rates that apply rather than inventing a '
       "'% of the sale</span></div>'" in JS and 'when the sale settles' in JS)
 check('...and the platform rate comes from the server, so the box cannot '
       'quote a rate the fee code does not charge',
-      'PT_FEE_RATE_TXN' in JS and 'fee_rate_txn=FEE_RATE_TXN' in src
+      'PT_FEE_RATE_TXN' in JS and 'fee_rate_txn=_live_market_fee_rate(_authenticated_wallet())' in src
+      and 'fee_rate=execution_fee_rate' in src and 'applied_fee_rate=execution_fee_rate' in src
       and 'var PT_FEE_RATE_TXN' in HTML)
 check('...which is the same constant the sell leg is actually charged at',
       re.search(r'_charge_evm_txn_fee\(', src) is not None
