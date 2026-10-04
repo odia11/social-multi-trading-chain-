@@ -10321,8 +10321,9 @@ function _feedSubmitNestedReply(inp, postId, parentReplyId){
       var card = document.getElementById('fc-card-'+postId);
       if(card){
         var rcnt = card.querySelector('.fc-reply-count');
-        if(rcnt) rcnt.textContent = (parseInt(rcnt.textContent,10)||0)+1;
+        if(rcnt) rcnt.textContent = (parseInt(rcnt.textContent,10)||0)+1+(d.platform_reply_id?1:0);
       }
+      if(d.platform_reply_id) _feedLoadReplies(postId);
     } else {
       openAlertModal({text:d.msg||'Could not post reply'});
     }
@@ -10438,8 +10439,9 @@ function _feedSubmitReply(inp, postId){
       var card = document.getElementById('fc-card-'+postId);
       if(card){
         var rcnt = card.querySelector('.fc-reply-count');
-        if(rcnt) rcnt.textContent = (parseInt(rcnt.textContent,10)||0)+1;
+        if(rcnt) rcnt.textContent = (parseInt(rcnt.textContent,10)||0)+1+(d.platform_reply_id?1:0);
       }
+      if(d.platform_reply_id) _feedLoadReplies(postId);
     } else {
       openAlertModal({text:d.msg||'Could not post reply'});
     }
