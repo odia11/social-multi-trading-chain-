@@ -1022,6 +1022,39 @@ _BUY_ESTIMATED_OUTFLOW_LAMPORTS = 0
 SOL_BUY_COST_RESERVE_LAMPORTS = 3_000_000
 
 
+class NativeBuyBudgetExceeded(RuntimeError):
+    """Raised only by a completed spend check BEFORE any broadcast."""
+    def __init__(self,estimated,ceiling):
+        self.estimated = estimated
+        self.ceiling = ceiling
+        super().__init__('Swap, fees and rent exceed the SOL amount entered; transaction not sent')
+
+def _execute_native_budget_buy(mint,budget,fee_wallet,fee_bps):
+    """Rebuild only an unbroadcast over-budget transaction, at a lower input.
+
+    Keep the original wallet-outflow ceiling and all requested platform fees.
+    Unknown simulation errors, broadcast errors and confirmation timeouts are
+    never retried here: only the guard's typed pre-send exception is eligible.
+    """
+    global _BUY_MAX_OUTFLOW_LAMPORTS, _BUY_ESTIMATED_OUTFLOW_LAMPORTS
+    _BUY_MAX_OUTFLOW_LAMPORTS = budget
+    _BUY_ESTIMATED_OUTFLOW_LAMPORTS = 0
+    spend = budget - _native_buy_cost_allowance(mint)
+    for attempt in range(3):
+        if spend<=0:
+            raise ValueError('SOL budget is too small for route fees and token-account rent; transaction not sent')
+        try:
+            signature,output = execute_swap(SOL_MINT,mint,spend,fee_wallet=fee_wallet,fee_bps=fee_bps)
+            return signature,output,spend
+        except NativeBuyBudgetExceeded as exc:
+            if exc.ceiling!=budget or exc.estimated<=budget or attempt==2:
+                raise
+            # Include an extra 10,000-lamport margin when rebuilding. Each
+            # fresh quote/transaction must still pass the unchanged guard.
+            spend -= exc.estimated-budget+10_000
+            print('[TRADE] Route costs exceeded the SOL budget; rebuilding a smaller unsubmitted buy',flush=True)
+
+
 def _native_buy_cost_allowance(output_mint):
     if output_mint != USDC_MINT:
         return SOL_BUY_COST_RESERVE_LAMPORTS
@@ -1065,7 +1098,7 @@ def _assert_native_budget(encoded, transaction):
     upper_debit = max(0, initial-final) + fee_value
     _BUY_ESTIMATED_OUTFLOW_LAMPORTS = upper_debit
     if upper_debit > _BUY_MAX_OUTFLOW_LAMPORTS:
-        raise RuntimeError('Swap, fees and rent exceed the SOL amount entered; transaction not sent')
+        raise NativeBuyBudgetExceeded(upper_debit,_BUY_MAX_OUTFLOW_LAMPORTS)
 
 
 def execute_single_swap(action: str, mint: str, amount_str: str, base: str = 'SOL'):
@@ -1112,13 +1145,12 @@ def execute_single_swap(action: str, mint: str, amount_str: str, base: str = 'SO
             from sol_native_payments import lamports as exact_lamports
             lamports = exact_lamports(amount_str) if base_mint == SOL_MINT else int(amount * (10 ** base_decimals))
             if base_mint == SOL_MINT:
-                _BUY_MAX_OUTFLOW_LAMPORTS = lamports
-                lamports -= _native_buy_cost_allowance(mint)
-                if lamports <= 0:
-                    raise ValueError('SOL buy amount must cover transaction fees and token-account rent')
-            sig, out_amount_raw = execute_swap(
-                base_mint, mint, lamports,
-                fee_wallet=FEE_WALLET, fee_bps=int(round(FEE_RATE_TXN * 10000)))
+                sig,out_amount_raw,lamports = _execute_native_budget_buy(
+                    mint,lamports,FEE_WALLET,int(round(FEE_RATE_TXN * 10000)))
+            else:
+                sig, out_amount_raw = execute_swap(
+                    base_mint, mint, lamports,
+                    fee_wallet=FEE_WALLET, fee_bps=int(round(FEE_RATE_TXN * 10000)))
             try:
                 decimals    = get_token_decimals(mint)
                 got_amount  = int(out_amount_raw) / (10 ** decimals)
