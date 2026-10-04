@@ -17,8 +17,8 @@ function buildHero(wrap){var old=document.getElementById('oa-m-hero');if(old)old
 function buildBot(wrap,afterEl){var old=document.getElementById('oa-m-bot');if(old)old.remove();var el=document.createElement('section');el.className='oa-m-bot';el.id='oa-m-bot';el.innerHTML='<div class="oa-m-bot-avatar"><img src="/static/ai-bot-icon.svg?v=1" alt="AI Bot"></div><div class="oa-m-bot-main"><div class="oa-m-bot-title"><span class="oa-m-bot-dot" id="oa-m-bot-dot"></span> AI Bot</div><div class="oa-m-bot-status">Status: <b id="oa-m-bot-state">checking…</b></div><div class="oa-m-bot-meta"><span id="oa-m-bot-ready">— SOL capital</span><span>•</span><span id="oa-m-bot-open">0/5 open trades</span><span>•</span><span id="oa-m-bot-win">— win rate</span></div></div><a class="oa-m-bot-settings" href="/settings" aria-label="Bot settings">⚙</a><a class="oa-m-bot-btn" href="/auto-trading-bot">Open AI Bot <span>→</span></a>';afterEl.insertAdjacentElement('afterend',el);refreshBot();return el}
 function refreshBot(){return Promise.allSettled([fetch('/api/bot/status',{credentials:'include'}).then(function(r){return r.json()}).then(function(d){var running=!!(d&&(d.running||d.status==='running')),state=document.getElementById('oa-m-bot-state'),dot=document.getElementById('oa-m-bot-dot');if(state){state.textContent=running?'Running':'Idle';state.classList.toggle('running',running)}if(dot)dot.classList.toggle('running',running);var open=d&&(d.open_positions!=null?d.open_positions:d.positions_open);if(open!=null)document.getElementById('oa-m-bot-open').textContent=open+'/5 open trades';var wr=d&&(d.win_rate!=null?d.win_rate:d.winrate);if(wr!=null)document.getElementById('oa-m-bot-win').textContent=Number(wr).toFixed(0)+'% win rate'}).catch(function(){var s=document.getElementById('oa-m-bot-state');if(s)s.textContent='Idle'}),fetch('/api/wallet/trading-balance',{credentials:'include'}).then(function(r){return r.json()}).then(function(d){if(d&&d.ok){var x=document.getElementById('oa-m-bot-ready');if(x)x.textContent=Number(d.available_sol||0).toFixed(6)+' SOL capital'}}).catch(function(){})])}
 var _oaPortfolioTimer=null,_oaPortfolioBusy=false;
-var _oaPortfolioCacheKey='orcaPortfolioLastConfirmedSOLTotal';
-var _oaPortfolioCacheAtKey='orcaPortfolioLastConfirmedSOLTotalAt';
+var _oaPortfolioCacheKey='orcaPortfolioLastConfirmedUSDCValue';
+var _oaPortfolioCacheAtKey='orcaPortfolioLastConfirmedUSDCValueAt';
 function _homeCachedPortfolio(){
   try{
     var raw=localStorage.getItem(_oaPortfolioCacheKey);
@@ -33,7 +33,7 @@ function _paintHomePortfolio(total,live,persist){
   total=Number(total);
   if(!Number.isFinite(total)||total<0)return false;
   var value=document.getElementById('oa-m-pf-value');
-  if(value)value.textContent=total.toLocaleString('en-US',{maximumFractionDigits:6})+' SOL';
+  if(value)value.textContent=total.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' USDC';
   var card=document.getElementById('oa-m-portfolio');
   if(card)card.title=live?'Live portfolio value':'Last confirmed portfolio value · refreshing';
   if(persist){
@@ -41,8 +41,8 @@ function _paintHomePortfolio(total,live,persist){
       localStorage.setItem(_oaPortfolioCacheKey,String(total));
       localStorage.setItem(_oaPortfolioCacheAtKey,String(Date.now()));
     }catch(_){}
-    window.__orcaPortfolioSolValue=total;
-    document.dispatchEvent(new CustomEvent('orca:portfolio-value',{detail:{total_sol:total}}));
+    window.__orcaPortfolioValue=total;
+    document.dispatchEvent(new CustomEvent('orca:portfolio-value',{detail:{total:total}}));
   }
   return true;
 }
@@ -56,7 +56,7 @@ async function refreshHomePortfolio(){
     });
     if(!response.ok)throw Error('Portfolio snapshot unavailable');
     var d=await response.json();
-    if(!d||!d.ok||!_paintHomePortfolio(d.total_sol,!d.stale,true))throw Error('Invalid portfolio snapshot');
+    if(!d||!d.ok||!_paintHomePortfolio(d.total_usd,!d.stale,true))throw Error('Invalid portfolio snapshot');
   }catch(e){
     var cached=_homeCachedPortfolio();
     if(cached!==null)_paintHomePortfolio(cached,false,false);
