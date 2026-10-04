@@ -66,6 +66,14 @@ function refreshProfileBalance(){
   return fetch('/api/profile/'+encodeURIComponent(userId)+'/portfolio-balance',{
     credentials:'same-origin',cache:'no-store'
   }).then(function(r){
+    if(r.status===403){
+      if(sameProfile()){
+        card.hidden=true;card.style.display='none';profileBalanceLastGood=false;
+        ['oa-profile-balance-value','oa-profile-balance-available','oa-profile-balance-other'].forEach(function(id){if($(id))$(id).textContent='—'});
+        try{localStorage.removeItem('orcaProfileBalanceSOL:'+userId)}catch(e){}
+      }
+      throw new Error('Portfolio balance is private');
+    }
     if(!r.ok)throw new Error('Balance unavailable');
     return r.json();
   }).then(function(d){

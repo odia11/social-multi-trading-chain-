@@ -13373,12 +13373,10 @@ def profile_view(wallet_address: str):
                     'SELECT 1 FROM follows WHERE follower_id=? AND following_id=?',
                     (user_id, me_row['id'])
                 ).fetchone())
-        if user["wallet_address"] == ADMIN_WALLET:
-            _auth_wallet = _authenticated_wallet()
-            viewer_role = get_user_role(_auth_wallet) if _auth_wallet else 'user'
-            can_view_sensitive = is_own or viewer_role in ('admin', 'moderator', 'analyst')
-        else:
-            can_view_sensitive = True
+        import sys
+        from profile_portfolio_balance import can_view_profile_balance
+        can_view_sensitive = can_view_profile_balance(
+            sys.modules[__name__],wallet_address,_authenticated_wallet())
         public_country = _public_profile_country(
             user['profile_country_code'], user['profile_country_visible'])
         return _render_no_cache(
