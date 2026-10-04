@@ -53,7 +53,7 @@ ensureScript('/static/in-app-notifications.js?v=1','in-app-notifications.js','oa
   if(here!=='/'||!window.matchMedia('(max-width:768px)').matches)return;
   document.documentElement.classList.add('oa-home-mobile-root');
   ensureStyle('/static/home-mobile.css?v=14','home-mobile.css');
-  ensureScript('/static/home-mobile.js?v=14','home-mobile.js');
+  ensureScript('/static/home-mobile.js?v=15','home-mobile.js');
 })();
 
 (function(){

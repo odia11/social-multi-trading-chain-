@@ -743,11 +743,11 @@ html,body{background:#080e11}
     <div class="wlt-hero">
       <div class="wlt-hero-top">
         <div>
-          <!-- USDC, not SOL. Every trade on every chain is funded with USDC
-               now; SOL only pays Solana's network fee. Leading with SOL made
-               a wallet holding $4.64 of tradeable balance read as empty. -->
+          <!-- Portfolio valuation is shown in USDC; trading remains native SOL. -->
           <div class="wlt-hero-lbl">OrcAgent Trading Wallet</div>
           <div class="wlt-hero-num" id="pf-total">—</div>
+          <div class="wlt-hero-usd" id="pf-sol-equivalent">SOL equivalent loading…</div>
+          <div class="wlt-hero-usd">Estimated value in USDC · trading uses SOL</div>
           <div class="wlt-hero-usd" id="pf-performance">Live Solana balance</div>
           <div class="wlt-hero-usd pf-tradeable">Available to trade in OrcAgent: <span id="avail">—</span> <span id="avail-sub">SOL on Solana</span></div>
         </div>
@@ -2515,6 +2515,8 @@ function _rememberPortfolioSnapshot(snap){
   if(!snap||!snap.ok||!Number.isFinite(Number(snap.total_usd)))return
   var safe={
     ok:true,total_usd:Number(snap.total_usd),
+    total_sol:snap.total_sol==null?null:Number(snap.total_sol),
+    available_to_trade_sol:Number(snap.available_to_trade_sol||0),
     other_assets_value_usd:Number(snap.other_assets_value_usd||0),
     stable:snap.stable||null,sol:snap.sol||null,
     assets:Array.isArray(snap.assets)?snap.assets.slice(0,250):[],
@@ -2692,7 +2694,8 @@ function _paintPortfolioSnapshotInstant(snap){
   if(!snap||!Number.isFinite(Number(snap.total_usd)))return false
   var total=Number(snap.total_usd),stable=Number(snap.stable&&snap.stable.total_usdc)
   var solValue=Number(snap.sol&&snap.sol.value_usd),solAmount=Number(snap.sol&&snap.sol.amount)
-  var totalEl=document.getElementById('pf-total');if(totalEl)totalEl.textContent=snap.total_sol==null?'—':Number(snap.total_sol).toFixed(6)+' SOL'
+  var totalEl=document.getElementById('pf-total');if(totalEl)totalEl.textContent=total.toFixed(2)+' USDC'
+  var equivalent=document.getElementById('pf-sol-equivalent');if(equivalent)equivalent.textContent=snap.total_sol==null?'SOL equivalent unavailable':'≈ '+Number(snap.total_sol).toLocaleString('en-US',{maximumFractionDigits:9})+' SOL · portfolio equivalent'
   var perf=document.getElementById('pf-performance');if(perf)perf.textContent='Last confirmed balance · refreshing…'
   var avail=document.getElementById('avail');if(avail)avail.textContent=Number(snap.available_to_trade_sol||0).toFixed(6)
   var usdcAsset=document.getElementById('pf-usdc-asset');if(usdcAsset&&Number.isFinite(stable))usdcAsset.textContent='$'+stable.toFixed(2)
@@ -2708,7 +2711,7 @@ function _paintPortfolioSnapshotInstant(snap){
   window.__orcaPortfolioValue=total
   _paintPortfolioBreakdown(snap)
   _paintPortfolioAssetsInstant(snap.assets||[])
-  var top=document.getElementById('pt-nb-sol-balance');if(top)top.textContent='$'+total.toFixed(2)
+  var top=document.getElementById('pt-nb-sol-balance');if(top)top.textContent=total.toFixed(2)+' USDC'
   return true
 }
 

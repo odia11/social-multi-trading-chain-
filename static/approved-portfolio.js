@@ -3,13 +3,13 @@
 'use strict';
 if((location.pathname.replace(/\/+$/,'')||'/')!=='/wallet')return;
 var samples=[];
-var STORAGE_KEY='orcaPortfolioLastConfirmedSOLTotal';
-var STORAGE_AT_KEY='orcaPortfolioLastConfirmedSOLTotalAt';
+var STORAGE_KEY='orcaPortfolioLastConfirmedUSDCValue';
+var STORAGE_AT_KEY='orcaPortfolioLastConfirmedUSDCValueAt';
 function remember(total){try{localStorage.setItem(STORAGE_KEY,String(total));localStorage.setItem(STORAGE_AT_KEY,String(Date.now()))}catch(e){}}
 function recalled(){try{var raw=localStorage.getItem(STORAGE_KEY),stamp=localStorage.getItem(STORAGE_AT_KEY);if(raw===null||stamp===null)return null;var n=Number(raw),at=Number(stamp);if(!Number.isFinite(n)||n<0||!Number.isFinite(at)||at<=0||Date.now()-at>86400000)return null;return n}catch(e){return null}}
 function money(n){
   n=Number(n);
-  return Number.isFinite(n)?n.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:6})+' SOL':'—';
+  return Number.isFinite(n)?n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' USDC':'—';
 }
 function put(id,value){var e=document.getElementById(id);if(e)e.textContent=value}
 function spark(){
@@ -33,9 +33,10 @@ function spark(){
   fill.setAttribute('d',d+' L '+coords[coords.length-1][0].toFixed(1)+' 72 L 3 72 Z');
 }
 function paint(value){
-  var d=value&&value.detail||{},total=d.total_sol==null?NaN:Number(d.total_sol);
+  var d=value&&value.detail||{},total=d.total==null?NaN:Number(d.total);
   if(!Number.isFinite(total)||total<0)return;
   put('pf-total',money(total));
+  put('pf-sol-equivalent',d.total_sol==null?'SOL equivalent unavailable':'≈ '+Number(d.total_sol).toLocaleString('en-US',{maximumFractionDigits:9})+' SOL · portfolio equivalent');
   remember(total);
   if(!samples.length||samples[samples.length-1]!==total){
     samples.push(total);if(samples.length>24)samples.shift();
@@ -44,7 +45,7 @@ function paint(value){
   if(samples.length>1){
     var first=samples[0],diff=total-first;
     put('pf-performance','Session '+(diff>=0?'+':'−')+money(Math.abs(diff))+' · live balance');
-  }else put('pf-performance','Live Solana balance');
+  }else put('pf-performance','Live portfolio value');
 }
 document.addEventListener('orca:portfolio-value',paint);
 function boot(){
@@ -54,25 +55,9 @@ function boot(){
     samples=[cached];
     spark();
     put('pf-performance','Last confirmed balance · refreshing…');
-    setTimeout(function(){if(window.__orcaPortfolioSolValue==null)put('pf-performance','Last confirmed balance · retrying live update…')},12000);
+    setTimeout(function(){if(window.__orcaPortfolioValue==null)put('pf-performance','Last confirmed balance · retrying live update…')},12000);
   }
-  /* On a first-ever session there is no confirmed total to reuse. As soon as
-     the fast pooled-USDC read lands, use it as an honest provisional floor
-     while the complete token + SOL snapshot finishes. */
-  var avail=document.getElementById('avail');
-  function provisionalFromAvail(){
-    var totalEl=document.getElementById('pf-total');
-    if(!avail||!totalEl||window.__orcaPortfolioSolValue!=null)return;
-    var current=(totalEl.textContent||'').trim();
-    if(current!=='—'&&current!=='$0.00')return;
-    var n=Number((avail.textContent||'').replace(/[^0-9.\-]/g,''));
-    if(Number.isFinite(n)&&n>0){
-      put('pf-total',money(n));samples=[n];spark();
-      put('pf-performance','Syncing Solana balance…');
-    }
-  }
-  provisionalFromAvail();
-  if(avail&&window.MutationObserver)new MutationObserver(provisionalFromAvail).observe(avail,{childList:true,characterData:true,subtree:true});
+
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
