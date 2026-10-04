@@ -39,7 +39,7 @@ def post(c,path,body=None,headers=h):return c.post(path,json=body,headers=header
 assert post(client,f'/api/calls/{call}/share',headers={}).status_code==403
 shared=post(client,f'/api/calls/{call}/share').json;assert shared['ok'];url=shared['url'];path=url.replace(origin,'')
 assert post(client,f'/api/calls/{call}/share').json['url']==url
-assert '.png?v=2&via=' in shared['card_url']
+assert '.png?v=3&via=' in shared['card_url']
 assert post(client,f'/api/calls/{evm}/share').status_code==404
 assert get(client,'/api/invitations?user_id=999').json['share_links']==1
 assert 'no-store' in get(client,'/api/invitations').headers['Cache-Control']
@@ -52,7 +52,7 @@ page=get(visitor,path);assert page.status_code==200
 assert '<script>alert(1)</script>' not in page.text and '&lt;script&gt;' in page.text
 assert '<img src=x onerror' not in page.text and '&lt;img' in page.text
 assert f'/call/{call}/trade' in page.text
-assert '.png?v=2&amp;via=' in page.text
+assert '.png?v=3&amp;via=' in page.text
 assert f'/u/{actor}' in page.text and 'og:image' in page.text and f'/call/{call}' in page.text
 assert any('orca_invite=' in value and 'HttpOnly' in value and 'Secure' in value for value in page.headers.getlist('Set-Cookie'))
 # A later valid invitation cannot overwrite the first one.
