@@ -230,7 +230,7 @@ def test_historical_usdc_sell_receives_sol_and_keeps_usd_cost_units():
     assert calls == ['SOL', 'SOL']
 
 
-@pytest.mark.parametrize('existing,expected', [(True,120000),(False,2159280)])
+@pytest.mark.parametrize('existing,expected', [(True,220000),(False,2259280)])
 def test_small_sol_usdc_conversion_accounts_for_actual_rent(existing,expected):
     import orcagent_solana as engine
     calls=[]

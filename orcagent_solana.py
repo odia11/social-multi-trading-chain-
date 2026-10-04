@@ -1032,8 +1032,9 @@ def _native_buy_cost_allowance(output_mint):
     if account.get('error') or not isinstance(account.get('result'), dict) or 'value' not in account['result']:
         raise RuntimeError('Cannot verify USDC account rent; conversion not sent')
     info = account['result']['value']
-    # 100,000 capped priority fee + signature fee, with conservative headroom.
-    allowance = 120_000
+    # Cover capped priority/signature fees and the spend guard's conservative
+    # second fee count (simulation may already include the fee).
+    allowance = 220_000
     if info is None:
         rent = _rpc_post({'jsonrpc':'2.0','id':1,'method':'getMinimumBalanceForRentExemption',
                          'params':[165]}, timeout=15)
