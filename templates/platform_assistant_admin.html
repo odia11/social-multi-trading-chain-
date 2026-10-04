@@ -15,7 +15,21 @@
 <label><input type="checkbox" name="replies" {% if state.replies %}checked{% endif %} style="width:auto"> Replies to @orcagent in homefeed comments</label>
 <p class="muted">Always English. Platform questions only, with a clarification reply for unknown topics. No private group replies, market predictions, account access or transaction execution.</p>
 <p class="muted">Limits: two replies per user per 15 minutes, eight per user per 24 hours, 120 across the platform per 24 hours. A saved comment gets at most one automated reply.</p>
+<label><input type="checkbox" name="learning" {% if state.learning %}checked{% endif %} style="width:auto"> Learn platform question wording and conversation context</label>
+<p class="muted">Follow-up context stays within the same user's public reply thread. New wording is associated with an existing reviewed English answer after three distinct users clarify the same topic. Conflicting clarifications return it to review. No model training, new product facts or external AI costs. Automatic observations expire after 90 days.</p>
 <button class="button" type="submit">Save settings</button><p id="platform-status" role="status" aria-live="polite"></p></form></section>
+<section><h2>Conversation learning</h2>
+<p class="muted">Unknown platform questions and learned wording. Approve a reviewed topic, ignore a question, or reset its votes. Samples link to existing public comments; credentials and long address-like strings are excluded from learning.</p>
+{% for q in questions %}
+<article class="panel" style="margin-bottom:12px;overflow-wrap:anywhere">
+<p>{{ q.question }}</p><p class="muted">{{ q.status|title }} · {{ q.seen }} unanswered occurrences · {{ q.votes }} distinct clarifying users{% if q.topic %} · {{ q.topic }}{% endif %}</p>
+<a href="/#post-{{ q.post_id }}">Open conversation</a>
+<form class="learning-review" data-question="{{ q.key }}" style="margin-top:12px">
+<label>Reviewed English topic <select name="topic" style="max-width:100%">{% for topic in topics %}<option value="{{ topic }}" {% if topic==q.topic %}selected{% endif %}>{{ topic|title }}</option>{% endfor %}</select></label>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="button" name="status" value="approved">Approve</button><button class="button" name="status" value="ignored">Ignore</button><button class="button" name="status" value="pending">Reset</button></div>
+<p class="learning-status" role="status" aria-live="polite"></p></form></article>
+{% else %}<p class="muted">No unanswered wording collected yet.</p>{% endfor %}
+</section>
 <section><h2>Recent publications</h2>
 {% for kind,post_id,reply_id,topic,created_at in recent %}
 <article class="panel" style="margin-bottom:8px"><strong>{{ 'Comment reply' if kind=='reply' else 'Feed thesis' }}</strong><p class="muted">{{ topic }} · {{ post_id }}{% if reply_id %} · Reply #{{ reply_id }}{% endif %}</p><a href="/#post-{{ post_id }}">Open conversation</a></article>
