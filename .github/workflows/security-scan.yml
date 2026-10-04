@@ -51,6 +51,7 @@ jobs:
           node --check static/following.js
           node --check static/call-sharing.js
           node --check static/invitations.js
+          node --check static/creator-rewards.js
           python -m pytest -q tests/test_security_boundaries.py tests/test_dashboard_output_security.py tests/test_xss_injection_hardening.py tests/test_security_xss_csrf_injection.py
           python tests/test_security_hardening.py
           python tests/test_authorization_hardening.py
@@ -66,7 +67,7 @@ jobs:
           python tests/test_trading_wallet_generator.py
           python tests/test_solana_only.py
           python tests/test_solana_gasless_trading.py
-          python -m pytest -q tests/test_native_sol_payments.py tests/test_trader_rewards.py tests/test_trader_fee_discounts.py tests/test_pro_trade_runtime.py tests/test_profile_portfolio_balance.py tests/test_watchlist_alerts.py tests/test_verified_calls.py tests/test_following_traders.py tests/test_call_invitations.py
+          python -m pytest -q tests/test_native_sol_payments.py tests/test_trader_rewards.py tests/test_trader_fee_discounts.py tests/test_pro_trade_runtime.py tests/test_profile_portfolio_balance.py tests/test_watchlist_alerts.py tests/test_verified_calls.py tests/test_following_traders.py tests/test_call_invitations.py tests/test_creator_rewards.py tests/test_creator_rewards_runtime.py
           python tests/test_solana_buy_flow.py
           python tests/test_sell_a_share.py
 

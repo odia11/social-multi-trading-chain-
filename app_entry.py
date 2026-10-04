@@ -175,4 +175,7 @@ _install_following_traders(_dashboard)
 from call_invitations import install as _install_call_invitations
 _install_call_invitations(_dashboard)
 
+from creator_rewards import install as _install_creator_rewards
+_install_creator_rewards(_dashboard)
+
 app = _dashboard.app

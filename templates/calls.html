@@ -378,9 +378,9 @@ function _likeBtnHtml(c, extraCls){
     +'onclick="event.stopPropagation();_toggleCallLike(this)" aria-label="Like this call">'
     +_HEART_SVG+'<span>'+(c.like_count||0)+'</span></button>';
 }
-function _goToToken(mint){
+function _goToToken(mint, callId){
   if(!mint) return;
-  window.location = '/live-market?mint=' + encodeURIComponent(mint);
+  window.location = callId ? '/call/'+encodeURIComponent(callId)+'/trade' : '/live-market?mint=' + encodeURIComponent(mint);
 }
 
 function _renderPodium(top3){
@@ -394,7 +394,7 @@ function _renderPodium(top3){
     var avatar = c.caller_avatar
       ? '<img class="podium-tile" src="'+esc(c.caller_avatar)+'" alt="">'
       : '<div class="podium-tile">'+esc((c.caller_username||'?').slice(0,2).toUpperCase())+'</div>';
-    return '<div class="podium-card p'+rank+'" onclick="_goToToken(\''+esc(c.mint)+'\')">'
+    return '<div class="podium-card p'+rank+'" onclick="_goToToken(\''+esc(c.mint)+'\', '+Number(c.id)+')">'
       +'<div class="podium-rank">#'+rank+'</div>'
       +avatar
       +'<div class="podium-info">'
@@ -458,7 +458,7 @@ async function _loadCallsList(){
       var avatarHtml = c.caller_avatar
         ? '<img src="'+esc(c.caller_avatar)+'" alt="">'
         : esc((c.caller_username||'?').slice(0,2).toUpperCase());
-      return '<div class="call-row" onclick="_goToToken(\''+esc(c.mint)+'\')">'
+      return '<div class="call-row" onclick="_goToToken(\''+esc(c.mint)+'\', '+Number(c.id)+')">'
         +'<div class="call-rank">#'+rank+'</div>'
         +'<div class="call-avatar">'+avatarHtml+'</div>'
         +'<div class="call-info">'

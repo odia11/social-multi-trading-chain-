@@ -51,7 +51,7 @@ assert get(visitor,'/invitations').status_code==302
 page=get(visitor,path);assert page.status_code==200
 assert '<script>alert(1)</script>' not in page.text and '&lt;script&gt;' in page.text
 assert '<img src=x onerror' not in page.text and '&lt;img' in page.text
-assert '/live-market?mint=So11111111111111111111111111111111111111112' in page.text
+assert f'/call/{call}/trade' in page.text
 assert '.png?v=2&amp;via=' in page.text
 assert f'/u/{actor}' in page.text and 'og:image' in page.text and f'/call/{call}' in page.text
 assert any('orca_invite=' in value and 'HttpOnly' in value and 'Secure' in value for value in page.headers.getlist('Set-Cookie'))
