@@ -4,7 +4,7 @@
    Solana portfolio snapshot in the background. */
 (function(){
 'use strict';
-var timer=null,inFlight=false,last='',lastAt=0;
+var timer=null,inFlight=false,last='',lastAt=0,lastStored=null,lastStoredAt=0;
 var here=location.pathname.replace(/\/+$/,'')||'/';
 var ON_PORTFOLIO=here==='/wallet',POLL_MS=5000,MIN_GAP_MS=1200;
 var STORAGE_KEY='orcaPortfolioLastConfirmedUSDCValue';
@@ -16,6 +16,7 @@ function n(v){if(v==null||v==='')return null;v=Number(v);return Number.isFinite(
 function money(v){var x=n(v);return x===null?'—':x.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' USDC'}
 function render(value){
   var node=el();if(!node)return;
+  if(node.textContent===value&&node.getAttribute('aria-label')==='Total portfolio value '+value)return;
   node.textContent=value||'—';
   node.setAttribute('aria-label','Total portfolio value '+(value||'unavailable'));
   var pill=node.closest('.pt-nb-balance,.pt-nb-sol,.pt-nb-wallet-balance')||node.parentElement;
@@ -23,9 +24,11 @@ function render(value){
 }
 function remember(total){
   var value=n(total);if(value===null)return;
+  if(value===lastStored && Date.now()-lastStoredAt<60000)return;
   try{
     localStorage.setItem(STORAGE_KEY,String(value));
     localStorage.setItem(STORAGE_AT_KEY,String(Date.now()));
+    lastStored=value;lastStoredAt=Date.now();
   }catch(e){}
 }
 function recalled(){

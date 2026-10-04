@@ -17,7 +17,7 @@ from flask import jsonify, request
 TZ = ZoneInfo('Europe/Amsterdam')
 HOURS = (9, 15, 21)
 MENTION = re.compile(r'(?<![\w@])@orcagent(?![\w])', re.I)
-LABEL = 'OrcAgent assistant · Automated\n'
+LABEL = 'Automated · '
 # Approved product copy, not generated claims about prices or user performance.
 THESES = (
 ('calls', 'A token ticker is only the start. A useful call explains the reasoning and records an entry price. Publish your analysis on OrcAgent so others can explore the call and its chart before making their own decision.'),
@@ -54,17 +54,17 @@ THESES = (
 
 # English platform guidance; both English and Dutch keywords are understood.
 FAQ = (
-    ('secrets', 'seed|recovery phrase|private key|secret key|herstelzin|priv[eé]sleutel', 'Never post your recovery phrase or private key. OrcAgent will not ask you to share them in comments or DMs. For a wallet issue, describe the screen and error without credentials.'),
-    ('bug', 'not working|doesn.t work|error|bug|failed|stuck|werkt niet|fout|mislukt|vast|probleem', 'Which OrcAgent page and action are affected? Share the error text and whether you use iOS, Android or desktop. Do not include secrets. This automated reply does not fix or inspect your account; a team member needs to review the issue.'),
-    ('creator', 'creator|creators|reward|beloning|verdien|paid|betaald|payout|uitbetaling', 'Creator Rewards is a pilot for approved creators: 10% of collected platform fees from qualifying buys reached through their calls. Posting or views alone do not earn rewards. Check Menu → Creator Rewards for approval and payout rules. USDC payouts are manually verified.'),
-    ('referral', 'referral|referrer|invite|invitation|uitnodig|doorverwijs', 'Use a personal call link to track invitations in Invitations & shared calls. The referral program shares 20% of trading fees from attributed users, subject to its rules. That is a share of the fee, not the trade amount. Invitation totals are private.'),
-    ('fees', '\\bfees?\\b|cost|kost|kosten|percentage|procent|%', 'Creator Rewards and referral percentages apply to collected platform fees, not total trading volume. Users fund transaction costs. Check the amount and costs shown before confirming a trade; this assistant cannot calculate a personal quote.'),
-    ('share', '\\bshare\\b|sharing|deel|delen|card|kaart', 'Open a call and tap Share call. You can copy its invitation link, share on X or save the card. The link opens the original analysis and chart. Your personal link tracks qualifying invitations; your totals remain private.'),
-    ('calls', '\\bcalls?\\b|analysis|analyse|entry|instap', 'A call shares a trader’s analysis and recorded entry price. Open it to read the reasoning and explore its chart. The entry is a reference point, not a guaranteed fill or return. Use the call controls to publish your own token analysis.'),
-    ('wallet', 'phantom|connect|login|log.?in|wallet|verbinden|inloggen', 'Use Connect wallet to connect Phantom. Choose your browser or PWA context and approve in Phantom. Keep recovery phrases and private keys out of posts and comments. If connecting fails, tell us the screen, device and error.'),
-    ('portfolio', 'portfolio|holding|balance|saldo|bezitting', 'Portfolio is where you review your holdings and recorded activity. This assistant cannot read your balance or confirm a transaction. For a missing balance or activity, describe the asset, page and error without sharing credentials.'),
-    ('trading', 'trad|buy|sell|swap|kopen|verkopen|ruil|chart|grafiek|solana|chain', 'OrcAgent is focused on Solana. Explore a token in Live Market, review its chart and inspect the buy/sell controls and costs before confirming. This assistant explains platform features; it does not recommend tokens, predict prices or place trades.'),
-    ('community', 'follow|volg|\\bdm\\b|message|bericht|community|feed|comment|reage', 'Use trader profiles to follow people, read their calls and continue conversations in comments or DMs. Tag @orcagent in a comment for platform guidance. Replies from this assistant are automated and limited to OrcAgent features.'),
+    ('secrets', 'seed|recovery phrase|private key|secret key|herstelzin|priv[eé]sleutel', 'Never post your recovery phrase or private key. Describe your wallet issue without credentials; OrcAgent will never ask for those secrets.'),
+    ('bug', 'not working|doesn.t work|error|bug|failed|stuck|werkt niet|fout|mislukt|vast|probleem', 'Which OrcAgent page and action failed? Share the error and your device type so the team can review it. Keep wallet secrets private.'),
+    ('creator', 'creator|creators|reward|beloning|verdien|paid|betaald|payout|uitbetaling', 'Approved creators can earn 10% of collected platform fees from qualifying call buys. Views alone do not pay. See Menu → Creator Rewards; USDC payouts are manually verified.'),
+    ('referral', 'referral|referrer|invite|invitation|uitnodig|doorverwijs', 'Referrals share 20% of trading fees from attributed users, not the trade amount. Share your referral link; track call invitations privately in Invitations & shared calls.'),
+    ('fees', '\bfees?\b|cost|kost|kosten|percentage|procent|%', 'Reward percentages apply to collected platform fees, not trading volume. You fund transaction costs. Review the costs before confirming; I cannot calculate a personal quote.'),
+    ('share', '\bshare\b|sharing|deel|delen|card|kaart', 'Open a call and tap Share call to copy its link, share on X or save the card. Your personal link tracks qualifying invitations privately.'),
+    ('calls', '\bcalls?\b|analysis|analyse|entry|instap', 'A call records a trader’s analysis and entry price. Open it to explore the reasoning and chart. The entry is a reference, not a guaranteed fill or return.'),
+    ('wallet', 'phantom|connect|login|log.?in|wallet|verbinden|inloggen', 'Tap Connect wallet and approve in Phantom. Return to your chosen browser or PWA. If it fails, share the screen and error, never your recovery phrase.'),
+    ('portfolio', 'portfolio|holding|balance|saldo|bezitting', 'Open Portfolio to review holdings and activity. I cannot access your balance or confirm transactions. For missing activity, name the asset and what you see.'),
+    ('trading', 'trad|buy|sell|swap|kopen|verkopen|ruil|chart|grafiek|solana|chain', 'Explore Solana tokens and charts in Live Market. Review the buy/sell controls and costs before confirming. This assistant does not recommend tokens or place trades.'),
+    ('community', 'follow|volg|\bdm\b|message|bericht|community|feed|comment|reage', 'Follow traders from their profiles, discuss calls in comments or chat in DMs. Tag @orcagent for help with platform features.'),
 )
 
 LEARNABLE = {topic:english for topic,pattern,english in FAQ if topic not in ('secrets','bug')}
@@ -76,12 +76,11 @@ def answer(message):
     for topic, pattern, english in FAQ:
         if re.search(pattern, clean, re.I):
             return topic, LABEL + english
+    if re.search(r'benefits?|what (?:can|does)|features?|voordelen|mogelijkheden',clean):
+        return 'overview', LABEL + 'OrcAgent brings Solana charts, trading, calls and community into one app. Follow traders, share your analysis and track holdings in Portfolio.'
     if re.fullmatch(r'\s*(?:hi|hello|hey|hello there|how are you|how are you doing|hoe gaat het|hallo|hoi)[\s!?.,]*',clean):
-        return 'welcome', LABEL + "I'm here to help you explore OrcAgent. Ask me about connecting Phantom, sharing calls, your portfolio, trading tools or platform fees. What would you like to do?"
-    return 'scope', LABEL + (
-        'I can explain OrcAgent features: Phantom connection, calls, sharing, portfolio, fees and Creator Rewards. '
-        'Which feature do you mean, and what are you trying to do? '
-        'I do not provide price predictions or personal trading advice.')
+        return 'welcome', LABEL + "I'm ready to help. What would you like to know about OrcAgent?"
+    return 'scope', LABEL + 'Which feature would you like help with: wallet, calls, trading, portfolio or rewards? I can explain OrcAgent, but cannot access your account or predict prices.'
 
 def initialize(db):
     with sqlite3.connect(db, timeout=8) as c:

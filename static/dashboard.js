@@ -1129,9 +1129,10 @@ function _rrColor(str){ var n=0; for(var i=0;i<(str||'').length;i++) n=(n*31+str
 function _rrPrice(p){ if(!p) return '—'; var n=parseFloat(p); if(isNaN(n)) return '—'; return n<0.001?'$'+n.toFixed(8).replace(/\.?0+$/,''):n<1?'$'+n.toFixed(6):'$'+n.toFixed(4); }
 
 async function _loadRightRail(){
+  if(!_oaOnScreen('right-rail')) return;
   _loadRrMarket();
   _loadRrTraders();
-  setInterval(_loadRrMarket, 30000);
+  if(!window._oaRailTimer) window._oaRailTimer=setInterval(_oaPollTask(_loadRrMarket),30000);
 }
 
 function _rrFeaturedMarketRow(p){
@@ -1147,6 +1148,7 @@ function _rrFeaturedMarketRow(p){
 }
 
 async function _loadRrMarket(){
+  if(!_oaOnScreen('right-rail') || document.hidden) return;
   var el=document.getElementById('rr-market-list'); if(!el) return;
   var badge=document.getElementById('rr-pumping-badge');
   var label=document.getElementById('rr-pumping-label');
@@ -1288,7 +1290,7 @@ async function _fetchSolPrice(){
   }catch(e){}
 }
 _fetchSolPrice();
-setInterval(_fetchSolPrice,30000);
+setInterval(_oaPollTask(_fetchSolPrice),30000);
 
 function _updateSolUsdc(sol){
   const _p=_getSolPrice();
@@ -1346,9 +1348,26 @@ function updateAuthBtns(){
 
 // ── STATE ──
 let lastLogCount=0;
-function appVisible(){ return document.getElementById('app').style.display!=='none'; }
+function appVisible(){ var app=document.getElementById('app'); return !document.hidden && !!app && app.style.display!=='none'; }
+function _oaOnScreen(id){
+  var el=document.getElementById(id); if(!el || !el.getClientRects().length) return false;
+  var r=el.getBoundingClientRect(); return r.bottom>0 && r.top<window.innerHeight;
+}
+function _oaPollTask(task){
+  var busy=false;
+  return function(){
+    if(document.hidden || busy) return;
+    busy=true;
+    return Promise.resolve().then(task).catch(function(e){console.error('[poll]',e)}).finally(function(){busy=false});
+  };
+}
+let _stateInFlight=false;
+let _stateTokensKey=null,_statePositionsKey=null,_stateLogsKey=null;
 
 async function fetchState(){
+  if(_stateInFlight) return;
+  _stateInFlight=true;
+  try{
   if(!document.getElementById('sol-balance-display')&&!document.getElementById('state-sol')) return
   if(!appVisible()) return;
   const r=await fetch('/api/state').then(r=>r.json()).catch(()=>null);
@@ -1376,16 +1395,20 @@ async function fetchState(){
   }
   traderOn=r.trader_running;
   updateBtns();
-  if(r.log_lines){checkForTrades(r.log_lines);renderLog(r.log_lines);}
-  renderMarket(r.tokens||[]);
-
-  _checkClosedPositions(r.positions_detail||[]);
-  renderPositions(r.positions_detail||[]);
   if(r.sol_price) _solPrice=r.sol_price;
-  _lfBuildMintMap(r.tokens||[]);
-  _lfCheckNewBuys(r.positions_detail||[]);
-  _lfPositions=r.positions_detail||[];
-  renderLiveFeed();
+  var tokensKey=JSON.stringify(r.tokens||[]),positionsKey=JSON.stringify([r.positions_detail||[],_solPrice]),logsKey=JSON.stringify(r.log_lines||[]);
+  var changed=tokensKey!==_stateTokensKey || positionsKey!==_statePositionsKey;
+  if(logsKey!==_stateLogsKey && r.log_lines){checkForTrades(r.log_lines);renderLog(r.log_lines);_stateLogsKey=logsKey;}
+  if(tokensKey!==_stateTokensKey){renderMarket(r.tokens||[]);_lfBuildMintMap(r.tokens||[]);_stateTokensKey=tokensKey;}
+  if(positionsKey!==_statePositionsKey){
+    _checkClosedPositions(r.positions_detail||[]);
+    renderPositions(r.positions_detail||[]);
+    _lfCheckNewBuys(r.positions_detail||[]);
+    _lfPositions=r.positions_detail||[];
+    _statePositionsKey=document.querySelector('.pos-sell-conf')?null:positionsKey;
+  }
+  if(changed) renderLiveFeed();
+  }finally{_stateInFlight=false;}
 }
 
 async function fetchMarketOnly(){
@@ -3860,7 +3883,7 @@ async function _botToggle(){
 
 // Initial fetch + 30s poll
 _botFetchStatus()
-_botPollTimer=setInterval(_botFetchStatus,30000)
+_botPollTimer=setInterval(_oaPollTask(_botFetchStatus),30000)
 
 // ── bot PNL panel ──────────────────────────────────────
 async function _botLoadPositions(){
@@ -3904,7 +3927,7 @@ async function _botLoadPositions(){
   }catch(e){}
 }
 _botLoadPositions()
-setInterval(_botLoadPositions,10000)
+setInterval(_oaPollTask(_botLoadPositions),10000)
 
 function _sbNav(section){
   if(section!=='wallet') _stopWalletRefresh();
@@ -4939,16 +4962,20 @@ async function _onPushToggle(cb){
 
 // ── PNL PERFORMANCE CHART (LightweightCharts) ──────────────────────────────
 let _pnlcChart=null,_pnlcSeries=null,_pnlcRange='1d';
+let _pnlInFlight=false;
 let _pnlcDataRef={current:[]}; // feeds attachChartScrub() -- see static/chart-scrub.js
 
 async function fetchPnlChart(){
-  if(!appVisible()) return;
+  if(!appVisible() || !_oaOnScreen('pnlc-container') || _pnlInFlight) return;
+  _pnlInFlight=true;
   try{
-    const r=await fetch('/api/pnl_chart?range='+_pnlcRange).then(r=>r.json());
+    var requestedRange=_pnlcRange;
+    const r=await fetch('/api/pnl_chart?range='+requestedRange).then(r=>r.json());
     var pts=r.data||[];
     if(pts.length) await _ensureLightweightCharts();
-    _renderPnlcChart(pts);
+    if(requestedRange===_pnlcRange) _renderPnlcChart(pts);
   }catch(e){console.error('[pnl_chart] fetch error:',e);}
+  finally{_pnlInFlight=false;if(requestedRange && requestedRange!==_pnlcRange)fetchPnlChart();}
 }
 
 function _renderPnlcChart(pts){
@@ -5004,6 +5031,13 @@ function _renderPnlcChart(pts){
   _pnlcChart.timeScale().fitContent();
 }
 
+document.addEventListener('DOMContentLoaded',function(){
+  var panel=document.getElementById('pnlc-container');
+  if(panel && 'IntersectionObserver' in window){
+    var observer=new IntersectionObserver(function(entries){if(entries.some(function(e){return e.isIntersecting;}))fetchPnlChart();});
+    observer.observe(panel);
+  }
+});
 function _pnlSetRange(range,btn){
   _pnlcRange=range;
   document.querySelectorAll('.pnlc-btn').forEach(b=>b.classList.remove('active'));
@@ -5011,13 +5045,13 @@ function _pnlSetRange(range,btn){
   fetchPnlChart();
 }
 
-setInterval(fetchState,10000);
-setInterval(fetchMarketOnly,15000);
-setInterval(fetchTrades,30000);
-setInterval(fetchPnlChart,30000);
-setInterval(fetchLeaderboard,30000);
-setInterval(_refreshVisibleReactions,12000);
-setInterval(fetchPumpScanner,30000);
+setInterval(_oaPollTask(fetchState),10000);
+setInterval(_oaPollTask(fetchMarketOnly),15000);
+setInterval(_oaPollTask(fetchTrades),30000);
+setInterval(_oaPollTask(fetchPnlChart),30000);
+setInterval(_oaPollTask(fetchLeaderboard),30000);
+setInterval(_oaPollTask(_refreshVisibleReactions),12000);
+setInterval(_oaPollTask(fetchPumpScanner),30000);
 
 // ── VERSION POLLING ──
 let _pageVersion=null;
@@ -5026,7 +5060,7 @@ let _pageVersion=null;
   if(r?.version) _pageVersion=r.version;
 })();
 setInterval(async()=>{
-  if(!_pageVersion) return;
+  if(document.hidden || !_pageVersion) return;
   const r=await fetch('/api/version').then(r=>r.json()).catch(()=>null);
   if(r?.version && r.version!==_pageVersion){
     document.getElementById('update-banner').style.display='flex';
@@ -5640,7 +5674,7 @@ async function sendSupportMessage(){
 }
 
 if(_SUPPORT_CHAT_ENABLED){
-  setInterval(_supportFetchUnread, 30000);
+  setInterval(_oaPollTask(_supportFetchUnread),30000);
   setTimeout(_supportFetchUnread, 2000);
 }
 
@@ -6819,7 +6853,7 @@ function _dmUpdateUnreadBadge(){
 }
 
 // Poll unread count on every page, even outside messages view
-setInterval(dmFetchUnread, 30000);
+setInterval(_oaPollTask(dmFetchUnread),30000);
 
 // ── PROFILE COMMENTS ──
 let _tvcCurrentUserId=null, _tvcCanComment=false, _tvcIsSelf=false;
@@ -9704,12 +9738,12 @@ function _renderFeedCard(e, cardIndex){
     +'<div class="fc-reply-row1">'
     +'<div class="fc-reply-avatar">'+_fcReplyAvatarHtml()+'</div>'
     +'<div class="fc-reply-pill">'
-    +'<input class="fc-reply-inp" id="rinp-'+esc(safePostId)+'" type="text" placeholder="Reply to '+esc(e.username||'this post')+'…" maxlength="500" '
+    +'<textarea rows="1" aria-label="Write a reply" class="fc-reply-inp" id="rinp-'+esc(safePostId)+'" placeholder="Reply to '+esc(e.username||'this post')+'…" maxlength="500" '
       +'oninput="_fcReplyCardSync(\'rcard-'+esc(safePostId)+'\')" onfocus="_fcReplyCardSync(\'rcard-'+esc(safePostId)+'\')" onblur="_fcReplyCardSync(\'rcard-'+esc(safePostId)+'\')" '
-      +'onkeydown="if(event.key===\'Enter\'){event.preventDefault();_feedSubmitReply(this,\''+esc(safePostId)+'\')}">'
+      +'onkeydown="if(event.key===\'Enter\'&&!event.shiftKey&&!event.isComposing){event.preventDefault();_feedSubmitReply(this,\''+esc(safePostId)+'\')}"></textarea>'
     +'<button class="fc-reply-tool" onclick="_emojiPickerToggle(event,\'repal-'+esc(safePostId)+'\',\'rinp-'+esc(safePostId)+'\')" title="Emoji">😊</button>'
     +'<div class="fc-reply-palette ep-palette" id="repal-'+esc(safePostId)+'"></div>'
-    +'<button class="fc-reply-send" onclick="_feedSubmitReply(document.getElementById(\'rinp-'+esc(safePostId)+'\'),\''+esc(safePostId)+'\')" title="Reageren">'+_RC_SEND_ICON_SVG+'</button>'
+    +'<button class="fc-reply-send" onclick="_feedSubmitReply(document.getElementById(\'rinp-'+esc(safePostId)+'\'),\''+esc(safePostId)+'\')" title="Send reply">'+_RC_SEND_ICON_SVG+'</button>'
     +'</div>'
     +'</div>'
     +'</div>'
@@ -9978,6 +10012,7 @@ function _fcReplyCardSync(cardId){
   var card = document.getElementById(cardId);
   if(!card) return;
   var inp = card.querySelector('.fc-reply-inp');
+  if(inp && inp.tagName==='TEXTAREA'){inp.style.height='auto';inp.style.height=Math.min(160,Math.max(44,inp.scrollHeight))+'px';}
   var focused = document.activeElement === inp;
   card.classList.toggle('active', focused || !!(inp && inp.value));
 }
@@ -10235,23 +10270,23 @@ function _renderReplyRow(r, postId, depth){
     ? 'event.stopPropagation();_showAvatarLightbox('+esc(JSON.stringify(r.avatar_url))+')'
     : (r.wallet ? 'event.stopPropagation();location.href=\'/profile/'+encodeURIComponent(r.wallet)+'\'' : '');
   var msgHtml = _fcRichText(r.message);
-  var indentStyle = depth>0 ? ' style="margin-left:'+Math.min(depth,3)*24+'px;border-left:2px solid #21252c;padding-left:10px"' : '';
-  // Instagram/Facebook-style row: avatar, then username flowing directly
-  // into the message as one paragraph (not a separate header line), a quiet
-  // time/Reply meta line underneath, and the like heart docked to the right
-  // of the row instead of in an actions row below the text.
+  var longReply=String(r.message||'').length>280;
+  var indentStyle = ''; // CSS applies one bounded indent at every nested depth.
+  // Keep author and actions separate from the full-width message.
   return '<div class="fc-reply-item'+(depth>0?' fc-reply-nested':'')+'" data-reply-id="'+r.id+'" data-parent-id="'+(r.parent_reply_id||'')+'"'+indentStyle+'>'
     +'<div class="fc-ri-row">'
     +'<div class="fc-ri-avatar" style="background:'+bg+';position:relative;overflow:hidden;cursor:pointer" onclick="'+avatarClick+'">'+ini+avatarImg+'</div>'
     +'<div class="fc-ri-body">'
-    +'<div class="fc-ri-line">'+nameHtml+verifiedBadge+_teamBadgeHtml(r.team_role)+youChip+' <span class="fc-ri-text-inline">'+msgHtml+'</span></div>'
+    +'<div class="fc-ri-line'+(longReply?' fc-ri-collapsed':'')+'"><div class="fc-ri-author">'+nameHtml+verifiedBadge+_teamBadgeHtml(r.team_role)+youChip+'</div><div class="fc-ri-text-inline">'+msgHtml+'</div></div>'
+    +(longReply?'<button type="button" class="fc-ri-more" aria-expanded="false" onclick="var t=this.previousElementSibling;var open=t.classList.toggle(\'fc-ri-collapsed\');this.textContent=open?\'Show more\':\'Show less\';this.setAttribute(\'aria-expanded\',String(!open))">Show more</button>':'')
     +'<div class="fc-ri-meta">'
     +'<span class="fc-ri-time">'+_replyRelTime(r.created_at)+'</span>'
     +'<button class="fc-ri-reply-btn" onclick="_feedToggleNestedReply('+r.id+',\''+postId.replace(/'/g,"\\'")+'\',this)">Reply</button>'
+    +'<button type="button" class="fc-ri-like'+likedCls+'" data-rid="'+r.id+'" aria-label="'+(r.liked_by_me?'Unlike reply':'Like reply')+'" aria-pressed="'+(r.liked_by_me?'true':'false')+'" onclick="_feedLikeReply('+r.id+',this)"><span class="fc-ri-heart" aria-hidden="true">'+(r.liked_by_me?'❤️':'♡')+'</span><span class="fc-ri-lc">'+likeCnt+'</span></button>'
     +delBtn
     +'</div>'
     +'</div>'
-    +'<button type="button" class="fc-ri-like'+likedCls+'" data-rid="'+r.id+'" aria-label="'+(r.liked_by_me?'Unlike reply':'Like reply')+'" aria-pressed="'+(r.liked_by_me?'true':'false')+'" onclick="_feedLikeReply('+r.id+',this)"><span class="fc-ri-heart" aria-hidden="true">'+(r.liked_by_me?'❤️':'♡')+'</span><span class="fc-ri-lc">'+likeCnt+'</span></button>'
+
     +'</div>'
     +'<div class="fc-ri-nested-box" id="rnbox-'+r.id+'" style="display:none"></div>'
     +'</div>';
@@ -10273,12 +10308,12 @@ function _feedToggleNestedReply(parentId, postId, btn){
     +'<div class="fc-reply-row1">'
     +'<div class="fc-reply-avatar">'+_fcReplyAvatarHtml()+'</div>'
     +'<div class="fc-reply-pill">'
-    +'<input class="fc-reply-inp" id="'+inpId+'" type="text" placeholder="Reply to '+esc(authorName)+'…" maxlength="500" '
+    +'<textarea rows="1" aria-label="Write a reply" class="fc-reply-inp" id="'+inpId+'" placeholder="Reply to '+esc(authorName)+'…" maxlength="500" '
       +'oninput="_fcReplyCardSync(\''+cardId+'\')" onfocus="_fcReplyCardSync(\''+cardId+'\')" onblur="_fcReplyCardSync(\''+cardId+'\')" '
-      +'onkeydown="if(event.key===\'Enter\'){event.preventDefault();_feedSubmitNestedReply(this,\''+postId.replace(/'/g,"\\'")+'\','+parentId+')}">'
+      +'onkeydown="if(event.key===\'Enter\'&&!event.shiftKey&&!event.isComposing){event.preventDefault();_feedSubmitNestedReply(this,\''+postId.replace(/'/g,"\\'")+'\','+parentId+')}"></textarea>'
     +'<button class="fc-reply-tool" onclick="_emojiPickerToggle(event,\'nrepal-'+parentId+'\',\''+inpId+'\')" title="Emoji">😊</button>'
     +'<div class="fc-reply-palette ep-palette" id="nrepal-'+parentId+'"></div>'
-    +'<button class="fc-reply-send" onclick="_feedSubmitNestedReply(document.getElementById(\''+inpId+'\'),\''+postId.replace(/'/g,"\\'")+'\','+parentId+')" title="Reageren">'+_RC_SEND_ICON_SVG+'</button>'
+    +'<button class="fc-reply-send" onclick="_feedSubmitNestedReply(document.getElementById(\''+inpId+'\'),\''+postId.replace(/'/g,"\\'")+'\','+parentId+')" title="Send reply">'+_RC_SEND_ICON_SVG+'</button>'
     +'</div>'
     +'</div>'
     +'</div>'
@@ -10328,10 +10363,10 @@ function _feedSubmitNestedReply(inp, postId, parentReplyId){
       openAlertModal({text:d.msg||'Could not post reply'});
     }
     inp.disabled = false;
-    if(sendBtn){ sendBtn.disabled = false; sendBtn.textContent = 'Reply'; }
+    if(sendBtn){ sendBtn.disabled = false; sendBtn.innerHTML = _RC_SEND_ICON_SVG; }
   }).catch(function(){
     inp.disabled = false;
-    if(sendBtn){ sendBtn.disabled = false; sendBtn.textContent = 'Reply'; }
+    if(sendBtn){ sendBtn.disabled = false; sendBtn.innerHTML = _RC_SEND_ICON_SVG; }
     openAlertModal({text:'Network error — could not post reply'});
   });
 }
@@ -10447,7 +10482,7 @@ function _feedSubmitReply(inp, postId){
     }
   }).catch(function(e){ console.error('[reply]',e); }).finally(function(){
     inp.disabled = false;
-    if(sendBtn){ sendBtn.disabled = false; sendBtn.textContent = 'Reply'; }
+    if(sendBtn){ sendBtn.disabled = false; sendBtn.innerHTML = _RC_SEND_ICON_SVG; }
   });
 }
 
@@ -10468,7 +10503,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
 // ── Live online-users badge (sidebar + tablet header) ──
 function _refreshOnlineCount(){
-  fetch('/api/online-count').then(function(r){ return r.json(); }).then(function(d){
+  return fetch('/api/online-count').then(function(r){ return r.json(); }).then(function(d){
     if(!d || !d.ok) return;
     var n = d.online;
     var sb = document.getElementById('sb-online-badge');
@@ -10481,7 +10516,7 @@ function _refreshOnlineCount(){
 }
 document.addEventListener('DOMContentLoaded', function(){
   _refreshOnlineCount();
-  setInterval(_refreshOnlineCount, 30000);
+  setInterval(_oaPollTask(_refreshOnlineCount),30000);
 });
 
 // Pull down at the top of Home (like Instagram) to refresh the feed and the

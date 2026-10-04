@@ -132,8 +132,9 @@ check('...and the 5 SOL another referrer earned from MY referral is not '
 # This page was adding its own 116-124px on top, so the gap under the last
 # card was about 240px of nothing on a phone.
 TPL = open(os.path.join(REPO, 'templates', 'referrals.html')).read()
-_pads = re.findall(r'\.ref-page\{[^}]*?padding:\s*([^;}]+)', TPL)
-check('the page still sets its own padding', len(_pads) >= 3)
+CSS = open(os.path.join(REPO, 'static', 'referrals.css')).read()
+_pads = re.findall(r'\.ref-page\{[^}]*?padding:\s*([^;}]+)', CSS)
+check('the page still sets its own padding', len(_pads) >= 2)
 check('...and none of it is a second clearance for the bottom navigation, '
       'which one stylesheet already owns',
       not any(re.search(r'(1[0-9]{2}px|safe-area-inset-bottom)', p) for p in _pads))
