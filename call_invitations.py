@@ -122,7 +122,7 @@ def render_card(call, inviter=None):
         text,f=fit(text,size,width);draw.text((70,y),text,font=f,fill=color)
     line('OrcAgent · SOLANA TOKEN CALL',60,28,gold)
     line('$'+str(call['symbol'] or call['mint'][:8]),119,64)
-    line('Called by '+str(call['username'] or 'OrcAgent trader')+(' ✓' if call['is_verified']==1 else ''),205,30)
+    line('Called by '+str(call['username'] or 'OrcAgent trader')+(' · Verified' if call['is_verified']==1 else ''),205,30)
     price=call['price_at_call'];price=float(price or 0)
     line('Entry: '+(f'${price:.8g} USD' if math.isfinite(price) and price>0 else 'Unavailable'),260,28,muted)
     text=' '.join(str(call['note'] or 'Open the call, explore its chart and decide whether to trade.').split())
