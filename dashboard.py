@@ -20427,6 +20427,12 @@ def save_banner():
 # _calls_peak_loop() (see thread startup section near the bottom of the file).
 CALLS_PER_DAY_LIMIT = 5
 CALL_NOTE_MAX = 280
+
+def _call_daily_limit(conn, user_id):
+    """Verified account checkmarks remove the daily quota; client flags cannot."""
+    row = conn.execute('SELECT is_verified FROM users WHERE id=?', (user_id,)).fetchone()
+    return None if row and row[0] == 1 else CALLS_PER_DAY_LIMIT
+
 # A call posted to the home feed is a feed_posts row whose content ends with
 # this marker plus {"id": <token_calls.id>}. Only api_make_call() writes it:
 # the numbers on the card always come from token_calls (server-fetched
@@ -20671,7 +20677,8 @@ def api_make_call():
             "SELECT COUNT(*) FROM token_calls WHERE user_id=? AND date(timestamp)=date('now')",
             (uid,)
         ).fetchone()[0]
-        if today_count >= CALLS_PER_DAY_LIMIT:
+        daily_limit = _call_daily_limit(conn, uid)
+        if daily_limit is not None and today_count >= daily_limit:
             return jsonify({'ok': False, 'msg': f'Daily call limit reached ({CALLS_PER_DAY_LIMIT}/day). Try again tomorrow.'}), 429
 
         # Always fetch the price fresh server-side -- never trust a client-submitted
@@ -20722,7 +20729,8 @@ def api_make_call():
                 # The call itself is saved; a failed follower ping must not undo it.
                 print(f'[calls] follower notify failed for call {call_id}: {type(e).__name__}: {e}', flush=True)
         return jsonify({'ok': True, 'id': call_id, 'post_id': post_id, 'symbol': symbol, 'price': price,
-                        'calls_left_today': CALLS_PER_DAY_LIMIT - today_count - 1})
+                        'calls_left_today': None if daily_limit is None else max(0, daily_limit - today_count - 1),
+                        'calls_per_day': daily_limit, 'calls_unlimited': daily_limit is None})
     except sqlite3.OperationalError as e:
         # sqlite3.OperationalError is NOT only "database is locked" -- it also
         # covers a read-only file, a full disk, a missing column and more.
@@ -20869,8 +20877,10 @@ def api_calls_mine():
             'multiplier': round(r[5]/r[4], 4) if r[4] > 0 else 0,
             'timestamp': r[6],
         } for r in rows]
-        return jsonify({'ok': True, 'calls': calls, 'calls_left_today': max(0, CALLS_PER_DAY_LIMIT - today_count),
-                        'calls_per_day': CALLS_PER_DAY_LIMIT})
+        daily_limit = _call_daily_limit(conn, uid)
+        return jsonify({'ok': True, 'calls': calls,
+                        'calls_left_today': None if daily_limit is None else max(0, daily_limit - today_count),
+                        'calls_per_day': daily_limit, 'calls_unlimited': daily_limit is None})
     finally:
         conn.close()
 

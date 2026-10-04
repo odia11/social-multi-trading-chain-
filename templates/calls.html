@@ -290,7 +290,7 @@ html,body{min-height:100vh;background:var(--bg);font-family:var(--ui);color:var(
         </div>
         <div class="call-dropdown" id="call-dropdown"></div>
         <div class="call-msg" id="call-msg"></div>
-        <div class="call-limit-note" id="call-limit-note"></div>
+        <div class="call-limit-note" id="call-limit-note">Verified accounts can place unlimited token calls. Other accounts can place five calls per day.</div>
       </div>
       <div class="calls-how">
         <div class="calls-how-title">How calls work</div>
@@ -561,7 +561,7 @@ async function _submitCall(){
     var d = null;
     try{ d = JSON.parse(raw); }catch(_){}
     if(d && d.ok){
-      msg.textContent = 'Call placed on $'+d.symbol+' at '+_fmtCallPrice(d.price)+'. '+d.calls_left_today+' call(s) left today.';
+      msg.textContent = 'Call placed on $'+d.symbol+' at '+_fmtCallPrice(d.price)+'. '+(d.calls_unlimited === true ? 'Unlimited calls · verified account.' : d.calls_left_today+' call(s) left today.');
       msg.className = 'call-msg ok';
       document.getElementById('call-search-input').value = '';
       _callSelected = null;
