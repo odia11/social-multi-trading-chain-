@@ -58,13 +58,13 @@ FAQ = (
     ('bug', 'not working|doesn.t work|error|bug|failed|stuck|werkt niet|fout|mislukt|vast|probleem', 'Which OrcAgent page and action failed? Share the error and your device type so the team can review it. Keep wallet secrets private.'),
     ('creator', 'creator|creators|reward|beloning|verdien|paid|betaald|payout|uitbetaling', 'Approved creators can earn 10% of collected platform fees from qualifying call buys. Views alone do not pay. See Menu → Creator Rewards; USDC payouts are manually verified.'),
     ('referral', 'referral|referrer|invite|invitation|uitnodig|doorverwijs', 'Referrals share 20% of trading fees from attributed users, not the trade amount. Share your referral link; track call invitations privately in Invitations & shared calls.'),
-    ('fees', '\bfees?\b|cost|kost|kosten|percentage|procent|%', 'Reward percentages apply to collected platform fees, not trading volume. You fund transaction costs. Review the costs before confirming; I cannot calculate a personal quote.'),
-    ('share', '\bshare\b|sharing|deel|delen|card|kaart', 'Open a call and tap Share call to copy its link, share on X or save the card. Your personal link tracks qualifying invitations privately.'),
-    ('calls', '\bcalls?\b|analysis|analyse|entry|instap', 'A call records a trader’s analysis and entry price. Open it to explore the reasoning and chart. The entry is a reference, not a guaranteed fill or return.'),
+    ('fees', r'\bfees?\b|cost|kost|kosten|percentage|procent|%', 'Reward percentages apply to collected platform fees, not trading volume. You fund transaction costs. Review the costs before confirming; I cannot calculate a personal quote.'),
+    ('share', r'\bshare\b|sharing|deel|delen|card|kaart', 'Open a call and tap Share call to copy its link, share on X or save the card. Your personal link tracks qualifying invitations privately.'),
+    ('calls', r'\bcalls?\b|analysis|analyse|entry|instap', 'A call records a trader’s analysis and entry price. Open it to explore the reasoning and chart. The entry is a reference, not a guaranteed fill or return.'),
     ('wallet', 'phantom|connect|login|log.?in|wallet|verbinden|inloggen', 'Tap Connect wallet and approve in Phantom. Return to your chosen browser or PWA. If it fails, share the screen and error, never your recovery phrase.'),
     ('portfolio', 'portfolio|holding|balance|saldo|bezitting', 'Open Portfolio to review holdings and activity. I cannot access your balance or confirm transactions. For missing activity, name the asset and what you see.'),
     ('trading', 'trad|buy|sell|swap|kopen|verkopen|ruil|chart|grafiek|solana|chain', 'Explore Solana tokens and charts in Live Market. Review the buy/sell controls and costs before confirming. This assistant does not recommend tokens or place trades.'),
-    ('community', 'follow|volg|\bdm\b|message|bericht|community|feed|comment|reage', 'Follow traders from their profiles, discuss calls in comments or chat in DMs. Tag @orcagent for help with platform features.'),
+    ('community', r'follow|volg|\bdm\b|message|bericht|community|feed|comment|reage', 'Follow traders from their profiles, discuss calls in comments or chat in DMs. Tag @orcagent for help with platform features.'),
 )
 
 LEARNABLE = {topic:english for topic,pattern,english in FAQ if topic not in ('secrets','bug')}
@@ -178,7 +178,7 @@ def reply_to_post(d,post_number,wallet,now=None):
         c.execute('INSERT INTO platform_assistant_events VALUES(?,?,?,?,?,?,?)',
                   (key,'reply',member[0],post_id,cur.lastrowid,topic,now))
         c.execute('INSERT INTO notifications(user_id,type,content,link,actor_wallet) VALUES(?,?,?,?,?)',
-                  (member[0],'reply','OrcAgent answered your platform question',d._post_link(c,post_id),author[1]))
+                  (member[0],'reply','OrcAgent answered your platform question',d._reply_link(c,post_id,cur.lastrowid),author[1]))
         return cur.lastrowid
 
 def reply_to(d, source_id, wallet, now=None):
@@ -226,7 +226,7 @@ def reply_to(d, source_id, wallet, now=None):
         c.execute('INSERT INTO platform_assistant_events VALUES(?,?,?,?,?,?,?)',
                   (key,'reply',source[0],source[1],cur.lastrowid,topic,now))
         c.execute('INSERT INTO notifications(user_id,type,content,link,actor_wallet) VALUES(?,?,?,?,?)',
-                  (source[0],'reply','OrcAgent answered your platform question',d._post_link(c,source[1]),author[1]))
+                  (source[0],'reply','OrcAgent answered your platform question',d._reply_link(c,source[1],cur.lastrowid),author[1]))
         return cur.lastrowid
 
 def install(d):

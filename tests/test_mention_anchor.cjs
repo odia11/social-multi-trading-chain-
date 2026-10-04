@@ -11,7 +11,7 @@ const box={style:{display:'none'},children:[],replaceChildren(){this.children=[]
 const viewport={offsetTop:0,offsetLeft:0,width:390,height:460,addEventListener:(n,f)=>events['vv'+n]=f};
 const ctx={document:{activeElement:input,getElementById:()=>box,addEventListener:(n,f)=>events[n]=f,
  createElement:()=>({style:{},addEventListener(){}})},window:{visualViewport:viewport,addEventListener:(n,f)=>events['win'+n]=f},
- fetch:()=>new Promise(resolve=>pending.push(resolve)),requestAnimationFrame:f=>{f();return 0},setTimeout:f=>f(),Event:class{}};
+ fetch:()=>new Promise(resolve=>pending.push(resolve)),requestAnimationFrame:f=>{f();return 0},setTimeout:f=>f(),clearTimeout:()=>{},Event:class{}};
 vm.createContext(ctx);vm.runInContext(code,ctx);
 const settle=async(users)=>{pending.shift()({ok:true,json:async()=>({users})});for(let i=0;i<6;i++)await Promise.resolve()};
 (async()=>{
@@ -28,6 +28,8 @@ const settle=async(users)=>{pending.shift()({ok:true,json:async()=>({users})});f
  input.value='@oj';input.selectionStart=3;ctx._mentionCheck(input);
  await settle([{username:'Older'}]);assert.equal(box.style.display,'none');
  await settle([{username:'OJ'}]);assert.equal(box.children[0].textContent,'@OJ');
- ctx._mentionSelect('OJ');assert.equal(input.value,'@OJ ');assert.equal(input.selectionStart,4);assert.equal(box.style.display,'none');
+ rect={...rect,top:4,bottom:456};ctx._mentionPosition();assert.equal(box.style.display,'block','tall reply field must not hide suggestions');
+ input.id='rninp-12';input.classList.contains=c=>c==='fc-reply-inp';input.value='Hello @oj';input.selectionStart=input.value.length;events.input({target:input});await settle([{username:'OJ'}]);
+ ctx._mentionSelect('OJ');assert.equal(input.value,'Hello @OJ ');assert.equal(input.selectionStart,10);assert.equal(box.style.display,'none');
  console.log('PASS: measured height, page scroll, keyboard resize, visual viewport pan, offscreen dismissal, stale results and insertion');
 })().catch(e=>{console.error(e);process.exitCode=1});

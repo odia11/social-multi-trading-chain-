@@ -29,7 +29,7 @@ INSERT INTO feed_posts(wallet,content,created_at) VALUES('member','A post','2026
                 row=c.execute('SELECT created_at FROM feed_posts WHERE id=?',(post[1:],)).fetchone()
                 return row[0] if row else None
             return '2026-10-04 00:00:00' if post.startswith(('t','g')) else None
-        self.d=SimpleNamespace(DB_FILE=self.db,_feed_post_created_at=created,_post_link=lambda c,post:'/#post-'+post)
+        self.d=SimpleNamespace(DB_FILE=self.db,_feed_post_created_at=created,_post_link=lambda c,post:'/#post-'+post,_reply_link=lambda c,post,rid:'/#post-'+post+'-reply-'+str(rid))
         self.now=dt.datetime(2026,10,4,9,0,tzinfo=p.TZ).timestamp()
     def tearDown(self):
         self.tmp.cleanup()
@@ -43,6 +43,10 @@ INSERT INTO feed_posts(wallet,content,created_at) VALUES('member','A post','2026
             ('@Orcagent hoe deel ik een call?','share','tap Share call'),
             ('@orcagent hoe krijg ik creator rewards?','creator','10%'),
             ('@orcagent wat kost het?','fees','collected platform fees'),
+            ('What are the fees ? @orcagent','fees','collected platform fees'),
+            ('@orcagent share','share','tap Share call'),
+            ('@orcagent calls','calls','reference'),
+            ('@orcagent dm','community','DMs'),
             ('@orcagent Phantom werkt niet','bug','Which OrcAgent page'),
             ('@orcagent vertel een mop','scope','Which feature'),
             ('@orcagent what are the benefits of this app?','overview','Solana charts'),
