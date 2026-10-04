@@ -1,9 +1,9 @@
 """User-scoped portfolio balance for the public OrcAgent profile card.
 
-The shown total is an approximate USDC equivalent of the existing authoritative
-Solana portfolio snapshot (1 USDC ~ 1 USD). If token indexing is temporarily
+The shown total is an approximate SOL equivalent of the existing authoritative
+Solana portfolio snapshot, converted at the current SOL/USD rate. If token indexing is temporarily
 unavailable, the endpoint still returns the profile user's directly verified
-Solana USDC trading balance instead of hiding the card. No key, token inventory
+Solana SOL trading balance instead of hiding the card. No key, token inventory
 or RPC URL is included in the response. All reads are read-only.
 """
 from __future__ import annotations
@@ -23,35 +23,33 @@ def _amount(value):
     return round(number, 6) if math.isfinite(number) and number >= 0 else None
 
 
-def _live_usdc_fallback(d, wallet: str, user_id: int):
-    """Return a real Solana USDC balance even when token indexing is down.
+def _live_sol_fallback(d, wallet: str, user_id: int):
+    """Return a real Solana SOL balance even when token indexing is down.
 
     Public profiles should not become "Unavailable" merely because the
     wallet-wide token indexer is throttled. The dedicated trading wallet's
-    canonical USDC ATA can be read with ordinary unindexed RPC calls.
+    native SOL account can be read with ordinary unindexed RPC calls.
     """
     onchain_wallet = d._get_trading_wallet_address(wallet) or wallet
     stale = False
     try:
-        _sol, available = d._get_bot_solana_balances(onchain_wallet)
+        available = d._get_user_sol(onchain_wallet)
     except Exception:
-        # Short provider hiccups may still have a very recent confirmed value.
-        available = d._get_solana_usdc_balance(onchain_wallet, allow_stale=True)
-        stale = True
+        raise ValueError('SOL balance unavailable')
     available = _amount(available)
     if available is None:
-        raise ValueError('Solana USDC balance unavailable')
+        raise ValueError('Solana SOL balance unavailable')
     return {
         'ok': True,
         'user_id': user_id,
-        'portfolio_value_usdc_approx': available,
-        'available_usdc': available,
-        'other_assets_usdc_approx': None,
+        'portfolio_value_sol_approx': available,
+        'available_sol': max(0, available - d.SOL_NETWORK_RESERVE),
+        'other_assets_sol_approx': None,
         'generated_at': time.time(),
         'stale': stale,
         'partial': True,
-        'scope': 'solana_usdc',
-        'unit': 'USDC',
+        'scope': 'solana_sol',
+        'unit': 'SOL',
         'approximate': False,
     }
 
@@ -89,12 +87,12 @@ def install(d):
 
         # Public profile views need one fast, dependable number. Do not make a
         # visitor wait for the wallet-wide indexed token scan just to show the
-        # user's USDC balance; read the dedicated trading wallet's canonical
-        # USDC account directly. Own-profile views still prefer the richer full
+        # user's SOL balance; read the dedicated trading wallet's native
+        # SOL account directly. Own-profile views still prefer the richer full
         # portfolio snapshot below.
         if viewer != wallet:
             try:
-                result = _live_usdc_fallback(d, wallet, user_id)
+                result = _live_sol_fallback(d, wallet, user_id)
                 response = jsonify(result)
                 response.headers['Cache-Control'] = 'private, no-store'
                 return response
@@ -104,32 +102,31 @@ def install(d):
         from portfolio_multichain_holdings import _portfolio_snapshot
         try:
             snap = _portfolio_snapshot(d, wallet)
-            value = _amount(snap.get('total_usd'))
-            stables = snap.get('stable') or {}
-            available = _amount(stables.get('solana_usdc'))
+            value = _amount(snap.get('total_sol'))
+            available = _amount(snap.get('available_to_trade_sol'))
             if available is None:
-                raise ValueError('Solana USDC balance unavailable')
+                raise ValueError('Solana SOL balance unavailable')
             if value is None or available is None:
                 raise ValueError('Incomplete portfolio valuation')
             others = round(max(0.0, value - available), 6)
             result = {
                 'ok': True, 'user_id': user_id,
-                'portfolio_value_usdc_approx': value,
-                'available_usdc': available,
-                'other_assets_usdc_approx': others,
+                'portfolio_value_sol_approx': value,
+                'available_sol': available,
+                'other_assets_sol_approx': others,
                 'generated_at': snap.get('generated_at'),
                 'stale': bool(snap.get('stale')),
                 'partial': False,
                 'scope': 'solana_portfolio',
-                'unit': 'USDC',
+                'unit': 'SOL',
                 'approximate': True,
             }
         except Exception:
             # A wallet-wide token indexer outage must not hide the one balance
             # we can verify cheaply and directly: the profile user's Solana
-            # USDC trading balance. Never invent other-token value here.
+            # SOL trading balance. Never invent other-token value here.
             try:
-                result = _live_usdc_fallback(d, wallet, user_id)
+                result = _live_sol_fallback(d, wallet, user_id)
             except Exception:
                 return jsonify({'ok': False, 'error': 'Portfolio balance temporarily unavailable'}), 503
 

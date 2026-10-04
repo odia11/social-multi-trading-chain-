@@ -104,6 +104,7 @@ def install(d):
     @app.post('/api/token-launch/<launch_id>/fund/quote')
     @d.rate_limit(4,60)
     def quote_funding(launch_id):
+        return fail('Launches now require native SOL. Deposit SOL into your connected wallet.',410)
         wallet,row=owner(launch_id)
         if not wallet:return fail('Connect Phantom',401)
         if not row:return fail('Your saved launch was not found',404)

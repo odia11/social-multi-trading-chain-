@@ -50,7 +50,7 @@ base = re.search(r"SOLANA_BASE_CURRENCY = '([A-Z]+)'", SRC).group(1)
 check(f'the page tells you to fund the trading wallet in {base}',
       f'<strong>{base}</strong> to fund trading' in INFO)
 check('the docs explain that SOL is still needed for Solana network costs',
-      'SOL available for Solana network and token-account costs' in INFO)
+      'SOL reserve available' in INFO)
 check('the page no longer advertises an active cross-chain bridge',
       'there is no active cross-chain bridge in the product'
       in INFO.replace('\n      ', ' '))
@@ -71,7 +71,7 @@ check('fees describe Solana/Jupiter costs instead of inactive EVM chains',
       'Every trade runs on Solana' in flat
       and 'OrcAgent supports Solana only' in flat)
 check('the docs distinguish USDC trading balance from SOL network costs',
-      'USDC is the trading balance OrcAgent uses for Solana buys and sells' in flat
+      'SOL is the trading balance OrcAgent uses for Solana buys and sells' in flat
       and 'small amount of SOL for network fees' in flat)
 
 # ── it must still be well-formed ──────────────────────────────────────────

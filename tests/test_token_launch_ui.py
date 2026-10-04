@@ -36,6 +36,8 @@ def test_token_launch_ui():
                 'id="tl-claim-now"','id="tl-recent-earnings"','id="tl-creator-share"'):
                 assert token in html,token
             assert re.search(r'name="tl-mode" value="creator" checked',html)
+            assert re.search(r'name="tl-asset" value="SOL" checked',html)
+            assert 'name="tl-asset" value="USDC"' not in html
             assert re.search(r'id="tl-image"[^>]*required',html)
             assert 'Network + protocol fees' in html and 'OrcAgent launch fee' in html
             assert 'Creator Earnings' in html and 'Earnings from tokens you created on OrcAgent.' in html
@@ -65,9 +67,9 @@ def test_token_launch_ui():
     assert "var draftNonce=''" in js
     assert 'Trade on OrcAgent' in js and 'View on Pump' not in js
     directory_js=(ROOT/'static/token-launches.js').read_text()
-    assert 'Trade on OrcAgent' in directory_js and 'Trade on Pump' not in directory_js
-    assert "'/live-market?mint='+encodeURIComponent(data.mint)" in directory_js
-    assert "'/live-market?mint='+encodeURIComponent(row.mint)" in js
+    assert 'Buy on OrcAgent' in directory_js and 'Trade on Pump' not in directory_js
+    assert "'/token/'+encodeURIComponent(data.mint)" in directory_js
+    assert "function tokenPath(mint){return '/token/'+encodeURIComponent(mint)}" in js
     assert "'/api/token-launch/creator-earnings'" in js
     assert "'/api/token-launch/creator-fees'" in js
     assert 'No live USDC Creator Rewards token yet.' not in js

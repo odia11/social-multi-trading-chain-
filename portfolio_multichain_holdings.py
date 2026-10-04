@@ -47,7 +47,8 @@ def _portfolio_snapshot(d, wallet, bust=False):
 
     # Token holdings and stablecoin balances are independent reads. Execute
     # them concurrently and publish only one completed snapshot to the UI.
-    jobs = {'tokens': lambda: d._fetch_wallet_tokens(wallet, onchain_wallet),
+    jobs = {'native_sol': lambda: d._get_user_sol(onchain_wallet),
+            'tokens': lambda: d._fetch_wallet_tokens(wallet, onchain_wallet),
             'solana_usdc': lambda: d._get_solana_usdc_balance(onchain_wallet, allow_stale=True)}
 
     results = {}
@@ -90,9 +91,9 @@ def _portfolio_snapshot(d, wallet, bust=False):
 
     sol_row = next((t for t in assets if str(t.get('symbol') or '').upper() == 'SOL'
                     and str(t.get('chain') or 'solana') == 'solana'), None)
-    sol_amount = _num(sol_row.get('amount')) if sol_row else 0.0
+    sol_amount = _num(results['native_sol'])
     sol_price = _num(sol_row.get('price_usd')) if sol_row else _num(getattr(d, '_sol_price_usd', 0))
-    sol_value = _num(sol_row.get('usd_value', sol_row.get('value_usd'))) if sol_row else sol_amount * sol_price
+    sol_value = sol_amount * sol_price
 
     stable_symbols = {'USDC', 'USDT', 'USDG'}
     other_value = 0.0
@@ -111,7 +112,7 @@ def _portfolio_snapshot(d, wallet, bust=False):
         if uid_row:
             spent = conn.execute(
                 "SELECT COALESCE(SUM(spend),0) FROM open_positions "
-                "WHERE user_id=? AND COALESCE(chain,'solana')='solana'",
+                "WHERE user_id=? AND COALESCE(chain,'solana')='solana' AND COALESCE(base_currency,'SOL')='SOL'",
                 (uid_row[0],)).fetchone()
             in_positions_sol = _num(spent[0] if spent else 0)
         conn.close()
@@ -123,7 +124,10 @@ def _portfolio_snapshot(d, wallet, bust=False):
         'generated_at': now,
         'wallets': {'solana': onchain_wallet},
         'total_usd': round(total, 4),
-        'available_to_trade_usdc': round(stable_total, 4),
+        'available_to_trade_usdc': round(stable_total, 4),  # historical/asset-only field
+        'trading_currency': 'SOL',
+        'available_to_trade_sol': max(0.0, sol_amount - d.SOL_NETWORK_RESERVE),
+        'total_sol': total / sol_price if sol_price > 0 else None,
         'stable': {
             'total_usdc': round(stable_total, 4),
             'solana_usdc': round(solana_usdc, 4),

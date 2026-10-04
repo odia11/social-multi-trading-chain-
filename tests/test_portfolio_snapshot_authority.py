@@ -19,10 +19,10 @@ def fake_dashboard():
     conn = sqlite3.connect(f.name)
     conn.executescript('''
       CREATE TABLE users(id INTEGER PRIMARY KEY,wallet_address TEXT,bsc_wallet_address TEXT);
-      CREATE TABLE open_positions(user_id INTEGER,mint_address TEXT,symbol TEXT,amount REAL,buy_price REAL,spend REAL,chain TEXT,opened_at REAL);
+      CREATE TABLE open_positions(user_id INTEGER,mint_address TEXT,symbol TEXT,amount REAL,buy_price REAL,spend REAL,chain TEXT,opened_at REAL,base_currency TEXT);
       INSERT INTO users VALUES(7,'session','0xevm');
-      INSERT INTO open_positions VALUES(7,'0xtoken','TOK',2,3,6,'base',1);
-      INSERT INTO open_positions VALUES(7,'solmint','SOLPOS',1,4,4,'solana',1);
+      INSERT INTO open_positions VALUES(7,'0xtoken','TOK',2,3,6,'base',1,'USDC');
+      INSERT INTO open_positions VALUES(7,'solmint','SOLPOS',1,4,4,'solana',1,'SOL');
     ''')
     conn.commit(); conn.close()
     d = types.SimpleNamespace()
@@ -45,6 +45,8 @@ def fake_dashboard():
     d.get_evm_usdc_balance=lambda addr,chain:balances[chain]
     d.get_token_data=lambda addr,chain=None:{'symbol':'TOK','name':'Token','price':4}
     d._sol_price_usd=100
+    d._get_user_sol=lambda addr:1
+    d.SOL_NETWORK_RESERVE=.005
     return d
 
 
@@ -58,6 +60,9 @@ def test_snapshot_has_one_authoritative_total():
     assert snap['sol']['value_usd'] == 100
     assert snap['other_assets_value_usd'] == 10
     assert snap['total_usd'] == 130
+    assert snap['total_sol'] == 1.3
+    assert snap['available_to_trade_sol'] == .995
+    assert snap['trading_currency'] == 'SOL'
     assert snap['sol']['in_positions_sol'] == 4
 
 

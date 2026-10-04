@@ -5,7 +5,7 @@
 function $(id){return document.getElementById(id)}
 function money(value){
   var v=Number(value||0);
-  return (isFinite(v)?v:0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:6});
+  return (isFinite(v)?v:0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:9});
 }
 function json(url){return fetch(url,{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()})}
 function stateLabel(s){
@@ -20,9 +20,9 @@ function refreshStats(){
   if(!box)return;
   json('/api/profile/'+encodeURIComponent(box.dataset.userId)+'/tip-stats').then(function(d){
     if(!d.ok)return;
-    if($('oa-tip-received'))$('oa-tip-received').textContent=money(d.received_usdc)+' USDC';
+    if($('oa-tip-received'))$('oa-tip-received').textContent=money(d.received_sol)+' SOL';
     if($('oa-tip-supporters'))$('oa-tip-supporters').textContent=String(d.supporters);
-    if($('oa-tip-sent')&&d.sent_usdc!==undefined)$('oa-tip-sent').textContent=money(d.sent_usdc)+' USDC';
+    if($('oa-tip-sent')&&d.sent_sol!==undefined)$('oa-tip-sent').textContent=money(d.sent_sol)+' SOL';
   }).catch(function(){});
 }
 var profileBalanceInFlight=false;
@@ -39,18 +39,18 @@ function refreshProfileBalance(){
   // account switch can never display another account's cached amounts.
   if(!profileBalanceLastGood&&card.dataset.own==='1'){
     try{
-      var cached=JSON.parse(localStorage.getItem('orcaProfileBalance:'+userId)||'null');
+      var cached=JSON.parse(localStorage.getItem('orcaProfileBalanceSOL:'+userId)||'null');
       if(cached&&Number.isFinite(Number(cached.at))&&Date.now()-Number(cached.at)<86400000){
         var cv=Number(cached.value),ca=Number(cached.available),cp=!!cached.partial;
         var coRaw=cached.other,co=(coRaw===null||coRaw===undefined)?null:Number(coRaw);
         if(Number.isFinite(cv)&&cv>=0&&Number.isFinite(ca)&&ca>=0&&
            (co===null||(Number.isFinite(co)&&co>=0))){
-          $('oa-profile-balance-value').textContent=(cp?'':'≈ ')+money(cv)+' USDC';
-          $('oa-profile-balance-available').textContent=money(ca)+' USDC';
-          $('oa-profile-balance-other').textContent=co===null?'—':'≈ '+money(co)+' USDC';
+          $('oa-profile-balance-value').textContent=(cp?'':'≈ ')+money(cv)+' SOL';
+          $('oa-profile-balance-available').textContent=money(ca)+' SOL';
+          $('oa-profile-balance-other').textContent=co===null?'—':'≈ '+money(co)+' SOL';
           if($('oa-profile-balance-unit'))$('oa-profile-balance-unit').textContent=cp
-            ?'Live Solana USDC balance'
-            :'Estimated value of USDC and other tokens';
+            ?'Live Solana SOL balance'
+            :'Estimated portfolio value in SOL';
           profileBalanceLastGood=true;
           card.classList.add('is-stale');
         }
@@ -71,35 +71,35 @@ function refreshProfileBalance(){
   }).then(function(d){
     if(!sameProfile())return;
     if(!d.ok||Number(d.user_id)!==Number(userId))throw new Error('Balance unavailable');
-    var value=Number(d.portfolio_value_usdc_approx);
-    var available=Number(d.available_usdc);
+    var value=Number(d.portfolio_value_sol_approx);
+    var available=Number(d.available_sol);
     var partial=!!d.partial;
-    var rawOther=d.other_assets_usdc_approx;
+    var rawOther=d.other_assets_sol_approx;
     var other=(rawOther===null||rawOther===undefined)?null:Number(rawOther);
     if(!Number.isFinite(value)||value<0||!Number.isFinite(available)||available<0||
        (other!==null&&(!Number.isFinite(other)||other<0)))throw new Error('Balance unavailable');
-    $('oa-profile-balance-value').textContent=(partial?'':'≈ ')+money(value)+' USDC';
-    $('oa-profile-balance-available').textContent=money(available)+' USDC';
-    $('oa-profile-balance-other').textContent=other===null?'—':'≈ '+money(other)+' USDC';
+    $('oa-profile-balance-value').textContent=(partial?'':'≈ ')+money(value)+' SOL';
+    $('oa-profile-balance-available').textContent=money(available)+' SOL';
+    $('oa-profile-balance-other').textContent=other===null?'—':'≈ '+money(other)+' SOL';
     if($('oa-profile-balance-unit')){
       $('oa-profile-balance-unit').textContent=partial
-        ?'Live Solana USDC balance'
-        :'Estimated value of USDC and other tokens';
+        ?'Live Solana SOL balance'
+        :'Estimated portfolio value in SOL';
     }
     profileBalanceLastGood=true;
     if(card.dataset.own==='1'){
       try{
-        localStorage.setItem('orcaProfileBalance:'+userId,JSON.stringify({
+        localStorage.setItem('orcaProfileBalanceSOL:'+userId,JSON.stringify({
           at:Date.now(),value:value,available:available,other:other,partial:partial
         }));
         if(!partial){
-          localStorage.setItem('orcaPortfolioLastConfirmedTotal',String(value));
-          localStorage.setItem('orcaPortfolioLastConfirmedTotalAt',String(Date.now()));
+          localStorage.setItem('orcaPortfolioLastConfirmedSOLTotal',String(value));
+          localStorage.setItem('orcaPortfolioLastConfirmedSOLTotalAt',String(Date.now()));
         }
       }catch(e){}
       // Repaint the shared top-bar balance from the exact same authoritative
       // profile snapshot instead of waiting for a separate RPC round-trip.
-      if(!partial)document.dispatchEvent(new CustomEvent('orca:portfolio-value',{detail:{total:value}}));
+      if(!partial)document.dispatchEvent(new CustomEvent('orca:portfolio-value',{detail:{total_sol:value}}));
     }
     // Refresh state stays internal; users only see the balance values.
     card.classList.toggle('is-stale',!!d.stale);
@@ -131,7 +131,7 @@ function renderReceipt(tip){
   card.hidden=false;sheet.classList.add('oa-tip-result');
   var state=tip.status||'submitted';
   $('oa-tip-receipt-title').textContent=state==='confirmed'?'Tip delivered!':state==='failed'?'Tip failed':'Tip submitted';
-  $('oa-tip-receipt-amount').textContent=money(tip.amount)+' USDC';
+  $('oa-tip-receipt-amount').textContent=money(tip.amount)+' '+(tip.currency||'USDC');
   $('oa-tip-receipt-peer').textContent=(state==='confirmed'?'Delivered to ':'To ')+(tip.recipient_username?'@'+tip.recipient_username.replace(/^@/,''):'OrcAgent member');
   $('oa-tip-receipt-network').textContent=(tip.chain||'Solana').replace(/^./,function(x){return x.toUpperCase()});
   var badge=$('oa-tip-receipt-status');
@@ -162,7 +162,7 @@ window.OrcAgentTipReceipt=function(reply,amount,onConfirmed){
   receiptId=reply.tip_id||null;receiptAttempts=0;receiptVisible=true;
   noteCallback=onConfirmed;noteDelivered=false;
   renderReceipt({
-    amount:reply.amount_sent||amount,
+    amount:reply.amount_sent||amount, currency:reply.currency||'SOL',
     chain:reply.chain,
     status:reply.status||'submitted',
     explorer_url:reply.explorer,
@@ -213,7 +213,7 @@ function renderHistory(tips){
     content.appendChild(peer);
     content.appendChild(make('small','',when(t.created_at)+' · '+(t.chain||'').replace(/^./,function(x){return x.toUpperCase()})));
     var right=make('div','oa-tip-row-right');
-    right.appendChild(make('strong',sent?'oa-tip-negative':'oa-tip-positive',(sent?'−':'+')+money(t.amount)+' USDC'));
+    right.appendChild(make('strong',sent?'oa-tip-negative':'oa-tip-positive',(sent?'−':'+')+money(t.amount)+' '+(t.currency||'USDC')));
     right.appendChild(make('span','oa-tip-pill '+t.status,stateLabel(t.status)));
     var detail=make('div','oa-tip-row-detail');
     detail.appendChild(make('span','',t.status==='confirmed'?'On-chain confirmed':t.status==='submitted'?'Awaiting on-chain confirmation':(t.failure_reason||'Transaction failed')));

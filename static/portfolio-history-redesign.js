@@ -84,7 +84,7 @@ function normalizeTips(tips){
       sub:(sent?'To ':'From ')+(sent
         ? (t.recipient_username?'@'+t.recipient_username.replace(/^@/,''):'OrcAgent member')
         : (t.sender_username?'@'+t.sender_username.replace(/^@/,''):'OrcAgent member')),
-      amount:(sent?-1:1)*Math.abs(Number(t.amount||0)),unit:'USDC',
+      amount:(sent?-1:1)*Math.abs(Number(t.amount||0)),unit:t.currency||'USDC',
       time:time.getTime(),status:t.status||'submitted',
       hash:t.tx_hash||'',url:t.explorer_url||'',message:t.message||'',
       profile:sent?t.recipient_profile:t.sender_profile,
@@ -105,8 +105,8 @@ function normalizeTrades(trades){
       sub:(buy?'Bought ':'Sold ')+(symbol||'token')+' · Live Market',
       // For old sells, amount_usd in the legacy endpoint can actually be
       // denominated in SOL. Do not mislabel it as USD.
-      amount:buy&&Number.isFinite(Number(t.amount_usd))?-Math.abs(Number(t.amount_usd)):null,
-      unit:buy?'USDC':'',time:time.getTime(),status:'confirmed',
+      amount:t.amount_base!=null?(buy?-1:1)*Math.abs(Number(t.amount_base)):(buy&&Number.isFinite(Number(t.amount_usd))?-Math.abs(Number(t.amount_usd)):null),
+      unit:t.currency||(buy?'USD':''),time:time.getTime(),status:'confirmed',
       hash:t.tx_hash||'',url:explorer(t.chain,t.tx_hash),message:'',
       profile:''
     };
@@ -119,8 +119,8 @@ function normalizeWallet(events){
       id:String(e.id||'wallet:'+e.tx_hash),type:incoming?'deposit':'send',
       filter:'wallet',icon:incoming?'deposit':'send',
       chain:'solana',title:incoming?'Deposit':'Send',
-      sub:'USDC · '+(incoming?'To your wallet':'From your wallet'),
-      amount:Number(e.amount),unit:'USDC',time:t.getTime(),
+      sub:(e.currency||'USDC')+' · '+(incoming?'To your wallet':'From your wallet'),
+      amount:Number(e.amount),unit:e.currency||'USDC',time:t.getTime(),
       status:'confirmed',hash:e.tx_hash||'',url:e.explorer_url||'',message:'',profile:''
     };
   }).filter(function(e){return Number.isFinite(e.time)});
@@ -294,7 +294,7 @@ function render(){
   var p=$('oa-h-scope');
   if(p)p.textContent=state.walletUnavailable
     ? 'Wallet transfer history is temporarily unavailable; confirmed tips and recorded Live Market trades remain visible.'
-    : 'Only actual tips, Live Market trades and recent confirmed Solana USDC wallet transfers are shown. No demo activity.';
+    : 'Only actual tips, Live Market trades and recent confirmed Solana SOL and token transfers are shown. No demo activity.';
 }
 function get(url){
   return fetch(url,{credentials:'same-origin',cache:'no-store'}).then(function(r){

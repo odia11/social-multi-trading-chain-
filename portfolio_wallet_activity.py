@@ -131,6 +131,30 @@ def _wallet_events(d, wallet):
         meta = tx.get('meta') or {}
         if meta.get('err') is not None:
             continue
+        message = (tx.get('transaction') or {}).get('message') or {}
+        instructions = message.get('instructions') or []
+        # Plain native sends only. Do not label rent funding, swaps or launch
+        # transactions as an incoming/outgoing payment.
+        if instructions and all(ix.get('program') in ('system', 'compute-budget', 'spl-memo') for ix in instructions):
+            native_raw = 0
+            for ix in instructions:
+                parsed = ix.get('parsed') or {}
+                info = parsed.get('info') or {}
+                if parsed.get('type') == 'transfer':
+                    if info.get('source') == owner:
+                        native_raw -= int(info.get('lamports') or 0)
+                    if info.get('destination') == owner:
+                        native_raw += int(info.get('lamports') or 0)
+            if native_raw:
+                events.append({'id':'solana-sol:'+sig,
+                    'type':'receive' if native_raw>0 else 'send',
+                    'title':'Received SOL' if native_raw>0 else 'Sent SOL',
+                    'amount':abs(native_raw)/1e9, 'currency':'SOL', 'chain':'solana',
+                    'status':'confirmed', 'tx_hash':sig,
+                    'timestamp':int(tx.get('blockTime') or signatures[sig]),
+                    'subtitle':'To your wallet' if native_raw>0 else 'From your wallet',
+                    'explorer_url':tip._explorer('solana',sig)})
+                continue
         raw = (_owner_usdc_balance(meta, 'postTokenBalances', owner) -
                _owner_usdc_balance(meta, 'preTokenBalances', owner))
         if not raw or _other_token_moved(meta, owner) or _native_balance_moved(meta, tx, owner):
@@ -166,12 +190,12 @@ def install(d):
         with _GUARD:
             cached = _CACHE.get(wallet)
             if cached and time.monotonic() - cached[0] < _TTL_SECONDS:
-                return jsonify({'ok': True, 'events': cached[1], 'scope': 'solana-usdc'})
+                return jsonify({'ok': True, 'events': cached[1], 'scope': 'solana-payments'})
         try:
             events = _wallet_events(d, wallet)
         except Exception:
             return jsonify({'ok': False, 'error': 'Wallet history temporarily unavailable',
-                            'events': [], 'scope': 'solana-usdc'}), 503
+                            'events': [], 'scope': 'solana-payments'}), 503
         with _GUARD:
             _CACHE[wallet] = (time.monotonic(), events)
-        return jsonify({'ok': True, 'events': events, 'scope': 'solana-usdc'})
+        return jsonify({'ok': True, 'events': events, 'scope': 'solana-payments'})

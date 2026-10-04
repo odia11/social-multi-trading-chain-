@@ -62,14 +62,14 @@ function calculate(summary,tokBody,bal){
 }
 function paint(snap){
   if(!snap)return;
-  var total=snap.total,stable=snap.stable,solValue=snap.sol,other=snap.other;
-  var totalEl=document.getElementById('pf-total');if(totalEl)totalEl.textContent=money(total);
-  var donutTotal=document.getElementById('pf-donut-total');if(donutTotal)donutTotal.textContent=total>=1000?'$'+(total/1000).toFixed(total>=10000?0:1)+'k':money(total);
+  var total=snap.total,solTotal=snap.total_sol,stable=snap.stable,solValue=snap.sol,other=snap.other;
+  var totalEl=document.getElementById('pf-total');if(totalEl)totalEl.textContent=solTotal==null?'—':Number(solTotal).toFixed(6)+' SOL';
+  var donutTotal=document.getElementById('pf-donut-total');if(donutTotal)donutTotal.textContent=solTotal==null?'—':Number(solTotal).toFixed(4)+' SOL';
   var sum=total||1,p1=Math.max(0,Math.min(100,stable/sum*100)),p2=Math.max(0,Math.min(100-p1,solValue/sum*100));
   var donut=document.getElementById('pf-donut');if(donut)donut.style.background='conic-gradient(var(--pf-yellow) 0 '+p1.toFixed(1)+'%,#7ed797 '+p1.toFixed(1)+'% '+(p1+p2).toFixed(1)+'%,#7b8ca6 '+(p1+p2).toFixed(1)+'% 100%)';
   [['pf-a',stable],['pf-b',solValue],['pf-c',other]].forEach(function(x){var e=document.getElementById(x[0]+'-val');if(e)e.textContent=(x[1]/sum*100).toFixed(1)+'%'});
-  _lastPaint=Date.now();window.__orcaPortfolioValue=total;
-  document.dispatchEvent(new CustomEvent('orca:portfolio-value',{detail:{total:total,stable:stable,sol:solValue,other:other}}));
+  _lastPaint=Date.now();window.__orcaPortfolioValue=total;window.__orcaPortfolioSolValue=solTotal;
+  document.dispatchEvent(new CustomEvent('orca:portfolio-value',{detail:{total:total,total_sol:solTotal,stable:stable,sol:solValue,other:other}}));
 }
 
 /* A Portfolio paint is all-or-nothing. Previously Promise.allSettled painted
@@ -85,7 +85,7 @@ function refreshValue(forceFresh){
     paint({stable:num(s.stable&&s.stable.total_usdc),
            sol:num(s.sol&&s.sol.value_usd),
            other:num(s.other_assets_value_usd),
-           total:num(s.total_usd)});
+           total:num(s.total_usd),total_sol:s.total_sol});
     if(typeof window.OrcAgentPaintPortfolioBreakdown==='function')window.OrcAgentPaintPortfolioBreakdown(s);
     decorate();return true;
   }).catch(function(){return false}).finally(function(){_busy=false});

@@ -422,7 +422,7 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/></svg><span id="pf-follow-label">{{ 'Following' if is_following else 'Follow' }}</span>
         </button>
         <button class="pf-btn-tip" type="button" onclick="_openTip()">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Tip USDC
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Tip SOL
         </button>
         <a href="/messages/{{ wallet }}" class="pf-btn-secondary">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Message
@@ -444,27 +444,27 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
     </section>
 
     {% if can_view_sensitive|default(false) %}
-    <section class="oa-profile-balance" id="oa-profile-balance" data-user-id="{{ user_id }}" data-own="{{ '1' if is_own_profile else '0' }}" aria-label="User portfolio balance in USDC" aria-live="polite">
+    <section class="oa-profile-balance" id="oa-profile-balance" data-user-id="{{ user_id }}" data-own="{{ '1' if is_own_profile else '0' }}" aria-label="User portfolio balance in SOL" aria-live="polite">
       <div class="oa-profile-balance-head">
-        <span class="oa-profile-balance-symbol" aria-hidden="true">$</span>
+        <span class="oa-profile-balance-symbol" aria-hidden="true">◎</span>
         <span class="oa-profile-balance-label">Portfolio balance</span>
         <span class="oa-profile-balance-chain">Solana</span>
       </div>
       <strong class="oa-profile-balance-value" id="oa-profile-balance-value">Loading…</strong>
-      <span class="oa-profile-balance-unit" id="oa-profile-balance-unit">Estimated value of USDC and other tokens</span>
+      <span class="oa-profile-balance-unit" id="oa-profile-balance-unit">Estimated portfolio value in SOL</span>
       <div class="oa-profile-balance-foot">
-        <span>Actual USDC balance</span>
+        <span>Available SOL balance</span>
         <strong id="oa-profile-balance-available">—</strong>
       </div>
       <div class="oa-profile-balance-foot oa-profile-balance-other">
-        <span>Other assets · estimated USDC equivalent</span>
+        <span>Other assets · estimated SOL equivalent</span>
         <strong id="oa-profile-balance-other">—</strong>
       </div>
       
     </section>
     {% endif %}
 
-    <section class="oa-tip-stats" id="oa-tip-stats" data-user-id="{{ user_id }}" aria-label="USDC tip support" aria-live="polite">
+    <section class="oa-tip-stats" id="oa-tip-stats" data-user-id="{{ user_id }}" aria-label="SOL tip support" aria-live="polite">
       <div class="oa-tip-stat"><span>Tips received</span><strong id="oa-tip-received">—</strong></div>
       <div class="oa-tip-stat"><span>Supporters</span><strong id="oa-tip-supporters">—</strong></div>
       {% if is_own_profile %}<div class="oa-tip-stat"><span>Tips sent</span><strong id="oa-tip-sent">—</strong></div>{% endif %}
@@ -1071,23 +1071,23 @@ async function _removeBanner(){
 <script src="/static/pull-to-refresh.js?v={{ app_version }}"></script>
 <script>initPullToRefresh();</script>
 
-<!-- ── TIP USDC ──────────────────────────────────────────────────────────
-     USDC on Solana, straight to the wallet this profile belongs to, through
+<!-- ── TIP SOL ──────────────────────────────────────────────────────────
+     SOL on Solana, straight to the wallet this profile belongs to, through
      the same authenticated CSRF-protected endpoint Portfolio withdraw uses.
      The recipient is rendered by the server; there is no field to type one
      into, so a tip cannot be redirected by editing the page. -->
 <div class="tip-back" id="tip-back" onclick="if(event.target===this)_closeTip()">
-  <div class="tip-sheet" role="dialog" aria-modal="true" aria-label="Tip USDC">
+  <div class="tip-sheet" role="dialog" aria-modal="true" aria-label="Tip SOL">
     <div class="tip-handle"></div>
     <div class="tip-head">
-      <div class="tip-title">Tip USDC</div>
+      <div class="tip-title">Tip SOL</div>
       <button class="tip-close" type="button" onclick="_closeTip()" aria-label="Close">&times;</button>
     </div>
 
     <section id="oa-tip-receipt" class="oa-tip-receipt" hidden aria-live="polite" aria-atomic="true">
       <div class="oa-tip-receipt-icon">✓</div>
       <h2 id="oa-tip-receipt-title">Tip submitted</h2>
-      <div class="oa-tip-receipt-amount" id="oa-tip-receipt-amount">— USDC</div>
+      <div class="oa-tip-receipt-amount" id="oa-tip-receipt-amount">— SOL</div>
       <div class="oa-tip-receipt-peer" id="oa-tip-receipt-peer">Waiting for blockchain confirmation</div>
       <div class="oa-tip-receipt-meta">
         <span id="oa-tip-receipt-network">Network —</span>
@@ -1118,21 +1118,21 @@ async function _removeBanner(){
 
     <label class="tip-label" for="tip-amount">Amount</label>
     <div class="tip-input-wrap">
-      <input class="tip-input" id="tip-amount" type="number" inputmode="decimal" min="0" step="0.01"
+      <input class="tip-input" id="tip-amount" type="number" inputmode="decimal" min="0" step="0.000000001"
              placeholder="0" oninput="_tipTouched()">
-      <span class="tip-input-sym">USDC</span>
+      <span class="tip-input-sym">SOL</span>
     </div>
     <div class="tip-approx" id="tip-approx">&asymp; $0.00</div>
     <div class="tip-presets">
-      {% for v in [1, 5, 10, 25, 50] %}
-      <button class="tip-preset" type="button" onclick="_tipPreset({{ v }}, this)">${{ v }}</button>
+      {% for v in [0.001, 0.005, 0.01, 0.025, 0.05] %}
+      <button class="tip-preset" type="button" onclick="_tipPreset({{ v }}, this)">{{ v }} SOL</button>
       {% endfor %}
     </div>
 
     <label class="tip-label">Routing</label>
     <div class="tip-network">
       <span class="tip-sol">$</span>
-      <div>Automatic USDC routing<small>OrcAgent selects an available network automatically. Network costs are paid from your own wallet.</small></div>
+      <div>Native SOL on Solana<small>The network fee comes out of your amount. The recipient receives the remainder.</small></div>
     </div>
 
     <label class="tip-label" for="tip-message">Add a message (optional)</label>
@@ -1143,15 +1143,15 @@ async function _removeBanner(){
     </div>
 
     <div class="tip-summary">
-      <span class="tip-usdc-mark">$</span>
+      <span class="tip-usdc-mark">◎</span>
       <span class="tip-summary-left">You send</span>
-      <span class="tip-summary-val"><span id="tip-send-val">0.00</span> USDC
+      <span class="tip-summary-val"><span id="tip-send-val">0.00</span> SOL
         <span class="tip-summary-usd" id="tip-send-usd">&asymp; $0.00</span></span>
     </div>
 
     <button class="tip-submit" id="tip-submit" type="button" onclick="_sendTip()" disabled>
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>
-      <span id="tip-submit-label">Tip USDC</span>
+      <span id="tip-submit-label">Tip SOL</span>
     </button>
     <div class="tip-note">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
@@ -1163,7 +1163,7 @@ async function _removeBanner(){
       <span class="tip-info-mark">&#9889;</span>
       <div>
         <strong>Instant. Secure. On-Chain.</strong>
-        <p>Your tip is sent directly to their USDC wallet. It cannot be reversed once it is sent.</p>
+        <p>Your tip is sent directly to their SOL wallet. It cannot be reversed once it is sent.</p>
       </div>
     </div>
   </div>
@@ -1184,18 +1184,18 @@ function _tipAmount(){
   return (isFinite(v) && v > 0) ? v : 0;
 }
 
-// USDC is a dollar, so the dollar figure is the same number. It is shown
+// SOL is a dollar, so the dollar figure is the same number. It is shown
 // anyway because the design asks the question "how much is that?" and a
 // blank answer reads as a missing price rather than as one-to-one.
 function _tipTouched(){
-  var a = _tipAmount(), fixed = a.toFixed(2);
-  _tipEl('tip-approx').textContent = '\u2248 $' + fixed;
+  var a = _tipAmount(), fixed = a.toFixed(9);
+  _tipEl('tip-approx').textContent = 'Total budget including the network fee';
   _tipEl('tip-send-val').textContent = fixed;
-  _tipEl('tip-send-usd').textContent = '\u2248 $' + fixed;
-  _tipEl('tip-submit-label').textContent = a > 0 ? ('Tip ' + (+a) + ' USDC') : 'Tip USDC';
+  _tipEl('tip-send-usd').textContent = 'Recipient receives budget minus network fee';
+  _tipEl('tip-submit-label').textContent = a > 0 ? ('Tip ' + (+a) + ' SOL') : 'Tip SOL';
   _tipEl('tip-submit').disabled = !(a > 0) || _tipSending;
   Array.prototype.forEach.call(document.querySelectorAll('.tip-preset'),
-    function(b){ b.classList.toggle('active', parseFloat(b.textContent.slice(1)) === a); });
+    function(b){ b.classList.toggle('active', parseFloat(b.textContent) === a); });
 }
 
 function _tipPreset(v, btn){
@@ -1224,14 +1224,14 @@ function _tipSendNote(amount){
     method: 'POST',
     headers: {'Content-Type':'application/json','X-CSRF-Token':_csrf},
     body: JSON.stringify({message_type:'text',
-                          message: 'Tipped ' + amount.toFixed(2) + ' USDC \u2014 ' + note})
+                          message: 'Tipped ' + amount.toFixed(9) + ' SOL \u2014 ' + note})
   }).catch(function(){ /* the money arrived; a missing note is not worth an alarm */ });
 }
 
 function _tipRecentMatch(tips, amount, startedAt){
   return (tips||[]).find(function(t){
     if(!t || t.direction!=='sent' || Number(t.recipient_user_id)!==Number(_tipPeerId)) return false;
-    if(Math.abs(Number(t.amount||0)-Number(amount))>0.0000005) return false;
+    if((Number(t.amount||0)>Number(amount)||Number(amount)-Number(t.amount||0)>0.0001)) return false;
     var ts=Date.parse(String(t.created_at||'').replace(' ','T')+'Z');
     return Number.isFinite(ts) && ts >= startedAt-5000;
   }) || null;
@@ -1247,7 +1247,7 @@ function _tipRecover(amount, startedAt, attempt){
         _tipSending=false;
         if(typeof window.OrcAgentTipReceipt==='function'){
           window.OrcAgentTipReceipt({
-            tip_id:match.id,amount_sent:match.amount,chain:match.chain,
+            tip_id:match.id,amount_sent:match.amount,currency:match.currency,chain:match.chain,
             status:match.status,explorer:match.explorer_url
           },amount,function(){_tipSendNote(amount)});
         }else{
@@ -1285,7 +1285,7 @@ function _sendTip(){
   fetch('/api/tip', {
     method: 'POST',
     headers: {'Content-Type':'application/json','X-CSRF-Token':_csrf},
-    body: JSON.stringify({recipient_user_id:_tipPeerId, amount:amount,
+    body: JSON.stringify({recipient_user_id:_tipPeerId, amount:amount, currency:'SOL', request_id:crypto.randomUUID(),
                           message:(_tipEl('tip-message').value||'').trim().slice(0,100)})
   }).then(function(r){ return r.json().catch(function(){ return {}; }); })
     .then(function(d){

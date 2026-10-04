@@ -26,7 +26,7 @@
     <div class="tl-hero-coin" aria-hidden="true"><div class="tl-coin-face"><span>▲</span></div></div>
   </header>
   {% if pilot_creator_only %}
-  <div class="tl-alert" role="status"><strong>Private OrcAgent mainnet pilot · USDC + 100% Creator Rewards.</strong> This test is limited to your signed-in Phantom wallet. Launch preparation is capped at 0.025 SOL, reserving at least 0.005 SOL for follow-up costs within your 0.03 SOL test budget. The separate USDC test trade is manual and at most 2 USDC.</div>
+  <div class="tl-alert" role="status"><strong>Private OrcAgent mainnet pilot · SOL + 100% Creator Rewards.</strong> This test is limited to your signed-in Phantom wallet. Launch preparation is capped at 0.025 SOL, reserving at least 0.005 SOL for follow-up costs within your 0.03 SOL test budget. Trading is a separate action paid in SOL.</div>
   {% endif %}
   {% if not launch_enabled %}
   <div class="tl-alert" role="status"><strong>Preflight mode.</strong> Save your token as a draft. Mainnet signing is disabled until final validation. Nothing is spent by saving a draft.</div>
@@ -59,8 +59,8 @@
             <fieldset class="tl-fieldset">
               <legend class="tl-label">Pair <span class="tl-info" title="Currency users trade your token against" aria-label="Currency users trade your token against">i</span></legend>
               <div class="tl-options" role="group" aria-label="Trading currency">
-                <label class="tl-option"><input type="radio" name="tl-asset" value="USDC" checked><span class="tl-choice"><span class="tl-asset-icon tl-usdc" aria-hidden="true">$</span> USDC Pair <span class="tl-radio-indicator" aria-hidden="true"></span></span></label>
-                <label class="tl-option"><input type="radio" name="tl-asset" value="SOL" {% if pilot_creator_only %}disabled{% endif %}><span class="tl-choice"><span class="tl-asset-icon tl-sol" aria-hidden="true"><i></i></span> SOL Pair <span class="tl-radio-indicator" aria-hidden="true"></span></span></label>
+
+                <label class="tl-option"><input type="radio" name="tl-asset" value="SOL" checked><span class="tl-choice"><span class="tl-asset-icon tl-sol" aria-hidden="true"><i></i></span> SOL Pair <span class="tl-radio-indicator" aria-hidden="true"></span></span></label>
               </div>
             </fieldset>
             <details class="tl-rewards"><summary><span class="tl-rewards-play" aria-hidden="true">▶</span><strong id="tl-reward-summary">Rewards: 100% creator</strong><span class="tl-chevron" aria-hidden="true">⌄</span></summary><fieldset class="tl-fieldset">
@@ -97,14 +97,14 @@
       <aside class="tl-preview-panel" aria-label="Live token preview">
         <span class="tl-preview-heading">LIVE PREVIEW</span>
         <div class="tl-preview-card">
-          <div class="tl-token"><div class="tl-token-icon" id="tl-preview-logo">▲</div><div><div class="tl-symbol" id="tl-preview-symbol">TOKEN / USDC</div><div class="tl-name" id="tl-preview-name">Your token name</div></div></div>
-          <div class="tl-line"><span>Pair</span><strong id="tl-review-pair">USDC</strong></div>
+          <div class="tl-token"><div class="tl-token-icon" id="tl-preview-logo">▲</div><div><div class="tl-symbol" id="tl-preview-symbol">TOKEN / SOL</div><div class="tl-name" id="tl-preview-name">Your token name</div></div></div>
+          <div class="tl-line"><span>Pair</span><strong id="tl-review-pair">SOL</strong></div>
           <div class="tl-line"><span>Rewards</span><strong id="tl-review-mode">Creator</strong></div>
           <div class="tl-line"><span>Your earnings</span><strong id="tl-review-creator">100%</strong></div>
           <div class="tl-line"><span>Community share</span><strong id="tl-review-community">—</strong></div>
           <div class="tl-line" id="tl-review-orc-line"{% if not orcagent_bps %} hidden{% endif %}><span>Platform fee</span><strong id="tl-review-orc">{{ '%g'|format((orcagent_bps|default(0))/100) }}%</strong></div>
         </div>
-        <p><strong>You're in control.</strong> No launch or swap is sent without your wallet approval. If your wallet needs SOL for network/rent, you can fund the saved draft with USDC where gasless funding is available.</p>
+        <p><strong>You're in control.</strong> No launch or swap is sent without your wallet approval. Keep SOL in your connected wallet for launch costs, network fees and account rent.</p>
       </aside>
     </div>
   </section>
@@ -124,14 +124,14 @@
       <div class="tl-ce-head">
         <div class="tl-ce-title-wrap">
           <span class="tl-ce-title-icon" aria-hidden="true"><i></i><i></i><i></i></span>
-          <div><h3 id="tl-earnings-title">Creator Earnings</h3><p>Earnings from tokens you created on OrcAgent.</p></div>
+          <div><h3 id="tl-earnings-title">Creator Earnings</h3><p>Earnings from tokens you created on OrcAgent.</p><p>New launches use SOL. Review and claim SOL rewards on each token below; existing USDC rewards remain available.</p></div>
         </div>
         <span class="tl-private-chip"><span aria-hidden="true">▣</span> Private</span>
       </div>
 
       <div class="tl-ce-available">
         <div class="tl-ce-available-copy">
-          <small>Available to claim <span class="tl-info" title="Verified wallet-wide creator fees currently available to claim" aria-label="About available creator fees">i</span></small>
+          <small>Existing USDC creator fees <span class="tl-info" title="Verified wallet-wide creator fees currently available to claim" aria-label="About available creator fees">i</span></small>
           <strong id="tl-available-usdc">—</strong>
           <span class="tl-ce-fiat" id="tl-available-fiat">Checking on-chain…</span>
           <span class="tl-ce-scope" id="tl-available-note">Checking your creator rewards…</span>
@@ -142,7 +142,7 @@
       <div class="tl-ce-metrics">
         <article class="tl-ce-metric">
           <span class="tl-ce-metric-icon" aria-hidden="true">▣</span>
-          <div><small>Total claimed</small><strong id="tl-claimed-usdc">0 USDC</strong><span id="tl-claimed-fiat">≈ $0.00</span></div>
+          <div><small>Total claimed</small><strong id="tl-claimed-usdc">0 SOL</strong><span id="tl-claimed-fiat">Historical USDC claims shown separately</span></div>
         </article>
         <article class="tl-ce-metric">
           <span class="tl-ce-metric-icon" aria-hidden="true">▤</span>

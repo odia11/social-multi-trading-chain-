@@ -608,13 +608,13 @@ def _needs_sol_message(sol, amount):
 
 
 def _record_tip(d, sender_wallet, sender_user_id, recipient_user_id,
-                recipient_wallet, amount, chain, tx_hash, note=''):
+                recipient_wallet, amount, chain, tx_hash, note='', currency='USDC'):
     # RPC submission gives only a signature, not a confirmed payment.
     # The confirmation watcher reconciles the real chain result separately.
     from tip_experience import record_submitted
     return record_submitted(d, sender_wallet, sender_user_id,
                             recipient_user_id, recipient_wallet, amount,
-                            chain, tx_hash, note=note)
+                            chain, tx_hash, note=note, currency=currency)
 
 
 def install(d):
@@ -638,10 +638,12 @@ def install(d):
             recipient_user_id = int(body.get('recipient_user_id'))
         except (TypeError, ValueError):
             return jsonify({'ok':False,'error':'Invalid recipient'}), 400
+        if body.get('currency') != 'SOL':
+            return jsonify({'ok':False,'error':'Refresh the app: tips now use SOL'}), 409
         amount = _amount(body.get('amount'))
         if amount is None:
-            return jsonify({'ok':False,'error':'Enter a positive USDC amount'}), 400
-        if amount > Decimal('10000'):
+            return jsonify({'ok':False,'error':'Enter a positive SOL amount'}), 400
+        if amount > Decimal('100'):
             return jsonify({'ok':False,'error':'Tip amount is above the per-transfer limit'}), 400
 
         conn = sqlite3.connect(d.DB_FILE, timeout=8.0)
@@ -667,131 +669,25 @@ def install(d):
             if now - _RECENT.get(key, 0) < 45:
                 return jsonify({'ok':False,'error':'This tip was already submitted recently'}), 409
 
-        lock = _lock_for(sender_wallet, 'tip')
+        lock = _lock_for(sender_wallet, 'solana')
         if not lock.acquire(blocking=False):
             return jsonify({'ok':False,'error':'Another tip is already in progress'}), 409
         try:
-            solana_error = ''
+            from sol_native_payments import native_transfer, lamports
             try:
-                sol = _tip_solana_ready(
-                    d, sender_wallet, amount, recipient.get('solana'))
-            except RuntimeError as exc:
-                sol = None
-                solana_error = str(exc)
-                app.logger.warning('Solana tip readiness unavailable: %s', solana_error)
-
-            tx_hash = ''
-            sent = 0.0
-            chain = 'solana'
-            recipient_address = recipient['solana']
-            solana_gas_shortfall = False
-
-            if sol and sol.get('native_ready'):
-                try:
-                    tx_hash, sent = _solana_transfer(
-                        d, sender_wallet, d.USDC_MINT,
-                        recipient_address, amount)
-                except Exception as exc:
-                    safe = str(exc)
-                    try:
-                        safe = d._redact_keys(safe)
-                    except Exception:
-                        pass
-                    solana_gas_shortfall = (
-                        isinstance(exc, _SolanaPreflightError) and exc.gas_shortfall
-                    ) or (isinstance(exc, ValueError) and str(exc).startswith(
-                        'Not enough SOL in your trading wallet'))
-                    solana_error = safe[:220]
-                    app.logger.warning(
-                        'solana tip direct transfer failed wallet=%s error=%s reason=%s',
-                        sender_wallet[:8] + '…', type(exc).__name__, solana_error)
-
-            # A marginal SOL balance can pass a pre-read and still fail
-            # preflight once the exact recipient ATA/rent/fee is known. If a
-            # Solana pre-send SOL check failed OR readiness said gas was short,
-            # make one user-funded gas bootstrap attempt from SPARE USDC, then
-            # retry the exact requested tip once. Never reduce the tip amount.
-            if not tx_hash and sol:
-                spare = sol['balance'] - amount
-                topup = getattr(d, '_gasless_solana_native_topup', None)
-                should_topup = (
-                    not sol.get('native_ready')
-                    or solana_gas_shortfall
-                )
-                if should_topup and callable(topup) and spare >= Decimal('0.20'):
-                    try:
-                        required = int(sol.get('required_lamports') or 0)
-                        current = int(sol.get('lamports') or 0)
-                        # The 165-byte ATA rent estimate alone does not
-                        # guarantee that account 0 (sender/fee payer) remains
-                        # rent-exempt after an account creation. A confirmed
-                        # InsufficientFundsForRent from simulation overrides
-                        # the optimistic readiness estimate. Keep the tip
-                        # amount reserved and bootstrap only from spare USDC.
-                        target_sol = max(
-                            Decimal('0.0035') if solana_gas_shortfall
-                            else Decimal('0.0025'),
-                            (Decimal(max(required, 0)) / Decimal(1_000_000_000))
-                            + (Decimal('0.001') if solana_gas_shortfall
-                               else Decimal('0.0005'))
-                        )
-                        topup(sender_wallet, spare, target_sol=float(target_sol))
-                        recipient_address = recipient['solana']
-                        chain = 'solana'
-                        tx_hash, sent = _solana_transfer(
-                            d, sender_wallet, d.USDC_MINT,
-                            recipient_address, amount)
-                        solana_error = ''
-                    except Exception as exc:
-                        safe = str(exc)
-                        try:
-                            safe = d._redact_keys(safe)
-                        except Exception:
-                            pass
-                        solana_error = safe[:220]
-                        app.logger.warning(
-                            'solana tip gas bootstrap unavailable wallet=%s error=%s reason=%s',
-                            sender_wallet[:8] + '…', type(exc).__name__, solana_error)
-                        tx_hash = ''
-
-            if not tx_hash and sol and (
-                    not sol.get('native_ready') or solana_gas_shortfall) \
-                    and (sol['balance'] - amount) < Decimal('0.20'):
-                # The one failure a member can fix themselves: too little SOL
-                # for Solana's network fee, and too little USDC left beside
-                # the tip to convert into it. Say exactly what to do.
-                return jsonify({
-                    'ok': False, 'reason': 'needs_sol',
-                    'error': _needs_sol_message(sol, amount),
-                }), 400
-
-            if not tx_hash:
-                if solana_error:
-                    # This is intentionally the server-side transfer/provider
-                    # reason, already redacted above. It is materially more
-                    # useful than blaming gas for every possible failure.
-                    return jsonify({
-                        'ok':False,
-                        'error':'Solana tip failed: ' + solana_error
-                    }), 400
-                if sol and (sol['balance'] - amount) < Decimal('0.20'):
-                    return jsonify({
-                        'ok':False,
-                        'error':'Not enough spare USDC to create Solana network gas while keeping the full tip amount.'
-                    }), 400
-                return jsonify({
-                    'ok':False,
-                    'error':('No spendable USDC is available for this tip. '
-                             'Portfolio value can include SOL or other tokens; '
-                             'tips send actual USDC. Convert or deposit USDC first.')
-                }), 400
+                lamports(amount)
+                recipient_address = recipient['solana']
+                tx_hash, sent = native_transfer(d, sender_wallet, recipient_address, amount, body.get('request_id'))
+                chain = 'solana'
+            except ValueError as exc:
+                return jsonify({'ok':False,'error':str(exc)}), 400
 
             with _RECENT_GUARD:
                 _RECENT[key] = time.time()
             tip_id = _record_tip(
                 d, sender_wallet, sender_user_id, recipient_user_id,
-                recipient_address, amount, chain, tx_hash,
-                note=str(body.get('message') or '')[:100])
+                recipient_address, sent, chain, tx_hash,
+                currency='SOL', note=str(body.get('message') or '')[:100])
             try:
                 d._wallet_tokens_cache.pop(sender_wallet, None)
                 d._wallet_tokens_cache.pop(recipient['session'], None)
@@ -799,12 +695,12 @@ def install(d):
                 pass
             try:
                 d.add_user_log(sender_wallet,
-                    'TIP: %.2f USDC sent to user %s · tx %s' %
-                    (float(amount), recipient_user_id, tx_hash[:12]))
+                    'TIP: %.9f SOL sent to user %s · tx %s' %
+                    (float(sent), recipient_user_id, tx_hash[:12]))
             except Exception:
                 pass
             return jsonify({
-                'ok':True, 'amount_sent':sent, 'currency':'USDC',
+                'ok':True, 'amount_sent':sent, 'max_spend_sol':str(amount), 'currency':'SOL',
                 'chain':chain, 'tx_hash':tx_hash, 'tip_id':tip_id,
                 'status':'submitted',
                 'explorer':_explorer(chain, tx_hash)
@@ -812,7 +708,7 @@ def install(d):
         except Exception as exc:
             app.logger.warning('user tip failed wallet=%s error=%s',
                                sender_wallet[:8] + '…', type(exc).__name__)
-            return jsonify({'ok':False,'error':'Tip transfer failed. Please try again after checking your balance.'}), 502
+            return jsonify({'ok':False,'error':'Tip submission unavailable. Check Activity before retrying.'}), 502
         finally:
             lock.release()
 
@@ -849,7 +745,7 @@ def install(d):
         try:
             tx_hash, sent = _solana_transfer(
                 d, wallet, token_address, to_address, amount,
-                allow_user_funded_gas=True)
+                allow_user_funded_gas=False)
             with _RECENT_GUARD:
                 _RECENT[key] = time.time()
             try:
@@ -884,7 +780,7 @@ def install(d):
             html = response.get_data(as_text=True)
             if marker in html:
                 return response
-            tag = '<script src="/static/portfolio-token-send.js?v=1" defer %s></script>' % marker
+            tag = '<script src="/static/portfolio-token-send.js?v=%s" defer %s></script>' % (getattr(d, '_APP_VERSION', 'sol-native-2'), marker)
             html = html.replace('</body>', tag + '</body>', 1) if '</body>' in html else html + tag
             response.set_data(html)
             response.content_length = len(response.get_data())

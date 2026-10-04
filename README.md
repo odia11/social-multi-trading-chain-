@@ -19,7 +19,7 @@ A Solana social trading platform. Follow traders, copy their trades, share wins 
 
 **Trading**
 - Automated bot scores tokens every 30 seconds and enters on momentum + volume acceleration
-- Configurable take-profit / stop-loss, min/max trade size (USDC), and daily loss limit per user
+- Configurable take-profit / stop-loss, min/max trade size (USD risk equivalents, executed in SOL), and daily loss limit per user
 - Manual trading via the Live Market page (Trending / New Pairs / Gainers)
 - Performance fee on profitable trades only (no fee on losses)
 
@@ -79,3 +79,9 @@ Optional:
 - Claude AI (Anthropic) for token scoring
 - X (Twitter) API v2 for social sharing
 - Deployed on Railway via Docker
+
+### Native SOL economy
+
+Active buy/sell, bot and copy-trading paths use native SOL on Solana. Deposit SOL into the dedicated trading wallet; the app retains a 0.005 SOL network reserve. Buy amounts are maximum wallet outflow, with fees and account rent inside that budget. Tips and native withdrawals also use SOL; their network fee is deducted from the entered amount. Token launches default to SOL.
+
+Existing USDC assets, creator claims and historical trade cost bases retain their original units. Asset conversions require an explicit user-confirmed swap. Existing USD risk settings retain their dollar meaning and are converted at the current SOL/USD rate, never reinterpreted as SOL amounts.

@@ -38,13 +38,13 @@ def make_app():
 
 
 def test_source_title_matches_solana_usdc_product_positioning():
-    assert "<title>OrcAgent — Solana Social Trading with USDC</title>" in DASHBOARD_HTML
+    assert "<title>OrcAgent — Solana Social Trading with SOL</title>" in DASHBOARD_HTML
     assert "Solana Trading Terminal" not in DASHBOARD_HTML
 
 
 def test_home_has_complete_search_metadata():
     body = make_app().test_client().get("/").get_data(as_text=True)
-    assert "OrcAgent — Solana Social Trading with USDC" in body
+    assert "OrcAgent — Solana Social Trading with SOL" in body
     assert '<link rel="canonical" href="https://orcagent.fun/">' in body
     assert 'name="description"' in body
     assert 'application/ld+json' in body

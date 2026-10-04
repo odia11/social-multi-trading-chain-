@@ -749,7 +749,7 @@ html,body{background:#080e11}
           <div class="wlt-hero-lbl">OrcAgent Trading Wallet</div>
           <div class="wlt-hero-num" id="pf-total">—</div>
           <div class="wlt-hero-usd" id="pf-performance">Live Solana balance</div>
-          <div class="wlt-hero-usd pf-tradeable">Available to trade in OrcAgent: <span id="avail">—</span> <span id="avail-sub">USDC on Solana</span></div>
+          <div class="wlt-hero-usd pf-tradeable">Available to trade in OrcAgent: <span id="avail">—</span> <span id="avail-sub">SOL on Solana</span></div>
         </div>
         <svg class="pf-spark" viewBox="0 0 122 73" role="img" aria-label="Portfolio trend during this session"><path id="pf-spark-fill" fill="url(#pf-spark-gradient)" d=""></path><path id="pf-spark-line" d="" stroke="#37dc9d" stroke-width="2.5" fill="none" stroke-linejoin="round" stroke-linecap="round"></path><defs><linearGradient id="pf-spark-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#32d99a" stop-opacity=".27"></stop><stop offset="100%" stop-color="#32d99a" stop-opacity="0"></stop></linearGradient></defs></svg><button class="wlt-hero-refresh" onclick="loadBalance()" aria-label="Refresh balance" title="Refresh">↻</button>
       </div>
@@ -911,7 +911,7 @@ html,body{background:#080e11}
           <button onclick="loadTokens(true)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:0" title="Refresh">↻</button>
         </div>
       </div>
-      <div class="pf-asset-static"><div class="pf-asset-coin usdc">$</div><div class="pf-asset-description"><b>USDC</b><small>Solana · available to trade</small></div><div class="pf-asset-amount"><b id="pf-usdc-asset">—</b><small id="pf-usdc-value">—</small></div></div><div class="pf-asset-static"><div class="pf-asset-coin sol"><span>≋</span></div><div class="pf-asset-description"><b>SOL</b><small>Solana · network asset</small></div><div class="pf-asset-amount"><b id="pf-sol-asset">—</b><small id="pf-sol-value">—</small></div></div><div class="tok-list" id="tokens"><div class="state-msg">Loading…</div></div>
+      <div class="pf-asset-static"><div class="pf-asset-coin usdc">$</div><div class="pf-asset-description"><b>USDC</b><small>Solana · optional asset</small></div><div class="pf-asset-amount"><b id="pf-usdc-asset">—</b><small id="pf-usdc-value">—</small></div></div><div class="pf-asset-static"><div class="pf-asset-coin sol"><span>≋</span></div><div class="pf-asset-description"><b>SOL</b><small>Solana · trading and network fees</small></div><div class="pf-asset-amount"><b id="pf-sol-asset">—</b><small id="pf-sol-value">—</small></div></div><div class="tok-list" id="tokens"><div class="state-msg">Loading…</div></div>
     </div>
 
     <!-- recent activity -->
@@ -923,8 +923,8 @@ html,body{background:#080e11}
       <div id="activity-list"><div class="state-msg">Loading…</div></div>
     </div>
 
-    <section class="act-card oa-tip-history-card" id="oa-tip-history-card" aria-label="USDC tips" style="margin-top:16px">
-      <div class="act-hdr"><span class="act-title">USDC Tips</span>
+    <section class="act-card oa-tip-history-card" id="oa-tip-history-card" aria-label="SOL tips" style="margin-top:16px">
+      <div class="act-hdr"><span class="act-title">SOL Tips</span>
         <button id="oa-tip-history-refresh" type="button" class="oa-tip-refresh" aria-label="Refresh tips">↻</button>
       </div>
       <div id="oa-tip-history" class="oa-tip-history"><div class="state-msg">Loading tips…</div></div>
@@ -1168,7 +1168,7 @@ function _closeModal(){
 
 // USDC mark (Circle's blue coin): everything on OrcAgent is priced and
 // traded in USDC, so that is what this address is for.
-var _RX_USDC_MARK='<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#2775CA"/><path d="M12.3 7.6a9.2 9.2 0 0 0 0 16.8M19.7 7.6a9.2 9.2 0 0 1 0 16.8" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/><path d="M16 9.4v13.2M19 12.6c-.5-1.2-1.6-1.8-3.1-1.8-1.8 0-3 .9-3 2.2 0 3.3 6.4 1.6 6.4 5 0 1.4-1.3 2.4-3.3 2.4-1.6 0-2.9-.7-3.4-2" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+var _RX_USDC_MARK='<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="16" fill="#15181e"/><path d="M9 9h16l-3 4H6zM6 15h16l3 4H9zM9 21h16l-3 4H6z" fill="#a8efb3"/></svg>';
 // Solana-only receive sheet.
 var _rxNet='sol'
 function _rxAddr(){ return _walletAddr }
@@ -1191,12 +1191,12 @@ function _modalDeposit(net){
   var scanName='Solscan'
   var tabs=''
   var chains=''
-  var warn='Send USDC (or SOL) on the <b>Solana</b> network only.'
+  var warn='Send SOL on the <b>Solana</b> network only.'
   _showModal(
-    '<div class="sx-hd"><div class="sx-title">Receive USDC</div><span class="sx-net"><i></i>Solana</span></div>'
+    '<div class="sx-hd"><div class="sx-title">Receive SOL</div><span class="sx-net"><i></i>Solana</span></div>'
     +tabs
     +'<div class="rx-qr" id="rx-qr"></div>'
-    +'<div class="rx-hint">Scan to send USDC on the Solana network</div>'
+    +'<div class="rx-hint">Scan to send SOL on the Solana network</div>'
     +chains
     +'<button type="button" class="rx-addr" onclick="_rxCopy()" aria-label="Copy address">'+pretty+'</button>'
     +'<div class="rx-btns">'
@@ -1219,7 +1219,7 @@ function _modalDeposit(net){
       if(tries<40){ setTimeout(function(){paint(tries+1)},100); return }
       el.style.display='none'; return   // never show a fake code
     }
-    el.innerHTML=svg+'<div class="rx-logo">'+_RX_USDC_MARK+'</div>'
+    el.innerHTML=svg+'<div class="rx-logo">◎</div>'
   })(0)
 }
 function _rxCopy(){
@@ -1234,7 +1234,7 @@ function _rxCopy(){
 function _rxShare(){
   var addr=_rxAddr()
   if(!addr||typeof navigator.share!=='function') return
-  navigator.share({title:'My USDC address (Solana)',text:addr}).catch(function(){})
+  navigator.share({title:'My SOL address (Solana)',text:addr}).catch(function(){})
 }
 
 
@@ -1274,7 +1274,7 @@ function _sendSyncChain(){
   var fee=document.getElementById('send-fee-note')
   if(fee) fee.textContent = c.evm
     ? 'The network fee comes out of this amount, so a little less may arrive.'
-    : ''
+    : 'The network fee comes out of your SOL amount. The recipient receives the remainder.'
 }
 function _sendBalanceFor(c){
   var b = c.evm ? _bridgeBalanceFor(c.v) : _solBalanceCache
@@ -1363,8 +1363,8 @@ function _execSend(){
   if(note){note.style.color='var(--muted)';note.textContent='Processing…'}
   var btn=document.getElementById('send-btn')
   if(btn) btn.disabled=true
-  var url = '/api/wallet/send'
-  var body = {to:to, amount_sol:amt}
+  var url = '/api/withdraw'
+  var body = {to_address:to, amount_sol:amt, request_id:crypto.randomUUID()}
   fetch(url,{
     method:'POST',credentials:'include',
     headers:Object.assign({'Content-Type':'application/json','X-CSRF-Token':_csrf},
@@ -2202,7 +2202,7 @@ async function _execSwap(){
   var payload
   var isSolToUsdc=fromIsSOL&&_swToMint==='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
   if(fromIsSOL){
-    payload={side:'buy',token_address:_swToMint,symbol:(toTok||{}).symbol||'',amount_sol:amt}
+    payload={side:'buy',token_address:_swToMint,symbol:(toTok||{}).symbol||'',currency:'SOL',amount_sol:amt}
   } else {
     var fromBal=parseFloat((fromTok||{}).amount||0)
     // amount_token is the literal quantity of the FROM token to sell (its own
@@ -2217,7 +2217,7 @@ async function _execSwap(){
     var r=await fetch(isSolToUsdc?'/api/wallet/convert-sol-usdc':'/api/instant-trade',{
       method:'POST',credentials:'include',
       headers:{'Content-Type':'application/json','X-CSRF-Token':_csrf},
-      body:JSON.stringify(isSolToUsdc?{amount_sol:amt}:payload)
+      body:JSON.stringify(isSolToUsdc?{currency:'SOL',amount_sol:amt}:payload)
     })
     var d=await r.json()
     if(d.success||d.ok){
@@ -2285,7 +2285,7 @@ function _wTrade(i, side){
   fetch('/api/instant-trade',{
     method:'POST',credentials:'include',
     headers:{'Content-Type':'application/json','X-CSRF-Token':_csrf},
-    body:JSON.stringify({token_address:tok.mint,symbol:tok.symbol||'',side:side,amount_sol:amount_sol})
+    body:JSON.stringify({token_address:tok.mint,symbol:tok.symbol||'',side:side,currency:'SOL',amount_sol:amount_sol})
   }).then(function(r){return r.json()}).then(function(d){
     if(d.success||d.ok){
       _wToast((side==='buy'?'✅ Bought ':'✅ Sold ')+(tok.symbol||''),true)
@@ -2615,7 +2615,7 @@ function loadUsdcSummary(){
     // This is the balance a trade is actually funded from, so it is the one
     // the hero shows.
     var _availEl=document.getElementById('avail')
-    if(_availEl) _availEl.textContent=_tot
+    if(_availEl) _availEl.textContent=Number(snap.available_to_trade_sol||0).toFixed(6)
     var _cUsdc=document.getElementById('convert-usdc-bal')
     if(_cUsdc) _cUsdc.textContent='$'+parseFloat(d.solana_usdc).toFixed(2)
     _usdcLoadedOnce=true
@@ -2692,9 +2692,9 @@ function _paintPortfolioSnapshotInstant(snap){
   if(!snap||!Number.isFinite(Number(snap.total_usd)))return false
   var total=Number(snap.total_usd),stable=Number(snap.stable&&snap.stable.total_usdc)
   var solValue=Number(snap.sol&&snap.sol.value_usd),solAmount=Number(snap.sol&&snap.sol.amount)
-  var totalEl=document.getElementById('pf-total');if(totalEl)totalEl.textContent='$'+total.toFixed(2)
+  var totalEl=document.getElementById('pf-total');if(totalEl)totalEl.textContent=snap.total_sol==null?'—':Number(snap.total_sol).toFixed(6)+' SOL'
   var perf=document.getElementById('pf-performance');if(perf)perf.textContent='Last confirmed balance · refreshing…'
-  var avail=document.getElementById('avail');if(avail&&Number.isFinite(stable))avail.textContent='$'+stable.toFixed(2)
+  var avail=document.getElementById('avail');if(avail)avail.textContent=Number(snap.available_to_trade_sol||0).toFixed(6)
   var usdcAsset=document.getElementById('pf-usdc-asset');if(usdcAsset&&Number.isFinite(stable))usdcAsset.textContent='$'+stable.toFixed(2)
   var solAsset=document.getElementById('pf-sol-asset');if(solAsset&&Number.isFinite(solValue))solAsset.textContent='$'+solValue.toFixed(2)
   if(Number.isFinite(solAmount)){

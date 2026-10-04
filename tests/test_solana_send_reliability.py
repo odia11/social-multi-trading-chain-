@@ -37,8 +37,8 @@ check('token transfer rejects a self-send to the trading wallet',
 check('token withdrawal is CSRF-protected, rate-limited and duplicate guarded',
       "_csrf_ok(d)" in withdraw and "_rate_ok('withdraw_wallet:' + wallet" in withdraw
       and "already submitted recently" in withdraw)
-check('token withdrawal can create user-funded Solana gas without reducing outgoing USDC',
-      "allow_user_funded_gas=True" in withdraw
+check('token withdrawals require existing SOL and never convert USDC automatically',
+      "allow_user_funded_gas=False" in withdraw
       and "reserved = amount if token_address == d.USDC_MINT" in T)
 check('all active send UI/route chains are Solana only',
       "var CHAIN={solana:'Solana'}" in W and "chain != 'solana'" in withdraw)

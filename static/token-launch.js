@@ -1,4 +1,4 @@
-/* USDC-first launch; only user's wallet signs. Never writes an invented reward. */
+/* Native SOL launch; only user's wallet signs. Never writes an invented reward. */
 (function(){
 'use strict';
 var cfg=window.ORC_TOKEN_LAUNCH||{};
@@ -82,9 +82,9 @@ function renderCreatorEarnings(){
  var claimedRaw=(data.verified_claimed_raw||{}).USDC||'0';
  var claimedSol=(data.verified_claimed_raw||{}).SOL||'0';
  var hasSol=false;try{hasSol=BigInt(claimedSol)>0n}catch(e){}
- text('tl-claimed-usdc',rawAmount(claimedRaw,'USDC'));
+ text('tl-claimed-usdc',rawAmount(claimedSol,'SOL'));
  // Claims paid out in SOL count too; they used to be left out of this total.
- text('tl-claimed-fiat','≈ $'+rawNumber(claimedRaw,'USDC').toFixed(2)+(hasSol?' + '+rawAmount(claimedSol,'SOL'):''));
+ text('tl-claimed-fiat',rawAmount(claimedRaw,'USDC')+' · historical claims');
  var history=data.history||[],expired=history.filter(isExpired).length;
  // Only real claims count; expired never-approved attempts are listed apart.
  text('tl-claim-count',String(history.length-expired));
@@ -113,7 +113,7 @@ async function refreshAvailableFees(showNotice){
 function renderPreview(){
  var name=$('tl-name').value.trim()||'Your token name';
  var symbol=($('tl-symbol').value.trim()||'TOKEN').toUpperCase();
- var asset=choice('tl-asset')||'USDC';
+ var asset=choice('tl-asset')||'SOL';
  var mode=choice('tl-mode')||'creator';
  var bps=toBps($('tl-community-share').value);
  text('tl-preview-name',name);text('tl-preview-symbol',symbol+' / '+asset);
@@ -562,18 +562,11 @@ function drawMine(){
   function action(label,fn){var b=dom('button','',label);b.type='button';b.onclick=fn;actions.appendChild(b);return b}
   if(cfg.enabled&&(row.status==='draft'||row.status==='prepared')){
     var fund=dom('div','tl-funding');fund.id='tl-fund-'+row.id;
-    fund.appendChild(dom('p','tl-helper','Only have USDC in your connected Phantom wallet? OrcAgent estimates the SOL reserve from a live Jupiter quote and uses no more than your maximum USDC budget. Approve the gasless swap, then separately approve your token launch. No OrcAgent launch fee.'));
-    var fundLabel=dom('label','tl-label','Maximum USDC budget');
-    var fundAmount=dom('input','tl-input');fundAmount.type='number';fundAmount.min='5';fundAmount.max='250';fundAmount.step='0.01';fundAmount.value='25';fundAmount.setAttribute('aria-label','Maximum USDC to convert for launch SOL reserve');
-    fundLabel.appendChild(fundAmount);fund.appendChild(fundLabel);
+    fund.appendChild(dom('p','tl-helper','Deposit SOL in your connected wallet for launch costs, network fees and account rent. Trading is paid in SOL.'));
     var fundNotice=dom('p','tl-helper');fundNotice.setAttribute('role','status');
-    var fundButton=dom('button','tl-btn secondary','Fund launch with USDC');fundButton.type='button';
-    fundButton.disabled=!cfg.fundingAvailable;
-    if(!cfg.fundingAvailable)fundNotice.textContent='USDC launch funding is not configured on the server yet.';
-    fundButton.onclick=function(){fundLaunchWithUsdc(row,fundAmount.value,fundNotice)};
     var checkButton=dom('button','tl-btn secondary','Check funding');checkButton.type='button';
     checkButton.onclick=function(){checkFunding(row,fundNotice)};
-    fund.appendChild(fundButton);fund.appendChild(checkButton);fund.appendChild(fundNotice);
+    fund.appendChild(checkButton);fund.appendChild(fundNotice);
     el.appendChild(fund);
   }
   if(row.status==='draft')action(cfg.enabled?'Approve launch':'Awaiting preflight',function(){launchStage(row,'create')});

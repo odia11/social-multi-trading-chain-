@@ -1,6 +1,6 @@
 """Shared navbar stablecoin balance.
 
-The compact amount pill shows the user's spendable Solana USDC balance.
+The compact amount pill shows the user's native Solana SOL balance.
 OrcAgent is Solana-only; no EVM balance is queried or included.
 """
 from __future__ import annotations
@@ -40,7 +40,7 @@ def install(d):
         errors = []
         if sol_address:
             try:
-                balances['solana'] = _safe_float(d._get_solana_usdc_balance(sol_address))
+                balances['solana'] = _safe_float(d._get_user_sol(sol_address))
             except Exception as exc:
                 errors.append('solana')
                 app.logger.debug('navbar stable balance read failed on solana: %s', exc)
@@ -52,8 +52,8 @@ def install(d):
     def header_stable_balance():
         wallet = d._authenticated_wallet()
         if not wallet:
-            return d.jsonify({'ok': False, 'total_usd': 0.0,
-                              'formatted': '$0.00', 'authenticated': False}), 401
+            return d.jsonify({'ok': False, 'total_sol': 0.0,
+                              'formatted': '0.000000 SOL', 'authenticated': False}), 401
 
         now = time.time()
         with _CACHE_LOCK:
@@ -65,8 +65,8 @@ def install(d):
         body = {
             'ok': True,
             'authenticated': True,
-            'total_usd': total,
-            'formatted': '${:,.2f}'.format(total),
+            'total_sol': total, 'currency': 'SOL',
+            'formatted': '{:,.6f} SOL'.format(total),
             'balances': {k: round(v, 6) for k, v in balances.items()},
             'complete': not errors,
             'unavailable_chains': errors,

@@ -1294,7 +1294,7 @@ function _updateSolUsdc(sol){
   const _p=_getSolPrice();
   const el=document.getElementById('s-sol-usdc');
   if(el){
-    if(_p>0) el.textContent='≈ $'+(sol*_p).toFixed(2)+' USDC';
+    if(_p>0) el.textContent='≈ $'+(sol*_p).toFixed(2)+' USD equivalent';
     else el.textContent='';
   }
   const sbEl=document.getElementById('sb-sol-usdc');
@@ -1306,7 +1306,7 @@ function _updateSolUsdc(sol){
   if(mnSolEl) mnSolEl.textContent=sol.toFixed(3)+' SOL';
   const mnUsdcEl=document.getElementById('mn-bal-usdc');
   if(mnUsdcEl){
-    if(_p>0) mnUsdcEl.textContent='≈ $'+(sol*_p).toFixed(2)+' USDC';
+    if(_p>0) mnUsdcEl.textContent='≈ $'+(sol*_p).toFixed(2)+' USD equivalent';
     else mnUsdcEl.textContent='';
   }
 }
@@ -5422,7 +5422,7 @@ async function confirmWithdraw() {
     const resp = await fetch('/api/withdraw', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({to_address: toAddr, amount_sol: amount})
+      body: JSON.stringify({to_address: toAddr, amount_sol: amount, request_id:crypto.randomUUID()})
     });
     const data = await resp.json();
     const resultEl = document.getElementById('wd-result');

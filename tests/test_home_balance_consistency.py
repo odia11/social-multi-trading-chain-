@@ -19,12 +19,12 @@ checks={
   'home no longer recomputes portfolio from three drifting endpoints':
       "var urls=['/api/wallet/usdc-summary','/api/wallet/tokens','/api/wallet/balance']" not in JS,
   'home paints last confirmed value synchronously':
-      'orcaPortfolioLastConfirmedTotal' in JS and '_homeCachedPortfolio()' in JS,
+      'orcaPortfolioLastConfirmedSOLTotal' in JS and '_homeCachedPortfolio()' in JS,
   'home snapshot also synchronizes the shared header':
       "new CustomEvent('orca:portfolio-value'" in JS,
   'changed home bundles are cache-busted everywhere':
-      'home-mobile.css?v=14' in NAV and 'home-mobile.js?v=13' in NAV
-      and 'home-mobile.css?v=14' in UX and 'home-mobile.js?v=13' in UX
+      'home-mobile.css?v=14' in NAV and 'home-mobile.js?v=14' in NAV
+      and 'home-mobile.css?v=14' in UX and 'home-mobile.js?v=14' in UX
       and 'home-mobile.css?v=14' in PERF,
 }
 for label,ok in checks.items():

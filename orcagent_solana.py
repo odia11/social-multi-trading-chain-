@@ -462,7 +462,7 @@ def _execute_buy_with_bundled_fee(mint: str, spend_lamports: int, fee_lamports: 
         JUPITER_SWAP_INSTRUCTIONS,
         json={'quoteResponse': quote, 'userPublicKey': str(payer),
               'wrapAndUnwrapSol': True, 'dynamicComputeUnitLimit': True,
-              'prioritizationFeeLamports': 'auto'},
+              'prioritizationFeeLamports': {'priorityLevelWithMaxLamports': {'maxLamports': 100000, 'priorityLevel': 'high'}}},
         headers=_JUP_HEADERS, timeout=20,
     )
     if r2.status_code != 200:
@@ -522,6 +522,7 @@ def _execute_buy_with_bundled_fee(mint: str, spend_lamports: int, fee_lamports: 
     message   = MessageV0.try_compile(payer, instructions, alt_accounts, SolHash.from_string(bh))
     signed_tx = _VTx(message, [keypair])
     encoded   = base64.b64encode(bytes(signed_tx)).decode()
+    _assert_native_budget(encoded, signed_tx)
 
     _send_t0 = time.time()
     rpc_resp = _rpc_post({
@@ -803,7 +804,7 @@ def _execute_swap_inner(input_mint: str, output_mint: str, amount_lamports: int,
                 'userPublicKey':             pubkey,
                 'wrapAndUnwrapSol':          True,
                 'dynamicComputeUnitLimit':   True,
-                'prioritizationFeeLamports': 'auto',
+                'prioritizationFeeLamports': {'priorityLevelWithMaxLamports': {'maxLamports': 100000, 'priorityLevel': 'high'}},
             }
             if fee_account:
                 swap_body['feeAccount'] = fee_account
@@ -860,6 +861,7 @@ def _execute_swap_inner(input_mint: str, output_mint: str, amount_lamports: int,
         # mutating vtx.signatures[0] is silently ignored (immutable Rust binding).
         signed_tx = VersionedTransaction(vtx.message, [keypair])
         encoded   = base64.b64encode(bytes(signed_tx)).decode()
+        _assert_native_budget(encoded, signed_tx)
     except Exception:
         print('[TRADE] FAIL Step 4 (sign):\n' + traceback.format_exc(), flush=True)
         meta['failure_reason'] = 'signing failed'
@@ -1013,6 +1015,45 @@ def execute_swap(input_mint: str, output_mint: str, amount_lamports: int,
 
 # ── SINGLE SWAP ENTRY POINT (called from dashboard subprocess) ───────────────
 
+_BUY_MAX_OUTFLOW_LAMPORTS = 0
+_BUY_ESTIMATED_OUTFLOW_LAMPORTS = 0
+SOL_BUY_COST_RESERVE_LAMPORTS = 3_000_000
+
+
+def _assert_native_budget(encoded, transaction):
+    """Fail closed before broadcasting a SOL buy with an excessive debit.
+
+    Simulation includes swap, bundled platform fee and account rent. Add the
+    exact network fee conservatively even if the RPC includes it already.
+    """
+    global _BUY_ESTIMATED_OUTFLOW_LAMPORTS
+    if not _BUY_MAX_OUTFLOW_LAMPORTS:
+        return
+    from solders.message import to_bytes_versioned
+    owner = str(transaction.message.account_keys[0])
+    before = _rpc_post({'jsonrpc':'2.0','id':1,'method':'getBalance',
+                       'params':[owner, {'commitment':'confirmed'}]}, timeout=15)
+    fee = _rpc_post({'jsonrpc':'2.0','id':1,'method':'getFeeForMessage',
+        'params':[base64.b64encode(to_bytes_versioned(transaction.message)).decode(),
+                  {'commitment':'confirmed'}]}, timeout=15)
+    simulated = _rpc_post({'jsonrpc':'2.0','id':1,'method':'simulateTransaction',
+        'params':[encoded, {'encoding':'base64','commitment':'confirmed',
+            'sigVerify':True,'accounts':{'encoding':'base64','addresses':[owner]}}]}, timeout=20)
+    value = (simulated.get('result') or {}).get('value') or {}
+    accounts = value.get('accounts') or []
+    fee_value = (fee.get('result') or {}).get('value')
+    initial = (before.get('result') or {}).get('value')
+    if value.get('err') or not accounts or not isinstance(fee_value, int) or not isinstance(initial, int):
+        raise RuntimeError('Cannot verify the SOL spend ceiling; transaction not sent')
+    final = accounts[0].get('lamports') if isinstance(accounts[0], dict) else None
+    if not isinstance(final, int):
+        raise RuntimeError('Cannot verify post-swap SOL balance; transaction not sent')
+    upper_debit = max(0, initial-final) + fee_value
+    _BUY_ESTIMATED_OUTFLOW_LAMPORTS = upper_debit
+    if upper_debit > _BUY_MAX_OUTFLOW_LAMPORTS:
+        raise RuntimeError('Swap, fees and rent exceed the SOL amount entered; transaction not sent')
+
+
 def execute_single_swap(action: str, mint: str, amount_str: str, base: str = 'SOL'):
     """Called as: python orcagent_solana.py buy|sell MINT AMOUNT [BASE]
     BASE selects which currency AMOUNT is denominated in, and which currency
@@ -1030,6 +1071,8 @@ def execute_single_swap(action: str, mint: str, amount_str: str, base: str = 'SO
     the RAW integer the RPC reports -- a percentage computed from the
     decimal-divided float and multiplied back up undershoots, which is the
     same precision loss that used to leave dust behind on a full close."""
+    global _BUY_MAX_OUTFLOW_LAMPORTS
+    _BUY_MAX_OUTFLOW_LAMPORTS = 0
     sell_pct = None
     _raw_amt = str(amount_str).strip()
     if _raw_amt.endswith('%'):
@@ -1052,7 +1095,13 @@ def execute_single_swap(action: str, mint: str, amount_str: str, base: str = 'SO
     base_label    = 'USDC' if base_mint == USDC_MINT else 'SOL'
     try:
         if action == 'buy':
-            lamports = int(amount * (10 ** base_decimals))
+            from sol_native_payments import lamports as exact_lamports
+            lamports = exact_lamports(amount_str) if base_mint == SOL_MINT else int(amount * (10 ** base_decimals))
+            if base_mint == SOL_MINT:
+                _BUY_MAX_OUTFLOW_LAMPORTS = lamports
+                lamports -= SOL_BUY_COST_RESERVE_LAMPORTS
+                if lamports <= 0:
+                    raise ValueError('SOL buy amount must cover transaction fees and token-account rent')
             sig, out_amount_raw = execute_swap(
                 base_mint, mint, lamports,
                 fee_wallet=FEE_WALLET, fee_bps=int(round(FEE_RATE_TXN * 10000)))
@@ -1061,7 +1110,18 @@ def execute_single_swap(action: str, mint: str, amount_str: str, base: str = 'SO
                 got_amount  = int(out_amount_raw) / (10 ** decimals)
             except Exception:
                 got_amount = 0
-            print(f'BUY {mint[:16]} {round(amount,4)} {base_label} got:{round(got_amount,6)} TX:{sig}', flush=True)
+            spent = amount
+            if base_mint == SOL_MINT:
+                spent = _BUY_ESTIMATED_OUTFLOW_LAMPORTS / 1e9
+                try:
+                    confirmed = _rpc_post({'jsonrpc':'2.0','id':1,'method':'getTransaction',
+                        'params':[sig, {'encoding':'json','commitment':'confirmed','maxSupportedTransactionVersion':0}]}, timeout=10)
+                    meta = (confirmed.get('result') or {}).get('meta') or {}
+                    if meta.get('err') is None and meta.get('preBalances') and meta.get('postBalances'):
+                        spent = max(0, meta['preBalances'][0] - meta['postBalances'][0]) / 1e9
+                except Exception:
+                    pass  # use the verified conservative simulation debit
+            print(f'BUY {mint[:16]} {amount:.9f} {base_label} got:{got_amount:.9f} sol:{spent:.9f} fee_base:{lamports / (10 ** base_decimals):.9f} TX:{sig}', flush=True)
         elif action == 'sell':
             decimals              = get_token_decimals(mint)
             actual_balance, raw_balance = get_token_balance_raw(mint)
@@ -1113,7 +1173,7 @@ def execute_single_swap(action: str, mint: str, amount_str: str, base: str = 'SO
             # parser reads, so every existing SOL-default caller's output is
             # byte-for-byte unchanged.
             base_note = '' if base_label == 'SOL' else f' base:{base_label}'
-            print(f'SELL {mint[:16]} amt:{round(sell_amount,6)} sol:{round(base_received,6)} '
+            print(f'SELL {mint[:16]} amt:{sell_amount:.9f} sol:{base_received:.9f} '
                   f'(requested:{requested}, on-chain:{round(actual_balance,6)}){base_note} TX:{sig}', flush=True)
         else:
             print(f'Unknown action: {action}', flush=True)
