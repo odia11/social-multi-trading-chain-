@@ -41,6 +41,7 @@
         time.textContent=Number.isNaN(date.getTime())?'':date.toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
         if(!Number.isNaN(date.getTime()))time.dateTime=date.toISOString();
         var price=Number(c.price_at_call);card.querySelector('.following-entry').textContent=Number.isFinite(price)&&price>0?'Price at call: $'+price.toLocaleString('en-US',{maximumSignificantDigits:8})+' USD':'';
+        card.querySelector('.oa-share-call').dataset.callId=c.id;
         card.querySelector('.following-note').textContent=c.note;card.querySelector('.following-trade').href='/live-market?mint='+encodeURIComponent(c.mint);
         var analysis=card.querySelector('.following-analysis');if(Number.isInteger(c.post_id)&&c.post_id>0){analysis.hidden=false;analysis.href='/#post-p'+c.post_id;}
         var watch=card.querySelector('.following-watch');watch.addEventListener('click',function(){

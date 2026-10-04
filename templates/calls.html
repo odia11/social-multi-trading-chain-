@@ -375,6 +375,7 @@ function _renderPodium(top3){
       +'<div class="podium-price">'+_fmtCallPrice(c.price_at_call)+' → '+_fmtCallPrice(c.peak_price)+'</div>'
       +'<div class="podium-gain'+neg+'">'+(gain>=0?'+':'')+gain+'%</div>'
       +_likeBtnHtml(c, 'podium-like')
+      +'<button type="button" class="oa-share-call" data-call-id="'+Number(c.id)+'">Share call</button>'
     +'</div>';
   }).join('');
 }
@@ -442,6 +443,7 @@ async function _loadCallsList(){
           +'<div class="call-token-line">'
             +'<span class="call-token">$'+esc(c.symbol||'?')+'</span>'
             +_likeBtnHtml(c)
+            +'<button type="button" class="oa-share-call" data-call-id="'+Number(c.id)+'">Share</button>'
           +'</div>'
           +'<div class="call-mcap">'+_fmtCallPrice(c.price_at_call)+' → '+_fmtCallPrice(c.peak_price)+'</div>'
         +'</div>'

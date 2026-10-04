@@ -105,6 +105,7 @@
       + '</div>'
       + '<div class="fcall-actions">'
         + '<button type="button" class="fcall-buy" onclick="event.stopPropagation();if(typeof showTokenCard===\'function\')showTokenCard(' + jsArg(sym) + ',' + jsArg(c.mint) + ')">Buy $' + esc(sym) + '</button>'
+        + '<button type="button" class="oa-share-call" data-call-id="' + esc(c.id) + '">Share call</button>'
         + '<a class="fcall-chart" href="/live-market?mint=' + encodeURIComponent(c.mint) + '" onclick="event.stopPropagation()">Chart</a>'
       + '</div>'
     + '</div>';
