@@ -42,6 +42,8 @@ class NativeSwapTests(unittest.TestCase):
             result = eng._execute_swap_inner(input_mint,output_mint,5191906,
                        wallet_address=str(key.pubkey()),private_key=str(key))
         self.assertEqual(rpc.call_count,1)
+        self.assertEqual(rpc.call_args.args[0]['params'][1]['preflightCommitment'],'confirmed')
+        self.assertFalse(rpc.call_args.args[0]['params'][1]['skipPreflight'])
         return result, token_reads, native.call_count
 
     def test_usdc_to_native_sol_uses_input_decrease_and_native_output(self):

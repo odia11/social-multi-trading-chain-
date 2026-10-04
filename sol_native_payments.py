@@ -91,7 +91,7 @@ def native_transfer(d, wallet, recipient, ceiling, request_id):
                 return previous[3], previous[2] / 1e9
         try:
             submitted, _ = provider._rpc_call_any(d, 'sendTransaction',
-                            [encoded, {'encoding': 'base64', 'skipPreflight': False, 'maxRetries': 3}], preferred_url=rpc)
+                            [encoded, {'encoding': 'base64', 'skipPreflight': False, 'preflightCommitment': 'confirmed', 'maxRetries': 3}], preferred_url=rpc)
             if submitted and str(submitted) != signature:
                 raise RuntimeError('RPC returned an unexpected transfer signature')
         except provider._SolanaPreflightError:
@@ -149,6 +149,8 @@ def install(d):
             return jsonify(ok=True, signature=sig, tx_hash=sig,
                            currency='SOL', amount_sent=sent, max_spend_sol=amount,
                            status='submitted', fee_deducted=float(Decimal(str(amount))-Decimal(str(sent))))
+        except provider._SolanaPreflightError as exc:
+            return jsonify(ok=False, error=str(exc), reason_code=exc.reason_code, status='failed'), 400
         except ValueError as exc:
             return jsonify(ok=False, error=str(exc)), 400
         except Exception:

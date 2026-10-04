@@ -114,6 +114,8 @@ _JUP_HEADERS = {
 }
 if _PROXY_SECRET:
     _JUP_HEADERS['X-Proxy-Secret'] = _PROXY_SECRET
+if not _PROXY_BASE and os.getenv('JUPITER_API_KEY'):
+    _JUP_HEADERS['x-api-key'] = os.environ['JUPITER_API_KEY']
 
 
 def _rpc_retryable_error(error) -> bool:
@@ -330,7 +332,7 @@ def _ensure_fee_ata(payer_keypair, fee_wallet: str, mint: str) -> str:
     tx = Transaction.new_signed_with_payer([ix], payer_pk, [payer_keypair], SolHash.from_string(bh))
     res = _rpc_post({
         'jsonrpc': '2.0', 'id': 1, 'method': 'sendTransaction',
-        'params': [base64.b64encode(bytes(tx)).decode(), {'encoding': 'base64', 'skipPreflight': False}],
+        'params': [base64.b64encode(bytes(tx)).decode(), {'encoding': 'base64', 'skipPreflight': False, 'preflightCommitment': 'confirmed'}],
     }, timeout=30)
     if 'error' in res:
         raise Exception('fee ATA creation failed: ' + str(res['error']))
@@ -527,7 +529,7 @@ def _execute_buy_with_bundled_fee(mint: str, spend_lamports: int, fee_lamports: 
     _send_t0 = time.time()
     rpc_resp = _rpc_post({
         'jsonrpc': '2.0', 'id': 1, 'method': 'sendTransaction',
-        'params': [encoded, {'encoding': 'base64', 'skipPreflight': False, 'maxRetries': 3}],
+        'params': [encoded, {'encoding': 'base64', 'skipPreflight': False, 'preflightCommitment': 'confirmed', 'maxRetries': 3}],
     }, timeout=30)
     meta['send_latency_ms'] = round((time.time() - _send_t0) * 1000, 1)
     if 'error' in rpc_resp:
@@ -880,7 +882,7 @@ def _execute_swap_inner(input_mint: str, output_mint: str, amount_lamports: int,
                 encoded,
                 {
                     'encoding':      'base64',
-                    'skipPreflight': False,
+                    'skipPreflight': False, 'preflightCommitment': 'confirmed',
                     'maxRetries':    3,
                 },
             ],
@@ -1020,6 +1022,30 @@ _BUY_ESTIMATED_OUTFLOW_LAMPORTS = 0
 SOL_BUY_COST_RESERVE_LAMPORTS = 3_000_000
 
 
+def _native_buy_cost_allowance(output_mint):
+    """Canonical USDC conversion needs its real account rent, not a token-buy buffer."""
+    if output_mint != USDC_MINT:
+        return SOL_BUY_COST_RESERVE_LAMPORTS
+    account = _rpc_post({'jsonrpc':'2.0','id':1,'method':'getAccountInfo',
+        'params':[_get_ata(WALLET_ADDRESS, USDC_MINT),
+                  {'encoding':'base64','commitment':'confirmed'}]}, timeout=15)
+    if account.get('error') or not isinstance(account.get('result'), dict) or 'value' not in account['result']:
+        raise RuntimeError('Cannot verify USDC account rent; conversion not sent')
+    info = account['result']['value']
+    # 100,000 capped priority fee + signature fee, with conservative headroom.
+    allowance = 120_000
+    if info is None:
+        rent = _rpc_post({'jsonrpc':'2.0','id':1,'method':'getMinimumBalanceForRentExemption',
+                         'params':[165]}, timeout=15)
+        value = rent.get('result')
+        if rent.get('error') or not isinstance(value, int) or value <= 0:
+            raise RuntimeError('Cannot verify USDC account rent; conversion not sent')
+        allowance += value
+    elif not isinstance(info, dict) or info.get('owner') != TOKEN_PROGRAM:
+        raise RuntimeError('Invalid USDC token account; conversion not sent')
+    return allowance
+
+
 def _assert_native_budget(encoded, transaction):
     """Fail closed before broadcasting a SOL buy with an excessive debit.
 
@@ -1099,7 +1125,7 @@ def execute_single_swap(action: str, mint: str, amount_str: str, base: str = 'SO
             lamports = exact_lamports(amount_str) if base_mint == SOL_MINT else int(amount * (10 ** base_decimals))
             if base_mint == SOL_MINT:
                 _BUY_MAX_OUTFLOW_LAMPORTS = lamports
-                lamports -= SOL_BUY_COST_RESERVE_LAMPORTS
+                lamports -= _native_buy_cost_allowance(mint)
                 if lamports <= 0:
                     raise ValueError('SOL buy amount must cover transaction fees and token-account rent')
             sig, out_amount_raw = execute_swap(
