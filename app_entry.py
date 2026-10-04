@@ -169,4 +169,7 @@ _install_trader_rewards(_dashboard)
 from watchlist_alerts import install as _install_watchlist_alerts
 _install_watchlist_alerts(_dashboard)
 
+from following_traders import install as _install_following_traders
+_install_following_traders(_dashboard)
+
 app = _dashboard.app

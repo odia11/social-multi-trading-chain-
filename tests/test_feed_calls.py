@@ -68,7 +68,7 @@ check('...at the price the SERVER fetched (a sent price is ignored)', row[0] == 
 check('...with the reason, chain and logo kept', row[1] == 'Volume is picking up' and row[2] == 'solana'
       and row[3] == 'https://cdn.example/sjp.png' and row[4] == post_id)
 check('...and 4 of 5 calls are left today', data.get('calls_left_today') == 4)
-check("the caller's followers are told", ('follow_post', 'alice called $SJP') in
+check("the caller's followers are told", ('follow_call', 'alice called $SJP') in
       db('SELECT type, content FROM notifications WHERE user_id=?', bu)
       and any(p[1] == 'New call' and bu in p[0] for p in pushed))
 

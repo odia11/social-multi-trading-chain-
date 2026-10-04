@@ -3086,6 +3086,7 @@ def run_migrations():
         "ALTER TABLE token_calls ADD COLUMN last_price REAL DEFAULT NULL",
         "ALTER TABLE feed_posts ADD COLUMN image_url TEXT DEFAULT NULL",
         "ALTER TABLE follows ADD COLUMN notify_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE follows ADD COLUMN notify_mode TEXT NOT NULL DEFAULT 'all'",
         "ALTER TABLE trades ADD COLUMN view_count INTEGER DEFAULT 0",
         "ALTER TABLE groups ADD COLUMN avatar_url TEXT DEFAULT NULL",
         "ALTER TABLE groups ADD COLUMN banner_url TEXT DEFAULT NULL",
@@ -18220,7 +18221,7 @@ def _notify_staff(title: str, body: str, link: str = '/admin#support', actor_wal
         print(f'[support] staff notify failed: {e}', flush=True)
 
 def _notify_followers(conn, actor_user_id: int, ntype: str,
-                       content_fn, link: str, actor_wallet: str):
+                       content_fn, link: str, actor_wallet: str, event_kind: str = 'post'):
     """content_fn(actor_name) -> str. Insert notificatie voor
     elke follower met notify_enabled=1 op deze actor.
     Stuurt zelf geen push (zelfde scheiding als alle andere
@@ -18228,8 +18229,10 @@ def _notify_followers(conn, actor_user_id: int, ntype: str,
     de follower_ids zodat de aanroeper zelf _send_push_notification()
     per follower kan aanroepen."""
     rows = conn.execute(
-        'SELECT follower_id FROM follows WHERE following_id=? '
-        'AND notify_enabled=1', (actor_user_id,)
+        'SELECT f.follower_id FROM follows f JOIN users u ON u.id=f.follower_id '
+        'WHERE f.following_id=? AND f.notify_enabled=1 '
+        'AND COALESCE(u.pref_notifications,1)=1 '
+        "AND (?='call' OR COALESCE(f.notify_mode,'all')='all')", (actor_user_id, event_kind)
     ).fetchall()
     print(f"[notify] actor {actor_user_id} type={ntype}: {len(rows)} followers with notify on", flush=True)
     actor = conn.execute('SELECT username FROM users WHERE id=?',
@@ -20716,18 +20719,18 @@ def api_make_call():
             # Not on the card this second, but within a few -- not two minutes later.
             threading.Thread(target=_call_fill_images, args=([mint], {mint: chain}),
                              name='call-logo', daemon=True).start()
-        if post_id:
-            try:
-                link = '/#post-p' + str(post_id)
-                follower_ids = _notify_followers(conn, uid, 'follow_post',
-                                                 lambda actor_name: actor_name + ' called $' + symbol, link, wallet)
-                conn.commit()
-                author = conn.execute('SELECT COALESCE(username,"") FROM users WHERE id=?', (uid,)).fetchone()
-                author_name = (author[0] if author and author[0] else wallet[:8] + '…')
-                _send_push_notifications_bulk(follower_ids, 'New call', author_name + ' called $' + symbol, link)
-            except Exception as e:
-                # The call itself is saved; a failed follower ping must not undo it.
-                print(f'[calls] follower notify failed for call {call_id}: {type(e).__name__}: {e}', flush=True)
+        try:
+            link = '/#post-p' + str(post_id) if post_id else '/live-market?mint=' + requests.utils.quote(mint, safe='')
+            follower_ids = _notify_followers(conn, uid, 'follow_call',
+                                             lambda actor_name: actor_name + ' called $' + symbol,
+                                             link, wallet, event_kind='call')
+            conn.commit()
+            author = conn.execute('SELECT COALESCE(username,"") FROM users WHERE id=?', (uid,)).fetchone()
+            author_name = (author[0] if author and author[0] else wallet[:8] + '…')
+            _send_push_notifications_bulk(follower_ids, 'New call', author_name + ' called $' + symbol, link)
+        except Exception as e:
+            # The call itself is saved; a failed follower ping must not undo it.
+            print(f'[calls] follower notify failed for call {call_id}: {type(e).__name__}: {e}', flush=True)
         return jsonify({'ok': True, 'id': call_id, 'post_id': post_id, 'symbol': symbol, 'price': price,
                         'calls_left_today': None if daily_limit is None else max(0, daily_limit - today_count - 1),
                         'calls_per_day': daily_limit, 'calls_unlimited': daily_limit is None})
