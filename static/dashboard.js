@@ -1044,7 +1044,7 @@ async function launchApp(){
   if(phantomKey) guestMode = false;
   document.getElementById('onboard').classList.add('hide');
   document.getElementById('app').style.display='block';
-  if(/^#post-[pt]\d+$/.test(location.hash)) _handleNotifDeepLink();
+  if(/^#post-[pt]\d+(?:-reply-\d+)?$/.test(location.hash)) _handleNotifDeepLink();
   if(location.hash==='#settings'){
     history.replaceState(null,'',location.pathname+location.search);
     _sbNav('settings');
@@ -7326,7 +7326,9 @@ var _mentionAtPos = -1;
 var _mentionRequest = 0;
 var _mentionCaret = -1;
 var _mentionFrame = 0;
+var _mentionSearchTimer=null;
 function _mentionHide(){
+  clearTimeout(_mentionSearchTimer);_mentionSearchTimer=null;
   var box = document.getElementById('mention-suggest');
   if(box) box.style.display='none';
   _mentionTarget = null;
@@ -7341,9 +7343,11 @@ function _mentionPosition(){
   var rect = el.getBoundingClientRect();
   var vv = window.visualViewport;
   var top = vv ? vv.offsetTop : 0;
+  var bar=document.querySelector && document.querySelector('.pt-nb-topbar');
+  if(bar)top=Math.max(top,bar.getBoundingClientRect().bottom);
   var left = vv ? vv.offsetLeft : 0;
   var width = vv ? vv.width : window.innerWidth;
-  var bottom = top + (vv ? vv.height : window.innerHeight);
+  var bottom = (vv ? vv.offsetTop : 0) + (vv ? vv.height : window.innerHeight);
   // The keyboard and nested/document scrolling can move the field entirely
   // offscreen. Never leave its suggestions floating over unrelated content.
   if(!el.isConnected || rect.bottom<=top || rect.top>=bottom){ _mentionHide(); return; }
@@ -7355,7 +7359,14 @@ function _mentionPosition(){
   var wanted = Math.min(box.scrollHeight+2,200);
   var useBelow = below>=wanted || below>=above;
   var available = useBelow ? below : above;
-  if(available<36){ _mentionHide(); return; }
+  if(available<36){
+    available=Math.min(200,bottom-top-16);
+    if(available<36){_mentionHide();return;}
+    box.style.maxHeight=Math.min(wanted,available)+'px';
+    box.style.left=Math.max(left+8,Math.min(rect.left,left+width-box.offsetWidth-8))+'px';
+    box.style.top=Math.max(top+8,Math.min(rect.top,bottom-box.offsetHeight-8))+'px';
+    return;
+  }
   box.style.maxHeight = Math.min(wanted,available)+'px';
   box.style.left = Math.max(left+8,Math.min(rect.left,left+width-box.offsetWidth-8))+'px';
   box.style.top = (useBelow ? rect.bottom+6 : rect.top-box.offsetHeight-6)+'px';
@@ -7365,15 +7376,20 @@ function _mentionSchedulePosition(){
   _mentionFrame = requestAnimationFrame(function(){ _mentionFrame=0; _mentionPosition(); });
 }
 function _mentionCheck(el){
+  clearTimeout(_mentionSearchTimer);
+  _mentionRequest++;
+  _mentionSearchTimer=setTimeout(function(){_mentionSearchTimer=null;_mentionQuery(el)},160);
+}
+function _mentionQuery(el){
   var val = el.value;
   var pos = el.selectionStart;
-  var m = val.slice(0,pos).match(/@([a-zA-Z0-9_]+)$/);
+  var m = val.slice(0,pos).match(/(?:^|\s)@([a-zA-Z0-9_]*)$/);
   if(!m){ _mentionHide(); return; }
-  _mentionAtPos = pos-m[0].length;
+  _mentionAtPos = pos-m[1].length-1;
   _mentionTarget = el;
   _mentionCaret = pos;
   var requestId = ++_mentionRequest;
-  fetch('/api/users/search?q='+encodeURIComponent(m[1])).then(function(r){
+  fetch('/api/users/search?q='+encodeURIComponent(m[1]||'orcagent')).then(function(r){
     if(!r.ok) throw new Error('Mention search unavailable');
     return r.json();
   }).then(function(d){
@@ -7426,7 +7442,14 @@ document.addEventListener('focusout',function(e){
     if(document.activeElement!==_mentionTarget && !(box && box.contains(document.activeElement))) _mentionHide();
   },0);
 });
-document.addEventListener('keydown',function(e){ if(e.key==='Escape') _mentionHide(); });
+document.addEventListener('keydown',function(e){
+  var box=document.getElementById('mention-suggest');
+  if(e.target!==_mentionTarget || !box || box.style.display==='none')return;
+  if(e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();_mentionHide();}
+  else if(e.key==='Enter' && !e.shiftKey && !e.isComposing){
+    var first=box.querySelector('button');if(first){e.preventDefault();e.stopImmediatePropagation();first.click();}
+  }
+},true);
 document.addEventListener('selectionchange',function(){
   if(_mentionTarget && document.activeElement===_mentionTarget && _mentionTarget.selectionStart!==_mentionCaret) _mentionCheck(_mentionTarget);
 });
@@ -10059,7 +10082,7 @@ var _pendingDeepLinkHash = null;
 var _activeDeepLinkedPost = null; // {id, post}; survives feed refreshes
 
 function _insertLinkedPostChronologically(items){
-  if(!_activeDeepLinkedPost || location.hash !== '#post-'+_activeDeepLinkedPost.id)
+  if(!_activeDeepLinkedPost || location.hash.split('-reply-')[0] !== '#post-'+_activeDeepLinkedPost.id)
     return items;
   var linked=_activeDeepLinkedPost.post;
   if(!linked) return items;
@@ -10094,7 +10117,7 @@ function _insertLinkedPostChronologically(items){
 }
 
 window.addEventListener('hashchange', function(){
-  if(/^#post-[pt]\d+$/.test(location.hash)){
+  if(/^#post-[pt]\d+(?:-reply-\d+)?$/.test(location.hash)){
     _handleNotifDeepLink();
   }else{
     _lastDeepLinkHash = null;
@@ -10102,7 +10125,7 @@ window.addEventListener('hashchange', function(){
   }
 });
 function _handleNotifDeepLink(){
-  var match = /^#post-([pt]\d+)$/.exec(location.hash);
+  var match = /^#post-([pt]\d+)(?:-reply-(\d+))?$/.exec(location.hash);
   if(!match) return;
   var hash = location.hash;
   var app = document.getElementById('app');
@@ -10117,13 +10140,25 @@ function _handleNotifDeepLink(){
     sessionStorage.removeItem('_notifJumpType');
   }catch(e){}
   _pendingDeepLinkHash=hash;
-  _jumpToPost(match[1],notifType).then(function(opened){
+  _jumpToPost(match[1],notifType,match[2]).then(function(opened){
     if(opened && location.hash===hash) _lastDeepLinkHash=hash;
   }).catch(function(err){
     console.error('[post-deeplink] failed to open',match[1],err);
   }).finally(function(){
     if(_pendingDeepLinkHash===hash) _pendingDeepLinkHash=null;
   });
+}
+
+function _openFeedNotification(link,type){
+  var url;
+  try{url=new URL(link,location.origin)}catch(e){return false}
+  if(url.origin!==location.origin || url.pathname!=='/' || location.pathname!=='/' ||
+      !/^#post-[pt]\d+(?:-reply-\d+)?$/.test(url.hash))return false;
+  try{sessionStorage.setItem('_notifJumpType',type||'reply')}catch(e){}
+  history.pushState(null,'',url.pathname+url.search+url.hash);
+  _lastDeepLinkHash=null;
+  _handleNotifDeepLink();
+  return true;
 }
 
 function _fcCardClick(ev, postId){
@@ -10146,7 +10181,7 @@ function _fcCardClick(ev, postId){
   _jumpToPost(postId);
 }
 
-async function _jumpToPost(postId, notifType){
+async function _jumpToPost(postId, notifType, replyId){
   if(!/^[pt]\d+$/.test(String(postId||''))) return false;
   var app=document.getElementById('app');
   if(!app || app.style.display==='none') return false;
@@ -10156,7 +10191,7 @@ async function _jumpToPost(postId, notifType){
   if(_dmOpen || _gcOpen || document.getElementById('dash-wallet')?.style.display==='block'){
     _sbNav('dashboard');
     // closeMessagesView/openCommunityView clear stale hashes during normal nav.
-    history.replaceState(null,'','#post-'+postId);
+    history.replaceState(null,'','#post-'+postId+(replyId?'-reply-'+replyId:''));
   }
 
   var card=document.getElementById('fc-card-'+postId);
@@ -10186,13 +10221,22 @@ async function _jumpToPost(postId, notifType){
   card.classList.add('fc-card-highlight');
   setTimeout(function(){card.classList.remove('fc-card-highlight')},2200);
   var rbox=document.getElementById('rbox-'+postId);
-  if(rbox && notifType==='reply'){
+  if(rbox && (notifType==='reply' || replyId)){
     rbox.classList.add('open');
     rbox.dataset.openedAt=Date.now();
   }
-  if(rbox && !rbox.dataset.repliesLoaded){
+  if(rbox && (replyId || !rbox.dataset.repliesLoaded)){
     rbox.dataset.repliesLoaded='1';
-    _feedLoadReplies(postId);
+    await _feedLoadReplies(postId);
+  }
+  if(replyId){
+    var target=document.querySelector('#rlist-'+postId+' .fc-reply-item[data-reply-id="'+Number(replyId)+'"]');
+    if(target){
+      await new Promise(function(resolve){requestAnimationFrame(resolve)});
+      target.scrollIntoView({behavior:'auto',block:'center'});
+      target.classList.add('fc-reply-highlight');
+      setTimeout(function(){target.classList.remove('fc-reply-highlight')},2400);
+    }
   }
   var replyBtn=card.querySelector('.fc-reply-btn');
   if(replyBtn && replyBtn.classList.contains('has-new')){
@@ -10374,7 +10418,7 @@ function _feedSubmitNestedReply(inp, postId, parentReplyId){
 function _feedLoadReplies(postId){
   var list = document.getElementById('rlist-'+postId);
   if(!list) return;
-  fetch('/api/feed/replies/'+encodeURIComponent(postId))
+  return fetch('/api/feed/replies/'+encodeURIComponent(postId))
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(!d.ok) return;

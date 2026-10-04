@@ -16864,6 +16864,14 @@ def _post_link(conn, post_id):
     return '/#post-' + post_id
 
 
+def _reply_link(conn, post_id, reply_id):
+    """Home replies carry their exact target; group navigation stays scoped."""
+    link = _post_link(conn, post_id)
+    if re.fullmatch(r'[pt]\d+', str(post_id)) and type(reply_id) is int and reply_id > 0:
+        return link + '-reply-' + str(reply_id)
+    return link
+
+
 @app.route('/api/groups/<int:group_id>/notifications', methods=['POST'])
 @rate_limit(30, 60)
 def api_group_notifications(group_id):
@@ -23630,11 +23638,11 @@ def _delete_post_notifications(conn, link):
     """
     if not link:
         return 0
-    cur = conn.execute('DELETE FROM notifications WHERE link=?', (link,))
+    cur = conn.execute('DELETE FROM notifications WHERE link=? OR link LIKE ?', (link, link+'-reply-%'))
     return int(cur.rowcount or 0)
 
 
-def _notify_reply_mentions(conn, message, me, wallet, owner_uid, post_id):
+def _notify_reply_mentions(conn, message, me, wallet, owner_uid, post_id, reply_id=None):
     """Notify each member @tagged in a reply (in-app + push). Never raises:
     the reply is already saved, a notification must not undo it."""
     try:
@@ -23643,7 +23651,7 @@ def _notify_reply_mentions(conn, message, me, wallet, owner_uid, post_id):
             return
         author = conn.execute('SELECT COALESCE(username,"") FROM users WHERE id=?', (me,)).fetchone()
         author_name = (author[0] if author and author[0] else wallet[:8]+'…')
-        link = _post_link(conn, post_id)
+        link = _reply_link(conn, post_id, reply_id)
         for uname in list(names)[:10]:
             row = conn.execute(
                 'SELECT id FROM users WHERE username=? COLLATE NOCASE AND wallet_address!=?',
@@ -23702,13 +23710,14 @@ def post_feed_reply():
             'INSERT INTO feed_replies (user_id, post_id, message, created_at, parent_reply_id) VALUES (?,?,?,?,?)',
             (me, post_id, message, now, parent_reply_id)
         )
+        reply_id = cur.lastrowid
         conn.commit()
         owner_uid = _post_owner_uid(conn, post_id)
         if owner_uid and owner_uid != me:
             replier_row = conn.execute('SELECT COALESCE(username,"") FROM users WHERE id=?', (me,)).fetchone()
             replier_name = (replier_row[0] if replier_row and replier_row[0] else wallet[:8]+'…')
             preview = message[:60] + ('…' if len(message) > 60 else '')
-            reply_link = _post_link(conn, post_id)
+            reply_link = _reply_link(conn, post_id, reply_id)
             conn.execute(
                 'INSERT INTO notifications (user_id, type, content, link, actor_wallet) VALUES (?,?,?,?,?)',
                 (owner_uid, 'reply', replier_name+': replied to your post — '+preview, reply_link, wallet))
@@ -23717,8 +23726,7 @@ def post_feed_reply():
         # @tags in a reply notify the tagged member too, exactly like @tags in
         # a post. The post owner already got the reply notification above, and
         # nobody is notified for tagging themselves.
-        _notify_reply_mentions(conn, message, me, wallet, owner_uid, post_id)
-        reply_id = cur.lastrowid
+        _notify_reply_mentions(conn, message, me, wallet, owner_uid, post_id, reply_id)
         row = conn.execute(
             'SELECT COALESCE(username,""), COALESCE(avatar_url,"") FROM users WHERE id=?', (me,)
         ).fetchone()

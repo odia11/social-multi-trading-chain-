@@ -206,7 +206,10 @@ function showNext(){
   function open(){
     window.clearTimeout(timer);
     markRead(Number(n.id)||0);
-    location.href=safeInternalLink(n.link);
+    var target=safeInternalLink(n.link);
+    try{sessionStorage.setItem('_notifJumpType',n.type||'')}catch(_){}
+    if(typeof window._openFeedNotification==='function' && window._openFeedNotification(target,n.type))return;
+    location.href=target;
   }
   card.addEventListener('click',function(e){
     if(e.target===close||close.contains(e.target))return;
