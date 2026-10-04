@@ -217,6 +217,12 @@ def install(d):
             order = json.loads(order_json)
             with d._use_key(key_blob(wallet), wallet) as key:
                 signature, result = provider._execute_order(key, order)
+            try:
+                from trader_rewards import record_confirmed_trade
+                record_confirmed_trade(d.DB_FILE, wallet, signature, 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+                                       'sell', amount, 'USDC', 0)
+            except Exception as reward_error:
+                print(f'[rewards] conversion evidence unavailable: {type(reward_error).__name__}', flush=True)
             # No fallible balance/token RPC after a successful transaction.
             return jsonify(ok=True, tx_hash=signature, from_symbol='USDC', to_symbol='SOL',
                            amount_in=amount, gasless=bool(order.get('gasless')))

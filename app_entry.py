@@ -163,4 +163,7 @@ _install_portfolio_sol_swap(_dashboard)
 from sol_native_payments import install as _install_sol_native_payments
 _install_sol_native_payments(_dashboard)
 
+from trader_rewards import install as _install_trader_rewards
+_install_trader_rewards(_dashboard)
+
 app = _dashboard.app

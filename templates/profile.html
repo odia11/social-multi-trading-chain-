@@ -386,6 +386,10 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#0a0b0e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
         </span>
         {% endif %}
+        {% set _reward = reward_status(wallet) if reward_status is defined else none %}
+        {% if _reward and _reward.status != 'New Member' %}
+        <span class="pf-team-badge" style="color:#3ad29b;border-color:#3ad29b" title="Earned activity status; not identity verification">{{ _reward.status }}</span>
+        {% endif %}
         {% set _tr = team_role|default('user') %}
         {% if _tr != 'user' %}
         {% set _tr_style = {
@@ -436,6 +440,10 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
         </button>
       </div>
     </section>
+
+    {% if is_own_profile|default(false) %}
+    <div style="padding:16px 28px"><a class="pf-btn-primary" href="/rewards">Activity badges &amp; progress</a></div>
+    {% endif %}
 
     <section class="pf-follow-row" aria-label="Profile counts">
       <button class="pf-follow-item" type="button" onclick="openFollowListModal('following')"><span class="pf-follow-count">{{ following }}</span><span class="pf-follow-label">Following</span></button>

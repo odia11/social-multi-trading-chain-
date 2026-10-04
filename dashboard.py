@@ -6939,31 +6939,10 @@ def _calculate_badges(wallet: str) -> list:
 
 
 def _check_auto_verify(user_id):
-    if not user_id:
-        return
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        row = conn.execute('SELECT is_verified FROM users WHERE id=?', (user_id,)).fetchone()
-        if not row or row[0]:
-            conn.close()
-            return
-        total = conn.execute(
-            "SELECT COALESCE(SUM(pnl),0) FROM trades WHERE user_id=? AND exit_price IS NOT NULL "
-            "AND timestamp >= datetime('now','-24 hours')",
-            (user_id,)
-        ).fetchone()[0]
-        if total >= 5.0:
-            conn.execute('UPDATE users SET is_verified=1 WHERE id=?', (user_id,))
-            conn.commit()
-            conn.execute(
-                'INSERT INTO notifications (user_id, type, content, link, actor_wallet) VALUES (?,?,?,?,?)',
-                (user_id, 'system', "You've been automatically verified for earning 5+ SOL profit in 24h! 🎉", '/profile', None)
-            )
-            conn.commit()
-            _send_push_notification(user_id, "You're verified! ✓", "You earned 5+ SOL profit in 24h and got the verified badge.", '/profile')
-        conn.close()
-    except Exception as e:
-        print(f'[auto_verify] check failed: {e}', flush=True)
+    # Profit and volume do not establish identity. Earned trader status is
+    # evaluated independently over the last 30 days in trader_rewards.
+    return
+
 
 def _recalculate_badges(wallet: str) -> None:
     badges = _calculate_badges(wallet)
@@ -7158,6 +7137,17 @@ def _execute_user_swap_ex(wallet: str, private_key: str, action: str, mint: str,
             capture['spent'] = sol_amount
             fee_base_match = re.search(r'fee_base:([0-9.]+)', out)
             capture['fee_base'] = float(fee_base_match.group(1)) if fee_base_match else sol_amount
+        if ok and tx_hash and token_amount > 0 and sol_amount > 0:
+            # Only confirmed, realized fills count. A rewards write failure
+            # must never turn a successful on-chain trade into a failed trade.
+            try:
+                from trader_rewards import record_confirmed_trade
+                reward_base = re.search(r'fee_base:([0-9.]+)', result.stdout or '')
+                reward_amount = float(reward_base.group(1)) if action == 'buy' and reward_base else sol_amount
+                record_confirmed_trade(DB_FILE, wallet, tx_hash, mint, action,
+                                       reward_amount, _base, _sol_price_usd)
+            except Exception as reward_error:
+                print(f'[rewards] trade evidence unavailable: {type(reward_error).__name__}', flush=True)
         return ok, tx_hash, err_msg, token_amount, sol_amount
     except subprocess.TimeoutExpired:
         add_user_log(wallet, 'Swap error: timed out after 120s')
@@ -18695,6 +18685,7 @@ _NAVBAR_MORE_LINKS = [
     ('/token-launch', 'Token Launch', 'launch'),
     ('/launches', 'Launches', 'launch'),
     ('/referrals', 'Referrals', 'referrals'),
+    ('/rewards', 'Activity badges', 'traders'),
     ('/history', 'History', 'history'),
     ('/bot', 'Bot', 'bot', 'pt-nb-feature'),
     ('/live-trades', 'Live Trades', 'live-trades'),
