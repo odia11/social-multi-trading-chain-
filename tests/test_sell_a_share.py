@@ -306,7 +306,7 @@ check('...starting at the whole position, so opening the sheet and sliding '
       and '_sellPct = 100;' in JS.split('function _openSheet')[1][:400])
 check('...saying which share is selected', ".pt-pct.on{" in HTML)
 check('the screen says what it is about to do, in the figure being sold',
-      "'Slide to sell $' + _sheetAmt" in JS)
+      "'Slide to sell ' + _sheetAmt + ' SOL'" in JS)
 check('...and says "all" out loud when it is all, because trimming a '
       'position and closing it are different decisions',
       "'Slide to sell all $'" in JS)
@@ -314,8 +314,8 @@ check('a tapped share travels as a share, so "All" closes the position '
       'exactly rather than to the nearest cent',
       re.search(r"if\(_sellPct != null\)\{\s*\n\s*how = \{sell_pct:", JS)
       is not None)
-check('a typed figure travels as dollars, so what is sold is what was typed',
-      'how = {sell_usd: usd}' in JS)
+check('a typed figure travels as SOL value, so the server prices the requested sale',
+      'how = {sell_sol: usd}' in JS)
 check('...and typing clears the tapped share, so the two can never disagree '
       'about which one the screen means',
       re.search(r"function _sheetTypeAmount[\s\S]{0,200}_sellPct = null", JS)
@@ -339,7 +339,7 @@ check('...at the price the SERVER quoted, so the number on the screen is the '
       'one that trades', '_sheetHold ? _sheetHold.price : 0' in JS
       and '/api/trade/holding' in JS)
 check('...measured against what is held, said in the same place the buy '
-      'screen says what is spendable', "'</b> held'" in JS)
+      'screen says what is spendable', "' SOL</b> held'" in JS)
 check('...and refusing to arm for more than that',
       "'More than you hold'" in JS)
 check('the quick shares fill the figure in rather than replacing it, so one '

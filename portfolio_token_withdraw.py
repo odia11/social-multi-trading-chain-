@@ -679,6 +679,8 @@ def install(d):
                 recipient_address = recipient['solana']
                 tx_hash, sent = native_transfer(d, sender_wallet, recipient_address, amount, body.get('request_id'))
                 chain = 'solana'
+            except _SolanaPreflightError as exc:
+                return jsonify({'ok':False,'error':str(exc),'reason_code':exc.reason_code,'status':'failed'}), 400
             except ValueError as exc:
                 return jsonify({'ok':False,'error':str(exc)}), 400
 

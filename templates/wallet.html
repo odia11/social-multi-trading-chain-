@@ -1625,7 +1625,7 @@ function _sxShowQuote(d,amt,dir){
   var o=_sxEl('sx-out'); o.textContent=_sxFmt(out,to); o.className='sx-out'
   var usd=to==='USDC'?out:amt
   _sxEl('sx-recv-usd').textContent=usd>0?'≈ $'+_sxFmt(usd,'USDC'):''
-  var rate=dir==='native_to_stable'?out/amt:amt/out
+  var rate=dir==='native_to_stable'?out/Number(d.swap_input_amount||amt):amt/out
   var impactPct=parseFloat(d.price_impact_pct||0)*100
   var ic=impactPct<1?'good':impactPct<3?'warn':'bad'
   _sxEl('sx-rate').innerHTML='<span>1 SOL ≈ '+_sxFmt(rate,'USDC')+' USDC</span>'
@@ -1635,6 +1635,7 @@ function _sxShowQuote(d,amt,dir){
     '<div class="sx-drow"><span>Minimum received</span><b>'+(min>0?_sxFmt(min,to)+' '+esc(to):'—')+'</b></div>'
     +'<div class="sx-drow"><span>Price impact</span><b class="'+ic+'">'+(impactPct<0.01?'&lt;0.01':impactPct.toFixed(2))+'%</b></div>'
     +'<div class="sx-drow"><span>Network fee</span><b>'+(d.gasless?'Included':(d.network_reserve_native>0?_sxFmt(d.network_reserve_native,'SOL')+' SOL reserve':'Paid in SOL'))+'</b></div>'
+  if(d.cost_allowance_sol>0) det.innerHTML+='<div class="sx-drow"><span>Budget reserved for fees and account rent</span><b>'+_sxFmt(d.cost_allowance_sol,'SOL')+' SOL</b></div>'
   if(wasOpen){ det.classList.add('open'); var mb=_sxEl('sx-more'); if(mb) mb.classList.add('open') }
   _sxSetCta('Swap '+from+' → '+to,true)
 }

@@ -22,6 +22,29 @@ def lamports(value):
     return int(amount * LAMPORTS)
 
 
+def sol_usdc_cost_allowance(owner, read):
+    """Shared quote/execution reserve for canonical USDC account rent and fees."""
+    from solders.pubkey import Pubkey
+    token = Pubkey.from_string('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+    mint = Pubkey.from_string('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')
+    ata, _ = Pubkey.find_program_address([bytes(Pubkey.from_string(owner)),bytes(token),bytes(mint)],
+        Pubkey.from_string('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'))
+    account = read('getAccountInfo',[str(ata),{'encoding':'base64','commitment':'confirmed'}])
+    if not isinstance(account, dict) or 'value' not in account:
+        raise RuntimeError('Cannot verify USDC account rent; conversion not sent')
+    info = account['value']
+    # Capped priority/signature fees plus the spend guard's conservative second fee count.
+    allowance = 220_000
+    if info is None:
+        value = read('getMinimumBalanceForRentExemption',[165])
+        if not isinstance(value, int) or value <= 0:
+            raise RuntimeError('Cannot verify USDC account rent; conversion not sent')
+        allowance += value
+    elif not isinstance(info, dict) or info.get('owner') != str(token):
+        raise RuntimeError('Invalid USDC token account; conversion not sent')
+    return allowance
+
+
 def native_transfer(d, wallet, recipient, ceiling, request_id):
     from solders.keypair import Keypair
     from solders.pubkey import Pubkey
@@ -91,7 +114,7 @@ def native_transfer(d, wallet, recipient, ceiling, request_id):
                 return previous[3], previous[2] / 1e9
         try:
             submitted, _ = provider._rpc_call_any(d, 'sendTransaction',
-                            [encoded, {'encoding': 'base64', 'skipPreflight': False, 'maxRetries': 3}], preferred_url=rpc)
+                            [encoded, {'encoding': 'base64', 'skipPreflight': False, 'preflightCommitment': 'confirmed', 'maxRetries': 3}], preferred_url=rpc)
             if submitted and str(submitted) != signature:
                 raise RuntimeError('RPC returned an unexpected transfer signature')
         except provider._SolanaPreflightError:
@@ -149,6 +172,8 @@ def install(d):
             return jsonify(ok=True, signature=sig, tx_hash=sig,
                            currency='SOL', amount_sent=sent, max_spend_sol=amount,
                            status='submitted', fee_deducted=float(Decimal(str(amount))-Decimal(str(sent))))
+        except provider._SolanaPreflightError as exc:
+            return jsonify(ok=False, error=str(exc), reason_code=exc.reason_code, status='failed'), 400
         except ValueError as exc:
             return jsonify(ok=False, error=str(exc)), 400
         except Exception:

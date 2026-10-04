@@ -22152,6 +22152,17 @@ def api_wallet_convert_quote():
             input_decimals = 9 if input_mint == SOL_MINT else 6
             output_decimals = 9 if output_mint == SOL_MINT else 6
             amount_raw = int(amount * (10 ** input_decimals))
+            cost_allowance = 0
+            if direction == 'native_to_stable':
+                import sys
+                from sol_native_payments import sol_usdc_cost_allowance
+                from portfolio_token_withdraw import _rpc_call_any
+                address = _get_trading_wallet_address(wallet)
+                cost_allowance = sol_usdc_cost_allowance(address,
+                    lambda method, params: _rpc_call_any(sys.modules[__name__], method, params)[0])
+                amount_raw -= cost_allowance
+                if amount_raw <= 0:
+                    return jsonify({'ok':False,'msg':'SOL amount must cover the network fee and USDC account rent'}), 400
             jup_url = (JUPITER_PROXY + '/quote') if JUPITER_PROXY else 'https://api.jup.ag/swap/v1/quote'
             headers = {'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 OrcAgent/1.0'}
             if PROXY_SECRET:
@@ -22179,6 +22190,8 @@ def api_wallet_convert_quote():
                 'min_out_amount': (min_raw / (10 ** output_decimals)) if min_raw > 0 else 0,
                 'price_impact_pct': float(q.get('priceImpactPct', 0) or 0),
                 'slippage_bps': 300,
+                'cost_allowance_sol': cost_allowance / 1e9,
+                'swap_input_amount': amount_raw / (10 ** input_decimals),
                 'network_reserve_native': SOL_NETWORK_RESERVE,
             })
 

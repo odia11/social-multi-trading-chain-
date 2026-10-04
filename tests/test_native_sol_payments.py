@@ -41,6 +41,8 @@ def fixture(tmp_path, send_error=None, balance=1_000_000_000):
                   'getLatestBlockhash': {'value': {'blockhash': str(Hash.default())}},
                   'getFeeForMessage': {'value': 5000}}.get(method)
         if method == 'sendTransaction':
+            assert params[1]['preflightCommitment'] == 'confirmed'
+            assert params[1]['skipPreflight'] is False
             tx = Transaction.from_bytes(base64.b64decode(params[0]))
             tx.verify()
             transactions.append(tx)
@@ -226,3 +228,78 @@ def test_historical_usdc_sell_receives_sol_and_keeps_usd_cost_units():
     assert sell('wallet', 'key', 'mint', '100%', 0, 10, base='USDC') == (True, 2.0, 10)
     assert sell('wallet', 'key', 'mint', '100%', 0, 10, base='SOL') == (True, 0.02, 10)
     assert calls == ['SOL', 'SOL']
+
+
+@pytest.mark.parametrize('existing,expected', [(True,220000),(False,2259280)])
+def test_small_sol_usdc_conversion_accounts_for_actual_rent(existing,expected):
+    import orcagent_solana as engine
+    calls=[]
+    def rpc(payload, **kw):
+        calls.append(payload['method'])
+        return {'result': {'value': {'owner':engine.TOKEN_PROGRAM} if existing else None}} if payload['method']=='getAccountInfo' else {'result':2039280}
+    with patch.object(engine,'WALLET_ADDRESS',str(Keypair().pubkey())),patch.object(engine,'_rpc_post',side_effect=rpc):
+        allowance=engine._native_buy_cost_allowance(engine.USDC_MINT)
+        assert allowance==expected
+        assert 2909000-allowance>0  # screenshot's small wallet can quote a remainder
+        assert engine._native_buy_cost_allowance('other-token')==3000000
+    assert calls==(['getAccountInfo'] if existing else ['getAccountInfo','getMinimumBalanceForRentExemption'])
+
+
+def test_conversion_unknown_rent_fails_before_swap():
+    import orcagent_solana as engine
+    with patch.object(engine,'WALLET_ADDRESS',str(Keypair().pubkey())),patch.object(engine,'_rpc_post',return_value={'error':{'code':429}}):
+        with pytest.raises(RuntimeError,match='not sent'):
+            engine._native_buy_cost_allowance(engine.USDC_MINT)
+
+
+@pytest.mark.parametrize('rejected',[False,True])
+def test_tip_http_signed_payment_or_explicit_rejection(tmp_path,rejected):
+    import sqlite3
+    from flask import Flask
+    d,recipient,calls,transactions,rpc=fixture(tmp_path,provider._SolanaPreflightError('Recent Solana blockhash expired before submission',reason_code='expired_blockhash') if rejected else None)
+    with sqlite3.connect(d.DB_FILE) as db:
+        db.execute('CREATE TABLE users(id INTEGER,username TEXT,wallet_address TEXT,encrypted_private_key TEXT)')
+        db.executemany('INSERT INTO users VALUES(?,?,?,?)',[(1,'sender','sender','encrypted'),(2,'recipient',recipient,None)])
+    d.app=Flask(__name__)
+    d._authenticated_wallet=lambda:'sender'
+    d._validate_csrf=lambda token:token=='valid'
+    d._get_trading_wallet_address=lambda wallet:wallet
+    provider._RECENT.clear()
+    provider.install(d)
+    with patch.object(provider,'_wallet_keys',return_value=('encrypted',)),patch.object(provider,'_fee_payer_rent_lamports',return_value=890880),patch.object(provider,'_rpc_call_any',side_effect=rpc):
+        response=d.app.test_client().post('/api/tip',headers={'X-CSRF-Token':'valid'},json={'recipient_user_id':2,'amount':0.002,'currency':'SOL','request_id':'tip-http-request-12345'})
+    assert calls.count('sendTransaction')==1
+    if rejected:
+        assert response.status_code==400
+        assert response.json['status']=='failed'
+        assert response.json['reason_code']=='expired_blockhash'
+        assert 'blockhash' in response.json['error']
+    else:
+        assert response.status_code==200
+        assert response.json['status']=='submitted'
+        assert response.json['amount_sent']==0.001995
+        assert response.json['tx_hash']==str(transactions[0].signatures[0])
+        with sqlite3.connect(d.DB_FILE) as db:
+            row=db.execute('SELECT amount,currency,status FROM tip_transactions').fetchone()
+        assert row==(0.001995,'SOL','submitted')
+
+
+def test_conversion_quote_uses_same_cost_allowance_as_execution():
+    import math, requests
+    from flask import Flask,jsonify,request
+    from unittest.mock import Mock
+    source=Path(__file__).resolve().parents[1].joinpath('dashboard.py').read_text()
+    node=next(n for n in ast.parse(source).body if isinstance(n,ast.FunctionDef) and n.name=='api_wallet_convert_quote')
+    node.decorator_list=[]
+    ns=dict(_authenticated_wallet=lambda:'sender',_get_trading_wallet_address=lambda _:str(Keypair().pubkey()),
+        request=request,jsonify=jsonify,math=math,requests=requests,JUPITER_PROXY='',PROXY_SECRET='',
+        SOL_MINT='So11111111111111111111111111111111111111112',USDC_MINT='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',SOL_NETWORK_RESERVE=.005,__name__=__name__,_redact_keys=str)
+    exec(compile(ast.Module(body=[node],type_ignores=[]),'<conversion-quote>','exec'),ns)
+    response=Mock(status_code=200)
+    response.json.return_value={'outAmount':'78000','otherAmountThreshold':'76000'}
+    app=Flask(__name__)
+    with app.test_request_context('/?direction=native_to_stable&amount=0.002909'),patch.object(pay,'sol_usdc_cost_allowance',return_value=2259280),patch.object(requests,'get',return_value=response) as quote:
+        result=ns['api_wallet_convert_quote']().json
+    assert quote.call_args.kwargs['params']['amount']==649720
+    assert result['cost_allowance_sol']==.002259280
+    assert result['swap_input_amount']==.000649720
