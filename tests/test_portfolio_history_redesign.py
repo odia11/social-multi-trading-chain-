@@ -110,7 +110,7 @@ def test_ui_replaces_history_only_and_keeps_assets_and_bridge_execution():
         assert 'data-oa-h-filter="'+value+'"' in WALLET
     assert 'Bridge History' not in WALLET
     assert 'id="bridge-history-list"' not in WALLET
-    assert 'function _loadBridgeHistory()' in WALLET  # bridge execution API unchanged
+    assert 'function _loadBridgeHistory()' not in WALLET  # active product is Solana-only
     assert 'body.oa-portfolio.pf-view-history .act-card' in CSS
     assert 'body.oa-portfolio.pf-view-history .wlt-hero' in CSS
     assert 'body.oa-portfolio .oa-h-page{display:none}' in CSS
@@ -142,8 +142,8 @@ def test_date_groups_filters_and_accessible_accordions():
 
 
 def test_no_synthetic_usd_sells_or_chains_in_wallet_events():
-    assert "amount:buy&&Number.isFinite(Number(t.amount_usd))" in JS
-    assert "unit:buy?'USDC':''" in JS
+    assert "amount:t.amount_base!=null?" in JS
+    assert "unit:t.currency||(buy?'USD':'')" in JS
     assert 'For old sells, amount_usd' in JS
     assert "state.chain==='all'||e.chain===state.chain" in JS
     assert 'getSignaturesForAddress' in (ROOT/'portfolio_wallet_activity.py').read_text()

@@ -58,18 +58,14 @@ def test_insufficient_spl_token_funds_does_not_trigger_sol_topup():
     assert exc.reason_code == 'program_rejected'
 
 
-def test_tip_rent_rejection_increases_reserve_and_preserves_amount():
+def test_native_tip_has_no_automatic_usdc_gas_retry():
     from pathlib import Path
-    src = (Path(__file__).resolve().parents[1] /
-           'portfolio_token_withdraw.py').read_text()
-    start = src.index("if not tx_hash and sol:")
-    end = src.index("if not tx_hash:", start+20)
-    block = src[start:end]
-    assert "spare = sol['balance'] - amount" in block
-    assert "Decimal('0.0035') if solana_gas_shortfall" in block
-    assert "Decimal('0.001') if solana_gas_shortfall" in block
-    assert "topup(sender_wallet, spare, target_sol=float(target_sol))" in block
-
+    src=(Path(__file__).resolve().parents[1]/'portfolio_token_withdraw.py').read_text()
+    block=src[src.index("@app.post('/api/tip')"):src.index("@app.post('/api/wallet/send-token')")]
+    assert 'native_transfer(d, sender_wallet' in block
+    assert "body.get('currency') != 'SOL'" in block
+    assert 'topup(' not in block
+    assert '_solana_transfer(' not in block
 
 
 def test_stale_blockhash_is_not_relabelled_as_gas():

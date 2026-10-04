@@ -102,7 +102,7 @@ def test_signed_launch_reconciles_via_readonly_fallback():
     headers={'X-CSRF-Token':'test-csrf'}
     payload={'name':'Fallback Test','symbol':'FBACK','description':'read-only',
         'client_nonce':'rpc-fallback-test-000001','image_data':icon(),
-        'reward_mode':'creator','quote_asset':'USDC'}
+        'reward_mode':'creator','quote_asset':'SOL'}
     draft=client.post('/api/token-launch/draft',json=payload,headers=headers).get_json()['draft']
     ident=draft['id'];blockhash=str(Keypair().pubkey())
     with patch.dict(os.environ,{'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED':'1'}):
@@ -216,7 +216,7 @@ def test_startup_reconcile_exact_signed_creator_launch():
     h={'X-CSRF-Token':'test-csrf'}
     payload={'name':'Original test','symbol':'ORCAGENT','description':'test token',
         'client_nonce':'startup-reconcile-test-v1','image_data':icon(),
-        'reward_mode':'creator','quote_asset':'USDC'}
+        'reward_mode':'creator','quote_asset':'SOL'}
     draft=client.post('/api/token-launch/draft',json=payload,headers=h).get_json()['draft']
     ident=draft['id']; blockhash=str(Keypair().pubkey())
     class Reply:
@@ -282,7 +282,7 @@ def test_launch_preflight_429_fallback_is_readonly_and_idempotent():
     headers={'X-CSRF-Token':'test-csrf'}
     body={'name':'Throttle Test','symbol':'ORCX','description':'no broadcast',
           'client_nonce':'throttle-fallback-0001','image_data':icon(),
-          'reward_mode':'creator','quote_asset':'USDC'}
+          'reward_mode':'creator','quote_asset':'SOL'}
     draft=client.post('/api/token-launch/draft',json=body,headers=headers).get_json()['draft']
     path='/api/token-launch/'+draft['id']+'/prepare'
     blockhash=str(Keypair().pubkey());observed=[]
@@ -329,7 +329,7 @@ def test_all_launch_rpcs_429_leave_original_draft_unsent():
         sess['wallet']=owner;sess['csrf_token']='test-csrf'
     headers={'X-CSRF-Token':'test-csrf'}
     body={'name':'Offline RPC','symbol':'ORCX','client_nonce':'all-rpc-busy-0001',
-          'image_data':icon(),'reward_mode':'creator','quote_asset':'USDC'}
+          'image_data':icon(),'reward_mode':'creator','quote_asset':'SOL'}
     draft=client.post('/api/token-launch/draft',json=body,headers=headers).get_json()['draft']
     class Throttled:
         status_code=429

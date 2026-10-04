@@ -1,4 +1,4 @@
-"""Regression checks for zero/low-SOL USDC-funded BUYs on Solana."""
+"""Retired USDC gasless adapter stays inactive; preserve its legacy safety checks."""
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -9,9 +9,12 @@ checks = []
 def check(name, cond):
     checks.append(bool(cond)); print(('PASS ' if cond else 'FAIL ') + name)
 
-check('Solana gasless adapter is installed in production entrypoint',
-      'from solana_gasless_trading import install as _install_solana_gasless_trading' in entry
-      and '_install_solana_gasless_trading(_dashboard)' in entry)
+check('retired USDC gasless adapter is not installed in production',
+      'from solana_gasless_trading import install as _install_solana_gasless_trading' not in entry
+      and '_install_solana_gasless_trading(_dashboard)' not in entry)
+check('native SOL payments are installed in production',
+      'from sol_native_payments import install as _install_sol_native_payments' in entry
+      and '_install_sol_native_payments(_dashboard)' in entry)
 check('platform sponsor remains disabled before dashboard import',
       "os.environ['ORCAGENT_FRONTS_GAS'] = '0'" in entry
       and entry.index("os.environ['ORCAGENT_FRONTS_GAS'] = '0'") < entry.index('import dashboard as _dashboard'))

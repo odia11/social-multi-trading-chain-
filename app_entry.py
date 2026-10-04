@@ -38,7 +38,6 @@ from financial_authorization_hardening import install as _install_financial_auth
 from owner_money_hardening import install as _install_owner_money_hardening
 from abuse_rate_hardening import install as _install_abuse_rate_hardening
 from upload_hardening import install as _install_upload_hardening
-from solana_gasless_trading import install as _install_solana_gasless_trading
 from header_stable_balance import install as _install_header_stable_balance
 from portfolio_multichain_holdings import install as _install_portfolio_multichain_holdings
 from video_uploads import install as _install_video_uploads
@@ -99,10 +98,7 @@ _install_upload_hardening(_dashboard)
 # Solana-only product: no EVM gasless, sponsor or cross-chain execution layer
 # is installed. The base bot follows the Solana scanner/trading path only.
 
-# Solana USDC BUYs use Jupiter's automatic gasless path when configured. The
-# network fee/rent is recovered by Jupiter from the swap instead of requiring
-# the user to pre-fund SOL.
-_install_solana_gasless_trading(_dashboard)
+# Native SOL buys use the Jupiter swap executor. Users fund costs with SOL.
 
 # Short (<=30s) video posts: chunked upload, server-side ffmpeg re-encode to
 # H.264 MP4 with metadata stripped, public media dir served by nginx.
@@ -163,5 +159,8 @@ _install_backup_scheduler(_dashboard)
 
 from portfolio_sol_swap import install as _install_portfolio_sol_swap
 _install_portfolio_sol_swap(_dashboard)
+
+from sol_native_payments import install as _install_sol_native_payments
+_install_sol_native_payments(_dashboard)
 
 app = _dashboard.app

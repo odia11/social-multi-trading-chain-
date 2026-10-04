@@ -1201,7 +1201,7 @@ body.pt-profile-mode .pt-card.pt-profile-open .pt-chart-waiting{left:50%!importa
 // Read by the buy sheet. Set before the deferred script so it is there the
 // first time anything paints, and taken from the server so the minimum the
 // button enforces cannot drift from the one the trade routes enforce.
-var PT_MIN_BUY_USDC = {{ min_buy_usdc|default(1) }};
+var PT_MIN_BUY_SOL = {{ min_buy_sol|default(0.006) }};
 // Where a completed trade can be looked up, per chain. From the server so
 // there is no second list of explorers to drift.
 var PT_TX_EXPLORERS = {{ tx_explorers|default({})|tojson }};

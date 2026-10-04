@@ -44,7 +44,7 @@ _MODES={'creator','community'}
 # protocol itself pays OrcAgent its part on every distribution -- never taken
 # from trading volume. Tokens launched before this existed keep 0.
 ORCAGENT_CREATOR_FEE_BPS=max(0,min(5000,int(os.environ.get('ORCAGENT_CREATOR_FEE_BPS','2000') or 0)))
-_ASSETS={'USDC','SOL'}
+_ASSETS={'SOL'}
 _B58=re.compile(r'^[1-9A-HJ-NP-Za-km-z]{32,44}$')
 _SIG=re.compile(r'^[1-9A-HJ-NP-Za-km-z]{85,90}$')
 _DRAFT_ID=re.compile(r'^[0-9a-f]{32}$')
@@ -69,7 +69,7 @@ def _optional_https_url(value,label,hosts=None):
 def _validate_form(d, data, wallet, orc_bps=0):
     if not isinstance(data,dict):raise ValueError('Invalid token details')
     name=data.get('name'); symbol=data.get('symbol'); desc=data.get('description','')
-    mode=data.get('reward_mode','community'); quote=data.get('quote_asset','USDC')
+    mode=data.get('reward_mode','community'); quote=data.get('quote_asset','SOL')
     community=data.get('community_wallet',''); bps=data.get('community_bps',0)
     if not isinstance(name,str) or not 2<=len(name.strip())<=32:
         raise ValueError('Token name must be 2–32 characters')
@@ -497,8 +497,8 @@ def install(d):
                             'Add SOL to this wallet, then retry. No transaction was sent.')
                     raise RuntimeError('Insufficient SOL in Phantom '
                         f'(balance: {before/1_000_000_000:.9f} SOL). '
-                        'Add SOL or use Fund launch with USDC on this saved draft '
-                        '(if Jupiter offers gasless). Full transaction cost is not yet known. '
+                        'Add SOL to your connected wallet for this saved draft '
+                        'Full transaction cost is not yet known. '
                         'No transaction was sent.')
                 raise RuntimeError('Pilot transaction simulation failed; no wallet approval is possible')
             if len(accounts)!=1 or not isinstance(accounts[0],dict):
@@ -950,7 +950,7 @@ def install(d):
             csrf_token=d._get_csrf_token(),launch_enabled=enabled(),
             pilot_creator_only=pilot_wallet(wallet),
             orcagent_bps=0 if pilot_wallet(wallet) else ORCAGENT_CREATOR_FEE_BPS,
-            funding_available=bool(os.getenv('JUPITER_API_KEY','').strip()),
+            funding_available=False,
             app_version=launch_assets_version(),
             navbar_html=d._navbar_html)
 
@@ -959,14 +959,14 @@ def install(d):
     def launch_config():
         if not identity():return fail('Connect your wallet',401)
         pilot=pilot_wallet()
-        return jsonify(ok=True,enabled=enabled(),default_quote='USDC',
+        return jsonify(ok=True,enabled=enabled(),default_quote='SOL',
            default_reward_mode='creator' if pilot else 'community',
-           sol_conversion='separate_wallet_approved_gasless_usdc_swap',pilot_creator_only=pilot,
+           sol_conversion='deposit_native_sol',pilot_creator_only=pilot,
            public_max_launch_sol_lamports=PUBLIC_MAX_LAUNCH_SOL_LAMPORTS,
            pilot_max_sol_lamports=PILOT_MAX_SOL_LAMPORTS if pilot else None,
            pilot_max_launch_sol_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS if pilot else None,
            pilot_max_trade_usdc_micro=PILOT_MAX_TRADE_USDC_MICRO if pilot else None,
-           usdc_launch_funding_available=bool(os.getenv('JUPITER_API_KEY','').strip()),
+           usdc_launch_funding_available=False,
            fee_disclosure=('Network and launch-protocol fees apply. OrcAgent launch fee: $0. '
                            + ('You earn %g%% of your token\'s creator fees; OrcAgent\'s platform fee is the other %g%% (never a share of trading volume).' % (100-ORCAGENT_CREATOR_FEE_BPS/100, ORCAGENT_CREATOR_FEE_BPS/100) if ORCAGENT_CREATOR_FEE_BPS and not pilot else '')).strip(),
            orcagent_bps=0 if pilot else ORCAGENT_CREATOR_FEE_BPS,
@@ -987,8 +987,8 @@ def install(d):
         new_orc=0 if (pilot_wallet(wallet) or not d.is_valid_solana_address(orc_wallet() or '')) else ORCAGENT_CREATOR_FEE_BPS
         try:
             name,symbol,desc,mode,quote,community,bps,website,x_url,telegram=_validate_form(d,body,wallet,new_orc)
-            if pilot_wallet(wallet) and (mode!='creator' or quote!='USDC'):
-                raise ValueError('Pilot allows USDC / 100% Creator Rewards only')
+            if pilot_wallet(wallet) and (mode!='creator' or quote!='SOL'):
+                raise ValueError('Pilot allows SOL / 100% Creator Rewards only')
             nonce=body.get('client_nonce')
             if not isinstance(nonce,str) or not re.fullmatch('[a-zA-Z0-9_-]{16,80}',nonce):
                 raise ValueError('Invalid launch request identifier')
@@ -1183,8 +1183,8 @@ def install(d):
         if not enabled():return fail('Token Launch is in preflight; no mainnet transaction can be prepared',503)
         row=lookup(launch_id,wallet)
         if not row:return fail('Launch not found',404)
-        if pilot_wallet(wallet) and (row['reward_mode']!='creator' or row['quote_asset']!='USDC'):
-            return fail('Pilot allows USDC / 100% Creator Rewards only',409)
+        if pilot_wallet(wallet) and (row['reward_mode']!='creator' or row['quote_asset'] not in ('SOL','USDC')):
+            return fail('Pilot allows SOL / 100% Creator Rewards only',409)
         # A Holder Rewards draft saved before that mode was withdrawn (even
         # one already prepared) must not become a token without OrcAgent's
         # share. Nothing was signed or sent for it.
@@ -1242,8 +1242,8 @@ def install(d):
             if available<10_000_000:
                 return fail('Insufficient SOL: Phantom has '
                     f'{available/1_000_000_000:.6f} SOL. Keep at least 0.01 SOL '
-                    'for creation/rent. Add SOL or use Fund launch with USDC '
-                    'on this draft (gasless quote required). No token was created.',409)
+                    'for creation/rent. Add SOL to your connected wallet '
+                    'before approving this draft. No token was created.',409)
             built=build_tx(row,'create')
             pilot_cost=pilot_sol_preflight(row,built['transaction_b64'],
                 max_lamports=PILOT_MAX_LAUNCH_SOL_LAMPORTS if pilot_wallet(wallet)

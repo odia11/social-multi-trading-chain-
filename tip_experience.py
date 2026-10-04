@@ -65,6 +65,7 @@ def _schema(d):
                 ('confirmed_at', 'TEXT'),
                 ('notification_sent_at', 'TEXT'),
                 ('note', "TEXT NOT NULL DEFAULT ''"),
+                ('currency', "TEXT NOT NULL DEFAULT 'USDC'"),
             ):
                 if name not in columns:
                     try:
@@ -86,7 +87,7 @@ def _schema(d):
 
 
 def record_submitted(d, sender_wallet, sender_user_id, recipient_user_id,
-                     recipient_wallet, amount, chain, tx_hash, note=''):
+                     recipient_wallet, amount, chain, tx_hash, note='', currency='USDC'):
     _schema(d)
     note = ''.join(c for c in str(note or '') if c.isprintable()).strip()[:100]
     with _db(d) as conn:
@@ -97,10 +98,10 @@ def record_submitted(d, sender_wallet, sender_user_id, recipient_user_id,
             return int(previous['id'])
         cur = conn.execute("""INSERT INTO tip_transactions
             (sender_user_id, recipient_user_id, sender_wallet, recipient_wallet,
-             amount, chain, tx_hash, status, note)
-             VALUES (?,?,?,?,?,?,?,'submitted',?)""",
+             amount, chain, tx_hash, status, note, currency)
+             VALUES (?,?,?,?,?,?,?,'submitted',?,?)""",
             (sender_user_id, recipient_user_id, sender_wallet, recipient_wallet,
-             float(amount), chain, tx_hash, note))
+             float(amount), chain, tx_hash, note, currency))
         return cur.lastrowid
 
 
@@ -144,7 +145,7 @@ def _transition(d, tip_id, state, reason=None):
         if state == 'confirmed':
             link = f'/wallet?tab=history&tip={tip_id}'
             name = (row['sender_name'] or 'An OrcAgent user')[:70]
-            content = f'{name} sent you {float(row["amount"]):.2f} USDC'
+            content = f'{name} sent you {float(row["amount"]):.9f} {row["currency"]}'
             if row['note']:
                 content += ' · ' + row['note']
             # Older tips already have a generic notification. Enrich it
@@ -171,7 +172,7 @@ def _transition(d, tip_id, state, reason=None):
         push = getattr(d, '_send_push_notification', None)
         if callable(push):
             try:
-                push(row['recipient_user_id'], 'USDC tip received',
+                push(row['recipient_user_id'], row['currency'] + ' tip received',
                      content, f'/wallet?tab=history&tip={tip_id}')
             except Exception:
                 pass
@@ -228,7 +229,7 @@ def _format_tip(row, me=None):
     v = dict(row)
     sent = me == v['sender_user_id'] if me is not None else None
     return {
-        'id': v['id'], 'amount': v['amount'], 'currency': 'USDC',
+        'id': v['id'], 'amount': v['amount'], 'currency': v.get('currency') or 'USDC',
         'message': v.get('note') or '',
         'chain': v['chain'], 'status': v['status'],
         'failure_reason': v.get('failure_reason') if me is not None else None,
@@ -319,18 +320,21 @@ def install(d):
             user = conn.execute('SELECT id FROM users WHERE id=?', (user_id,)).fetchone()
             if not user:
                 return jsonify({'ok': False, 'error': 'Profile not found'}), 404
-            stats = conn.execute("""SELECT COALESCE(SUM(amount),0),
+            stats = conn.execute("""SELECT
+                COALESCE(SUM(CASE WHEN currency='SOL' THEN amount ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN currency='USDC' THEN amount ELSE 0 END),0),
                 COUNT(DISTINCT sender_user_id), COUNT(*)
                 FROM tip_transactions WHERE recipient_user_id=? AND status='confirmed'""",
                 (user_id,)).fetchone()
-            result = {'ok': True, 'user_id': user_id,
-                      'received_usdc': round(float(stats[0]), 6),
-                      'supporters': int(stats[1]), 'received_count': int(stats[2])}
+            result = {'ok': True, 'user_id': user_id, 'currency': 'SOL',
+                      'received_sol': float(stats[0]), 'received_usdc': float(stats[1]),
+                      'supporters': int(stats[2]), 'received_count': int(stats[3])}
             if me == user_id:
-                sent = conn.execute("""SELECT COALESCE(SUM(amount),0)
-                    FROM tip_transactions WHERE sender_user_id=?
-                    AND status='confirmed'""", (me,)).fetchone()
-                result['sent_usdc'] = round(float(sent[0]), 6)
+                sent = conn.execute("""SELECT
+                    COALESCE(SUM(CASE WHEN currency='SOL' THEN amount ELSE 0 END),0),
+                    COALESCE(SUM(CASE WHEN currency='USDC' THEN amount ELSE 0 END),0)
+                    FROM tip_transactions WHERE sender_user_id=? AND status='confirmed'""", (me,)).fetchone()
+                result['sent_sol'], result['sent_usdc'] = map(float, sent)
         return jsonify(result)
 
     # Each gunicorn worker can restart independently. The persistent SQL

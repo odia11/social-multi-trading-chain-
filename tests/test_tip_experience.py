@@ -180,3 +180,47 @@ if __name__=='__main__':
         globals()[n]()
         print('PASS',n)
     print('ALL TIP EXPERIENCE REGRESSIONS PASSED')
+
+
+def test_native_and_historical_tip_totals_are_separate():
+    temp,d=setup()
+    try:
+        old=te.record_submitted(d,'wallet-1',1,2,'wallet-2',5,'solana','old-usdc')
+        new=te.record_submitted(d,'wallet-1',1,2,'wallet-2',.009995,'solana','native-sol',currency='SOL')
+        te._transition(d,old,'confirmed')
+        te._transition(d,new,'confirmed')
+        stats=d.app.test_client().get('/api/profile/2/tip-stats').json
+        assert stats['received_usdc']==5
+        assert stats['received_sol']==.009995
+        assert stats['received_count']==2
+        with patch.object(te,'_chain_confirmation',return_value=(True,None)):
+            tips=d.app.test_client().get('/api/tips/mine',headers={'X-User':'1'}).json['tips']
+            assert {t['currency'] for t in tips}=={'SOL','USDC'}
+    finally:temp.cleanup()
+
+
+def test_native_tip_http_records_net_sol_and_never_early_confirmation():
+    import portfolio_token_withdraw as provider
+    temp,d=setup()
+    try:
+        provider.install(d)
+        client=d.app.test_client()
+        with patch.object(provider,'_csrf_ok',return_value=True), \
+             patch.object(provider,'_user_tip_wallets',return_value={'solana':'recipient-trading','session':'wallet-2'}), \
+             patch('sol_native_payments.native_transfer',return_value=('native-http-signature',.009995)) as transfer:
+            stale=client.post('/api/tip',json={'recipient_user_id':2,'amount':.01},headers={'X-User':'1'})
+            assert stale.status_code==409
+            transfer.assert_not_called()
+            response=client.post('/api/tip',json={'recipient_user_id':2,'amount':.01,'currency':'SOL',
+                'request_id':'native-tip-request-123'},headers={'X-User':'1'})
+            assert response.status_code==200,response.json
+            assert response.json['currency']=='SOL'
+            assert response.json['status']=='submitted'
+            assert response.json['amount_sent']==.009995
+            row=query(d,'SELECT amount,currency,status FROM tip_transactions')[0]
+            assert row['amount']==.009995 and row['currency']=='SOL' and row['status']=='submitted'
+            assert not query(d,'SELECT * FROM notifications')
+            assert transfer.call_args.args[2]=='recipient-trading'
+    finally:
+        provider._RECENT.clear()
+        temp.cleanup()

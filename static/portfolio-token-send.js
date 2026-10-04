@@ -54,15 +54,15 @@ function choose(){
  var a=state.selected,ch=document.getElementById('oa-st-chain'),bal=document.getElementById('oa-st-balance'),to=document.getElementById('oa-st-to');
  if(ch)ch.textContent=a?chainName(a.chain):'—';if(bal)bal.textContent=a?'Balance: '+fmtAmount(a.amount)+' '+a.symbol:'Balance: —';if(to)to.placeholder=a&&a.chain==='solana'?'Solana wallet address…':'0x wallet address…';
  var amount=document.getElementById('oa-st-amount');if(amount)amount.value='';
- note('Network fees are paid by your trading wallet. OrcAgent does not subsidize withdrawals.','');
+ note(a&&a.isNative?'The network fee comes out of the SOL amount entered. The 0.005 SOL reserve is retained.':'You need SOL in your trading wallet for token transfers.','');
 }
-function setMax(){var a=state.selected,inp=document.getElementById('oa-st-amount');if(!a||!inp)return;var v=a.amount;if(a.isNative)v=Math.max(0,v-0.001);inp.value=String(Math.floor(v*1e9)/1e9);if(a.isNative)note('0.001 SOL is left behind for the Solana network fee.','')}
+function setMax(){var a=state.selected,inp=document.getElementById('oa-st-amount');if(!a||!inp)return;var v=a.amount;if(a.isNative)v=Math.max(0,v-0.005);inp.value=String(Math.floor(v*1e9)/1e9);if(a.isNative)note('0.005 SOL reserve is retained. The network fee comes out of your send amount.','')}
 function authHeaders(){var c=csrf();return {'Content-Type':'application/json','X-CSRF-Token':c,'X-CSRFToken':c,'X-Requested-With':'XMLHttpRequest'}}
 function send(){
  if(state.busy)return;var a=state.selected,to=(document.getElementById('oa-st-to').value||'').trim(),amount=Number(document.getElementById('oa-st-amount').value||0),btn=document.getElementById('oa-st-send');
  if(!a){note('Choose an asset first.','err');return}if(!to){note('Enter the recipient wallet address.','err');return}if(!(amount>0)){note('Enter an amount greater than zero.','err');return}if(amount>a.amount+1e-12){note('Amount is higher than your portfolio balance.','err');return}
  state.busy=true;if(btn){btn.disabled=true;btn.textContent='Sending…'};note('Submitting transfer…','');
- var url,body;if(a.isNative){url='/api/wallet/send';body={to:to,amount_sol:amount}}else{url='/api/wallet/send-token';body={chain:a.chain,token_address:a.token,to_address:to,amount:amount}}
+ var url,body;if(a.isNative){url='/api/wallet/send';body={to:to,amount_sol:amount,request_id:crypto.randomUUID()}}else{url='/api/wallet/send-token';body={chain:a.chain,token_address:a.token,to_address:to,amount:amount}}
  fetch(url,{method:'POST',credentials:'include',headers:authHeaders(),body:JSON.stringify(body)}).then(function(r){return r.json().catch(function(){return{}}).then(function(d){if(!r.ok||d.ok!==true)throw new Error(d.error||d.msg||'Transfer failed');return d})}).then(function(d){
    var sent=Number(d.amount_sent!=null?d.amount_sent:amount);note('Transfer submitted: '+fmtAmount(sent)+' '+a.symbol+'. Awaiting network confirmation.','ok');
    try{document.dispatchEvent(new CustomEvent('orca:portfolio-changed'))}catch(e){}try{document.dispatchEvent(new CustomEvent('orca:trade-complete'))}catch(e){};

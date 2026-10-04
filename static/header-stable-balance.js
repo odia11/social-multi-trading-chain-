@@ -7,19 +7,19 @@
 var timer=null,inFlight=false,last='',lastAt=0;
 var here=location.pathname.replace(/\/+$/,'')||'/';
 var ON_PORTFOLIO=here==='/wallet',POLL_MS=5000,MIN_GAP_MS=1200;
-var STORAGE_KEY='orcaPortfolioLastConfirmedTotal';
-var STORAGE_AT_KEY='orcaPortfolioLastConfirmedTotalAt';
+var STORAGE_KEY='orcaPortfolioLastConfirmedSOLTotal';
+var STORAGE_AT_KEY='orcaPortfolioLastConfirmedSOLTotalAt';
 var MAX_CACHE_AGE=86400000;
 
 function el(){return document.getElementById('pt-nb-sol-balance')}
-function n(v){v=Number(v);return Number.isFinite(v)&&v>=0?v:null}
-function money(v){var x=n(v);return x===null?'—':'$'+x.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
+function n(v){if(v==null||v==='')return null;v=Number(v);return Number.isFinite(v)&&v>=0?v:null}
+function money(v){var x=n(v);return x===null?'—':x.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:6})+' SOL'}
 function render(value){
   var node=el();if(!node)return;
   node.textContent=value||'—';
   node.setAttribute('aria-label','Total portfolio value '+(value||'unavailable'));
   var pill=node.closest('.pt-nb-balance,.pt-nb-sol,.pt-nb-wallet-balance')||node.parentElement;
-  if(pill)pill.title='Live total portfolio value across OrcAgent chains';
+  if(pill)pill.title='Live estimated Solana portfolio value in SOL';
 }
 function remember(total){
   var value=n(total);if(value===null)return;
@@ -49,15 +49,15 @@ function accept(total){
 function refresh(force){
   if(!el()||document.hidden)return Promise.resolve(false);
   if(ON_PORTFOLIO){
-    if(window.__orcaPortfolioValue!=null)accept(window.__orcaPortfolioValue);
+    if(window.__orcaPortfolioSolValue!=null)accept(window.__orcaPortfolioSolValue);
     return Promise.resolve(true);
   }
   if(inFlight)return Promise.resolve(false);
   var now=Date.now();if(!force&&now-lastAt<MIN_GAP_MS)return Promise.resolve(false);
   lastAt=now;inFlight=true;
   return json('/api/portfolio/snapshot').then(function(s){
-    if(!s||!s.ok||!accept(s.total_usd))throw new Error('bad portfolio snapshot');
-    window.__orcaPortfolioValue=Number(s.total_usd);
+    if(!s||!s.ok||!accept(s.total_sol))throw new Error('bad portfolio snapshot');
+    window.__orcaPortfolioSolValue=Number(s.total_sol);
     return true;
   }).catch(function(){
     if(last)render(last);
@@ -71,7 +71,7 @@ function start(){
   else if((el().textContent||'').trim()==='$0.00')render('—');
 
   if(ON_PORTFOLIO){
-    if(window.__orcaPortfolioValue!=null)accept(window.__orcaPortfolioValue);
+    if(window.__orcaPortfolioSolValue!=null)accept(window.__orcaPortfolioSolValue);
     return;
   }
   refresh(true);
@@ -81,7 +81,7 @@ function start(){
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 
 document.addEventListener('orca:portfolio-value',function(e){
-  var total=e&&e.detail&&e.detail.total;
+  var total=e&&e.detail&&e.detail.total_sol;
   if(total!=null)accept(total);
 });
 window.addEventListener('pageshow',function(){start();refresh(true)});

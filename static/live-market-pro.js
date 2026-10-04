@@ -1015,19 +1015,8 @@ function tfPill(tf, label, active){
 /* OrcAgent is Solana-only. Older cached scanner responses that omit a chain
    are treated as Solana so they never render blank. */
 var CHAIN_LABELS = {solana:'SOL'};
-// What the user is told they are spending: USDC, on every chain.
-//
-// This used to name Robinhood Chain's USDG, on the reasoning that USDC does
-// not exist there and calling it USDC would be a lie. The reasoning was
-// right about the chain and wrong about the question. The user never holds,
-// picks, or deposits USDG -- they spend USDC, and the app bridges it there,
-// where it converts to USDG on arrival. Naming that intermediate token on
-// the Buy button described the plumbing instead of the payment.
-//
-// The on-chain symbol still exists server-side as usdc_symbol, and still
-// says USDG, because a log line or an explorer lookup needs the token that
-// actually moved. See user_currency_label() in dashboard.py.
-function evmCurrencyLabel(chain){ return 'USDC'; }
+// All active trades spend and receive native SOL.
+function evmCurrencyLabel(chain){ return 'SOL'; }
 function chainLabel(chain){ return CHAIN_LABELS[chain] || 'SOL'; }
 function shortAddr(addr){
   addr = addr || '';
@@ -1843,6 +1832,7 @@ function _sheetFooter(){
 var _sheetIdx = null;       // index of the token being traded, null when closed
 var _sheetMode = 'buy';     // 'buy' or 'sell'
 var _sheetAmt = '';         // what the keypad has typed, as a string
+var _sheetSolPrice = 0;
 var _sheetAvail = null;     // spendable USDC on THIS token's chain
 var _availCache = {t: 0, data: null};
 
@@ -1911,16 +1901,16 @@ function _paintFees(t, mode){
   }
 }
 
-// Spendable balance is Solana USDC. Cached briefly so reopening the sheet
+// Spendable balance is native SOL after the network reserve. Cached briefly so reopening the sheet
 // does not repeat the same wallet lookup.
 // Fetched once when the page loads, not when the sheet opens. Opening used
 // to start the request, so the first buy of a session sat on "Checking
 // balance…" for ~290ms with the 10/25/50/Max buttons inert -- measured on a
 // throttled phone. By the time anyone taps Buy this has long since landed.
 function _prefetchBalances(){
-  fetch('/api/wallet/usdc-summary', {credentials:'include'})
+  fetch('/api/wallet/trading-balance', {credentials:'include'})
     .then(function(r){ return r.json(); })
-    .then(function(d){ if(d && d.ok) _availCache = {t: Date.now(), data: d}; })
+    .then(function(d){ if(d && d.ok){ _availCache = {t: Date.now(), data: d}; _sheetSolPrice=Number(d.sol_price_usd||0); } })
     .catch(function(){});
 }
 
@@ -1941,15 +1931,15 @@ function _loadSheetHolding(t){
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(_sheetIdx !== idx || _sheetMode !== 'sell') return;
-      if(!d || !d.ok){ failed(); return; }
-      _sheetHold = {amount: Number(d.amount || 0), price: Number(d.price_usd || 0),
-                    value: Number(d.value_usd || 0)};
+      if(!d || !d.ok || d.value_sol == null){ failed(); return; }
+      _sheetHold = {amount: Number(d.amount || 0), price: Number(d.sol_price_usd)>0?Number(d.price_usd||0)/Number(d.sol_price_usd):0,
+                    value: Number(d.value_sol || 0)};
       _sheetAvail = _sheetHold.value;
       // Open on the whole position, which is what the button used to do and
       // is still the common case -- now with the figure filled in, so it can
       // be edited down instead of retyped from nothing.
       if(_sellPct >= 100 && _sheetAmt === '' && _sheetHold.value > 0){
-        _sheetAmt = String(Math.floor(_sheetHold.value * 100) / 100);
+        _sheetAmt = String(Math.floor(_sheetHold.value * 1e9) / 1e9);
         var hidden = document.getElementById('pt-buy-amt-'+idx);
         if(hidden) hidden.value = _sheetAmt;
       }
@@ -1961,12 +1951,13 @@ function _loadSheetHolding(t){
 function _loadSheetBalance(chain){
   var now = Date.now();
   var use = function(d){
-    var v = d.solana_usdc;
+    var v = d.available_sol;
+    _sheetSolPrice=Number(d.sol_price_usd||0);
     _sheetAvail = Number(v || 0);
     _paintSheet();
   };
   if(_availCache.data && now - _availCache.t < 12000){ use(_availCache.data); return; }
-  fetch('/api/wallet/usdc-summary', {credentials:'include'})
+  fetch('/api/wallet/trading-balance', {credentials:'include'})
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(!d || !d.ok) return;
@@ -2036,10 +2027,10 @@ function _openSheet(idx, mode){
 
   if(mode === 'sell'){
     _sheetEl('pt-sheet-cap-txt').textContent = 'You sell';
-    _sheetEl('pt-sheet-cur').textContent = 'USD';
+    _sheetEl('pt-sheet-cur').textContent = 'SOL';
   } else {
     _sheetEl('pt-sheet-cap-txt').textContent = 'You spend';
-    _sheetEl('pt-sheet-cur').textContent = 'USDC';
+    _sheetEl('pt-sheet-cur').textContent = 'SOL';
   }
   _sheetEl('pt-slide').classList.toggle('sell', mode === 'sell');
 
@@ -2115,7 +2106,7 @@ function _paintSheet(){
 
     var sAmt = parseFloat(_sheetAmt);
     var sEl  = _sheetEl('pt-sheet-amt');
-    sEl.textContent = '$' + (_sheetAmt === '' ? '0' : _sheetAmt);
+    sEl.textContent = (_sheetAmt === '' ? '0' : _sheetAmt);
     sEl.classList.toggle('dim', !(sAmt > 0));
 
     // What that sells, in tokens -- the same conversion the buy screen
@@ -2129,7 +2120,7 @@ function _paintSheet(){
       ? 'Could not read your position — you can still sell all of it'
       : ((_sheetAvail === null)
           ? 'Checking your position…'
-          : ('<b>$' + _sheetAvail.toFixed(2) + '</b> held'));
+          : ('<b>' + _sheetAvail.toFixed(6) + ' SOL</b> held'));
 
     // Selling is how a loss gets cut. A lookup that could not be reached is
     // not a reason to leave somebody holding a position they are trying to
@@ -2149,7 +2140,7 @@ function _paintSheet(){
       _slideSetLabel('Nothing to sell'); _slideEnable(false);
     } else if(!(sAmt > 0)){
       _slideSetLabel('Enter an amount'); _slideEnable(false);
-    } else if(_sheetAvail !== null && sAmt > _sheetAvail + 0.01){
+    } else if(_sheetAvail !== null && sAmt > _sheetAvail + 1e-9){
       // A cent of slack: "Max" floors to the cent, and a price that ticks
       // between the fill and the tap must not disarm the control someone
       // just used.
@@ -2159,14 +2150,14 @@ function _paintSheet(){
       // trimming a position and closing it is the whole decision.
       _slideSetLabel(_sellPct >= 100
         ? ('Slide to sell all $' + (t && t.symbol || ''))
-        : ('Slide to sell $' + _sheetAmt));
+        : ('Slide to sell ' + _sheetAmt + ' SOL'));
       _slideEnable(true);
     }
     return;
   }
   var amt = parseFloat(_sheetAmt);
   var el = _sheetEl('pt-sheet-amt');
-  el.textContent = '$' + (_sheetAmt === '' ? '0' : _sheetAmt);
+  el.textContent = (_sheetAmt === '' ? '0' : _sheetAmt);
   el.classList.toggle('dim', !(amt > 0));
 
   // What that money buys, at the price on screen. An estimate, and labelled
@@ -2174,24 +2165,33 @@ function _paintSheet(){
   var get = _sheetEl('pt-sheet-get');
   var px = Number(t && t.price_usd || 0);
   get.textContent = (amt > 0 && px > 0)
-    ? '≈ ' + fmtAmount(amt / px) + ' ' + (t.symbol || '')
+    ? '≈ ' + fmtAmount(Math.max(0, amt - 0.003) * (1 - PT_FEE_RATE_TXN) * _sheetSolPrice / px) + ' ' + (t.symbol || '')
     : '';
 
   // Cents, not fmtUsd's compact form: a balance of 12.40 shown as "$12"
   // contradicts the 12.40 that Max then fills in, and a person reading a
   // number about their own money should see the actual number.
+  var feeBase = Math.max(0, amt - 0.003);
+  var feeSummary = _sheetEl('pt-fees-amt'), feeDetails = _sheetEl('pt-fees-sell');
+  if(feeSummary) feeSummary.textContent = 'Included in SOL budget';
+  if(feeDetails) feeDetails.innerHTML =
+    '<div class="pt-quote-row"><span>Maximum spend</span><span>'+Math.max(0,amt||0).toFixed(9)+' SOL</span></div>'
+    + '<div class="pt-quote-row"><span>Network and account-rent allowance</span><span>0.003 SOL</span></div>'
+    + '<div class="pt-quote-row"><span>OrcAgent fee · '+(PT_FEE_RATE_TXN*100).toFixed(2)+'%</span><span>'+(feeBase*PT_FEE_RATE_TXN).toFixed(9)+' SOL</span></div>'
+    + '<div class="pt-quote-note">Costs come out of your budget. Unused allowance stays in your wallet. Slippage changes the tokens received. The transaction is checked before sending.</div>';
+
   var availEl = _sheetEl('pt-sheet-avail');
   availEl.innerHTML = (_sheetAvail === null)
     ? 'Checking balance…'
-    : '<b>$' + _sheetAvail.toFixed(2) + '</b> available';
+    : '<b>' + _sheetAvail.toFixed(6) + ' SOL</b> available';
 
   // The button says why it cannot be pressed, rather than sitting greyed out
   // with no reason -- "nothing happens" is the worst state a Buy can be in.
-  var min = PT_MIN_BUY_USDC;
+  var min = PT_MIN_BUY_SOL;
   if(!(amt > 0)){
     _slideSetLabel('Enter an amount'); _slideEnable(false);
   } else if(amt < min){
-    _slideSetLabel('$' + min + ' minimum'); _slideEnable(false);
+    _slideSetLabel(min + ' SOL minimum'); _slideEnable(false);
   } else if(_sheetAvail !== null && amt > _sheetAvail + 1e-9){
     _slideSetLabel('More than you have'); _slideEnable(false);
   } else {
@@ -2433,10 +2433,10 @@ document.addEventListener('click', function(e){
     } else if(v === '.'){
       if(_sheetAmt.indexOf('.') === -1) _sheetTypeAmount((_sheetAmt || '0') + '.');
     } else {
-      // No leading zeros ("05"), and two decimals is as fine as money gets.
+      // No leading zeros ("05"), and SOL supports nine decimal places.
       var next = (_sheetAmt === '0') ? v : _sheetAmt + v;
       var dot = next.indexOf('.');
-      if(dot !== -1 && next.length - dot > 3) return;
+      if(dot !== -1 && next.length - dot > 10) return;
       if(next.replace('.', '').length > 12) return;
       _sheetTypeAmount(next);
     }
@@ -2456,7 +2456,7 @@ document.addEventListener('click', function(e){
     var part = _sheetAvail * (pct / 100);
     // Floored to the cent: rounding up on Max would ask to spend more than
     // the wallet holds, and the server would refuse it.
-    _sheetSetAmount(String(Math.floor(part * 100) / 100), true);
+    _sheetSetAmount(String(Math.floor(part * 1e9) / 1e9), true);
   }
 });
 
@@ -2468,7 +2468,7 @@ document.addEventListener('keydown', function(e){
   if(e.key >= '0' && e.key <= '9'){
     var next = (_sheetAmt === '0') ? e.key : _sheetAmt + e.key;
     var dot = next.indexOf('.');
-    if(dot !== -1 && next.length - dot > 3) return;
+    if(dot !== -1 && next.length - dot > 10) return;
     _sheetTypeAmount(next);
   }
 });
@@ -2553,7 +2553,7 @@ function confirmBuy(idx){
   }
   var url = '/api/instant-trade';
   var body = {symbol:t.symbol, token_address:t.mint, pair_address:t.pair_address,
-              side:'buy', amount_usdc:amt, amount_sol:amt};
+              side:'buy', currency:'SOL', amount_sol:amt};
   // The stop loss / take profit this buy is protected with (every chain).
   var prot = _protectionChoice();
   if(prot.error){
@@ -2577,8 +2577,8 @@ function confirmBuy(idx){
     // the compatibility fields below; accept only an explicit success shape.
     if(d && (d.success || d.tx || d.ok || d.sig || d.tx_hash)){
       // Show the realized USDC amount returned by the Solana trade when known.
-      var got = (d.amount_usdc != null) ? d.amount_usdc : amt;
-      var cur = d.currency || 'USDC';
+      var got = (d.sol_amount != null) ? d.sol_amount : amt;
+      var cur = d.currency || 'SOL';
       var line = 'Bought ' + got + ' ' + cur + ' of $' + t.symbol;
       if(d.max_spend_usd != null && Number(d.max_spend_usd) > Number(got)){
         line += ' (spent ' + d.max_spend_usd + ' ' + cur + ')';
@@ -2635,7 +2635,7 @@ function handleSell(idx, btn){
   } else {
     var usd = parseFloat(_sheetAmt);
     if(!(usd > 0)){ toast('Enter an amount to sell'); _slideEnable(true); _slideReset(); return; }
-    how = {sell_usd: usd};
+    how = {sell_sol: usd};
   }
   var body = Object.assign({symbol:t.symbol, token_address:t.mint,
                             pair_address:t.pair_address, side:'sell', amount_sol:0}, how);
@@ -2653,8 +2653,8 @@ function handleSell(idx, btn){
     // proceeds_usdc is what the swap actually returned, measured from the
     // wallet across the trade -- shown only when it was measured, since the
     // fallback is a market quote rather than the realised amount.
-    var got = (sold && d && d.proceeds_usdc != null && d.exit_price_estimated === false)
-      ? (' for $' + Number(d.proceeds_usdc).toFixed(2)) : '';
+    var got = (sold && d && d.sol_amount != null)
+      ? (' for ' + Number(d.sol_amount).toFixed(6) + ' SOL') : '';
     var partial = sold && (d && d.position_closed === false);
     toast(sold ? ((partial ? 'Sold ' + (d.sold_pct != null ? d.sold_pct + '% of $' : 'part of $')
                            : 'Sold $') + t.symbol + got)

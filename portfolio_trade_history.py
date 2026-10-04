@@ -51,6 +51,29 @@ def install(d):
             if not uid:
                 return d.jsonify({'ok': True, 'transactions': [], 'count': 0})
 
+            # Native Live Market executions carry a confirmed signature and
+            # their own explicit base currency. Never infer SOL from an old
+            # field called amount_usd or reinterpret historical rows.
+            columns={r[1] for r in conn.execute('PRAGMA table_info(trades)')}
+            if 'tx_hash' in columns:
+                rows=conn.execute("""SELECT id,token,amount,timestamp,mint_address,
+                    side,base_currency,tx_hash FROM trades WHERE user_id=?
+                    AND source='manual' AND COALESCE(chain,'solana')='solana'
+                    AND side IN ('buy','sell') AND COALESCE(tx_hash,'')!=''
+                    ORDER BY timestamp DESC LIMIT ?""",(uid,limit)).fetchall()
+                for r in rows:
+                    if side!='all' and r['side']!=side:continue
+                    try:ts=_dt.datetime.fromisoformat(str(r['timestamp']).replace('Z','+00:00')).timestamp()
+                    except ValueError:continue
+                    unit=r['base_currency'] or 'SOL'
+                    amount=max(0,_f(r['amount']))
+                    items.append(dict(id='native:'+str(r['id']),side=r['side'],timestamp=ts,
+                        token=r['mint_address'] or '',symbol=r['token'] or '',chain='solana',
+                        amount_base=amount,currency=unit,
+                        amount_usd=amount*_f(getattr(d,'_sol_price_usd',0)) if unit=='SOL' else amount,
+                        token_value_usd=0,price_usd=0,pnl=None,pnl_pct=None,
+                        tx_hash=r['tx_hash'],source='manual'))
+
             # BUYs: only mode='manual'. QuoteRequest defines manual/bot/copy as
             # distinct modes, so this excludes every automated/copy execution.
             if side in {'all', 'buy'}:
