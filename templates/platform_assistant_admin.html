@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="csrf-token" content="{{ csrf_token }}"><title>Platform assistant · OrcAgent</title>
+<link rel="stylesheet" href="/static/navbar.css"><link rel="stylesheet" href="/static/watchlist.css?v={{ app_version }}">
+<script src="/static/platform-assistant-admin.js?v={{ app_version }}" defer></script></head>
+<body>{{ navbar_html('home') }}<main class="oa-watch">
+<p class="eyebrow">ORCAGENT · ADMIN</p><h1>Platform assistant</h1>
+<p class="muted">English platform guidance and short feed theses. No external AI service or API costs.</p>
+<section class="panel"><h2>Official author</h2><p>{% if state.author %}@{{ state.author }} · Verified{% else %}Paused: a single verified @Orcagent account is required. No account is created automatically.{% endif %}</p>
+<p class="muted">The author is pinned by user ID. Changing or removing that verified identity stops publication.</p></section>
+<section class="panel" style="margin-top:16px"><h2>Publication settings</h2>
+<form id="platform-settings">
+<label><input type="checkbox" name="posts" {% if state.posts %}checked{% endif %} style="width:auto"> Automatic feed theses</label>
+<p class="muted">09:00, 15:00 and 21:00 · Europe/Amsterdam. One post per slot; missed slots older than 30 minutes are skipped. Reviewed copy rotates through 30 theses.</p>
+<label><input type="checkbox" name="replies" {% if state.replies %}checked{% endif %} style="width:auto"> Replies to @orcagent in homefeed comments</label>
+<p class="muted">Always English. Platform questions only, with a clarification reply for unknown topics. No private group replies, market predictions, account access or transaction execution.</p>
+<p class="muted">Limits: two replies per user per 15 minutes, eight per user per 24 hours, 120 across the platform per 24 hours. A saved comment gets at most one automated reply.</p>
+<button class="button" type="submit">Save settings</button><p id="platform-status" role="status" aria-live="polite"></p></form></section>
+<section><h2>Recent publications</h2>
+{% for kind,post_id,reply_id,topic,created_at in recent %}
+<article class="panel" style="margin-bottom:8px"><strong>{{ 'Comment reply' if kind=='reply' else 'Feed thesis' }}</strong><p class="muted">{{ topic }} · {{ post_id }}{% if reply_id %} · Reply #{{ reply_id }}{% endif %}</p><a href="/#post-{{ post_id }}">Open conversation</a></article>
+{% else %}<p class="muted">No automated publications yet.</p>{% endfor %}</section>
+<details class="panel watch-note"><summary>Review thesis library · 30 posts</summary>
+{% for topic,text in theses %}<article><h3 style="font-size:16px;margin-top:20px">{{ topic|replace('_',' ')|title }}</h3><p>{{ text }}</p></article>{% endfor %}</details>
+</main></body></html>

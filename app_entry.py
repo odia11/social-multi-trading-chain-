@@ -178,4 +178,7 @@ _install_call_invitations(_dashboard)
 from creator_rewards import install as _install_creator_rewards
 _install_creator_rewards(_dashboard)
 
+from platform_assistant import install as _install_platform_assistant
+_install_platform_assistant(_dashboard)
+
 app = _dashboard.app
