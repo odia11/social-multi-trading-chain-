@@ -121,7 +121,7 @@ INSERT INTO feed_posts(wallet,content,created_at) VALUES('member','A post','2026
         self.assertIsNone(p.reply_to(self.d,self.source(),'another-wallet',self.now))
         self.assertIsNone(p.reply_to(self.d,self.source(created='2020-01-01'),'member',self.now))
     def test_throttling_and_disable(self):
-        for _ in range(2):
+        for _ in range(6):
             self.assertIsNotNone(p.reply_to(self.d,self.source(),'member',self.now))
         self.assertIsNone(p.reply_to(self.d,self.source(),'member',self.now))
         self.assertIsNotNone(p.reply_to(self.d,self.source(),'member',self.now+901))

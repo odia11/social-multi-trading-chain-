@@ -156,7 +156,7 @@ def within_reply_limits(c,user_id,now):
     recent = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND source_user_id=? AND created_at>?",(user_id,now-900)).fetchone()[0]
     daily = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND source_user_id=? AND created_at>?",(user_id,now-86400)).fetchone()[0]
     total = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND created_at>?",(now-86400,)).fetchone()[0]
-    return recent<2 and daily<8 and total<120
+    return recent<6 and daily<20 and total<120
 
 def reply_to_post(d,post_number,wallet,now=None):
     # Only a successfully authenticated NEW post; no edits, reposts or backfill.

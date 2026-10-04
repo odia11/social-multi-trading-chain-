@@ -26,7 +26,7 @@ class PostMentions(unittest.TestCase):
         for text in ['@orcagent hello','@orcagent hoe gaat het?','@orcagent how are you?']:
             self.assertEqual(p.answer(text)[0],'welcome')
     def test_post_and_comment_share_reply_limits(self):
-        for _ in range(2):
+        for _ in range(6):
             self.assertIsNotNone(p.reply_to_post(self.d,self.post(),'member',self.now))
         self.assertIsNone(p.reply_to(self.d,self.source(),'member',self.now))
         self.assertIsNone(p.reply_to_post(self.d,self.post(),'member',self.now))
