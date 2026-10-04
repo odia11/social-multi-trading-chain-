@@ -56,14 +56,14 @@ THESES = (
 FAQ = (
     ('secrets', 'seed|recovery phrase|private key|secret key|herstelzin|priv[eé]sleutel', 'Never post your recovery phrase or private key. Describe your wallet issue without credentials; OrcAgent will never ask for those secrets.'),
     ('bug', 'not working|doesn.t work|error|bug|failed|stuck|werkt niet|fout|mislukt|vast|probleem', 'Which OrcAgent page and action failed? Share the error and your device type so the team can review it. Keep wallet secrets private.'),
-    ('creator', 'creator|creators|reward|beloning|verdien|paid|betaald|payout|uitbetaling', 'Approved creators can earn 10% of collected platform fees from qualifying call buys. Views alone do not pay. See Menu → Creator Rewards; USDC payouts are manually verified.'),
-    ('referral', 'referral|referrer|invite|invitation|uitnodig|doorverwijs', 'Referrals share 20% of trading fees from attributed users, not the trade amount. Share your referral link; track call invitations privately in Invitations & shared calls.'),
+    ('creator', 'creator|creators|reward|beloning|verdien|paid|betaald|payout|uitbetaling', 'Approved creators earn 10% of collected fees from qualifying call buys, not views. Read eligibility and payout rules: https://orcagent.fun/creator-rewards. Which part would you like explained?'),
+    ('referral', 'referral|referrer|invite|invitation|uitnodig|doorverwijs', 'Referrals share 20% of fees from attributed users, not trade volume. Copy your personal link here: https://orcagent.fun/referrals. Would you like help sharing it?'),
     ('fees', r'\bfees?\b|cost|kost|kosten|percentage|procent|%', 'Reward percentages apply to collected platform fees, not trading volume. You fund transaction costs. Review the costs before confirming; I cannot calculate a personal quote.'),
-    ('share', r'\bshare\b|sharing|deel|delen|card|kaart', 'Open a call and tap Share call to copy its link, share on X or save the card. Your personal link tracks qualifying invitations privately.'),
-    ('calls', r'\bcalls?\b|analysis|analyse|entry|instap', 'A call records a trader’s analysis and entry price. Open it to explore the reasoning and chart. The entry is a reference, not a guaranteed fill or return.'),
+    ('share', r'\bshare\b|sharing|deel|delen|card|kaart', 'Open a call and tap Share call to copy its link or save its card. Track invitations: https://orcagent.fun/invitations. Are you sharing a link or a card?'),
+    ('calls', r'\bcalls?\b|analysis|analyse|entry|instap', 'A call records analysis and an entry reference, not a guaranteed return. Explore a call in the feed: https://orcagent.fun/#app-home. Would you like help reading or publishing one?'),
     ('wallet', 'phantom|connect|login|log.?in|wallet|verbinden|inloggen', 'Tap Connect wallet and approve in Phantom. Return to your chosen browser or PWA. If it fails, share the screen and error, never your recovery phrase.'),
-    ('portfolio', 'portfolio|holding|balance|saldo|bezitting', 'Open Portfolio to review holdings and activity. I cannot access your balance or confirm transactions. For missing activity, name the asset and what you see.'),
-    ('trading', 'trad|buy|sell|swap|kopen|verkopen|ruil|chart|grafiek|solana|chain', 'Explore Solana tokens and charts in Live Market. Review the buy/sell controls and costs before confirming. This assistant does not recommend tokens or place trades.'),
+    ('portfolio', 'portfolio|holding|balance|saldo|bezitting', 'Check holdings and activity in Portfolio: https://orcagent.fun/#app-portfolio. Missing something? Tell me which asset and what you see; I cannot access your account.'),
+    ('trading', 'trad|buy|sell|swap|kopen|verkopen|ruil|chart|grafiek|solana|chain', 'Explore charts in Live Market: https://orcagent.fun/#app-market. Review costs before confirming a trade. Which platform control would you like help with? I do not recommend tokens or place trades.'),
     ('community', r'follow|volg|\bdm\b|message|bericht|community|feed|comment|reage', 'Follow traders from their profiles, discuss calls in comments or chat in DMs. Tag @orcagent for help with platform features.'),
 )
 
@@ -73,13 +73,21 @@ def answer(message):
     if not isinstance(message, str) or not MENTION.search(message):
         return None
     clean = MENTION.sub('', message).lower()
+    token = re.fullmatch(r'\s*(?:do you know\s+|tell me about\s+|what is\s+)?\$?([a-z][a-z0-9_]{1,19})\s+token[\s?!.]*',clean)
+    if token:
+        symbol = token[1].upper()
+        return 'token_choice', LABEL + f"Do you mean ${symbol}? Choose the matching token below, then tell me which OrcAgent feature you want help with."
     for topic, pattern, english in FAQ:
         if re.search(pattern, clean, re.I):
             return topic, LABEL + english
     if re.search(r'benefits?|what (?:can|does)|features?|voordelen|mogelijkheden',clean):
         return 'overview', LABEL + 'OrcAgent brings Solana charts, trading, calls and community into one app. Follow traders, share your analysis and track holdings in Portfolio.'
-    if re.fullmatch(r'\s*(?:hi|hello|hey|hello there|how are you|how are you doing|hoe gaat het|hallo|hoi)[\s!?.,]*',clean):
-        return 'welcome', LABEL + "I'm ready to help. What would you like to know about OrcAgent?"
+    if re.fullmatch(r'\s*(?:(?:hi|hello|hey)[\s,!]+)?(?:how are you(?: doing)?|how.s it going|hoe gaat het)[\s!?.,]*',clean):
+        return 'welcome', LABEL + "I'm doing well, thanks! How about you? What can I help you with on OrcAgent today?"
+    if re.fullmatch(r'\s*(?:hi|hello|hey|hello there|hallo|hoi)[\s!?.,]*',clean):
+        return 'welcome', LABEL + "Hey! Welcome to OrcAgent. What would you like to explore today: calls, charts or your portfolio?"
+    if re.fullmatch(r"\s*(?:i.m (?:good|fine|well)|good|fine|doing well|thanks|thank you|goed|dank je)(?:[\s,!]+(?:thanks|thank you))?[\s!?.,]*",clean):
+        return 'welcome', LABEL + "Thanks for sharing! What would you like to do on OrcAgent today? Explore the feed: https://orcagent.fun/#app-home"
     return 'scope', LABEL + 'Which feature would you like help with: wallet, calls, trading, portfolio or rewards? I can explain OrcAgent, but cannot access your account or predict prices.'
 
 def initialize(db):
@@ -148,7 +156,7 @@ def within_reply_limits(c,user_id,now):
     recent = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND source_user_id=? AND created_at>?",(user_id,now-900)).fetchone()[0]
     daily = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND source_user_id=? AND created_at>?",(user_id,now-86400)).fetchone()[0]
     total = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND created_at>?",(now-86400,)).fetchone()[0]
-    return recent<2 and daily<8 and total<120
+    return recent<6 and daily<20 and total<120
 
 def reply_to_post(d,post_number,wallet,now=None):
     # Only a successfully authenticated NEW post; no edits, reposts or backfill.

@@ -21,7 +21,9 @@ const settle=async(users)=>{pending.shift()({ok:true,json:async()=>({users})});f
  assert.equal(box.style.top,'356px','list follows field after scrolling, below when room exists');
  viewport.height=360;events.vvresize();assert.equal(box.style.top,'210px','keyboard opening keeps list beside field');
  viewport.offsetTop=100;rect={...rect,top:320,bottom:410};events.vvscroll();assert.equal(box.style.top,'270px');
- rect={...rect,top:500,bottom:590};events.winscroll();assert.equal(box.style.display,'none','offscreen input closes list');
+ rect={...rect,top:500,bottom:590};events.winscroll();assert.equal(box.style.visibility,'hidden','keyboard transition suspends suggestions');
+ rect={...rect,top:320,bottom:410};events.vvscroll();assert.equal(box.style.visibility,'visible','suggestions return without typing another character');
+ assert.equal(ctx._mentionTarget,input);
  rect={...rect,top:200,bottom:290};viewport.offsetTop=0;viewport.height=460;
  ctx._mentionCheck(input);ctx._mentionHide();await settle([{username:'Late'}]);assert.equal(box.style.display,'none','late result does not reopen');
  input.value='@o';input.selectionStart=2;ctx._mentionCheck(input);
