@@ -151,12 +151,12 @@ def render_card(call, inviter=None, logo_img=None):
         text, f = fitted(text, size, width)
         draw.text((x,y), text, font=f, fill=color)
 
-    draw.rounded_rectangle((56,51,108,103), radius=14, fill=gold)
-    draw.polygon(((82,64),(69,89),(95,89)), fill='#080d11')
-    line('OrcAgent',122,48,32)
-    line('SOLANA TOKEN CALL',124,88,16,gold)
-    draw.rounded_rectangle((966,57,1144,97), radius=15, fill='#202d36')
-    line('CALL #'+str(call['id']),986,65,18,muted,138)
+
+    draw.rounded_rectangle((56,50,104,98), radius=13, fill=gold)
+    draw.polygon(((80,61),(67,86),(93,86)), fill='#080d11')
+    line('OrcAgent',118,48,32)
+    line('SOLANA CALL  /  #'+str(call['id']),760,57,22,muted,380)
+    draw.line((56,125,1144,125), fill='#2b3841', width=2)
 
     symbol = str(call.get('symbol') or call['mint'][:8]).lstrip('$')
     draw.ellipse((56,146,144,234), fill='#24313a', outline='#3d4c55', width=2)
@@ -169,37 +169,33 @@ def render_card(call, inviter=None, logo_img=None):
         initials = symbol[:2].upper()
         f = font(27)
         draw.text((100-draw.textlength(initials,font=f)/2,169), initials, font=f, fill=gold)
-    line('$'+symbol,164,141,48,width=610)
-    line(call.get('token_name') or 'Solana token',166,201,23,muted,610)
-    line('Analysis by '+str(call.get('username') or 'OrcAgent trader'),166,239,18,muted,610)
+    line('$'+symbol,168,143,58,width=570)
+    line(call.get('token_name') or 'Solana token',170,213,25,muted,565)
 
-    draw.rounded_rectangle((810,139,1144,271), radius=20, fill='#1a2730', outline='#34434b')
-    line('ENTRY PRICE · USD',834,157,17,gold,286)
+    line('RECORDED ENTRY · USD',790,152,19,muted,354)
     price = format_card_price(call.get('price_at_call'))
-    size = 32
-    while size > 16 and draw.textlength(price,font=font(size)) > 286:
+    size = 43
+    while size > 20 and draw.textlength(price,font=font(size)) > 354:
         size -= 1
-    line(price,834,193,size,width=286)
-    line('Recorded at publication',834,240,15,muted,286)
+    line(price,790,191,size,gold,354)
 
-    draw.rounded_rectangle((56,297,1144,444), radius=20, fill='#0c1319')
-    line('THE CALL',78,312,16,gold)
-    words = str(call.get('note') or 'Open the call, explore its chart and decide whether to trade.').split()
+    words = str(call.get('note') or 'Explore the full call and chart on OrcAgent.').split()
     first = []
-    while words and (not first or draw.textlength(' '.join(first+[words[0]]),font=font(26)) <= 1040):
+    while words and (not first or draw.textlength(' '.join(first+[words[0]]),font=font(32)) <= 1088):
         first.append(words.pop(0))
-    line(' '.join(first),78,342,26,width=1040)
+    line(' '.join(first),56,294,32,width=1088)
     if words:
-        line(' '.join(words),78,381,26,width=1040)
+        line(' '.join(words),56,341,32,width=1088)
+    draw.line((56,415,1144,415), fill='#2b3841', width=2)
 
-    line('CALLED BY',56,471,15,muted)
     author = str(call.get('username') or 'OrcAgent trader')
-    line(author+(' · Verified' if call.get('is_verified')==1 else ''),56,494,26,width=510)
-    line('SHARED BY' if inviter else 'OPEN CALL & CHART',624,471,15,muted)
-    line(inviter['username'] if inviter else 'Trade on OrcAgent',624,494,26,gold,520)
-    line(str(call.get('timestamp') or '')+' UTC',56,550,18,muted,510)
-    line('orcagent.fun/call/'+str(call['id']),624,548,22,gold,520)
-    line('A call is an opinion, not a buy or a guarantee of returns.',56,581,14,muted)
+    line('CALLED BY',56,442,18,muted,500)
+    line(author+(' · Verified' if call.get('is_verified')==1 else ''),56,470,29,width=510)
+    line('SHARED BY' if inviter else 'VIEW THE CALL',640,442,18,muted,504)
+    line(inviter['username'] if inviter else 'orcagent.fun',640,470,29,gold,504)
+    line(str(call.get('timestamp') or '')+' UTC',56,532,18,muted,510)
+    line('orcagent.fun/call/'+str(call['id']),640,529,23,white,504)
+    line('A call is an opinion, not a buy or a guarantee of returns.',56,578,17,muted,1088)
     buffer = io.BytesIO()
     image.save(buffer, format='PNG')
     return buffer.getvalue()
@@ -328,7 +324,7 @@ def install(d):
             c.execute('INSERT OR IGNORE INTO call_share_links VALUES (?,?,?,?)',(secrets.token_urlsafe(18),uid,call_id,time.time()))
             token=c.execute('SELECT token FROM call_share_links WHERE user_id=? AND call_id=?',(uid,call_id)).fetchone()[0]
         url=f'{BASE}/call/{call_id}?via={token}'
-        return jsonify(ok=True,url=url,card_url=f'{BASE}/api/call-card/{call_id}.png?v=2&via={token}',
+        return jsonify(ok=True,url=url,card_url=f'{BASE}/api/call-card/{call_id}.png?v=3&via={token}',
                        text=f'${value["symbol"] or value["mint"][:8]} · Token call on OrcAgent')
 
     @app.route('/invitations')
