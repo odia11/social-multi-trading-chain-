@@ -5,6 +5,7 @@ No client trade counters, wallet balances, payout rules or signing operations.
 from __future__ import annotations
 
 import io
+from functools import lru_cache
 import math
 from pathlib import Path
 import re
@@ -40,7 +41,7 @@ def public_call(path, call_id):
     with sqlite3.connect(path, timeout=10) as c:
         c.row_factory = sqlite3.Row
         row = c.execute('''SELECT t.id,t.mint,t.symbol,t.note,t.price_at_call,
-            t.timestamp,t.post_id,t.chain,u.id AS author_id,u.username,u.is_verified
+            t.timestamp,t.post_id,t.chain,t.token_name,t.image_url,u.id AS author_id,u.username,u.is_verified
             FROM token_calls t JOIN users u ON u.id=t.user_id WHERE t.id=?
             AND COALESCE(t.chain,'') IN ('','solana')''', (call_id,)).fetchone()
     return dict(row) if row else None
@@ -105,40 +106,103 @@ def metrics(path, uid):
                              url=f'{BASE}/call/{r[1]}?via={r[0]}') for r in shares])
 
 
-def render_card(call, inviter=None):
-    """1200×630 PNG from the recorded call, without remote images or price lookups."""
-    from PIL import Image, ImageDraw, ImageFont
+def format_card_price(value):
+    """Readable recorded USD price, including very small token prices."""
+    try:
+        price = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return 'Unavailable'
+    if not math.isfinite(price) or price <= 0:
+        return 'Unavailable'
+    if price < 1e-18:
+        return '< $0.000000000000000001'
+    places = 4 if price >= 1 else min(18, max(6, 2 - math.floor(math.log10(price))))
+    return '$' + f'{price:,.{places}f}'.rstrip('0').rstrip('.')
+
+
+@lru_cache(maxsize=128)
+def _card_logo(d, url, bucket):
+    """Reuse the existing HTTPS/SSRF/size guard; cache failures as well."""
+    from share_token_card import _fetch_image
+    from PIL import Image, ImageOps
+    logo = _fetch_image(d, url)
+    return ImageOps.fit(logo, (80,80), method=Image.Resampling.LANCZOS) if logo is not None else None
+
+
+def render_card(call, inviter=None, logo_img=None):
+    """1200×630 PNG from recorded call data and an optional guarded token logo."""
+    from PIL import Image, ImageDraw, ImageFont, ImageOps
     root = Path(__file__).resolve().parent / 'fonts'
     def font(size):
-        return ImageFont.truetype(str(root/'Geist-Bold.ttf'),size)
-    image = Image.new('RGB',(1200,630),'#080d11');draw=ImageDraw.Draw(image)
-    draw.rounded_rectangle((30,30,1170,600),radius=30,fill='#111a20',outline='#34434b',width=2)
-    gold='#f7b955';white='#f2f4f7';muted='#9aa3af'
-    def fit(text,size,width):
-        text=' '.join(str(text or '').split());f=font(size)
-        while len(text)>1 and draw.textlength(text,font=f)>width:text=text[:-2]+'…'
-        return text,f
-    def line(text,y,size,color=white,width=1060):
-        text,f=fit(text,size,width);draw.text((70,y),text,font=f,fill=color)
-    line('OrcAgent · SOLANA TOKEN CALL',60,28,gold)
-    line('$'+str(call['symbol'] or call['mint'][:8]),119,64)
-    line('Called by '+str(call['username'] or 'OrcAgent trader')+(' · Verified' if call['is_verified']==1 else ''),205,30)
-    price=call['price_at_call'];price=float(price or 0)
-    line('Entry: '+(f'${price:.8g} USD' if math.isfinite(price) and price>0 else 'Unavailable'),260,28,muted)
-    text=' '.join(str(call['note'] or 'Open the call, explore its chart and decide whether to trade.').split())
-    words=text.split();rows=[];current=''
-    for word in words:
-        candidate=(current+' '+word).strip()
-        if draw.textlength(candidate,font=font(28))>1060 and current:
-            rows.append(current);current=word
-        else:current=candidate
-        if len(rows)==2:break
-    if len(rows)<2:rows.append(current)
-    for i,row in enumerate(rows[:2]):line(row,322+i*39,28)
-    line('Shared by '+inviter['username'] if inviter else 'View call & trade on OrcAgent',435,26,gold)
-    line(str(call['timestamp'])+' UTC · A call is not a buy',489,22,muted)
-    line('orcagent.fun/call/'+str(call['id']),535,24)
-    buffer=io.BytesIO();image.save(buffer,format='PNG');return buffer.getvalue()
+        return ImageFont.truetype(str(root/'Geist-Bold.ttf'), size)
+    image = Image.new('RGB', (1200,630), '#080d11')
+    draw = ImageDraw.Draw(image)
+    gold, white, muted = '#f7b955', '#f2f4f7', '#9aa3af'
+    draw.rounded_rectangle((24,24,1176,606), radius=30, fill='#111a20', outline='#34434b', width=2)
+    def fitted(text, size, width):
+        text = ' '.join(str(text or '').split())
+        f = font(size)
+        if draw.textlength(text, font=f) > width:
+            while text and draw.textlength(text+'…', font=f) > width:
+                text = text[:-1]
+            text += '…'
+        return text, f
+    def line(text, x, y, size, color=white, width=1088):
+        text, f = fitted(text, size, width)
+        draw.text((x,y), text, font=f, fill=color)
+
+    draw.rounded_rectangle((56,51,108,103), radius=14, fill=gold)
+    draw.polygon(((82,64),(69,89),(95,89)), fill='#080d11')
+    line('OrcAgent',122,48,32)
+    line('SOLANA TOKEN CALL',124,88,16,gold)
+    draw.rounded_rectangle((966,57,1144,97), radius=15, fill='#202d36')
+    line('CALL #'+str(call['id']),986,65,18,muted,138)
+
+    symbol = str(call.get('symbol') or call['mint'][:8]).lstrip('$')
+    draw.ellipse((56,146,144,234), fill='#24313a', outline='#3d4c55', width=2)
+    if logo_img is not None:
+        logo = ImageOps.fit(logo_img.convert('RGB'), (80,80), method=Image.Resampling.LANCZOS)
+        mask = Image.new('L', (80,80), 0)
+        ImageDraw.Draw(mask).ellipse((0,0,79,79), fill=255)
+        image.paste(logo, (60,150), mask)
+    else:
+        initials = symbol[:2].upper()
+        f = font(27)
+        draw.text((100-draw.textlength(initials,font=f)/2,169), initials, font=f, fill=gold)
+    line('$'+symbol,164,141,48,width=610)
+    line(call.get('token_name') or 'Solana token',166,201,23,muted,610)
+    line('Analysis by '+str(call.get('username') or 'OrcAgent trader'),166,239,18,muted,610)
+
+    draw.rounded_rectangle((810,139,1144,271), radius=20, fill='#1a2730', outline='#34434b')
+    line('ENTRY PRICE · USD',834,157,17,gold,286)
+    price = format_card_price(call.get('price_at_call'))
+    size = 32
+    while size > 16 and draw.textlength(price,font=font(size)) > 286:
+        size -= 1
+    line(price,834,193,size,width=286)
+    line('Recorded at publication',834,240,15,muted,286)
+
+    draw.rounded_rectangle((56,297,1144,444), radius=20, fill='#0c1319')
+    line('THE CALL',78,312,16,gold)
+    words = str(call.get('note') or 'Open the call, explore its chart and decide whether to trade.').split()
+    first = []
+    while words and (not first or draw.textlength(' '.join(first+[words[0]]),font=font(26)) <= 1040):
+        first.append(words.pop(0))
+    line(' '.join(first),78,342,26,width=1040)
+    if words:
+        line(' '.join(words),78,381,26,width=1040)
+
+    line('CALLED BY',56,471,15,muted)
+    author = str(call.get('username') or 'OrcAgent trader')
+    line(author+(' · Verified' if call.get('is_verified')==1 else ''),56,494,26,width=510)
+    line('SHARED BY' if inviter else 'OPEN CALL & CHART',624,471,15,muted)
+    line(inviter['username'] if inviter else 'Trade on OrcAgent',624,494,26,gold,520)
+    line(str(call.get('timestamp') or '')+' UTC',56,550,18,muted,510)
+    line('orcagent.fun/call/'+str(call['id']),624,548,22,gold,520)
+    line('A call is an opinion, not a buy or a guarantee of returns.',56,581,14,muted)
+    buffer = io.BytesIO()
+    image.save(buffer, format='PNG')
+    return buffer.getvalue()
 
 
 def install(d):
@@ -245,7 +309,8 @@ def install(d):
     def call_card(call_id):
         value=call_data(call_id)
         if not value:return 'Call not found',404
-        response=d.make_response(render_card(value,inviter_for(call_id)))
+        logo=_card_logo(d,value['image_url'],int(time.time()//900)) if value.get('image_url') else None
+        response=d.make_response(render_card(value,inviter_for(call_id),logo))
         response.headers['Content-Type']='image/png'
         response.headers['Cache-Control']='public, max-age=300'
         response.headers['Content-Disposition']='inline; filename="orcagent-call-'+str(call_id)+'.png"'
@@ -263,7 +328,7 @@ def install(d):
             c.execute('INSERT OR IGNORE INTO call_share_links VALUES (?,?,?,?)',(secrets.token_urlsafe(18),uid,call_id,time.time()))
             token=c.execute('SELECT token FROM call_share_links WHERE user_id=? AND call_id=?',(uid,call_id)).fetchone()[0]
         url=f'{BASE}/call/{call_id}?via={token}'
-        return jsonify(ok=True,url=url,card_url=f'{BASE}/api/call-card/{call_id}.png?via={token}',
+        return jsonify(ok=True,url=url,card_url=f'{BASE}/api/call-card/{call_id}.png?v=2&via={token}',
                        text=f'${value["symbol"] or value["mint"][:8]} · Token call on OrcAgent')
 
     @app.route('/invitations')
