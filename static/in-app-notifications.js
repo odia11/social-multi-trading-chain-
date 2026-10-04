@@ -49,6 +49,8 @@ function labelFor(type){
   if(type==='message')return'New message';
   if(type==='tip')return'Tip received';
   if(type==='follow')return'New follower';
+  if(type==='follow_call')return'New token call';
+  if(type==='follow_post')return'New post from a trader you follow';
   if(type==='mention')return'You were mentioned';
   if(type==='reply')return'New reply';
   if(type==='reply_like'||type==='like')return'New like';
