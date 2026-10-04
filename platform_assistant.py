@@ -10,6 +10,7 @@ import re
 import sqlite3
 import threading
 import time
+import platform_learning as learning
 from zoneinfo import ZoneInfo
 from flask import jsonify, request
 
@@ -66,6 +67,8 @@ FAQ = (
     ('community', 'follow|volg|\\bdm\\b|message|bericht|community|feed|comment|reage', 'Use trader profiles to follow people, read their calls and continue conversations in comments or DMs. Tag @orcagent in a comment for platform guidance. Replies from this assistant are automated and limited to OrcAgent features.'),
 )
 
+LEARNABLE = {topic:english for topic,pattern,english in FAQ if topic not in ('secrets','bug')}
+
 def answer(message):
     if not isinstance(message, str) or not MENTION.search(message):
         return None
@@ -73,6 +76,8 @@ def answer(message):
     for topic, pattern, english in FAQ:
         if re.search(pattern, clean, re.I):
             return topic, LABEL + english
+    if re.fullmatch(r'\s*(?:hi|hello|hey|hello there|how are you|how are you doing|hoe gaat het|hallo|hoi)[\s!?.,]*',clean):
+        return 'welcome', LABEL + "I'm here to help you explore OrcAgent. Ask me about connecting Phantom, sharing calls, your portfolio, trading tools or platform fees. What would you like to do?"
     return 'scope', LABEL + (
         'I can explain OrcAgent features: Phantom connection, calls, sharing, portfolio, fees and Creator Rewards. '
         'Which feature do you mean, and what are you trying to do? '
@@ -80,6 +85,7 @@ def answer(message):
 
 def initialize(db):
     with sqlite3.connect(db, timeout=8) as c:
+        learning.initialize(c)
         c.execute("CREATE TABLE IF NOT EXISTS platform_assistant_settings (key TEXT PRIMARY KEY,value TEXT NOT NULL)")
         c.execute("""CREATE TABLE IF NOT EXISTS platform_assistant_events (
             event_key TEXT PRIMARY KEY,kind TEXT NOT NULL,source_user_id INTEGER,
@@ -87,7 +93,7 @@ def initialize(db):
         c.execute('CREATE INDEX IF NOT EXISTS platform_assistant_limits ON platform_assistant_events(kind,source_user_id,created_at)')
 
 def enabled(c, key):
-    env = {'posts':'ORCAGENT_PLATFORM_POSTS','replies':'ORCAGENT_PLATFORM_REPLIES'}[key]
+    env = {'posts':'ORCAGENT_PLATFORM_POSTS','replies':'ORCAGENT_PLATFORM_REPLIES','learning':'ORCAGENT_PLATFORM_LEARNING'}[key]
     if os.environ.get(env, '1') == '0':
         return False
     row = c.execute('SELECT value FROM platform_assistant_settings WHERE key=?', (key,)).fetchone()
@@ -139,6 +145,43 @@ def publish_due(db, now=None):
                   (key,'post',None,post_id,None,topic,now))
         return post_id
 
+def within_reply_limits(c,user_id,now):
+    recent = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND source_user_id=? AND created_at>?",(user_id,now-900)).fetchone()[0]
+    daily = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND source_user_id=? AND created_at>?",(user_id,now-86400)).fetchone()[0]
+    total = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND created_at>?",(now-86400,)).fetchone()[0]
+    return recent<2 and daily<8 and total<120
+
+def reply_to_post(d,post_number,wallet,now=None):
+    # Only a successfully authenticated NEW post; no edits, reposts or backfill.
+    if type(post_number) is not int or post_number<=0:
+        return None
+    now = time.time() if now is None else now
+    with sqlite3.connect(d.DB_FILE,timeout=8) as c:
+        c.execute('BEGIN IMMEDIATE')
+        if not enabled(c,'replies'):
+            return None
+        author = identity(c)
+        if not author:
+            return None
+        post = c.execute('SELECT wallet,content FROM feed_posts WHERE id=?',(post_number,)).fetchone()
+        member = c.execute('SELECT id FROM users WHERE wallet_address=?',(wallet,)).fetchone()
+        if not post or post[0]!=wallet or not member or member[0]==author[0]:
+            return None
+        text = d._feed_text_part(post[1]) if hasattr(d,'_feed_text_part') else re.split(r'__(?:CHART|TRADE|CALL)__',post[1],maxsplit=1)[0]
+        response = answer(text)
+        key = 'post-reply:'+str(post_number)
+        if not response or c.execute('SELECT 1 FROM platform_assistant_events WHERE event_key=?',(key,)).fetchone() or not within_reply_limits(c,member[0],now):
+            return None
+        topic,message = response
+        post_id = 'p'+str(post_number)
+        cur = c.execute('INSERT INTO feed_replies(user_id,post_id,message,created_at,parent_reply_id) VALUES(?,?,?,?,NULL)',
+                        (author[0],post_id,message,utcstamp(now)))
+        c.execute('INSERT INTO platform_assistant_events VALUES(?,?,?,?,?,?,?)',
+                  (key,'reply',member[0],post_id,cur.lastrowid,topic,now))
+        c.execute('INSERT INTO notifications(user_id,type,content,link,actor_wallet) VALUES(?,?,?,?,?)',
+                  (member[0],'reply','OrcAgent answered your platform question',d._post_link(c,post_id),author[1]))
+        return cur.lastrowid
+
 def reply_to(d, source_id, wallet, now=None):
     now = time.time() if now is None else now
     with sqlite3.connect(d.DB_FILE, timeout=8) as c:
@@ -148,7 +191,7 @@ def reply_to(d, source_id, wallet, now=None):
         author = identity(c)
         if not author:
             return None
-        source = c.execute('SELECT user_id,post_id,message,created_at FROM feed_replies WHERE id=?', (source_id,)).fetchone()
+        source = c.execute('SELECT user_id,post_id,message,created_at,parent_reply_id FROM feed_replies WHERE id=?', (source_id,)).fetchone()
         if not source or source[0] == author[0]:
             return None
         member = c.execute('SELECT wallet_address FROM users WHERE id=?', (source[0],)).fetchone()
@@ -157,16 +200,27 @@ def reply_to(d, source_id, wallet, now=None):
         created = d._feed_post_created_at(c, source[1])
         if not created or c.execute('SELECT datetime(?)>=datetime(?)', (source[3],created)).fetchone()[0] != 1:
             return None
-        response = answer(source[2])
+        explicit = answer(source[2])
+        response = explicit
+        previous = None
+        use_learning = enabled(c,'learning')
+        if explicit and use_learning:
+            previous = learning.prior(c,d,source,author[0])
+            if explicit[0]=='scope':
+                topic = learning.lookup(c,d,source[2],MENTION,LEARNABLE,now)
+                clean = MENTION.sub('',source[2])
+                if not topic and previous and previous[0] in LEARNABLE and len(clean)<=160 and learning.FOLLOWUP.search(clean) and not learning.UNSAFE.search(clean):
+                    topic = previous[0]
+                if topic:
+                    response = topic, LABEL + LEARNABLE[topic]
         key = 'reply:' + str(source_id)
         if not response or c.execute('SELECT 1 FROM platform_assistant_events WHERE event_key=?', (key,)).fetchone():
             return None
-        # Limit assistant amplification, independently of ordinary comment limits.
-        recent = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND source_user_id=? AND created_at>?", (source[0],now-900)).fetchone()[0]
-        daily = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND source_user_id=? AND created_at>?", (source[0],now-86400)).fetchone()[0]
-        total = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND created_at>?", (now-86400,)).fetchone()[0]
-        if recent >= 2 or daily >= 8 or total >= 120:
+        if not within_reply_limits(c,source[0],now):
             return None
+        if use_learning:
+            observed = explicit[0] if explicit[0]!='scope' or response[0]=='scope' else None
+            learning.observe(c,d,source_id,source,observed,previous,MENTION,LEARNABLE,now)
         topic, message = response
         cur = c.execute('INSERT INTO feed_replies(user_id,post_id,message,created_at,parent_reply_id) VALUES(?,?,?,?,?)',
                         (author[0],source[1],message,utcstamp(now),source_id))
@@ -185,7 +239,7 @@ def install(d):
 
     @app.after_request
     def mentioned(response):
-        if request.path != '/api/feed/reply' or request.method != 'POST' or response.status_code != 200 or not response.is_json:
+        if request.path not in ('/api/feed/reply','/api/feed/post') or request.method != 'POST' or response.status_code != 200 or not response.is_json:
             return response
         data = response.get_json(silent=True)
         if not isinstance(data,dict) or not data.get('ok') or type(data.get('id')) is not int:
@@ -193,7 +247,7 @@ def install(d):
         try:
             wallet = d._authenticated_wallet()
             if wallet:
-                reply_id = reply_to(d,data['id'],wallet)
+                reply_id = reply_to_post(d,data['id'],wallet) if request.path=='/api/feed/post' else reply_to(d,data['id'],wallet)
                 if reply_id:
                     data['platform_reply_id'] = reply_id
                     response.set_data(app.json.dumps(data))
@@ -209,9 +263,10 @@ def install(d):
             return err
         with sqlite3.connect(d.DB_FILE,timeout=8) as c:
             author = identity(c)
-            state = dict(posts=enabled(c,'posts'),replies=enabled(c,'replies'),author=author[2] if author else None)
+            state = dict(posts=enabled(c,'posts'),replies=enabled(c,'replies'),learning=enabled(c,'learning'),author=author[2] if author else None)
+            questions = learning.dashboard(c,d,MENTION,LEARNABLE,time.time())
             recent = c.execute('SELECT kind,post_id,reply_id,topic,created_at FROM platform_assistant_events ORDER BY created_at DESC LIMIT 20').fetchall()
-        return d._render_no_cache('platform_assistant_admin.html',state=state,recent=recent,theses=THESES,csrf_token=d._get_csrf_token())
+        return d._render_no_cache('platform_assistant_admin.html',state=state,recent=recent,theses=THESES,questions=questions,topics=LEARNABLE,csrf_token=d._get_csrf_token())
 
     @app.route('/api/admin/platform-assistant',methods=['POST'])
     def configure():
@@ -221,12 +276,35 @@ def install(d):
         if not d._validate_csrf(request.headers.get('X-CSRF-Token','')):
             return jsonify(ok=False,error='CSRF validation failed'),403
         body = request.get_json(silent=True)
-        if not isinstance(body,dict) or set(body)-{'posts','replies'} or not body or any(type(v) is not bool for v in body.values()):
-            return jsonify(ok=False,error='Use boolean posts/replies settings'),400
+        if not isinstance(body,dict) or set(body)-{'posts','replies','learning'} or not body or any(type(v) is not bool for v in body.values()):
+            return jsonify(ok=False,error='Use boolean posts/replies/learning settings'),400
         with sqlite3.connect(d.DB_FILE,timeout=8) as c:
             c.execute('BEGIN IMMEDIATE')
             for key, value in body.items():
                 c.execute('INSERT OR REPLACE INTO platform_assistant_settings VALUES(?,?)',(key,'1' if value else '0'))
+        return jsonify(ok=True)
+
+    @app.route('/api/admin/platform-assistant/learning',methods=['POST'])
+    def review_learning():
+        err = d._require_role('admin','executive')
+        if err:
+            return err
+        if not d._validate_csrf(request.headers.get('X-CSRF-Token','')):
+            return jsonify(ok=False,error='CSRF validation failed'),403
+        body = request.get_json(silent=True)
+        if not isinstance(body,dict) or set(body)-{'question','topic','status'} or any(not isinstance(v,str) for v in body.values()):
+            return jsonify(ok=False,error='Invalid review'),400
+        wallet = d._authenticated_wallet()
+        if not wallet:
+            return jsonify(ok=False,error='Authentication required'),401
+        try:
+            with sqlite3.connect(d.DB_FILE,timeout=8) as c:
+                c.execute('BEGIN IMMEDIATE')
+                learning.review(c,body.get('question'),body.get('topic'),body.get('status'),wallet,time.time(),LEARNABLE)
+        except ValueError as e:
+            return jsonify(ok=False,error=str(e)),400
+        except LookupError as e:
+            return jsonify(ok=False,error=str(e)),404
         return jsonify(ok=True)
 
     def loop():
