@@ -161,11 +161,11 @@ def _draw_common(dm, img, symbol, price, pct, mode='CHART', entry_price=None,
     draw.text((736, 278), perf_label, font=_font(dm, True, 15), fill=(211, 217, 224))
     _draw_chart_line(draw, pct)
 
-    # Asset/channel strip, intentionally generic so it is correct across chains.
+    # Asset/channel strip reflects Solana trading with USDC.
     draw.line([(50, 463), (W-50, 463)], fill=(119, 83, 36), width=1)
     draw.ellipse([58, 479, 99, 520], outline=_GOLD2, width=3)
     draw.line([(69, 500), (87, 500)], fill=_GOLD2, width=3)
-    draw.text((121, 485), 'MULTI-CHAIN', font=_font(dm, True, 17), fill=(226, 228, 232))
+    draw.text((121, 485), 'SOLANA · USDC', font=_font(dm, True, 17), fill=(226, 228, 232))
     draw.line([(430, 482), (430, 518)], fill=(105, 107, 112), width=1)
     draw.text((468, 485), 'orcagent.fun', font=_font(dm, False, 18), fill=(226, 228, 232))
 

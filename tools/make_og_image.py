@@ -70,13 +70,13 @@ def main():
 
     # Subline.
     sf = font('Geist-Medium.ttf', 28)
-    for i, line in enumerate(('Multi-chain social trading.', 'Discover tokens, follow traders,', 'trade across chains with USDC.')):
+    for i, line in enumerate(('Solana social trading.', 'Discover tokens, follow traders,', 'trade Solana tokens with USDC.')):
         d.text((s(72), s(370 + i * 38)), line, font=sf, fill=SUB, anchor='ls')
 
     # Chains.
     cf = font('JetBrainsMono-Bold.ttf', 17)
     x = 72
-    for name in ('Solana', 'Base', 'BNB', 'Arbitrum', 'Robinhood'):
+    for name in ('Solana', 'USDC'):
         tw = d.textlength(name, font=cf) / S
         d.rounded_rectangle([s(x), s(478), s(x + tw + 28), s(512)], radius=s(17), outline=LINE, width=s(1.5), fill=(12, 16, 22))
         d.text((s(x + 14 + tw / 2), s(495)), name, font=cf, fill=(201, 207, 216), anchor='mm')
