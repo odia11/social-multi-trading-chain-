@@ -278,6 +278,7 @@ def install(dashboard_module):
             "Allow: /api/trade-card/",
             "Allow: /api/post-og-image/",
             "Allow: /api/trending-card/",
+            "Allow: /api/call-card/",
             "Disallow: /api/",
             "Disallow: /admin/",
             "Disallow: /phantom/",

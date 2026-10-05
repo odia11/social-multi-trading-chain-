@@ -24,10 +24,10 @@
       var token=await fetch('/api/csrf-token',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json();});
       var response=await fetch('/api/calls/'+id+'/share',{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'X-CSRF-Token':token.token}});
       var data=await response.json();
-      if(response.status===401){show({url:'https://orcagent.fun/call/'+id,card_url:'/api/call-card/'+id+'.png',text:'View this Solana token call on OrcAgent'},false);return;}
+      if(response.status===401){show({url:'https://orcagent.fun/call/'+id+'?v=4',card_url:'/api/call-card/'+id+'.png?v=4',text:'View this Solana token call on OrcAgent'},false);return;}
       if(!response.ok||!data.ok)throw new Error(data.msg||'Could not create a share link. Try again.');
       show(data,true);
-    }catch(e){show({url:'https://orcagent.fun/call/'+id,card_url:'/api/call-card/'+id+'.png',text:'View this call on OrcAgent'},false);dialog.querySelector('[role="status"]').textContent=e.message;}
+    }catch(e){show({url:'https://orcagent.fun/call/'+id+'?v=4',card_url:'/api/call-card/'+id+'.png?v=4',text:'View this call on OrcAgent'},false);dialog.querySelector('[role="status"]').textContent=e.message;}
     finally{busy=false;}
   }
   document.addEventListener('click',function(e){var button=e.target.closest('.oa-share-call');if(!button)return;e.preventDefault();e.stopPropagation();share(button.dataset.callId);},true);

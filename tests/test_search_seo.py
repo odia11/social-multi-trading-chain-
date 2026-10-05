@@ -93,6 +93,10 @@ def test_public_share_artwork_is_crawlable_without_opening_private_api():
     def _post_preview():
         return Response(b"png", mimetype="image/png")
 
+    @app.get("/api/call-card/79.png")
+    def _call_preview():
+        return Response(b"png", mimetype="image/png")
+
     @app.get("/api/wallet/private")
     def _private_api():
         return {"ok": True}
@@ -100,12 +104,13 @@ def test_public_share_artwork_is_crawlable_without_opening_private_api():
     client = app.test_client()
     parser = RobotFileParser()
     parser.parse(client.get("/robots.txt").get_data(as_text=True).splitlines())
-    for path in ("/api/trade-card/p449.png", "/api/post-og-image/p449"):
+    for path in ("/api/trade-card/p449.png", "/api/post-og-image/p449", "/api/call-card/79.png?v=4"):
         assert parser.can_fetch("Twitterbot", path)
         image = client.get(path)
         assert image.status_code == 200
         assert "X-Robots-Tag" not in image.headers
 
+    assert not parser.can_fetch("Twitterbot", "/api/calls/79/share")
     assert not parser.can_fetch("Twitterbot", "/api/wallet/private")
     assert client.get("/api/wallet/private").headers["X-Robots-Tag"] == "noindex, nofollow, noarchive"
 
