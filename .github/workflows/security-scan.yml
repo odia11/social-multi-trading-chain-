@@ -47,6 +47,7 @@ jobs:
           node tests/test_feed_reply_orphans.js
           node tests/test_agent_clean_replies.js
           node tests/test_agent_token_flow.js
+          node tests/test_agent_token_identity.js
           node --check static/live-market-pro.js
           node --check static/watchlist.js
           node --check static/home-feed-chart-redesign.js
