@@ -148,10 +148,10 @@ INSERT INTO feed_posts(wallet,content,created_at) VALUES('member','A post','2026
         self.assertIsNone(p.reply_to(self.d,self.source(post='g1'),'member',self.now))
         self.assertIsNone(p.reply_to(self.d,self.source(),'another-wallet',self.now))
         self.assertIsNone(p.reply_to(self.d,self.source(created='2020-01-01'),'member',self.now))
-    def test_throttling_and_disable(self):
-        for _ in range(6):
+    def test_unlimited_replies_and_disable(self):
+        for _ in range(30):
             self.assertIsNotNone(p.reply_to(self.d,self.source(),'member',self.now))
-        self.assertIsNone(p.reply_to(self.d,self.source(),'member',self.now))
+        self.assertIsNotNone(p.reply_to(self.d,self.source(),'member',self.now))
         self.assertIsNotNone(p.reply_to(self.d,self.source(),'member',self.now+901))
         with sqlite3.connect(self.db) as c:
             c.execute("INSERT INTO platform_assistant_settings VALUES('replies','0')")

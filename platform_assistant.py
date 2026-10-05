@@ -189,10 +189,25 @@ def publish_due(db, now=None):
         return post_id
 
 def within_reply_limits(c,user_id,now):
-    recent = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND source_user_id=? AND created_at>?",(user_id,now-900)).fetchone()[0]
-    daily = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND source_user_id=? AND created_at>?",(user_id,now-86400)).fetchone()[0]
-    total = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND created_at>?",(now-86400,)).fetchone()[0]
-    return recent<6 and daily<20 and total<120
+    # User-requested unlimited platform conversations; provider quotas remain
+    # separate and only affect price lookups, never the ability to reply.
+    return True
+
+def _conversation_message(c,d,source,author_id,now):
+    message = source[2]
+    if MENTION.search(message):
+        return message
+    previous = learning.prior(c,d,source,author_id)
+    if previous and source[4]:
+        parent = c.execute('SELECT user_id,created_at FROM feed_replies WHERE id=?',(source[4],)).fetchone()
+        if parent and parent[0]==author_id:
+            try:
+                stamp = dt.datetime.strptime(parent[1],'%Y-%m-%d %H:%M:%S').replace(tzinfo=dt.timezone.utc).timestamp()
+                if 0<=now-stamp<=3600:
+                    return '@orcagent '+message
+            except (ValueError,TypeError):
+                pass
+    return message
 
 def _prepare_market(d, source_id, wallet, kind, now):
     # External I/O finishes BEFORE BEGIN IMMEDIATE. Revalidate the source below.
@@ -208,6 +223,11 @@ def _prepare_market(d, source_id, wallet, kind, now):
         if not row or not within_reply_limits(c,row[1],now):
             return None
         text = d._feed_text_part(row[0]) if kind=='post' and hasattr(d,'_feed_text_part') else re.split(r'__(?:CHART|TRADE|CALL)__',row[0],maxsplit=1)[0]
+        if kind=='reply' and not MENTION.search(text):
+            source = c.execute('SELECT user_id,post_id,message,created_at,parent_reply_id FROM feed_replies WHERE id=?',(source_id,)).fetchone()
+            official = c.execute("SELECT id FROM users WHERE lower(username)='orcagent' AND is_verified=1").fetchall()
+            if source and len(official)==1:
+                text = _conversation_message(c,d,source,official[0][0],now)
         if not MENTION.search(text):
             return None
         q = prices.query(MENTION.sub('',text))
@@ -271,7 +291,8 @@ def reply_to(d, source_id, wallet, now=None):
             return None
         use_learning = enabled(c,'learning')
         previous = learning.prior(c,d,source,author[0]) if use_learning else None
-        explicit = answer(source[2], previous[0] if previous else None, market=_market_for(source[2],market))
+        message = _conversation_message(c,d,source,author[0],now)
+        explicit = answer(message, previous[0] if previous else None, market=_market_for(message,market))
         response = explicit
         if explicit and use_learning:
             if explicit[0]=='scope':
