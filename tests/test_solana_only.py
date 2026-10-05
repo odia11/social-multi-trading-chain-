@@ -164,7 +164,7 @@ for name, text in (('wallet onboarding server', onboard_py), ('wallet onboarding
           'evm_private_key' not in text and 'freshEvmKey' not in text)
 check('new trading-wallet generation stores only Solana key',
       'bsc_wallet_address=?, encrypted_private_key_bsc=?' not in gen_py)
-check('active portfolio snapshot contains no EVM wallet', "'wallets': {'solana': onchain_wallet}" in portfolio)
+check('active portfolio snapshot contains no EVM wallet', "wallets={'solana':owner}" in portfolio)
 check('portfolio history is Solana-filtered',
       "COALESCE(q.destination_chain,'solana'))='solana'" in history
       and "COALESCE(chain,'solana'))='solana'" in history)
