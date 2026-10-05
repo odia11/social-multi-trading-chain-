@@ -73,9 +73,10 @@ def test_high_risk_dom_sinks_escape_or_avoid_untrusted_html():
     assert "var side = String(r.side||'').toLowerCase()==='sell' ? 'sell' : 'buy';" in live
     # Token symbols and avatar/image URLs are external data. Keep them out of
     # raw HTML execution contexts even if the global runtime guard regresses.
-    assert "function setTradeNote(note,sell,sym)" in live_redesign
-    assert "note.innerHTML=sell?" not in live_redesign
-    assert "b.textContent=(sell?'selling $':'buying $')" in live_redesign
+    # The duplicate swap preview and its external-symbol HTML sink were removed.
+    assert "installModernSwap" not in live_redesign
+    assert "note.innerHTML" not in live_redesign
+    assert "_sheetEl('pt-sheet-sym').textContent" in live
     assert "avDiv.replaceChildren()" in js and "img.src=avatar" in js
     assert "function safeImgUrl(v)" in navbar and "safe=safeImgUrl(imgUrl)" in navbar
 
