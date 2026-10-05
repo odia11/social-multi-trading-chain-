@@ -10076,10 +10076,8 @@ function _feedToggleReply(btn, postId){
   var open = rbox.classList.toggle('open');
   if(open){
     rbox.dataset.openedAt = Date.now();
-    if(!rbox.dataset.repliesLoaded){
-      rbox.dataset.repliesLoaded = '1';
-      _feedLoadReplies(postId);
-    }
+    // Reopening must retry failed loads and include replies posted since last open.
+    _feedLoadReplies(postId);
     // Opening the thread counts as having seen it -- clear the new-reply
     // badge immediately instead of waiting for the next feed refresh to
     // notice the localStorage write below (see _fcHasNewReply()).
@@ -10244,7 +10242,6 @@ async function _jumpToPost(postId, notifType, replyId){
     rbox.dataset.openedAt=Date.now();
   }
   if(rbox && (replyId || !rbox.dataset.repliesLoaded)){
-    rbox.dataset.repliesLoaded='1';
     await _feedLoadReplies(postId);
   }
   if(replyId){
@@ -10555,22 +10552,43 @@ function _feedRenderReplyTree(replies, postId){
 
 function _feedLoadReplies(postId){
   var list = document.getElementById('rlist-'+postId);
-  if(!list) return;
-  return fetch('/api/feed/replies/'+encodeURIComponent(postId))
-    .then(function(r){ return r.json(); })
+  if(!list) return Promise.resolve(false);
+  if(list._replyLoad)return list._replyLoad;
+  var box=document.getElementById('rbox-'+postId);
+  var hasReplies=!!list.querySelector('.fc-reply-item');
+  var oldStatus=list.querySelector('.fc-replies-status');
+  if(oldStatus)oldStatus.remove();
+  if(!hasReplies)list.innerHTML='<div class="fc-replies-status" role="status" style="font-size:12px;color:var(--muted);padding:10px 0">Loading replies…</div>';
+  list.setAttribute('aria-busy','true');
+  list._replyLoad = fetch('/api/feed/replies/'+encodeURIComponent(postId))
+    .then(function(r){ if(r.ok===false)throw new Error('Reply request failed');return r.json(); })
     .then(function(d){
-      if(!d.ok) return;
+      if(!d.ok || !Array.isArray(d.replies))throw new Error('Replies unavailable');
+      // A feed refresh may replace the card while this request is in flight.
+      if(document.getElementById('rlist-'+postId)!==list)return false;
       var card=document.getElementById('fc-card-'+postId);
       var count=card && card.querySelector('.fc-reply-count');
-      if(count) count.textContent=String((d.replies||[]).length);
-      if(!d.replies||!d.replies.length){
+      if(!d.replies.length){
         list.innerHTML='<div style="font-size:12px;color:var(--muted);padding:4px 0">No replies yet — be the first.</div>';
-        return;
+      }else{
+        list.innerHTML = _feedRenderReplyTree(d.replies, postId);
       }
-      list.innerHTML = _feedRenderReplyTree(d.replies, postId);
       if(count)count.textContent=String(list.querySelectorAll('.fc-reply-item').length);
+      if(box)box.dataset.repliesLoaded='1';
+      return true;
     })
-    .catch(function(){});
+    .catch(function(){
+      if(document.getElementById('rlist-'+postId)!==list)return false;
+      if(box)delete box.dataset.repliesLoaded;
+      var error='<div class="fc-replies-status" role="alert" style="font-size:12px;color:var(--muted);padding:10px 0">Could not load replies. <button type="button" data-post-id="'+esc(postId)+'" onclick="event.stopPropagation();_feedLoadReplies(this.dataset.postId)" style="border:0;background:transparent;color:#f7b955;font:inherit;font-weight:600;cursor:pointer">Try again</button></div>';
+      if(hasReplies)list.insertAdjacentHTML('afterbegin',error);
+      else list.innerHTML=error;
+      return false;
+    }).finally(function(){
+      list.removeAttribute('aria-busy');
+      delete list._replyLoad;
+    });
+  return list._replyLoad;
 }
 
 function _feedLikeReply(replyId, btn){
