@@ -102,6 +102,8 @@ def initialize(db):
 
 def _clean_existing_prefixes(c):
     """Remove only fixed intros from recorded posts/replies of the verified agent."""
+    if not c.in_transaction:
+        c.execute('BEGIN IMMEDIATE')
     key = 'content_prefix_cleanup_v1'
     if c.execute('SELECT 1 FROM platform_assistant_settings WHERE key=?', (key,)).fetchone():
         return

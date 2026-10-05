@@ -40,7 +40,7 @@ INSERT INTO feed_posts(wallet,content,created_at) VALUES('member','A post','2026
 
     def test_existing_prefix_cleanup_is_scoped_and_idempotent(self):
         with sqlite3.connect(self.db) as c:
-            c.execute("DELETE FROM platform_assistant_settings WHERE key='content_prefix_cleanup_v1'")
+            c.execute("DELETE FROM platform_assistant_settings WHERE key IN ('content_prefix_cleanup_v1','author_id')")
             intro='OrcAgent · Platform thesis (automated)\n\n'
             pid=c.execute('INSERT INTO feed_posts(wallet,content) VALUES(?,?)',('official',intro+'Original thesis')).lastrowid
             copied=c.execute('INSERT INTO feed_posts(wallet,content) VALUES(?,?)',('member',intro+'User copy')).lastrowid
