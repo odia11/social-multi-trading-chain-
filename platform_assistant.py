@@ -17,7 +17,7 @@ from flask import jsonify, request
 TZ = ZoneInfo('Europe/Amsterdam')
 HOURS = (9, 15, 21)
 MENTION = re.compile(r'(?<![\w@])@orcagent(?![\w])', re.I)
-LABEL = 'Automated · '
+LABEL = ''
 # Approved product copy, not generated claims about prices or user performance.
 THESES = (
 ('calls', 'A token ticker is only the start. A useful call explains the reasoning and records an entry price. Publish your analysis on OrcAgent so others can explore the call and its chart before making their own decision.'),
@@ -98,6 +98,32 @@ def initialize(db):
             event_key TEXT PRIMARY KEY,kind TEXT NOT NULL,source_user_id INTEGER,
             post_id TEXT,reply_id INTEGER,topic TEXT NOT NULL,created_at REAL NOT NULL)""")
         c.execute('CREATE INDEX IF NOT EXISTS platform_assistant_limits ON platform_assistant_events(kind,source_user_id,created_at)')
+        _clean_existing_prefixes(c)
+
+def _clean_existing_prefixes(c):
+    """Remove only fixed intros from recorded posts/replies of the verified agent."""
+    key = 'content_prefix_cleanup_v1'
+    if c.execute('SELECT 1 FROM platform_assistant_settings WHERE key=?', (key,)).fetchone():
+        return
+    author = identity(c)
+    if not author:
+        return
+    prefix = 'OrcAgent · Platform thesis (automated)'
+    posts = c.execute("SELECT p.id,p.content FROM feed_posts p JOIN platform_assistant_events e "
+                      "ON e.post_id='p'||p.id AND e.kind='post' WHERE p.wallet=?", (author[1],)).fetchall()
+    for post_id, content in posts:
+        if isinstance(content, str) and content.startswith(prefix):
+            c.execute('UPDATE feed_posts SET content=? WHERE id=?',
+                      (content[len(prefix):].lstrip(), post_id))
+    prefix = 'Automated · '
+    replies = c.execute("SELECT r.id,r.message FROM feed_replies r JOIN platform_assistant_events e "
+                        "ON e.reply_id=r.id AND e.kind='reply' WHERE r.user_id=?", (author[0],)).fetchall()
+    for reply_id, message in replies:
+        if isinstance(message, str) and message.startswith(prefix):
+            c.execute('UPDATE feed_replies SET message=? WHERE id=?',
+                      (message[len(prefix):].lstrip(), reply_id))
+    c.execute('INSERT INTO platform_assistant_settings VALUES(?,?)', (key, '1'))
+
 
 def enabled(c, key):
     env = {'posts':'ORCAGENT_PLATFORM_POSTS','replies':'ORCAGENT_PLATFORM_REPLIES','learning':'ORCAGENT_PLATFORM_LEARNING'}[key]
@@ -144,7 +170,7 @@ def publish_due(db, now=None):
             return None
         sequence = (slot.date() - dt.date(2026,10,4)).days * 3 + HOURS.index(slot.hour)
         topic, text = THESES[sequence % len(THESES)]
-        content = 'OrcAgent · Platform thesis (automated)\n\n' + text
+        content = text
         cur = c.execute('INSERT INTO feed_posts(wallet,content,created_at) VALUES(?,?,?)',
                         (author[1], content, utcstamp(now)))
         post_id = 'p'+str(cur.lastrowid)

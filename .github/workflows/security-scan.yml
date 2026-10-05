@@ -71,6 +71,7 @@ jobs:
           python tests/test_solana_buy_flow.py
           python tests/test_sell_a_share.py
           bash deploy/check-performance-contract.sh
+          PYTHONPATH=.:tests python -m unittest tests.test_platform_assistant tests.test_platform_learning
 
       - name: pip-audit
         run: pip-audit --strict -r requirements.txt
