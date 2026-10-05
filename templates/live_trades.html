@@ -49,6 +49,9 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:'J
 .lt-empty{text-align:center;padding:26px 16px;background:var(--bg2);border:1px dashed var(--bg4);border-radius:14px;color:var(--muted);font-size:12.5px;margin-bottom:18px}
 .lt-empty a{color:var(--accent);text-decoration:none;font-weight:700}
 @media(max-width:420px){.lt-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.lt-wallet{font-size:11px;color:var(--muted);margin:8px 0 16px;overflow-wrap:anywhere}.lt-wallet a{color:var(--accent)}
+.lt-sell{display:block;width:100%;min-height:44px;margin-top:12px;border:1px solid var(--accent);border-radius:10px;background:transparent;color:var(--accent);font:inherit;font-weight:700;cursor:pointer}.lt-sell:disabled{opacity:.45;cursor:default}
+.lt-dialog{margin:auto;width:calc(100% - 32px);max-width:400px;padding:24px;background:var(--bg2);color:var(--text);border:1px solid var(--bg4);border-radius:20px}.lt-dialog::backdrop{background:rgba(0,0,0,.75)}.lt-dialog h2{margin-bottom:12px}.lt-dialog p{color:var(--muted);margin:12px 0}.lt-dialog-actions{display:flex;gap:12px}.lt-dialog-actions button{flex:1}.lt-dialog-actions .primary{background:var(--accent);color:var(--bg)}#lt-sell-error{color:var(--red)}#lt-feedback{color:var(--green);margin:12px 0}
 </style>
 </head>
 <body>
@@ -58,6 +61,8 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:'J
     <h1 class="lt-title">Live Trades</h1><span class="lt-live-dot" aria-hidden="true"></span>
     <a class="lt-manage-link" href="/bot">Manage bot</a>
   </div>
+  <p class="lt-wallet">Trading wallet: <a href="https://solscan.io/account/{{ trading_wallet }}" target="_blank" rel="noopener noreferrer">{{ trading_wallet }}</a></p>
+  <p id="lt-feedback" role="status"></p>
   <div class="lt-stats">
     <div class="lt-stat"><div class="lt-stat-label">Bot</div><div class="lt-stat-value"><span class="lt-bot-dot" id="lt-bot-dot"></span><span id="lt-bot-state">—</span></div></div>
     <div class="lt-stat"><div class="lt-stat-label">Ready</div><div class="lt-stat-value" id="lt-ready">—</div></div>
@@ -71,9 +76,17 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:'J
   <div class="lt-section"><h2>Bot trades</h2><span class="lt-count" id="lt-closed-count"></span></div>
   <div id="lt-closed"></div>
 </main>
+<dialog id="lt-sell-dialog" class="lt-dialog" aria-labelledby="lt-sell-title">
+<h2 id="lt-sell-title">Sell this position?</h2>
+<p>Sell all tokens held in your trading wallet. This overrides the bot’s exit for this position. Network and trading fees apply.</p>
+<input type="hidden" id="lt-sell-mint">
+<p id="lt-sell-error" role="alert"></p>
+<div class="lt-dialog-actions"><button class="lt-sell" id="lt-sell-cancel">Cancel</button><button class="lt-sell primary" id="lt-sell-confirm">Sell all</button></div>
+</dialog>
 <script>
 var _ltInitial = {positions: {{ open_positions|tojson }}, trades: {{ closed_trades|tojson }}};
 var _ltBot = {{ bot_status|tojson }};
+var _ltCsrf = {{ csrf_token|tojson }};
 function _ltEsc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 // Token prices run from dollars down to a millionth of a cent: keep four
 // significant digits instead of a fixed six decimals that shows 0.000000.
@@ -120,10 +133,11 @@ function _ltOpenHtml(p){
     + '<div class="lt-grid">'
       + '<div><div class="lt-k">Entry</div><div class="lt-v">' + _ltPrice(p.entry_price) + '</div></div>'
       + '<div><div class="lt-k">Now</div><div class="lt-v">' + (p.price_known ? _ltPrice(p.current_price) : '—') + '</div></div>'
-      + '<div><div class="lt-k">Stake</div><div class="lt-v">' + _ltUsd(p.stake_usd) + '</div></div>'
+      + '<div><div class="lt-k">Stake</div><div class="lt-v">' + (p.stake_usd == null ? '—' : _ltUsd(p.stake_usd)) + '</div></div>'
     + '</div>'
     + '<div class="lt-foot">' + (p.opened_ts ? '<span>Bought ' + _ltAgo(p.opened_ts) + '</span>' : '')
       + targets.map(function(t){ return '<span>' + t + '</span>'; }).join('') + '</div>'
+    + (p.can_sell ? '<button class="lt-sell" data-sell-mint="' + _ltEsc(p.mint_address) + '" data-sell-symbol="' + _ltEsc(p.token) + '">Sell $' + _ltEsc(p.token) + '</button>' : '<p class="lt-foot">Balance verification unavailable · selling disabled</p>')
   + '</div>';
 }
 
@@ -175,7 +189,7 @@ async function _ltPoll(){
   try{
     var r = await fetch('/api/live-trades', {cache: 'no-store'});
     var d = await r.json();
-    if(d && d.ok) _ltRender(d);
+    if(d && d.ok && !_ltSelling) _ltRender(d);
   }catch(e){ console.error('[live-trades] poll failed', e); }
 }
 async function _ltPollBotStatus(){
@@ -189,6 +203,7 @@ _ltRender(_ltInitial);
 _ltUpdateBotStatus(_ltBot);
 setInterval(function(){ if(!document.hidden){ _ltPoll(); _ltPollBotStatus(); } }, 12000);
 </script>
+<script src="/static/live-trades-sell.js?v={{ app_version }}"></script>
 <script src="/static/pull-to-refresh.js?v={{ app_version }}"></script>
 <script>
 initPullToRefresh({ onRefresh: function(){ return Promise.all([_ltPoll(), _ltPollBotStatus()]); } });

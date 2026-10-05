@@ -181,4 +181,7 @@ _install_creator_rewards(_dashboard)
 from platform_assistant import install as _install_platform_assistant
 _install_platform_assistant(_dashboard)
 
+from live_trades_truth import install as _install_live_trades_truth
+_install_live_trades_truth(_dashboard)
+
 app = _dashboard.app

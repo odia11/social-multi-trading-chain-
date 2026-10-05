@@ -51,6 +51,8 @@ d.state['tokens'] = [{'mint': BOT, 'price': 0.0025}, {'mint': NARR, 'price': 0.4
 def fake_token(mint, fast=False, chain=None):
     return {'price': 0.012} if mint == GONE else None
 
+inventory_patch = patch.object(d, '_known_wallet_token_accounts', return_value=[{'mint':m,'amount':1000} for m in (BOT,NARR,GONE)])
+inventory_patch.start()
 cl = app.test_client(); B = 'https://orcagent.fun'
 with cl.session_transaction(base_url=B) as s:
     s['wallet'] = w; s['user_id'] = uid; s['csrf_token'] = 'x' * 40
@@ -70,7 +72,7 @@ check('a held token no longer in the scanner still gets its real price, not the 
 with patch.object(d, 'get_token_data', return_value=None):
     blind = {p['token']: p for p in cl.get('/api/live-trades', base_url=B).get_json()['positions']}
 check('...and a price that cannot be read shows as unknown, never a flat 0%',
-      blind['GONE']['price_known'] is False and blind['GONE']['pnl_pct'] is None and blind['GONE']['pnl_usd'] == 0.0)
+      blind['GONE']['price_known'] is False and blind['GONE']['pnl_pct'] is None and blind['GONE']['pnl_usd'] is None)
 
 tr = api['trades']
 check("bot trades are the bot's own finished round trips, newest first (no manual trades, no single legs)",
@@ -97,4 +99,11 @@ check('...with an Open positions and a Bot trades section, in English',
       '<h2>Open positions</h2>' in html and '<h2>Bot trades</h2>' in html
       and 'Bought ' in html and 'Sold ' in html
       and not any(nl in html for nl in ('Instap', 'Open sinds', '1e deel')))
+denied = cl.post('/api/live-trades/sell', base_url=B, json={'mint_address':BOT})
+check('manual override is protected by production CSRF middleware', denied.status_code == 403)
+with cl.session_transaction(base_url=B) as s:
+    s['readonly'] = True
+readonly = cl.post('/api/live-trades/sell', base_url=B,
+                   headers={'X-CSRF-Token':'x' * 40}, json={'mint_address':BOT})
+check('a read-only connected wallet cannot sell', readonly.status_code in (401,403))
 raise SystemExit(0 if all(checks) else 1)
