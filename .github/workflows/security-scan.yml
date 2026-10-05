@@ -45,6 +45,7 @@ jobs:
         run: |
           node --check static/dashboard.js
           node tests/test_feed_reply_orphans.js
+          node tests/test_agent_clean_replies.js
           node --check static/live-market-pro.js
           node --check static/watchlist.js
           node --check static/home-feed-chart-redesign.js
@@ -129,3 +130,4 @@ jobs:
             exit 1
           fi
           echo "OK: no secret/database/backup-like files tracked."
+

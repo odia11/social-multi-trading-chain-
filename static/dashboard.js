@@ -9469,7 +9469,8 @@ var _TEAM_ROLE_STYLE = {
   moderator: ['#7c8cff', 'rgba(124,140,255,.12)', 'MOD'],
   analyst:   ['#8a919c', 'rgba(138,145,156,.12)', 'ANALYST'],
 };
-function _teamBadgeHtml(role){
+function _teamBadgeHtml(role, username, verified){
+  if(verified && String(username||'').toLowerCase()==='orcagent') return ' <span class="fc-agent-badge" title="Automated OrcAgent assistant">AI AGENT</span>';
   if(!role || role === 'user') return '';
   var s = _TEAM_ROLE_STYLE[role] || ['#8a919c', 'rgba(138,145,156,.12)', role.toUpperCase()];
   return ' <span style="display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border-radius:999px;'
@@ -9726,7 +9727,7 @@ function _renderFeedCard(e, cardIndex){
       : _aProf+'<div class="fc-avatar" style="background:'+bg+';width:44px;height:44px;position:relative;flex-shrink:0"><span class="fc-avatar-ini">'+ini+'</span></div></a>')
     +'<div class="fc-body">'
     +'<div class="fc-header">'
-    +_aProf+'<span class="fc-name" style="font-weight:700">'+esc(e.username||'Trader')+(e.verified ? ' <svg width="14" height="14" viewBox="0 0 24 24" style="vertical-align:-2px"><circle cx="12" cy="12" r="12" fill="#f7b955"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#0a0b0e" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '')+_teamBadgeHtml(e.team_role)+'</span></a>'
+    +_aProf+'<span class="fc-name" style="font-weight:700">'+esc(e.username||'Trader')+(e.verified ? ' <svg width="14" height="14" viewBox="0 0 24 24" style="vertical-align:-2px"><circle cx="12" cy="12" r="12" fill="#f7b955"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#0a0b0e" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '')+_teamBadgeHtml(e.team_role,e.username,e.verified)+'</span></a>'
     +_aProf+'<span class="fc-handle">'+esc(handle)+'</span></a>'
     +(callHtml ? '<span class="fc-call-badge">CALLED</span>' : '')
     +(timeStr ? '<span class="fc-sep">·</span><span class="fc-time">'+esc(timeStr)+'</span>' : '')
@@ -10302,6 +10303,23 @@ function _replyRelTime(created_at){
   return Math.floor(s/86400)+'d';
 }
 
+function _agentPriceReplyHtml(message){
+  // Format only the known first-party quote shape; preserve full stored data.
+  var text=String(message||''),parts=text.split('. Source: ');
+  if(parts.length!==2)return '';
+  var rows=parts[0].split(' | '),html='',mint=(parts[1].match(/Solana contract: ([1-9A-HJ-NP-Za-km-z]{32,44})\./)||[])[1];
+  for(var i=0;i<rows.length;i++){
+    var row=rows[i].match(/^([A-Za-z0-9 _+.-]{1,24}): ([0-9,.]+(?:e[+-]?[0-9]+)?) (USD|EUR) · [0-9:]+ UTC$/i);
+    if(!row || !Number.isFinite(Number(row[2].replace(/,/g,''))) || Number(row[2].replace(/,/g,''))<=0)return '';
+    var symbol=row[1],label='$'+symbol,currency=row[3].toUpperCase();
+    var name=mint && safeMint(mint)
+      ? '<button type="button" class="fc-agent-token" onclick="event.stopPropagation();showTokenCard(\''+esc(symbol)+'\',\''+esc(mint)+'\')" aria-label="Open '+esc(symbol)+' token chart">'+esc(label)+'</button>'
+      : '<span class="fc-agent-token">'+esc(label)+'</span>';
+    html+='<div class="fc-agent-price">'+name+'<div class="fc-agent-price-value">'+(currency==='EUR'?'€':'$')+esc(row[2])+'<span class="fc-agent-currency">'+currency+'</span></div></div>';
+  }
+  return html;
+}
+
 function _renderReplyRow(r, postId, depth){
   depth = depth || 0;
   var name    = esc(r.username || (r.wallet ? r.wallet.slice(0,6)+'…' : '?'));
@@ -10327,19 +10345,23 @@ function _renderReplyRow(r, postId, depth){
   var avatarClick = r.avatar_url
     ? 'event.stopPropagation();_showAvatarLightbox('+esc(JSON.stringify(r.avatar_url))+')'
     : (r.wallet ? 'event.stopPropagation();location.href=\'/profile/'+encodeURIComponent(r.wallet)+'\'' : '');
-  var msgHtml = _fcRichText(r.message);
+  var isAgent = r.verified && String(r.username||'').toLowerCase()==='orcagent';
+  var compactPrice = isAgent ? _agentPriceReplyHtml(r.message) : '';
+  var displayMessage = String(r.message||'').replace(/(@orcagent\s+\$[A-Za-z0-9_+.-]+)\s+\(([1-9A-HJ-NP-Za-km-z]{32,44})\)(\s+what is the price\?)/i,'$1$3');
+  var msgHtml = compactPrice || _fcRichText(displayMessage);
   var tokenQuestion=String(r.message||'').match(/^(?:Automated · )?Do you mean \$([A-Z][A-Z0-9_+.-]{0,24})\?/);
   if(tokenQuestion && r.verified && String(r.username||'').toLowerCase()==='orcagent'){
-    msgHtml+='<div class="fc-assistant-token-choices"><button type="button" style="margin-top:8px;padding:10px 14px;border:1px solid #39434d;border-radius:12px;background:#131c23;color:#f7b955" onclick="event.stopPropagation();_assistantTokenChoices(this,\''+tokenQuestion[1]+'\','+Number(r.id)+',\''+esc(postId)+'\')">Choose $'+tokenQuestion[1]+' token</button></div>';
+    msgHtml=_fcRichText('Select the $'+tokenQuestion[1]+' token.');
+    msgHtml+='<div class="fc-assistant-token-choices"><button type="button" class="fc-agent-token-choice" onclick="event.stopPropagation();_assistantTokenChoices(this,\''+tokenQuestion[1]+'\','+Number(r.id)+',\''+esc(postId)+'\')">Choose $'+tokenQuestion[1]+' token</button></div>';
   }
-  var longReply=String(r.message||'').length>280;
+  var longReply=!compactPrice && displayMessage.length>280;
   var indentStyle = ''; // CSS applies one bounded indent at every nested depth.
   // Keep author and actions separate from the full-width message.
   return '<div class="fc-reply-item'+(depth>0?' fc-reply-nested':'')+'" data-reply-id="'+r.id+'" data-parent-id="'+(r.parent_reply_id||'')+'"'+indentStyle+'>'
     +'<div class="fc-ri-row">'
     +'<div class="fc-ri-avatar" style="background:'+bg+';position:relative;overflow:hidden;cursor:pointer" onclick="'+avatarClick+'">'+ini+avatarImg+'</div>'
     +'<div class="fc-ri-body">'
-    +'<div class="fc-ri-line'+(longReply?' fc-ri-collapsed':'')+'"><div class="fc-ri-author">'+nameHtml+verifiedBadge+_teamBadgeHtml(r.team_role)+youChip+'</div><div class="fc-ri-text-inline">'+msgHtml+'</div></div>'
+    +'<div class="fc-ri-line'+(longReply?' fc-ri-collapsed':'')+'"><div class="fc-ri-author">'+nameHtml+verifiedBadge+_teamBadgeHtml(r.team_role,r.username,r.verified)+youChip+'</div><div class="fc-ri-text-inline">'+msgHtml+'</div></div>'
     +(longReply?'<button type="button" class="fc-ri-more" aria-expanded="false" onclick="var t=this.previousElementSibling;var open=t.classList.toggle(\'fc-ri-collapsed\');this.textContent=open?\'Show more\':\'Show less\';this.setAttribute(\'aria-expanded\',String(!open))">Show more</button>':'')
     +'<div class="fc-ri-meta">'
     +'<span class="fc-ri-time">'+_replyRelTime(r.created_at)+'</span>'
