@@ -44,6 +44,7 @@ jobs:
       - name: OrcAgent security regression checks
         run: |
           node --check static/dashboard.js
+          node tests/test_feed_reply_orphans.js
           node --check static/live-market-pro.js
           node --check static/watchlist.js
           node --check static/home-feed-chart-redesign.js

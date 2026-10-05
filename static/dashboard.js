@@ -10474,6 +10474,33 @@ function _feedSubmitNestedReply(inp, postId, parentReplyId){
   });
 }
 
+function _feedRenderReplyTree(replies, postId){
+  var byParent=new Map(), ids=new Set(replies.map(function(r){return String(r.id)}));
+  replies.forEach(function(r){
+    var parent=r.parent_reply_id ? String(r.parent_reply_id) : null;
+    // Deleted/filtered parents must never hide their surviving conversation.
+    var key=parent && ids.has(parent) && parent!==String(r.id) ? parent : 'root';
+    if(!byParent.has(key))byParent.set(key,[]);
+    byParent.get(key).push(r);
+  });
+  var html='',seen=new Set();
+  function branch(rows){
+    var stack=rows.slice().reverse().map(function(r){return [r,0]});
+    while(stack.length){
+      var next=stack.pop(),r=next[0],key=String(r.id),depth=next[1];
+      if(seen.has(key))continue;
+      seen.add(key);
+      html+=_renderReplyRow(r,postId,depth);
+      var children=byParent.get(key)||[];
+      for(var i=children.length-1;i>=0;i--)stack.push([children[i],depth+1]);
+    }
+  }
+  branch(byParent.get('root')||[]);
+  // Defensive fallback for legacy cycles: render each remaining reply once.
+  replies.forEach(function(r){if(!seen.has(String(r.id)))branch([r])});
+  return html;
+}
+
 function _feedLoadReplies(postId){
   var list = document.getElementById('rlist-'+postId);
   if(!list) return;
@@ -10481,24 +10508,14 @@ function _feedLoadReplies(postId){
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(!d.ok) return;
+      var card=document.getElementById('fc-card-'+postId);
+      var count=card && card.querySelector('.fc-reply-count');
+      if(count) count.textContent=String((d.replies||[]).length);
       if(!d.replies||!d.replies.length){
         list.innerHTML='<div style="font-size:12px;color:var(--muted);padding:4px 0">No replies yet — be the first.</div>';
         return;
       }
-      var byParent = {};
-      d.replies.forEach(function(r){
-        var key = r.parent_reply_id || 'root';
-        (byParent[key] = byParent[key] || []).push(r);
-      });
-      var html = '';
-      function renderBranch(parentKey, depth){
-        (byParent[parentKey] || []).forEach(function(r){
-          html += _renderReplyRow(r, postId, depth);
-          renderBranch(r.id, depth+1);
-        });
-      }
-      renderBranch('root', 0);
-      list.innerHTML = html;
+      list.innerHTML = _feedRenderReplyTree(d.replies, postId);
     })
     .catch(function(){});
 }
@@ -10536,6 +10553,7 @@ function _feedDeleteReply(replyId, rowEl, postId){
     .then(function(d){
       if(!d.ok){ console.warn('[reply-del]', d.error); return; }
       if(rowEl) rowEl.remove();
+      _feedLoadReplies(postId);
       var card = document.getElementById('fc-card-'+postId);
       if(card){
         var rcnt = card.querySelector('.fc-reply-count');
