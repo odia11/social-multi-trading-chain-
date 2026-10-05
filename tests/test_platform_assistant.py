@@ -31,6 +31,34 @@ INSERT INTO feed_posts(wallet,content,created_at) VALUES('member','A post','2026
             return '2026-10-04 00:00:00' if post.startswith(('t','g')) else None
         self.d=SimpleNamespace(DB_FILE=self.db,_feed_post_created_at=created,_post_link=lambda c,post:'/#post-'+post,_reply_link=lambda c,post,rid:'/#post-'+post+'-reply-'+str(rid))
         self.now=dt.datetime(2026,10,4,9,0,tzinfo=p.TZ).timestamp()
+    def test_agent_content_has_no_fixed_intro(self):
+        post_id=p.publish_due(self.db,self.now)
+        with sqlite3.connect(self.db) as c:
+            content=c.execute('SELECT content FROM feed_posts WHERE id=?',(post_id[1:],)).fetchone()[0]
+        self.assertIn(content,[text for _,text in p.THESES])
+        self.assertTrue(p.answer('@orcagent how are you?')[1].startswith("I'm doing well"))
+
+    def test_existing_prefix_cleanup_is_scoped_and_idempotent(self):
+        with sqlite3.connect(self.db) as c:
+            c.execute("DELETE FROM platform_assistant_settings WHERE key IN ('content_prefix_cleanup_v1','author_id')")
+            intro='OrcAgent · Platform thesis (automated)\n\n'
+            pid=c.execute('INSERT INTO feed_posts(wallet,content) VALUES(?,?)',('official',intro+'Original thesis')).lastrowid
+            copied=c.execute('INSERT INTO feed_posts(wallet,content) VALUES(?,?)',('member',intro+'User copy')).lastrowid
+            unrecorded=c.execute('INSERT INTO feed_posts(wallet,content) VALUES(?,?)',('official',intro+'Unrecorded')).lastrowid
+            rid=c.execute('INSERT INTO feed_replies(user_id,post_id,message) VALUES(?,?,?)',(1,'p1','Automated · Original answer')).lastrowid
+            user_reply=c.execute('INSERT INTO feed_replies(user_id,post_id,message) VALUES(?,?,?)',(2,'p1','Automated · User text')).lastrowid
+            c.execute('INSERT INTO platform_assistant_events VALUES(?,?,?,?,?,?,?)',('legacy-post','post',None,'p'+str(pid),None,'portfolio',self.now))
+            c.execute('INSERT INTO platform_assistant_events VALUES(?,?,?,?,?,?,?)',('legacy-reply','reply',2,'p1',rid,'wallet',self.now))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(lambda _:p.initialize(self.db),range(4)))
+        p.initialize(self.db)
+        with sqlite3.connect(self.db) as c:
+            self.assertEqual(c.execute('SELECT content FROM feed_posts WHERE id=?',(pid,)).fetchone()[0],'Original thesis')
+            self.assertEqual(c.execute('SELECT message FROM feed_replies WHERE id=?',(rid,)).fetchone()[0],'Original answer')
+            self.assertEqual(c.execute('SELECT content FROM feed_posts WHERE id=?',(copied,)).fetchone()[0],intro+'User copy')
+            self.assertEqual(c.execute('SELECT content FROM feed_posts WHERE id=?',(unrecorded,)).fetchone()[0],intro+'Unrecorded')
+            self.assertEqual(c.execute('SELECT message FROM feed_replies WHERE id=?',(user_reply,)).fetchone()[0],'Automated · User text')
+
     def tearDown(self):
         self.tmp.cleanup()
     def source(self,message='@orcagent hoe deel ik een call?',uid=2,post='p1',created='2026-10-04 01:00:00'):
@@ -55,7 +83,7 @@ INSERT INTO feed_posts(wallet,content,created_at) VALUES('member','A post','2026
             answer=p.answer(text)
             self.assertEqual(answer[0],topic)
             self.assertIn(phrase,answer[1])
-            self.assertTrue(answer[1].startswith(p.LABEL))
+            self.assertFalse(answer[1].startswith('Automated · '))
             self.assertLessEqual(len(answer[1]),240)
         for topic,pattern,english in p.FAQ:
             self.assertLessEqual(len(p.LABEL+english),240)
@@ -105,7 +133,7 @@ INSERT INTO feed_posts(wallet,content,created_at) VALUES('member','A post','2026
         for day in [dt.datetime(2026,3,29,9,tzinfo=p.TZ),dt.datetime(2026,10,25,9,tzinfo=p.TZ)]:
             self.assertEqual(p.due_slot(day.timestamp()).hour,9)
             self.assertIsNone(p.due_slot(day.replace(hour=8).timestamp()))
-        self.assertTrue(all(len('OrcAgent · Platform thesis (automated)\n\n'+t)<=500 for _,t in p.THESES))
+        self.assertTrue(all(len(t)<=500 for _,t in p.THESES))
     def test_nested_response_idempotency_and_no_group_or_self_reply(self):
         source=self.source()
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
