@@ -10357,7 +10357,7 @@ function _renderReplyRow(r, postId, depth){
   var longReply=!compactPrice && displayMessage.length>280;
   var indentStyle = ''; // CSS applies one bounded indent at every nested depth.
   // Keep author and actions separate from the full-width message.
-  return '<div class="fc-reply-item'+(depth>0?' fc-reply-nested':'')+'" data-reply-id="'+r.id+'" data-parent-id="'+(r.parent_reply_id||'')+'"'+indentStyle+'>'
+  return '<div class="fc-reply-item'+(depth>0?' fc-reply-nested':'')+'" data-reply-id="'+r.id+'" data-parent-id="'+(r.parent_reply_id||'')+'" data-token-choice="'+(isAgent && tokenQuestion ? tokenQuestion[1] : '')+'"'+indentStyle+'>'
     +'<div class="fc-ri-row">'
     +'<div class="fc-ri-avatar" style="background:'+bg+';position:relative;overflow:hidden;cursor:pointer" onclick="'+avatarClick+'">'+ini+avatarImg+'</div>'
     +'<div class="fc-ri-body">'
@@ -10399,18 +10399,19 @@ async function _assistantTokenChoices(btn,symbol,replyId,postId){
       var logo=safeImageUrl(pair.info && pair.info.imageUrl);
       if(logo){var img=document.createElement('img');img.src=logo;img.alt='';img.width=28;img.height=28;img.style.borderRadius='50%';choice.appendChild(img);}
       var label=document.createElement('span');label.textContent='$'+token.symbol+' · '+token.name+' · Solana · '+token.address.slice(0,6)+'…'+token.address.slice(-4);choice.appendChild(label);
-      choice.addEventListener('click',function(e){
+      choice.addEventListener('click',async function(e){
         e.stopPropagation();
-        var replyBtn=host.closest('.fc-reply-item').querySelector('.fc-ri-reply-btn');
-        var box=document.getElementById('rnbox-'+replyId);
-        if(box && box.style.display==='none')_feedToggleNestedReply(replyId,postId,replyBtn);
-        var input=document.getElementById('rninp-'+replyId);
-        if(input){input.value='@orcagent $'+token.symbol+' ('+token.address+') what is the price?';input.focus();input.setSelectionRange(input.value.length,input.value.length);input.dispatchEvent(new Event('input',{bubbles:true}));}
-        host.replaceChildren();
-        var selected=document.createElement('button');selected.type='button';selected.textContent='Open $'+token.symbol+' chart · '+token.address.slice(0,6)+'…'+token.address.slice(-4);
-        selected.style.cssText=choice.style.cssText;
-        selected.onclick=function(ev){ev.stopPropagation();showTokenCard(token.symbol,token.address)};
-        host.appendChild(selected);
+        if(choice.disabled)return;
+        var choices=Array.from(host.querySelectorAll('button'));
+        choices.forEach(function(b){b.disabled=true});
+        var originalLabel=label.textContent;
+        label.textContent='Getting $'+token.symbol+' price…';
+        var input={value:'@orcagent $'+token.symbol+' ('+token.address+') what is the price?',disabled:false};
+        var saved=await _feedSubmitNestedReply(input,postId,replyId);
+        if(!saved && host.isConnected){
+          choices.forEach(function(b){b.disabled=false});
+          label.textContent=originalLabel;
+        }
       });
       host.appendChild(choice);
     });
@@ -10449,13 +10450,13 @@ function _feedToggleNestedReply(parentId, postId, btn){
 }
 
 function _feedSubmitNestedReply(inp, postId, parentReplyId){
-  if(!inp) return;
+  if(!inp || inp.disabled) return Promise.resolve(false);
   var text = inp.value.trim();
-  if(!text) return;
+  if(!text) return Promise.resolve(false);
   inp.disabled = true;
   var sendBtn = inp.parentNode ? inp.parentNode.querySelector('.fc-reply-send') : null;
   if(sendBtn){ sendBtn.disabled = true; sendBtn.textContent = '…'; }
-  fetch('/api/feed/reply', {
+  return fetch('/api/feed/reply', {
     method: 'POST',
     credentials: 'include',
     headers: {'Content-Type': 'application/json'},
@@ -10465,6 +10466,8 @@ function _feedSubmitNestedReply(inp, postId, parentReplyId){
       var parentRow = document.querySelector('#rlist-'+postId+' .fc-reply-item[data-reply-id="'+parentReplyId+'"]');
       var box = document.getElementById('rnbox-'+parentReplyId);
       if(box){ box.style.display='none'; box.innerHTML=''; }
+      var selected=text.match(/^@orcagent \$([A-Za-z0-9_+.-]+) \(([1-9A-HJ-NP-Za-km-z]{32,44})\) what is the price\?$/i);
+      var resolvedChoice=!!(parentRow && selected && parentRow.dataset.tokenChoice===selected[1].toUpperCase());
       if(parentRow){
         var parentDepth = parentRow.dataset.parentId ? 2 : 1; // one level deeper than the parent, capped visually
         var fakeReply = {
@@ -10476,23 +10479,26 @@ function _feedSubmitNestedReply(inp, postId, parentReplyId){
           verified: !!(_myProfileData && _myProfileData.verified),
           avatar_url: (_myProfileData && _myProfileData.avatar_url) || ''
         };
-        parentRow.insertAdjacentHTML('afterend', _renderReplyRow(fakeReply, postId, parentDepth));
+        parentRow.insertAdjacentHTML('afterend', _renderReplyRow(fakeReply, postId, resolvedChoice ? 1 : parentDepth));
+        if(resolvedChoice)parentRow.remove();
       }
       var card = document.getElementById('fc-card-'+postId);
       if(card){
         var rcnt = card.querySelector('.fc-reply-count');
-        if(rcnt) rcnt.textContent = (parseInt(rcnt.textContent,10)||0)+1+(d.platform_reply_id?1:0);
+        if(rcnt) rcnt.textContent = (parseInt(rcnt.textContent,10)||0)+1+(d.platform_reply_id?1:0)-(resolvedChoice?1:0);
       }
-      if(d.platform_reply_id) _feedLoadReplies(postId);
+      if(d.platform_reply_id || resolvedChoice) _feedLoadReplies(postId);
     } else {
       openAlertModal({text:d.msg||'Could not post reply'});
     }
     inp.disabled = false;
     if(sendBtn){ sendBtn.disabled = false; sendBtn.innerHTML = _RC_SEND_ICON_SVG; }
+    return !!d.ok;
   }).catch(function(){
     inp.disabled = false;
     if(sendBtn){ sendBtn.disabled = false; sendBtn.innerHTML = _RC_SEND_ICON_SVG; }
     openAlertModal({text:'Network error — could not post reply'});
+    return false;
   });
 }
 
@@ -10505,6 +10511,19 @@ function _feedRenderReplyTree(replies, postId){
     if(!byParent.has(key))byParent.set(key,[]);
     byParent.get(key).push(r);
   });
+  // A saved exact-token selection completes this temporary agent prompt.
+  // Keep stored ancestry for notifications and follow-ups, but omit the resolved row.
+  var resolved=new Set();
+  replies.forEach(function(r){
+    if(!r.verified || String(r.username||'').toLowerCase()!=='orcagent')return;
+    var prompt=String(r.message||'').match(/^(?:Automated · )?Do you mean \$([A-Z][A-Z0-9_+.-]{0,24})\?/);
+    if(!prompt)return;
+    var children=byParent.get(String(r.id))||[];
+    if(children.some(function(child){
+      var selected=String(child.message||'').match(/^@orcagent \$([A-Za-z0-9_+.-]+) \(([1-9A-HJ-NP-Za-km-z]{32,44})\) what is the price\?$/i);
+      return selected && selected[1].toUpperCase()===prompt[1];
+    }))resolved.add(String(r.id));
+  });
   var html='',seen=new Set();
   function branch(rows){
     var stack=rows.slice().reverse().map(function(r){return [r,0]});
@@ -10512,9 +10531,9 @@ function _feedRenderReplyTree(replies, postId){
       var next=stack.pop(),r=next[0],key=String(r.id),depth=next[1];
       if(seen.has(key))continue;
       seen.add(key);
-      html+=_renderReplyRow(r,postId,depth);
+      if(!resolved.has(key))html+=_renderReplyRow(r,postId,depth);
       var children=byParent.get(key)||[];
-      for(var i=children.length-1;i>=0;i--)stack.push([children[i],depth+1]);
+      for(var i=children.length-1;i>=0;i--)stack.push([children[i],depth+(resolved.has(key)?0:1)]);
     }
   }
   branch(byParent.get('root')||[]);
@@ -10538,6 +10557,7 @@ function _feedLoadReplies(postId){
         return;
       }
       list.innerHTML = _feedRenderReplyTree(d.replies, postId);
+      if(count)count.textContent=String(list.querySelectorAll('.fc-reply-item').length);
     })
     .catch(function(){});
 }
@@ -10672,3 +10692,4 @@ if(typeof initPullToRefresh==='function'){
     try{ return loadHomeFeed(); }catch(e){ return Promise.resolve(); }
   }});
 }
+
