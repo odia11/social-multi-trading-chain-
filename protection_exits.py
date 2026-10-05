@@ -11,6 +11,27 @@ _GUARD = threading.Lock()
 _INTENT_LOCK = threading.RLock()
 _BUSY = set()
 _STORES = set()
+_PRICE_CONDITION = threading.Condition()
+_PRICE_REVISION = 0
+
+def price_revision():
+    with _PRICE_CONDITION:
+        return _PRICE_REVISION
+
+def price_updated():
+    global _PRICE_REVISION
+    with _PRICE_CONDITION:
+        _PRICE_REVISION += 1
+        _PRICE_CONDITION.notify_all()
+
+def wait_for_price(revision, timeout, stop_event=None):
+    # All monitors see the same tick. No clearing a shared Event, no busy polling.
+    with _PRICE_CONDITION:
+        return _PRICE_CONDITION.wait_for(
+            lambda: _PRICE_REVISION != revision or
+                    (stop_event is not None and stop_event.is_set()),
+            timeout=max(0, timeout))
+
 
 
 def positive(value):
@@ -190,6 +211,8 @@ def prices(ctx, mints):
                     for mint, price in got.items():
                         if mint in due and positive(price) and ctx['_exit_price_cache'].get(mint,(0,0))[0] < started:
                             ctx['_exit_price_cache'][mint] = (stamp, float(price))
+                if got:
+                    price_updated()
             except Exception as exc:
                 print('[exit-price] ' + type(exc).__name__, flush=True)
             finally:
@@ -255,6 +278,8 @@ def fetch_prices(ctx, mints):
         with ctx['_exit_price_lock']:
             for m,p in got.items():
                 ctx['_exit_price_cache'][m] = (stamp,p)
+        if got:
+            price_updated()
 
     found = {}
     jobs = [(jupiter,sol[i:i+50]) for i in range(0,len(sol),50)]

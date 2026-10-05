@@ -11,6 +11,7 @@ import sqlite3
 import threading
 import time
 import platform_learning as learning
+from platform_answers import specific
 from zoneinfo import ZoneInfo
 from flask import jsonify, request
 
@@ -69,10 +70,13 @@ FAQ = (
 
 LEARNABLE = {topic:english for topic,pattern,english in FAQ if topic not in ('secrets','bug')}
 
-def answer(message):
+def answer(message, context=None):
     if not isinstance(message, str) or not MENTION.search(message):
         return None
     clean = MENTION.sub('', message).lower()
+    targeted = specific(clean, context)
+    if targeted:
+        return targeted
     token = re.fullmatch(r'\s*(?:do you know\s+|tell me about\s+|what is\s+)?\$?([a-z][a-z0-9_]{1,19})\s+token[\s?!.]*',clean)
     if token:
         symbol = token[1].upper()
@@ -88,7 +92,7 @@ def answer(message):
         return 'welcome', LABEL + "Hey! Welcome to OrcAgent. What would you like to explore today: calls, charts or your portfolio?"
     if re.fullmatch(r"\s*(?:i.m (?:good|fine|well)|good|fine|doing well|thanks|thank you|goed|dank je)(?:[\s,!]+(?:thanks|thank you))?[\s!?.,]*",clean):
         return 'welcome', LABEL + "Thanks for sharing! What would you like to do on OrcAgent today? Explore the feed: https://orcagent.fun/#app-home"
-    return 'scope', LABEL + 'Happy to help! What would you like to do on OrcAgent today?'
+    return 'scope', LABEL + 'Happy to help! Which OrcAgent feature is your question about, and what are you trying to do? Tell me the screen or action so I can give specific steps.'
 
 def initialize(db):
     with sqlite3.connect(db, timeout=8) as c:
@@ -235,16 +239,15 @@ def reply_to(d, source_id, wallet, now=None):
         created = d._feed_post_created_at(c, source[1])
         if not created or c.execute('SELECT datetime(?)>=datetime(?)', (source[3],created)).fetchone()[0] != 1:
             return None
-        explicit = answer(source[2])
-        response = explicit
-        previous = None
         use_learning = enabled(c,'learning')
+        previous = learning.prior(c,d,source,author[0]) if use_learning else None
+        explicit = answer(source[2], previous[0] if previous else None)
+        response = explicit
         if explicit and use_learning:
-            previous = learning.prior(c,d,source,author[0])
             if explicit[0]=='scope':
                 topic = learning.lookup(c,d,source[2],MENTION,LEARNABLE,now)
                 clean = MENTION.sub('',source[2])
-                if not topic and previous and previous[0] in LEARNABLE and len(clean)<=160 and learning.FOLLOWUP.search(clean) and not learning.UNSAFE.search(clean):
+                if not topic and previous and previous[0] in LEARNABLE and len(clean)<=160 and re.fullmatch(r'\s*(?:how|where|what next|hoe|waar)[\s?!.]*', clean, re.I) and not learning.UNSAFE.search(clean):
                     topic = previous[0]
                 if topic:
                     response = topic, LABEL + LEARNABLE[topic]

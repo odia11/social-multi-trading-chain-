@@ -11016,6 +11016,7 @@ _exit_price_cache: dict = {}   # mint -> (fetched_at, usd_price)
 _exit_watched: dict = {}       # mint -> (chain, watched_until)
 
 
+from protection_exits import price_revision as _price_revision, wait_for_price as _wait_for_price
 from protection_exits import (
     market_price as _protection_price, pending as _pending_protection_exit,
     dispatch as _dispatch_protection_exit, clear as _clear_protection_exit,
@@ -11551,12 +11552,13 @@ def user_trader_loop(stop_event, config, wallet: str):
 
     def _exit_watch():
         while not stop_event.is_set():
+            _revision = _price_revision()
             _t0 = time.time()
             try:
                 _exit_pass()
             except Exception as _xe:
                 print(f'[exit-watch] {short} {type(_xe).__name__}: {_xe}', flush=True)
-            stop_event.wait(max(0.05, EXIT_CHECK_INTERVAL - (time.time() - _t0)))
+            _wait_for_price(_revision, max(0.05, EXIT_CHECK_INTERVAL - (time.time() - _t0)), stop_event)
 
     threading.Thread(target=_exit_watch, name='exit-watch-' + short, daemon=True).start()
     try:
@@ -34288,13 +34290,14 @@ def _position_guardian_loop():
           flush=True)
     _guardian_state['running'] = True
     while True:
+        _revision = _price_revision()
         t0 = time.time()
         try:
             _guardian_pass()
             _guardian_state['last_pass'] = time.time()
         except Exception as e:
             print(f'[guardian] {type(e).__name__}: {e}', flush=True)
-        time.sleep(max(0.05, GUARDIAN_INTERVAL - (time.time() - t0)))
+        _wait_for_price(_revision, max(0.05, GUARDIAN_INTERVAL - (time.time() - t0)))
 
 
 if os.environ.get('ORCAGENT_POSITION_GUARDIAN', '1') != '0':
