@@ -10406,7 +10406,8 @@ async function _assistantTokenChoices(btn,symbol,replyId,postId){
         choices.forEach(function(b){b.disabled=true});
         var originalLabel=label.textContent;
         label.textContent='Getting $'+token.symbol+' price…';
-        var input={value:'@orcagent $'+token.symbol+' ('+token.address+') what is the price?',disabled:false};
+        var question='@orcagent $'+token.symbol+' ('+token.address+') what is the price?';
+        var input={value:question,disabled:false};
         var saved=await _feedSubmitNestedReply(input,postId,replyId);
         if(!saved && host.isConnected){
           choices.forEach(function(b){b.disabled=false});
