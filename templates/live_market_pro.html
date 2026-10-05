@@ -450,7 +450,6 @@ input{font-family:inherit}
 .pt-sheet-ft .pt-quote{margin:0 0 11px;max-height:32vh;overflow-y:auto}
 
 /* ── what it costs, folded away ── */
-.pt-sheet.sell-mode #pt-protect{display:none}.pt-protect-body{padding:2px 13px 11px;display:grid;gap:8px}.pt-protect-row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px}.pt-protect-in{display:inline-flex;align-items:center;gap:3px;font-weight:700}.pt-protect-in input{width:64px;padding:6px 8px;border-radius:8px;border:1px solid var(--sheet-line);background:transparent;color:inherit;font:inherit;text-align:right}.pt-protect-row input[type=checkbox]{width:18px;height:18px;accent-color:#f7b955}.pt-protect-note{font-size:11px;opacity:.7;line-height:1.4}.pt-protect.off .pt-protect-in{opacity:.4}
 .pt-fees{margin:0 0 10px;background:var(--sheet-tile);border:1px solid var(--sheet-line);
   border-radius:13px;overflow:hidden}
 .pt-fees-sum{display:flex;align-items:center;gap:9px;padding:10px 13px;cursor:pointer;
@@ -889,6 +888,7 @@ body.pt-profile-mode .pt-card.pt-profile-open .pt-chart-waiting{left:50%!importa
  body.pt-profile-mode .pt-card.pt-profile-open .pt-trade-btns{position:fixed!important;left:0;right:0;bottom:calc(72px + env(safe-area-inset-bottom,0px));z-index:1100;padding:12px 16px 36px!important;background:#0a131c;border-top:1px solid #1d2833}
  body.pt-profile-mode .pt-feed-list{padding-bottom:220px!important}
 }
+.pt-trade-close{position:absolute;right:14px;top:5px;z-index:5;width:32px;height:32px;border:1px solid #263340;border-radius:50%;background:#101821;color:#aebbc9;font-size:23px;line-height:1;cursor:pointer}.pt-sheet-hd{margin-top:16px}
 </style>
 </head>
 <body>
@@ -1038,7 +1038,7 @@ body.pt-profile-mode .pt-card.pt-profile-open .pt-chart-waiting{left:50%!importa
      the document. -->
 <div class="pt-sheet-scrim" id="pt-sheet-scrim" data-action="close-sheet"></div>
 <div class="pt-sheet" id="pt-sheet" role="dialog" aria-modal="true" aria-label="Buy token">
-  <div class="pt-sheet-grab"></div>
+  <div class="pt-sheet-grab"></div><button type="button" class="pt-trade-close" data-action="close-sheet" aria-label="Close trade">×</button>
   <div class="pt-sheet-hd">
     <img class="pt-sheet-img" id="pt-sheet-img" alt="">
     <div class="pt-sheet-img-ph" id="pt-sheet-img-ph" style="display:none"></div>
@@ -1135,29 +1135,6 @@ body.pt-profile-mode .pt-card.pt-profile-open .pt-chart-waiting{left:50%!importa
          The EVM cost breakdown still renders into #pt-quote-sheet
          unchanged: same class, same id shape, so scheduleQuote() needs to
          know nothing about any of this. -->
-    <!-- Every buy by hand is protected: OrcAgent sells it at this stop loss
-         or take profit, checked every second -- by the bot when it runs,
-         by the position guardian when it does not. Starts at the user's own
-         settings; can be changed or switched off per buy. -->
-    <details class="pt-fees pt-protect" id="pt-protect">
-      <summary class="pt-fees-sum">
-        <span class="pt-fees-lbl">Protection</span>
-        <span class="pt-fees-amt" id="pt-protect-sum">Stop loss · Take profit</span>
-        <svg class="pt-fees-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <polyline points="6 9 12 15 18 9"></polyline>
-        </svg>
-      </summary>
-      <div class="pt-protect-body">
-        <label class="pt-protect-row"><span>Sell automatically</span>
-          <input type="checkbox" id="pt-protect-on" checked></label>
-        <label class="pt-protect-row"><span>Stop loss</span>
-          <span class="pt-protect-in">−<input type="number" id="pt-protect-sl" min="1" max="30" step="0.5" inputmode="decimal">%</span></label>
-        <label class="pt-protect-row"><span>Take profit</span>
-          <span class="pt-protect-in">+<input type="number" id="pt-protect-tp" min="2" max="500" step="1" inputmode="decimal">%</span></label>
-        <div class="pt-protect-note" id="pt-protect-note">Checked every second, also when your bot is off.</div>
-      </div>
-    </details>
     <details class="pt-fees" id="pt-fees">
       <summary class="pt-fees-sum">
         <span class="pt-fees-lbl">Fees &amp; costs</span>

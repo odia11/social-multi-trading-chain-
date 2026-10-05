@@ -59,8 +59,8 @@ ensureScript('/static/in-app-notifications.js?v=1','in-app-notifications.js','oa
 (function(){
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/live-market')return;
-  ensureStyle('/static/live-market-redesign.css?v=9','live-market-redesign.css');
-  ensureScript('/static/live-market-redesign.js?v=6','live-market-redesign.js');
+  ensureStyle('/static/live-market-redesign.css?v=10','live-market-redesign.css');
+  ensureScript('/static/live-market-redesign.js?v=7','live-market-redesign.js');
 })();
 
 (function(){

@@ -4690,8 +4690,8 @@ def _hydrate_positions_from_db(wallet: str, us: dict):
             us['positions'][mint].update({k: v for k, v in snap.items() if v is not None})
             if trailing_enabled is not None:
                 us['positions'][mint]['trailing_enabled'] = bool(trailing_enabled)
-            if protect_off:
-                us['positions'][mint]['protect'] = False
+            if protect_off or source == 'manual':
+                _apply_manual_protection(us['positions'][mint], wallet, 0, (False, None, None))
         if rows:
             print(f'[open_positions] restored {len(rows)} open position(s) for {wallet[:8]}…', flush=True)
     except Exception as e:
@@ -6280,24 +6280,8 @@ def _protection_summary(wallet: str, mint: str):
 
 
 def _manual_protection(data: dict) -> tuple:
-    """(protect, sl_pct, tp_pct) for a buy made by hand. Protection is ON by
-    default, at the user's own stop loss / take profit (sl/tp None = those
-    settings); the buy sheet can set other values or switch it off. Raises
-    ValueError for a value the app would refuse in Settings too."""
-    protect = data.get('protect', True)
-    if not isinstance(protect, bool):
-        raise ValueError('protect must be true or false')
-    if not protect:
-        return False, None, None
-    sl, tp = data.get('sl_pct'), data.get('tp_pct')
-    if sl is None and tp is None:
-        return True, None, None
-    ok, err = _validate_sl_tp(sl, tp)
-    if not ok:
-        raise ValueError(err)
-    if float(tp) <= float(sl):
-        raise ValueError('Take profit must be higher than the stop loss')
-    return True, float(sl), float(tp)
+    """Live Market buys are manual trades, including requests from old clients."""
+    return False, None, None
 
 
 def _apply_manual_protection(pos: dict, wallet: str, entry_price: float, protection: tuple) -> dict:
@@ -6319,10 +6303,9 @@ def _apply_manual_protection(pos: dict, wallet: str, entry_price: float, protect
 
 def _register_manual_buy(user_id: int, wallet: str, mint: str, symbol: str, spent: float,
                          tokens: float, protection: tuple, chain: str = 'solana'):
-    """A buy made by hand becomes a tracked position, so its stop loss and
-    take profit are watched every second -- by the bot when it runs, by the
-    position guardian when it does not. Buying more of a token already held
-    adds to that position at the averaged entry and keeps its protection."""
+    """Track manual holdings without automatic exits.
+    Adding to an existing bot-owned position preserves its bot settings."""
+
     if tokens <= 0 or spent <= 0:
         return None
     us = get_user_state(wallet)
@@ -6332,6 +6315,8 @@ def _register_manual_buy(user_id: int, wallet: str, mint: str, symbol: str, spen
         pos['amount'] = held['amount'] + tokens
         pos['spend'] = held.get('spend', 0.0) + spent
         pos['buy_price'] = pos['spend'] / pos['amount']
+        if held.get('source', 'manual') == 'manual':
+            _apply_manual_protection(pos, wallet, 0, (False, None, None))
         for k, sign in (('sl', -1), ('tp', 1)):
             if pos.get(k + '_pct') is not None:
                 pos[k + '_price'] = round(pos['buy_price'] * (1 + sign * pos[k + '_pct'] / 100), 10)
@@ -6341,7 +6326,7 @@ def _register_manual_buy(user_id: int, wallet: str, mint: str, symbol: str, spen
     entry = spent / tokens
     pos = {'amount': tokens, 'buy_price': entry, 'spend': spent, 'symbol': symbol,
            'opened_at': time.time(), 'base': SOLANA_BASE_CURRENCY if chain == 'solana' else 'USDC'}
-    _apply_manual_protection(pos, wallet, entry, protection)
+    _apply_manual_protection(pos, wallet, entry, (False, None, None))
     _upsert_open_position(user_id, wallet, mint, pos, source='manual', chain=chain)
     return pos
 
@@ -11366,7 +11351,7 @@ def user_trader_loop(stop_event, config, wallet: str):
             continue  # no EVM trading key configured -- can't touch this position at all
         if not _chain_tradeable(_chain):
             continue  # chain removed from OrcAgent (Polygon) -- nothing to sell it through
-        if _pos.get('protect') is False:
+        if _pos.get('protect') is False or _pos.get('source') == 'manual':
             continue  # bought by hand with stop loss / take profit switched off
         _td = get_token_data(_mint)
         _price = float(_td['price']) if _td else 0.0
@@ -11426,7 +11411,7 @@ def user_trader_loop(stop_event, config, wallet: str):
                 continue  # no EVM trading key configured -- can't touch this position at all
             if not _chain_tradeable(pos.get('chain', 'solana')):
                 continue  # chain removed from OrcAgent (Polygon) -- nothing to sell it through
-            if pos.get('protect') is False:
+            if pos.get('protect') is False or pos.get('source') == 'manual':
                 continue  # bought by hand with stop loss / take profit switched off
             # Every open position stays fast-polled for as long as it's held, not
             # just once it's already close to a trigger -- a real rugpull can crash
@@ -34318,7 +34303,8 @@ def _guardian_users() -> list:
             try:
                 rows = conn.execute(
                     'SELECT DISTINCT u.id, u.wallet_address FROM open_positions op '
-                    'JOIN users u ON u.id = op.user_id WHERE op.amount > 0').fetchall()
+                    'JOIN users u ON u.id = op.user_id WHERE op.amount > 0 '
+                    "AND COALESCE(op.source, '') != 'manual' AND COALESCE(op.protect_off, 0) = 0").fetchall()
             finally:
                 conn.close()
             _guardian_users_cache.update(at=now, rows=rows)
@@ -34391,7 +34377,7 @@ def _guardian_pass():
             continue   # the bot's own exit watcher has these
         held = {m: p for m, p in list(us['positions'].items())
                 if p.get('amount', 0) > 0 and p.get('buy_price', 0) > 0
-                and p.get('protect') is not False and _chain_tradeable(p.get('chain', 'solana'))}
+                and p.get('protect') is not False and p.get('source') != 'manual' and _chain_tradeable(p.get('chain', 'solana'))}
         if held:
             work.append((user_id, wallet, us, held))
     if not work:

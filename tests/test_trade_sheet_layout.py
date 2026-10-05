@@ -29,13 +29,13 @@ def rule(sel_re):
 
 mid = rule(r'body\.oa-live-v2 \.pt-sheet-mid')
 check('the amount never shrinks below what it shows (it was squeezed and clipped)',
-      'flex:10auto!important' in mid and 'overflow:visible!important' in mid)
+      'flex:00auto!important' in mid and 'overflow:visible!important' in mid)
 pcts = rule(r'body\.oa-live-v2 \.pt-sheet-pcts')
 check('the quick amounts are four tiles inside the margins, no full-width bordered track behind them',
       'background:transparent!important' in pcts and 'border:0!important' in pcts and 'padding:018px9px!important' in pcts)
 keys = rule(r'body\.oa-live-v2 #pt-keys,body\.oa-live-v2 \.pt-keys')
 check('the keypad gives way instead: shorter keys, never overlapping',
-      'grid-template-rows:repeat(4,minmax(0,1fr))!important' in keys and 'flex:01clamp(' in keys)
+      'grid-template-rows:repeat(4,minmax(0,1fr))!important' in keys and 'flex:10clamp(' in keys)
 key = rule(r'body\.oa-live-v2 \.pt-key')
 check('...a key has no fixed minimum that would push the keypad over the amount', 'min-height:0!important' in key)
 sheet = rule(r'body\.oa-live-v2 \.pt-sheet')
@@ -52,5 +52,5 @@ check('scrolling the sheet back up never closes it: swipe-to-close only starts a
 check('...and a drag that turns into a scroll stops moving the sheet',
       "if(sh.scrollTop > 0){" in drag and "sh.style.transform = '';" in drag)
 for f in ('app_performance.py', 'static/navbar.js', 'static/app-ux.js'):
-    check(f'phones fetch the new stylesheet ({f})', 'live-market-redesign.css?v=9' in read(*f.split('/')))
+    check(f'phones fetch the new stylesheet ({f})', 'live-market-redesign.css?v=10' in read(*f.split('/')))
 raise SystemExit(0 if all(checks) else 1)

@@ -1999,6 +1999,7 @@ function _openSheet(idx, mode){
   _paintFees(t, mode);
   _sheetBindIds(idx);
   _sheetEl('pt-sheet').classList.toggle('sell-mode', mode === 'sell');
+  _sheetEl('pt-sheet').setAttribute('aria-label', (mode === 'sell' ? 'Sell ' : 'Buy ') + (t.symbol || 'token'));
   _slideReset();
   // The previous trade's receipt belongs to the previous trade. Leaving it
   // up would show one token's transaction under another token's name.
@@ -2045,7 +2046,7 @@ function _openSheet(idx, mode){
   _paintSheet();
   // A sell closes the whole tracked position server-side, so there is no
   // balance to divide up and nothing to price -- only a confirmation.
-  if(mode === 'buy'){ _loadSheetBalance(t.chain); _loadProtectionDefaults(); }
+  if(mode === 'buy'){ _loadSheetBalance(t.chain); }
   else _loadSheetHolding(t);
 }
 
@@ -2425,6 +2426,12 @@ document.addEventListener('click', function(e){
   // so closeBuySheet() is not a global and `onclick="closeBuySheet()"` threw
   // ReferenceError -- the sheet simply would not close.
   if(e.target.closest('[data-action="close-sheet"]')){ closeBuySheet(); return; }
+  var modeButton=e.target.closest('#pt-sheet [data-mode]');
+  if(modeButton && _sheetIdx !== null){
+    var nextMode=modeButton.dataset.mode;
+    if((nextMode==='buy'||nextMode==='sell') && nextMode!==_sheetMode){var currentIdx=_sheetIdx;closeBuySheet();_openSheet(currentIdx,nextMode);}
+    return;
+  }
   var k = e.target.closest('#pt-keys .pt-key');
   if(k && _sheetIdx !== null){
     var v = k.dataset.k;
@@ -2483,59 +2490,6 @@ function openBuyPanel(idx){
 
 // Solana-only: pricing/execution uses /api/instant-trade; no EVM quote cache.
 
-// ── Protection (stop loss / take profit) for a buy made by hand ──
-// Starts at the user's own settings (the same ones the bot uses); edits
-// apply to this buy only. Switched off, nothing sells it automatically.
-var _protDefaults = null, _protEdited = false;
-function _protEl(id){ return document.getElementById(id); }
-function _paintProtection(){
-  var on = _protEl('pt-protect-on'), sl = _protEl('pt-protect-sl'), tp = _protEl('pt-protect-tp');
-  var sum = _protEl('pt-protect-sum'), box = _protEl('pt-protect');
-  if(!on || !sum) return;
-  if(box) box.classList.toggle('off', !on.checked);
-  sum.textContent = on.checked
-    ? ('Stop loss −' + (sl.value || '?') + '% · Take profit +' + (tp.value || '?') + '%')
-    : 'Off — not sold automatically';
-}
-function _loadProtectionDefaults(){
-  _protEdited = false;   // every buy starts at the user's own settings
-  var apply = function(){
-    if(_protDefaults && !_protEdited){
-      _protEl('pt-protect-sl').value = _protDefaults.sl;
-      _protEl('pt-protect-tp').value = _protDefaults.tp;
-      _protEl('pt-protect-on').checked = true;
-    }
-    _paintProtection();
-  };
-  if(_protDefaults) return apply();
-  fetch('/api/bot/overview', {credentials:'include'}).then(function(r){ return r.json(); })
-    .then(function(d){
-      if(d && d.ok && d.stop_loss != null && d.take_profit != null)
-        _protDefaults = {sl: Number(d.stop_loss), tp: Number(d.take_profit)};
-      apply();
-    }).catch(apply);
-}
-function _protectionChoice(){
-  var on = _protEl('pt-protect-on');
-  if(!on) return {protect:true, sl:null, tp:null};
-  if(!on.checked) return {protect:false};
-  // Untouched (or the settings could not be loaded): the server applies the
-  // user's own stop loss / take profit. A buy is never blocked by this row.
-  if(!_protEdited) return {protect:true, sl:null, tp:null};
-  var sl = parseFloat(_protEl('pt-protect-sl').value), tp = parseFloat(_protEl('pt-protect-tp').value);
-  if(!(sl >= 1 && sl <= 30)) return {error:'Stop loss must be between 1% and 30%'};
-  if(!(tp >= 2 && tp <= 500)) return {error:'Take profit must be between 2% and 500%'};
-  if(tp <= sl) return {error:'Take profit must be higher than the stop loss'};
-  return {protect:true, sl:sl, tp:tp};
-}
-document.addEventListener('input', function(e){
-  var id = e.target && e.target.id;
-  if(id === 'pt-protect-sl' || id === 'pt-protect-tp' || id === 'pt-protect-on'){ _protEdited = true; _paintProtection(); }
-});
-document.addEventListener('change', function(e){
-  if(e.target && e.target.id === 'pt-protect-on'){ _protEdited = true; _paintProtection(); }
-});
-
 function confirmBuy(idx){
   var t = ST.tokens[Number(idx)];
   if(!t) return;
@@ -2557,15 +2511,7 @@ function confirmBuy(idx){
               max_platform_fee_bps:Math.round(PT_FEE_RATE_TXN*10000)};
   var creatorContext = new URLSearchParams(location.search).get('creator_context');
   if(creatorContext) body.creator_context = creatorContext;
-  // The stop loss / take profit this buy is protected with (every chain).
-  var prot = _protectionChoice();
-  if(prot.error){
-    showMsg(msgEl, prot.error, false);
-    if(btn){ btn.disabled = false; if(_sheetIdx === null) btn.textContent = 'Buy'; }
-    return;
-  }
-  body.protect = prot.protect;
-  if(prot.protect && prot.sl != null){ body.sl_pct = prot.sl; body.tp_pct = prot.tp; }
+  body.protect = false;
 
   // Whether this attempt ended in a purchase. A bought trade must NOT leave
   // the slider armed again: the sheet would then read "Bought ..." above a
