@@ -10328,7 +10328,7 @@ function _renderReplyRow(r, postId, depth){
     ? 'event.stopPropagation();_showAvatarLightbox('+esc(JSON.stringify(r.avatar_url))+')'
     : (r.wallet ? 'event.stopPropagation();location.href=\'/profile/'+encodeURIComponent(r.wallet)+'\'' : '');
   var msgHtml = _fcRichText(r.message);
-  var tokenQuestion=String(r.message||'').match(/^Automated · Do you mean \$([A-Z][A-Z0-9_]{1,19})\?/);
+  var tokenQuestion=String(r.message||'').match(/^(?:Automated · )?Do you mean \$([A-Z][A-Z0-9_+.-]{0,24})\?/);
   if(tokenQuestion && r.verified && String(r.username||'').toLowerCase()==='orcagent'){
     msgHtml+='<div class="fc-assistant-token-choices"><button type="button" style="margin-top:8px;padding:10px 14px;border:1px solid #39434d;border-radius:12px;background:#131c23;color:#f7b955" onclick="event.stopPropagation();_assistantTokenChoices(this,\''+tokenQuestion[1]+'\','+Number(r.id)+',\''+esc(postId)+'\')">Choose $'+tokenQuestion[1]+' token</button></div>';
   }
@@ -10383,7 +10383,7 @@ async function _assistantTokenChoices(btn,symbol,replyId,postId){
         var box=document.getElementById('rnbox-'+replyId);
         if(box && box.style.display==='none')_feedToggleNestedReply(replyId,postId,replyBtn);
         var input=document.getElementById('rninp-'+replyId);
-        if(input){input.value='@orcagent $'+token.symbol+' ('+token.address+') ';input.focus();input.setSelectionRange(input.value.length,input.value.length);input.dispatchEvent(new Event('input',{bubbles:true}));}
+        if(input){input.value='@orcagent $'+token.symbol+' ('+token.address+') what is the price?';input.focus();input.setSelectionRange(input.value.length,input.value.length);input.dispatchEvent(new Event('input',{bubbles:true}));}
         host.replaceChildren();
         var selected=document.createElement('button');selected.type='button';selected.textContent='Open $'+token.symbol+' chart · '+token.address.slice(0,6)+'…'+token.address.slice(-4);
         selected.style.cssText=choice.style.cssText;

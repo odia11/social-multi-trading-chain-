@@ -12,6 +12,7 @@ import threading
 import time
 import platform_learning as learning
 from platform_answers import specific
+import platform_prices as prices
 from zoneinfo import ZoneInfo
 from flask import jsonify, request
 
@@ -70,10 +71,13 @@ FAQ = (
 
 LEARNABLE = {topic:english for topic,pattern,english in FAQ if topic not in ('secrets','bug')}
 
-def answer(message, context=None):
+def answer(message, context=None, market=None):
     if not isinstance(message, str) or not MENTION.search(message):
         return None
     clean = MENTION.sub('', message).lower()
+    price_query = prices.query(MENTION.sub('', message))
+    if price_query:
+        return prices.render(price_query, market)
     targeted = specific(clean, context)
     if targeted:
         return targeted
@@ -190,11 +194,36 @@ def within_reply_limits(c,user_id,now):
     total = c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='reply' AND created_at>?",(now-86400,)).fetchone()[0]
     return recent<6 and daily<20 and total<120
 
+def _prepare_market(d, source_id, wallet, kind, now):
+    # External I/O finishes BEFORE BEGIN IMMEDIATE. Revalidate the source below.
+    with sqlite3.connect(d.DB_FILE, timeout=2) as c:
+        if not enabled(c, 'replies'):
+            return None
+        if kind == 'post':
+            row = c.execute('SELECT p.content,u.id FROM feed_posts p JOIN users u ON u.wallet_address=p.wallet WHERE p.id=? AND p.wallet=?',
+                            (source_id,wallet)).fetchone()
+        else:
+            row = c.execute("SELECT r.message,r.user_id FROM feed_replies r JOIN users u ON u.id=r.user_id WHERE r.id=? AND u.wallet_address=? AND substr(r.post_id,1,1) IN ('p','t')",
+                            (source_id,wallet)).fetchone()
+        if not row or not within_reply_limits(c,row[1],now):
+            return None
+        text = d._feed_text_part(row[0]) if kind=='post' and hasattr(d,'_feed_text_part') else re.split(r'__(?:CHART|TRADE|CALL)__',row[0],maxsplit=1)[0]
+        if not MENTION.search(text):
+            return None
+        q = prices.query(MENTION.sub('',text))
+    if not q or q['kind'] not in ('major','token','search'):
+        return None
+    return text, prices.fetch(q,dex_get=getattr(d,'_dex_get',None))
+
+def _market_for(text, prepared):
+    return prepared[1] if prepared and prepared[0]==text else None
+
 def reply_to_post(d,post_number,wallet,now=None):
     # Only a successfully authenticated NEW post; no edits, reposts or backfill.
     if type(post_number) is not int or post_number<=0:
         return None
     now = time.time() if now is None else now
+    market = _prepare_market(d,post_number,wallet,'post',now)
     with sqlite3.connect(d.DB_FILE,timeout=8) as c:
         c.execute('BEGIN IMMEDIATE')
         if not enabled(c,'replies'):
@@ -207,7 +236,7 @@ def reply_to_post(d,post_number,wallet,now=None):
         if not post or post[0]!=wallet or not member or member[0]==author[0]:
             return None
         text = d._feed_text_part(post[1]) if hasattr(d,'_feed_text_part') else re.split(r'__(?:CHART|TRADE|CALL)__',post[1],maxsplit=1)[0]
-        response = answer(text)
+        response = answer(text,market=_market_for(text,market))
         key = 'post-reply:'+str(post_number)
         if not response or c.execute('SELECT 1 FROM platform_assistant_events WHERE event_key=?',(key,)).fetchone() or not within_reply_limits(c,member[0],now):
             return None
@@ -223,6 +252,7 @@ def reply_to_post(d,post_number,wallet,now=None):
 
 def reply_to(d, source_id, wallet, now=None):
     now = time.time() if now is None else now
+    market = _prepare_market(d,source_id,wallet,'reply',now)
     with sqlite3.connect(d.DB_FILE, timeout=8) as c:
         c.execute('BEGIN IMMEDIATE')
         if not enabled(c, 'replies'):
@@ -241,7 +271,7 @@ def reply_to(d, source_id, wallet, now=None):
             return None
         use_learning = enabled(c,'learning')
         previous = learning.prior(c,d,source,author[0]) if use_learning else None
-        explicit = answer(source[2], previous[0] if previous else None)
+        explicit = answer(source[2], previous[0] if previous else None, market=_market_for(source[2],market))
         response = explicit
         if explicit and use_learning:
             if explicit[0]=='scope':
