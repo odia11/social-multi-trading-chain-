@@ -1,0 +1,24 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const src=fs.readFileSync('static/dashboard.js','utf8');
+const mint='98kfF7rmsg1QDUEoCqNE7g7M1FdrTt92TEp2CLzypump';
+const ctx={String,Number,Map,Set,URL,location:{origin:'https://orcagent.fun'},safeMint:s=>/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s)?s:'',_replyRelTime:()=>'',_teamBadgeHtml:()=>''};
+vm.createContext(ctx);
+vm.runInContext(src.slice(src.indexOf('function _fcTagText('),src.indexOf('function safeImageUrl(')),ctx);
+vm.runInContext(src.slice(src.indexOf('function _agentPriceReplyHtml('),src.indexOf('async function _assistantTokenChoices(')),ctx);
+vm.runInContext(src.slice(src.indexOf('function _feedRenderReplyTree('),src.indexOf('function _feedLoadReplies(')),ctx);
+const selected={id:138,username:'Paddy',parent_reply_id:137,message:'@orcagent $PAID ('+mint+') what is the price?'};
+let html=ctx._renderReplyRow(selected,'p554',1);
+assert.ok(html.includes('data-mint="'+mint+'"'));
+assert.ok(html.includes('showTokenCard(this.dataset.sym,this.dataset.mint)'));
+assert.ok(!html.replace(/<[^>]*>/g,'').includes(mint),'address stays hidden');
+const quote={id:139,parent_reply_id:138,verified:true,username:'Orcagent',message:'PAID: 0.004466 USD · 13:47:22 UTC. Source: DexScreener (retrieved). Solana contract: '+mint+'.'};
+html=ctx._feedRenderReplyTree([{id:136,username:'Paddy',message:'@orcagent what is the price of $paid'},
+ {id:137,parent_reply_id:136,verified:true,username:'Orcagent',message:'Do you mean $PAID? Several Solana tokens match.'},selected,quote],'p554');
+assert.equal((html.match(new RegExp('data-mint="'+mint+'"','g'))||[]).length,2,'original and selected question retain chosen identity');
+assert.ok(!html.includes('data-reply-id="137"'));
+assert.ok(html.includes("showTokenCard('PAID','"+mint+"')"),'price card retains exact identity');
+html=ctx._fcRichText('$EMBER and $PAID https://example.com/$PAID',{symbol:'PAID',mint});
+assert.equal((html.match(/data-mint=/g)||[]).length,1,'identity only applies to matching ticker outside URLs');
+assert.ok(!ctx._fcRichText('$PAID',{symbol:'PAID',mint:'bad" onclick="alert(1)'}).includes('data-mint='));
+assert.ok(!ctx._fcRichText('<script>alert(1)</script>').includes('<script>'));
+console.log('PASS exact selected-token links, original question context, quote chart identity, hidden mint and safe rich text');

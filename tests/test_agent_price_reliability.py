@@ -78,15 +78,24 @@ class Conversations(unittest.TestCase):
         with sqlite3.connect(self.db) as c:
             message=c.execute('SELECT message FROM feed_replies WHERE id=?',(rid,)).fetchone()[0]
         self.assertIn('BTC: 85,000.00 USD',message)
-    def test_followups_do_not_capture_other_users_unrelated_or_expired_threads(self):
+    def test_followups_do_not_capture_other_users_or_unrelated_threads(self):
         first=self.source('@orcagent hi');bot=agent.reply_to(self.d,first,'member',self.now)
         with sqlite3.connect(self.db) as c:c.execute("INSERT INTO users VALUES(3,'other','Other',0)")
         other=self.nested('BTC price?',bot,uid=3)
         with patch.object(prices,'fetch',side_effect=AssertionError('must not fetch')):
             self.assertIsNone(agent.reply_to(self.d,other,'other',self.now+1))
             self.assertIsNone(agent.reply_to(self.d,self.source('BTC price?'),'member',self.now+1))
-            expired=self.nested('BTC price?',bot)
-            self.assertIsNone(agent.reply_to(self.d,expired,'member',self.now+3601))
+    def test_ember_followup_after_two_hours_still_gets_an_answer(self):
+        bot=agent.reply_to(self.d,self.source('@orcagent hi'),'member',self.now)
+        follow=self.nested('Perfect and the price of ember ?',bot)
+        snap=dict(kind='choice',symbol='EMBER',count=2)
+        with patch.object(prices,'fetch',return_value=snap) as fetch:
+            rid=agent.reply_to(self.d,follow,'member',self.now+2*3600)
+        self.assertIsNotNone(rid)
+        self.assertEqual(fetch.call_args.args[0]['value'],'EMBER')
+        with sqlite3.connect(self.db) as c:
+            message=c.execute('SELECT message FROM feed_replies WHERE id=?',(rid,)).fetchone()[0]
+        self.assertIn('$EMBER',message)
     def test_duplicate_followup_publishes_only_one_reply(self):
         bot=agent.reply_to(self.d,self.source('@orcagent hi'),'member',self.now)
         follow=self.nested('How do I sell?',bot)

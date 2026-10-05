@@ -199,14 +199,11 @@ def _conversation_message(c,d,source,author_id,now):
         return message
     previous = learning.prior(c,d,source,author_id)
     if previous and source[4]:
-        parent = c.execute('SELECT user_id,created_at FROM feed_replies WHERE id=?',(source[4],)).fetchone()
+        parent = c.execute('SELECT user_id FROM feed_replies WHERE id=?',(source[4],)).fetchone()
         if parent and parent[0]==author_id:
-            try:
-                stamp = dt.datetime.strptime(parent[1],'%Y-%m-%d %H:%M:%S').replace(tzinfo=dt.timezone.utc).timestamp()
-                if 0<=now-stamp<=3600:
-                    return '@orcagent '+message
-            except (ValueError,TypeError):
-                pass
+            # The authenticated conversation stays open until the user leaves it.
+            # prior() still verifies the source user, thread and official event.
+            return '@orcagent '+message
     return message
 
 def _prepare_market(d, source_id, wallet, kind, now):

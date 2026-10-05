@@ -1550,13 +1550,16 @@ function renderLog(lines){
 
    Only http(s) and bare www. can match, so javascript: and data: URLs can
    never become a link however they are typed. */
-function _fcTagText(t){
+function _fcTagText(t,tokenIdentity){
   if(!t) return '';
   // A ticker starts with a LETTER. /\$([^\s<]+)/ matched anything after a
   // dollar sign, so "$500 profit" and "$0.000002346" became clickable token
   // tags that resolve to nothing -- any post quoting a price or an amount
   // got them. Bounded length too: a ticker is not forty characters long.
-  var out = esc(t).replace(/\$([A-Za-z][A-Za-z0-9_]{0,19})\b/g,'<span class="token-tag" data-sym="$1" onclick="event.stopPropagation();showTokenCard(this.dataset.sym)">$$$1</span>');
+  var out = esc(t).replace(/\$([A-Za-z][A-Za-z0-9_]{0,19})\b/g,function(match,symbol){
+    var mint=tokenIdentity && String(tokenIdentity.symbol||'').toUpperCase()===symbol.toUpperCase() ? safeMint(tokenIdentity.mint) : '';
+    return '<span class="token-tag" data-sym="'+symbol+'"'+(mint?' data-mint="'+mint+'"':'')+' onclick="event.stopPropagation();showTokenCard(this.dataset.sym,this.dataset.mint)">$'+symbol+'</span>';
+  });
   // The @ has to START a word. Without that guard "me@example.com" renders as
   // "me" followed by a link to /profile/example -- the same class of bug the
   // URL split above exists to prevent, one character earlier.
@@ -1595,14 +1598,14 @@ function _fcLinkHtml(url){
        + 'style="color:#f7b955;text-decoration:none;word-break:break-word">'+esc(label)+'</a>'
        + esc(trail);
 }
-function _fcRichText(raw){
+function _fcRichText(raw,tokenIdentity){
   var s = String(raw == null ? '' : raw), out = '', last = 0, m;
   var re = /\b(?:https?:\/\/|www\.)[^\s<>"'`]+/gi;
   while((m = re.exec(s)) !== null){
-    out += _fcTagText(s.slice(last, m.index)) + _fcLinkHtml(m[0]);
+    out += _fcTagText(s.slice(last, m.index),tokenIdentity) + _fcLinkHtml(m[0]);
     last = m.index + m[0].length;
   }
-  return out + _fcTagText(s.slice(last));
+  return out + _fcTagText(s.slice(last),tokenIdentity);
 }
 
 function esc(s){
@@ -10320,7 +10323,7 @@ function _agentPriceReplyHtml(message){
   return html;
 }
 
-function _renderReplyRow(r, postId, depth){
+function _renderReplyRow(r, postId, depth, tokenIdentity){
   depth = depth || 0;
   var name    = esc(r.username || (r.wallet ? r.wallet.slice(0,6)+'…' : '?'));
   // A wallet URL keeps pointing to the same trader after username changes.
@@ -10347,8 +10350,10 @@ function _renderReplyRow(r, postId, depth){
     : (r.wallet ? 'event.stopPropagation();location.href=\'/profile/'+encodeURIComponent(r.wallet)+'\'' : '');
   var isAgent = r.verified && String(r.username||'').toLowerCase()==='orcagent';
   var compactPrice = isAgent ? _agentPriceReplyHtml(r.message) : '';
+  var exactQuestion=String(r.message||'').match(/^@orcagent \$([A-Za-z0-9_+.-]+) \(([1-9A-HJ-NP-Za-km-z]{32,44})\) what is the price\?$/i);
+  if(exactQuestion)tokenIdentity={symbol:exactQuestion[1],mint:exactQuestion[2]};
   var displayMessage = String(r.message||'').replace(/(@orcagent\s+\$[A-Za-z0-9_+.-]+)\s+\(([1-9A-HJ-NP-Za-km-z]{32,44})\)(\s+what is the price\?)/i,'$1$3');
-  var msgHtml = compactPrice || _fcRichText(displayMessage);
+  var msgHtml = compactPrice || _fcRichText(displayMessage,tokenIdentity);
   var tokenQuestion=String(r.message||'').match(/^(?:Automated · )?Do you mean \$([A-Z][A-Z0-9_+.-]{0,24})\?/);
   if(tokenQuestion && r.verified && String(r.username||'').toLowerCase()==='orcagent'){
     msgHtml=_fcRichText('Select the $'+tokenQuestion[1]+' token.');
@@ -10514,16 +10519,21 @@ function _feedRenderReplyTree(replies, postId){
   });
   // A saved exact-token selection completes this temporary agent prompt.
   // Keep stored ancestry for notifications and follow-ups, but omit the resolved row.
-  var resolved=new Set();
+  var resolved=new Set(),tokenIdentities=new Map();
   replies.forEach(function(r){
     if(!r.verified || String(r.username||'').toLowerCase()!=='orcagent')return;
     var prompt=String(r.message||'').match(/^(?:Automated · )?Do you mean \$([A-Z][A-Z0-9_+.-]{0,24})\?/);
     if(!prompt)return;
     var children=byParent.get(String(r.id))||[];
-    if(children.some(function(child){
+    children.forEach(function(child){
       var selected=String(child.message||'').match(/^@orcagent \$([A-Za-z0-9_+.-]+) \(([1-9A-HJ-NP-Za-km-z]{32,44})\) what is the price\?$/i);
-      return selected && selected[1].toUpperCase()===prompt[1];
-    }))resolved.add(String(r.id));
+      if(selected && selected[1].toUpperCase()===prompt[1]){
+        resolved.add(String(r.id));
+        // The original question's ticker must open the token chosen for it.
+        if(r.parent_reply_id && !tokenIdentities.has(String(r.parent_reply_id)))
+          tokenIdentities.set(String(r.parent_reply_id),{symbol:selected[1],mint:selected[2]});
+      }
+    });
   });
   var html='',seen=new Set();
   function branch(rows){
@@ -10532,7 +10542,7 @@ function _feedRenderReplyTree(replies, postId){
       var next=stack.pop(),r=next[0],key=String(r.id),depth=next[1];
       if(seen.has(key))continue;
       seen.add(key);
-      if(!resolved.has(key))html+=_renderReplyRow(r,postId,depth);
+      if(!resolved.has(key))html+=_renderReplyRow(r,postId,depth,tokenIdentities.get(key));
       var children=byParent.get(key)||[];
       for(var i=children.length-1;i>=0;i--)stack.push([children[i],depth+(resolved.has(key)?0:1)]);
     }
@@ -10693,4 +10703,3 @@ if(typeof initPullToRefresh==='function'){
     try{ return loadHomeFeed(); }catch(e){ return Promise.resolve(); }
   }});
 }
-
