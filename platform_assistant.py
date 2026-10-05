@@ -113,16 +113,16 @@ def _clean_existing_prefixes(c):
                       "ON e.post_id='p'||p.id AND e.kind='post' WHERE p.wallet=?", (author[1],)).fetchall()
     for post_id, content in posts:
         if isinstance(content, str) and content.startswith(prefix):
-            c.execute('UPDATE feed_posts SET content=? WHERE id=?',
-                      (content[len(prefix):].lstrip(), post_id))
+            c.execute('UPDATE feed_posts SET content=? WHERE id=? AND content=?',
+                      (content[len(prefix):].lstrip(), post_id, content))
     prefix = 'Automated · '
     replies = c.execute("SELECT r.id,r.message FROM feed_replies r JOIN platform_assistant_events e "
                         "ON e.reply_id=r.id AND e.kind='reply' WHERE r.user_id=?", (author[0],)).fetchall()
     for reply_id, message in replies:
         if isinstance(message, str) and message.startswith(prefix):
-            c.execute('UPDATE feed_replies SET message=? WHERE id=?',
-                      (message[len(prefix):].lstrip(), reply_id))
-    c.execute('INSERT INTO platform_assistant_settings VALUES(?,?)', (key, '1'))
+            c.execute('UPDATE feed_replies SET message=? WHERE id=? AND message=?',
+                      (message[len(prefix):].lstrip(), reply_id, message))
+    c.execute('INSERT OR IGNORE INTO platform_assistant_settings VALUES(?,?)', (key, '1'))
 
 
 def enabled(c, key):

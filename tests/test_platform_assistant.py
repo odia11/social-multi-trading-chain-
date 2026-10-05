@@ -49,7 +49,9 @@ INSERT INTO feed_posts(wallet,content,created_at) VALUES('member','A post','2026
             user_reply=c.execute('INSERT INTO feed_replies(user_id,post_id,message) VALUES(?,?,?)',(2,'p1','Automated · User text')).lastrowid
             c.execute('INSERT INTO platform_assistant_events VALUES(?,?,?,?,?,?,?)',('legacy-post','post',None,'p'+str(pid),None,'portfolio',self.now))
             c.execute('INSERT INTO platform_assistant_events VALUES(?,?,?,?,?,?,?)',('legacy-reply','reply',2,'p1',rid,'wallet',self.now))
-        p.initialize(self.db);p.initialize(self.db)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(lambda _:p.initialize(self.db),range(4)))
+        p.initialize(self.db)
         with sqlite3.connect(self.db) as c:
             self.assertEqual(c.execute('SELECT content FROM feed_posts WHERE id=?',(pid,)).fetchone()[0],'Original thesis')
             self.assertEqual(c.execute('SELECT message FROM feed_replies WHERE id=?',(rid,)).fetchone()[0],'Original answer')
