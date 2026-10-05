@@ -323,8 +323,8 @@ def install(d):
         with sqlite3.connect(d.DB_FILE,timeout=10) as c:
             c.execute('INSERT OR IGNORE INTO call_share_links VALUES (?,?,?,?)',(secrets.token_urlsafe(18),uid,call_id,time.time()))
             token=c.execute('SELECT token FROM call_share_links WHERE user_id=? AND call_id=?',(uid,call_id)).fetchone()[0]
-        url=f'{BASE}/call/{call_id}?via={token}'
-        return jsonify(ok=True,url=url,card_url=f'{BASE}/api/call-card/{call_id}.png?v=3&via={token}',
+        url=f'{BASE}/call/{call_id}?v=4&via={token}'
+        return jsonify(ok=True,url=url,card_url=f'{BASE}/api/call-card/{call_id}.png?v=4&via={token}',
                        text=f'${value["symbol"] or value["mint"][:8]} · Token call on OrcAgent')
 
     @app.route('/invitations')
