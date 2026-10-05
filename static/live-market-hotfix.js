@@ -2,12 +2,6 @@
 (function(){
 'use strict';
 if((location.pathname.replace(/\/+$/,'')||'/')!=='/live-market')return;
-function cleanSymbol(s){return String(s||'').replace(/^\$/,'').trim().toUpperCase()}
-function currentCard(){var se=document.getElementById('pt-sheet-sym'),sym=cleanSymbol(se&&se.textContent);if(!sym)return null;var cards=document.querySelectorAll('.pt-card');for(var i=0;i<cards.length;i++){var x=cards[i].querySelector('.pt-tok-sym');if(cleanSymbol(x&&x.textContent).indexOf(sym)===0)return cards[i]}return null}
-function switchTradeMode(mode){var card=currentCard();if(!card)return false;var btn=card.querySelector(mode==='sell'?'[data-action="sell"]':'[data-action="buy-open"]');if(!btn)return false;btn.click();return true}
-document.addEventListener('click',function(e){var b=e.target.closest('.oa-swipe-mode [data-mode]');if(!b)return;e.preventDefault();e.stopImmediatePropagation();switchTradeMode(b.dataset.mode)},true);
-function syncModeButtons(){var sheet=document.getElementById('pt-sheet');if(!sheet)return;var sell=sheet.classList.contains('sell-mode');sheet.querySelectorAll('.oa-swipe-mode [data-mode]').forEach(function(b){var on=(b.dataset.mode==='sell')===sell;b.classList.toggle('active',on);b.setAttribute('aria-pressed',on?'true':'false')})}
-function installModeObserver(){var sheet=document.getElementById('pt-sheet');if(!sheet)return;syncModeButtons();new MutationObserver(syncModeButtons).observe(sheet,{attributes:true,attributeFilter:['class']})}
 function installFixStyles(){
  if(document.getElementById('oa-live-authoritative-fix'))return;
  var s=document.createElement('style');s.id='oa-live-authoritative-fix';
@@ -44,6 +38,6 @@ function enforceSearchState(){
  var root=document.querySelector('.pt-nb-topbar');if(root){root.querySelectorAll('.pt-nb-logo,.pt-nb-menu-btn,.pt-nb-nav,.pt-nb-right,.pt-nb-more-wrap').forEach(function(el){if(!el.closest('.pt-nb-search-wrap'))el.style.setProperty('display','none','important')})}
  wrap.style.setProperty('position','fixed','important');wrap.style.setProperty('inset','0 0 auto 0','important');wrap.style.setProperty('width','100vw','important');wrap.style.setProperty('max-width','100vw','important');wrap.style.setProperty('margin','0','important');wrap.style.setProperty('z-index','1450','important')
 }
-function boot(){installFixStyles();installModeObserver();enforceSearchState();new MutationObserver(enforceSearchState).observe(document.body,{attributes:true,attributeFilter:['class'],childList:true,subtree:true})}
+function boot(){installFixStyles();enforceSearchState();new MutationObserver(enforceSearchState).observe(document.body,{attributes:true,attributeFilter:['class'],childList:true,subtree:true})}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })();

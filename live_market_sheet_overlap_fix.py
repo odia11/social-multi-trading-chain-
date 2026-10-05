@@ -17,7 +17,7 @@ _CSS = r'''
 
   body.oa-live-v2 .pt-sheet-mid {
     flex: 0 0 auto !important;
-    min-height: 205px !important;
+    min-height: 0px !important;
     height: auto !important;
     overflow: visible !important;
     padding-bottom: 14px !important;
@@ -25,7 +25,7 @@ _CSS = r'''
 
   body.oa-live-v2 .pt-ticket {
     height: auto !important;
-    min-height: 185px !important;
+    min-height: 0px !important;
     overflow: visible !important;
     align-content: start !important;
   }
@@ -33,7 +33,7 @@ _CSS = r'''
   body.oa-live-v2 .pt-ticket-stats {
     position: static !important;
     width: 100% !important;
-    min-height: 48px !important;
+    min-height: 0px !important;
     margin: 8px 0 0 !important;
     padding: 10px 0 0 !important;
     transform: none !important;
@@ -45,11 +45,11 @@ _CSS = r'''
     position: static !important;
     flex: 0 0 auto !important;
     margin: 0 !important;
-    padding: 8px 16px 12px !important;
+    padding: 0px 18px 9px !important;
     transform: none !important;
     clear: both !important;
     z-index: 2 !important;
-    background: #060a0f !important;
+    background: transparent !important;
   }
 
   body.oa-live-v2 #pt-keys,
@@ -112,8 +112,8 @@ _CSS = r'''
 }
 
 @media (max-width: 767px) and (max-height: 760px) {
-  body.oa-live-v2 .pt-sheet-mid { min-height: 190px !important; }
-  body.oa-live-v2 .pt-ticket { min-height: 172px !important; }
+  body.oa-live-v2 .pt-sheet-mid { min-height: 0px !important; }
+  body.oa-live-v2 .pt-ticket { min-height: 0px !important; }
 }
 </style>
 '''

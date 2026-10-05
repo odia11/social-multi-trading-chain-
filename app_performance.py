@@ -97,10 +97,10 @@ def install(appmod) -> None:
                 script('portfolio-redesign.js', '/static/portfolio-redesign.js?v=9')
                 script('portfolio-assets.js', '/static/portfolio-assets.js?v=1')
             elif path == '/live-market':
-                style('live-market-redesign.css', '/static/live-market-redesign.css?v=9')
+                style('live-market-redesign.css', '/static/live-market-redesign.css?v=10')
                 style('live-market-final.css', '/static/live-market-final.css?v=6', ' data-oa-live-final="1"')
-                script('live-market-redesign.js', '/static/live-market-redesign.js?v=5')
-                script('live-market-hotfix.js', '/static/live-market-hotfix.js?v=8', ' data-oa-live-hotfix="1"')
+                script('live-market-redesign.js', '/static/live-market-redesign.js?v=7')
+                script('live-market-hotfix.js', '/static/live-market-hotfix.js?v=9', ' data-oa-live-hotfix="1"')
             elif path == '/groups':
                 style('groups-redesign.css', '/static/groups-redesign.css?v=1')
                 script('groups-redesign.js', '/static/groups-redesign.js?v=1')

@@ -16,7 +16,7 @@ function closestLink(e){var n=e.target;return n&&n.closest?n.closest('a[href]'):
 var ROUTE_ASSETS={
   '/':['home-mobile.css?v=14','home-mobile-polish.css?v=8','home-composer-mobile.css?v=7','home-desktop.css?v=1','home-mobile.js?v=15','home-desktop.js?v=1'],
   '/wallet':['portfolio-redesign.css?v={app}','portfolio-history-redesign.css?v={app}','portfolio-redesign.js?v={app}','portfolio-history-redesign.js?v={app}','approved-portfolio.js?v={app}','portfolio-assets.js?v=1'],
-  '/live-market':['live-market-redesign.css?v=9','live-market-final.css?v=6','live-market-redesign.js?v=5','live-market-hotfix.js?v=8'],
+  '/live-market':['live-market-redesign.css?v=10','live-market-final.css?v=6','live-market-redesign.js?v=7','live-market-hotfix.js?v=9'],
   '/groups':['groups-redesign.css?v=1','groups-redesign.js?v=1'],
   '/messages':['messages-ui.css?v=1','messages-inbox.css?v=2','messages-thread.css?v=2','messages-ui.js?v=4'],
   '/notifications':[],

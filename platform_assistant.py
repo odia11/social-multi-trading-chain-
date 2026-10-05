@@ -63,7 +63,7 @@ FAQ = (
     ('calls', r'\bcalls?\b|analysis|analyse|entry|instap', 'A call records analysis and an entry reference, not a guaranteed return. Explore a call in the feed: https://orcagent.fun/#app-home. Would you like help reading or publishing one?'),
     ('wallet', 'phantom|connect|login|log.?in|wallet|verbinden|inloggen', 'Tap Connect wallet and approve in Phantom. Return to your chosen browser or PWA. If it fails, share the screen and error, never your recovery phrase.'),
     ('portfolio', 'portfolio|holding|balance|saldo|bezitting', 'Check holdings and activity in Portfolio: https://orcagent.fun/#app-portfolio. Missing something? Tell me which asset and what you see; I cannot access your account.'),
-    ('trading', 'trad|buy|sell|swap|kopen|verkopen|ruil|chart|grafiek|solana|chain', 'Explore charts in Live Market: https://orcagent.fun/#app-market. Review costs before confirming a trade. Which platform control would you like help with? I do not recommend tokens or place trades.'),
+    ('trading', 'trad|buy|sell|swap|kopen|verkopen|ruil|chart|grafiek|solana|chain', 'Open Live Market: https://orcagent.fun/live-market. Choose a token, tap Buy or Sell, enter an amount and review the costs. Which token would you like to explore?'),
     ('community', r'follow|volg|\bdm\b|message|bericht|community|feed|comment|reage', 'Follow traders from their profiles, discuss calls in comments or chat in DMs. Tag @orcagent for help with platform features.'),
 )
 
@@ -88,7 +88,7 @@ def answer(message):
         return 'welcome', LABEL + "Hey! Welcome to OrcAgent. What would you like to explore today: calls, charts or your portfolio?"
     if re.fullmatch(r"\s*(?:i.m (?:good|fine|well)|good|fine|doing well|thanks|thank you|goed|dank je)(?:[\s,!]+(?:thanks|thank you))?[\s!?.,]*",clean):
         return 'welcome', LABEL + "Thanks for sharing! What would you like to do on OrcAgent today? Explore the feed: https://orcagent.fun/#app-home"
-    return 'scope', LABEL + 'Which feature would you like help with: wallet, calls, trading, portfolio or rewards? I can explain OrcAgent, but cannot access your account or predict prices.'
+    return 'scope', LABEL + 'Happy to help! What would you like to do on OrcAgent today?'
 
 def initialize(db):
     with sqlite3.connect(db, timeout=8) as c:
