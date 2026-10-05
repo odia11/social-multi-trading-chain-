@@ -46,13 +46,13 @@ check('no fixed 15% crash exit, in the 1-second check or on bot start',
 check('no rugpull exit on liquidity or volume -- pulled liquidity is caught by the user\'s own stop '
       'loss on what a sale really returns', "'RUGPULL " not in xp and '_liquidity_stop(pos, mint, price, _eff_sl)' in xp)
 check('every exit compares against the position\'s own (user) stop loss and take profit',
-      'elif chg <= -_eff_sl:' in xp and 'elif chg >= _eff_tp:' in xp
+      "_protection_stop_hit(price, pos['buy_price'], _eff_sl)" in xp and "_protection_profit_hit(price, pos['buy_price'], _eff_tp)" in xp
       and '_eff_sl = _pos_sl_frac(pos, stop_loss)' in xp and '_eff_tp = _pos_tp_frac(pos, take_profit)' in xp)
 check('the staged take profit / trailing stop only runs when the user switched Trailing Stop on',
       "_trailing_on  = pos.get('trailing_enabled', tiered_tp_enabled)" in xp
       and 'if _trailing_on and not pos.get(\'tp1_hit\'):' in xp)
 check('a position bought by hand with protection OFF is never sold by the bot -- also not on bot start',
-      "if _pos.get('protect') is False:" in startup and "if pos.get('protect') is False:" in xp)
+      "if _pos.get('protect') is False or _pos.get('source') == 'manual':" in startup and "if pos.get('protect') is False or pos.get('source') == 'manual':" in xp)
 
 # A new bot position takes the user's settings exactly, whatever was learned.
 w = str(Keypair().pubkey()); uid = d.get_or_create_user(w)
@@ -73,7 +73,7 @@ check('self-learning only learns entries (minimum score, tokens to avoid), never
 
 gp = src[src.index('def _guardian_pass():'):src.index('def _position_guardian_loop():')]
 check('the position guardian (bot off) uses the same stop loss / take profit and nothing else',
-      'elif chg >= _pos_tp_frac(pos, cfg[\'tp\']):' in gp and 'if chg <= -_sl:' in gp
+      "_protection_profit_hit(price, pos['buy_price'], _pos_tp_frac(pos, cfg['tp']))" in gp and "_protection_stop_hit(price, pos['buy_price'], _sl)" in gp
       and 'MOMENTUM' not in gp and 'CRASH' not in gp and 'RUGPULL' not in gp)
 page = open(os.path.join(ROOT, 'templates', 'auto_trading_bot.html'), encoding='utf-8').read()
 js = open(os.path.join(ROOT, 'static', 'dashboard.js'), encoding='utf-8').read()

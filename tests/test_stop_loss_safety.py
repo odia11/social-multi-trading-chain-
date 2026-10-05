@@ -60,14 +60,15 @@ check('with Jupiter and DexScreener down the stop loss still gets a live price (
 
 src = open(os.path.join(ROOT, 'dashboard.py'), encoding='utf-8').read()
 xp = src[src.index('    def _exit_pass():'):src.index('    def _exit_watch():')]
-check('an old fallback price is never used for a stop-loss decision (max 30 s old)',
-      "_EXIT_TD_PRICE_MAX_AGE = 30.0" in src and "_exit_td_at[mint] = time.time()" in src
+check('an old fallback price is never used for a stop-loss decision (max 3 s old)',
+      "_EXIT_TD_PRICE_MAX_AGE = 3.0" in src and "_exit_td_at[mint] = time.time()" in src
       and "(_td.get('price') if _td_fresh else 0)" in xp)
 check('a held token without any price is no longer skipped silently: the user is told, once',
       "if time.time() - _np >= EXIT_NO_PRICE_ALERT_SEC and not pos.get('_no_price_alerted'):" in xp
       and "'Stop loss paused: '" in xp and 'stop loss active again' in xp)
-check('a stop-loss sell that keeps failing reaches the user and the server log',
-      "if pos['_sell_fails'] == EXIT_SELL_FAIL_ALERT:" in xp and 'SELL KEEPS FAILING' in xp
-      and "'Could not sell '" in xp)
-check('the exit watcher keeps checking every second', 'EXIT_CHECK_INTERVAL   = 1.0' in src)
+executor = open(os.path.join(ROOT,'protection_exits.py'),encoding='utf-8').read()
+check('a stop-loss sell that keeps failing reaches the user and remains queued',
+      "current['_sell_fails'] == ctx.get('EXIT_SELL_FAIL_ALERT', 5)" in executor
+      and "'Could not sell '" in executor and 'retry queued' in executor)
+check('the exit watcher keeps checking independently four times per second', 'EXIT_CHECK_INTERVAL   = 0.25' in src)
 raise SystemExit(0 if all(checks) else 1)
