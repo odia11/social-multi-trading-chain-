@@ -74,6 +74,7 @@ jobs:
           PYTHONPATH=. python tests/test_portfolio_snapshot_authority.py
           python tests/test_portfolio_full_breakdown.py
           python tests/test_protection_exit_runtime.py
+          python tests/test_responsive_agent.py
           python tests/test_bot_follows_settings.py
           python tests/test_position_guardian.py
           python tests/test_stop_loss_safety.py
