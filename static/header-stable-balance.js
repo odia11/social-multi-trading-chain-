@@ -7,8 +7,10 @@
 var timer=null,inFlight=false,last='',lastAt=0,lastStored=null,lastStoredAt=0;
 var here=location.pathname.replace(/\/+$/,'')||'/';
 var ON_PORTFOLIO=here==='/wallet',POLL_MS=5000,MIN_GAP_MS=1200;
-var STORAGE_KEY='orcaPortfolioLastConfirmedUSDCValue';
-var STORAGE_AT_KEY='orcaPortfolioLastConfirmedUSDCValueAt';
+var scopeNode=document.querySelector('[data-orca-wallet-scope]');
+var scope=scopeNode?scopeNode.getAttribute('data-orca-wallet-scope'):'';
+var STORAGE_KEY='orcaPortfolioLastConfirmedUSDCValue:v3:'+scope;
+var STORAGE_AT_KEY='orcaPortfolioLastConfirmedUSDCValueAt:v3:'+scope;
 var MAX_CACHE_AGE=86400000;
 
 function el(){return document.getElementById('pt-nb-sol-balance')}
@@ -23,7 +25,7 @@ function render(value){
   if(pill)pill.title='Estimated portfolio value in USDC; assets remain on Solana';
 }
 function remember(total){
-  var value=n(total);if(value===null)return;
+  var value=n(total);if(value===null||!scope)return;
   if(value===lastStored && Date.now()-lastStoredAt<60000)return;
   try{
     localStorage.setItem(STORAGE_KEY,String(value));
@@ -32,6 +34,7 @@ function remember(total){
   }catch(e){}
 }
 function recalled(){
+  if(!scope)return null;
   try{
     var raw=localStorage.getItem(STORAGE_KEY),at=Number(localStorage.getItem(STORAGE_AT_KEY));
     if(raw===null)return null;
@@ -45,21 +48,21 @@ function json(url){
   return fetch(url+sep+'t='+Date.now(),{credentials:'include',cache:'no-store'})
     .then(function(r){if(!r.ok)throw new Error('portfolio unavailable');return r.json()});
 }
-function accept(total){
+function accept(total,persist){
   var value=n(total);if(value===null)return false;
-  last=money(value);render(last);remember(value);return true;
+  last=money(value);render(last);if(persist!==false)remember(value);return true;
 }
 function refresh(force){
   if(!el()||document.hidden)return Promise.resolve(false);
   if(ON_PORTFOLIO){
-    if(window.__orcaPortfolioValue!=null)accept(window.__orcaPortfolioValue);
+    if(window.__orcaPortfolioValue!=null)accept(window.__orcaPortfolioValue,false);
     return Promise.resolve(true);
   }
   if(inFlight)return Promise.resolve(false);
   var now=Date.now();if(!force&&now-lastAt<MIN_GAP_MS)return Promise.resolve(false);
   lastAt=now;inFlight=true;
   return json('/api/portfolio/snapshot').then(function(s){
-    if(!s||!s.ok||!accept(s.total_usd))throw new Error('bad portfolio snapshot');
+    if(!s||!s.ok||!accept(s.total_usd,!s.stale&&s.inventory_complete!==false&&s.valuation_complete!==false))throw new Error('bad portfolio snapshot');
     window.__orcaPortfolioValue=Number(s.total_usd);
     return true;
   }).catch(function(){
@@ -74,7 +77,7 @@ function start(){
   else if((el().textContent||'').trim()==='$0.00')render('—');
 
   if(ON_PORTFOLIO){
-    if(window.__orcaPortfolioValue!=null)accept(window.__orcaPortfolioValue);
+    if(window.__orcaPortfolioValue!=null)accept(window.__orcaPortfolioValue,false);
     return;
   }
   refresh(true);
@@ -85,7 +88,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 
 document.addEventListener('orca:portfolio-value',function(e){
   var total=e&&e.detail&&e.detail.total;
-  if(total!=null)accept(total);
+  if(total!=null)accept(total,!e.detail.stale&&e.detail.inventory_complete!==false&&e.detail.valuation_complete!==false);
 });
 window.addEventListener('pageshow',function(){start();refresh(true)});
 window.addEventListener('focus',function(){refresh(true)});

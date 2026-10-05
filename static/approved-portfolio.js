@@ -3,10 +3,12 @@
 'use strict';
 if((location.pathname.replace(/\/+$/,'')||'/')!=='/wallet')return;
 var samples=[];
-var STORAGE_KEY='orcaPortfolioLastConfirmedUSDCValue';
-var STORAGE_AT_KEY='orcaPortfolioLastConfirmedUSDCValueAt';
-function remember(total){try{localStorage.setItem(STORAGE_KEY,String(total));localStorage.setItem(STORAGE_AT_KEY,String(Date.now()))}catch(e){}}
-function recalled(){try{var raw=localStorage.getItem(STORAGE_KEY),stamp=localStorage.getItem(STORAGE_AT_KEY);if(raw===null||stamp===null)return null;var n=Number(raw),at=Number(stamp);if(!Number.isFinite(n)||n<0||!Number.isFinite(at)||at<=0||Date.now()-at>86400000)return null;return n}catch(e){return null}}
+var scopeTag=document.querySelector('[data-orca-wallet-scope]');
+var scope=scopeTag?scopeTag.getAttribute('data-orca-wallet-scope'):'';
+var STORAGE_KEY='orcaPortfolioLastConfirmedUSDCValue:v3:'+scope;
+var STORAGE_AT_KEY='orcaPortfolioLastConfirmedUSDCValueAt:v3:'+scope;
+function remember(total){if(!scope)return;try{localStorage.setItem(STORAGE_KEY,String(total));localStorage.setItem(STORAGE_AT_KEY,String(Date.now()))}catch(e){}}
+function recalled(){if(!scope)return null;try{var raw=localStorage.getItem(STORAGE_KEY),stamp=localStorage.getItem(STORAGE_AT_KEY);if(raw===null||stamp===null)return null;var n=Number(raw),at=Number(stamp);if(!Number.isFinite(n)||n<0||!Number.isFinite(at)||at<=0||Date.now()-at>86400000)return null;return n}catch(e){return null}}
 function money(n){
   n=Number(n);
   return Number.isFinite(n)?n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' USDC':'—';
@@ -37,6 +39,8 @@ function paint(value){
   if(!Number.isFinite(total)||total<0)return;
   put('pf-total',money(total));
   put('pf-sol-equivalent',d.total_sol==null?'SOL equivalent unavailable':'≈ '+Number(d.total_sol).toLocaleString('en-US',{maximumFractionDigits:9})+' SOL · portfolio equivalent');
+  if(d.stale||d.inventory_complete===false){put('pf-performance','Last confirmed balance · refreshing…');return;}
+  if(d.valuation_complete===false){put('pf-performance','Some prices unavailable · estimated known value');return;}
   remember(total);
   if(!samples.length||samples[samples.length-1]!==total){
     samples.push(total);if(samples.length>24)samples.shift();

@@ -2426,13 +2426,45 @@ function _sbSearch(q){
 }
 
 // ── render holdings rows ──────────────────────────────────
+function _pfIsSol(x){return x.is_native===true||(x.is_native!==false&&String(x.mint||'')==='So11111111111111111111111111111111111111112')}
+function _pfIsUsdc(x){return String(x.mint||'')==='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'}
+function _reconcilePortfolioRows(wrap,html){
+  var next=document.createElement('div');next.innerHTML=html;
+  var existing=new Map();
+  Array.from(wrap.children).forEach(function(node){if(node.dataset.mint)existing.set(node.dataset.mint,node)});
+  var wanted=Array.from(next.children),keys=new Set(wanted.map(function(node){return node.dataset.mint}));
+  Array.from(wrap.children).forEach(function(node){if(!keys.has(node.dataset.mint))node.remove()});
+  wanted.forEach(function(fresh,index){
+    var node=existing.get(fresh.dataset.mint);
+    if(!node){node=fresh}
+    else{
+      var row=node.querySelector('.tok-row'),newRow=fresh.querySelector('.tok-row');
+      if(node.dataset.view!==newRow.outerHTML){row.replaceWith(newRow)}
+      // Keep the opened panel, focus, amount and percentage while prices update.
+      var panel=node.querySelector('.tok-trade-panel'),freshPanel=fresh.querySelector('.tok-trade-panel');
+      if(panel&&freshPanel){
+        panel.id=freshPanel.id;
+        var oldControls=panel.querySelectorAll('[id]'),newControls=freshPanel.querySelectorAll('[id]');
+        oldControls.forEach(function(control,i){
+          if(!newControls[i])return;
+          control.id=newControls[i].id;
+          var click=newControls[i].getAttribute('onclick');
+          if(click)control.setAttribute('onclick',click);
+        });
+      }
+    }
+    node.dataset.view=(node.querySelector('.tok-row')||fresh.querySelector('.tok-row')).outerHTML;
+    if(wrap.children[index]!==node)wrap.insertBefore(node,wrap.children[index]||null);
+  });
+}
+
 function _renderHoldings(spl){
   var wrap=document.getElementById('tokens')
   if(!wrap) return
   // Solana USDC has its own pinned row above the token list.
-  spl=spl.filter(function(x){return String(x.symbol||'').toUpperCase()!=='USDC'})
+  spl=spl.filter(function(x){return !_pfIsUsdc(x)})
   if(!spl.length){wrap.innerHTML='';return}
-  wrap.innerHTML=spl.map(function(x,i){
+  var markup=spl.map(function(x,i){
     var realI=_allSpl.indexOf(x)
     var sym=x.symbol||'?'
     var amt=parseFloat(x.amount||0)
@@ -2459,10 +2491,10 @@ function _renderHoldings(spl){
     // listing for) -- showing "$0.00" there reads as "this is worthless",
     // when really we just don't know. "—" is honest about the difference.
     var usdStr=cur>0?('$'+usd.toFixed(2)):'—'
-    return '<div class="tok-row-block">'
+    return '<div class="tok-row-block" data-mint="'+esc(x.mint||'')+'">'
       +'<div class="tok-row">'
         +logoHtml
-        +'<div class="tok-info" data-sym="'+esc(sym)+'" onclick="window.location=\'/live-market?token=\'+encodeURIComponent(this.dataset.sym)">'
+        +'<div class="tok-info" data-mint="'+esc(x.mint||'')+'" onclick="window.location=\'/live-market?mint=\'+encodeURIComponent(this.dataset.mint)">'
           +'<div class="tok-name">'+esc(sym)+'</div>'
           +'<div class="tok-amount">'+amtStr+'</div>'
         +'</div>'
@@ -2484,6 +2516,7 @@ function _renderHoldings(spl){
       +'</div>'
     +'</div>'
   }).join('')
+  _reconcilePortfolioRows(wrap,markup)
 }
 
 function _toggleTokTrade(i){
@@ -2495,12 +2528,13 @@ function _toggleTokTrade(i){
 var _portfolioSnapshotData=null
 var _portfolioSnapshotAt=0
 var _portfolioSnapshotPromise=null
+var _portfolioForcedPromise=null
 
 // Keep the COMPLETE last confirmed portfolio snapshot on-device, scoped to
 // this wallet. Page navigation can therefore paint total + USDC + SOL + token
 // rows synchronously, before the first RPC round-trip finishes.
-var _PORTFOLIO_CACHE_KEY='orcaPortfolioSnapshot:v2:'+String(_walletAddr||'').toLowerCase()
-var _PORTFOLIO_ASSETS_KEY='orcaPortfolioAssets:v2:'+String(_walletAddr||'').toLowerCase()
+var _PORTFOLIO_CACHE_KEY='orcaPortfolioSnapshot:v3:'+String(_walletAddr||{{ wallet_address|tojson }}||'')
+var _PORTFOLIO_ASSETS_KEY='orcaPortfolioAssets:v3:'+String(_walletAddr||{{ wallet_address|tojson }}||'')
 var _PORTFOLIO_CACHE_MAX_AGE=86400000
 function _portfolioCacheRead(key){
   try{
@@ -2513,16 +2547,17 @@ function _portfolioCacheWrite(key,data){
   try{localStorage.setItem(key,JSON.stringify({at:Date.now(),data:data}))}catch(e){}
 }
 function _rememberPortfolioSnapshot(snap){
-  if(!snap||!snap.ok||!Number.isFinite(Number(snap.total_usd)))return
+  if(!snap||!snap.ok||snap.stale||snap.inventory_complete===false||!Number.isFinite(Number(snap.total_usd)))return
   var safe={
     ok:true,total_usd:Number(snap.total_usd),
     total_sol:snap.total_sol==null?null:Number(snap.total_sol),
     available_to_trade_sol:Number(snap.available_to_trade_sol||0),
     other_assets_value_usd:Number(snap.other_assets_value_usd||0),
     stable:snap.stable||null,sol:snap.sol||null,
-    assets:Array.isArray(snap.assets)?snap.assets.slice(0,250):[],
+    assets:Array.isArray(snap.assets)?snap.assets:[],
     asset_count:Number(snap.asset_count||0),
-    inventory_complete:snap.inventory_complete!==false,
+    inventory_complete:snap.inventory_complete!==false,valuation_complete:snap.valuation_complete!==false,
+    wallets:snap.wallets||null,unpriced_mints:snap.unpriced_mints||[],stale_price_mints:snap.stale_price_mints||[],
     generated_at:snap.generated_at||null,stale:!!snap.stale
   }
   _portfolioCacheWrite(_PORTFOLIO_CACHE_KEY,safe)
@@ -2533,7 +2568,7 @@ function _rememberPortfolioSnapshot(snap){
   }catch(e){}
 }
 function _rememberPortfolioAssets(assets){
-  if(Array.isArray(assets))_portfolioCacheWrite(_PORTFOLIO_ASSETS_KEY,assets.slice(0,250))
+  if(Array.isArray(assets))_portfolioCacheWrite(_PORTFOLIO_ASSETS_KEY,assets)
 }
 
 function _getPortfolioSnapshot(forceFresh){
@@ -2541,13 +2576,25 @@ function _getPortfolioSnapshot(forceFresh){
   if(!forceFresh && _portfolioSnapshotData && now-_portfolioSnapshotAt<3500){
     return Promise.resolve(_portfolioSnapshotData)
   }
-  if(_portfolioSnapshotPromise) return _portfolioSnapshotPromise
+  if(_portfolioSnapshotPromise){
+    if(!forceFresh)return _portfolioSnapshotPromise
+    if(!_portfolioForcedPromise){
+      var prior=_portfolioSnapshotPromise
+      _portfolioForcedPromise=prior.catch(function(){}).then(function(){return _getPortfolioSnapshot(true)})
+        .finally(function(){_portfolioForcedPromise=null})
+    }
+    return _portfolioForcedPromise
+  }
   var url='/api/portfolio/snapshot'+(forceFresh?'?bust=1':'')
   _portfolioSnapshotPromise=fetch(url,{credentials:'include',cache:'no-store'})
     .then(function(r){if(!r.ok)throw new Error('snapshot unavailable');return r.json()})
     .then(function(d){
       if(!d||!d.ok)throw new Error((d&&d.msg)||'snapshot failed')
-      _portfolioSnapshotData=d;_portfolioSnapshotAt=Date.now();_rememberPortfolioSnapshot(d);return d
+      if(d.inventory_complete===false&&_portfolioSnapshotData&&_portfolioSnapshotData.inventory_complete!==false){
+        d=Object.assign({},_portfolioSnapshotData,{stale:true,partial:true,unavailable:d.unavailable||['full_token_index']})
+      }
+      _portfolioSnapshotData=d;_portfolioSnapshotAt=Date.now();_rememberPortfolioSnapshot(d)
+      _paintPortfolioSnapshotInstant(d);return d
     })
     .finally(function(){_portfolioSnapshotPromise=null})
   return _portfolioSnapshotPromise
@@ -2604,7 +2651,7 @@ loadBalance()
 // time, so this keeps the on-screen balance current (a bot trade, a Live
 // Market trade, or a deposit from elsewhere) instead of only updating on
 // page load or right after an action taken on this specific page.
-setInterval(function(){ if(!document.hidden) loadBalance() }, 8000)
+// The shared Portfolio controller owns background refreshes.
 
 // ── Solana USDC balance ──
 var _usdcLoadedOnce=false
@@ -2632,7 +2679,7 @@ function loadUsdcSummary(){
   })
 }
 loadUsdcSummary()
-setInterval(function(){ if(!document.hidden) loadUsdcSummary() }, 8000)
+// Same snapshot as holdings and total.
 
 // ── hide small balances toggle ────────────────────────────
 var _hideSmall=false
@@ -2653,7 +2700,7 @@ function _paintPortfolioBreakdown(snap){
   var seen={}
   assets.forEach(function(x){
     var sym=String(x.symbol||'').toUpperCase(),mint=String(x.mint||x.token_address||sym)
-    if(sym!=='USDC'&&sym!=='SOL'&&Number(x.amount||0)>0)seen[mint]=1
+    if(!_pfIsUsdc(x)&&!_pfIsSol(x)&&Number(x.amount||0)>0)seen[mint]=1
   })
   var count=Object.keys(seen).length+(stable>0?1:0)+(solAmount>0?1:0)
   function set(id,val){var e=document.getElementById(id);if(e)e.textContent=val}
@@ -2668,7 +2715,7 @@ function _paintPortfolioBreakdown(snap){
   set('pf-usdc-value',_pfMoney(stable))
   set('pf-sol-asset',solAmount.toLocaleString('en-US',{maximumFractionDigits:8})+' SOL')
   set('pf-sol-value',_pfMoney(sol)+(solPrice>0?' · '+_pfMoney(solPrice)+'/SOL':''))
-  set('oa-pf-scope',snap.inventory_complete===false
+  set('oa-pf-scope',snap.stale?'Last confirmed balances · refreshing…':snap.inventory_complete===false
     ?'Verified balances · full token scan retrying'
     :'Everything in your Solana trading wallet')
   return true
@@ -2677,7 +2724,7 @@ window.OrcAgentPaintPortfolioBreakdown=_paintPortfolioBreakdown
 
 function _paintPortfolioAssetsInstant(assets){
   if(!Array.isArray(assets))return false
-  var solToken=assets.find(function(x){return String(x.symbol||'').toUpperCase()==='SOL'})
+  var solToken=assets.find(_pfIsSol)
   if(solToken){
     var solUsd=Number(solToken.usd_value!=null?solToken.usd_value:solToken.value_usd)
     var solAmt=Number(solToken.amount||0),solPx=Number(solToken.price_usd||0)
@@ -2686,7 +2733,9 @@ function _paintPortfolioAssetsInstant(assets){
     if(solValEl&&Number.isFinite(solUsd))solValEl.textContent=_pfMoney(solUsd)+(solPx>0?' · '+_pfMoney(solPx)+'/SOL':'')
     window._wSolPrice=Number(solToken.price_usd||0)
   }
-  var spl=assets.filter(function(x){return String(x.symbol||'').toUpperCase()!=='SOL'})
+  var spl=assets.filter(function(x){return !_pfIsSol(x)})
+  var order=new Map(_allSpl.map(function(x,i){return [x.mint,i]}))
+  spl.sort(function(a,b){return (order.has(a.mint)?order.get(a.mint):1e9)-(order.has(b.mint)?order.get(b.mint):1e9)})
   _allSpl=spl;window._wTokens=spl
   _renderHoldings(_hideSmall?spl.filter(function(x){return parseFloat(x.usd_value||x.value_usd||0)>=1}):spl)
   return true
@@ -2697,7 +2746,7 @@ function _paintPortfolioSnapshotInstant(snap){
   var solValue=Number(snap.sol&&snap.sol.value_usd),solAmount=Number(snap.sol&&snap.sol.amount)
   var totalEl=document.getElementById('pf-total');if(totalEl)totalEl.textContent=total.toFixed(2)+' USDC'
   var equivalent=document.getElementById('pf-sol-equivalent');if(equivalent)equivalent.textContent=snap.total_sol==null?'SOL equivalent unavailable':'≈ '+Number(snap.total_sol).toLocaleString('en-US',{maximumFractionDigits:9})+' SOL · portfolio equivalent'
-  var perf=document.getElementById('pf-performance');if(perf)perf.textContent='Last confirmed balance · refreshing…'
+  var perf=document.getElementById('pf-performance');if(perf)perf.textContent=snap.stale?'Last confirmed balance · refreshing…':snap.inventory_complete===false?'Verified balances · full token scan retrying':snap.valuation_complete===false?'Some prices unavailable · estimated known value':'Live Solana balance'
   var avail=document.getElementById('avail');if(avail)avail.textContent=Number(snap.available_to_trade_sol||0).toFixed(6)
   var usdcAsset=document.getElementById('pf-usdc-asset');if(usdcAsset&&Number.isFinite(stable))usdcAsset.textContent='$'+stable.toFixed(2)
   var solAsset=document.getElementById('pf-sol-asset');if(solAsset&&Number.isFinite(solValue))solAsset.textContent='$'+solValue.toFixed(2)
@@ -2719,7 +2768,7 @@ function _paintPortfolioSnapshotInstant(snap){
 // Millisecond first paint: complete snapshot when available; otherwise at
 // least restore the last token rows while the authoritative total refreshes.
 var _instantPortfolio=_portfolioCacheRead(_PORTFOLIO_CACHE_KEY)
-if(_instantPortfolio)_paintPortfolioSnapshotInstant(_instantPortfolio)
+if(_instantPortfolio){_portfolioSnapshotData=_instantPortfolio;_paintPortfolioSnapshotInstant(Object.assign({},_instantPortfolio,{stale:true}))}
 else {
   var _instantAssets=_portfolioCacheRead(_PORTFOLIO_ASSETS_KEY)
   if(_instantAssets)_paintPortfolioAssetsInstant(_instantAssets)
@@ -2735,62 +2784,18 @@ function _toggleHideSmall(){
 // ── holdings ──────────────────────────────────────────────
 function loadTokens(bust){
   var wrap=document.getElementById('tokens')
-  if(!_allSpl.length) wrap.innerHTML='<div class="state-msg">Loading…</div>'
-
-  // On a cold page load do not make token rows wait for every chain's RPC.
-  // Start the independent holdings read in parallel and use the first valid
-  // result. A slow/down Polygon RPC can no longer hold the Assets list hostage.
-  var aggregate=_getPortfolioSnapshot(!!bust)
-  var tokenOnly=(!_allSpl.length||bust)
-    ?fetch('/api/wallet/tokens'+(bust?'?bust=1':''),{credentials:'include',cache:'no-store'})
-      .then(function(r){if(!r.ok)throw new Error('tokens unavailable');return r.json()})
-      .then(function(d){
-        if(!d||!d.ok||!Array.isArray(d.tokens))throw new Error('tokens unavailable')
-        _rememberPortfolioAssets(d.tokens);return {assets:d.tokens}
-      })
-    :null
-  var source=tokenOnly?new Promise(function(resolve,reject){
-    var failed=0,last
-    ;[aggregate,tokenOnly].forEach(function(p){
-      p.then(resolve).catch(function(e){last=e;if(++failed===2)reject(last)})
-    })
-  }):aggregate
-
-  source.then(function(snap){
-    var tokens=snap.assets||[]
-
-    // SOL entry for USD total
-    var solToken=tokens.find(function(x){return x.symbol==='SOL'})
-    if(solToken){
-      var usdVal=parseFloat(solToken.usd_value||solToken.value_usd||0)
-      document.getElementById('usd').textContent=usdVal.toFixed(2)
-    }
-
-    var spl=tokens.filter(function(x){return x.symbol!=='SOL'})
-    window._wTokens=spl
-    window._wSolPrice=solToken?parseFloat(solToken.price_usd||0):0
-
-    // portfolio PnL
-    var totalCost=0,totalCur=0,hasPnl=false
-    spl.forEach(function(x){
-      var avg=parseFloat(x.avg_price||0)
-      var cur=parseFloat(x.price_usd||0)
-      var amt=parseFloat(x.amount||0)
-      if(avg>0&&cur>0&&amt>0){totalCost+=avg*amt;totalCur+=cur*amt;hasPnl=true}
-    })
-
-    _allSpl=spl
-    _rememberPortfolioAssets(tokens)
-    _renderHoldings(_hideSmall?spl.filter(function(x){return parseFloat(x.usd_value||x.value_usd||0)>=1}):spl)
-
+  if(!_allSpl.length&&!wrap.children.length)wrap.innerHTML='<div class="state-msg">Loading…</div>'
+  return _getPortfolioSnapshot(!!bust).then(function(snap){
+    _paintPortfolioAssetsInstant(snap.assets||[])
+    return snap
   }).catch(function(err){
-    console.error('[wallet/tokens]', err)
-    if(!_allSpl.length) wrap.innerHTML='<div class="state-msg">Tokens temporarily unavailable. Retrying…</div>'
+    console.error('[portfolio]',err)
+    if(!_allSpl.length)wrap.innerHTML='<div class="state-msg">Tokens temporarily unavailable. Retrying…</div>'
   })
 }
 
 loadTokens()
-setInterval(function(){ if(!document.hidden) loadTokens(false) }, 15000)
+// A single controller updates balances, assets and totals together.
 _loadBridgeHistory()
 
 // ── recent activity ──────────────────────────────────────
