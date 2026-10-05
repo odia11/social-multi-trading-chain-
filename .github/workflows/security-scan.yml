@@ -73,6 +73,12 @@ jobs:
           python tests/test_portfolio_reliability.py
           PYTHONPATH=. python tests/test_portfolio_snapshot_authority.py
           python tests/test_portfolio_full_breakdown.py
+          python tests/test_protection_exit_runtime.py
+          python tests/test_bot_follows_settings.py
+          python tests/test_position_guardian.py
+          python tests/test_stop_loss_safety.py
+          python tests/test_sell_value_stop.py
+          python tests/test_exit_watch_every_second.py
           python tests/test_live_trades_truth.py
           python tests/test_live_trades_overview.py
           bash deploy/check-performance-contract.sh

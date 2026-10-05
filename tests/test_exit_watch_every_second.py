@@ -23,6 +23,7 @@ from unittest.mock import patch
 ROOT = os.path.join(os.path.dirname(__file__), '..')
 sys.path.insert(0, ROOT)
 os.environ.update({'DATA_DIR': tempfile.mkdtemp(),
+                   'ORCAGENT_POSITION_GUARDIAN':'0',
                    'ENCRYPTION_KEY': '6UorqYgQpSk59aqy_MY73E0nlUjevVeCj0clmTGE_Ck='})
 import app_entry  # noqa: E402
 d = app_entry._dashboard
@@ -38,19 +39,25 @@ def fake_fetch(mints_by_chain):
     calls.append(sorted(mints_by_chain)); return {m: 1.0 for m in mints_by_chain}
 with patch.object(d, '_exit_fetch_prices', side_effect=fake_fetch):
     d._exit_price_cache.clear(); d._exit_watched.clear()
+    d._exit_fresh_prices({'MintA':'solana'})
+    time.sleep(.1)
     a = d._exit_fresh_prices({'MintA': 'solana'})
+    d._exit_fresh_prices({'MintB':'solana'})
+    time.sleep(.1)
     b = d._exit_fresh_prices({'MintB': 'solana'})
     time.sleep(1.05)
     d._exit_fresh_prices({'MintA': 'solana'})
+    time.sleep(.1)
 check('the exit feed reads every watched mint in one batch once a second, shared by all bots',
       a == {'MintA': 1.0} and b == {'MintB': 1.0} and calls[-1] == ['MintA', 'MintB'])
 with patch.object(d, '_exit_fetch_prices', return_value={}):
     d._exit_price_cache['Old'] = (time.time() - 20, 5.0); d._exit_watched['Old'] = ('solana', time.time() + 10)
     check('a price older than 15 s is never acted on', d._exit_fresh_prices({'Old': 'solana'}) == {})
 src = open(os.path.join(ROOT, 'dashboard.py'), encoding='utf-8').read()
+feed_src = open(os.path.join(ROOT, 'protection_exits.py'), encoding='utf-8').read()
 check('Solana prices come from Jupiter in batches of 50, EVM/missing from DexScreener in batches of 30',
-      "'/price/v3?ids=' + ','.join(chunk)" in src and 'for i in range(0, len(sol), 50)' in src
-      and "'https://api.dexscreener.com/latest/dex/tokens/' + ','.join(chunk)" in src)
+      "'/price/v3?ids='+','.join(chunk)" in feed_src and 'range(0,len(sol),50)' in feed_src
+      and "'https://api.dexscreener.com/latest/dex/tokens/'+','.join(chunk)" in feed_src)
 
 # ── the real trader loop, with the main loop stuck on a slow RPC ──
 wallet = str(Keypair().pubkey()); uid = d.get_or_create_user(wallet)
@@ -62,13 +69,13 @@ SL, TP = str(Keypair().pubkey()), str(Keypair().pubkey())
 us = d.get_user_state(wallet)
 for mint, sym in ((SL, 'SLTEST'), (TP, 'TPTEST')):
     us['positions'][mint] = {'amount': 100.0, 'buy_price': 1.0, 'spend': 100.0, 'chain': 'solana',
-                             'symbol': sym, 'sl_pct': 10.0, 'tp_pct': 20.0}
+                             'symbol': sym, 'sl_pct': 10.0, 'tp_pct': 20.0, 'base':'USDC'}
 market = {SL: 0.95, TP: 1.05}
 sells, fetches = [], []
 def fake_prices(mints_by_chain):
     fetches.append(time.time()); return {m: market[m] for m in mints_by_chain if m in market}
 def fake_exit(user_id, us_, wallet_, mint, pos, price, label, amount, spend, reason, *a, **kw):
-    sells.append((mint, reason, time.time())); return True, price, amount
+    sells.append((mint, reason, time.time())); fake_close(user_id,wallet_,mint); return True, price, amount
 def fake_close(user_id, wallet_, mint, chain='solana'):
     us['positions'][mint] = {'amount': 0.0, 'buy_price': 0.0, 'spend': 0.0}
 def stuck_rpc(*a, **kw):

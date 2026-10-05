@@ -28,7 +28,7 @@ read = lambda *p: open(os.path.join(ROOT, *p), encoding='utf-8').read()
 quotes = []          # (usd_per_token, quoted_at) returned in turn
 real_orig = d._exit_realizable_price
 d._exit_realizable_price = lambda mint, amount: quotes.pop(0) if quotes else (None, 0.0)
-pos = {'amount': 1000.0, 'buy_price': 0.010, 'chain': 'solana'}
+pos = {'amount': 1000.0, 'buy_price': 0.010, 'chain': 'solana', 'base': 'USDC'}
 quotes[:] = [(0.0097, 1.0)]       # a normal 3% exit cost at the start
 hit, chg = d._liquidity_stop(pos, 'MINT', 0.0100, 0.02)
 check('the normal cost of selling is the baseline: a tight 2% stop does not sell on ordinary price impact',
@@ -44,7 +44,7 @@ quotes[:] = [(0.0048, 3.0)]
 hit, _ = d._liquidity_stop(pos, 'MINT', 0.0100, 0.08)
 check('...a second, newer quote that agrees triggers the stop loss', hit)
 
-pos2 = {'amount': 1000.0, 'buy_price': 0.010, 'chain': 'solana'}
+pos2 = {'amount': 1000.0, 'buy_price': 0.010, 'chain': 'solana', 'base': 'USDC'}
 quotes[:] = [(0.0000001, 1.0), (0.0000001, 2.0)]
 h1, c1 = d._liquidity_stop(pos2, 'M2', 0.0100, 0.08)
 h2, c2 = d._liquidity_stop(pos2, 'M2', 0.0100, 0.08)
@@ -52,7 +52,7 @@ check('an implausible quote (wrong decimals, a glitch) is ignored, never acted o
 check('EVM positions keep the market-price stop only', d._liquidity_stop(
     {'amount': 1, 'buy_price': 1, 'chain': 'base'}, 'X', 1.0, 0.05) == (False, None))
 check('no quote -> the market-price stop applies', d._liquidity_stop(
-    {'amount': 1, 'buy_price': 1, 'chain': 'solana'}, 'Y', 1.0, 0.05) == (False, None))
+    {'amount': 1, 'buy_price': 1, 'chain': 'solana', 'base': 'USDC'}, 'Y', 1.0, 0.05) == (False, None))
 d._exit_realizable_price = real_orig
 
 class R:
@@ -82,7 +82,7 @@ us['positions'].update({
                 '_no_price_since': now - 60},
     'FAILING': {'amount': 10, 'buy_price': 1.0, 'spend': 10, 'symbol': 'STUCK', 'chain': 'solana', '_sell_fails': 7},
     'THIN':    {'amount': 10, 'buy_price': 1.0, 'spend': 10, 'symbol': 'THIN', 'chain': 'solana', '_sell_value_ratio': 0.4},
-    'FINE':    {'amount': 10, 'buy_price': 1.0, 'spend': 10, 'symbol': 'OK', 'chain': 'solana'},
+    'FINE':    {'amount': 10, 'buy_price': 1.0, 'spend': 10, 'symbol': 'OK', 'chain': 'solana', 'base': 'USDC'},
 })
 d._guardian_state.update(running=False, last_pass=0)
 data = d._positions_at_risk(now)

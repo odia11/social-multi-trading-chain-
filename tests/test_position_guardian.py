@@ -59,8 +59,9 @@ check('legacy manual exits disabled on hydration',restored['positions'][legacy].
 # ── 2. the guardian ─────────────────────────────────────────────────────────
 sold = []
 def fake_exit(user_id, us, wallet, mint, pos, price, symbol, amount, spend, reason, *a, **k):
-    sold.append((wallet, mint, reason)); return True, price, amount
+    sold.append((wallet, mint, reason)); d._close_open_position(user_id,wallet,mint,chain=pos.get('chain','solana')); return True, price, amount
 d._bot_execute_exit = fake_exit
+d._sol_price_usd = 100.0
 gw, gu = user(sl=10, tp=20)
 mint_sl, mint_ok, mint_off, mint_tp = (str(Keypair().pubkey()) for _ in range(4))
 bot_buy(gu, gw, mint_sl, 'DROP', 10.0, 1000.0, (True, None, None))   # entry 0.01
@@ -68,7 +69,7 @@ bot_buy(gu, gw, mint_ok, 'FINE', 10.0, 1000.0, (True, None, None))
 d._register_manual_buy(gu, gw, mint_off, 'OFF', 10.0, 1000.0, (False, None, None))
 bot_buy(gu, gw, mint_tp, 'MOON', 10.0, 1000.0, (True, 5.0, 25.0))
 prices = {mint_sl: 0.0089, mint_ok: 0.0099, mint_off: 0.001, mint_tp: 0.0126}
-d._exit_fresh_prices = lambda mints: {m: prices[m] for m in mints if m in prices}
+d._exit_fresh_prices = lambda mints: {m: prices[m] * d._sol_price_usd for m in mints if m in prices}
 d._guardian_users_cache['at'] = 0
 d._guardian_pass(); time.sleep(0.5)
 got = {m: r for (_w, m, r) in sold if _w == gw}
@@ -114,7 +115,7 @@ src = read('dashboard.py')
 ex = src[src.index('def _bot_execute_exit('):src.index('def _bot_execute_exit_locked(')]
 check('bot, guardian and manual sells share one per-position lock (never sold twice)',
       'lock = _get_sell_lock(wallet, mint, chain)' in ex and 'lock.acquire(blocking=False)' in ex
-      and "(us['positions'].get(mint) or {}).get('amount', 0) <= 0" in ex)
+      and "current.get('amount', 0) <= 0" in ex)
 it = src[src.index('def api_instant_trade('):src.index('def api_instant_trade(') + 30000]
 check('Live Market\'s buy reads the protection before the swap and tracks the position after it',
       it.index('protection = _manual_protection(data)') < it.index('ok, sig, err_msg, token_amount, sol_amount = _execute_user_swap_ex(')
