@@ -10406,7 +10406,295 @@ async function _assistantTokenChoices(btn,symbol,replyId,postId){
         choices.forEach(function(b){b.disabled=true});
         var originalLabel=label.textContent;
         label.textContent='Getting $'+token.symbol+' price…';
-        var input={value:'@orcagent $'+token.symbol+' ('+token.address+') what is the price?',disabled:false};
+        var question='@orcagent 
+        var saved=await _feedSubmitNestedReply(input,postId,replyId);
+        if(!saved && host.isConnected){
+          choices.forEach(function(b){b.disabled=false});
+          label.textContent=originalLabel;
+        }
+      });
+      host.appendChild(choice);
+    });
+  }catch(e){if(host.isConnected){btn.disabled=false;btn.textContent='Retry token search';}}
+}
+
+function _feedToggleNestedReply(parentId, postId, btn){
+  var box = document.getElementById('rnbox-'+parentId);
+  if(!box) return;
+  var isOpen = box.style.display !== 'none';
+  // Close any other open nested composer on this post first, so only one is active.
+  document.querySelectorAll('#rlist-'+postId+' .fc-ri-nested-box').forEach(function(b){ b.style.display='none'; b.innerHTML=''; });
+  if(isOpen) return; // was open -> we just closed it above
+  var inpId  = 'rninp-'+parentId;
+  var cardId = 'rncard-'+parentId;
+  var row    = btn ? btn.closest('.fc-reply-item') : null;
+  var authorName = (row && row.querySelector('.fc-ri-name') && row.querySelector('.fc-ri-name').textContent) || 'Trader';
+  box.innerHTML = '<div class="fc-reply-inner" style="margin-top:8px" onclick="event.stopPropagation()">'
+    +'<div class="fc-reply-card" id="'+cardId+'">'
+    +'<div class="fc-reply-row1">'
+    +'<div class="fc-reply-avatar">'+_fcReplyAvatarHtml()+'</div>'
+    +'<div class="fc-reply-pill">'
+    +'<textarea rows="1" aria-label="Write a reply" class="fc-reply-inp" id="'+inpId+'" placeholder="Reply to '+esc(authorName)+'…" maxlength="500" '
+      +'oninput="_fcReplyCardSync(\''+cardId+'\')" onfocus="_fcReplyCardSync(\''+cardId+'\')" onblur="_fcReplyCardSync(\''+cardId+'\')" '
+      +'onkeydown="if(event.key===\'Enter\'&&!event.shiftKey&&!event.isComposing){event.preventDefault();_feedSubmitNestedReply(this,\''+postId.replace(/'/g,"\\'")+'\','+parentId+')}"></textarea>'
+    +'<button class="fc-reply-tool" onclick="_emojiPickerToggle(event,\'nrepal-'+parentId+'\',\''+inpId+'\')" title="Emoji">😊</button>'
+    +'<div class="fc-reply-palette ep-palette" id="nrepal-'+parentId+'"></div>'
+    +'<button class="fc-reply-send" onclick="_feedSubmitNestedReply(document.getElementById(\''+inpId+'\'),\''+postId.replace(/'/g,"\\'")+'\','+parentId+')" title="Send reply">'+_RC_SEND_ICON_SVG+'</button>'
+    +'</div>'
+    +'</div>'
+    +'</div>'
+    +'</div>';
+  box.style.display = '';
+  var inp = document.getElementById(inpId);
+  if(inp) setTimeout(function(){ inp.focus(); }, 100);
+}
+
+function _feedSubmitNestedReply(inp, postId, parentReplyId){
+  if(!inp || inp.disabled) return Promise.resolve(false);
+  var text = inp.value.trim();
+  if(!text) return Promise.resolve(false);
+  inp.disabled = true;
+  var sendBtn = inp.parentNode ? inp.parentNode.querySelector('.fc-reply-send') : null;
+  if(sendBtn){ sendBtn.disabled = true; sendBtn.textContent = '…'; }
+  return fetch('/api/feed/reply', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({post_id: postId, message: text, parent_reply_id: parentReplyId})
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if(d.ok){
+      var parentRow = document.querySelector('#rlist-'+postId+' .fc-reply-item[data-reply-id="'+parentReplyId+'"]');
+      var box = document.getElementById('rnbox-'+parentReplyId);
+      if(box){ box.style.display='none'; box.innerHTML=''; }
+      var selected=text.match(/^@orcagent \$([A-Za-z0-9_+.-]+) \(([1-9A-HJ-NP-Za-km-z]{32,44})\) what is the price\?$/i);
+      var resolvedChoice=!!(parentRow && selected && parentRow.dataset.tokenChoice===selected[1].toUpperCase());
+      if(parentRow){
+        var parentDepth = parentRow.dataset.parentId ? 2 : 1; // one level deeper than the parent, capped visually
+        var fakeReply = {
+          id: d.id, user_id: d.user_id,
+          username: d.username, wallet: d.wallet || '',
+          message: d.message, created_at: d.created_at,
+          like_count: 0, liked_by_me: false, is_mine: true,
+          parent_reply_id: parentReplyId,
+          verified: !!(_myProfileData && _myProfileData.verified),
+          avatar_url: (_myProfileData && _myProfileData.avatar_url) || ''
+        };
+        parentRow.insertAdjacentHTML('afterend', _renderReplyRow(fakeReply, postId, resolvedChoice ? 1 : parentDepth));
+        if(resolvedChoice)parentRow.remove();
+      }
+      var card = document.getElementById('fc-card-'+postId);
+      if(card){
+        var rcnt = card.querySelector('.fc-reply-count');
+        if(rcnt) rcnt.textContent = (parseInt(rcnt.textContent,10)||0)+1+(d.platform_reply_id?1:0)-(resolvedChoice?1:0);
+      }
+      if(d.platform_reply_id || resolvedChoice) _feedLoadReplies(postId);
+    } else {
+      openAlertModal({text:d.msg||'Could not post reply'});
+    }
+    inp.disabled = false;
+    if(sendBtn){ sendBtn.disabled = false; sendBtn.innerHTML = _RC_SEND_ICON_SVG; }
+    return !!d.ok;
+  }).catch(function(){
+    inp.disabled = false;
+    if(sendBtn){ sendBtn.disabled = false; sendBtn.innerHTML = _RC_SEND_ICON_SVG; }
+    openAlertModal({text:'Network error — could not post reply'});
+    return false;
+  });
+}
+
+function _feedRenderReplyTree(replies, postId){
+  var byParent=new Map(), ids=new Set(replies.map(function(r){return String(r.id)}));
+  replies.forEach(function(r){
+    var parent=r.parent_reply_id ? String(r.parent_reply_id) : null;
+    // Deleted/filtered parents must never hide their surviving conversation.
+    var key=parent && ids.has(parent) && parent!==String(r.id) ? parent : 'root';
+    if(!byParent.has(key))byParent.set(key,[]);
+    byParent.get(key).push(r);
+  });
+  // A saved exact-token selection completes this temporary agent prompt.
+  // Keep stored ancestry for notifications and follow-ups, but omit the resolved row.
+  var resolved=new Set();
+  replies.forEach(function(r){
+    if(!r.verified || String(r.username||'').toLowerCase()!=='orcagent')return;
+    var prompt=String(r.message||'').match(/^(?:Automated · )?Do you mean \$([A-Z][A-Z0-9_+.-]{0,24})\?/);
+    if(!prompt)return;
+    var children=byParent.get(String(r.id))||[];
+    if(children.some(function(child){
+      var selected=String(child.message||'').match(/^@orcagent \$([A-Za-z0-9_+.-]+) \(([1-9A-HJ-NP-Za-km-z]{32,44})\) what is the price\?$/i);
+      return selected && selected[1].toUpperCase()===prompt[1];
+    }))resolved.add(String(r.id));
+  });
+  var html='',seen=new Set();
+  function branch(rows){
+    var stack=rows.slice().reverse().map(function(r){return [r,0]});
+    while(stack.length){
+      var next=stack.pop(),r=next[0],key=String(r.id),depth=next[1];
+      if(seen.has(key))continue;
+      seen.add(key);
+      if(!resolved.has(key))html+=_renderReplyRow(r,postId,depth);
+      var children=byParent.get(key)||[];
+      for(var i=children.length-1;i>=0;i--)stack.push([children[i],depth+(resolved.has(key)?0:1)]);
+    }
+  }
+  branch(byParent.get('root')||[]);
+  // Defensive fallback for legacy cycles: render each remaining reply once.
+  replies.forEach(function(r){if(!seen.has(String(r.id)))branch([r])});
+  return html;
+}
+
+function _feedLoadReplies(postId){
+  var list = document.getElementById('rlist-'+postId);
+  if(!list) return;
+  return fetch('/api/feed/replies/'+encodeURIComponent(postId))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d.ok) return;
+      var card=document.getElementById('fc-card-'+postId);
+      var count=card && card.querySelector('.fc-reply-count');
+      if(count) count.textContent=String((d.replies||[]).length);
+      if(!d.replies||!d.replies.length){
+        list.innerHTML='<div style="font-size:12px;color:var(--muted);padding:4px 0">No replies yet — be the first.</div>';
+        return;
+      }
+      list.innerHTML = _feedRenderReplyTree(d.replies, postId);
+      if(count)count.textContent=String(list.querySelectorAll('.fc-reply-item').length);
+    })
+    .catch(function(){});
+}
+
+function _feedLikeReply(replyId, btn){
+  if(!btn || btn.disabled) return;
+  var heart=btn.querySelector('.fc-ri-heart');
+  var countEl=btn.querySelector('.fc-ri-lc');
+  var previouslyLiked=btn.classList.contains('liked');
+  var previousCount=Math.max(0,parseInt(countEl ? countEl.textContent : '0',10)||0);
+  function setState(liked,count){
+    btn.classList.toggle('liked',!!liked);
+    btn.setAttribute('aria-pressed',liked?'true':'false');
+    btn.setAttribute('aria-label',liked?'Unlike reply':'Like reply');
+    if(heart)heart.textContent=liked?'❤️':'♡';
+    if(countEl)countEl.textContent=String(Math.max(0,Number(count)||0));
+  }
+  // The heart and number must change together; repeated taps cannot race
+  // each other and leave the UI disagreeing with the server.
+  btn.disabled=true;
+  setState(!previouslyLiked,previousCount+(previouslyLiked?-1:1));
+  fetch('/api/feed/reply/like/'+replyId, {method:'POST', credentials:'include'})
+    .then(function(r){return r.json()})
+    .then(function(d){
+      if(!d.ok){setState(previouslyLiked,previousCount);return;}
+      setState(d.liked,d.like_count);
+    })
+    .catch(function(){setState(previouslyLiked,previousCount)})
+    .finally(function(){btn.disabled=false});
+}
+
+function _feedDeleteReply(replyId, rowEl, postId){
+  fetch('/api/feed/reply/'+replyId, {method:'DELETE', credentials:'include'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d.ok){ console.warn('[reply-del]', d.error); return; }
+      if(rowEl) rowEl.remove();
+      _feedLoadReplies(postId);
+      var card = document.getElementById('fc-card-'+postId);
+      if(card){
+        var rcnt = card.querySelector('.fc-reply-count');
+        if(rcnt) rcnt.textContent = Math.max(0,(parseInt(rcnt.textContent,10)||1)-1);
+      }
+    })
+    .catch(function(){});
+}
+
+function _feedSubmitReply(inp, postId){
+  if(!inp) return;
+  var text = inp.value.trim();
+  if(!text) return;
+  inp.disabled = true;
+  var sendBtn = inp.parentNode ? inp.parentNode.querySelector('.fc-reply-send') : null;
+  if(sendBtn){ sendBtn.disabled = true; sendBtn.textContent = '…'; }
+  fetch('/api/feed/reply', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({post_id: postId, message: text})
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if(d.ok){
+      inp.value = '';
+      var list = document.getElementById('rlist-'+postId);
+      if(list){
+        var emptyMsg = list.querySelector('div');
+        if(emptyMsg && emptyMsg.textContent.indexOf('No replies yet')!==-1) list.innerHTML='';
+        var fakeReply = {
+          id: d.id, user_id: d.user_id,
+          username: d.username, wallet: d.wallet || '',
+          message: d.message, created_at: d.created_at,
+          like_count: 0, liked_by_me: false, is_mine: true,
+          verified: !!(_myProfileData && _myProfileData.verified),
+          avatar_url: (_myProfileData && _myProfileData.avatar_url) || ''
+        };
+        list.insertAdjacentHTML('beforeend', _renderReplyRow(fakeReply, postId));
+      }
+      var card = document.getElementById('fc-card-'+postId);
+      if(card){
+        var rcnt = card.querySelector('.fc-reply-count');
+        if(rcnt) rcnt.textContent = (parseInt(rcnt.textContent,10)||0)+1+(d.platform_reply_id?1:0);
+      }
+      if(d.platform_reply_id) _feedLoadReplies(postId);
+    } else {
+      openAlertModal({text:d.msg||'Could not post reply'});
+    }
+  }).catch(function(e){ console.error('[reply]',e); }).finally(function(){
+    inp.disabled = false;
+    if(sendBtn){ sendBtn.disabled = false; sendBtn.innerHTML = _RC_SEND_ICON_SVG; }
+  });
+}
+
+document.addEventListener('DOMContentLoaded', function(){
+  /* mirror avatar into composer */
+  var _ca = document.getElementById('feed-composer-avatar');
+  var _sa = document.getElementById('sb-avatar-img');
+  var _si = document.getElementById('sb-avatar-ini');
+  if(_ca && _sa && _sa.src){
+    var img = document.createElement('img');
+    img.src = _sa.src; img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%';
+    _ca.appendChild(img);
+  } else if(_ca && _si && _si.textContent){
+    _ca.textContent = _si.textContent;
+    _ca.style.cssText += ';display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--muted)';
+  }
+});
+
+// ── Live online-users badge (sidebar + tablet header) ──
+function _refreshOnlineCount(){
+  return fetch('/api/online-count').then(function(r){ return r.json(); }).then(function(d){
+    if(!d || !d.ok) return;
+    var n = d.online;
+    var sb = document.getElementById('sb-online-badge');
+    var sbCount = document.getElementById('sb-online-count');
+    if(sb && sbCount){ sbCount.textContent = n; sb.style.display = 'flex'; }
+    var hdr = document.getElementById('hdr-online-badge');
+    var hdrCount = document.getElementById('hdr-online-count');
+    if(hdr && hdrCount){ hdrCount.textContent = n; hdr.style.display = 'flex'; }
+  }).catch(function(){});
+}
+document.addEventListener('DOMContentLoaded', function(){
+  _refreshOnlineCount();
+  setInterval(_oaPollTask(_refreshOnlineCount),30000);
+});
+
+// Pull down at the top of Home (like Instagram) to refresh the feed and the
+// mobile Home cards (portfolio value, markets, AI bot) in place. The spinner
+// waits for the feed only; the cards update as their (wallet/RPC) numbers
+// arrive, so a slow balance never holds the pull.
+if(typeof initPullToRefresh==='function'){
+  initPullToRefresh({ onRefresh: function(){
+    try{ if(typeof window.OrcAgentRefreshHome==='function') window.OrcAgentRefreshHome(); }catch(e){}
+    try{ return loadHomeFeed(); }catch(e){ return Promise.resolve(); }
+  }});
+}
+
++token.symbol+' ('+token.address+') what is the price?';
+        var input={value:question,disabled:false};
         var saved=await _feedSubmitNestedReply(input,postId,replyId);
         if(!saved && host.isConnected){
           choices.forEach(function(b){b.disabled=false});
