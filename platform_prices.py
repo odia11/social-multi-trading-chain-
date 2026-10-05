@@ -85,16 +85,58 @@ def _pairs(body,q):
             best[mint]=dict(mint=mint,symbol=_label(base.get('symbol')),price=price,liquidity=liquidity)
     return sorted(best.values(),key=lambda v:v['liquidity'],reverse=True)
 
+def _major(q, get):
+    rows = []
+    try:
+        r = get('https://api.coingecko.com/api/v3/simple/price',
+                params=dict(ids=','.join(q['values']),vs_currencies=q['currency'],
+                            include_last_updated_at='true'),timeout=1.5,allow_redirects=False)
+        body = r.json() if r.status_code==200 else {}
+        for coin in q['values']:
+            value = body.get(coin) or {}
+            stamp = positive(value.get('last_updated_at'))
+            price = positive(value.get(q['currency']))
+            if price and stamp and -5<=time.time()-stamp<=120:
+                rows.append(dict(symbol='SOL' if coin=='solana' else 'BTC',price=price,observed=stamp))
+        if len(rows)==len(q['values']):
+            return dict(kind='prices',rows=rows,currency=q['currency'],source='CoinGecko')
+    except (requests.RequestException,ValueError,TypeError,KeyError,AttributeError):
+        pass
+    # Independent native markets; never use a copied Solana ticker for BTC/SOL.
+    from concurrent.futures import ThreadPoolExecutor
+    def ticker(coin):
+        symbol = 'SOL' if coin=='solana' else 'BTC'
+        try:
+            r = get('https://api.exchange.coinbase.com/products/'+symbol+'-'+q['currency'].upper()+'/ticker',
+                    timeout=1.5,allow_redirects=False)
+            body = r.json() if r.status_code==200 else {}
+            stamp = dt.datetime.fromisoformat(str(body.get('time','')).replace('Z','+00:00'))
+            if stamp.tzinfo is None:
+                return None
+            observed = stamp.timestamp()
+            price = positive(body.get('price'))
+            if price and -5<=time.time()-observed<=120:
+                return dict(symbol=symbol,price=price,observed=observed)
+        except (requests.RequestException,ValueError,TypeError,KeyError,AttributeError):
+            pass
+        return None
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        rows = list(pool.map(ticker,q['values']))
+    if rows and all(rows):
+        return dict(kind='prices',rows=rows,currency=q['currency'],source='Coinbase')
+    print('[platform-price] native sources unavailable or stale',flush=True)
+    return None
+
 def fetch(q,dex_get=None,get=None):
     """Bounded lookup outside the feed write transaction."""
     get=get or requests.get
     key=repr(sorted(q.items()))
     now=time.time()
-    if not _LOCK.acquire(timeout=2.5):
+    if not _LOCK.acquire(timeout=3.5):
         return None
     try:
         hit=_CACHE.get(key)
-        if hit and now-hit[0]<hit[1]:
+        if hit and now-hit[0]<hit[1] and (not hit[2] or hit[2].get('kind')!='prices' or all(now-v['observed']<=120 for v in hit[2]['rows'])):
             return hit[2]
         while _CALLS and now-_CALLS[0]>=60:
             _CALLS.popleft()
@@ -104,19 +146,7 @@ def fetch(q,dex_get=None,get=None):
         result=None
         try:
             if q['kind']=='major':
-                r=get('https://api.coingecko.com/api/v3/simple/price',
-                      params=dict(ids=','.join(q['values']),vs_currencies=q['currency'],
-                                  include_last_updated_at='true'),timeout=2,allow_redirects=False)
-                body=r.json() if r.status_code==200 else {}
-                rows=[]
-                for coin in q['values']:
-                    value=body.get(coin) or {}
-                    stamp=positive(value.get('last_updated_at'))
-                    price=positive(value.get(q['currency']))
-                    if price and stamp and -5<=time.time()-stamp<=120:
-                        rows.append(dict(symbol='SOL' if coin=='solana' else 'BTC',price=price,observed=stamp))
-                if len(rows)==len(q['values']):
-                    result=dict(kind='prices',rows=rows,currency=q['currency'],source='CoinGecko')
+                result = _major(q,get)
             elif q['kind'] in ('token','search'):
                 if q['currency']!='usd':
                     return dict(kind='token_currency')
