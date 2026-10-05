@@ -184,4 +184,7 @@ _install_platform_assistant(_dashboard)
 from live_trades_truth import install as _install_live_trades_truth
 _install_live_trades_truth(_dashboard)
 
+from portfolio_inventory import install as _install_portfolio_inventory
+_install_portfolio_inventory(_dashboard)
+
 app = _dashboard.app

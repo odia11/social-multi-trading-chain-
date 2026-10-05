@@ -84,7 +84,6 @@ function boot(){
   }
 
   revealWhenStyled();
-  setTimeout(function(){if(typeof window.OrcAgentRefreshPortfolio==='function')window.OrcAgentRefreshPortfolio()},60);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();

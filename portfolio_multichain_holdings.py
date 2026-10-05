@@ -7,21 +7,23 @@ active Portfolio snapshot.
 from __future__ import annotations
 
 import sqlite3
+import math
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def _num(v, default=0.0):
     try:
-        return float(v if v is not None else default)
+        result = float(v if v is not None else default)
+        return result if math.isfinite(result) else float(default)
     except Exception:
         return float(default)
 
 
 _SNAPSHOT_CACHE = {}
 _SNAPSHOT_LOCK = threading.Lock()
-_SNAPSHOT_TTL = 12.0
+_SNAPSHOT_TTL = 5.0
+_SNAPSHOT_FLIGHTS = {}
 
 
 def _merge_evm_positions(d, wallet, tokens):
@@ -30,125 +32,74 @@ def _merge_evm_positions(d, wallet, tokens):
 
 
 def _portfolio_snapshot(d, wallet, bust=False):
-    now = time.time()
-    if not bust:
-        with _SNAPSHOT_LOCK:
-            cached = _SNAPSHOT_CACHE.get(wallet)
-            if cached and now - cached[0] < _SNAPSHOT_TTL:
-                return cached[1]
-
-    onchain_wallet = d._get_trading_wallet_address(wallet) or wallet
-
-    if bust:
-        try:
-            d._wallet_tokens_cache.pop(wallet, None)
-        except Exception:
-            pass
-
-    # Token holdings and stablecoin balances are independent reads. Execute
-    # them concurrently and publish only one completed snapshot to the UI.
-    jobs = {'native_sol': lambda: d._get_user_sol(onchain_wallet),
-            'tokens': lambda: d._fetch_wallet_tokens(wallet, onchain_wallet),
-            'solana_usdc': lambda: d._get_solana_usdc_balance(onchain_wallet, allow_stale=True)}
-
-    results = {}
-    errors = {}
-    with ThreadPoolExecutor(max_workers=max(2, len(jobs))) as ex:
-        future_map = {ex.submit(fn): name for name, fn in jobs.items()}
-        for fut in as_completed(future_map):
-            name = future_map[fut]
-            try:
-                results[name] = fut.result()
-            except Exception as exc:
-                errors[name] = type(exc).__name__
-
-    # Never publish a mathematically incomplete total. If one independent
-    # chain/RPC fails, keep the last complete snapshot rather than making a
-    # user's balance visibly drop and jump back on the next poll.
-    if errors:
-        with _SNAPSHOT_LOCK:
-            previous = _SNAPSHOT_CACHE.get(wallet)
-        if previous:
-            stale = dict(previous[1])
-            stale['stale'] = True
-            stale['partial'] = False
-            stale['unavailable'] = sorted(errors.keys())
-            return stale
-        raise RuntimeError('portfolio snapshot incomplete: ' + ','.join(sorted(errors.keys())))
-
-    token_data = results.get('tokens') or {'tokens': []}
-    inventory_complete = bool(token_data.get('inventory_complete', True))
-    assets = _merge_evm_positions(d, wallet, token_data.get('tokens') or [])
-    for t in assets:
-        if 'usd_value' not in t:
-            t['usd_value'] = _num(t.get('value_usd'))
-        if 'chain' not in t:
-            t['chain'] = 'solana'
-
-    solana_usdc = _num(results.get('solana_usdc'))
-    evm_chains = {}
-    stable_total = solana_usdc
-
-    sol_row = next((t for t in assets if str(t.get('symbol') or '').upper() == 'SOL'
-                    and str(t.get('chain') or 'solana') == 'solana'), None)
-    sol_amount = _num(results['native_sol'])
-    sol_price = _num(sol_row.get('price_usd')) if sol_row else _num(getattr(d, '_sol_price_usd', 0))
-    sol_value = sol_amount * sol_price
-
-    stable_symbols = {'USDC', 'USDT', 'USDG'}
-    other_value = 0.0
-    for t in assets:
-        sym = str(t.get('symbol') or '').upper()
-        if sym == 'SOL' or sym in stable_symbols:
-            continue
-        other_value += _num(t.get('usd_value', t.get('value_usd')))
-
-    total = stable_total + sol_value + other_value
-
-    in_positions_sol = 0.0
-    try:
-        conn = sqlite3.connect(d.DB_FILE, timeout=8.0)
-        uid_row = conn.execute('SELECT id FROM users WHERE wallet_address=?', (wallet,)).fetchone()
-        if uid_row:
-            spent = conn.execute(
-                "SELECT COALESCE(SUM(spend),0) FROM open_positions "
-                "WHERE user_id=? AND COALESCE(chain,'solana')='solana' AND COALESCE(base_currency,'SOL')='SOL'",
-                (uid_row[0],)).fetchone()
-            in_positions_sol = _num(spent[0] if spent else 0)
-        conn.close()
-    except Exception:
-        pass
-
-    snapshot = {
-        'ok': True,
-        'generated_at': now,
-        'wallets': {'solana': onchain_wallet},
-        'total_usd': round(total, 4),
-        'available_to_trade_usdc': round(stable_total, 4),  # historical/asset-only field
-        'trading_currency': 'SOL',
-        'available_to_trade_sol': max(0.0, sol_amount - d.SOL_NETWORK_RESERVE),
-        'total_sol': total / sol_price if sol_price > 0 else None,
-        'stable': {
-            'total_usdc': round(stable_total, 4),
-            'solana_usdc': round(solana_usdc, 4),
-            'evm_chains': {k: round(v, 4) for k, v in evm_chains.items()},
-        },
-        'sol': {
-            'amount': round(sol_amount, 8), 'price_usd': round(sol_price, 6),
-            'value_usd': round(sol_value, 4),
-            'in_positions_sol': round(in_positions_sol, 8),
-        },
-        'other_assets_value_usd': round(other_value, 4),
-        'assets': assets,
-        'asset_count': len(assets),
-        'inventory_complete': inventory_complete,
-        'partial': False,
-        'stale': False,
-        'unavailable': [] if inventory_complete else ['full_token_index'],
-    }
+    owner = d._get_trading_wallet_address(wallet) or wallet
+    key = (d.DB_FILE, wallet, owner)
     with _SNAPSHOT_LOCK:
-        _SNAPSHOT_CACHE[wallet] = (now, snapshot)
-    return snapshot
+        lock = _SNAPSHOT_FLIGHTS.setdefault(key, threading.Lock())
+    with lock:
+        now = time.time()
+        previous = _SNAPSHOT_CACHE.get(key)
+        if not bust and previous and now - previous['generated_at'] < _SNAPSHOT_TTL:
+            return previous
+        if bust:
+            d._wallet_tokens_cache.pop(wallet, None)
+        try:
+            token_data = d._fetch_wallet_tokens(wallet, owner)
+        except Exception:
+            if previous:
+                return dict(previous, stale=True, partial=True, unavailable=['full_token_index'])
+            raise RuntimeError('complete portfolio snapshot unavailable')
+        inventory_complete = bool(token_data.get('inventory_complete', True))
+        if not inventory_complete and previous:
+            return dict(previous, stale=True, partial=True, unavailable=['full_token_index'])
+        assets = [dict(t) for t in token_data.get('tokens', [])]
+        sol_mint = getattr(d, 'SOL_MINT', 'So11111111111111111111111111111111111111112')
+        usdc_mint = getattr(d, 'USDC_MINT', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')
+        sol_row = next((t for t in assets if t.get('is_native')), None) or next(
+            (t for t in assets if t.get('mint') == sol_mint and t.get('is_native') is not False), None)
+        if sol_row is None:
+            raise RuntimeError('native SOL balance missing from inventory')
+        for t in assets:
+            t['chain'] = 'solana'
+            t['usd_value'] = _num(t.get('value_usd', t.get('usd_value')))
+        sol_amount = _num(sol_row.get('amount'))
+        sol_price = _num(sol_row.get('price_usd')) or _num(d._sol_price_usd)
+        sol_value = sol_amount * sol_price
+        sol_row.update(price_usd=sol_price,value_usd=sol_value,usd_value=sol_value)
+        # Exact mint identity, not ticker: a fake $USDC or $SOL must never
+        # replace the pinned canonical asset or disappear from the totals.
+        stable_total = sum(_num(t.get('amount')) for t in assets if t.get('mint') == usdc_mint)
+        other_value = sum(t['usd_value'] for t in assets if t.get('mint') != usdc_mint and t is not sol_row)
+        unpriced = [t['mint'] for t in assets if _num(t.get('amount')) > 0
+                    and _num(t.get('price_usd')) <= 0]
+        valuation_complete = bool(token_data.get('valuation_complete', True)) and not unpriced
+        total = stable_total + sol_value + other_value
+        in_positions_sol = 0.0
+        try:
+            with sqlite3.connect(d.DB_FILE, timeout=3) as c:
+                uid = c.execute('SELECT id FROM users WHERE wallet_address=?',(wallet,)).fetchone()
+                if uid:
+                    row = c.execute("SELECT COALESCE(SUM(spend),0) FROM open_positions "
+                        "WHERE user_id=? AND COALESCE(chain,'solana')='solana' "
+                        "AND COALESCE(base_currency,'SOL')='SOL'",(uid[0],)).fetchone()
+                    in_positions_sol = _num(row[0])
+        except sqlite3.Error:
+            pass
+        snapshot = dict(ok=True,generated_at=token_data.get('ts', now),
+            wallets={'solana':owner},total_usd=round(total,4),
+            available_to_trade_usdc=round(stable_total,4),trading_currency='SOL',
+            available_to_trade_sol=max(0,sol_amount-d.SOL_NETWORK_RESERVE),
+            total_sol=total/sol_price if sol_price>0 else None,
+            stable=dict(total_usdc=round(stable_total,4),solana_usdc=round(stable_total,4),evm_chains={}),
+            sol=dict(amount=sol_amount,price_usd=sol_price,value_usd=sol_value,in_positions_sol=in_positions_sol),
+            other_assets_value_usd=round(other_value,4),assets=assets,asset_count=len(assets),
+            inventory_complete=inventory_complete,valuation_complete=valuation_complete,
+            unpriced_mints=unpriced,stale_price_mints=token_data.get('stale_price_mints',[]),
+            partial=not inventory_complete,stale=bool(token_data.get('stale')),
+            unavailable=token_data.get('unavailable',[]))
+        if inventory_complete and not snapshot['stale']:
+            _SNAPSHOT_CACHE[key] = snapshot
+        return snapshot
 
 
 def install(d):

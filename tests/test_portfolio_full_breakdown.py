@@ -33,7 +33,7 @@ check('fallback DB rows only discover mint candidates, never supply balances',
       "SELECT token_address, symbol, avg_price FROM user_tokens" in D
       and "raw_amount = int.from_bytes(raw[64:72], 'little')" in D)
 check('snapshot exposes whether full token discovery completed',
-      "'inventory_complete': inventory_complete" in P)
+      "inventory_complete=inventory_complete" in P)
 check('breakdown has responsive compact styling',
       '.oa-pf-breakdown-grid' in CSS and '@media(max-width:420px)' in CSS)
 

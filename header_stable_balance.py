@@ -5,6 +5,7 @@ OrcAgent is Solana-only; no EVM balance is queried or included.
 """
 from __future__ import annotations
 
+from html import escape
 import sqlite3
 import threading
 import time
@@ -86,8 +87,11 @@ def install(d):
             if marker in body or 'pt-nb-sol-balance' not in body:
                 return response
             version = getattr(d, '_APP_VERSION', '1')
-            tag = ('<script src="/static/header-stable-balance.js?v=%s" defer %s></script>'
-                   % (version, marker))
+            wallet = d._authenticated_wallet()
+            owner = d._get_trading_wallet_address(wallet) or wallet if wallet else ''
+            scope = escape(wallet + ':' + owner, quote=True) if wallet else ''
+            tag = ('<script src="/static/header-stable-balance.js?v=%s" defer %s data-orca-wallet-scope="%s"></script>'
+                   % (version, marker, scope))
             body = body.replace('</body>', tag + '</body>', 1) if '</body>' in body else body + tag
             response.set_data(body)
             response.content_length = len(response.get_data())

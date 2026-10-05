@@ -35,9 +35,11 @@ def fake_dashboard():
     d.ACTIVE_EVM_CHAINS={}
     d._get_trading_wallet_address=lambda w:'soltrader'
     d._wallet_tokens_cache={}
+    d.SOL_MINT='So11111111111111111111111111111111111111112'
+    d.USDC_MINT='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
     d._fetch_wallet_tokens=lambda wallet,onchain:{'tokens':[
-      {'symbol':'SOL','mint':'So111','amount':1,'price_usd':100,'value_usd':100},
-      {'symbol':'USDC','mint':'usdc','amount':20,'price_usd':1,'value_usd':20},
+      {'symbol':'SOL','mint':d.SOL_MINT,'amount':1,'price_usd':100,'value_usd':100},
+      {'symbol':'USDC','mint':d.USDC_MINT,'amount':20,'price_usd':1,'value_usd':20},
       {'symbol':'ABC','mint':'abc','amount':2,'price_usd':5,'value_usd':10},
     ]}
     d._get_solana_usdc_balance=lambda addr,**kwargs:20
@@ -88,7 +90,7 @@ def test_wallet_three_loaders_share_snapshot_request():
     assert '_getPortfolioSnapshot(false)' in bal and '/api/wallet/balance' not in bal
     assert '_getPortfolioSnapshot(false)' in usdc and '/api/wallet/usdc-summary' not in usdc
     assert '_getPortfolioSnapshot(!!bust)' in toks
-    assert "fetch('/api/wallet/tokens'" in toks  # assets stay visible if one chain blocks the aggregate
+    assert "fetch('/api/wallet/tokens'" not in toks  # one authoritative scan, no racing partial list
 
 
 def test_total_controller_no_longer_fans_out_three_requests():
@@ -110,11 +112,11 @@ def test_background_snapshot_uses_provider_failover_not_raw_public_rpc():
 def test_partial_refresh_keeps_last_confirmed_snapshot():
     d=fake_dashboard()
     first=pf._portfolio_snapshot(d,'session',bust=True)
-    d._get_solana_usdc_balance=lambda addr,**kwargs: (_ for _ in ()).throw(RuntimeError('rpc down'))
+    d._fetch_wallet_tokens=lambda *args: (_ for _ in ()).throw(RuntimeError('rpc down'))
     second=pf._portfolio_snapshot(d,'session',bust=True)
     assert second['total_usd']==first['total_usd']
     assert second['stale'] is True
-    assert 'solana_usdc' in second['unavailable']
+    assert 'full_token_index' in second['unavailable']
 
 
 if __name__=='__main__':
