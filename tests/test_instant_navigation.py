@@ -28,11 +28,24 @@ def test_core_route_chunks_are_warmed_without_private_document_prefetch():
     assert 'fetchDocument' not in UX
 
 
-def test_slow_navigation_uses_shell_but_keeps_native_browser_navigation():
+def test_navigation_shell_is_visible_before_native_navigation_freezes_old_page():
     assert 'showRouteShell' in UX
     assert 'beginRoute(u.pathname)' in UX
+    assert "n.className='oa-route-shell show'" in UX
+    assert 'showRouteShell(path);' in UX
+    assert 'setTimeout(function(){showRouteShell(path)},120)' not in UX
     section=UX[UX.index("document.addEventListener('click'"):UX.index("window.addEventListener('pageshow'")]
     assert 'preventDefault' not in section
+
+
+def test_nested_profile_routes_use_profile_asset_family():
+    assert 'function routeKey(path)' in UX
+    assert "path.indexOf(base+'/')===0" in UX
+    assert 'ROUTE_ASSETS[routeKey(path)]' in UX
+
+
+def test_beforeunload_covers_programmatic_navigation():
+    assert 'OrcAgentShowRouteShell' in SRC
 
 
 if __name__ == '__main__':
