@@ -52,8 +52,10 @@ primary = ''.join(
 anchors = re.findall(r'<a class="[^"]*"[^>]*>(.*?)</a>', more)
 check('every destination in the menu carries an icon and a label',
       anchors and all('<svg' in a and '<span>' in a for a in anchors))
-check('...the five primary links too, not only the secondary ones',
+check('...the primary links too, not only the secondary ones',
       primary.count('<svg') == len(ns['_NAVBAR_PRIMARY']))
+check('Calls is not a primary navigation option anymore',
+      not any(label == 'Calls' or href == '/calls' for _, label, href in ns['_NAVBAR_PRIMARY']))
 check('...and Disconnect, which is the one row where hitting the wrong thing '
       'actually costs something', 'Disconnect Wallet' in more
       and more[more.index('Disconnect Wallet') - 400:].count('<svg') >= 1)
