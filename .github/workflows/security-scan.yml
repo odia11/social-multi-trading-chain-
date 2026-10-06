@@ -37,6 +37,7 @@ jobs:
           python -m pip install --quiet --upgrade pip
           python -m pip install --quiet pip-audit bandit pytest
           python -m pip install --quiet -r requirements.txt
+          npm ci --prefix pump_adapter --ignore-scripts --no-audit --no-fund
 
       - name: Python compile check
         run: python -m compileall -q .
