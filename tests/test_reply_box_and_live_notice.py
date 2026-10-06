@@ -50,17 +50,19 @@ dash = read('static', 'dashboard.js')
 nest = dash[dash.index('function _feedToggleNestedReply('):dash.index('function _feedSubmitNestedReply(')]
 check('one reply box at a time: the post\'s own box hides while replying to a reply, and returns on close',
       '_feedPostComposerShown(postId, false);' in nest and "if(isOpen){ _feedPostComposerShown(postId, true); return; }" in nest
-      and "card.style.display = show ? '' : 'none';" in nest)
+      and "card.style.display = show ? '' : 'none';" in dash)
 sub = dash[dash.index('function _feedSubmitNestedReply('):dash.index('function _feedSubmitNestedReply(') + 1500]
 load = dash[dash.index('function _feedLoadReplies('):dash.index('function _feedLikeReply(')]
 check('...and after sending, or when the replies are reloaded (no state without any box)',
-      '_feedPostComposerShown(postId, true);' in sub and '_feedPostComposerShown(postId, true);' in load)
+      '_feedPostComposerShown(postId, true);' in sub and "_feedPostComposerShown(postId, true);" in load)
 
 nav = read('static', 'mobile-bottom-nav.js')
 check('the bottom bar (and POST) hides while a text field has focus, and returns after',
       "html.oa-kb-typing .oa-bottom-nav,html.oa-kb-typing #oa-bottom-nav{display:none!important}" in nav
-      and "document.addEventListener('focusin',_syncTyping,true);" in nav
-      and "document.addEventListener('focusout',function(){setTimeout(_syncTyping,60)},true);" in nav)
+      and "if(_isTextField(e.target))document.documentElement.classList.add('oa-kb-typing');" in nav
+      and "document.addEventListener('focusout',function(){setTimeout(_syncTyping,450)},true);" in nav)
+check('...and it never comes back under the finger that taps Send (that tap then missed and the reply was not sent)',
+      "document.addEventListener('focusin',_syncTyping,true);" not in nav)
 check('...text fields only (a button or checkbox does not hide it)',
       "/^(text|search|email|url|tel|number|password)$/i.test(el.type||'text')" in nav and "t==='TEXTAREA'" in nav)
 raise SystemExit(0 if all(checks) else 1)

@@ -775,8 +775,8 @@ ENTRY_REJECT_COOLDOWN_SEC = 600   # a candidate that failed a check rests this l
 TP1_MULTIPLE       = 2.0   # first target: 2x entry price
 TP1_SELL_FRACTION  = 0.5   # sell 50% of the position at TP1
 TRAILING_STOP_PCT  = 0.15  # trail the remainder 15% below its post-TP1 peak
-MIN_MARKETCAP_USD = 15_000  # fallback only — see _min_marketcap_for_stake() below, which is
-                             # what actually gates entries per-user based on their stake size
+MIN_MARKETCAP_USD = 50_000  # the bot's market-cap floor for every entry, whatever the stake
+                             # (see _min_marketcap_for_stake)
 
 # ── TRADING ENGINE V2: user-controlled SL/TP presets + staged exits ──
 # Server-side-validated bounds for a user's own stop_loss/take_profit % --
@@ -861,16 +861,11 @@ LOSS_STREAK_SCORE_BONUS = 1.5   # added to the score-≥5.0 qualifying floor whi
 LOSS_STREAK_MCAP_MULT   = 2.0   # multiplier on the marketcap floor while tightened
 
 def _min_marketcap_for_stake(stake_usd: float) -> int:
-    """Tiered entry-marketcap floor: the smaller the stake, the smaller (riskier) a
-    market cap is acceptable to enter, since the absolute dollar risk is small. Larger
-    stakes are restricted to more established tokens. Boundaries are non-overlapping:
-    a stake of exactly $5 or $50 belongs to the higher tier ("threshold reached")."""
-    if stake_usd < 5:
-        return 15_000
-    elif stake_usd < 50:
-        return 50_000
-    else:
-        return 100_000
+    """The bot's entry market-cap floor: $50K for every stake. It used to be a
+    tiered floor ($15K under a $5 stake, $50K up to $50, $100K above), which
+    let the smallest stakes into tokens under $50K. A losing streak still
+    doubles it (LOSS_STREAK_MCAP_MULT)."""
+    return MIN_MARKETCAP_USD
 
 # ── LEARNED ENTRY-CONDITION BIAS ── the bot's other self-training signal,
 # proactive rather than reactive: instead of only responding to a run of

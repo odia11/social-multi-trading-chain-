@@ -9,6 +9,8 @@ import os
 import re
 import unicodedata
 
+import orcagent_chat
+
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 MAX_QUESTION = 420
 MAX_REPLY = 900
@@ -45,6 +47,7 @@ REASONABLE_TOPICS = {
 SYSTEM = """You are OrcAgent's public feed assistant for a Solana social-trading app.
 
 Answer like an excellent university tutor who also understands fast social media:
+- Always reply in English, whatever language the user writes in.
 - Lead with the direct answer. No filler.
 - Be natural, compact and conversational; light dry wit is okay when appropriate.
 - For a simple question, usually 1-4 short sentences.
@@ -83,6 +86,9 @@ def sanitize(question):
         return None
     text = unicodedata.normalize("NFKC", question).strip()
     if not text or len(text) > MAX_QUESTION or SECRET.search(text) or PRIVATE.search(text):
+        return None
+    # Questions about anyone's private account matters never leave the server.
+    if orcagent_chat.private_request(text):
         return None
     text = WALLET.sub("[wallet redacted]", text)
     text = URL.sub("[link]", text)
@@ -128,7 +134,8 @@ def _safe_output(text):
     text = re.sub(r"[ \t]{2,}", " ", text).strip()
     if SECRET.search(text):
         return None
-    return text or None
+    # The same leak filter as the conversational layer (addresses, someone's holdings).
+    return orcagent_chat.safe_output(text) if text else None
 
 def reason(d, question, context_topic=None, deterministic=None):
     clean = sanitize(question)

@@ -17,6 +17,7 @@ from platform_answers import specific, trade_action_slots, merge_trade_action_sl
 import platform_prices as prices
 import platform_public_data as public_data
 import platform_reasoner as reasoner
+import orcagent_chat as chat
 from zoneinfo import ZoneInfo
 from flask import jsonify, request
 
@@ -390,14 +391,107 @@ def _prepare_reasoning(d, source_id, wallet, kind, now):
 def _reasoning_for(text, prepared):
     return prepared[1] if prepared and prepared[0] == text else None
 
-def reply_to_post(d,post_number,wallet,now=None):
+def _chat_source(d, source_id, wallet, kind, now):
+    """Public inputs for a conversational (Grok-style) reply, or None when a
+    deterministic module owns the answer. No network; reads only public
+    Home-feed text and usernames (orcagent_chat.thread_context)."""
+    with sqlite3.connect(d.DB_FILE, timeout=2) as c:
+        if not enabled(c, 'replies'):
+            return None
+        author = identity(c)
+        if not author:
+            return None
+        context_topic = None
+        action_state = None
+        thread = []
+        if kind == 'post':
+            row = c.execute(
+                'SELECT p.content,u.id,u.username FROM feed_posts p JOIN users u ON u.wallet_address=p.wallet '
+                'WHERE p.id=? AND p.wallet=?',
+                (source_id, wallet),
+            ).fetchone()
+            if not row or row[1] == author[0]:
+                return None
+            text = d._feed_text_part(row[0]) if hasattr(d, '_feed_text_part') else re.split(
+                r'__(?:CHART|TRADE|CALL)__', row[0], maxsplit=1)[0]
+            user_id, asker = row[1], row[2]
+        else:
+            source = c.execute(
+                'SELECT user_id,post_id,message,created_at,parent_reply_id FROM feed_replies WHERE id=?',
+                (source_id,),
+            ).fetchone()
+            if not source or source[0] == author[0] or source[1][:1] not in ('p', 't'):
+                return None
+            member = c.execute('SELECT wallet_address,username FROM users WHERE id=?', (source[0],)).fetchone()
+            if not member or member[0] != wallet:
+                return None
+            text = _conversation_message(c, d, source, author[0], now)
+            previous = learning.prior(c, d, source, author[0])
+            context_topic = previous[0] if previous else None
+            action_state = _trade_thread_state(c, d, source, author[0]) if context_topic == 'trade_action' else None
+            user_id, asker = source[0], member[1]
+            thread = chat.thread_context(c, d, source[1], source[4], author[0])
+        if not MENTION.search(text):
+            return None
+        raw = MENTION.sub('', text).strip()
+        # Live data, own-account privacy, actions and secrets stay deterministic.
+        if not raw or chat.private_request(raw) or prices.query(raw) or public_data.query(raw):
+            return None
+        deterministic = answer(text, context_topic, action_state=action_state)
+        if deterministic and deterministic[0] in chat.DETERMINISTIC_TOPICS:
+            return None
+    facts = deterministic[1] if deterministic and deterministic[0] not in ('scope', 'welcome', 'overview') else None
+    return {'text': text, 'raw': raw, 'asker': asker, 'user_id': user_id, 'thread': thread, 'facts': facts}
+
+
+def wants_chat(d, source_id, wallet, kind, now=None):
+    if not chat.available(d):
+        return False
+    try:
+        return _chat_source(d, source_id, wallet, kind, time.time() if now is None else now) is not None
+    except Exception:
+        return False
+
+
+def chat_then_reply(d, source_id, wallet, kind):
+    """Background: ask the model, then publish (falls back to the
+    deterministic answer when the model gives nothing usable)."""
+    try:
+        now = time.time()
+        src = _chat_source(d, source_id, wallet, kind, now)
+        result = None
+        if src:
+            got = chat.reply(d, src['raw'], src['asker'], src['thread'], src['user_id'], src['facts'], now)
+            result = (src['text'], got) if got else None
+        if kind == 'post':
+            reply_to_post(d, source_id, wallet, chat_answer=result)
+        else:
+            reply_to(d, source_id, wallet, chat_answer=result)
+    except Exception:
+        try:
+            d.app.logger.exception('orcagent chat reply failed')
+        except Exception:
+            pass
+
+
+def _privacy_guard(text, response):
+    """Absolute: a question about anyone's private account matters is always
+    answered with the refusal, whatever any other layer produced."""
+    if isinstance(text, str) and chat.private_request(MENTION.sub('', text)):
+        return ('privacy', chat.PRIVACY_REFUSAL)
+    return response
+
+
+def reply_to_post(d,post_number,wallet,now=None,chat_answer=None):
     # Only a successfully authenticated NEW post; no edits, reposts or backfill.
     if type(post_number) is not int or post_number<=0:
         return None
     now = time.time() if now is None else now
     market = _prepare_market(d,post_number,wallet,'post',now)
     public = _prepare_public(d,post_number,wallet,'post',now)
-    reasoning = _prepare_reasoning(d,post_number,wallet,'post',now)
+    # While the conversational layer is on it owns every model call (with its
+    # privacy guard); the older reasoning fallback only runs when it is off.
+    reasoning = None if (chat_answer or chat.available(d)) else _prepare_reasoning(d,post_number,wallet,'post',now)
     with sqlite3.connect(d.DB_FILE,timeout=8) as c:
         c.execute('BEGIN IMMEDIATE')
         if not enabled(c,'replies'):
@@ -414,6 +508,10 @@ def reply_to_post(d,post_number,wallet,now=None):
         smart = _reasoning_for(text,reasoning)
         if smart and response and smart[0] == response[0]:
             response = smart
+        talk = _reasoning_for(text,chat_answer)
+        if talk and (not response or response[0] not in chat.DETERMINISTIC_TOPICS):
+            response = talk
+        response = _privacy_guard(text, response)
         key = 'post-reply:'+str(post_number)
         if not response or c.execute('SELECT 1 FROM platform_assistant_events WHERE event_key=?',(key,)).fetchone() or not within_reply_limits(c,member[0],now):
             return None
@@ -428,14 +526,16 @@ def reply_to_post(d,post_number,wallet,now=None):
         c.execute('INSERT INTO platform_assistant_events VALUES(?,?,?,?,?,?,?)',
                   (key,'reply',member[0],post_id,cur.lastrowid,topic,now))
         c.execute('INSERT INTO notifications(user_id,type,content,link,actor_wallet) VALUES(?,?,?,?,?)',
-                  (member[0],'reply','OrcAgent answered your platform question',d._reply_link(c,post_id,cur.lastrowid),author[1]))
+                  (member[0],'reply','OrcAgent replied to you',d._reply_link(c,post_id,cur.lastrowid),author[1]))
         return cur.lastrowid
 
-def reply_to(d, source_id, wallet, now=None):
+def reply_to(d, source_id, wallet, now=None, chat_answer=None):
     now = time.time() if now is None else now
     market = _prepare_market(d,source_id,wallet,'reply',now)
     public = _prepare_public(d,source_id,wallet,'reply',now)
-    reasoning = _prepare_reasoning(d,source_id,wallet,'reply',now)
+    # While the conversational layer is on it owns every model call (with its
+    # privacy guard); the older reasoning fallback only runs when it is off.
+    reasoning = None if (chat_answer or chat.available(d)) else _prepare_reasoning(d,source_id,wallet,'reply',now)
     with sqlite3.connect(d.DB_FILE, timeout=8) as c:
         c.execute('BEGIN IMMEDIATE')
         if not enabled(c, 'replies'):
@@ -471,6 +571,12 @@ def reply_to(d, source_id, wallet, now=None):
         # reasoned answer may refine only the same deterministic intent.
         if smart and response is explicit and explicit and smart[0] == explicit[0]:
             response = smart
+        # A conversational answer for anything a deterministic module does
+        # not own (live data, actions, secrets, privacy).
+        talk = _reasoning_for(message,chat_answer)
+        if talk and (not explicit or explicit[0] not in chat.DETERMINISTIC_TOPICS):
+            response = talk
+        response = _privacy_guard(message, response)
         key = 'reply:' + str(source_id)
         if not response or c.execute('SELECT 1 FROM platform_assistant_events WHERE event_key=?', (key,)).fetchone():
             return None
@@ -490,7 +596,7 @@ def reply_to(d, source_id, wallet, now=None):
         c.execute('INSERT INTO platform_assistant_events VALUES(?,?,?,?,?,?,?)',
                   (key,'reply',source[0],source[1],cur.lastrowid,topic,now))
         c.execute('INSERT INTO notifications(user_id,type,content,link,actor_wallet) VALUES(?,?,?,?,?)',
-                  (source[0],'reply','OrcAgent answered your platform question',d._reply_link(c,source[1],cur.lastrowid),author[1]))
+                  (source[0],'reply','OrcAgent replied to you',d._reply_link(c,source[1],cur.lastrowid),author[1]))
         return cur.lastrowid
 
 def install(d):
@@ -510,7 +616,15 @@ def install(d):
         try:
             wallet = d._authenticated_wallet()
             if wallet:
-                reply_id = reply_to_post(d,data['id'],wallet) if request.path=='/api/feed/post' else reply_to(d,data['id'],wallet)
+                kind = 'post' if request.path=='/api/feed/post' else 'reply'
+                if wants_chat(d,data['id'],wallet,kind):
+                    # A real conversation takes a few seconds: answer in the
+                    # background; the app shows "OrcAgent is typing…" meanwhile.
+                    chat.run_later(chat_then_reply,d,data['id'],wallet,kind)
+                    data['platform_reply_pending'] = True
+                    response.set_data(app.json.dumps(data))
+                    return response
+                reply_id = reply_to_post(d,data['id'],wallet) if kind=='post' else reply_to(d,data['id'],wallet)
                 if reply_id:
                     data['platform_reply_id'] = reply_id
                     response.set_data(app.json.dumps(data))

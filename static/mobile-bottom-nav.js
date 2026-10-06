@@ -151,9 +151,13 @@ function _syncTyping(){
     st.textContent='html.oa-kb-typing .oa-bottom-nav,html.oa-kb-typing #oa-bottom-nav{display:none!important}';
     (document.head||document.documentElement).appendChild(st);
   }
-  document.addEventListener('focusin',_syncTyping,true);
-  // focusout fires before the next field gets focus: re-check a tick later.
-  document.addEventListener('focusout',function(){setTimeout(_syncTyping,60)},true);
+  // Focus on a text field hides the bar at once. It only comes back a moment
+  // after typing ends: tapping Send moves focus first, and a bar reappearing
+  // under the finger would take the tap (the reply was then not sent).
+  document.addEventListener('focusin',function(e){
+    if(_isTextField(e.target))document.documentElement.classList.add('oa-kb-typing');
+  },true);
+  document.addEventListener('focusout',function(){setTimeout(_syncTyping,450)},true);
   window.addEventListener('pageshow',_syncTyping,{passive:true});
 })();
 window.addEventListener('pageshow',function(){invalidateAppMenu();setTimeout(_ensureBottomNav,0)},{passive:true});
