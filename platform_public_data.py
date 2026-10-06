@@ -46,7 +46,18 @@ BEST_CALL = re.compile(
     re.I,
 )
 TOP_CALLS = re.compile(
-    r"\b(?:best|top|beste)\s+calls\b|\bcalls?\s+leaderboard\b",
+    r"\b(?:top|beste)\s*(?:3|three|drie)?\s+calls\b|"
+    r"\b(?:best|beste)\s+calls\b|\bcalls?\s+leaderboard\b",
+    re.I,
+)
+WHY_BEST_CALL = re.compile(
+    r"\b(?:why|waarom|reason|reasons|uitleg)\b.*\b(?:best|beste)\s+call\b|"
+    r"\b(?:best|beste)\s+call\b.*\b(?:why|waarom|reason|reasons|uitleg)\b",
+    re.I,
+)
+SHOW_BEST_CALL = re.compile(
+    r"\b(?:show|laat|toon|chart|grafiek|zien|preview)\b.*\b(?:best|beste)\s+call\b|"
+    r"\b(?:best|beste)\s+call\b.*\b(?:show|laat|toon|chart|grafiek|preview)\b",
     re.I,
 )
 MARKET_MOVERS = re.compile(
@@ -67,10 +78,14 @@ def query(text):
     clean = text.strip()
     if _private_request(clean):
         return {"kind": "private"}
-    if BEST_CALL.search(clean):
-        return {"kind": "best_call"}
     if TOP_CALLS.search(clean):
         return {"kind": "top_calls"}
+    if BEST_CALL.search(clean):
+        if WHY_BEST_CALL.search(clean):
+            return {"kind": "best_call", "variant": "explain"}
+        if SHOW_BEST_CALL.search(clean):
+            return {"kind": "best_call", "variant": "chart"}
+        return {"kind": "best_call", "variant": "simple"}
     if MARKET_MOVERS.search(clean):
         return {"kind": "market_movers"}
     if PLATFORM_FEE.search(clean):
@@ -121,6 +136,21 @@ def _call_rows(db_file, limit):
     return result
 
 
+def _public_market_for_call(row, dashboard):
+    mint = str(row.get("mint") or "").strip().lower()
+    symbol = str(row.get("symbol") or "").strip().upper()
+    for token in list(getattr(dashboard, "state", {}).get("tokens", []) or []):
+        token_mint = str(token.get("mint") or token.get("address") or "").strip().lower()
+        token_symbol = str(token.get("symbol") or "").strip().upper()
+        if (mint and token_mint == mint) or (symbol and token_symbol == symbol):
+            return {
+                "volume24h": _finite(token.get("volume24h") if token.get("volume24h") is not None else token.get("volume_24h")),
+                "liquidity": _finite(token.get("liquidity") if token.get("liquidity") is not None else token.get("liquidity_usd")),
+                "change24h": _finite(token.get("change24h") if token.get("change24h") is not None else token.get("price_change_24h")),
+            }
+    return {}
+
+
 def fetch(q, dashboard):
     if not q or not dashboard:
         return None
@@ -128,7 +158,10 @@ def fetch(q, dashboard):
     if kind == "private":
         return {"kind": "private"}
     if kind in ("best_call", "top_calls"):
-        return {"kind": kind, "rows": _call_rows(dashboard.DB_FILE, 1 if kind == "best_call" else 3)}
+        rows = _call_rows(dashboard.DB_FILE, 1 if kind == "best_call" else 3)
+        if kind == "best_call" and rows:
+            rows[0].update(_public_market_for_call(rows[0], dashboard))
+        return {"kind": kind, "variant": q.get("variant", "simple"), "rows": rows}
     if kind == "market_movers":
         rows = []
         for token in list(getattr(dashboard, "state", {}).get("tokens", []) or []):
@@ -164,6 +197,31 @@ def _peak_percent(entry, peak):
     return f"{pct:+.1f}%"
 
 
+def _money_short(value):
+    value = _finite(value)
+    if value is None or value <= 0:
+        return ""
+    if value >= 1_000_000:
+        return ("$" + f"{value / 1_000_000:.1f}M").replace(".0M", "M")
+    if value >= 1_000:
+        return ("$" + f"{value / 1_000:.1f}K").replace(".0K", "K")
+    return "$" + f"{value:,.0f}"
+
+
+def _why_lines(row):
+    reasons = ["Best recorded peak today (" + _peak_percent(row["entry"], row["peak"]) + ")"]
+    volume = _money_short(row.get("volume24h"))
+    liquidity = _money_short(row.get("liquidity"))
+    change = _finite(row.get("change24h"))
+    if volume:
+        reasons.append("24h volume " + volume)
+    if liquidity:
+        reasons.append("Liquidity " + liquidity)
+    if change is not None and abs(change) >= 5 and len(reasons) < 4:
+        reasons.append("24h move " + f"{change:+.1f}%")
+    return reasons[:4]
+
+
 def render(q, snapshot):
     kind = (q or {}).get("kind")
     if kind == "private":
@@ -176,23 +234,45 @@ def render(q, snapshot):
         return None
     if kind == "best_call":
         rows = snapshot.get("rows") or []
-        if not rows:
-            return "calls_live", "There are no public OrcAgent calls in the last 24 hours yet."
+        if not rows or max((r.get("peak_multiple") or 0) for r in rows) <= 1:
+            return (
+                "calls_live",
+                "No clear best call today.\n"
+                "There is no winning public call in the last 24h yet.\n"
+                "View trending: https://orcagent.fun/live-market",
+            )
         row = rows[0]
-        text = (
-            f"Best call today: ${row['symbol']}\n"
-            f"Peak: {_peak_percent(row['entry'], row['peak'])}\n"
-            f"Entry: {_price(row['entry'])}\n"
-            f"Top: {_price(row['peak'])}\n"
-            f"View call: https://orcagent.fun/call/{row['id']}"
-        )
-        return "calls_live", text[:240]
+        variant = (snapshot.get("variant") or q.get("variant") or "simple").lower()
+        lines = [
+            "Best call today: $" + str(row["symbol"]),
+            "Peak: " + _peak_percent(row["entry"], row["peak"]),
+            "Entry: " + _price(row["entry"]),
+            "Top: " + _price(row["peak"]),
+        ]
+        if variant == "explain":
+            lines.extend("Why: " + reason for reason in _why_lines(row))
+        elif variant == "chart":
+            lines.append("Chart: yes")
+        lines.append("View call: https://orcagent.fun/call/" + str(row["id"]))
+        return "calls_live", "\n".join(lines)[:360]
     if kind == "top_calls":
         rows = snapshot.get("rows") or []
         if not rows:
-            return "calls_live", "There are no public OrcAgent calls in the last 24 hours yet."
-        summary = ", ".join(f"${r['symbol']} {r['peak_multiple']:.2f}x" for r in rows)
-        return "calls_live", ("Top OrcAgent calls in the last 24h by recorded peak performance: " + summary + ". https://orcagent.fun/calls")[:240]
+            return (
+                "calls_live",
+                "No clear best call today.\n"
+                "There are no public calls in the last 24h yet.\n"
+                "View trending: https://orcagent.fun/live-market",
+            )
+        lines = ["Top 3 calls today:"]
+        for idx, row in enumerate(rows[:3], 1):
+            lines.append(
+                str(idx) + ". $" + str(row["symbol"]) + " | "
+                + _peak_percent(row["entry"], row["peak"])
+                + " | /call/" + str(row["id"])
+            )
+        lines.append("View all calls: https://orcagent.fun/calls")
+        return "calls_live", "\n".join(lines)[:360]
     if kind == "market_movers":
         rows = snapshot.get("rows") or []
         if not rows:

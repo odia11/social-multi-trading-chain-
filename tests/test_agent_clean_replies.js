@@ -22,9 +22,31 @@ assert.equal(ctx._agentPriceReplyHtml('BTC: NaN USD · 13:47:22 UTC. Source: Coi
 const callMessage='Best call today: $SK\nPeak: +96%\nEntry: $0.00006769\nTop: $0.000133\nView call: https://orcagent.fun/call/85';
 const callHtml=ctx._renderReplyRow({...official,message:callMessage},'p554',1);
 const callVisible=callHtml.replace(/<[^>]*>/g,'');
-for(const text of ['Best call today: $SK','Peak','+96%','Entry','$0.00006769','Top','$0.000133','View call'])assert.ok(callVisible.includes(text),text);
-assert.ok(callHtml.includes('fc-agent-call-card')&&callHtml.includes("location.href='/call/85'"),'best call must render as a compact direct-action card');
+for(const text of ['Best call today','$SK','+96%','Entry','$0.00006769','Top','$0.000133','View call'])assert.ok(callVisible.includes(text),text);
+assert.ok(callHtml.includes('fc-agent-call-hero')&&callHtml.includes('fc-agent-call-peak')&&callHtml.includes("location.href='/call/85'"),'best call must render as the clean call card');
 assert.ok(!callVisible.includes('https://orcagent.fun/call/85'),'raw call URL must be replaced by the button');
+
+const whyMessage='Best call today: $SK\nPeak: +96%\nEntry: $0.00006769\nTop: $0.000133\nWhy: Best recorded peak today (+96%)\nWhy: 24h volume $51.5K\nWhy: Liquidity $39.6K\nView call: https://orcagent.fun/call/85';
+const whyHtml=ctx._renderReplyRow({...official,message:whyMessage},'p554',1);
+assert.ok(whyHtml.includes('Why this call?')&&whyHtml.includes('24h volume $51.5K')&&whyHtml.includes('Liquidity $39.6K'),'why question gets short factual reasons');
+
+const chartMessage='Best call today: $SK\nPeak: +96%\nEntry: $0.00006769\nTop: $0.000133\nChart: yes\nView call: https://orcagent.fun/call/85';
+const chartHtml=ctx._renderReplyRow({...official,message:chartMessage},'p554',1);
+assert.ok(chartHtml.includes('fc-agent-call-chart')&&chartHtml.includes('data-agent-call-chart="85"'),'show question gets a chart preview');
+
+const topMessage='Top 3 calls today:\n1. $SK | +96% | /call/85\n2. $EMBER | +48.2% | /call/86\n3. $NIO | +31.7% | /call/87\nView all calls: https://orcagent.fun/calls';
+const topHtml=ctx._renderReplyRow({...official,message:topMessage},'p554',1);
+for(const text of ['Top 3 calls today','$SK','+96%','$EMBER','+48.2%','$NIO','+31.7%','View all calls'])assert.ok(topHtml.replace(/<[^>]*>/g,'').includes(text),text);
+assert.ok(topHtml.includes("location.href='/call/85'")&&topHtml.includes("location.href='/calls'"),'top calls rows link directly to calls');
+
+const emptyMessage='No clear best call today.\nThere is no winning public call in the last 24h yet.\nView trending: https://orcagent.fun/live-market';
+const emptyHtml=ctx._renderReplyRow({...official,message:emptyMessage},'p554',1);
+assert.ok(emptyHtml.includes('No clear best call yet')&&emptyHtml.includes("location.href='/live-market'"),'no-winner state is simple and actionable');
+
+const legacy='Best-performing OrcAgent call in the last 24h: $SK — 1.96x peak from $6.769e-05 to $0.000133. orcagent.fun/#post-p557';
+const legacyHtml=ctx._renderReplyRow({...official,message:legacy},'p554',1);
+assert.ok(legacyHtml.includes('fc-agent-call-card')&&legacyHtml.includes('+96%')&&legacyHtml.includes("location.href='/#post-p557'"),'legacy long best-call replies are upgraded to the new card');
+
 assert.ok(!ctx._renderReplyRow({...official,verified:false,message:callMessage},'p554',1).includes('fc-agent-call-card'),'only the verified OrcAgent account may render the call card');
 html=ctx._renderReplyRow({id:138,username:'Trader',message:'@orcagent $PAID ('+mint+') what is the price?'},'p554',1);
 assert.ok(!html.replace(/<[^>]*>/g,'').includes(mint));
