@@ -10561,7 +10561,10 @@ function _feedToggleNestedReply(parentId, postId, btn){
   var isOpen = box.style.display !== 'none';
   // Close any other open nested composer on this post first, so only one is active.
   document.querySelectorAll('#rlist-'+postId+' .fc-ri-nested-box').forEach(function(b){ b.style.display='none'; b.innerHTML=''; });
-  if(isOpen) return; // was open -> we just closed it above
+  if(isOpen){ _feedPostComposerShown(postId, true); return; } // was open -> we just closed it above
+  // One reply box at a time: the post's own "Reply to <author>" box hides
+  // while a reply to a reply is being written (two boxes stacked looked broken).
+  _feedPostComposerShown(postId, false);
   var inpId  = 'rninp-'+parentId;
   var cardId = 'rncard-'+parentId;
   var row    = btn ? btn.closest('.fc-reply-item') : null;
@@ -10600,6 +10603,11 @@ function _feedToggleNestedReply(parentId, postId, btn){
   }
 }
 
+function _feedPostComposerShown(postId, show){
+  var card = document.getElementById('rcard-'+postId);
+  if(card) card.style.display = show ? '' : 'none';
+}
+
 function _feedSubmitNestedReply(inp, postId, parentReplyId){
   if(!inp || inp.disabled) return Promise.resolve(false);
   var text = inp.value.trim();
@@ -10617,6 +10625,7 @@ function _feedSubmitNestedReply(inp, postId, parentReplyId){
       var parentRow = document.querySelector('#rlist-'+postId+' .fc-reply-item[data-reply-id="'+parentReplyId+'"]');
       var box = document.getElementById('rnbox-'+parentReplyId);
       if(box){ box.style.display='none'; box.innerHTML=''; }
+      _feedPostComposerShown(postId, true);
       var selected=text.match(/^@orcagent \$([A-Za-z0-9_+.-]+) \(([1-9A-HJ-NP-Za-km-z]{32,44})\) what is the price\?$/i);
       var resolvedChoice=!!(parentRow && selected && parentRow.dataset.tokenChoice===selected[1].toUpperCase());
       if(parentRow){
@@ -10722,6 +10731,8 @@ function _feedLoadReplies(postId){
         list.innerHTML = _feedRenderReplyTree(d.replies, postId);
         if(typeof _agentHydrateCallCards==='function')_agentHydrateCallCards(list);
       }
+      // A re-render drops any open reply-to-reply box: bring the post's own back.
+      _feedPostComposerShown(postId, true);
       if(count)count.textContent=String(list.querySelectorAll('.fc-reply-item').length);
       if(box)box.dataset.repliesLoaded='1';
       return true;

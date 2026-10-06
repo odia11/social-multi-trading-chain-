@@ -131,6 +131,31 @@ function build(){
     requestAnimationFrame(function(){requestAnimationFrame(function(){focusSocialComposer(0)})});
   }
 }
+/* While the keyboard is up the bottom bar (and its POST button) floated above
+   it, right over the reply box being typed in. Hide it while a text field
+   has focus; it returns as soon as typing ends. */
+function _isTextField(el){
+  if(!el||el.disabled||el.readOnly)return false;
+  if(el.isContentEditable)return true;
+  var t=el.tagName;
+  if(t==='TEXTAREA')return true;
+  if(t!=='INPUT')return false;
+  return /^(text|search|email|url|tel|number|password)$/i.test(el.type||'text');
+}
+function _syncTyping(){
+  document.documentElement.classList.toggle('oa-kb-typing',_isTextField(document.activeElement));
+}
+(function(){
+  if(!document.getElementById('oa-kb-typing-css')){
+    var st=document.createElement('style');st.id='oa-kb-typing-css';
+    st.textContent='html.oa-kb-typing .oa-bottom-nav,html.oa-kb-typing #oa-bottom-nav{display:none!important}';
+    (document.head||document.documentElement).appendChild(st);
+  }
+  document.addEventListener('focusin',_syncTyping,true);
+  // focusout fires before the next field gets focus: re-check a tick later.
+  document.addEventListener('focusout',function(){setTimeout(_syncTyping,60)},true);
+  window.addEventListener('pageshow',_syncTyping,{passive:true});
+})();
 window.addEventListener('pageshow',function(){invalidateAppMenu();setTimeout(_ensureBottomNav,0)},{passive:true});
 document.addEventListener('orca:admin-access-changed',function(){invalidateAppMenu()});
 document.addEventListener('orca:bfcache-restored',function(){invalidateAppMenu();setTimeout(_ensureBottomNav,0)});
