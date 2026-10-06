@@ -83,9 +83,14 @@ check('core route chunks warm only public static assets after first paint',
       'primeRouteAssets' in UX and 'CORE_ROUTES' in UX
       and "var key='/static/'+asset" in UX
       and "fetch('/api/" not in UX)
-check('slow mobile navigations get an immediate native-app shell without hijacking links',
-      'showRouteShell' in UX and 'setTimeout(function(){showRouteShell(path)},120)' in UX
+check('mobile navigations paint the destination shell synchronously without hijacking links',
+      'showRouteShell' in UX and "n.className='oa-route-shell show'" in UX
+      and 'showRouteShell(path);' in UX and 'setTimeout(function(){showRouteShell(path)},120)' not in UX
       and "e.preventDefault()" not in LOADER)
+check('profile subroutes warm the profile asset family before navigation',
+      'ROUTE_ASSETS[routeKey(path)]' in UX and "path.indexOf(base+'/')===0" in UX)
+check('programmatic navigation cannot leave stale page content painted',
+      'OrcAgentShowRouteShell' in UX and 'OrcAgentShowRouteShell' in LOADER)
 check('service worker caches only same-origin public static GETs',
       "url.pathname.indexOf('/static/')!==0" in SW
       and "url.origin!==self.location.origin" in SW
@@ -95,4 +100,4 @@ check('mobile app shell assets are preloaded from head',
       and 'mobile-bottom-nav.css?v=9' in PERF
       and 'mobile-bottom-nav.js?v=10' in PERF)
 
-print('\n24/24 checks passed')
+print('\n27/27 checks passed')

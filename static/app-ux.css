@@ -86,9 +86,10 @@ body{max-width:100%;overflow-x:hidden;overflow-x:clip;background:#080d12!importa
   navigation: none;
 }
 
-/* Native-app route placeholder. It is created after 120ms only when a native
-   cross-document navigation has not completed yet. The top bar/bottom nav stay
-   visually stable, so iOS/Android never flash a white/unstyled document. */
+/* Native-app route placeholder. It is painted synchronously when a native
+   cross-document navigation starts, before Safari can freeze the outgoing page.
+   The top bar/bottom nav stay visually stable, so users never stare at stale
+   content or a white/unstyled document while the destination is loading. */
 .oa-route-shell{position:fixed;z-index:900;inset:76px 0 72px;background:#080d12;opacity:0;pointer-events:none;transition:opacity .08s linear;overflow:hidden}
 .oa-route-shell.show{opacity:1}
 .oa-route-shell-inner{padding:18px 18px 28px;max-width:820px;margin:0 auto}

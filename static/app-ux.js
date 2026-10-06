@@ -35,9 +35,19 @@ function warmAsset(asset,urgent){
   if(urgent)l.fetchPriority='high';
   document.head.appendChild(l);
 }
+function routeKey(path){
+  path=String(path||'').replace(/\/+$/,'')||'/';
+  if(path==='/')return '/';
+  var families=['/live-market','/wallet','/groups','/messages','/notifications','/profile','/bot','/settings'];
+  for(var i=0;i<families.length;i++){
+    var base=families[i];
+    if(path===base||path.indexOf(base+'/')===0)return base;
+  }
+  return path;
+}
 function warmRoute(path,urgent){
   if(navigator.connection&&navigator.connection.saveData)return;
-  (ROUTE_ASSETS[path]||[]).forEach(function(asset){warmAsset(asset,!!urgent)});
+  (ROUTE_ASSETS[routeKey(path)]||[]).forEach(function(asset){warmAsset(asset,!!urgent)});
 }
 function prefetch(a){
   var u=navCandidate(a);if(!u)return;
@@ -67,13 +77,14 @@ function scheduleRoutePrime(){
   else setTimeout(run,650);
 }
 
-/* Native navigation stays authoritative. We only make the shell react
-   immediately and show a lightweight route skeleton if the server takes long
-   enough that a user would otherwise see a frozen old screen. */
+/* Native navigation stays authoritative. Paint the destination shell in the
+   same click turn, before Safari can freeze the outgoing document for native
+   paint holding. That prevents stale page content from lingering during a
+   normal cross-document route change. */
 function routeLabel(path){
   return {'/':'Home','/live-market':'Live Market','/wallet':'Portfolio','/groups':'Groups',
           '/messages':'Messages','/notifications':'Notifications','/profile':'Profile',
-          '/bot':'Auto Trading','/settings':'Settings'}[path]||'OrcAgent';
+          '/bot':'Auto Trading','/settings':'Settings'}[routeKey(path)]||'OrcAgent';
 }
 function optimisticNav(path){
   document.querySelectorAll('.oa-bottom-nav a[href]').forEach(function(a){
@@ -83,20 +94,24 @@ function optimisticNav(path){
 function showRouteShell(path){
   if(!window.matchMedia('(max-width:768px)').matches||document.hidden)return;
   if(shellNode&&shellNode.isConnected)return;
-  var n=document.createElement('div');n.id='oa-route-shell';n.className='oa-route-shell';
+  var n=document.createElement('div');n.id='oa-route-shell';n.className='oa-route-shell show';
   n.setAttribute('aria-hidden','true');
   n.innerHTML='<div class="oa-route-shell-inner"><div class="oa-route-shell-title">'+routeLabel(path)+'</div>'+
     '<div class="oa-route-shell-hero"></div><div class="oa-route-shell-row"></div>'+
     '<div class="oa-route-shell-row short"></div><div class="oa-route-shell-card"></div>'+
     '<div class="oa-route-shell-card small"></div></div>';
+  // Safari may freeze the outgoing document as soon as native navigation
+  // starts. Make the shell visible synchronously so its paint-hold snapshot
+  // contains the destination skeleton, never stale content from the old page.
   document.body.appendChild(n);shellNode=n;
-  requestAnimationFrame(function(){n.classList.add('show')});
 }
 function beginRoute(path){
   optimisticNav(path);
-  clearTimeout(shellTimer);
-  shellTimer=setTimeout(function(){showRouteShell(path)},120);
+  clearTimeout(shellTimer);shellTimer=null;
+  showRouteShell(path);
 }
+window.OrcAgentBeginRoute=beginRoute;
+window.OrcAgentShowRouteShell=showRouteShell;
 function clearRouteShell(){
   clearTimeout(shellTimer);shellTimer=null;
   if(shellNode&&shellNode.parentNode)shellNode.parentNode.removeChild(shellNode);

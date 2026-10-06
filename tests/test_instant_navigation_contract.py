@@ -20,8 +20,14 @@ checks={
       "['pointerover','touchstart','focusin']" in UX and 'warmRoute(u.pathname,true)' in UX,
   'slow navigation gets a stable app-shell placeholder':
       'showRouteShell' in UX and '.oa-route-shell{' in CSS,
-  'fast navigation does not flash the placeholder':
-      'setTimeout(function(){showRouteShell(path)},120)' in UX,
+  'destination shell paints synchronously before Safari freezes the old page':
+      "n.className='oa-route-shell show'" in UX
+      and 'showRouteShell(path);' in UX
+      and 'setTimeout(function(){showRouteShell(path)},120)' not in UX,
+  'route families warm nested profile and message assets':
+      'ROUTE_ASSETS[routeKey(path)]' in UX and "path.indexOf(base+'/')===0" in UX,
+  'programmatic navigation gets a beforeunload shell fallback':
+      'OrcAgentShowRouteShell' in UX and 'OrcAgentShowRouteShell' in LOADER,
   'shared shell assets preload from head':
       'data-oa-shell-preload' in PERF and 'mobile-bottom-nav.css?v=9' in PERF,
   'shared UX is cache-busted consistently':
