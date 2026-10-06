@@ -33,17 +33,20 @@ about = INFO[INFO.index('<section class="info-section" id="about">'):
              INFO.index('<!-- ═══════════ DOCS ═══════════ -->')]
 check('the active product is explicitly Solana-only in code',
       'SOLANA_ONLY = True' in SRC and 'ACTIVE_EVM_CHAINS = {}' in SRC)
-check('About describes OrcAgent as a Solana social trading platform',
-      'Solana social trading platform' in about)
+check('About describes OrcAgent as Solana trading with automation and social features',
+      'Solana trading, automation and social features' in about)
 check('About no longer contains the old duplicated or multichain copy',
       'Solana, Solana' not in about.replace('\n      ', ' ')
       and 'every supported chain' not in about
       and 'whichever chain' not in about)
-check('the refreshed About hero carries the current product line',
-      'Trade it. Share it.' in about and 'Built on Solana' in about)
-for feature in ('Live Market', 'Auto Trading', 'Social &amp; Copy Trading',
-                'Launch Tokens', 'Messages', 'One Portfolio'):
-    check(f'About includes {feature}', feature in about)
+check('the compact About hero carries the current product line',
+      'Trade. Automate. Connect.' in about and 'Built on Solana' in about)
+for feature in ('Trade', 'Automate', 'Social', 'Launch'):
+    check(f'About includes {feature}', f'<h3>{feature}</h3>' in about)
+check('About stays compact instead of repeating secondary product details',
+      'Start in three steps' not in about
+      and 'One Portfolio' not in about
+      and 'Messages</h3>' not in about)
 
 # ── the funding currency ──────────────────────────────────────────────────
 base = re.search(r"SOLANA_BASE_CURRENCY = '([A-Z]+)'", SRC).group(1)
