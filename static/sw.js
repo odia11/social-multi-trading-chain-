@@ -82,7 +82,7 @@ function oaStartNavPrefetch(clientId,rawUrl){
   });
   var record={href:href,clientId:String(clientId||''),ts:Date.now(),promise:null};
   record.promise=oaFetchThroughDeploy(req,0).then(function(resp){
-    if(!resp || !resp.ok) return null;
+    if(!resp || !resp.ok || resp.redirected || (resp.url && oaNavHref(resp.url)!==href)) return null;
     var ctype=(resp.headers.get('content-type')||'').toLowerCase();
     if(ctype.indexOf('text/html')===-1) return null;
     OA_NAV_READY.set(key,{href:href,clientId:record.clientId,ts:Date.now(),response:resp.clone()});
