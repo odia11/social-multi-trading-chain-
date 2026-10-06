@@ -24,6 +24,7 @@ from share_token_card import install as _install_share_token_card
 from messages_premium_ui import install as _install_messages_premium_ui
 from auto_trading_bot_route import install as _install_auto_trading_bot_route
 from bot_learning import install as _install_bot_learning
+from bot_entry_policy import install as _install_bot_entry_policy
 from canonical_domain import install as _install_canonical_domain
 from browser_shared_secret_hardening import install as _install_browser_shared_secret_hardening
 from secret_hygiene import install as _install_secret_hygiene
@@ -70,6 +71,7 @@ _install_share_token_card(_dashboard)
 _install_messages_premium_ui(_dashboard)
 _install_auto_trading_bot_route(_dashboard)
 _install_bot_learning(_dashboard)
+_install_bot_entry_policy(_dashboard)
 
 # Reject untrusted Host headers before any security- or auth-sensitive route
 # can derive an absolute URL/origin from them. Loopback remains allowed for
