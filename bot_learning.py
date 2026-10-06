@@ -27,6 +27,7 @@ import sqlite3
 import threading
 import time
 from statistics import median
+import bot_shadow_learning
 
 MIN_POSITIONS = 20          # closed bot trades before anything is learned
 WINDOW = 120                # most recent closed bot trades analysed
@@ -430,6 +431,25 @@ def invalidate(user_id):
         _cache.pop(user_id, None)
 
 
+def learning_enabled(db_file, user_id):
+    """Whether this user opted into adaptive entry learning.
+
+    Public shadow observations can continue independently, but no learned
+    personal rule or public-market veto is applied to a user who switched
+    Self-learning off.
+    """
+    try:
+        conn = sqlite3.connect(db_file, timeout=3)
+        try:
+            _ensure(conn)
+            row = conn.execute('SELECT enabled FROM bot_learning WHERE user_id=?', (user_id,)).fetchone()
+            return True if not row else bool(row[0])
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return False
+
+
 def avoid_reason(tuning, chain='solana', pair_age_minutes=None, market_cap=None, buy_sell_ratio=None):
     """The learned rule this candidate falls under, or ''."""
     for a in (tuning or {}).get('avoid') or []:
@@ -514,6 +534,7 @@ def install(d):
         finally:
             conn.close()
         active = (st.get('active') or {}) if enabled else {}
+        shadow = bot_shadow_learning.status(d.DB_FILE)
         return jsonify({
             'ok': True, 'enabled': enabled,
             'trades_analysed': seen, 'needs': MIN_POSITIONS,
@@ -523,4 +544,5 @@ def install(d):
             'avoid': [a.get('label') for a in active.get('avoid') or []],
             'notes': [n for n in st.get('notes') or [] if not str(n).startswith('Exits:')],
             'log': [{'at': int(a), 'message': m} for a, m in log],
+            'market_brain': shadow,
         })

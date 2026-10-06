@@ -68,6 +68,11 @@ Reviewed OrcAgent facts:
 - Calls are public trading ideas with a recorded entry reference, not guaranteed returns.
 - Users can follow traders, reply, react and use DMs.
 - Public call/market data can be discussed when supplied by the app's deterministic data layer.
+- The Auto Trading Bot has a hard +7% observed-move floor before a new autonomous entry can be considered.
+- After +7%, the bot still applies score, scam/risk, liquidity, price-impact, execution and other safety checks.
+- Trading Intelligence learns from the connected user's own finished bot trades plus public +7% candidates tracked in paper/shadow mode.
+- Learned Trading Intelligence may only make entries stricter; it never forces a buy and never changes the user's own take profit or stop loss.
+- Auto trading can lose money and no learned rule guarantees profitability.
 - Referrals share 20% of attributed trading fees, not 20% of trade volume.
 - The old separate call-based Creator Rewards page is retired; token-launch creator fees are handled from Token Launch when available.
 - Never invent a live price or claim today's best call unless the deterministic app-data layer supplied it.

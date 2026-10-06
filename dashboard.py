@@ -56,6 +56,7 @@ from werkzeug.exceptions import HTTPException
 # module exists to prevent. tests/test_module_imports.py catches breakage.
 from trade_engine import registry as te_registry
 import bot_learning  # self-learning: replays closed bot trades, tunes exits/entries
+import bot_shadow_learning  # public-market paper/shadow learning; veto-only, never forces buys
 from trade_engine import ledger as te_ledger
 from trade_engine import subsidy as te_subsidy
 from trade_engine import execute as te_execute
@@ -5991,6 +5992,26 @@ def token_loop():
                         bd['confidence'] = round(sc / 10 * 100)
                 # Re-sort after AI adjustments
                 display.sort(key=lambda t: t['score'], reverse=True)
+            # Public-market shadow learning runs once in the shared
+            # Solana scanner, independent of how many user bots are currently
+            # running. The module itself records only candidates whose observed
+            # move is >=+7%, and uses one SQLite transaction for the whole batch.
+            _shadow_now = time.time()
+            _shadow_universe = [t for t in display if _bot_gainers_eligible(t)]
+            bot_shadow_learning.observe_many(DB_FILE, _shadow_universe, _shadow_now)
+            # A candidate can disappear from the normal trending universe
+            # before its 60-minute paper outcome is known. Resolve a small
+            # bounded number of due samples with a fresh public token read so
+            # the learning set does not contain only survivors/winners.
+            for _shadow_mint in bot_shadow_learning.due_mints(DB_FILE, _shadow_now, limit=3):
+                try:
+                    _shadow_td = get_token_data(_shadow_mint, chain='solana')
+                    if _shadow_td and _shadow_td.get('price', 0) > 0:
+                        bot_shadow_learning.resolve_price(
+                            DB_FILE, _shadow_mint, _shadow_td['price'], time.time()
+                        )
+                except Exception:
+                    pass
             qualifying = [t for t in display if t['score'] >= 4.5]
             state['tokens'] = display
             add_log(str(len(qualifying)) + '/' + str(total_disc) + ' qualify (score≥4.5) — '
@@ -11777,8 +11798,9 @@ def user_trader_loop(stop_event, config, wallet: str):
                     _learned_lp_bias_map = _learned_lp_bias(user_id)
                     # Self-learning (bot_learning): a higher minimum score and
                     # kinds of entries to avoid, learned from this user's own
-                    # replayed bot trades; also tighter exits for the buy.
+                    # replayed bot trades. User TP/SL are never changed.
                     _tune = bot_learning.tuning_for(DB_FILE, user_id, take_profit * 100, stop_loss * 100)
+                    _shadow_enabled = bot_learning.learning_enabled(DB_FILE, user_id)
                     _entry_rejected = us.setdefault('entry_rejected', {})
                     for _rm in [m for m, t in _entry_rejected.items() if t <= time.time()]:
                         _entry_rejected.pop(_rm, None)
@@ -11846,6 +11868,12 @@ def user_trader_loop(stop_event, config, wallet: str):
                             _tune, 'solana', **bot_learning.candidate_features(_t))
                         if _learned_avoid:
                             _skip_log.append(f'[skip] {_tsym}: learned from your trades — avoiding {_learned_avoid}')
+                            continue
+                        _shadow_avoid = bot_shadow_learning.veto_reason(DB_FILE, _t) if _shadow_enabled else ''
+                        if _shadow_avoid:
+                            _skip_log.append(
+                                f'[skip] {_tsym}: market shadow learning — historically weak {_shadow_avoid}'
+                            )
                             continue
                         if not _m5_ok:
                             _skip_log.append(f'[skip] {_tsym}: trend too low (5m:{round(_m5,1)}% 1h:{round(_h1,1)}% — need {_m5_desc} on either)')

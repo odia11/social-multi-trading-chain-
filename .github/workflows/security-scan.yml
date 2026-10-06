@@ -53,8 +53,12 @@ jobs:
       - name: Python compile check
         run: python -m compileall -q .
 
-      - name: Bot +7% entry regression
-        run: python tests/test_bot_entry_7pct_policy.py
+      - name: Bot +7% and trading intelligence regressions
+        run: |
+          python tests/test_bot_entry_7pct_policy.py
+          PYTHONPATH=. python tests/test_bot_shadow_learning.py
+          PYTHONPATH=. python tests/test_bot_shadow_wiring.py
+          PYTHONPATH=. python tests/test_bot_learning.py
 
       - name: PWA lifecycle cleanup regression
         run: |
@@ -109,6 +113,7 @@ jobs:
           PYTHONPATH=. python tests/test_responsive_agent.py
           PYTHONPATH=.:tests python tests/test_platform_prices.py
           PYTHONPATH=.:tests python tests/test_agent_price_reliability.py
+          PYTHONPATH=.:tests python tests/test_platform_reasoner.py
           python tests/test_bot_follows_settings.py
           python tests/test_retired_extra_pages.py
           python tests/test_position_guardian.py
