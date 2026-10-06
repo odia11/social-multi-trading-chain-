@@ -102,11 +102,14 @@ async function navigate(url,clientId='client-1'){
   await warm('https://evil.example/profile/alice');
   assert.equal(networkFetches,1,'cross-origin routes are never warmed');
 
+  await warm('/x/connect');
+  assert.equal(networkFetches,1,'unknown or side-effect GET routes are never warmed');
+
   const cold=await navigate('/profile/bob','client-2');
   assert.equal(cold.status,200);
   assert.equal(networkFetches,2,'cold navigation falls back to normal network fetch');
 
   console.log('PASS X-style navigation reuses one ephemeral per-client document');
   console.log('PASS authenticated HTML is RAM-only and never written to Cache Storage');
-  console.log('PASS API, Phantom callback and cross-origin routes are excluded');
+  console.log('PASS API, callback, cross-origin and non-allowlisted GET routes are excluded');
 })().catch(function(err){console.error(err);process.exit(1);});
