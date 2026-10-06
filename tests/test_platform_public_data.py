@@ -37,6 +37,7 @@ class PublicData(unittest.TestCase):
         self.d = SimpleNamespace(
             DB_FILE=self.db,
             state={"tokens": [
+                {"mint": "mint-a", "symbol": "EMBER", "volume24h": 51517, "liquidity": 39585, "change24h": 83.97},
                 {"symbol": "AAA", "price_change_24h": 12.5},
                 {"symbol": "BBB", "price_change_24h": -31.2},
                 {"symbol": "CCC", "price_change_24h": 4.0},
@@ -66,6 +67,37 @@ class PublicData(unittest.TestCase):
         self.assertLessEqual(len(text), 240)
         self.assertEqual(public_data._price(0.00006769), "$0.00006769")
         self.assertEqual(public_data._price(0.000133), "$0.000133")
+
+    def test_best_call_variants_are_simple_explain_chart_and_top3(self):
+        explain = public_data.query("why is the best call the best?")
+        self.assertEqual(explain, {"kind": "best_call", "variant": "explain"})
+        snap = public_data.fetch(explain, self.d)
+        topic, text = public_data.render(explain, snap)
+        self.assertEqual(topic, "calls_live")
+        self.assertIn("Why: Best recorded peak today (+150%)", text)
+        self.assertIn("Why: 24h volume $51.5K", text)
+        self.assertIn("Why: Liquidity $39.6K", text)
+
+        chart = public_data.query("show me the best call chart")
+        self.assertEqual(chart, {"kind": "best_call", "variant": "chart"})
+        _, chart_text = public_data.render(chart, public_data.fetch(chart, self.d))
+        self.assertIn("Chart: yes", chart_text)
+
+        top = public_data.query("what are the top 3 calls?")
+        self.assertEqual(top["kind"], "top_calls")
+        _, top_text = public_data.render(top, public_data.fetch(top, self.d))
+        self.assertIn("Top 3 calls today:", top_text)
+        self.assertIn("1. $EMBER | +150% | /call/2", top_text)
+        self.assertIn("2. $NOVA | +40% | /call/3", top_text)
+        self.assertIn("View all calls: https://orcagent.fun/calls", top_text)
+
+    def test_no_public_winner_has_clear_trending_fallback(self):
+        with sqlite3.connect(self.db) as c:
+            c.execute("UPDATE token_calls SET peak_price=price_at_call WHERE timestamp >= datetime('now','-1 day')")
+        q = public_data.query("what is the best call today?")
+        _, text = public_data.render(q, public_data.fetch(q, self.d))
+        self.assertIn("No clear best call today.", text)
+        self.assertIn("View trending: https://orcagent.fun/live-market", text)
 
     def test_market_movers_and_live_fee_use_public_app_state(self):
         q = public_data.query("what is trending?")

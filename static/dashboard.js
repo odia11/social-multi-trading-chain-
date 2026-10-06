@@ -10320,22 +10320,136 @@ function _agentPriceReplyHtml(message){
   return html;
 }
 
-function _agentBestCallReplyHtml(message){
-  // Only the verified OrcAgent account reaches this renderer. Keep the stored
-  // reply plain text and convert this exact first-party shape into a compact
-  // card + local button. No user-supplied HTML is ever trusted.
-  var text=String(message||'');
-  var m=text.match(/^Best call today: \$([A-Za-z0-9_+.-]{1,24})\nPeak: ([+-][0-9]+(?:\.[0-9]+)?)%\nEntry: \$([0-9,.]+(?:e[+-]?[0-9]+)?)\nTop: \$([0-9,.]+(?:e[+-]?[0-9]+)?)\nView call: https:\/\/orcagent\.fun\/call\/(\d+)$/i);
-  if(!m)return '';
-  var entry=Number(m[3].replace(/,/g,'')),top=Number(m[4].replace(/,/g,'')),callId=Number(m[5]);
-  if(!Number.isFinite(entry)||entry<=0||!Number.isFinite(top)||top<=0||!Number.isInteger(callId)||callId<=0)return '';
-  return '<div class="fc-agent-call-card">'
-    +'<div class="fc-agent-call-title">Best call today: <strong>$'+esc(m[1])+'</strong></div>'
-    +'<div class="fc-agent-call-row"><span>Peak</span><strong class="fc-agent-call-peak">'+esc(m[2])+'%</strong></div>'
-    +'<div class="fc-agent-call-row"><span>Entry</span><strong>$'+esc(m[3])+'</strong></div>'
-    +'<div class="fc-agent-call-row"><span>Top</span><strong>$'+esc(m[4])+'</strong></div>'
-    +'<button type="button" class="fc-agent-call-open" onclick="event.stopPropagation();location.href=\'/call/'+callId+'\'" aria-label="View $'+esc(m[1])+' call">View call</button>'
+function _agentCallMetric(label,value,extra){
+  return '<div class="fc-agent-call-metric"><span>'+esc(label)+'</span><strong'+(extra?' class="'+extra+'"':'')+'>'+esc(value)+'</strong></div>';
+}
+function _agentCallCta(route,label){
+  return '<button type="button" class="fc-agent-call-open" onclick="event.stopPropagation();location.href=\''+route+'\'">'+esc(label)+' <span aria-hidden="true">→</span></button>';
+}
+function _agentCallCardHtml(data){
+  var initials=String(data.symbol||'?').slice(0,2).toUpperCase();
+  var reasons=(data.reasons||[]).map(function(reason){
+    return '<li><span aria-hidden="true">✓</span>'+esc(reason)+'</li>';
+  }).join('');
+  var chart=data.chart
+    ? '<div class="fc-agent-call-chart-wrap"><svg class="fc-agent-call-chart" viewBox="0 0 300 72" preserveAspectRatio="none" data-agent-call-chart="'+data.callId+'" aria-label="Price chart preview"><path class="fc-agent-call-chart-line" d=""></path></svg><div class="fc-agent-call-chart-labels"><span>'+esc(data.entry)+'</span><span>'+esc(data.top)+'</span></div></div>'
+    : '';
+  return '<div class="fc-agent-call-card" data-call-id="'+data.callId+'" data-show-chart="'+(data.chart?'1':'0')+'">'
+    +'<div class="fc-agent-call-heading"><span class="fc-agent-call-trophy" aria-hidden="true">🏆</span><span>Best call today</span></div>'
+    +'<div class="fc-agent-call-hero"><div class="fc-agent-call-token"><span class="fc-agent-call-avatar"><span>'+esc(initials)+'</span><img data-agent-call-logo alt="" hidden></span><strong>$'+esc(data.symbol)+'</strong></div><span class="fc-agent-call-peak">'+esc(data.peak)+'</span></div>'
+    +'<div class="fc-agent-call-metrics">'+_agentCallMetric('Entry',data.entry)+_agentCallMetric('Top',data.top)+'</div>'
+    +(reasons?'<div class="fc-agent-call-why"><div>Why this call?</div><ul>'+reasons+'</ul></div>':'')
+    +chart
+    +_agentCallCta(data.route,'View call')
     +'</div>';
+}
+function _agentBestCallReplyHtml(message){
+  // Only verified OrcAgent replies reach this renderer. Every accepted shape
+  // below is a strict first-party text protocol; user HTML is never trusted.
+  var text=String(message||'').trim(),lines=text.split('\n');
+
+  if(lines[0]==='No clear best call today.' && /^View trending: https:\/\/orcagent\.fun\/live-market$/.test(lines[lines.length-1]||'')){
+    var note=lines.slice(1,-1).join(' ').trim()||'There is no clear winner in the public calls from the last 24 hours yet.';
+    return '<div class="fc-agent-call-card fc-agent-call-empty"><div class="fc-agent-call-heading"><span class="fc-agent-call-info" aria-hidden="true">i</span><span>No clear best call yet</span></div><p>'+esc(note)+'</p>'+_agentCallCta('/live-market','View trending tokens')+'</div>';
+  }
+
+  if(lines[0]==='Top 3 calls today:'){
+    var items=[],i;
+    for(i=1;i<lines.length;i++){
+      var m=lines[i].match(/^([1-3])\. \$([A-Za-z0-9_+.-]{1,24}) \| ([+-][0-9]+(?:\.[0-9]+)?)% \| \/call\/(\d+)$/);
+      if(!m)break;
+      items.push({rank:Number(m[1]),symbol:m[2],peak:m[3]+'%',id:Number(m[4])});
+    }
+    if(items.length && lines[i]==='View all calls: https://orcagent.fun/calls'){
+      var rows=items.map(function(item){
+        return '<button type="button" class="fc-agent-topcall-row" onclick="event.stopPropagation();location.href=\'/call/'+item.id+'\'"><span class="fc-agent-topcall-rank">'+item.rank+'</span><span class="fc-agent-topcall-symbol">$'+esc(item.symbol)+'</span><strong>'+esc(item.peak)+'</strong><span aria-hidden="true">›</span></button>';
+      }).join('');
+      return '<div class="fc-agent-call-card fc-agent-topcalls"><div class="fc-agent-call-heading"><span aria-hidden="true">🔥</span><span>Top 3 calls today</span></div><div class="fc-agent-topcall-list">'+rows+'</div>'+_agentCallCta('/calls','View all calls')+'</div>';
+    }
+  }
+
+  if(/^Best call today: \$/.test(lines[0]||'')){
+    var title=(lines[0].match(/^Best call today: \$([A-Za-z0-9_+.-]{1,24})$/)||[]);
+    var peak=(lines[1]||'').match(/^Peak: ([+-][0-9]+(?:\.[0-9]+)?)%$/);
+    var entry=(lines[2]||'').match(/^Entry: \$([0-9,.]+(?:e[+-]?[0-9]+)?)$/i);
+    var top=(lines[3]||'').match(/^Top: \$([0-9,.]+(?:e[+-]?[0-9]+)?)$/i);
+    if(title[1]&&peak&&entry&&top){
+      var reasons=[],chart=false,route='',callId=0;
+      for(var j=4;j<lines.length;j++){
+        if(lines[j].indexOf('Why: ')===0 && lines[j].length<=100)reasons.push(lines[j].slice(5));
+        else if(lines[j]==='Chart: yes')chart=true;
+        else{
+          var view=lines[j].match(/^View call: https:\/\/orcagent\.fun\/call\/(\d+)$/);
+          if(view){callId=Number(view[1]);route='/call/'+callId;}
+        }
+      }
+      var e=Number(entry[1].replace(/,/g,'')),t=Number(top[1].replace(/,/g,''));
+      if(callId>0&&Number.isFinite(e)&&e>0&&Number.isFinite(t)&&t>0){
+        return _agentCallCardHtml({
+          symbol:title[1],peak:peak[1]+'%',entry:'$'+entry[1],top:'$'+top[1],
+          callId:callId,route:route,reasons:reasons.slice(0,4),chart:chart
+        });
+      }
+    }
+  }
+
+  // Existing stored replies from before the card redesign become the same
+  // clean component after refresh instead of staying as a long raw sentence.
+  var legacy=text.match(/^Best-performing OrcAgent call in the last 24h: \$([A-Za-z0-9_+.-]{1,24}) — ([0-9]+(?:\.[0-9]+)?)x peak from \$([0-9.e+-]+) to \$([0-9.e+-]+)\.?\s+orcagent\.fun\/#post-p(\d+)\.?$/i);
+  if(legacy){
+    var mult=Number(legacy[2]),pct=(mult-1)*100,postId=Number(legacy[5]);
+    var pctText=(Math.abs(pct-Math.round(pct))<0.05?Math.round(pct).toFixed(0):pct.toFixed(1));
+    return _agentCallCardHtml({
+      symbol:legacy[1],peak:(pct>=0?'+':'')+pctText+'%',entry:'$'+legacy[3],top:'$'+legacy[4],
+      callId:0,route:'/#post-p'+postId,reasons:[],chart:false
+    }).replace('data-call-id="0"','');
+  }
+  return '';
+}
+
+var _agentCallMetaPromise=null,_agentCallMetaAt=0;
+function _agentCallMeta(){
+  if(_agentCallMetaPromise&&Date.now()-_agentCallMetaAt<60000)return _agentCallMetaPromise;
+  _agentCallMetaAt=Date.now();
+  _agentCallMetaPromise=fetch('/api/calls/top?window=24h',{credentials:'same-origin'})
+    .then(function(r){return r.ok?r.json():{calls:[]}})
+    .then(function(d){return Array.isArray(d.calls)?d.calls:[]})
+    .catch(function(){return[]});
+  return _agentCallMetaPromise;
+}
+function _agentDrawCallChart(svg,candles,entry){
+  var vals=(candles||[]).map(function(c){return Number(c.c)}).filter(function(v){return Number.isFinite(v)&&v>0}).slice(-36);
+  if(vals.length<2)return;
+  if(entry>0)vals.push(entry);
+  var lo=Math.min.apply(null,vals),hi=Math.max.apply(null,vals),span=hi-lo||hi||1;
+  if(entry>0)vals.pop();
+  var pts=vals.map(function(v,i){
+    var x=(i*300/(vals.length-1)).toFixed(1),y=(66-((v-lo)/span)*56).toFixed(1);
+    return (i?'L':'M')+x+' '+y;
+  }).join(' ');
+  var path=svg.querySelector('.fc-agent-call-chart-line');
+  if(path)path.setAttribute('d',pts);
+}
+function _agentHydrateCallCards(root){
+  var cards=(root||document).querySelectorAll('.fc-agent-call-card[data-call-id]');
+  if(!cards.length)return;
+  _agentCallMeta().then(function(calls){
+    cards.forEach(function(card){
+      if(card.dataset.agentHydrated==='1')return;
+      card.dataset.agentHydrated='1';
+      var id=Number(card.dataset.callId),call=calls.find(function(c){return Number(c.id)===id});
+      if(!call)return;
+      var img=card.querySelector('[data-agent-call-logo]'),src=typeof safeImageUrl==='function'?safeImageUrl(call.image_url):'';
+      if(img&&src){img.src=src;img.hidden=false;}
+      if(card.dataset.showChart!=='1'||!call.mint)return;
+      var svg=card.querySelector('[data-agent-call-chart]');
+      if(!svg)return;
+      fetch('/api/chart/'+encodeURIComponent(call.mint)+'?chain=solana&tf=1h',{credentials:'same-origin'})
+        .then(function(r){return r.ok?r.json():{}})
+        .then(function(data){_agentDrawCallChart(svg,Array.isArray(data.candles)?data.candles:[],Number(call.price_at_call)||0)})
+        .catch(function(){});
+    });
+  });
 }
 
 function _renderReplyRow(r, postId, depth, tokenIdentity){
@@ -10591,6 +10705,7 @@ function _feedLoadReplies(postId){
         list.innerHTML='<div style="font-size:12px;color:var(--muted);padding:4px 0">No replies yet — be the first.</div>';
       }else{
         list.innerHTML = _feedRenderReplyTree(d.replies, postId);
+        if(typeof _agentHydrateCallCards==='function')_agentHydrateCallCards(list);
       }
       if(count)count.textContent=String(list.querySelectorAll('.fc-reply-item').length);
       if(box)box.dataset.repliesLoaded='1';
@@ -10698,6 +10813,7 @@ function _feedSubmitReply(inp, postId){
 }
 
 document.addEventListener('DOMContentLoaded', function(){
+  if(typeof _agentHydrateCallCards==='function')_agentHydrateCallCards(document);
   /* mirror avatar into composer */
   var _ca = document.getElementById('feed-composer-avatar');
   var _sa = document.getElementById('sb-avatar-img');
