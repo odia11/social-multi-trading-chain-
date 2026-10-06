@@ -4,7 +4,8 @@ SRC = (ROOT / 'static' / 'page-loader.js').read_text(encoding='utf-8')
 UX = (ROOT / 'static' / 'app-ux.js').read_text(encoding='utf-8')
 
 def test_only_one_layer_prefetches_navigation_intent():
-    assert "prefetch(closestLink(e))" in UX
+    assert "prefetch(closestLink(e),false)" in UX
+    assert "prefetch(closestLink(e),true)" in UX
     assert "fetchDocument" not in SRC
     assert "primeCore" not in SRC
     assert "X-OrcAgent-Prefetch" not in SRC
