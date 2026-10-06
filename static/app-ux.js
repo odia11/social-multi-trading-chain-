@@ -2,17 +2,19 @@
 (function(){
 'use strict';
 var prefetched=new Set();
+var navWarmAt=new Map();
 var shellTimer=null;
 var shellNode=null;
 var APP_VERSION=(document.querySelector('meta[name=\"oa-app-version\"]')||{}).content||'';
 function sameOriginUrl(href){try{var u=new URL(href,location.href);if(u.origin!==location.origin)return null;if(u.protocol!=='http:'&&u.protocol!=='https:')return null;return u}catch(e){return null}}
-function navCandidate(a){if(!a||!a.href||a.hasAttribute('download')||(a.target&&a.target!=='_self'))return null;var u=sameOriginUrl(a.href);if(!u)return null;if(u.pathname.indexOf('/api/')===0)return null;if(/^javascript:/i.test(a.getAttribute('href')||''))return null;if(u.pathname===location.pathname&&u.search===location.search)return null;return u}
+function navCandidate(a){if(!a||!a.href||a.hasAttribute('download')||a.hasAttribute('data-no-instant-nav')||(a.target&&a.target!=='_self'))return null;var u=sameOriginUrl(a.href);if(!u)return null;if(u.pathname.indexOf('/api/')===0)return null;if(/^javascript:/i.test(a.getAttribute('href')||''))return null;if(u.pathname===location.pathname&&u.search===location.search)return null;return u}
 function closestLink(e){var n=e.target;return n&&n.closest?n.closest('a[href]'):null}
 
-/* HTML responses carry no-store because wallet/session pages are private.
-   Prefetching those documents re-runs server work without a reusable cache
-   entry. Warm ONLY versioned public route assets (never API or wallet data).
-   Cross-document View Transitions keep the old page painted during navigation. */
+/* Route assets are warmed in the normal HTTP cache. The destination HTML is
+   different: it can contain authenticated/session data, so it is never stored
+   in Cache Storage/localStorage. We only send navigation intent to the service
+   worker, which may hold one same-origin document briefly in RAM for this
+   browser client and hand it to the subsequent native navigation. */
 var ROUTE_ASSETS={
   '/':['home-mobile.css?v=14','home-mobile-polish.css?v=8','home-composer-mobile.css?v=7','home-desktop.css?v=1','home-mobile.js?v=15','home-desktop.js?v=1'],
   '/wallet':['portfolio-redesign.css?v={app}','portfolio-history-redesign.css?v={app}','portfolio-redesign.js?v={app}','portfolio-history-redesign.js?v={app}','approved-portfolio.js?v={app}','portfolio-assets.js?v=1'],
@@ -49,17 +51,40 @@ function warmRoute(path,urgent){
   if(navigator.connection&&navigator.connection.saveData)return;
   (ROUTE_ASSETS[routeKey(path)]||[]).forEach(function(asset){warmAsset(asset,!!urgent)});
 }
+function navWarmable(u){
+  if(!u)return false;
+  var p=u.pathname||'/';
+  if(p.indexOf('/api/')===0||p==='/sw.js'||p.indexOf('/phantom-callback')===0||
+     p.indexOf('/phantom-launch-callback')===0||p.indexOf('/logout')===0)return false;
+  return true;
+}
+function warmDocument(u){
+  if(!navWarmable(u)||!('serviceWorker' in navigator))return;
+  if(navigator.connection&&navigator.connection.saveData)return;
+  var key=u.pathname+u.search,now=Date.now(),last=navWarmAt.get(key)||0;
+  if(now-last<2500)return;
+  navWarmAt.set(key,now);
+  var msg={type:'oa-nav-prefetch',url:key};
+  if(navigator.serviceWorker.controller){
+    try{navigator.serviceWorker.controller.postMessage(msg)}catch(_){}
+    return;
+  }
+  navigator.serviceWorker.ready.then(function(reg){
+    if(reg&&reg.active)reg.active.postMessage(msg);
+  }).catch(function(){});
+}
 function prefetch(a){
   var u=navCandidate(a);if(!u)return;
   warmRoute(u.pathname,true);
+  warmDocument(u);
 }
 ['pointerover','touchstart','focusin'].forEach(function(type){
   document.addEventListener(type,function(e){prefetch(closestLink(e))},{passive:true,capture:true});
 });
 
-/* X/Instagram-style route chunk warming: after the CURRENT page is interactive,
-   cache only public versioned CSS/JS for the routes users switch between most.
-   We deliberately do NOT fetch private HTML, API responses, balances or feeds. */
+/* Background priming remains static-assets-only. Authenticated HTML is warmed
+   only after explicit pointer/touch/focus intent, through the short-lived
+   service-worker RAM handoff above. */
 function primeRouteAssets(){
   if(navigator.connection&&navigator.connection.saveData)return;
   var i=0;
@@ -121,6 +146,7 @@ document.addEventListener('click',function(e){
   if(e.defaultPrevented||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;
   var a=closestLink(e),u=navCandidate(a);if(!u)return;
   warmRoute(u.pathname,true);
+  warmDocument(u);
   beginRoute(u.pathname);
 },true);
 window.addEventListener('pageshow',clearRouteShell,true);
@@ -163,9 +189,9 @@ function watchThread(){var main=document.querySelector('.msgs-main');if(!main)re
 function ready(){
   document.body.classList.add('oa-shared-ux');
   tuneTree(document);syncModalLock();scheduleRoutePrime();
-  // Register the app-wide service worker for every signed-in/browser session,
-  // not only users who happened to open notification settings. It caches only
-  // public /static/ assets; private HTML/API data remain network-only.
+  // Register the app-wide service worker for every signed-in/browser session.
+  // Only /static/ persists in Cache Storage; intent-warmed HTML is short-lived
+  // RAM only and APIs are never navigation-prefetched.
   if('serviceWorker' in navigator){
     window.addEventListener('load',function(){
       navigator.serviceWorker.register('/sw.js').catch(function(){});
