@@ -10,16 +10,29 @@ var OA_DEPLOY_RETRY_DELAYS = [250,500,1000,1500,2000,2500,3000,3500,4000];
 // native navigation can reuse an already-started network request.
 var OA_NAV_TTL_MS = 7000;
 var OA_NAV_MAX_READY = 6;
+var OA_NAV_SAFE_PREFIXES = [
+  '/live-market','/wallet','/profile','/messages','/notifications','/groups',
+  '/traders','/calls','/call','/following','/leaderboard','/watchlist','/history',
+  '/referrals','/rewards','/settings','/auto-trading-bot','/bot','/token-launch',
+  '/token-launches','/invitations','/creator-rewards','/live-trades','/promote','/info'
+];
 var OA_NAV_READY = new Map();
 var OA_NAV_INFLIGHT = new Map();
 function oaWait(ms){ return new Promise(function(resolve){ setTimeout(resolve, ms); }); }
+function oaNavWarmablePath(p){
+  if(p==='/') return true;
+  for(var i=0;i<OA_NAV_SAFE_PREFIXES.length;i++){
+    var base=OA_NAV_SAFE_PREFIXES[i];
+    if(p===base || p.indexOf(base+'/')===0) return true;
+  }
+  return false;
+}
 function oaNavHref(raw){
   var u;
   try{ u=new URL(raw,self.location.origin); }catch(_){ return ''; }
   if(u.origin!==self.location.origin) return '';
   var p=u.pathname||'/';
-  if(p.indexOf('/api/')===0 || p==='/sw.js' || p.indexOf('/phantom-callback')===0 ||
-     p.indexOf('/phantom-launch-callback')===0 || p.indexOf('/logout')===0) return '';
+  if(p.indexOf('/api/')===0 || !oaNavWarmablePath(p)) return '';
   u.hash='';
   return u.href;
 }
