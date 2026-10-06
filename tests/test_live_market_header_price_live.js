@@ -25,6 +25,7 @@ for(const id of ['pt-price-0','pt-chg-0','pt-mcap-0','pt-liq-0','pt-vol-0','pt-r
 const token={mint:'MINT',price_usd:0.000161,price_change_24h:212,market_cap:160700,liquidity_usd:37800,
   volume_24h:747200,buys_24h:57,sells_24h:43};
 const ctx={ST:{tokens:[token]}, document:{getElementById:id=>els[id]}, setTimeout:()=>0, clearTimeout:()=>{},
+  _routeScope:{setTimeout:()=>0,clearTimeout:()=>{}},
   Date, Math, Number, isFinite, isNaN, _chartTimers:{}, renderChartSvg:()=>{}, updateLiveChartPrice:()=>{},
   chartBucketSeconds:()=>300, startObservedCandle:()=>({})};
 vm.createContext(ctx);

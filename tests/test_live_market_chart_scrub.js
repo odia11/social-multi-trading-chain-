@@ -43,12 +43,13 @@ assert(!els['pt-price-0']._c.has('pt-scrubbing'));
 // 3. Wiring: long-press starts scrubbing, release restores, polls respect it,
 //    and the chart never starts a pull-to-refresh.
 const scrub=grab('attachChartSvgScrub');
-assert(/holdTimer = setTimeout\(/.test(scrub),'holding a finger still starts scrubbing');
+assert(/holdTimer = _routeScope\.setTimeout\(/.test(scrub),'holding a finger still starts scrubbing');
 assert(/_showScrubHeader\(idx, s, best\)/.test(scrub));
 assert(/_restoreLiveHeader\(idx, _chartTimers\[idx\]\)/.test(scrub));
 assert(/if\(st\.scrubbing\) return;/.test(grab('_syncCardPrice')));
 assert(/scrubbing = !!\(_chartTimers\[idx\] && _chartTimers\[idx\]\.scrubbing\)/.test(grab('patchFeedList')));
-assert(fs.readFileSync('templates/live_market_pro.html','utf8').includes("initPullToRefresh({ ignoreTarget: '.pt-chart-wrap'"));
+const liveTemplate=fs.readFileSync('templates/live_market_pro.html','utf8');
+assert(liveTemplate.includes("initPullToRefresh({ scope: liveMarketScope, ignoreTarget: '.pt-chart-wrap'"));
 for(const f of ['app_performance.py','static/app-ux.js','static/live-market-redesign.js'])
   assert(fs.readFileSync(f,'utf8').includes('live-market-final.css?v=6'),f+' loads live-market-final.css?v=6');
 console.log('PASS Live Market chart scrub: finger on the chart shows the price at that point');

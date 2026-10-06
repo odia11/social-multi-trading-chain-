@@ -7,8 +7,8 @@ PERF = (ROOT / 'app_performance.py').read_text()
 
 checks = {
     'lifecycle injected into every HTML response':
-        '<script src="/static/page-lifecycle.js?v=1"></script>' in PERF
-        and PERF.find('<script src="/static/page-lifecycle.js?v=1"></script>')
+        '<script src="/static/page-lifecycle.js?v=2"></script>' in PERF
+        and PERF.find('<script src="/static/page-lifecycle.js?v=2"></script>')
         < PERF.find('<script src="/static/bfcache-guard.js?v=2"></script>'),
     'pagehide suspends resources and aborts stale reads':
         "addEventListener('pagehide'" in LIFECYCLE and "suspend('pagehide',true)" in LIFECYCLE,
@@ -52,4 +52,48 @@ for root_name in ('static', 'templates'):
 
 assert not bad, 'Unmanaged page-lifecycle resources: ' + repr(bad)
 print('PASS - all first-party page intervals/observers/connections use OrcPageLifecycle')
+
+# Lazy-route contract: Live Market is the heaviest data route and must own all
+# recurring/async work through one named route scope. A same-document router
+# unmount must therefore be able to abort/close everything without pagehide.
+live = (ROOT / 'static' / 'live-market-pro.js').read_text()
+redesign = (ROOT / 'static' / 'live-market-redesign.js').read_text()
+hotfix = (ROOT / 'static' / 'live-market-hotfix.js').read_text()
+pull = (ROOT / 'static' / 'pull-to-refresh.js').read_text()
+template = (ROOT / 'templates' / 'live_market_pro.html').read_text()
+route_checks = {
+    'named route scopes are available for lazy components':
+        'routeScope:routeScope' in LIFECYCLE and 'namedScopes=new Map()' in LIFECYCLE,
+    'route cleanup aborts reads and clears intervals/timeouts/raf/listeners/observers/connections':
+        'scopeReads.forEach' in LIFECYCLE and 'scopeIntervals.forEach' in LIFECYCLE
+        and 'timeouts.forEach' in LIFECYCLE and 'rafs.forEach' in LIFECYCLE
+        and 'removeEventListener' in LIFECYCLE and 'scopeObservers.forEach' in LIFECYCLE
+        and 'connections.forEach' in LIFECYCLE,
+    'history navigation cleans lazy route scopes':
+        "cleanupRouteScopes('history-push')" in LIFECYCLE
+        and "cleanupRouteScopes('history-replace')" in LIFECYCLE
+        and "cleanupRouteScopes('popstate')" in LIFECYCLE,
+    'detached route roots clean their scope':
+        "scope.cleanup('dom-unmount')" in LIFECYCLE,
+    'Live Market uses one named scope':
+        "routeScope('live-market','.pt-shell')" in live
+        and "routeScope('live-market','.pt-shell')" in redesign
+        and "routeScope('live-market','.pt-shell')" in hotfix
+        and "routeScope('live-market','.pt-shell')" in template,
+    'Live Market has no unscoped fetches':
+        not re.search(r'(?<![\w.])fetch\(', live) and live.count('_routeScope.fetch(') >= 20,
+    'Live Market polling is route-scoped':
+        'OrcPageLifecycle.setInterval(' not in live and live.count('_routeScope.setInterval(') >= 5,
+    'Live Market timeouts and animation frames are route-scoped':
+        not re.search(r'(?<![\w.])setTimeout\(', live)
+        and not re.search(r'(?<![\w.])requestAnimationFrame\(', live),
+    'Live Market has no direct WebSocket or EventSource':
+        not re.search(r'new\s+(?:WebSocket|EventSource)\(', live + redesign + hotfix),
+    'pull-to-refresh participates in route cleanup':
+        'opts.scope' in pull and 'scope.onCleanup' in pull and 'scope.addEventListener' in pull,
+}
+for label, ok in route_checks.items():
+    print(('PASS' if ok else 'FAIL') + ' - ' + label)
+    assert ok, label
+
 print('ALL PAGE LIFECYCLE CLEANUP REGRESSIONS PASSED')

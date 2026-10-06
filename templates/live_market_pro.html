@@ -1193,10 +1193,11 @@ var PT_FEE_RATE_TXN = {{ fee_rate_txn|default(0.0075) }};
 // live-market-pro.js is deferred, so loadFeed()/etc. aren't defined yet at
 // this point in the parse -- DOMContentLoaded fires only after every
 // deferred script has already run, which is what guarantees they exist here.
-document.addEventListener('DOMContentLoaded', function(){
+var liveMarketScope=OrcPageLifecycle.routeScope('live-market','.pt-shell');
+liveMarketScope.addEventListener(document,'DOMContentLoaded', function(){
   // Dragging a finger over a chart scrubs its price; it must never start a pull.
-  initPullToRefresh({ ignoreTarget: '.pt-chart-wrap', onRefresh: function(){
-    if(typeof window.OrcAgentRefreshLiveMarket==='function') window.OrcAgentRefreshLiveMarket();
+  initPullToRefresh({ scope: liveMarketScope, ignoreTarget: '.pt-chart-wrap', onRefresh: function(){
+    if(typeof window.OrcAgentRefreshLiveMarket==='function') return window.OrcAgentRefreshLiveMarket();
   }});
 });
 </script>

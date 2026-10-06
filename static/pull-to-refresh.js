@@ -88,6 +88,14 @@ window.initPullToRefresh=function(opts){
   opts=opts||{};
   if(opts.pull===false)return;
   if(window.__oaPtrInit)return;window.__oaPtrInit=true;
+  var scope=opts.scope&&opts.scope.isActive&&opts.scope.isActive()?opts.scope:null;
+  if(!scope&&window.OrcPageLifecycle&&OrcPageLifecycle.routeScope){
+    scope=OrcPageLifecycle.routeScope('pull-to-refresh:'+location.pathname);
+  }
+  function listen(target,type,fn,options){return scope?scope.addEventListener(target,type,fn,options):target.addEventListener(type,fn,options)}
+  function later(fn,ms){return scope?scope.setTimeout(fn,ms):setTimeout(fn,ms)}
+  function raf(fn){return scope?scope.requestAnimationFrame(fn):requestAnimationFrame(fn)}
+  function cancelRaf(id){return scope?scope.cancelAnimationFrame(id):cancelAnimationFrame(id)}
   var inPlace=typeof opts.onRefresh==='function';
   var onRefresh=inPlace?opts.onRefresh:function(){
     location.reload();
@@ -99,6 +107,13 @@ window.initPullToRefresh=function(opts){
   function customScrollerActive(){try{return !!(typeof opts.scrollEl==='function'&&opts.scrollEl())}catch(_){return false}}
 
   var ind=null,arc=null,startX=0,startY=0,startTarget=null,tracking=false,pulling=false,dist=0,refreshing=false,armedOnce=false,frame=0;
+  if(scope&&scope.onCleanup)scope.onCleanup(function(){
+    window.__oaPtrInit=false;
+    if(frame){cancelRaf(frame);frame=0;}
+    tracking=pulling=refreshing=false;dist=0;
+    if(ind&&ind.parentNode)ind.parentNode.removeChild(ind);
+    ind=arc=null;
+  });
 
   function ensure(){if(!ind){injectStyle();ind=makeIndicator();arc=ind.querySelector('.oa-ptr-arc');}}
   // Only transform/opacity change while the finger moves (compositor-only);
@@ -121,16 +136,16 @@ window.initPullToRefresh=function(opts){
     place(THRESHOLD*.8,1,.9,true);
     var started=Date.now(),p;
     try{p=Promise.resolve(onRefresh());}catch(e){p=Promise.resolve();}
-    var cap=new Promise(function(res){setTimeout(res,inPlace?MAX_SPIN_MS:MAX_RELOAD_SPIN_MS)});
+    var cap=new Promise(function(res){later(res,inPlace?MAX_SPIN_MS:MAX_RELOAD_SPIN_MS)});
     Promise.race([p.catch(function(){}),cap]).then(function(){
       var wait=Math.max(0,MIN_SPIN_MS-(Date.now()-started));
-      setTimeout(function(){refreshing=false;hide();},wait);
+      later(function(){refreshing=false;hide();},wait);
     });
   }
 
   // touchstart stays cheap (every tap and scroll starts here); the ancestor
   // walks run once, on the first downward move of a possible pull.
-  document.addEventListener('touchstart',function(e){
+  listen(document,'touchstart',function(e){
     tracking=pulling=false;dist=0;armedOnce=false;
     if(refreshing||e.touches.length!==1||scrollTop()>0)return;
     tracking=true;startTarget=e.target;startX=e.touches[0].clientX;startY=e.touches[0].clientY;
@@ -147,7 +162,7 @@ window.initPullToRefresh=function(opts){
     ind.classList.toggle('oa-ptr-armed',dist>=THRESHOLD);
   }
 
-  document.addEventListener('touchmove',function(e){
+  listen(document,'touchmove',function(e){
     if(!tracking||e.touches.length!==1)return;
     var dx=e.touches[0].clientX-startX,dy=e.touches[0].clientY-startY;
     if(!pulling){
@@ -162,20 +177,20 @@ window.initPullToRefresh=function(opts){
     var armed=dist>=THRESHOLD;
     if(armed&&!armedOnce){armedOnce=true;try{navigator.vibrate&&navigator.vibrate(8)}catch(_){}}
     if(!armed)armedOnce=false;
-    if(!frame)frame=requestAnimationFrame(paint);
+    if(!frame)frame=raf(paint);
   },{passive:true});
 
   function end(){
     if(!tracking)return;
     tracking=false;
-    if(frame){cancelAnimationFrame(frame);frame=0;}
+    if(frame){cancelRaf(frame);frame=0;}
     if(pulling&&dist>=THRESHOLD&&!refreshing)run();
     else if(pulling)hide();
     pulling=false;dist=0;
   }
-  document.addEventListener('touchend',end,{passive:true});
-  document.addEventListener('touchcancel',function(){
-    if(frame){cancelAnimationFrame(frame);frame=0;}
+  listen(document,'touchend',end,{passive:true});
+  listen(document,'touchcancel',function(){
+    if(frame){cancelRaf(frame);frame=0;}
     tracking=pulling=false;dist=0;if(!refreshing)hide();
   },{passive:true});
 };

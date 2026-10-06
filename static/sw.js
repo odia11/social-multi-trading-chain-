@@ -1,7 +1,7 @@
 // OrcAgent service worker — public app-shell cache + Web Push.
 // SECURITY INVARIANT: only /static/ GETs are cached. Authenticated HTML,
 // API responses, balances, feeds and wallet data are always network-only.
-var OA_STATIC_CACHE = 'orcagent-static-v12';
+var OA_STATIC_CACHE = 'orcagent-static-v13';
 var OA_DEPLOY_RETRY_DELAYS = [250,500,1000,1500,2000,2500,3000,3500,4000];
 function oaWait(ms){ return new Promise(function(resolve){ setTimeout(resolve, ms); }); }
 function oaFetchThroughDeploy(req, attempt){
@@ -23,7 +23,7 @@ function oaFetchThroughDeploy(req, attempt){
   });
 }
 var OA_STATIC_BOOT = [
-  '/static/page-lifecycle.js?v=1',
+  '/static/page-lifecycle.js?v=2',
   '/static/app-ux.css?v=9',
   '/static/app-ux.js?v=11',
   '/static/mobile-bottom-nav.css?v=9',
