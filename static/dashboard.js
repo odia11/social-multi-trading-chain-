@@ -10705,7 +10705,7 @@ function _feedLoadReplies(postId){
         list.innerHTML='<div style="font-size:12px;color:var(--muted);padding:4px 0">No replies yet — be the first.</div>';
       }else{
         list.innerHTML = _feedRenderReplyTree(d.replies, postId);
-        _agentHydrateCallCards(list);
+        if(typeof _agentHydrateCallCards==='function')_agentHydrateCallCards(list);
       }
       if(count)count.textContent=String(list.querySelectorAll('.fc-reply-item').length);
       if(box)box.dataset.repliesLoaded='1';
@@ -10813,7 +10813,7 @@ function _feedSubmitReply(inp, postId){
 }
 
 document.addEventListener('DOMContentLoaded', function(){
-  _agentHydrateCallCards(document);
+  if(typeof _agentHydrateCallCards==='function')_agentHydrateCallCards(document);
   /* mirror avatar into composer */
   var _ca = document.getElementById('feed-composer-avatar');
   var _sa = document.getElementById('sb-avatar-img');
