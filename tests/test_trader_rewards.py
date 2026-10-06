@@ -91,7 +91,7 @@ def test_api_owner_only_and_no_client_write(db):
             helper=app.template_context_processors[None][-1]()['reward_status']
             assert set(helper('alice',details=True))=={'status'}
         viewer[0]='alice'
-        assert client.get('/rewards').status_code==200
+        retired=client.get('/rewards');assert retired.status_code==302 and retired.location.endswith('/')
         assert client.get('/api/rewards/progress').json['reward']['volume_usdc']==0 # fixture history now expired
 
 
@@ -101,6 +101,8 @@ def test_activity_unique_and_not_api_polling(db):
         client.get('/api/rewards/progress');client.get('/api/rewards/progress')
         with sqlite3.connect(db) as c:assert c.execute('SELECT COUNT(*) FROM reward_activity').fetchone()[0]==0
         client.get('/rewards');client.get('/rewards')
+        with sqlite3.connect(db) as c:assert c.execute('SELECT COUNT(*) FROM reward_activity').fetchone()[0]==0
+        client.get('/');client.get('/')
         with sqlite3.connect(db) as c:assert c.execute('SELECT COUNT(*) FROM reward_activity').fetchone()[0]==1
         viewer[0]=None;client.get('/rewards')
         with sqlite3.connect(db) as c:assert c.execute('SELECT COUNT(*) FROM reward_activity').fetchone()[0]==1

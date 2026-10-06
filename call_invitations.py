@@ -268,7 +268,7 @@ def install(d):
 
     @app.after_request
     def invitations_response(response):
-        private=request.path=='/invitations' or request.path.startswith('/api/invitations') or request.path.endswith('/share') and request.path.startswith('/api/calls/')
+        private=request.path.startswith('/api/invitations') or request.path.endswith('/share') and request.path.startswith('/api/calls/')
         if private:response.headers['Cache-Control']='private, no-store'
         if response.status_code<400 and not request.path.startswith(('/static/','/media/','/api/call-card/')):
             invite=getattr(g,'orca_pending_invite',None)
@@ -280,15 +280,12 @@ def install(d):
             if uid:
                 try:complete_signup(d.DB_FILE,uid,pending())
                 except sqlite3.Error:app.logger.warning('Invitation signup bookkeeping temporarily unavailable')
-        if response.status_code==200 and response.mimetype=='text/html' and request.path in ('/','/calls','/following'):
+        if response.status_code==200 and response.mimetype=='text/html' and request.path in ('/','/calls'):
             body=response.get_data(as_text=True)
             if 'src="/static/call-sharing.js' not in body:
                 tag='<script src="/static/call-sharing.js?v='+d._APP_VERSION+'" defer></script><link rel="stylesheet" href="/static/call-sharing.css?v='+d._APP_VERSION+'">'
                 response.set_data(body.replace('</head>',tag+'</head>',1))
         return response
-
-    if not any(item and item[0]=='/invitations' for item in d._NAVBAR_MORE_LINKS):
-        d._NAVBAR_MORE_LINKS.insert(0,('/invitations','Invitations & shared calls','referrals'))
 
     @app.route('/call/<int:call_id>')
     @d.rate_limit(60,60)
@@ -329,9 +326,7 @@ def install(d):
 
     @app.route('/invitations')
     def invitations_page():
-        uid=owner()
-        if not uid:return redirect('/?next=/invitations')
-        return d._render_no_cache('invitations.html',csrf_token=d._get_csrf_token())
+        return redirect('/')
 
     @app.route('/api/invitations')
     @d.rate_limit(60,60)

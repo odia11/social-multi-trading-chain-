@@ -57,9 +57,6 @@ def install(d):
         return
     app._orca_following_traders=True
     initialize(d.DB_FILE)
-    if not any(item and item[0]=='/following' for item in d._NAVBAR_MORE_LINKS):
-        d._NAVBAR_MORE_LINKS.insert(0,('/following','Following & alerts','traders'))
-
     def owner():
         wallet=d._authenticated_wallet()
         if not wallet:
@@ -69,15 +66,13 @@ def install(d):
 
     @app.after_request
     def own_preferences_private(response):
-        if request.path=='/following' or request.path.startswith('/api/following/'):
+        if request.path.startswith('/api/following/'):
             response.headers['Cache-Control']='private, no-store'
         return response
 
     @app.route('/following')
     def following_page():
-        if not owner():
-            return redirect('/?next=/following')
-        return d._render_no_cache('following.html',csrf_token=d._get_csrf_token())
+        return redirect('/')
 
     @app.route('/api/following/preferences')
     @d.rate_limit(60,60)

@@ -80,12 +80,9 @@ jobs:
           node tests/test_agent_token_identity.js
           node tests/test_feed_reply_loading.js
           node --check static/live-market-pro.js
-          node --check static/watchlist.js
           node --check static/home-feed-chart-redesign.js
           node --check static/feed-calls.js
-          node --check static/following.js
           node --check static/call-sharing.js
-          node --check static/invitations.js
           node --check static/creator-rewards.js
           python -m pytest -q tests/test_security_boundaries.py tests/test_dashboard_output_security.py tests/test_xss_injection_hardening.py tests/test_security_xss_csrf_injection.py
           python tests/test_security_hardening.py
@@ -113,6 +110,7 @@ jobs:
           PYTHONPATH=.:tests python tests/test_platform_prices.py
           PYTHONPATH=.:tests python tests/test_agent_price_reliability.py
           python tests/test_bot_follows_settings.py
+          python tests/test_retired_extra_pages.py
           python tests/test_position_guardian.py
           python tests/test_stop_loss_safety.py
           python tests/test_sell_value_stop.py

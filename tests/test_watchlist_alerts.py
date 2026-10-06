@@ -158,9 +158,8 @@ class Routes(unittest.TestCase):
 
     def test_private_page_and_removal_cancels(self):
         response=self.client.get('/watchlist')
-        self.assertEqual(response.status_code,200)
-        self.assertEqual(response.headers['Cache-Control'],'private, no-store')
-        self.assertIn(b'watch-token-template',response.data)
+        self.assertEqual(response.status_code,302)
+        self.assertTrue(response.location.endswith('/'))
         w.create_alert(self.db,1,MINT,'above',100)
         self.client.delete('/api/watchlist/'+MINT,headers={'X-CSRF-Token':'valid'})
         with sqlite3.connect(self.db) as c:
