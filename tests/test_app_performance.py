@@ -23,8 +23,9 @@ def check(message, condition):
 check('the shared UX no longer bulk-prefetches seven authenticated pages',
       'idlePrefetch' not in UX
       and "['/','/live-market','/wallet','/groups','/bot','/messages','/notifications']" not in UX)
-check('navigation intent still warms the page a user is actually about to open',
-      "['pointerover','touchstart','focusin']" in UX and 'prefetch(closestLink(e))' in UX)
+check('navigation intent warms assets on hover but HTML only on committed touch/pointer intent',
+      "['pointerover','focusin']" in UX and "['pointerdown','touchstart']" in UX
+      and 'prefetch(closestLink(e),false)' in UX and 'prefetch(closestLink(e),true)' in UX)
 check('below-fold images decode asynchronously and lazy-load',
       "img.decoding='async'" in UX and "img.loading='lazy'" in UX)
 check('the app no longer observes class/style mutations on every DOM node',
