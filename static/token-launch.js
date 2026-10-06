@@ -26,7 +26,7 @@ function rawAmount(raw,asset){
  }catch(e){return '—'}
 }
 function claimLabel(value){
- return {confirmed:'Claimed',confirmed_no_payout:'No payout',prepared:'Awaiting approval',submitted:'Pending confirmation',expired_unverified:'Expired'}[value]||String(value||'Unknown').replaceAll('_',' ');
+ return {confirmed:'Claimed',confirmed_no_payout:'No payout',failed:'Failed',prepared:'Awaiting approval',submitted:'Pending confirmation',expired_unverified:'Expired'}[value]||String(value||'Unknown').replaceAll('_',' ');
 }
 function claimDate(value){return value?new Date(Number(value)*1000).toLocaleString([], {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—'}
 function rawNumber(raw,asset){
@@ -83,12 +83,13 @@ function renderCreatorEarnings(){
  var claimedSol=(data.verified_claimed_raw||{}).SOL||'0';
  var hasSol=false;try{hasSol=BigInt(claimedSol)>0n}catch(e){}
  text('tl-claimed-usdc',rawAmount(claimedSol,'SOL'));
- // Claims paid out in SOL count too; they used to be left out of this total.
- text('tl-claimed-fiat',rawAmount(claimedRaw,'USDC')+' · historical claims');
+ // Keep the legacy USDC history visible next to the SOL total; neither asset
+ // is converted or added to the other with an invented exchange rate.
+ text('tl-claimed-fiat',rawAmount(claimedRaw,'USDC')+(hasSol?' + '+rawAmount(claimedSol,'SOL'):'') );
  var history=data.history||[],expired=history.filter(isExpired).length;
  // Only real claims count; expired never-approved attempts are listed apart.
  text('tl-claim-count',String(history.length-expired));
- var parts=[];if(data.pending_claims)parts.push(data.pending_claims+' pending');if(data.confirmed_claims)parts.push(data.confirmed_claims+' confirmed');if(expired)parts.push(expired+' expired');
+ var parts=[];if(data.pending_claims)parts.push(data.pending_claims+' pending');if(data.confirmed_claims)parts.push(data.confirmed_claims+' confirmed');if(data.failed_claims)parts.push(data.failed_claims+' failed');if(expired)parts.push(expired+' expired');
  text('tl-claim-count-note',parts.length?parts.join(' · '):'No claims yet');
  var creatorLive=mine.some(function(row){return row.status==='live'&&row.reward_mode==='creator'});
  var communityLive=mine.some(function(row){return row.status==='live'&&row.reward_mode==='community'});
@@ -449,10 +450,14 @@ async function claimRewards(row){
        ?(BigInt(result.received_raw)/1000000n).toString()+'.'+
          (BigInt(result.received_raw)%1000000n).toString().padStart(6,'0')+' USDC'
        :'');
-     status(result.confirmed
-       ?(result.status==='confirmed_no_payout'?'Transaction confirmed, but no new USDC was received. Network costs may still have been charged.':
-         actual?'Creator-fee claim confirmed. Actual USDC received in your wallet: '+actual+' (wallet-wide creator rewards).':'Creator-fee claim confirmed on-chain.')
-       :'Claim submitted; check your wallet and claim history before retrying.');
+     if(result.status==='failed'){
+       status(result.msg||'The creator-fee claim failed on Solana. No creator fees were claimed; you can safely prepare a new claim.',true);
+     }else{
+       status(result.confirmed
+         ?(result.status==='confirmed_no_payout'?'Transaction confirmed, but no new USDC was received. Network costs may still have been charged.':
+           actual?'Creator-fee claim confirmed. Actual USDC received in your wallet: '+actual+' (wallet-wide creator rewards).':'Creator-fee claim confirmed on-chain.')
+         :(result.msg||'Claim submitted; check your wallet and claim history before retrying.'));
+     }
      creatorAvailableRaw=null;await loadMine();
    }
  }catch(e){status(e.message||'Claim could not be prepared',true)}
@@ -482,7 +487,7 @@ async function showClaims(row){
         :'Creator-fee claim confirmed on-chain.');
       var refreshed=await call('/api/token-launch/'+row.id+'/claims');
       renderClaimRows(target,refreshed.claims||[],false);
-      await loadMine();
+      creatorAvailableRaw=null;await loadMine();
     }
   }
  }catch(e){if(target){target.replaceChildren(dom('p','tl-helper','Claim history unavailable.'))}status(e.message||'Claim history unavailable',true)}
@@ -777,7 +782,10 @@ $('tl-claim-now').addEventListener('click',async function(){
    // Re-check first: the server settles claims approved in Phantom and
    // retires ones that were never approved, which frees "Claim Now".
    var btn=this;btn.disabled=true;status('Checking your pending claim on Solana…');
-   try{creatorEarnings=await call('/api/token-launch/creator-earnings');renderCreatorEarnings()}
+   try{
+     creatorEarnings=await call('/api/token-launch/creator-earnings');renderCreatorEarnings();
+     creatorAvailableRaw=null;await refreshAvailableFees(false);
+   }
    catch(e){status(e.message||'Could not check the pending claim',true);btn.disabled=false;return}
    btn.disabled=false;
    if(btn.dataset.mode==='claim'){status('Nothing is waiting any more — you can claim your creator fees now.');return}

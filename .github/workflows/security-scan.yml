@@ -37,6 +37,18 @@ jobs:
           python -m pip install --quiet --upgrade pip
           python -m pip install --quiet pip-audit bandit pytest
           python -m pip install --quiet -r requirements.txt
+          PUMP_NODE_VERSION="$(cat pump_adapter/.node-version)"
+          test "$PUMP_NODE_VERSION" = "22.23.2"
+          PUMP_NODE_ARCHIVE="node-v${PUMP_NODE_VERSION}-linux-x64.tar.xz"
+          curl --proto '=https' --tlsv1.2 -fsS --retry 3 --max-time 180 \
+            "https://nodejs.org/dist/v${PUMP_NODE_VERSION}/${PUMP_NODE_ARCHIVE}" \
+            -o "$RUNNER_TEMP/$PUMP_NODE_ARCHIVE"
+          echo "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307  $RUNNER_TEMP/$PUMP_NODE_ARCHIVE" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/$PUMP_NODE_ARCHIVE" -C "$RUNNER_TEMP" --no-same-owner
+          PUMP_NODE="$RUNNER_TEMP/node-v${PUMP_NODE_VERSION}-linux-x64/bin/node"
+          echo "ORCAGENT_PUMP_NODE=$PUMP_NODE" >> "$GITHUB_ENV"
+          ORCAGENT_PUMP_NODE="$PUMP_NODE" bash pump_adapter/run-node.sh npm \
+            --prefix pump_adapter ci --ignore-scripts --no-audit --no-fund
 
       - name: Python compile check
         run: python -m compileall -q .
@@ -48,6 +60,16 @@ jobs:
         run: |
           python tests/test_page_lifecycle_cleanup.py
           node tests/test_lazy_route_unmount_cleanup.js
+
+      - name: Creator fee claim reliability
+        run: |
+          python tests/test_creator_claim_reliability.py
+          python tests/test_creator_claim_profile_privacy.py
+          python tests/test_creator_rewards_preflight.py
+          python tests/test_creator_claims_cleanup.py
+          python tests/test_phantom_claim_mobile.py
+          python tests/test_creator_fee_share.py
+          python tests/test_portfolio_history_redesign.py
 
       - name: OrcAgent security regression checks
         run: |

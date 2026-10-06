@@ -13106,6 +13106,46 @@ def _recent_trades_for_profile(conn, user_id: int, limit: int = 3):
         'logo_url': None,
     } for r in rows]
 
+def _recent_creator_claims_for_profile(conn, wallet: str, limit: int = 3):
+    """Private creator-fee receipts for the authenticated owner's profile.
+
+    Only durable signed claims are returned. Accrued/prepared amounts are
+    deliberately excluded: received_raw is displayed only after confirmation.
+    """
+    try:
+        rows = conn.execute('''
+            SELECT c.id,c.quote_asset,c.status,c.received_raw,c.signature,
+                   c.created_at,c.confirmed_at,l.symbol
+            FROM token_reward_claims c
+            LEFT JOIN token_launches l ON l.id=c.launch_id AND l.wallet=c.wallet
+            WHERE c.wallet=? AND c.signature<>''
+              AND c.status IN ('submitted','confirmed','confirmed_no_payout','failed')
+            ORDER BY CASE WHEN c.confirmed_at>0 THEN c.confirmed_at ELSE c.created_at END DESC
+            LIMIT ?''',(wallet,limit)).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    result=[]
+    for row in rows:
+        status=row['status'];asset=row['quote_asset'] or 'USDC';amount='—'
+        if status=='confirmed' and row['received_raw'] not in ('',None):
+            try:
+                raw=max(0,int(row['received_raw']));decimals=9 if asset=='SOL' else 6
+                base=10**decimals;whole=raw//base;fraction=str(raw%base).zfill(decimals).rstrip('0')
+                amount=str(whole)+('.'+fraction if fraction else '')+' '+asset
+            except (TypeError,ValueError):
+                amount='—'
+        elif status=='confirmed_no_payout':
+            amount='0 '+asset
+        ts=row['confirmed_at'] or row['created_at'] or 0
+        stamp=datetime.datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S') if ts else ''
+        sig=row['signature'] or ''
+        safe_sig=sig if re.fullmatch(r'[1-9A-HJ-NP-Za-km-z]{85,90}',sig) else ''
+        result.append({'id':row['id'],'symbol':row['symbol'] or 'TOKEN','status':status,
+                       'amount':amount,'signature':safe_sig,
+                       'time_ago':_time_ago_str(stamp)})
+    return result
+
+
 def _recent_token_calls(conn, user_id: int, limit: int = 3):
     rows = conn.execute('''
         SELECT mint, symbol, token_name, price_at_call, mcap_at_call, peak_price, timestamp
@@ -13151,6 +13191,7 @@ def profile():
         ).fetchall()
         recent_calls = _recent_token_calls(conn, user_id)
         recent_trades = _recent_trades_for_profile(conn, user_id)
+        recent_claims = _recent_creator_claims_for_profile(conn, wallet)
         followers = conn.execute(
             'SELECT COUNT(*) FROM follows WHERE following_id=?', (user_id,)
         ).fetchone()[0]
@@ -13191,6 +13232,7 @@ def profile():
             posts=[dict(p) for p in posts],
             recent_calls=recent_calls,
             recent_trades=recent_trades,
+            recent_claims=recent_claims,
             is_verified=bool(user["is_verified"]),
             is_own_profile=True,
             notify_enabled=False,
@@ -13253,6 +13295,7 @@ def profile_view(wallet_address: str):
         sw_short = (sw[:4] + '...' + sw[-4:]) if len(sw) >= 8 else sw
         total_pnl_usd = _sol_usd(total_pnl)
         is_own = bool(session_wallet and session_wallet == user["wallet_address"])
+        recent_claims = _recent_creator_claims_for_profile(conn, wallet_address) if is_own else []
         is_following = False
         follows_me = False
         notify_enabled = False
@@ -13301,6 +13344,7 @@ def profile_view(wallet_address: str):
             posts=[dict(p) for p in posts],
             recent_calls=recent_calls,
             recent_trades=recent_trades,
+            recent_claims=recent_claims,
             is_verified=bool(user["is_verified"]),
             is_own_profile=is_own,
             is_following=is_following,

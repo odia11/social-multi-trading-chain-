@@ -137,6 +137,9 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
 .pf-trade-dir{font-size:11px;font-weight:700;border-radius:6px;padding:3px 8px;flex-shrink:0}
 .pf-trade-dir.buy{background:rgba(58,210,155,.12);color:#3ad29b}
 .pf-trade-dir.sell{background:rgba(255,77,106,.1);color:#ff4d6a}
+.pf-trade-dir.pending{background:rgba(247,185,85,.10);color:#f7b955}
+.pf-claim-chain{font-size:11px;color:#f7b955;text-decoration:none;white-space:nowrap;flex-shrink:0}
+.pf-claim-chain:hover{text-decoration:underline}
 .pf-trade-pnl{font-size:13px;font-weight:700;font-family:'JetBrains Mono',monospace;flex-shrink:0;min-width:60px;text-align:right}
 .pf-trade-pnl.pos{color:#3ad29b}
 .pf-trade-pnl.neg{color:#ff4d6a}
@@ -498,6 +501,7 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
       <div class="pf-tabs" role="tablist" aria-label="Profile activity">
         <button class="pf-tab active" type="button" role="tab" aria-selected="true" aria-controls="pf-panel-posts" onclick="showProfileTab('posts',this)">Posts</button>
         <button class="pf-tab" type="button" role="tab" aria-selected="false" aria-controls="pf-panel-trades" onclick="showProfileTab('trades',this)">Trades</button>
+        {% if is_own_profile %}<button class="pf-tab" type="button" role="tab" aria-selected="false" aria-controls="pf-panel-claims" onclick="showProfileTab('claims',this)">Claims</button>{% endif %}
         <button class="pf-tab" type="button" role="tab" aria-selected="false" aria-controls="pf-panel-calls" onclick="showProfileTab('calls',this)">Calls</button>
       </div>
 
@@ -519,6 +523,19 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
           {% else %}<div class="pf-empty"><span class="pf-empty-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m3 17 6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg></span><strong>No trades yet</strong><span>Completed trades will appear here.</span></div>{% endif %}
         </div>
       </section>
+
+      {% if is_own_profile %}
+      {% set claims = recent_claims|default([]) %}
+      <section class="pf-tab-panel" id="pf-panel-claims" role="tabpanel" hidden>
+        <div class="pf-trades">
+          {% if claims %}{% for c in claims %}
+          {% set claim_class = 'sell' if c.status == 'failed' else ('pending' if c.status == 'submitted' else 'buy') %}
+          {% set claim_label = 'FAILED' if c.status == 'failed' else ('PENDING' if c.status == 'submitted' else ('NO PAYOUT' if c.status == 'confirmed_no_payout' else 'CLAIMED')) %}
+          <div class="pf-trade-row"><div class="pf-trade-chip">CF</div><span class="pf-trade-name">${{ c.symbol }} creator fees</span><span class="pf-trade-dir {{ claim_class }}">{{ claim_label }}</span><span class="pf-trade-pnl {{ 'neg' if c.status == 'failed' else ('pos' if c.status in ['confirmed','confirmed_no_payout'] else '') }}">{{ c.amount }}</span><span class="pf-trade-time">{{ c.time_ago }}</span>{% if c.signature %}<a class="pf-claim-chain" href="https://solscan.io/tx/{{ c.signature }}" target="_blank" rel="noopener noreferrer">Solscan ↗</a>{% endif %}</div>
+          {% endfor %}{% else %}<div class="pf-empty"><strong>No creator-fee claims yet</strong><span>Confirmed and pending claim receipts will appear here.</span></div>{% endif %}
+        </div>
+      </section>
+      {% endif %}
 
       {% set calls = recent_calls|default([]) %}
       <section class="pf-tab-panel" id="pf-panel-calls" role="tabpanel" hidden>

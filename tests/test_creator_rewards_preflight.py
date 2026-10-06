@@ -140,11 +140,11 @@ def test_received_usdc_is_exact_confirmed_wallet_delta_not_fee_snapshot():
     with patch('token_launch.requests.post',side_effect=rpc),patch('token_launch.time.sleep'):
         missing=client.post(route+'/claim/confirm',json=body,
                    headers={'X-CSRF-Token':'test-csrf'})
-        assert missing.status_code==503,missing.get_data(as_text=True)[:300]
-        assert 'delta unavailable' in missing.get_json()['msg']
+        assert missing.status_code==202,missing.get_data(as_text=True)[:300]
+        assert missing.get_json()['status']=='submitted' and missing.get_json()['received_raw']==''
         with sqlite3.connect(d.DB_FILE) as c:
-            assert c.execute('SELECT status,received_raw FROM token_reward_claims WHERE id=?',
-                     (claim_id,)).fetchone()==('prepared','')
+            assert c.execute('SELECT status,received_raw,signature FROM token_reward_claims WHERE id=?',
+                     (claim_id,)).fetchone()==('submitted','',sig)
         # A lookalike USDC credit to somebody else must never be presented
         # as money received by this creator's wallet.
         meta['postTokenBalances']=[dict(accountIndex=1,
@@ -152,13 +152,17 @@ def test_received_usdc_is_exact_confirmed_wallet_delta_not_fee_snapshot():
             uiTokenAmount={'amount':'9999999','decimals':6})]
         stranger=client.post(route+'/claim/confirm',json=body,
                     headers={'X-CSRF-Token':'test-csrf'})
-        assert stranger.status_code==503 and 'received_raw' not in stranger.get_json()
+        assert stranger.status_code==202 and stranger.get_json()['received_raw']==''
+        with sqlite3.connect(d.DB_FILE) as c:
+            assert c.execute('SELECT status,received_raw FROM token_reward_claims WHERE id=?',(claim_id,)).fetchone()==('submitted','')
         # Missing token pre-balance from a PREEXISTING account is not a
         # license to credit its whole balance as newly received creator fees.
         meta['preBalances']=[10000000,2039280]
         existing=client.post(route+'/claim/confirm',json=body,
                    headers={'X-CSRF-Token':'test-csrf'})
-        assert existing.status_code==503 and 'received_raw' not in existing.get_json()
+        assert existing.status_code==202 and existing.get_json()['received_raw']==''
+        with sqlite3.connect(d.DB_FILE) as c:
+            assert c.execute('SELECT status,received_raw FROM token_reward_claims WHERE id=?',(claim_id,)).fetchone()==('submitted','')
         meta['preBalances']=[10000000,0]
         # In a newly created recipient ATA, there is no preTokenBalance.
         # The actual confirmed postTokenBalance, NOT accrued_raw, is credited.
