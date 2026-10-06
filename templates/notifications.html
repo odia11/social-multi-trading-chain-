@@ -25,7 +25,10 @@
 .ntf-select-checkbox input{width:18px;height:18px;accent-color:var(--accent);cursor:pointer}
 .ntf-row-selectable{cursor:pointer}
 .ntf-row-selected{background:rgba(247,185,85,.06)}
-.ntf-body{max-width:640px;padding:0 26px 60px}
+/* Desktop: header, tabs and list share one centred column (the list used to
+   sit 640px wide against the left edge under a full-width header). */
+.ntf-body{max-width:720px;margin:0 auto;padding:0 26px 60px;box-sizing:border-box}
+.ntf-header>*{max-width:668px;margin-left:auto;margin-right:auto}
 .ntf-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:15px;border-bottom:1px solid var(--line,#1f2630)}
 .ntf-tab{background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-1px;padding:0 4px 11px;text-align:center;font-size:14px;font-weight:500;color:var(--muted);cursor:pointer;font-family:var(--ui);transition:color .15s,border-color .15s}
 .ntf-tab.active{color:var(--text);border-bottom-color:var(--accent);font-weight:600}

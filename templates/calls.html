@@ -170,6 +170,9 @@ html,body{min-height:100vh;background:var(--bg);font-family:var(--ui);color:var(
 .page-title{font-size:34px;line-height:1.05;letter-spacing:-.045em;margin-bottom:8px}
 .page-sub{max-width:630px;margin:0;color:#9ba5b2;font-size:14px;line-height:1.55}
 .live-badge{border:1px solid rgba(58,210,155,.2);background:rgba(58,210,155,.07);border-radius:999px;padding:8px 11px}
+/* Desktop: LIVE sits in the banner's top-right corner. In the header row it
+   was centred on the right edge -- right on top of the slogan. */
+@media(min-width:768px){.calls-hero .page-header-row{position:static}.calls-hero .live-badge{position:absolute;top:14px;right:16px;z-index:3;padding:5px 9px;font-size:10px}.calls-hero-slogan{top:56%}}
 .calls-layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:20px;align-items:start}
 .calls-main,.calls-side{min-width:0}
 .calls-side{position:sticky;top:82px}

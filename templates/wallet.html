@@ -2745,7 +2745,7 @@ function _paintPortfolioSnapshotInstant(snap){
   var total=Number(snap.total_usd),stable=Number(snap.stable&&snap.stable.total_usdc)
   var solValue=Number(snap.sol&&snap.sol.value_usd),solAmount=Number(snap.sol&&snap.sol.amount)
   var totalEl=document.getElementById('pf-total');if(totalEl)totalEl.textContent=total.toFixed(2)+' USDC'
-  var equivalent=document.getElementById('pf-sol-equivalent');if(equivalent)equivalent.textContent=snap.total_sol==null?'SOL equivalent unavailable':'≈ '+Number(snap.total_sol).toLocaleString('en-US',{maximumFractionDigits:9})+' SOL · portfolio equivalent'
+  var equivalent=document.getElementById('pf-sol-equivalent');if(equivalent)equivalent.textContent=snap.total_sol==null?'SOL equivalent unavailable':'≈ '+Number(snap.total_sol).toLocaleString('en-US',{maximumFractionDigits:4})+' SOL · portfolio equivalent'
   var perf=document.getElementById('pf-performance');if(perf)perf.textContent=snap.stale?'Last confirmed balance · refreshing…':snap.inventory_complete===false?'Verified balances · full token scan retrying':snap.valuation_complete===false?'Some prices unavailable · estimated known value':'Live Solana balance'
   var avail=document.getElementById('avail');if(avail)avail.textContent=Number(snap.available_to_trade_sol||0).toFixed(6)
   var usdcAsset=document.getElementById('pf-usdc-asset');if(usdcAsset&&Number.isFinite(stable))usdcAsset.textContent='$'+stable.toFixed(2)
@@ -2796,7 +2796,6 @@ function loadTokens(bust){
 
 loadTokens()
 // A single controller updates balances, assets and totals together.
-_loadBridgeHistory()
 
 // ── recent activity ──────────────────────────────────────
 function _qtyFmt(n){

@@ -38,7 +38,7 @@ function paint(value){
   var d=value&&value.detail||{},total=d.total==null?NaN:Number(d.total);
   if(!Number.isFinite(total)||total<0)return;
   put('pf-total',money(total));
-  put('pf-sol-equivalent',d.total_sol==null?'SOL equivalent unavailable':'≈ '+Number(d.total_sol).toLocaleString('en-US',{maximumFractionDigits:9})+' SOL · portfolio equivalent');
+  put('pf-sol-equivalent',d.total_sol==null?'SOL equivalent unavailable':'≈ '+Number(d.total_sol).toLocaleString('en-US',{maximumFractionDigits:4})+' SOL · portfolio equivalent');
   if(d.stale||d.inventory_complete===false){put('pf-performance','Last confirmed balance · refreshing…');return;}
   if(d.valuation_complete===false){put('pf-performance','Some prices unavailable · estimated known value');return;}
   remember(total);

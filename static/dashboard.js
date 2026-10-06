@@ -5497,16 +5497,13 @@ async function confirmWithdraw() {
 }
 
 // ── DEPOSIT SOL MODAL ──────────────────────────────────────────────────────
-let _depQrWallet = null;
 
 function openDepositModal() {
-  if (!phantomKey) return;
-  document.getElementById('deposit-modal').classList.add('open');
-  document.getElementById('dep-addr-text').textContent = phantomKey;
-  document.getElementById('dep-copy-msg').textContent = '';
-  document.getElementById('dep-copy-btn').innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>';
-  const qrEl = document.getElementById('dep-qr');
-  qrEl.innerHTML = '<img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(phantomKey) + '" style="width:180px;height:180px;border-radius:4px" alt="QR code" onerror="this.parentElement.innerHTML=\'<p style=\\\'color:var(--muted);font-size:10px\\\'>QR unavailable</p>\'">';
+  // Deposits go to the OrcAgent trading wallet -- the address Portfolio ->
+  // Deposit shows. This modal used to show the login (Phantom) wallet, so
+  // money sent from it never reached the wallet OrcAgent trades with (and its
+  // QR came from a third-party service).
+  location.href = '/wallet#deposit';
 }
 
 function closeDepositModal() {
