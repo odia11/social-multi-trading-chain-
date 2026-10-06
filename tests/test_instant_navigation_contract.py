@@ -17,8 +17,9 @@ checks={
       and "cache:'no-store'" in SW and "fetch('/api/" not in UX,
   'core route static chunks are warmed':
       'primeRouteAssets' in UX and 'CORE_ROUTES' in UX and 'warmRoute(path,false)' in UX,
-  'touch/pointer intent upgrades the target route chunks':
-      "['pointerover','touchstart','focusin']" in UX and 'warmRoute(u.pathname,true)' in UX,
+  'hover warms assets while touch/pointer-down may warm one document':
+      "['pointerover','focusin']" in UX and "['pointerdown','touchstart']" in UX
+      and 'warmRoute(u.pathname,true)' in UX and 'warmDocument(u)' in UX,
   'slow navigation gets a stable app-shell placeholder':
       'showRouteShell' in UX and '.oa-route-shell{' in CSS,
   'destination shell paints synchronously before Safari freezes the old page':
