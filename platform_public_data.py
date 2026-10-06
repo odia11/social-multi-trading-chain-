@@ -148,9 +148,20 @@ def fetch(q, dashboard):
 
 
 def _price(value):
+    value = float(value)
     if value >= 1:
         return f"${value:,.4f}".rstrip("0").rstrip(".")
-    return f"${value:.8g}"
+    fixed = f"{value:.12f}".rstrip("0").rstrip(".")
+    if fixed in ("0", "-0"):
+        fixed = f"{value:.8g}"
+    return "$" + fixed
+
+
+def _peak_percent(entry, peak):
+    pct = (float(peak) / float(entry) - 1.0) * 100.0
+    if abs(pct - round(pct)) < 0.05:
+        return f"{int(round(pct)):+d}%"
+    return f"{pct:+.1f}%"
 
 
 def render(q, snapshot):
@@ -168,11 +179,12 @@ def render(q, snapshot):
         if not rows:
             return "calls_live", "There are no public OrcAgent calls in the last 24 hours yet."
         row = rows[0]
-        link = f" https://orcagent.fun/#post-p{row['post_id']}" if row.get("post_id") else " https://orcagent.fun/calls"
         text = (
-            f"Best-performing OrcAgent call in the last 24h: ${row['symbol']} — "
-            f"{row['peak_multiple']:.2f}x peak from {_price(row['entry'])} to {_price(row['peak'])}."
-            f"{link}"
+            f"Best call today: ${row['symbol']}\n"
+            f"Peak: {_peak_percent(row['entry'], row['peak'])}\n"
+            f"Entry: {_price(row['entry'])}\n"
+            f"Top: {_price(row['peak'])}\n"
+            f"View call: https://orcagent.fun/call/{row['id']}"
         )
         return "calls_live", text[:240]
     if kind == "top_calls":
