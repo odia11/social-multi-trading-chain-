@@ -148,6 +148,71 @@ INSERT INTO feed_posts(wallet,content,created_at) VALUES('member','A post','2026
         self.assertIn('@alice',message)
         self.assertIn('approve it in Phantom',message)
 
+    def test_delegated_trade_thread_remembers_token_amount_and_correction(self):
+        first=self.source('@orcagent can you buy $BUTO for me?')
+        bot1=p.reply_to(self.d,first,'member',self.now)
+        self.assertIsNotNone(bot1)
+        with sqlite3.connect(self.db) as c:
+            self.assertIn('$BUTO',c.execute('SELECT message FROM feed_replies WHERE id=?',(bot1,)).fetchone()[0])
+
+        amount=self.source('1 SOL')
+        with sqlite3.connect(self.db) as c:
+            c.execute('UPDATE feed_replies SET parent_reply_id=? WHERE id=?',(bot1,amount))
+        bot2=p.reply_to(self.d,amount,'member',self.now+1)
+        self.assertIsNotNone(bot2)
+        with sqlite3.connect(self.db) as c:
+            message=c.execute('SELECT message FROM feed_replies WHERE id=?',(bot2,)).fetchone()[0]
+        self.assertIn('1 SOL for $BUTO',message)
+        self.assertNotIn('Which token',message)
+
+        correction=self.source('I already told you')
+        with sqlite3.connect(self.db) as c:
+            c.execute('UPDATE feed_replies SET parent_reply_id=? WHERE id=?',(bot2,correction))
+        bot3=p.reply_to(self.d,correction,'member',self.now+2)
+        self.assertIsNotNone(bot3)
+        with sqlite3.connect(self.db) as c:
+            message=c.execute('SELECT message FROM feed_replies WHERE id=?',(bot3,)).fetchone()[0]
+        self.assertIn('You did',message)
+        self.assertIn('1 SOL for $BUTO',message)
+        self.assertNotIn('Which OrcAgent feature',message)
+
+        switch=self.source('$EMBER instead')
+        with sqlite3.connect(self.db) as c:
+            c.execute('UPDATE feed_replies SET parent_reply_id=? WHERE id=?',(bot3,switch))
+        bot4=p.reply_to(self.d,switch,'member',self.now+3)
+        with sqlite3.connect(self.db) as c:
+            message=c.execute('SELECT message FROM feed_replies WHERE id=?',(bot4,)).fetchone()[0]
+        self.assertIn('1 SOL for $EMBER',message)
+        self.assertNotIn('$BUTO',message)
+
+    def test_home_post_trade_thread_remembers_original_token(self):
+        with sqlite3.connect(self.db) as c:
+            c.execute("UPDATE feed_posts SET content=? WHERE id=1",('@orcagent how are you brother? Can you buy BUTO for me on Solana?',))
+        bot=p.reply_to_post(self.d,1,'member',self.now)
+        self.assertIsNotNone(bot)
+        amount=self.source('@orcagent 1 sol')
+        with sqlite3.connect(self.db) as c:
+            c.execute('UPDATE feed_replies SET parent_reply_id=? WHERE id=?',(bot,amount))
+        answer=p.reply_to(self.d,amount,'member',self.now+1)
+        self.assertIsNotNone(answer)
+        with sqlite3.connect(self.db) as c:
+            message=c.execute('SELECT message FROM feed_replies WHERE id=?',(answer,)).fetchone()[0]
+        self.assertIn('1 SOL for $BUTO',message)
+        self.assertNotIn('Which token',message)
+
+    def test_trade_thread_memory_never_crosses_threads_or_users(self):
+        first=self.source('@orcagent can you buy $BUTO for me?')
+        bot=p.reply_to(self.d,first,'member',self.now)
+        isolated=self.source('1 SOL')
+        self.assertIsNone(p.reply_to(self.d,isolated,'member',self.now+1))
+
+        with sqlite3.connect(self.db) as c:
+            c.execute("INSERT INTO users VALUES(3,'other','Other',0)")
+        other=self.source('1 SOL',uid=3)
+        with sqlite3.connect(self.db) as c:
+            c.execute('UPDATE feed_replies SET parent_reply_id=? WHERE id=?',(bot,other))
+        self.assertIsNone(p.reply_to(self.d,other,'other',self.now+2))
+
     def test_ambiguous_token_requires_user_choice(self):
         topic,message=p.answer('@orcagent cate token')
         self.assertEqual(topic,'token_choice')

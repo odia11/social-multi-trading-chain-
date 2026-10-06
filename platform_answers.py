@@ -72,16 +72,44 @@ def _recipient(text):
     return matches[-1] if matches else None
 
 
-def _trade_action_reply(text, context=None):
-    amount_sol = _amount_sol(text)
-    amount_usdc = _amount_usdc(text)
-    symbol = _token_symbol(text)
+def trade_action_slots(text):
+    """Extract only the explicit, non-sensitive slots needed for a trade intent."""
+    text = text if isinstance(text, str) else ""
     wants_sell = bool(SELL_WORD.search(text))
     wants_buy = bool(BUY_WORD.search(text))
-    if context == "trade_action" and not (wants_buy or wants_sell):
-        wants_buy = True
+    return {
+        "action": "sell" if wants_sell and not wants_buy else ("buy" if wants_buy else None),
+        "symbol": _token_symbol(text),
+        "amount_sol": _amount_sol(text),
+        "amount_usdc": _amount_usdc(text),
+    }
 
-    action = "sell" if wants_sell and not wants_buy else "buy"
+
+def merge_trade_action_slots(base=None, update=None):
+    """Merge conversation slots; the newest explicit value wins."""
+    merged = {"action": None, "symbol": None, "amount_sol": None, "amount_usdc": None}
+    for source in (base or {}, update or {}):
+        for key in merged:
+            value = source.get(key)
+            if value is not None:
+                merged[key] = value
+        if source.get("amount_sol") is not None:
+            merged["amount_usdc"] = None
+        elif source.get("amount_usdc") is not None:
+            merged["amount_sol"] = None
+    return merged
+
+
+def _trade_action_reply(text, context=None, action_state=None):
+    current = trade_action_slots(text)
+    slots = merge_trade_action_slots(action_state, current)
+    amount_sol = slots["amount_sol"]
+    amount_usdc = slots["amount_usdc"]
+    symbol = slots["symbol"]
+    action = current["action"] or slots["action"]
+    if context == "trade_action" and not action:
+        action = "buy"
+    action = action or "buy"
     if action == "buy":
         if amount_usdc and not amount_sol:
             token_part = (" for $" + symbol) if symbol else ""
@@ -91,6 +119,22 @@ def _trade_action_reply(text, context=None):
                 "I’ll show the quote and costs first; you approve it in Phantom before anything is submitted.",
             )
         if symbol and amount_sol:
+            if context == "trade_action" and action_state:
+                if re.search(
+                    r"\b(?:already told you|told you already|i told you|zei ik al|heb ik al gezegd|had ik al gezegd)\b",
+                    text,
+                    re.I,
+                ):
+                    return (
+                        "trade_action",
+                        "You did — I have it: " + amount_sol + " SOL for $" + symbol + ". "
+                        "The next step is the quote and costs; you approve it in Phantom before anything is submitted.",
+                    )
+                return (
+                    "trade_action",
+                    "Got it — " + amount_sol + " SOL for $" + symbol + ". I have both trade details. "
+                    "The next step is the quote and costs; you approve it in Phantom before anything is submitted.",
+                )
             return (
                 "trade_action",
                 "Yes — I can help set up a " + amount_sol + " SOL buy for $" + symbol + ". "
@@ -157,7 +201,7 @@ def _transfer_action_reply(text):
     )
 
 
-def specific(clean, context=None):
+def specific(clean, context=None, action_state=None):
     """Resolve the requested action before broad topic FAQ matching."""
     text = clean.lower().strip()
     def has(pattern):
@@ -175,11 +219,11 @@ def specific(clean, context=None):
     delegated = bool(ACTION_REQUEST.search(text) and not INSTRUCTION_REQUEST.search(text))
     if delegated:
         if BUY_WORD.search(text) or SELL_WORD.search(text):
-            return _trade_action_reply(text, context)
+            return _trade_action_reply(text, context, action_state)
         if TRANSFER_WORD.search(text) or TIP_WORD.search(text):
             return _transfer_action_reply(text)
-    if context == 'trade_action' and (_amount_sol(text) or _amount_usdc(text) or _token_symbol(text)):
-        return _trade_action_reply(text, context)
+    if context == 'trade_action' and (action_state or _amount_sol(text) or _amount_usdc(text) or _token_symbol(text)):
+        return _trade_action_reply(text, context, action_state)
     if has(r'\b(?:fee|fees|cost|costs|kosten|kost)\b') and not has(r'\b(?:creator|referral|reward|rewards)\b'):
         return response('fees', 'Your trade review shows the platform fee, network costs and any token-account rent before confirmation. Check Fees & costs in the Buy/Sell screen: '+MARKET)
     if has(r'\b(?:stop.?loss|take.?profit|sl|tp)\b'):
