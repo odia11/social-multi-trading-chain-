@@ -213,6 +213,19 @@ INSERT INTO feed_posts(wallet,content,created_at) VALUES('member','A post','2026
             c.execute('UPDATE feed_replies SET parent_reply_id=? WHERE id=?',(bot,other))
         self.assertIsNone(p.reply_to(self.d,other,'other',self.now+2))
 
+    def test_auto_bot_explanation_matches_live_trading_invariants(self):
+        topic,message=p.answer('@orcagent how does the auto trading bot learn?')
+        self.assertEqual(topic,'trading')
+        self.assertIn('+7%',message)
+        self.assertIn('paper/shadow',message)
+        self.assertIn('never change your take profit or stop loss',message)
+
+        topic,message=p.answer('@orcagent is the auto trading bot guaranteed profitable?')
+        self.assertEqual(topic,'trading')
+        self.assertIn('cannot guarantee profit',message)
+        self.assertIn('+7%',message)
+        self.assertIn('never changes your take profit or stop loss',message)
+
     def test_ambiguous_token_requires_user_choice(self):
         topic,message=p.answer('@orcagent cate token')
         self.assertEqual(topic,'token_choice')

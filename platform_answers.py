@@ -226,6 +226,21 @@ def specific(clean, context=None, action_state=None):
         return _trade_action_reply(text, context, action_state)
     if has(r'\b(?:fee|fees|cost|costs|kosten|kost)\b') and not has(r'\b(?:creator|referral|reward|rewards)\b'):
         return response('fees', 'Your trade review shows the platform fee, network costs and any token-account rent before confirmation. Check Fees & costs in the Buy/Sell screen: '+MARKET)
+    if has(r'\b(?:auto.?trading|trading bot|self.?learning|market brain|trading intelligence)\b'):
+        if has(r'\b(?:profit|profitable|guarantee|guaranteed|winst|rendement)\b'):
+            return response(
+                'trading',
+                'The Auto Trading Bot can learn to become more selective, but it cannot guarantee profit. '
+                'A new entry still needs the hard +7% move, the normal safety/risk checks, and your own settings. '
+                'Trading Intelligence can only tighten entry selection; it never changes your take profit or stop loss.'
+            )
+        return response(
+            'trading',
+            'The Auto Trading Bot only considers a new entry after a +7% observed move. '
+            'Then it applies the normal score, scam/risk, liquidity, price-impact and execution checks. '
+            'Trading Intelligence learns from your finished bot trades and from public +7% candidates tracked in paper/shadow mode; '
+            'learned rules can only make entries stricter and never change your take profit or stop loss.'
+        )
     if has(r'\b(?:stop.?loss|take.?profit|sl|tp)\b'):
         if has(r'not|fail|miss|didn|werkt niet|mislukt'):
             return response('trading', 'A hit starts a sell attempt; the position stays open until confirmed. Check its status in Live Trades. Which token and error do you see? Never share wallet secrets.')
