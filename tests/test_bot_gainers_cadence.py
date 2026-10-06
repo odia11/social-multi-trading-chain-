@@ -53,7 +53,7 @@ def test_cadence_and_routes():
     assert 'FAST_POLL_INTERVAL   = 2' in SOURCE
     assert '_scan_interval = 2.0' in SOURCE
     assert '_wait_s = _scan_interval' in SOURCE
-    assert 'time.sleep(30)  # shared candidate refresh' in SOURCE
+    assert 'time.sleep(DISCOVERY_INTERVAL)  # shared candidate refresh' in SOURCE and 'DISCOVERY_INTERVAL = 10 ' in SOURCE
     assert 'interval:2,trade_pct:0.20' in JS
     for token in ('_bot_gainers_eligible(_t)', '_bot_gainers_eligible(t)',
                   '_bot_gainers_eligible(_td)', "_fast_pump_check(mint, chain=chain)"):
