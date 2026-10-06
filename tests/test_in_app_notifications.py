@@ -17,6 +17,18 @@ checks = {
         "var baseline=(lastId===0);" in js and "if(baseline){" in js,
     'new events are shown while the app is visible and checked immediately on resume':
         "visibilitychange" in js and "if(!document.hidden){syncTop();poll(false)}" in js,
+    'banner auto-dismisses and all close/open paths share one cleanup flow':
+        'var AUTO_DISMISS_MS=4200;' in js
+        and 'timer=window.setTimeout(finishCard,AUTO_DISMISS_MS);' in js
+        and 'function finishCard(){' in js
+        and 'finishCard();' in js,
+    'same-page navigation cannot strand a notification after its timer is cleared':
+        'Always dismiss first. Same-page feed navigation used to clear the timer' in js
+        and "if(typeof window._openFeedNotification==='function' && window._openFeedNotification(target,n.type))return;" in js,
+    'dismiss button marks the notification read before closing it':
+        "close.addEventListener('click',function(e){" in js
+        and 'markRead(Number(n.id)||0);' in js
+        and 'finishCard();' in js,
     'tap opens the event destination and marks only that notification read with CSRF':
         "/api/notifications/mine/mark_read_batch" in js
         and "body:JSON.stringify({ids:[id]})" in js

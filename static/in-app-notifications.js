@@ -9,6 +9,7 @@ if(window.__oaInAppNotificationsStarted)return;
 window.__oaInAppNotificationsStarted=true;
 
 var POLL_MS=3000;
+var AUTO_DISMISS_MS=4200;
 var MAX_BATCH=8;
 var STORAGE_KEY='oa_live_notification_last_id_v1';
 var lastId=readLastId();
@@ -232,12 +233,22 @@ function showNext(){
   dot.setAttribute('aria-hidden','true');
   card.appendChild(dot);
 
-  var timer=window.setTimeout(function(){dismiss(card,function(){showing=false;showNext()})},5200);
+  var finished=false;
+  var timer=null;
+  function finishCard(){
+    if(finished)return;
+    finished=true;
+    if(timer!==null)window.clearTimeout(timer);
+    dismiss(card,function(){showing=false;showNext()});
+  }
+  timer=window.setTimeout(finishCard,AUTO_DISMISS_MS);
   function open(){
-    window.clearTimeout(timer);
     markRead(Number(n.id)||0);
     var target=safeInternalLink(n.link);
     try{sessionStorage.setItem('_notifJumpType',n.type||'')}catch(_){}
+    // Always dismiss first. Same-page feed navigation used to clear the timer
+    // and return without removing the banner, leaving it stuck indefinitely.
+    finishCard();
     if(typeof window._openFeedNotification==='function' && window._openFeedNotification(target,n.type))return;
     location.href=target;
   }
@@ -249,8 +260,9 @@ function showNext(){
     if(e.key==='Enter'||e.key===' '){e.preventDefault();open()}
   });
   close.addEventListener('click',function(e){
-    e.preventDefault();e.stopPropagation();window.clearTimeout(timer);
-    dismiss(card,function(){showing=false;showNext()});
+    e.preventDefault();e.stopPropagation();
+    markRead(Number(n.id)||0);
+    finishCard();
   });
   host.appendChild(card);
   requestAnimationFrame(function(){requestAnimationFrame(function(){card.classList.add('is-visible')})});
