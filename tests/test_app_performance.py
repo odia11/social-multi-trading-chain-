@@ -39,7 +39,7 @@ check('ordinary mobile bottom space is tightened from the old 132px reserve',
 check('portfolio gets a compact but safe fixed-nav reserve',
       'body.oa-shared-ux.oa-portfolio .wlt-center' in CSS)
 check('every HTML response gets the current shared performance assets early',
-      'app-ux.css?v=9' in PERF and 'app-ux.js?v=11' in PERF)
+      'app-ux.css?v=9' in PERF and 'app-ux.js?v=12' in PERF)
 check('route-critical redesign assets are applied before first paint',
       'portfolio-redesign.css?v=6' in PERF
       and 'live-market-redesign.css?v=10' in PERF
@@ -49,7 +49,7 @@ check('production WSGI installs the performance adapter',
       'from app_performance import install as _install_app_performance' in ENTRY
       and '_install_app_performance(_dashboard)' in ENTRY)
 check('fallback loader no longer duplicates document prefetching',
-      'app-ux.css?v=9' in LOADER and 'app-ux.js?v=11' in LOADER
+      'app-ux.css?v=9' in LOADER and 'app-ux.js?v=12' in LOADER
       and 'fetchDocument' not in LOADER and 'primeCore' not in LOADER)
 check('nginx compresses text assets while retaining live proxy streaming',
       'gzip on;' in NGINX and 'application/javascript' in NGINX
@@ -61,8 +61,9 @@ check('static assets keep bounded caching with background revalidation',
 check('route changes are instant: no cross-document slide or fade',
       '@view-transition {\n  navigation: none;\n}' in CSS and 'navigation: auto' not in CSS
       and '::view-transition-old(root)' not in CSS)
-check('private no-store HTML is never prefetched',
-      "l.as='document'" not in UX and "l.href=u.pathname+u.search" not in UX)
+check('navigation HTML warmup is service-worker RAM only, never document cache storage',
+      'oa-nav-prefetch' in UX and 'OA_NAV_READY = new Map()' in SW
+      and "cache:'no-store'" in SW and "l.as='document'" not in UX)
 check('route asset prefetch is restricted to public versioned CSS/JS',
       "var ROUTE_ASSETS" in UX and "var key='/static/'+asset" in UX
       and 'navigator.connection.saveData' in UX)
@@ -91,10 +92,11 @@ check('profile subroutes warm the profile asset family before navigation',
       'ROUTE_ASSETS[routeKey(path)]' in UX and "path.indexOf(base+'/')===0" in UX)
 check('programmatic navigation cannot leave stale page content painted',
       'OrcAgentShowRouteShell' in UX and 'OrcAgentShowRouteShell' in LOADER)
-check('service worker caches only same-origin public static GETs',
+check('service worker persists only same-origin public static GETs',
       "url.pathname.indexOf('/static/')!==0" in SW
       and "url.origin!==self.location.origin" in SW
-      and "req.method!=='GET'" in SW)
+      and "req.method!=='GET'" in SW
+      and 'OA_NAV_READY = new Map()' in SW and "cache:'no-store'" in SW)
 check('mobile app shell assets are preloaded from head',
       'data-oa-shell-preload' in PERF
       and 'mobile-bottom-nav.css?v=9' in PERF
