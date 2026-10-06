@@ -16415,7 +16415,8 @@ def message_thread(wallet_address):
 
 @app.route('/deposit')
 def deposit_page():
-    return redirect('/?action=deposit')
+    # Portfolio's deposit sheet: the trading wallet's address (see openDepositModal).
+    return redirect('/wallet#deposit')
 
 
 @app.route('/withdraw')
@@ -27100,7 +27101,12 @@ def get_dm_history(peer_id):
         for r in rows
     ]})
 
-_DM_REACTION_EMOJIS = frozenset({'❤️', '😂', '😮', '😢', '😡', '👍', '🔥'})
+# The quick row plus the "+" set of the long-press menu (templates/messages.html
+# _DM_REACTION_CHOICES / _DM_REACTION_MORE). A closed set: a reaction is never
+# free text.
+_DM_REACTION_EMOJIS = frozenset({'❤️', '😂', '😮', '😢', '😡', '👍', '🔥',
+                                 '🙌', '👏', '🙏', '💯', '🚀', '💰', '🤑', '📈', '📉', '💎', '🐳',
+                                 '🤝', '😍', '🥳', '😎', '🤔', '😅', '😭', '🤯', '👀', '✅', '❌', '💀', '🫡'})
 
 @app.route('/api/messages/<int:message_id>/reaction', methods=['POST'])
 @rate_limit(60, 60)

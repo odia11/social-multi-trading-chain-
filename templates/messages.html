@@ -282,9 +282,20 @@ html,body{background:#0a0b0e;color:#eef1f5;font-family:'Geist',system-ui,sans-se
 .dm-reaction-pill{border:1px solid #2b313b;background:#11161e;color:#eef1f5;border-radius:999px;padding:2px 7px;font:600 12px/1.45 system-ui;cursor:pointer;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;touch-action:manipulation}
 .dm-reaction-pill.mine{border-color:rgba(247,185,85,.7);background:rgba(247,185,85,.12)}
 .dm-reaction-pill span{font-size:10px;color:#9aa4b2;margin-left:2px}
-.dm-reaction-menu{position:fixed;z-index:9999;display:flex;align-items:center;gap:3px;padding:7px;background:#151a22;border:1px solid #303743;border-radius:999px;box-shadow:0 14px 42px rgba(0,0,0,.48);touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.dm-reaction-menu{position:fixed;z-index:9999;display:flex;flex-direction:column;align-items:stretch;gap:6px;padding:7px;max-width:calc(100vw - 16px);box-sizing:border-box;background:#151a22;border:1px solid #303743;border-radius:26px;animation:dmMenuIn .14s ease-out;box-shadow:0 14px 42px rgba(0,0,0,.48);touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 .dm-reaction-menu button{width:38px;height:38px;border:0;background:transparent;border-radius:50%;font-size:22px;line-height:38px;padding:0;cursor:pointer;transition:transform .12s,background .12s;touch-action:manipulation;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 .dm-reaction-menu button:hover,.dm-reaction-menu button:focus-visible{background:#242b36;transform:scale(1.14);outline:none}
+.dm-reaction-row{display:flex;align-items:center;gap:3px}
+.dm-reaction-menu .dm-reaction-more{font:500 22px/38px system-ui;color:#c9d1dc;background:#1f2630}
+.dm-reaction-menu.expanded .dm-reaction-more{display:none}
+.dm-reaction-grid{display:grid;grid-template-columns:repeat(8,38px);gap:3px;justify-content:center;padding-top:6px;border-top:1px solid #262d38}
+.dm-reaction-actions{display:flex;border-top:1px solid #262d38;padding-top:6px}
+.dm-reaction-menu .dm-reaction-copy{width:100%;height:36px;border-radius:14px;font:600 14px/36px 'Geist',system-ui,sans-serif;color:#eef1f5;text-align:left;padding:0 12px}
+.dm-reaction-menu .dm-reaction-copy:hover,.dm-reaction-menu .dm-reaction-copy:focus-visible{transform:none}
+#msgs-area .msg-wrap[data-mid] .msg-bubble{transition:transform .18s ease}
+#msgs-area .msg-wrap.dm-pressing .msg-bubble{transform:scale(.96)}
+@keyframes dmMenuIn{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:none}}
+@media (max-width:360px){.dm-reaction-grid{grid-template-columns:repeat(7,38px)}}
 
 </style>
 </head>
@@ -1343,7 +1354,10 @@ async function _postDmPhoto(mid){
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&_dmPhotoSheet)_closeDmPhotoSheet();});
 
 var _DM_REACTION_CHOICES=['❤️','😂','😮','😢','😡','👍','🔥'];
-var _dmReactionTimer=null, _dmReactionStart=null, _dmReactionMenu=null;
+// "+" opens these too (Instagram-style "more reactions"); the server accepts
+// exactly this set (_DM_REACTION_EMOJIS in dashboard.py).
+var _DM_REACTION_MORE=['🙌','👏','🙏','💯','🚀','💰','🤑','📈','📉','💎','🐳','🤝','😍','🥳','😎','🤔','😅','😭','🤯','👀','✅','❌','💀','🫡'];
+var _dmReactionTimer=null, _dmReactionStart=null, _dmReactionMenu=null, _dmSwallowClickUntil=0;
 function _dmReactionPills(reactions){
   if(!reactions||!reactions.length)return '';
   var grouped={};
@@ -1363,6 +1377,35 @@ function _closeDmReactionMenu(){
   if(_dmReactionMenu&&_dmReactionMenu.parentNode)_dmReactionMenu.parentNode.removeChild(_dmReactionMenu);
   _dmReactionMenu=null;
 }
+function _dmReactionButton(mid,emoji){
+  var b=document.createElement('button'); b.type='button'; b.textContent=emoji; b.setAttribute('aria-label','React '+emoji);
+  // iOS can delay/suppress the synthetic click that follows a long-press.
+  // Commit on pointerup instead; keep click as keyboard/older-browser fallback
+  // and guard it so one tap can never toggle the reaction twice.
+  var committed=false;
+  var choose=function(ev){
+    ev.preventDefault(); ev.stopPropagation();
+    if(committed)return;
+    committed=true;
+    _setDmReaction(mid,emoji);
+    _closeDmReactionMenu();
+  };
+  b.addEventListener('pointerup',choose);
+  b.addEventListener('click',choose);
+  return b;
+}
+function _dmPlaceMenu(menu,x,y,wrap){
+  // offsetWidth/Height, not getBoundingClientRect: the opening animation
+  // starts scaled down, which made the menu measure narrower than it is and
+  // run off the right edge of a 360px phone.
+  var w=menu.offsetWidth, h=menu.offsetHeight, vw=document.documentElement.clientWidth, vh=document.documentElement.clientHeight;
+  var bubble=wrap&&wrap.querySelector('.msg-bubble'), br=bubble?bubble.getBoundingClientRect():null;
+  var left=Math.max(8,Math.min((x||vw/2)-w/2,vw-w-8));
+  // Above the message (as on Instagram), else below it, else over it.
+  var above=(br?br.top:(y||vh/2))-h-10, below=(br?br.bottom:(y||vh/2))+10;
+  var top=above>=8?above:(below+h<=vh-8?below:Math.max(8,Math.min((y||vh/2)-h/2,vh-h-8)));
+  menu.style.left=left+'px'; menu.style.top=top+'px';
+}
 function _openDmReactionMenu(wrap,x,y){
   if(!wrap)return;
   _closeDmReactionMenu();
@@ -1370,28 +1413,44 @@ function _openDmReactionMenu(wrap,x,y){
   var menu=document.createElement('div');
   menu.className='dm-reaction-menu';
   menu.setAttribute('role','menu');
-  _DM_REACTION_CHOICES.forEach(function(emoji){
-    var b=document.createElement('button'); b.type='button'; b.textContent=emoji; b.setAttribute('aria-label','React '+emoji);
-    // iOS can delay/suppress the synthetic click that follows a long-press.
-    // Commit on pointerup instead; keep click as keyboard/older-browser fallback
-    // and guard it so one tap can never toggle the reaction twice.
-    var committed=false;
-    var choose=function(ev){
-      ev.preventDefault(); ev.stopPropagation();
-      if(committed)return;
-      committed=true;
-      _setDmReaction(mid,emoji);
+  var row=document.createElement('div'); row.className='dm-reaction-row';
+  _DM_REACTION_CHOICES.forEach(function(emoji){ row.appendChild(_dmReactionButton(mid,emoji)); });
+  var more=document.createElement('button'); more.type='button'; more.className='dm-reaction-more'; more.textContent='+';
+  more.setAttribute('aria-label','More reactions');
+  var openMore=function(ev){
+    ev.preventDefault(); ev.stopPropagation();
+    if(menu.classList.contains('expanded'))return;
+    menu.classList.add('expanded');
+    var grid=document.createElement('div'); grid.className='dm-reaction-grid';
+    _DM_REACTION_MORE.forEach(function(emoji){ grid.appendChild(_dmReactionButton(mid,emoji)); });
+    menu.insertBefore(grid,actions.parentNode===menu?actions:null);
+    _dmPlaceMenu(menu,x,y,wrap);
+  };
+  // Click only (not pointerup like the emojis): opening the grid grows and
+  // moves the menu, so the click that follows a pointerup would land on
+  // whatever is under the finger then -- outside the menu, or on an emoji.
+  more.addEventListener('click',openMore);
+  row.appendChild(more); menu.appendChild(row);
+  // Text selection is off on message bubbles (so a long press never turns into
+  // iOS Copy/Look Up), so copying the text lives here instead.
+  var actions=document.createElement('div'); actions.className='dm-reaction-actions';
+  var msg=_renderedMessages.find(function(m){return Number(m.id)===mid;});
+  var text=msg&&String(msg.message_type||'text')==='text'?String(msg.message||''):'';
+  if(text){
+    var copy=document.createElement('button'); copy.type='button'; copy.className='dm-reaction-copy'; copy.textContent='Copy text';
+    var done=false;
+    var doCopy=function(ev){
+      ev.preventDefault(); ev.stopPropagation(); if(done)return; done=true;
       _closeDmReactionMenu();
+      try{
+        navigator.clipboard.writeText(text).then(function(){_toast('Copied');},function(){_toast('Could not copy');});
+      }catch(_){_toast('Could not copy');}
     };
-    b.addEventListener('pointerup',choose);
-    b.addEventListener('click',choose);
-    menu.appendChild(b);
-  });
+    copy.addEventListener('pointerup',doCopy); copy.addEventListener('click',doCopy);
+    actions.appendChild(copy); menu.appendChild(actions);
+  }
   document.body.appendChild(menu); _dmReactionMenu=menu;
-  var r=menu.getBoundingClientRect(), vw=document.documentElement.clientWidth, vh=document.documentElement.clientHeight;
-  var left=Math.max(8,Math.min((x||vw/2)-r.width/2,vw-r.width-8));
-  var top=Math.max(8,Math.min((y||vh/2)-r.height-14,vh-r.height-8));
-  menu.style.left=left+'px'; menu.style.top=top+'px';
+  _dmPlaceMenu(menu,x,y,wrap);
 }
 var _dmReactionSeq=Object.create(null);
 function _dmPaintReactions(mid,reactions){
@@ -1468,11 +1527,19 @@ function _installDmReactionGestures(){
     if(e.pointerType==='mouse'&&e.button!==0)return;
     var wrap=e.target.closest('.msg-wrap[data-mid]'); if(!wrap||e.target.closest('button,a,input'))return;
     _dmReactionStart={x:e.clientX,y:e.clientY,wrap:wrap};
+    _dmSwallowClickUntil=0;
+    if(e.pointerType!=='mouse')wrap.classList.add('dm-pressing');
     clearTimeout(_dmReactionTimer);
     _dmReactionTimer=setTimeout(function(){
       if(_dmReactionStart){
         try{var sel=window.getSelection&&window.getSelection();if(sel)sel.removeAllRanges();}catch(_){}
+        _dmReactionStart.wrap.classList.remove('dm-pressing');
         _openDmReactionMenu(_dmReactionStart.wrap,_dmReactionStart.x,_dmReactionStart.y);
+        // Releasing the finger still fires a click on the bubble (Chrome, and
+        // iOS once its own callout is off); that click used to close the menu
+        // the moment it opened. Swallow that one click.
+        _dmSwallowClickUntil=Date.now()+1500;
+        if(navigator.vibrate)try{navigator.vibrate(8);}catch(_){}
         _dmReactionStart=null;
       }
     },360);
@@ -1480,15 +1547,20 @@ function _installDmReactionGestures(){
   area.addEventListener('pointermove',function(e){
     if(!_dmReactionStart)return;
     if(Math.abs(e.clientX-_dmReactionStart.x)>10||Math.abs(e.clientY-_dmReactionStart.y)>10){
-      clearTimeout(_dmReactionTimer);_dmReactionStart=null;
+      clearTimeout(_dmReactionTimer);_dmReactionStart.wrap.classList.remove('dm-pressing');_dmReactionStart=null;
     }
   },{passive:true});
-  ['pointerup','pointercancel'].forEach(function(t){area.addEventListener(t,function(){clearTimeout(_dmReactionTimer);_dmReactionStart=null;},{passive:true});});
+  ['pointerup','pointercancel'].forEach(function(t){area.addEventListener(t,function(){clearTimeout(_dmReactionTimer);if(_dmReactionStart)_dmReactionStart.wrap.classList.remove('dm-pressing');_dmReactionStart=null;},{passive:true});});
   area.addEventListener('click',function(e){
     var pill=e.target.closest('.dm-reaction-pill'); if(!pill)return;
     var wrap=pill.closest('.msg-wrap[data-mid]'); if(wrap)_setDmReaction(parseInt(wrap.dataset.mid,10),pill.dataset.emoji||pill.textContent.trim());
   });
-  document.addEventListener('click',function(e){if(_dmReactionMenu&&!_dmReactionMenu.contains(e.target))_closeDmReactionMenu();});
+  document.addEventListener('click',function(e){
+    if(_dmSwallowClickUntil&&Date.now()<_dmSwallowClickUntil&&!(_dmReactionMenu&&_dmReactionMenu.contains(e.target))){
+      _dmSwallowClickUntil=0; e.preventDefault(); e.stopPropagation(); return;
+    }
+    if(_dmReactionMenu&&!_dmReactionMenu.contains(e.target))_closeDmReactionMenu();
+  },true);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_installDmReactionGestures);
 else _installDmReactionGestures();

@@ -168,10 +168,40 @@ function dismiss(card,done){
     if(done)done();
   },180);
 }
+function inView(el){
+  if(!el)return false;
+  var r=el.getBoundingClientRect();
+  if(!r.width&&!r.height)return false;
+  return r.bottom>0&&r.top<(window.innerHeight||document.documentElement.clientHeight);
+}
+/* The member is already looking at what this notification is about: the
+   reply (or the open replies of that post) is on screen, or the DM thread
+   with the sender is open. A banner then only covers the very thing it
+   announces, so it is marked read without showing one. */
+function alreadyOnScreen(n){
+  var link=safeInternalLink(n.link),u;
+  try{u=new URL(link,location.origin)}catch(_){return false}
+  var post=/^#post-([pt]\d+)(?:-reply-(\d+))?$/.exec(u.hash||'');
+  if(post&&u.pathname===location.pathname){
+    if(post[2]&&inView(document.querySelector('.fc-reply-item[data-reply-id="'+post[2]+'"]')))return true;
+    var box=document.getElementById('rbox-'+post[1]);
+    if(box&&getComputedStyle(box).display!=='none'&&inView(box))return true;
+    return false;
+  }
+  var dm=/^\/messages\/([^/?#]+)/.exec(u.pathname);
+  if(dm&&!document.hidden){
+    var peer=decodeURIComponent(dm[1]);
+    if(location.pathname==='/messages/'+dm[1])return true;
+    var active=window._activePeer;
+    if(location.pathname.indexOf('/messages')===0&&active&&active.wallet===peer)return true;
+  }
+  return false;
+}
 function showNext(){
   if(showing||document.hidden||!queue.length)return;
-  showing=true;
   var n=queue.shift();
+  if(alreadyOnScreen(n)){markRead(Number(n.id)||0);refreshBadges();showNext();return}
+  showing=true;
   var host=ensureRoot();
   var card=document.createElement('div');
   card.className='oa-live-notification';

@@ -65,7 +65,7 @@ function paint(snap){
   var total=snap.total,solTotal=snap.total_sol,stable=snap.stable,solValue=snap.sol,other=snap.other;
   var totalEl=document.getElementById('pf-total');if(totalEl)totalEl.textContent=Number(total).toFixed(2)+' USDC';
   var donutTotal=document.getElementById('pf-donut-total');if(donutTotal)donutTotal.textContent=Number(total).toFixed(2)+' USDC';
-  var equivalent=document.getElementById('pf-sol-equivalent');if(equivalent)equivalent.textContent=solTotal==null?'SOL equivalent unavailable':'≈ '+Number(solTotal).toLocaleString('en-US',{maximumFractionDigits:9})+' SOL · portfolio equivalent';
+  var equivalent=document.getElementById('pf-sol-equivalent');if(equivalent)equivalent.textContent=solTotal==null?'SOL equivalent unavailable':'≈ '+Number(solTotal).toLocaleString('en-US',{maximumFractionDigits:4})+' SOL · portfolio equivalent';
   var sum=total||1,p1=Math.max(0,Math.min(100,stable/sum*100)),p2=Math.max(0,Math.min(100-p1,solValue/sum*100));
   var donut=document.getElementById('pf-donut');if(donut)donut.style.background='conic-gradient(var(--pf-yellow) 0 '+p1.toFixed(1)+'%,#7ed797 '+p1.toFixed(1)+'% '+(p1+p2).toFixed(1)+'%,#7b8ca6 '+(p1+p2).toFixed(1)+'% 100%)';
   [['pf-a',stable],['pf-b',solValue],['pf-c',other]].forEach(function(x){var e=document.getElementById(x[0]+'-val');if(e)e.textContent=(x[1]/sum*100).toFixed(1)+'%'});
