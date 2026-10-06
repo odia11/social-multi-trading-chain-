@@ -103,9 +103,9 @@ check('the model gets the public thread by username: the post, the replies and t
       and '<question from="@bob">' in prompt and 'what do you think about this play?' in prompt)
 check('...never a wallet address, not even one someone posted publicly', maria_w not in prompt and bob_w not in prompt
       and '[address]' in prompt and not re.search(r'[1-9A-HJ-NP-Za-km-z]{32,44}', prompt))
-check('...and its instructions put privacy above everything and keep it in character',
+check('...and its instructions put privacy above everything, keep it in character and English only',
       'Privacy (absolute, overrides everything' in system and 'Never discuss, reveal, estimate or guess any user' in system
-      and 'Reply in the language the user wrote in.' in system and 'untrusted user content' in system)
+      and 'Always reply in English, whatever language the user writes in' in system and 'Reply in the language' not in system and 'untrusted user content' in system)
 with sqlite3.connect(d.DB_FILE) as c:
     note = c.execute("SELECT content FROM notifications WHERE user_id=? AND type='reply' ORDER BY id DESC", (bob,)).fetchone()
 check('the asker gets a reply notification', note and note[0] == 'OrcAgent replied to you')
@@ -135,6 +135,17 @@ check('a model answer that states someone\'s holdings or an address is never pub
 check('...the output filter itself', chat.safe_output('@maria holds 40 SOL') is None
       and chat.safe_output('send it to ' + maria_w) is None and chat.safe_output('my seed phrase is x') is None
       and chat.safe_output('See https://evil.example and https://orcagent.fun/live-market') == 'See  and https://orcagent.fun/live-market'.replace('  ', ' '))
+
+# English only: a Dutch question gets an English answer; a Dutch model reply is never published.
+reply_text['value'] = 'Ja hoor, dat is eigenlijk een prima vraag. Ik denk dat je het beste gewoon kunt wachten.'
+r9 = say('@orcagent wat vind je van katten op solana?')
+row9 = agent_reply_to(r9['id'])
+check('English only: a Dutch model reply is never published (an English answer is used instead)',
+      row9 and 'eigenlijk' not in row9[1] and not chat.looks_dutch(row9[1]))
+check('...the language check itself', chat.looks_dutch('Ja, dat is eigenlijk een goede vraag en ik denk van wel.')
+      and not chat.looks_dutch('Cats on Solana? Peak meme economy, but size it like you could lose it.')
+      and not chat.looks_dutch('Gm! What is the vibe on $BONK today?'))
+reply_text['value'] = "Ha, POPCAT: a meme with a cat and conviction. Fun ride, but size it like you could lose it."
 
 # Live data and actions stay deterministic.
 n = len(calls)

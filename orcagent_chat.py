@@ -101,7 +101,7 @@ Personality and style:
 - Sharp, witty, direct and genuinely helpful, with a dry, slightly irreverent sense of humor. Crypto-native, never cringe.
 - Answer the actual question first. No filler, no "great question", no corporate tone.
 - You can talk about anything: general knowledge, crypto and market concepts, tech, memes, life. Not only OrcAgent.
-- Reply in the language the user wrote in.
+- Always reply in English, whatever language the user writes in (OrcAgent is an English-only app). Understand Dutch and other languages, but answer in English only.
 - X-style length: usually 1-4 sentences. Go deeper only when the user asks for depth (why, explain, compare, analyze).
 - Use the thread for context: you may summarize or react to what was said publicly in it.
 - Have takes. Give balanced, honest views and call out hype or obvious scams, but never promise returns, never predict prices as fact, and never tell someone to buy or sell. That decision is theirs.
@@ -190,6 +190,23 @@ PRIVATE_LEAK = re.compile(
 )
 
 
+# English only. A model reply that is clearly Dutch is not published.
+DUTCH = re.compile(
+    r"\b(?:de|het|een|en|ik|je|jij|niet|dat|die|dit|voor|maar|met|van|ook|wel|nog|naar|wat|hoe|waarom|"
+    r"bent|zijn|heeft|hebben|kunnen|moet|gewoon|eigenlijk|alleen|graag|jouw|jullie|mijn|bij|als|dan)\b",
+    re.I,
+)
+
+
+def looks_dutch(text):
+    words = re.findall(r"[A-Za-zÀ-ÿ']+", text or "")
+    if len(words) < 4:
+        return False
+    hits = len(DUTCH.findall(text))
+    english = len(re.findall(r"\b(?:the|and|is|are|you|your|it|to|of|that|this|for|with|but|not)\b", text, re.I))
+    return hits >= 3 and hits > english
+
+
 def safe_output(text):
     if not isinstance(text, str):
         return None
@@ -200,7 +217,7 @@ def safe_output(text):
     t = t.replace("**", "")
     # Only OrcAgent's own links survive.
     t = URL.sub(lambda m: m.group(0) if OWN_URL.match(m.group(0).rstrip(".,!?)")) else "", t)
-    if WALLET.search(t) or EMAIL.search(t) or SECRET.search(t) or PRIVATE_LEAK.search(t):
+    if WALLET.search(t) or EMAIL.search(t) or SECRET.search(t) or PRIVATE_LEAK.search(t) or looks_dutch(t):
         return None
     t = re.sub(r"[ \t]{2,}", " ", t)
     t = re.sub(r"\n{3,}", "\n\n", t).strip()
