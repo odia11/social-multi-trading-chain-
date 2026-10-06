@@ -6,7 +6,16 @@ import unicodedata
 RETENTION = 90 * 86400
 QUORUM = 3
 UNSAFE = re.compile(r'seed|recovery|private.?key|secret|password|credential|herstelzin|priv[eé]sleutel|ignore.{0,30}(rules|instructions)|system.?prompt|guarantee|guaranteed|profit|predict|password|https?://|www\.|[A-Za-z0-9+/=_-]{32,}', re.I)
-FOLLOWUP = re.compile(r'^\s*(?:how|where|why|which|what next|what about|can i|is it|and |hoe|waar|welke|waarom|en )', re.I)
+FOLLOWUP = re.compile(
+    r'^\s*(?:how|where|why|which|what next|what about|can i|can you|could you|'
+    r'is it|and |hoe|waar|welke|waarom|kun je|kan je|en )',
+    re.I,
+)
+CORRECTION = re.compile(
+    r'\b(?:i mean|i meant|actually|no[,.! ]|not what i asked|that(?:\'s| is) not what i asked|'
+    r'i asked (?:if|whether|you)|bedoel|nee[,.! ]|maar ik (?:bedoel|vroeg)|ik vraag (?:of|je))\b',
+    re.I,
+)
 
 def key(message, mention):
     if not isinstance(message, str) or not mention.search(message):
@@ -32,9 +41,43 @@ CREATE TABLE IF NOT EXISTS platform_assistant_votes(
 CREATE TABLE IF NOT EXISTS platform_assistant_reviews(
  id INTEGER PRIMARY KEY,question_key TEXT NOT NULL,topic TEXT,status TEXT NOT NULL,
  actor_wallet TEXT NOT NULL,created_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS platform_assistant_contact_signals(
+ source_kind TEXT NOT NULL,source_ref TEXT NOT NULL,source_user_id INTEGER NOT NULL,
+ question_key TEXT,detected_topic TEXT,final_topic TEXT NOT NULL,previous_topic TEXT,
+ fallback INTEGER NOT NULL DEFAULT 0,created_at REAL NOT NULL,
+ PRIMARY KEY(source_kind,source_ref));
 CREATE INDEX IF NOT EXISTS platform_assistant_vote_time ON platform_assistant_votes(created_at);
 CREATE INDEX IF NOT EXISTS platform_assistant_question_time ON platform_assistant_questions(updated_at);
+CREATE INDEX IF NOT EXISTS platform_assistant_contact_time ON platform_assistant_contact_signals(created_at);
+CREATE INDEX IF NOT EXISTS platform_assistant_contact_intent ON platform_assistant_contact_signals(final_topic,created_at);
 """)
+
+def record_contact(c,source_kind,source_ref,source_user_id,message,detected_topic,final_topic,previous_topic,mention,now):
+    """Record an intent signal for every safe assistant contact, never raw text.
+
+    This is telemetry for learning quality, not a license to copy user claims
+    into product facts. Wording is represented only by the same constrained
+    hash used by reviewed learning; unsafe/private-looking text gets no hash.
+    """
+    if source_kind not in ('post','reply') or not isinstance(final_topic,str):
+        return
+    c.execute('DELETE FROM platform_assistant_contact_signals WHERE created_at<?',(now-RETENTION,))
+    question_key = key(message,mention)
+    fallback = int(not detected_topic or detected_topic == 'scope')
+    c.execute(
+        """INSERT INTO platform_assistant_contact_signals(
+ source_kind,source_ref,source_user_id,question_key,detected_topic,final_topic,previous_topic,fallback,created_at)
+ VALUES(?,?,?,?,?,?,?,?,?)
+ ON CONFLICT(source_kind,source_ref) DO UPDATE SET
+ question_key=excluded.question_key,detected_topic=excluded.detected_topic,
+ final_topic=excluded.final_topic,previous_topic=excluded.previous_topic,
+ fallback=excluded.fallback,created_at=excluded.created_at""",
+        (
+            source_kind,str(source_ref),int(source_user_id),question_key,
+            detected_topic,final_topic,previous_topic,fallback,now,
+        ),
+    )
+
 
 def prior(c, d, source, author_id):
     """Use only this user's authenticated conversation, at most six ancestors."""
@@ -107,7 +150,15 @@ def observe(c,d,source_id,source,explicit_topic,previous,mention,topics,now):
         c.execute("""INSERT INTO platform_assistant_questions(question_key,sample_reply_id,updated_at)
  VALUES(?,?,?) ON CONFLICT(question_key) DO UPDATE SET
  sample_reply_id=excluded.sample_reply_id,seen=seen+1,updated_at=excluded.updated_at""",(question_key,source_id,now))
-    clarified = previous and (previous[0]=='scope' or re.search(r'i mean|meant|actually|bedoel|clarify|talking about',source[2],re.I))
+    clarified = previous and (
+        previous[0]=='scope'
+        or CORRECTION.search(source[2])
+        or (
+            explicit_topic in topics
+            and explicit_topic != previous[0]
+            and FOLLOWUP.search(source[2])
+        )
+    )
     if clarified and previous[1] is not None and explicit_topic in topics and not UNSAFE.search(source[2]):
         old_key = key(previous[2],mention)
         if old_key and c.execute('SELECT 1 FROM platform_assistant_questions WHERE question_key=?',(old_key,)).fetchone():

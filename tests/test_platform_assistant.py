@@ -104,6 +104,50 @@ INSERT INTO feed_posts(wallet,content,created_at) VALUES('member','A post','2026
         self.assertEqual(share[0],'share')
         self.assertIn('Share call',share[1])
         self.assertNotIn('/invitations',share[1])
+    def test_delegated_trade_intent_answers_the_question_not_a_tutorial(self):
+        topic,message=p.answer('@orcagent can you buy for me ?')
+        self.assertEqual(topic,'trade_action')
+        self.assertIn('Which token',message)
+        self.assertIn('how much SOL',message)
+        self.assertIn('approve it in Phantom',message)
+        self.assertNotIn('Open Live Market',message)
+
+        topic,message=p.answer('@orcagent can you buy $SK for me with 0.05 SOL?')
+        self.assertEqual(topic,'trade_action')
+        self.assertIn('0.05 SOL buy for $SK',message)
+        self.assertIn('quote and costs',message)
+        self.assertIn('Phantom',message)
+
+        topic,message=p.answer('@orcagent kun je $EMBER voor mij kopen met 0.12 SOL?')
+        self.assertEqual(topic,'trade_action')
+        self.assertIn('0.12 SOL buy for $EMBER',message)
+
+        for tutorial_question in (
+            '@orcagent how do I buy a token?',
+            '@orcagent can you tell me how to buy?',
+            '@orcagent can you explain how to sell?',
+        ):
+            tutorial=p.answer(tutorial_question)
+            self.assertEqual(tutorial[0],'trading')
+            self.assertIn('Live Market',tutorial[1])
+
+    def test_delegated_action_followup_uses_conversation_context(self):
+        topic,message=p.answer('@orcagent $SK 0.07 SOL',context='trade_action')
+        self.assertEqual(topic,'trade_action')
+        self.assertIn('0.07 SOL buy for $SK',message)
+        self.assertIn('approve it in Phantom',message)
+
+        topic,message=p.answer('@orcagent can you buy $SK for me with 5 USDC?')
+        self.assertEqual(topic,'trade_action')
+        self.assertIn('Buys use SOL, not USDC',message)
+        self.assertIn('how much SOL',message)
+
+        topic,message=p.answer('@orcagent can you send 2 USDC to @alice for me?')
+        self.assertEqual(topic,'transfer_action')
+        self.assertIn('2 USDC',message)
+        self.assertIn('@alice',message)
+        self.assertIn('approve it in Phantom',message)
+
     def test_ambiguous_token_requires_user_choice(self):
         topic,message=p.answer('@orcagent cate token')
         self.assertEqual(topic,'token_choice')

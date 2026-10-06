@@ -1,7 +1,9 @@
-"""Free, first-party platform posts and explicit @orcagent comment replies.
+"""First-party platform posts and explicit @orcagent comment replies.
 
-No external model, credentials, market predictions or user-wallet actions.
-SQLite publication receipts coordinate all workers and survive restarts.
+Deterministic rules own actions, live data, privacy and safety. An optional
+sanitized AI reasoning fallback can refine complex public questions; it never
+receives account-specific data or wallet secrets. SQLite publication receipts
+coordinate all workers and survive restarts.
 """
 from __future__ import annotations
 import datetime as dt
@@ -14,6 +16,7 @@ import platform_learning as learning
 from platform_answers import specific
 import platform_prices as prices
 import platform_public_data as public_data
+import platform_reasoner as reasoner
 from zoneinfo import ZoneInfo
 from flask import jsonify, request
 
@@ -68,6 +71,16 @@ FAQ = (
 )
 
 LEARNABLE = {topic:english for topic,pattern,english in FAQ if topic not in ('secrets','bug')}
+LEARNABLE.update({
+    'trade_action': (
+        'I can help set up a buy or sell, but your wallet must approve it. '
+        'For a buy, tell me the token and SOL amount so I can keep the next step specific.'
+    ),
+    'transfer_action': (
+        'I can help set up a USDC send or tip, but your wallet must approve it. '
+        'Tell me the recipient and amount so I can keep the next step specific.'
+    ),
+})
 
 def answer(message, context=None, market=None, public=None):
     if not isinstance(message, str) or not MENTION.search(message):
@@ -273,6 +286,58 @@ def _prepare_public(d, source_id, wallet, kind, now):
 def _public_for(text, prepared):
     return prepared[1] if prepared and prepared[0]==text else None
 
+def _prepare_reasoning(d, source_id, wallet, kind, now):
+    """Do optional external reasoning before the write transaction.
+
+    Only a sanitized public feed question and reviewed facts leave the process.
+    No account/private tables are read into the model prompt.
+    """
+    with sqlite3.connect(d.DB_FILE, timeout=2) as c:
+        if not enabled(c, 'replies'):
+            return None
+        author = identity(c)
+        if not author:
+            return None
+        context_topic = None
+        if kind == 'post':
+            row = c.execute(
+                'SELECT p.content,u.id FROM feed_posts p JOIN users u ON u.wallet_address=p.wallet '
+                'WHERE p.id=? AND p.wallet=?',
+                (source_id,wallet),
+            ).fetchone()
+            if not row or row[1] == author[0]:
+                return None
+            text = d._feed_text_part(row[0]) if hasattr(d,'_feed_text_part') else re.split(
+                r'__(?:CHART|TRADE|CALL)__',row[0],maxsplit=1
+            )[0]
+        else:
+            source = c.execute(
+                'SELECT user_id,post_id,message,created_at,parent_reply_id FROM feed_replies WHERE id=?',
+                (source_id,),
+            ).fetchone()
+            if not source or source[0] == author[0] or source[1][:1] not in ('p','t'):
+                return None
+            member = c.execute('SELECT wallet_address FROM users WHERE id=?',(source[0],)).fetchone()
+            if not member or member[0] != wallet:
+                return None
+            text = _conversation_message(c,d,source,author[0],now)
+            previous = learning.prior(c,d,source,author[0])
+            context_topic = previous[0] if previous else None
+        if not MENTION.search(text):
+            return None
+        raw = MENTION.sub('',text).strip()
+        # Never send live-data questions to the reasoning provider. Their
+        # deterministic data modules are authoritative and privacy-scoped.
+        if prices.query(raw) or public_data.query(raw):
+            return None
+        deterministic = answer(text, context_topic)
+    smart = reasoner.reason(d, raw, context_topic, deterministic)
+    return (text, smart) if smart else None
+
+
+def _reasoning_for(text, prepared):
+    return prepared[1] if prepared and prepared[0] == text else None
+
 def reply_to_post(d,post_number,wallet,now=None):
     # Only a successfully authenticated NEW post; no edits, reposts or backfill.
     if type(post_number) is not int or post_number<=0:
@@ -280,6 +345,7 @@ def reply_to_post(d,post_number,wallet,now=None):
     now = time.time() if now is None else now
     market = _prepare_market(d,post_number,wallet,'post',now)
     public = _prepare_public(d,post_number,wallet,'post',now)
+    reasoning = _prepare_reasoning(d,post_number,wallet,'post',now)
     with sqlite3.connect(d.DB_FILE,timeout=8) as c:
         c.execute('BEGIN IMMEDIATE')
         if not enabled(c,'replies'):
@@ -293,10 +359,17 @@ def reply_to_post(d,post_number,wallet,now=None):
             return None
         text = d._feed_text_part(post[1]) if hasattr(d,'_feed_text_part') else re.split(r'__(?:CHART|TRADE|CALL)__',post[1],maxsplit=1)[0]
         response = answer(text,market=_market_for(text,market),public=_public_for(text,public))
+        smart = _reasoning_for(text,reasoning)
+        if smart and response and smart[0] == response[0]:
+            response = smart
         key = 'post-reply:'+str(post_number)
         if not response or c.execute('SELECT 1 FROM platform_assistant_events WHERE event_key=?',(key,)).fetchone() or not within_reply_limits(c,member[0],now):
             return None
         topic,message = response
+        if enabled(c,'learning'):
+            learning.record_contact(
+                c,'post',str(post_number),member[0],text,topic,topic,None,MENTION,now
+            )
         post_id = 'p'+str(post_number)
         cur = c.execute('INSERT INTO feed_replies(user_id,post_id,message,created_at,parent_reply_id) VALUES(?,?,?,?,NULL)',
                         (author[0],post_id,message,utcstamp(now)))
@@ -310,6 +383,7 @@ def reply_to(d, source_id, wallet, now=None):
     now = time.time() if now is None else now
     market = _prepare_market(d,source_id,wallet,'reply',now)
     public = _prepare_public(d,source_id,wallet,'reply',now)
+    reasoning = _prepare_reasoning(d,source_id,wallet,'reply',now)
     with sqlite3.connect(d.DB_FILE, timeout=8) as c:
         c.execute('BEGIN IMMEDIATE')
         if not enabled(c, 'replies'):
@@ -339,12 +413,22 @@ def reply_to(d, source_id, wallet, now=None):
                     topic = previous[0]
                 if topic:
                     response = topic, LABEL + LEARNABLE[topic]
+        smart = _reasoning_for(message,reasoning)
+        # Reviewed learned mappings outrank model wording. Otherwise a
+        # reasoned answer may refine only the same deterministic intent.
+        if smart and response is explicit and explicit and smart[0] == explicit[0]:
+            response = smart
         key = 'reply:' + str(source_id)
         if not response or c.execute('SELECT 1 FROM platform_assistant_events WHERE event_key=?', (key,)).fetchone():
             return None
         if not within_reply_limits(c,source[0],now):
             return None
         if use_learning:
+            detected = explicit[0] if explicit else None
+            learning.record_contact(
+                c,'reply',str(source_id),source[0],source[2],detected,response[0],
+                previous[0] if previous else None,MENTION,now
+            )
             observed = explicit[0] if explicit[0]!='scope' or response[0]=='scope' else None
             learning.observe(c,d,source_id,source,observed,previous,MENTION,LEARNABLE,now)
         topic, message = response

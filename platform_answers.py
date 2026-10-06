@@ -5,6 +5,158 @@ HOME = 'https://orcagent.fun/#app-home'
 MARKET = 'https://orcagent.fun/live-market'
 PORTFOLIO = 'https://orcagent.fun/#app-portfolio'
 
+ACTION_REQUEST = re.compile(
+    r"\b(?:can|could|would|will)\s+(?:you|u)\b|"
+    r"\b(?:do|handle|make|place)\s+(?:it|this|the\s+(?:buy|sell|trade))\s+for\s+me\b|"
+    r"\bfor\s+me\b|"
+    r"\b(?:kun|kan|wil|zou)\s+(?:je|jij|u)\b|"
+    r"\bvoor\s+mij\b",
+    re.I,
+)
+INSTRUCTION_REQUEST = re.compile(
+    r"\b(?:tell|show|explain|teach|walk)(?:\s+me)?\b.{0,50}\b(?:how|where|steps?)\b|"
+    r"\bhow\s+(?:do|can|should)\s+i\b|"
+    r"\b(?:kun|kan)\s+je\s+(?:me|mij)\s+(?:uitleggen|vertellen|laten\s+zien)\b|"
+    r"\bhoe\s+(?:kan|moet)\s+ik\b",
+    re.I,
+)
+BUY_WORD = re.compile(r"\b(?:buy|buying|purchase|kopen|koop)\b", re.I)
+SELL_WORD = re.compile(r"\b(?:sell|selling|verkopen|verkoop)\b", re.I)
+TRANSFER_WORD = re.compile(r"\b(?:send|transfer|stuur|verstuur|overmaken)\b", re.I)
+TIP_WORD = re.compile(r"\b(?:tip|tippen|fooi)\b", re.I)
+
+
+def _amount_named(text, unit, maximum):
+    m = re.search(
+        r"(?<![\w.])(?:\$)?(\d{1,9}(?:[.,]\d{1,9})?)\s*" + re.escape(unit) + r"\b",
+        text,
+        re.I,
+    )
+    if not m:
+        return None
+    value = m.group(1).replace(",", ".")
+    try:
+        number = float(value)
+    except ValueError:
+        return None
+    if not (0 < number <= maximum):
+        return None
+    return ("%f" % number).rstrip("0").rstrip(".")
+
+
+def _amount_sol(text):
+    return _amount_named(text, "SOL", 500)
+
+
+def _amount_usdc(text):
+    return _amount_named(text, "USDC", 100000000)
+
+
+def _token_symbol(text):
+    m = re.search(r"\$([A-Za-z][A-Za-z0-9_]{1,19})\b", text)
+    if m:
+        return m.group(1).upper()
+    m = re.search(
+        r"\b(?:buy|purchase|kopen|koop|sell|verkopen|verkoop)\s+(?:some\s+)?([A-Za-z][A-Za-z0-9_]{1,19})\b",
+        text,
+        re.I,
+    )
+    if not m:
+        return None
+    symbol = m.group(1).upper()
+    return None if symbol.lower() in {"for","me","it","this","token","usdc","some"} else symbol
+
+
+def _recipient(text):
+    matches = re.findall(r"(?<![\w@])@([A-Za-z0-9_]{2,32})\b", text)
+    return matches[-1] if matches else None
+
+
+def _trade_action_reply(text, context=None):
+    amount_sol = _amount_sol(text)
+    amount_usdc = _amount_usdc(text)
+    symbol = _token_symbol(text)
+    wants_sell = bool(SELL_WORD.search(text))
+    wants_buy = bool(BUY_WORD.search(text))
+    if context == "trade_action" and not (wants_buy or wants_sell):
+        wants_buy = True
+
+    action = "sell" if wants_sell and not wants_buy else "buy"
+    if action == "buy":
+        if amount_usdc and not amount_sol:
+            token_part = (" for $" + symbol) if symbol else ""
+            return (
+                "trade_action",
+                "Buys use SOL, not USDC. Tell me how much SOL you want to use" + token_part + ". "
+                "I’ll show the quote and costs first; you approve it in Phantom before anything is submitted.",
+            )
+        if symbol and amount_sol:
+            return (
+                "trade_action",
+                "Yes — I can help set up a " + amount_sol + " SOL buy for $" + symbol + ". "
+                "I’ll show the quote and costs first; you approve it in Phantom before anything is submitted.",
+            )
+        if symbol:
+            return (
+                "trade_action",
+                "Yes — I can help set up a buy for $" + symbol + ". How much SOL do you want to use? "
+                "You approve the transaction in Phantom before anything is submitted.",
+            )
+        if amount_sol:
+            return (
+                "trade_action",
+                "Yes — I can help set up a " + amount_sol + " SOL buy. Which token do you want? "
+                "You approve the transaction in Phantom before anything is submitted.",
+            )
+        return (
+            "trade_action",
+            "Yes — I can help set up the buy. Which token do you want, and how much SOL? "
+            "I’ll show the quote and costs first; you approve it in Phantom before anything is submitted.",
+        )
+
+    if symbol:
+        return (
+            "trade_action",
+            "Yes — I can help set up a sell for $" + symbol + ". How much do you want to sell? "
+            "I’ll show the quote first; you approve it in Phantom before anything is submitted.",
+        )
+    return (
+        "trade_action",
+        "Yes — I can help set up the sell. Which token do you want to sell, and how much? "
+        "I’ll show the quote first; you approve it in Phantom before anything is submitted.",
+    )
+
+
+def _transfer_action_reply(text):
+    amount = _amount_usdc(text)
+    recipient = _recipient(text)
+    is_tip = bool(TIP_WORD.search(text))
+    noun = "tip" if is_tip else "transfer"
+    if amount and recipient:
+        return (
+            "transfer_action",
+            "I can help set up a " + amount + " USDC " + noun + " to @" + recipient + ". "
+            "You review the recipient and amount, then approve it in Phantom before anything is sent.",
+        )
+    if recipient:
+        return (
+            "transfer_action",
+            "I can help set up the " + noun + " to @" + recipient + ". How much USDC do you want to send? "
+            "You approve it in Phantom before anything is sent.",
+        )
+    if amount:
+        return (
+            "transfer_action",
+            "I can help set up a " + amount + " USDC " + noun + ". Who do you want to send it to? "
+            "You approve it in Phantom before anything is sent.",
+        )
+    return (
+        "transfer_action",
+        "I can help set up the " + noun + ". Who should receive it, and how much USDC do you want to send? "
+        "You approve it in Phantom before anything is sent.",
+    )
+
+
 def specific(clean, context=None):
     """Resolve the requested action before broad topic FAQ matching."""
     text = clean.lower().strip()
@@ -16,6 +168,18 @@ def specific(clean, context=None):
     # Credentials take priority; these questions must never be treated as wallet steps.
     if has(r'seed|recovery phrase|private key|secret key|herstelzin|priv[eé]sleutel'):
         return None
+
+    # Delegated action intent must win over broad FAQ keywords. A user asking
+    # "can you buy for me?" is asking whether OrcAgent can help perform an
+    # action, not asking for a tutorial on where the Buy button lives.
+    delegated = bool(ACTION_REQUEST.search(text) and not INSTRUCTION_REQUEST.search(text))
+    if delegated:
+        if BUY_WORD.search(text) or SELL_WORD.search(text):
+            return _trade_action_reply(text, context)
+        if TRANSFER_WORD.search(text) or TIP_WORD.search(text):
+            return _transfer_action_reply(text)
+    if context == 'trade_action' and (_amount_sol(text) or _amount_usdc(text) or _token_symbol(text)):
+        return _trade_action_reply(text, context)
     if has(r'\b(?:fee|fees|cost|costs|kosten|kost)\b') and not has(r'\b(?:creator|referral|reward|rewards)\b'):
         return response('fees', 'Your trade review shows the platform fee, network costs and any token-account rent before confirmation. Check Fees & costs in the Buy/Sell screen: '+MARKET)
     if has(r'\b(?:stop.?loss|take.?profit|sl|tp)\b'):
