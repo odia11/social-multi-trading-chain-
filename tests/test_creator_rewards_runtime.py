@@ -46,8 +46,9 @@ assert post(operator,'/api/admin/creator-rewards/member',dict(user_id=ids[creato
 link=get(trader,f'/call/{call}/trade').location
 from urllib.parse import parse_qs,urlparse
 token=parse_qs(urlparse(link).query)['creator_context'][0]
-assert get(maker,'/creator-rewards').status_code==200
-assert 'no-store' in get(maker,'/creator-rewards').headers['Cache-Control']
+retired=get(maker,'/creator-rewards')
+assert retired.status_code in (301,302) and retired.location.endswith('/')
+assert not any(item and item[0]=='/creator-rewards' for item in d._NAVBAR_MORE_LINKS)
 page=get(operator,'/admin/creator-rewards')
 assert page.status_code==200,page.text[:300]
 assert '<script>creator</script>' not in page.text

@@ -69,7 +69,7 @@ INSERT INTO feed_posts(wallet,content,created_at) VALUES('member','A post','2026
     def test_every_answer_is_english_even_for_dutch_comments(self):
         for text,topic,phrase in [
             ('@Orcagent hoe deel ik een call?','share','tap Share call'),
-            ('@orcagent hoe krijg ik creator rewards?','creator','10%'),
+            ('@orcagent hoe krijg ik creator rewards?','creator','no longer part of OrcAgent'),
             ('@orcagent wat kost het?','fees','network costs'),
             ('What are the fees ? @orcagent','fees','network costs'),
             ('@orcagent share','share','tap Share call'),
@@ -95,7 +95,7 @@ INSERT INTO feed_posts(wallet,content,created_at) VALUES('member','A post','2026
             self.assertIn('OrcAgent today', reply)
             self.assertLessEqual(len(reply), 240)
         self.assertIn('Thanks for sharing!', p.answer("@orcagent I'm good, thanks!")[1])
-        for topic, query, route in [('portfolio','holdings','#app-portfolio'),('trading','charts','/live-market'),('calls','calls','#app-home'),('creator','creator','/creator-rewards'),('referral','referral','/referrals'),('share','share','/invitations')]:
+        for topic, query, route in [('portfolio','holdings','#app-portfolio'),('trading','charts','/live-market'),('calls','calls','#app-home'),('creator','creator','/token-launch'),('referral','referral','/referrals'),('share','share','/invitations')]:
             result = p.answer('@orcagent '+query)
             self.assertEqual(result[0],topic)
             self.assertIn('https://orcagent.fun/'+('' if route.startswith('/') else '')+route.lstrip('/'),result[1])

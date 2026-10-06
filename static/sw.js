@@ -14,7 +14,7 @@ var OA_NAV_SAFE_PREFIXES = [
   '/live-market','/wallet','/profile','/messages','/notifications','/groups',
   '/traders','/calls','/call','/following','/leaderboard','/watchlist','/history',
   '/referrals','/rewards','/settings','/auto-trading-bot','/bot','/token-launch',
-  '/token-launches','/invitations','/creator-rewards','/live-trades','/promote','/info'
+  '/token-launches','/invitations','/live-trades','/promote','/info'
 ];
 var OA_NAV_READY = new Map();
 var OA_NAV_INFLIGHT = new Map();
