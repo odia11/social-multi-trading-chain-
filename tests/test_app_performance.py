@@ -13,6 +13,7 @@ PERF = (ROOT / 'app_performance.py').read_text(encoding='utf-8')
 ENTRY = (ROOT / 'app_entry.py').read_text(encoding='utf-8')
 NGINX = (ROOT / 'deploy' / 'nginx-orcagent.conf').read_text(encoding='utf-8')
 LOADER = (ROOT / 'static' / 'page-loader.js').read_text(encoding='utf-8')
+SW = (ROOT / 'static' / 'sw.js').read_text(encoding='utf-8')
 
 
 def check(message, condition):
@@ -80,7 +81,6 @@ check('noncritical dashboard hydration is staggered through idle work',
 check('normal deploys repair nginx static compression on Certbot sites',
       'apply-nginx-performance.sh' in (ROOT/'deploy'/'install.sh').read_text(encoding='utf-8'))
 
-SW=(ROOT/'static'/'sw.js').read_text(encoding='utf-8')
 check('core route chunks warm only public static assets after first paint',
       'primeRouteAssets' in UX and 'CORE_ROUTES' in UX
       and "var key='/static/'+asset" in UX
