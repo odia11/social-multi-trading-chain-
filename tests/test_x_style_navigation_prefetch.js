@@ -1,6 +1,9 @@
 const fs=require('fs');
+const path=require('path');
 const vm=require('vm');
 const assert=require('assert');
+
+const ROOT=path.resolve(__dirname,'..');
 
 const handlers={};
 let networkFetches=0;
@@ -50,7 +53,7 @@ const context={
 };
 context.globalThis=context;
 vm.createContext(context);
-vm.runInContext(fs.readFileSync('static/sw.js','utf8'),context,{filename:'sw.js'});
+vm.runInContext(fs.readFileSync(path.join(ROOT,'static','sw.js'),'utf8'),context,{filename:'sw.js'});
 
 assert.ok(handlers.message,'message handler registered');
 assert.ok(handlers.fetch,'fetch handler registered');
