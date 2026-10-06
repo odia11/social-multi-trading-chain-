@@ -1,9 +1,43 @@
 // OrcAgent service worker — public app-shell cache + Web Push.
-// SECURITY INVARIANT: only /static/ GETs are cached. Authenticated HTML,
-// API responses, balances, feeds and wallet data are always network-only.
-var OA_STATIC_CACHE = 'orcagent-static-v13';
+// SECURITY INVARIANT: only /static/ GETs enter Cache Storage. Authenticated
+// navigation HTML may be warmed only in short-lived per-client RAM; APIs,
+// balances and wallet data are never persisted by the service worker.
+var OA_STATIC_CACHE = 'orcagent-static-v14';
 var OA_DEPLOY_RETRY_DELAYS = [250,500,1000,1500,2000,2500,3000,3500,4000];
+// X-style navigation warmup: authenticated HTML is NEVER written to Cache
+// Storage. A target document may live for a few seconds in this service
+// worker's RAM, scoped to the browser client that requested it, so the real
+// native navigation can reuse an already-started network request.
+var OA_NAV_TTL_MS = 7000;
+var OA_NAV_MAX_READY = 6;
+var OA_NAV_READY = new Map();
+var OA_NAV_INFLIGHT = new Map();
 function oaWait(ms){ return new Promise(function(resolve){ setTimeout(resolve, ms); }); }
+function oaNavHref(raw){
+  var u;
+  try{ u=new URL(raw,self.location.origin); }catch(_){ return ''; }
+  if(u.origin!==self.location.origin) return '';
+  var p=u.pathname||'/';
+  if(p.indexOf('/api/')===0 || p==='/sw.js' || p.indexOf('/phantom-callback')===0 ||
+     p.indexOf('/phantom-launch-callback')===0 || p.indexOf('/logout')===0) return '';
+  u.hash='';
+  return u.href;
+}
+function oaNavKey(clientId,href){ return String(clientId||'')+'|'+href; }
+function oaTrimNavWarm(now){
+  now=now||Date.now();
+  OA_NAV_READY.forEach(function(entry,key){
+    if(!entry || now-entry.ts>OA_NAV_TTL_MS) OA_NAV_READY.delete(key);
+  });
+  OA_NAV_INFLIGHT.forEach(function(entry,key){
+    if(!entry || now-entry.ts>OA_NAV_TTL_MS) OA_NAV_INFLIGHT.delete(key);
+  });
+  while(OA_NAV_READY.size>OA_NAV_MAX_READY){
+    var first=OA_NAV_READY.keys().next();
+    if(first.done) break;
+    OA_NAV_READY.delete(first.value);
+  }
+}
 function oaFetchThroughDeploy(req, attempt){
   return fetch(req.clone()).then(function(resp){
     if(attempt < OA_DEPLOY_RETRY_DELAYS.length &&
@@ -22,10 +56,65 @@ function oaFetchThroughDeploy(req, attempt){
     throw err;
   });
 }
+function oaStartNavPrefetch(clientId,rawUrl){
+  var href=oaNavHref(rawUrl);
+  if(!href) return Promise.resolve(null);
+  oaTrimNavWarm();
+  var key=oaNavKey(clientId,href), ready=OA_NAV_READY.get(key), pending=OA_NAV_INFLIGHT.get(key);
+  if(ready && Date.now()-ready.ts<=OA_NAV_TTL_MS) return Promise.resolve(ready.response.clone());
+  if(pending) return pending.promise;
+  var req=new Request(href,{
+    method:'GET',credentials:'include',cache:'no-store',redirect:'follow',
+    headers:{'Accept':'text/html,application/xhtml+xml','X-OrcAgent-Nav-Warm':'1'}
+  });
+  var record={href:href,clientId:String(clientId||''),ts:Date.now(),promise:null};
+  record.promise=oaFetchThroughDeploy(req,0).then(function(resp){
+    if(!resp || !resp.ok) return null;
+    var ctype=(resp.headers.get('content-type')||'').toLowerCase();
+    if(ctype.indexOf('text/html')===-1) return null;
+    OA_NAV_READY.set(key,{href:href,clientId:record.clientId,ts:Date.now(),response:resp.clone()});
+    oaTrimNavWarm();
+    return resp;
+  }).catch(function(){ return null; }).finally(function(){ OA_NAV_INFLIGHT.delete(key); });
+  OA_NAV_INFLIGHT.set(key,record);
+  return record.promise;
+}
+function oaFindNavWarm(event,href){
+  oaTrimNavWarm();
+  var ids=[event.clientId||'',event.resultingClientId||''];
+  for(var i=0;i<ids.length;i++){
+    if(!ids[i]) continue;
+    var key=oaNavKey(ids[i],href);
+    if(OA_NAV_READY.has(key)) return {key:key,ready:OA_NAV_READY.get(key)};
+    if(OA_NAV_INFLIGHT.has(key)) return {key:key,pending:OA_NAV_INFLIGHT.get(key)};
+  }
+  // Safari can omit clientId on a navigation FetchEvent. Browser cookies are
+  // origin-wide, so a same-origin warm entry from the only signed-in session
+  // is still safe to reuse. Keep this fallback short-lived and URL-exact.
+  var found=null;
+  OA_NAV_READY.forEach(function(entry,key){ if(!found && entry.href===href) found={key:key,ready:entry}; });
+  if(found) return found;
+  OA_NAV_INFLIGHT.forEach(function(entry,key){ if(!found && entry.href===href) found={key:key,pending:entry}; });
+  return found;
+}
+function oaNavigationResponse(event,req,href){
+  var warm=oaFindNavWarm(event,href);
+  if(warm && warm.ready){
+    OA_NAV_READY.delete(warm.key);
+    return Promise.resolve(warm.ready.response.clone());
+  }
+  if(warm && warm.pending){
+    return warm.pending.promise.then(function(resp){
+      OA_NAV_READY.delete(warm.key);
+      return resp ? resp.clone() : oaFetchThroughDeploy(req,0);
+    }).catch(function(){ return oaFetchThroughDeploy(req,0); });
+  }
+  return oaFetchThroughDeploy(req,0);
+}
 var OA_STATIC_BOOT = [
   '/static/page-lifecycle.js?v=2',
   '/static/app-ux.css?v=9',
-  '/static/app-ux.js?v=11',
+  '/static/app-ux.js?v=12',
   '/static/mobile-bottom-nav.css?v=9',
   '/static/mobile-bottom-nav.js?v=10'
 ];
@@ -47,6 +136,13 @@ self.addEventListener('activate', function(event) {
     }).then(function(){ return self.clients.claim(); })
   );
 });
+self.addEventListener('message', function(event){
+  var data=event.data||{};
+  if(data.type!=='oa-nav-prefetch' || typeof data.url!=='string') return;
+  var clientId=(event.source&&event.source.id)||'';
+  var work=oaStartNavPrefetch(clientId,data.url);
+  if(event.waitUntil) event.waitUntil(work);
+});
 self.addEventListener('fetch', function(event) {
   var req=event.request;
   if(req.method!=='GET') return;
@@ -54,12 +150,13 @@ self.addEventListener('fetch', function(event) {
   try{ url=new URL(req.url); }catch(_){ return; }
   if(url.origin!==self.location.origin) return;
 
-  // Never cache authenticated HTML, but keep an already-open OrcAgent PWA from
-  // falling onto nginx's 502 page when a user taps a route during the short
-  // Gunicorn restart window. The old document stays visible while this GET is
-  // retried; as soon as the backend answers, normal navigation continues.
+  // Native navigation stays authoritative. If pointer/touch intent already
+  // started this exact document request, reuse that short-lived in-memory
+  // response; otherwise fetch normally with the deploy-retry shield. No HTML
+  // response from this branch is ever written to Cache Storage.
   if(req.mode==='navigate'){
-    event.respondWith(oaFetchThroughDeploy(req,0));
+    var navHref=oaNavHref(url.href);
+    event.respondWith(navHref ? oaNavigationResponse(event,req,navHref) : oaFetchThroughDeploy(req,0));
     return;
   }
 
