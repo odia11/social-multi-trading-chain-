@@ -4,6 +4,8 @@
    copy-trade/leaderboard endpoints already used elsewhere in the app. */
 (function(){
 'use strict';
+var _routeScope=OrcPageLifecycle.routeScope('live-market','.pt-shell');
+window.__oaLiveMarketScope=_routeScope;
 
 /* ── helpers ── */
 function esc(s){
@@ -119,8 +121,8 @@ function toast(msg){
   if(!el) return;
   el.textContent = msg;
   el.classList.add('show');
-  clearTimeout(_toastTimer);
-  _toastTimer = setTimeout(function(){ el.classList.remove('show'); }, 2600);
+  _routeScope.clearTimeout(_toastTimer);
+  _toastTimer = _routeScope.setTimeout(function(){ el.classList.remove('show'); }, 2600);
 }
 function showMsg(el, text, ok){
   if(!el) return;
@@ -358,7 +360,7 @@ function updateLiveChartPrice(idx, nextPrice){
   var dot=document.getElementById('pt-live-dot-'+idx), halo=document.getElementById('pt-live-halo-'+idx), guide=document.getElementById('pt-live-guide-'+idx);
   var pill=wrap.querySelector('.pt-price-pill');
   if(!dot || !guide || st.lastX==null){ renderChartSvg(idx,st.candles,nextPrice); return; }
-  if(st.liveRaf) cancelAnimationFrame(st.liveRaf);
+  if(st.liveRaf) _routeScope.cancelAnimationFrame(st.liveRaf);
   var started=performance.now(), duration=Math.max(900,(typeof _pricePollBaseMs==='number'?_pricePollBaseMs:2000)-150);
   var head=st.lineHead||'', lx=Number(st.lastX).toFixed(2), fx=Number(st.firstX).toFixed(2), base=Number(st.priceH).toFixed(2);
   function frame(now){
@@ -373,9 +375,9 @@ function updateLiveChartPrice(idx, nextPrice){
     guide.setAttribute('y1',yc); guide.setAttribute('y2',yc);
     if(st.pts && st.pts.length) st.pts[st.pts.length-1].y=Number(yc);
     if(pill){pill.style.top=yc+'px'; pill.textContent=fmtPrice(p);}
-    if(q<1) st.liveRaf=requestAnimationFrame(frame); else {st.liveRaf=null; st.animPrice=null; st.renderedPrice=nextPrice;}
+    if(q<1) st.liveRaf=_routeScope.requestAnimationFrame(frame); else {st.liveRaf=null; st.animPrice=null; st.renderedPrice=nextPrice;}
   }
-  st.liveRaf=requestAnimationFrame(frame);
+  st.liveRaf=_routeScope.requestAnimationFrame(frame);
 }
 
 // Touch/mouse "chart-scrub" for the hand-rolled SVG chart above (the
@@ -445,7 +447,7 @@ function attachChartSvgScrub(idx){
   function scheduleScrub(clientX){
     pendingX = clientX;
     if(rafId != null) return;
-    rafId = requestAnimationFrame(function(){
+    rafId = _routeScope.requestAnimationFrame(function(){
       rafId = null;
       doScrub(pendingX);
     });
@@ -508,8 +510,8 @@ function attachChartSvgScrub(idx){
     tip.style.transform = 'translate('+tipX.toFixed(1)+'px,'+tipY.toFixed(1)+'px)';
   }
   function clearScrub(){
-    if(rafId != null){ cancelAnimationFrame(rafId); rafId = null; }
-    if(holdTimer){ clearTimeout(holdTimer); holdTimer = null; }
+    if(rafId != null){ _routeScope.cancelAnimationFrame(rafId); rafId = null; }
+    if(holdTimer){ _routeScope.clearTimeout(holdTimer); holdTimer = null; }
     line.style.display = 'none'; dot.style.display = 'none'; tip.style.display = 'none';
     wrap.classList.remove('pt-scrubbing');
     lastBest = -1;
@@ -522,8 +524,8 @@ function attachChartSvgScrub(idx){
     touchIntent = null;
     // Holding a finger still on the chart also starts scrubbing (then any
     // direction scrubs); a quick vertical swipe still scrolls the page.
-    if(holdTimer) clearTimeout(holdTimer);
-    holdTimer = setTimeout(function(){
+    if(holdTimer) _routeScope.clearTimeout(holdTimer);
+    holdTimer = _routeScope.setTimeout(function(){
       holdTimer = null;
       if(touchIntent != null) return;
       touchIntent = 'scrub';
@@ -537,7 +539,7 @@ function attachChartSvgScrub(idx){
     var dy = e.touches[0].clientY - touchStartY;
     if(touchIntent == null){
       if(Math.max(Math.abs(dx), Math.abs(dy)) < 7) return;
-      if(holdTimer){ clearTimeout(holdTimer); holdTimer = null; }
+      if(holdTimer){ _routeScope.clearTimeout(holdTimer); holdTimer = null; }
       touchIntent = Math.abs(dx) > Math.abs(dy) * 1.15 ? 'scrub' : 'scroll';
     }
     if(touchIntent !== 'scrub'){ clearScrub(); return; }
@@ -545,15 +547,15 @@ function attachChartSvgScrub(idx){
     scheduleScrub(e.touches[0].clientX);
   }
   function onMouseMove(e){ scheduleScrub(e.clientX); }
-  wrap.addEventListener('touchstart', onTouchStart, {passive:true});
-  wrap.addEventListener('touchmove', onTouchMove, {passive:false});
-  wrap.addEventListener('touchend', clearScrub, {passive:true});
-  wrap.addEventListener('touchcancel', clearScrub, {passive:true});
-  wrap.addEventListener('mousemove', onMouseMove);
-  wrap.addEventListener('mouseleave', clearScrub);
+  _routeScope.addEventListener(wrap,'touchstart', onTouchStart, {passive:true});
+  _routeScope.addEventListener(wrap,'touchmove', onTouchMove, {passive:false});
+  _routeScope.addEventListener(wrap,'touchend', clearScrub, {passive:true});
+  _routeScope.addEventListener(wrap,'touchcancel', clearScrub, {passive:true});
+  _routeScope.addEventListener(wrap,'mousemove', onMouseMove);
+  _routeScope.addEventListener(wrap,'mouseleave', clearScrub);
 
   st.scrubTeardown = function(){
-    if(rafId != null){ cancelAnimationFrame(rafId); rafId = null; }
+    if(rafId != null){ _routeScope.cancelAnimationFrame(rafId); rafId = null; }
     wrap.removeEventListener('touchstart', onTouchStart);
     wrap.removeEventListener('touchmove', onTouchMove);
     wrap.removeEventListener('touchend', clearScrub);
@@ -584,7 +586,7 @@ function drainChartFetchQueue(){
     if(!job) continue;
     if(job.state && job.state.destroyed){ job.resolve(null); continue; }
     _chartFetchActive++;
-    fetch(job.url).then(function(r){return r.json();}).then(job.resolve,function(){job.resolve(null);})
+    _routeScope.fetch(job.url).then(function(r){return r.json();}).then(job.resolve,function(){job.resolve(null);})
       .then(function(){ _chartFetchActive--; drainChartFetchQueue(); });
   }
 }
@@ -619,7 +621,7 @@ function candleCachePut(mint, pair, tf, candles, price){
     keys.slice(0, keys.length-_CANDLE_CACHE_MAX).forEach(function(k){ delete _candleCache[k]; });
   }
   if(_candleSaveTimer) return;
-  _candleSaveTimer=setTimeout(function(){
+  _candleSaveTimer=_routeScope.setTimeout(function(){
     _candleSaveTimer=null;
     try{ sessionStorage.setItem(_CANDLE_CACHE_KEY, JSON.stringify(_candleCache)); }catch(_){}
   }, 800);
@@ -709,8 +711,8 @@ function _flashTick(el, up){
   el.classList.remove('pt-tick-up','pt-tick-down');
   void el.offsetWidth;   // restart the flash on back-to-back ticks
   el.classList.add(up?'pt-tick-up':'pt-tick-down');
-  clearTimeout(el._tickTimer);
-  el._tickTimer=setTimeout(function(){el.classList.remove('pt-tick-up','pt-tick-down');},700);
+  _routeScope.clearTimeout(el._tickTimer);
+  el._tickTimer=_routeScope.setTimeout(function(){el.classList.remove('pt-tick-up','pt-tick-down');},700);
 }
 // Re-bases a token's 24h change and market cap from `from` to price `to`:
 // both scale with price over the same 24h window / the same supply.
@@ -782,7 +784,7 @@ function tickLivePrices(){
   _priceInFlight=true;
   var qs=new URLSearchParams();
   qs.set('groups',JSON.stringify(groups));
-  fetch('/api/market/prices-batch?'+qs.toString(),{credentials:'include',cache:'no-store'})
+  _routeScope.fetch('/api/market/prices-batch?'+qs.toString(),{credentials:'include',cache:'no-store'})
     .then(function(r){
       if(r.status===429||r.status===503){var e=new Error('backoff');e.retryable=true;throw e;}
       if(!r.ok)throw new Error('price batch failed');
@@ -813,8 +815,8 @@ function startLivePrices(){
   // Small scheduler tick, actual network cadence is controlled by
   // _priceNextAt. This avoids overlapping requests and gives 429/503 an
   // exponential backoff instead of immediately hammering the same endpoint.
-  _priceTimer=OrcPageLifecycle.setInterval(tickLivePrices,500);
-  document.addEventListener('visibilitychange',function(){
+  _priceTimer=_routeScope.setInterval(tickLivePrices,500);
+  _routeScope.addEventListener(document,'visibilitychange',function(){
     if(document.visibilityState==='visible'){
       _priceNextAt=0;
       tickLivePrices();
@@ -853,10 +855,10 @@ function mountChart(idx, mint, pairAddr, chain, seedPrice){
   chartTick(idx);
   // A one-point chart needs provider history as soon as the cache refreshes;
   // established charts can wait. Server caches chart responses for 30s.
-  st.timer = OrcPageLifecycle.setInterval(function(){
+  st.timer = _routeScope.setInterval(function(){
     if(!document.hidden && (st.candles||[]).length<2) chartTick(idx);
   }, 30000);
-  st.slowTimer=OrcPageLifecycle.setInterval(function(){
+  st.slowTimer=_routeScope.setInterval(function(){
     if(!document.hidden && (st.candles||[]).length>=2) chartTick(idx);
   }, 300000);
   attachChartSvgScrub(idx);
@@ -865,9 +867,9 @@ function unmountChart(idx){
   var st = _chartTimers[idx];
   if(!st) return;
   st.destroyed = true;
-  if(st.timer) OrcPageLifecycle.clearInterval(st.timer);
-  if(st.slowTimer) OrcPageLifecycle.clearInterval(st.slowTimer);
-  if(st.liveRaf) cancelAnimationFrame(st.liveRaf);
+  if(st.timer) _routeScope.clearInterval(st.timer);
+  if(st.slowTimer) _routeScope.clearInterval(st.slowTimer);
+  if(st.liveRaf) _routeScope.cancelAnimationFrame(st.liveRaf);
   if(st.scrubTeardown) st.scrubTeardown();
   delete _chartTimers[idx];
 }
@@ -893,7 +895,7 @@ var _cardObserver = null;
 
 function fetchSafety(idx, mint){
   var el = document.getElementById('pt-safety-'+idx);
-  fetch('/api/token/'+encodeURIComponent(mint)+'/safety', {credentials:'include'})
+  _routeScope.fetch('/api/token/'+encodeURIComponent(mint)+'/safety', {credentials:'include'})
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(d && d.ok){ _pfSafety[mint] = d; _pfRefresh(mint); }
@@ -912,7 +914,7 @@ function fetchFriends(idx, mint){
   // going blank when nobody you follow holds it, so the Friends section
   // reads as a real, always-there stat rather than something that only
   // appears sometimes.
-  fetch('/api/token/'+encodeURIComponent(mint)+'/co-traders', {credentials:'include'})
+  _routeScope.fetch('/api/token/'+encodeURIComponent(mint)+'/co-traders', {credentials:'include'})
     .then(function(r){ return r.json(); })
     .then(function(d){
       var users = (d && d.ok && d.users) || [];
@@ -932,7 +934,7 @@ function fetchFriends(idx, mint){
       if(friendsEl) friendsEl.innerHTML = '<span class="pt-friends-empty">👥 0 friends</span>';
     });
 
-  fetch('/api/token/'+encodeURIComponent(mint)+'/holders', {credentials:'include'})
+  _routeScope.fetch('/api/token/'+encodeURIComponent(mint)+'/holders', {credentials:'include'})
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(d && d.ok){ (_pfCommunity[mint] = _pfCommunity[mint] || {}).holders = Number(d.platform_holders)||0; _pfRefresh(mint); }
@@ -976,7 +978,7 @@ function observeCards(){
     cards.forEach(activateCard);
     return;
   }
-  _cardObserver = OrcPageLifecycle.intersectionObserver(function(entries){
+  _cardObserver = _routeScope.intersectionObserver(function(entries){
     entries.forEach(function(entry){
       var idx = entry.target.dataset.idx;
       if(entry.isIntersecting) activateCard(entry.target);
@@ -1051,7 +1053,7 @@ function copyCA(mint, el){
       if(textEl){
         var orig = textEl.textContent;
         textEl.textContent = 'Copied!';
-        setTimeout(function(){ textEl.textContent = orig; }, 1200);
+        _routeScope.setTimeout(function(){ textEl.textContent = orig; }, 1200);
       }
     }
   }).catch(function(){ toast('Could not copy — long-press the address instead'); });
@@ -1270,24 +1272,24 @@ function enableDragScroll(el){
   // NEXT genuine tap instead. mousedown clears it, so it can never outlive
   // the gesture that set it.
   var swallowClick = false;
-  el.addEventListener('click', function(e){
+  _routeScope.addEventListener(el,'click', function(e){
     if(!swallowClick) return;
     swallowClick = false;
     e.stopPropagation();
     e.preventDefault();
   }, true);
-  el.addEventListener('mousedown', function(e){
+  _routeScope.addEventListener(el,'mousedown', function(e){
     down = true; moved = false; swallowClick = false;
     startX = e.pageX; startScroll = el.scrollLeft;
     el.classList.add('pt-rail-dragging');
   });
-  window.addEventListener('mousemove', function(e){
+  _routeScope.addEventListener(window,'mousemove', function(e){
     if(!down) return;
     var dx = e.pageX - startX;
     if(Math.abs(dx) > 3) moved = true;
     el.scrollLeft = startScroll - dx;
   });
-  window.addEventListener('mouseup', function(){
+  _routeScope.addEventListener(window,'mouseup', function(){
     if(!down) return;
     down = false;
     el.classList.remove('pt-rail-dragging');
@@ -1295,9 +1297,9 @@ function enableDragScroll(el){
     // happens to be over on release. A tap that never moved must.
     swallowClick = moved;
   });
-  el.addEventListener('touchstart', function(){ _railsBeingTouched[el.id] = true; }, {passive:true});
-  el.addEventListener('touchend', function(){ _railsBeingTouched[el.id] = false; }, {passive:true});
-  el.addEventListener('touchcancel', function(){ _railsBeingTouched[el.id] = false; }, {passive:true});
+  _routeScope.addEventListener(el,'touchstart', function(){ _railsBeingTouched[el.id] = true; }, {passive:true});
+  _routeScope.addEventListener(el,'touchend', function(){ _railsBeingTouched[el.id] = false; }, {passive:true});
+  _routeScope.addEventListener(el,'touchcancel', function(){ _railsBeingTouched[el.id] = false; }, {passive:true});
 }
 
 function renderFeedList(){
@@ -1385,7 +1387,7 @@ function syncTokenProfile(){
     var card=document.getElementById('pt-card-'+idx);
     if(card){window.scrollTo(0,0);loadTokenProfileDetails(card,_profileMint);_pfMount(card,ST.tokens[idx]);}
     if(_chartTimers[idx] && _chartTimers[idx].candles)
-      requestAnimationFrame(function(){renderChartSvg(idx,_chartTimers[idx].candles,_cardRefPrice(_chartTimers[idx],idx));});
+      _routeScope.requestAnimationFrame(function(){renderChartSvg(idx,_chartTimers[idx].candles,_cardRefPrice(_chartTimers[idx],idx));});
   }
 }
 function loadTokenProfileDetails(card,mint){
@@ -1393,7 +1395,7 @@ function loadTokenProfileDetails(card,mint){
   if(!box || box.dataset.loading) return;
   box.dataset.loading='1';
   box.textContent='Loading token details…';
-  fetch('/api/token/info/'+encodeURIComponent(mint)).then(function(r){return r.json();}).then(function(info){
+  _routeScope.fetch('/api/token/info/'+encodeURIComponent(mint)).then(function(r){return r.json();}).then(function(info){
     if(!card.isConnected || card.dataset.mint!==mint) return;
     if(!info || !info.ok){box.textContent='Token details are temporarily unavailable.';return;}
     box.replaceChildren();
@@ -1413,8 +1415,8 @@ function loadTokenProfileDetails(card,mint){
     var row=document.createElement('div');row.className='pt-pf-contract';
     var addr=document.createElement('span');addr.className='pt-profile-address mono';addr.textContent=shortAddr(mint);addr.title=mint;row.appendChild(addr);
     var copy=document.createElement('button');copy.type='button';copy.className='pt-pf-copy';copy.textContent='Copy';
-    copy.addEventListener('click',function(){
-      var done=function(){copy.textContent='Copied';setTimeout(function(){copy.textContent='Copy';},1500);};
+    _routeScope.addEventListener(copy,'click',function(){
+      var done=function(){copy.textContent='Copied';_routeScope.setTimeout(function(){copy.textContent='Copy';},1500);};
       if(navigator.clipboard) navigator.clipboard.writeText(mint).then(done,function(){toast('Copy failed');}); else toast(mint);
     });
     row.appendChild(copy);
@@ -1464,17 +1466,17 @@ function _pfMount(card, t){
     back.setAttribute('aria-label', 'Back to Live Market');
     var share = _pfNode('button', 'pt-pf-icon pt-pf-share', '');
     share.type = 'button'; share.setAttribute('aria-label', 'Share token');
-    share.addEventListener('click', function(){
+    _routeScope.addEventListener(share,'click', function(){
       var url = location.origin + '/token/' + encodeURIComponent(mint);
       if(navigator.share) navigator.share({title: '$' + (t.symbol || ''), url: url}).catch(function(){});
       else if(navigator.clipboard) navigator.clipboard.writeText(url).then(function(){ toast('Link copied'); });
     });
     var star = _pfNode('button', 'pt-pf-icon pt-pf-star', '');
     star.type = 'button'; star.setAttribute('aria-label', 'Watchlist');
-    star.addEventListener('click', function(){
+    _routeScope.addEventListener(star,'click', function(){
       var w = card.querySelector('.pt-watch-btn');
       if(w) w.click();
-      setTimeout(function(){ _pfDecorate(card); }, 400);
+      _routeScope.setTimeout(function(){ _pfDecorate(card); }, 400);
     });
     bar.appendChild(back); bar.appendChild(share); bar.appendChild(star);
     card.insertBefore(bar, card.firstChild);
@@ -1494,7 +1496,7 @@ function _pfMount(card, t){
   // re-apply the empty-state wording and the position value after each.
   if(_pfObserver) _pfObserver.disconnect();
   if('MutationObserver' in window){
-    _pfObserver = OrcPageLifecycle.mutationObserver(function(){ _pfDecorate(card); });
+    _pfObserver = _routeScope.mutationObserver(function(){ _pfDecorate(card); });
     var stats = card.querySelector('.pt-card-stats');
     if(stats) _pfObserver.observe(stats, {subtree: true, childList: true, characterData: true});
   }
@@ -1591,7 +1593,7 @@ function _pfRefresh(mint){
 function _pfLoadHolding(card, t){
   var mint = t.mint, sell = card.querySelector('.pt-sell-btn');
   if(sell){ sell.disabled = true; sell.title = "You don't hold this token"; }
-  fetch('/api/trade/holding?chain=' + encodeURIComponent(t.chain || 'solana')
+  _routeScope.fetch('/api/trade/holding?chain=' + encodeURIComponent(t.chain || 'solana')
         + '&token_address=' + encodeURIComponent(mint), {credentials: 'include', headers: authHeaders()})
     .then(function(r){ return r.ok ? r.json() : null; })
     .then(function(d){
@@ -1608,7 +1610,7 @@ function _pfLoadHolding(card, t){
     .catch(function(){});
 }
 function _pfLoadActivity(card, mint){
-  fetch('/api/token/' + encodeURIComponent(mint) + '/activity', {credentials: 'include'})
+  _routeScope.fetch('/api/token/' + encodeURIComponent(mint) + '/activity', {credentials: 'include'})
     .then(function(r){ return r.ok ? r.json() : null; })
     .then(function(d){
       if(!d || !d.ok) return;
@@ -1758,7 +1760,7 @@ function loadFeed(isPoll){
     hide_honeypots: ST.hideHoneypots?1:0,
     verified_socials: ST.verifiedSocials?1:0
   });
-  fetch('/api/market/scanner?'+qs.toString(), {credentials:'include'})
+  _routeScope.fetch('/api/market/scanner?'+qs.toString(), {credentials:'include'})
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(!d || !d.ok) return;
@@ -1908,7 +1910,7 @@ function _paintFees(t, mode){
 // balance…" for ~290ms with the 10/25/50/Max buttons inert -- measured on a
 // throttled phone. By the time anyone taps Buy this has long since landed.
 function _prefetchBalances(){
-  fetch('/api/wallet/trading-balance', {credentials:'include'})
+  _routeScope.fetch('/api/wallet/trading-balance', {credentials:'include'})
     .then(function(r){ return r.json(); })
     .then(function(d){ if(d && d.ok){ _availCache = {t: Date.now(), data: d}; _sheetSolPrice=Number(d.sol_price_usd||0); } })
     .catch(function(){});
@@ -1925,7 +1927,7 @@ function _loadSheetHolding(t){
     _holdErr = true;
     _paintSheet();
   };
-  fetch('/api/trade/holding?chain=' + encodeURIComponent(t.chain)
+  _routeScope.fetch('/api/trade/holding?chain=' + encodeURIComponent(t.chain)
         + '&token_address=' + encodeURIComponent(t.mint),
         {credentials:'include', headers: authHeaders()})
     .then(function(r){ return r.json(); })
@@ -1957,7 +1959,7 @@ function _loadSheetBalance(chain){
     _paintSheet();
   };
   if(_availCache.data && now - _availCache.t < 12000){ use(_availCache.data); return; }
-  fetch('/api/wallet/trading-balance', {credentials:'include'})
+  _routeScope.fetch('/api/wallet/trading-balance', {credentials:'include'})
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(!d || !d.ok) return;
@@ -2338,13 +2340,13 @@ function _slideRelease(){
     if(!e.touches) e.preventDefault();
   }
   function up(){ if(!_sliding) return; _sliding = false; _slideRelease(); }
-  document.addEventListener('touchstart', down, {passive:true});
-  document.addEventListener('touchmove',  move, {passive:true});
-  document.addEventListener('touchend',   up);
-  document.addEventListener('touchcancel',up);
-  document.addEventListener('mousedown',  down);
-  document.addEventListener('mousemove',  move);
-  document.addEventListener('mouseup',    up);
+  _routeScope.addEventListener(document,'touchstart', down, {passive:true});
+  _routeScope.addEventListener(document,'touchmove',  move, {passive:true});
+  _routeScope.addEventListener(document,'touchend',   up);
+  _routeScope.addEventListener(document,'touchcancel',up);
+  _routeScope.addEventListener(document,'mousedown',  down);
+  _routeScope.addEventListener(document,'mousemove',  move);
+  _routeScope.addEventListener(document,'mouseup',    up);
   // A keyboard has no gesture to make, and Enter used to confirm in one
   // press -- which is the single accidental keystroke this whole control
   // exists to prevent, just moved off the touchscreen. The arrow keys walk
@@ -2352,7 +2354,7 @@ function _slideRelease(){
   // where it confirms, and Escape or Home puts it back. Deliberate by the
   // same measure, reachable without a touchscreen.
   var KEY_STEPS = 8;
-  document.addEventListener('keydown', function(e){
+  _routeScope.addEventListener(document,'keydown', function(e){
     if(_sheetIdx === null || !_slideOn) return;
     if(document.activeElement !== _sheetEl('pt-slide-knob')) return;
     var max = _slideTravel();
@@ -2412,15 +2414,15 @@ function _slideRelease(){
     // to be deliberate, near enough not to be a workout.
     if(dy > Math.min(140, window.innerHeight * 0.25)) closeBuySheet();
   }
-  document.addEventListener('touchstart', start, {passive:true});
-  document.addEventListener('touchmove',  move,  {passive:true});
-  document.addEventListener('touchend',   end);
-  document.addEventListener('touchcancel',end);
+  _routeScope.addEventListener(document,'touchstart', start, {passive:true});
+  _routeScope.addEventListener(document,'touchmove',  move,  {passive:true});
+  _routeScope.addEventListener(document,'touchend',   end);
+  _routeScope.addEventListener(document,'touchcancel',end);
 })();
 
 // Keypad and the percentage row. Delegated, so the buttons themselves carry
 // no handlers and the markup stays in the template.
-document.addEventListener('click', function(e){
+_routeScope.addEventListener(document,'click', function(e){
   // The close button and the scrim are wired here rather than with an inline
   // onclick in the template: everything in this file lives inside an IIFE,
   // so closeBuySheet() is not a global and `onclick="closeBuySheet()"` threw
@@ -2467,7 +2469,7 @@ document.addEventListener('click', function(e){
   }
 });
 
-document.addEventListener('keydown', function(e){
+_routeScope.addEventListener(document,'keydown', function(e){
   if(_sheetIdx === null) return;
   if(e.key === 'Escape'){ closeBuySheet(); return; }
   if(e.key === 'Backspace'){ _sheetTypeAmount(_sheetAmt.slice(0, -1)); e.preventDefault(); return; }
@@ -2518,7 +2520,7 @@ function confirmBuy(idx){
   // live "Slide to buy" for the seconds before it closes, which is an
   // invitation to buy the same token twice by accident.
   var bought = false;
-  fetch(url, {
+  _routeScope.fetch(url, {
     method:'POST', credentials:'include', headers: authHeaders(),
     body: JSON.stringify(body)
   }).then(function(r){ return r.json(); }).then(function(d){
@@ -2540,7 +2542,7 @@ function confirmBuy(idx){
       // that away before it can be read, so a buy that produced a hash holds
       // the sheet open longer -- long enough to read it and tap through.
       _showTxReceipt(idx, t, d);
-      setTimeout(function(){ closeBuyPanel(idx); },
+      _routeScope.setTimeout(function(){ closeBuyPanel(idx); },
                  document.getElementById('pt-txline') ? 7000 : 2600);
     } else {
       showMsg(msgEl, (d && (d.error||d.msg)) || 'Buy failed', false);
@@ -2589,7 +2591,7 @@ function handleSell(idx, btn){
   var body = Object.assign({symbol:t.symbol, token_address:t.mint,
                             pair_address:t.pair_address, side:'sell', amount_sol:0,
                             max_platform_fee_bps:Math.round(PT_FEE_RATE_TXN*10000)}, how);
-  fetch(url, {
+  _routeScope.fetch(url, {
     method:'POST', credentials:'include', headers: authHeaders(),
     body: JSON.stringify(body)
   }).then(function(r){ return r.json(); }).then(function(d){
@@ -2621,7 +2623,7 @@ function handleSell(idx, btn){
         _slideSetLabel('Sold');
         // Only if this is still the same sheet: opening another token inside
         // those seconds must not have its screen closed out from under it.
-        setTimeout(function(){
+        _routeScope.setTimeout(function(){
           if(String(_sheetIdx) === String(idx)) closeBuySheet();
         }, 7000);
       } else {
@@ -2636,13 +2638,13 @@ function handleSell(idx, btn){
 
 /* ── watchlist ── */
 function loadWatchlistSet(){
-  return fetch('/api/watchlist', {credentials:'include'}).then(function(r){ return r.json(); }).then(function(d){
+  return _routeScope.fetch('/api/watchlist', {credentials:'include'}).then(function(r){ return r.json(); }).then(function(d){
     watchSet = new Set((d && d.ok ? d.tokens : []).map(function(t){ return t.token_address; }));
   }).catch(function(){});
 }
 function toggleWatch(mint, sym, btn){
   var active = watchSet.has(mint);
-  fetch('/api/watchlist/'+encodeURIComponent(mint), {
+  _routeScope.fetch('/api/watchlist/'+encodeURIComponent(mint), {
     method: active?'DELETE':'POST', credentials:'include', headers: authHeaders(),
     body: active ? undefined : JSON.stringify({symbol:sym})
   }).then(function(r){ return r.json(); }).then(function(d){
@@ -2662,18 +2664,18 @@ function toggleWlEdit(){
   document.querySelectorAll('.pt-wl-remove').forEach(function(b){ b.classList.toggle('show', _wlEditMode); });
 }
 function removeWatchFromList(mint){
-  fetch('/api/watchlist/'+encodeURIComponent(mint), {method:'DELETE', credentials:'include', headers:authHeaders()})
+  _routeScope.fetch('/api/watchlist/'+encodeURIComponent(mint), {method:'DELETE', credentials:'include', headers:authHeaders()})
     .then(function(r){ return r.json(); }).then(function(d){
       if(d && d.ok){ watchSet.delete(mint); loadWatchlist(); renderFeedList(); }
     }).catch(function(){});
 }
 function loadWatchlist(){
-  fetch('/api/watchlist', {credentials:'include'}).then(function(r){ return r.json(); }).then(function(d){
+  _routeScope.fetch('/api/watchlist', {credentials:'include'}).then(function(r){ return r.json(); }).then(function(d){
     var addrs = (d && d.ok ? d.tokens : []) || [];
     var el = document.getElementById('pt-wl-list');
     if(!addrs.length){ el.innerHTML = '<div class="pt-tape-empty">No tokens watched</div>'; return; }
     var joined = addrs.map(function(t){ return t.token_address; }).join(',');
-    fetch('/api/dexscreener/tokens/'+joined).then(function(r){ return r.json(); }).then(function(pd){
+    _routeScope.fetch('/api/dexscreener/tokens/'+joined).then(function(r){ return r.json(); }).then(function(pd){
       var byAddr = {};
       (pd.pairs||[]).forEach(function(p){
         var a = p.baseToken && p.baseToken.address;
@@ -2771,7 +2773,7 @@ function launchCardHtml(l){
     +'<span class="pt-launch-buy">Buy</span></div>';
 }
 function loadLaunches(){
-  fetch('/api/token-launches?page=1', {credentials:'include'})
+  _routeScope.fetch('/api/token-launches?page=1', {credentials:'include'})
     .then(function(r){ return r.json(); })
     .then(function(d){
       var wrap=document.getElementById('pt-launch-wrap'), rail=document.getElementById('pt-launch-rail');
@@ -2788,7 +2790,7 @@ function loadLaunches(){
     .catch(function(){});
 }
 function loadSurges(){
-  fetch('/api/market/surges', {credentials:'include'})
+  _routeScope.fetch('/api/market/surges', {credentials:'include'})
     .then(function(r){ return r.json(); })
     .then(function(d){
       var wrap = document.getElementById('pt-surge-wrap');
@@ -2819,7 +2821,7 @@ function loadSurges(){
 }
 
 function loadTape(){
-  fetch('/api/market/tape').then(function(r){ return r.json(); }).then(function(d){
+  _routeScope.fetch('/api/market/tape').then(function(r){ return r.json(); }).then(function(d){
     var el = document.getElementById('pt-tape-list');
     var rows = (d && d.ok && d.trades) || [];
     var identity=JSON.stringify(rows.slice(0,14).map(function(t){return [t.id,t.tx_hash,t.timestamp,t.side,t.symbol,t.sol_amount,t.usd_amount];}));
@@ -2846,7 +2848,7 @@ function loadTape(){
    top-of-feed rail (renderTraderRail, mobile+desktop, above the fold) and
    the fuller right-rail list (desktop only, has the Copy-trade button). */
 function loadTraders(){
-  fetch('/api/leaderboard').then(function(r){ return r.json(); }).then(function(rows){
+  _routeScope.fetch('/api/leaderboard').then(function(r){ return r.json(); }).then(function(rows){
     rows = Array.isArray(rows) ? rows : [];
     var identity=JSON.stringify([rows,_copyStatus.copying,_copyStatus.target]);
     if(identity===_traderIdentity) return;
@@ -2902,7 +2904,7 @@ function renderTraderRail(rows){
 function toggleCopy(btn){
   var wallet = btn.dataset.wallet;
   var alreadyCopying = _copyStatus.copying && _copyStatus.target === wallet;
-  fetch('/api/copy-trade/toggle', {
+  _routeScope.fetch('/api/copy-trade/toggle', {
     method:'POST', credentials:'include', headers: authHeaders(),
     // No amount: the copy spends this user's own trade size, in USDC.
     body: JSON.stringify({wallet: wallet})
@@ -2921,7 +2923,7 @@ function toggleCopy(btn){
 
 /* ── market pulse ── */
 function loadPulse(){
-  fetch('/api/platform/stats').then(function(r){ return r.json(); }).then(function(d){
+  _routeScope.fetch('/api/platform/stats').then(function(r){ return r.json(); }).then(function(d){
     if(!d || !d.ok) return;
     var tradesEl = document.getElementById('pt-pulse-trades');
     var netEl    = document.getElementById('pt-pulse-net');
@@ -2933,7 +2935,7 @@ function loadPulse(){
       netEl.style.color = net<0 ? 'var(--red)' : '';
     }
   }).catch(function(){});
-  fetch('/api/online-count').then(function(r){ return r.json(); }).then(function(d){
+  _routeScope.fetch('/api/online-count').then(function(r){ return r.json(); }).then(function(d){
     var el = document.getElementById('pt-pulse-online');
     if(d && d.ok && el) el.textContent = d.online;
   }).catch(function(){});
@@ -2946,11 +2948,11 @@ function scrollToCard(idx){
   card.scrollIntoView({behavior:'smooth', block:'center'});
   var wasHi = card.classList.contains('hi');
   card.classList.add('hi');
-  if(!wasHi) setTimeout(function(){ card.classList.remove('hi'); }, 1600);
+  if(!wasHi) _routeScope.setTimeout(function(){ card.classList.remove('hi'); }, 1600);
 }
 
 function prependSearchedToken(mint, sym, pairAddr){
-  return fetch('/api/token/info/'+encodeURIComponent(mint)).then(function(r){ return r.json(); }).then(function(info){
+  return _routeScope.fetch('/api/token/info/'+encodeURIComponent(mint)).then(function(r){ return r.json(); }).then(function(info){
     var tok;
     if(info && info.ok){
       var pc = info.price_change || {};
@@ -2971,12 +2973,12 @@ function prependSearchedToken(mint, sym, pairAddr){
     renderStoryRail();
     renderFeedList();
     updateHeaderCounts();
-    setTimeout(function(){ if(_profileMint===tok.mint) syncTokenProfile(); else scrollToCard(0); }, 60);
+    _routeScope.setTimeout(function(){ if(_profileMint===tok.mint) syncTokenProfile(); else scrollToCard(0); }, 60);
   }).catch(function(){});
 }
 
 /* ── event wiring ── */
-document.addEventListener('click', function(e){
+_routeScope.addEventListener(document,'click', function(e){
   var el;
   if((el = e.target.closest('[data-action="token-profile"]'))){ setTokenProfile(el.dataset.mint); return; }
   if((el = e.target.closest('[data-action="story"]'))){ scrollToCard(el.dataset.idx); return; }
@@ -3012,16 +3014,16 @@ document.addEventListener('click', function(e){
 });
 
 /* ── init ── */
-document.addEventListener('DOMContentLoaded', function(){
+_routeScope.addEventListener(document,'DOMContentLoaded', function(){
   var liqSlider  = document.getElementById('pt-liq-slider');
   var liqValueEl = document.getElementById('pt-liq-value');
   var _liqDebounce = null;
-  liqSlider.addEventListener('input', function(){
+  _routeScope.addEventListener(liqSlider,'input', function(){
     ST.minLiquidity = parseInt(liqSlider.value, 10);
     liqValueEl.textContent = '$'+fmtShort(ST.minLiquidity)+' of $500K';
     updateAdvCount();
-    clearTimeout(_liqDebounce);
-    _liqDebounce = setTimeout(loadFeed, 350);
+    _routeScope.clearTimeout(_liqDebounce);
+    _liqDebounce = _routeScope.setTimeout(loadFeed, 350);
   });
 
   // Folded by default on a phone, open on desktop. Set from JS rather than
@@ -3057,10 +3059,10 @@ document.addEventListener('DOMContentLoaded', function(){
   // Again after webfonts settle, which is the common way the bar ends up a
   // few pixels taller than it measured on first paint.
   if(document.fonts && document.fonts.ready) document.fonts.ready.then(syncNavbarHeight);
-  window.addEventListener('resize', syncNavbarHeight);
-  window.addEventListener('orientationchange', syncNavbarHeight);
+  _routeScope.addEventListener(window,'resize', syncNavbarHeight);
+  _routeScope.addEventListener(window,'orientationchange', syncNavbarHeight);
 
-  if(filtersBtn) filtersBtn.addEventListener('click', function(){
+  if(filtersBtn) _routeScope.addEventListener(filtersBtn,'click', function(){
     var opening = !leftEl.classList.contains('mobile-open');
     closeMobileOverlays();
     // Re-measured on open rather than only at startup: the bar can have
@@ -3074,15 +3076,15 @@ document.addEventListener('DOMContentLoaded', function(){
       try{ document.body.style.overflow = 'hidden'; }catch(e){}
     }
   });
-  if(scrimEl) scrimEl.addEventListener('click', closeMobileOverlays);
+  if(scrimEl) _routeScope.addEventListener(scrimEl,'click', closeMobileOverlays);
 
   /* re-measure & redraw mounted charts on resize/rotation (e.g. desktop<->mobile
      breakpoint change) -- renderChartSvg() re-reads clientWidth each call, it
      just isn't re-triggered by a resize on its own between 5s poll ticks */
   var _resizeTimer = null;
-  window.addEventListener('resize', function(){
-    clearTimeout(_resizeTimer);
-    _resizeTimer = setTimeout(function(){
+  _routeScope.addEventListener(window,'resize', function(){
+    _routeScope.clearTimeout(_resizeTimer);
+    _resizeTimer = _routeScope.setTimeout(function(){
       Object.keys(_chartTimers).forEach(function(idx){ chartTick(idx); });
     }, 200);
   });
@@ -3134,7 +3136,7 @@ document.addEventListener('DOMContentLoaded', function(){
   loadTraders();
   loadWatchlist();
   loadPulse();
-  fetch('/api/copy-trade/status', {credentials:'include'}).then(function(r){ return r.json(); }).then(function(d){
+  _routeScope.fetch('/api/copy-trade/status', {credentials:'include'}).then(function(r){ return r.json(); }).then(function(d){
     if(d && d.ok){ _copyStatus.copying = d.copying; _copyStatus.target = d.target_wallet; loadTraders(); }
   }).catch(function(){});
 
@@ -3144,7 +3146,7 @@ document.addEventListener('DOMContentLoaded', function(){
   //
   // A deep link opens directly above. The scanner can refresh its numbers
   // later without replacing the focused card.
-  window.addEventListener('popstate',function(){
+  _routeScope.addEventListener(window,'popstate',function(){
     var q=new URLSearchParams(location.search);
     _profileMint=q.get('profile')==='1'?q.get('mint'):(q.get('addr')&&!q.get('mint')?q.get('addr'):null);
     syncTokenProfile();
@@ -3153,10 +3155,10 @@ document.addEventListener('DOMContentLoaded', function(){
   // Background tabs do zero market polling. Mobile browsers otherwise keep
   // old pages alive long enough to burn through rate limits for data nobody
   // can see, then return to the foreground already throttled.
-  OrcPageLifecycle.setInterval(function(){ if(!document.hidden) loadFeed(true); }, 15000);
-  OrcPageLifecycle.setInterval(function(){
+  _routeScope.setInterval(function(){ if(!document.hidden) loadFeed(true); }, 15000);
+  _routeScope.setInterval(function(){
     if(!_focusedMint || document.hidden) return;
-    fetch('/api/token/info/'+encodeURIComponent(_focusedMint)).then(function(r){return r.json();}).then(function(info){
+    _routeScope.fetch('/api/token/info/'+encodeURIComponent(_focusedMint)).then(function(r){return r.json();}).then(function(info){
       if(!info || !info.ok) return;
       var idx=ST.tokens.findIndex(function(t){return t.mint===_focusedMint;});
       if(idx<0) return;
@@ -3167,11 +3169,11 @@ document.addEventListener('DOMContentLoaded', function(){
       patchFeedList();
     }).catch(function(){});
   }, 15000);
-  OrcPageLifecycle.setInterval(function(){ if(!document.hidden) loadSurges(); }, 12000);
-  OrcPageLifecycle.setInterval(function(){ if(!document.hidden) loadLaunches(); }, 60000);
-  OrcPageLifecycle.setInterval(function(){ if(!document.hidden) loadTape(); }, 8000);
-  OrcPageLifecycle.setInterval(function(){ if(!document.hidden) loadTraders(); }, 30000);
-  OrcPageLifecycle.setInterval(function(){ if(!document.hidden) loadPulse(); }, 20000);
+  _routeScope.setInterval(function(){ if(!document.hidden) loadSurges(); }, 12000);
+  _routeScope.setInterval(function(){ if(!document.hidden) loadLaunches(); }, 60000);
+  _routeScope.setInterval(function(){ if(!document.hidden) loadTape(); }, 8000);
+  _routeScope.setInterval(function(){ if(!document.hidden) loadTraders(); }, 30000);
+  _routeScope.setInterval(function(){ if(!document.hidden) loadPulse(); }, 20000);
   // The one that makes the charts move. Started once for the whole page, not
   // per card -- it batches every visible chart into a single request.
   startLivePrices();

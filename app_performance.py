@@ -63,7 +63,7 @@ def install(appmod) -> None:
             # It owns poller/observer cleanup and aborts stale read requests
             # when a document leaves the foreground or enters bfcache.
             if 'page-lifecycle.js' not in html:
-                tags.append('<script src="/static/page-lifecycle.js?v=1"></script>')
+                tags.append('<script src="/static/page-lifecycle.js?v=2"></script>')
             if 'bfcache-guard.js' not in html:
                 tags.append('<script src="/static/bfcache-guard.js?v=2"></script>')
 

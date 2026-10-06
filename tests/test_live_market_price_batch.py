@@ -23,7 +23,7 @@ def test_price_poll_never_overlaps_and_backs_off():
 
 
 def test_hidden_tabs_do_not_poll_market_panels():
-    tail=JS[JS.rindex('OrcPageLifecycle.setInterval(function(){ if(!document.hidden) loadFeed(true);')-200:]
+    tail=JS[JS.rindex('_routeScope.setInterval(function(){ if(!document.hidden) loadFeed(true);')-200:]
     assert 'if(!document.hidden) loadFeed(true)' in tail
     assert 'if(!document.hidden) loadSurges()' in tail
     assert 'if(!document.hidden) loadTape()' in tail

@@ -68,9 +68,9 @@ drag_fn = drag_fn_m.group(1) if drag_fn_m else ''
 
 check('enableDragScroll binds mousedown, mousemove and mouseup so a mouse '
       'drag actually pans the rail',
-      "addEventListener('mousedown'" in drag_fn
-      and "addEventListener('mousemove'" in drag_fn
-      and "addEventListener('mouseup'" in drag_fn)
+      "_routeScope.addEventListener(el,'mousedown'" in drag_fn
+      and "_routeScope.addEventListener(window,'mousemove'" in drag_fn
+      and "_routeScope.addEventListener(window,'mouseup'" in drag_fn)
 
 check('...and it updates el.scrollLeft from the drag delta, rather than '
       'just tracking state without moving anything',
@@ -83,9 +83,9 @@ check('a genuine drag suppresses the click it would otherwise fire on '
 
 check('enableDragScroll also tracks touch start/end so callers can tell '
       'whether a rail is mid-gesture',
-      "addEventListener('touchstart'" in drag_fn
-      and ("addEventListener('touchend'" in drag_fn
-           or "addEventListener('touchcancel'" in drag_fn))
+      "_routeScope.addEventListener(el,'touchstart'" in drag_fn
+      and ("_routeScope.addEventListener(el,'touchend'" in drag_fn
+           or "_routeScope.addEventListener(el,'touchcancel'" in drag_fn))
 
 for rail_id in ('pt-story-rail', 'pt-surge-rail', 'pt-trader-rail'):
     check(f'enableDragScroll is actually called on #{rail_id}',

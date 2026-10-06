@@ -45,7 +45,9 @@ jobs:
         run: python tests/test_bot_entry_7pct_policy.py
 
       - name: PWA lifecycle cleanup regression
-        run: python tests/test_page_lifecycle_cleanup.py
+        run: |
+          python tests/test_page_lifecycle_cleanup.py
+          node tests/test_lazy_route_unmount_cleanup.js
 
       - name: OrcAgent security regression checks
         run: |
