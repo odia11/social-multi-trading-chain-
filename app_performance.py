@@ -68,7 +68,7 @@ def install(appmod) -> None:
                 tags.append('<script src="/static/bfcache-guard.js?v=2"></script>')
 
             style('app-ux.css', '/static/app-ux.css?v=9', ' id="oa-app-ux-css"')
-            script('app-ux.js', '/static/app-ux.js?v=11', ' id="oa-app-ux-js"')
+            script('app-ux.js', '/static/app-ux.js?v=12', ' id="oa-app-ux-js"')
 
             # The navbar is rendered later in <body>, and its JS used to be the
             # thing that only then discovered the fixed mobile bottom-nav
