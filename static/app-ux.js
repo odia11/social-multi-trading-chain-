@@ -51,12 +51,21 @@ function warmRoute(path,urgent){
   if(navigator.connection&&navigator.connection.saveData)return;
   (ROUTE_ASSETS[routeKey(path)]||[]).forEach(function(asset){warmAsset(asset,!!urgent)});
 }
+var NAV_WARM_SAFE_PREFIXES=[
+  '/live-market','/wallet','/profile','/messages','/notifications','/groups',
+  '/traders','/calls','/call','/following','/leaderboard','/watchlist','/history',
+  '/referrals','/rewards','/settings','/auto-trading-bot','/bot','/token-launch',
+  '/token-launches','/invitations','/creator-rewards','/live-trades','/promote','/info'
+];
 function navWarmable(u){
   if(!u)return false;
   var p=u.pathname||'/';
-  if(p.indexOf('/api/')===0||p==='/sw.js'||p.indexOf('/phantom-callback')===0||
-     p.indexOf('/phantom-launch-callback')===0||p.indexOf('/logout')===0)return false;
-  return true;
+  if(p==='/')return true;
+  for(var i=0;i<NAV_WARM_SAFE_PREFIXES.length;i++){
+    var base=NAV_WARM_SAFE_PREFIXES[i];
+    if(p===base||p.indexOf(base+'/')===0)return true;
+  }
+  return false;
 }
 function warmDocument(u){
   if(!navWarmable(u)||!('serviceWorker' in navigator))return;
