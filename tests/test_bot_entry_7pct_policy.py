@@ -114,11 +114,13 @@ def test_hard_seven_percent_floor_and_user_truth():
 def test_production_entry_and_ui_use_policy():
     root = os.path.dirname(os.path.dirname(__file__))
     entry = open(os.path.join(root, 'app_entry.py'), encoding='utf-8').read()
+    dashboard = open(os.path.join(root, 'dashboard.py'), encoding='utf-8').read()
     bot = open(os.path.join(root, 'templates', 'auto_trading_bot.html'), encoding='utf-8').read()
     home = open(os.path.join(root, 'static', 'home-mobile.js'), encoding='utf-8').read()
 
     assert 'from bot_entry_policy import install as _install_bot_entry_policy' in entry
     assert '_install_bot_entry_policy(_dashboard)' in entry
+    assert '_bot_gainers_eligible(_td)' in dashboard, 'detailed pre-entry token snapshot must pass the hard entry policy'
     assert 'id="strategy-entry"' in bot
     assert "r.entry_trigger_pct||7" in bot
     assert "open+'/'+(max&&Number.isFinite(max)?max:'—')+' open trades'" in home
