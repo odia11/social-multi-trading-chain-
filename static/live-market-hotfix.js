@@ -38,6 +38,6 @@ function enforceSearchState(){
  var root=document.querySelector('.pt-nb-topbar');if(root){root.querySelectorAll('.pt-nb-logo,.pt-nb-menu-btn,.pt-nb-nav,.pt-nb-right,.pt-nb-more-wrap').forEach(function(el){if(!el.closest('.pt-nb-search-wrap'))el.style.setProperty('display','none','important')})}
  wrap.style.setProperty('position','fixed','important');wrap.style.setProperty('inset','0 0 auto 0','important');wrap.style.setProperty('width','100vw','important');wrap.style.setProperty('max-width','100vw','important');wrap.style.setProperty('margin','0','important');wrap.style.setProperty('z-index','1450','important')
 }
-function boot(){installFixStyles();enforceSearchState();new MutationObserver(enforceSearchState).observe(document.body,{attributes:true,attributeFilter:['class'],childList:true,subtree:true})}
+function boot(){installFixStyles();enforceSearchState();OrcPageLifecycle.mutationObserver(enforceSearchState).observe(document.body,{attributes:true,attributeFilter:['class'],childList:true,subtree:true})}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })();

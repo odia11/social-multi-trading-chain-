@@ -50,7 +50,7 @@ function _shouldLegacyPoll(){
      fallback behaviour. */
   return document.hidden || !document.getElementById('pt-nb-notif-badge');
 }
-setInterval(function(){if(_shouldLegacyPoll())_pollNotifCount()},30000);
+OrcPageLifecycle.setInterval(function(){if(_shouldLegacyPoll())_pollNotifCount()},30000);
 if(!document.getElementById('pt-nb-notif-badge'))_pollNotifCount();
 
 async function _notifCsrfHeaders(){

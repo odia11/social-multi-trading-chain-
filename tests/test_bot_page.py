@@ -73,7 +73,7 @@ check('results in dollars, never a USDC number labelled SOL',
       'usd(r.best_trade.pnl_usd,true)' in T and 'fmtSol' not in T and 'Trading Capital' in h)
 check('pull-to-refresh and the poll refresh status and activity together',
       'initPullToRefresh({onRefresh:refreshAll})' in T
-      and 'setInterval(function(){if(!document.hidden)refreshAll()},20000);' in T)
+      and 'OrcPageLifecycle.setInterval(function(){if(!document.hidden)refreshAll()},20000);' in T)
 check('the activity card has its own styles',
       'body.oa-bot-page .bot-activity{' in read('static', 'approved-bot.css'))
 js = T[T.index('<script>\nvar CSRF'):]; js = js[len('<script>'):js.index('</script>')].replace('{{ csrf_token|tojson }}', '""')

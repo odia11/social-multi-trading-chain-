@@ -81,8 +81,8 @@ function start(){
     return;
   }
   refresh(true);
-  if(timer)clearInterval(timer);
-  timer=setInterval(function(){refresh(false)},POLL_MS);
+  if(timer)OrcPageLifecycle.clearInterval(timer);
+  timer=OrcPageLifecycle.setInterval(function(){refresh(false)},POLL_MS);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 

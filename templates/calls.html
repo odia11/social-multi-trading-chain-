@@ -659,7 +659,7 @@ window.addEventListener('pageshow', function(e){
   function _safeCall(fn){
     try{ if(typeof fn === 'function') fn(); }catch(e){}
   }
-  setInterval(function(){
+  OrcPageLifecycle.setInterval(function(){
     if(document.hidden) return;
     if(_isTypingOrFocused()) return;
     if(_modalOpen()) return;

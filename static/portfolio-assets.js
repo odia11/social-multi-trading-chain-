@@ -58,7 +58,7 @@ function boot(){
   },true);
   if(window.MutationObserver){
     var timer=null;
-    new MutationObserver(function(){
+    OrcPageLifecycle.mutationObserver(function(){
       clearTimeout(timer);
       timer=setTimeout(function(){polishButtons(holdings);},0);
     }).observe(holdings,{childList:true,subtree:true});

@@ -137,13 +137,13 @@ function syncModalLock(){if(!window.matchMedia('(max-width:768px)').matches)retu
 
 /* Observe class/style only on modal shells. */
 var modalObserved=typeof WeakSet!=='undefined'?new WeakSet():null;
-var modalAttrObserver=window.MutationObserver?new MutationObserver(function(){syncModalLock()}):null;
+var modalAttrObserver=window.MutationObserver?OrcPageLifecycle.mutationObserver(function(){syncModalLock()}):null;
 function observeModal(el){if(!modalAttrObserver||!isModalNode(el))return;if(modalObserved&&modalObserved.has(el))return;if(modalObserved)modalObserved.add(el);modalAttrObserver.observe(el,{attributes:true,attributeFilter:['class','style']})}
 function observeModalsIn(root){if(!root||root.nodeType!==1)return;if(isModalNode(root))observeModal(root);if(root.querySelectorAll)root.querySelectorAll(MODAL_SEL).forEach(observeModal)}
 
 /* Keep Messages' fullscreen thread truly fullscreen even though every normal
    page gets the shared bottom navigation. */
-function watchThread(){var main=document.querySelector('.msgs-main');if(!main)return;function sync(){document.body.classList.toggle('oa-thread-open',main.classList.contains('thread-open'))}sync();if(window.MutationObserver)new MutationObserver(sync).observe(main,{attributes:true,attributeFilter:['class']})}
+function watchThread(){var main=document.querySelector('.msgs-main');if(!main)return;function sync(){document.body.classList.toggle('oa-thread-open',main.classList.contains('thread-open'))}sync();if(window.MutationObserver)OrcPageLifecycle.mutationObserver(sync).observe(main,{attributes:true,attributeFilter:['class']})}
 
 function ready(){
   document.body.classList.add('oa-shared-ux');
@@ -157,7 +157,7 @@ function ready(){
     },{once:true});
   }
   document.querySelectorAll(MODAL_SEL).forEach(observeModal);
-  if(window.MutationObserver)new MutationObserver(function(ms){
+  if(window.MutationObserver)OrcPageLifecycle.mutationObserver(function(ms){
     var modalAdded=false;
     ms.forEach(function(m){m.addedNodes.forEach(function(n){if(n.nodeType!==1)return;tuneTree(n);observeModalsIn(n);if(isModalNode(n)||(n.querySelector&&n.querySelector(MODAL_SEL)))modalAdded=true})});
     if(modalAdded)syncModalLock();

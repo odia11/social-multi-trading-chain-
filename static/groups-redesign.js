@@ -34,7 +34,7 @@ function watchModals(){
  var mods=document.querySelectorAll('.modal-backdrop');
  if(!mods.length)return;
  if(window.MutationObserver){
-   mods.forEach(function(m){new MutationObserver(syncModalLock).observe(m,{attributes:true,attributeFilter:['class','style']})});
+   mods.forEach(function(m){OrcPageLifecycle.mutationObserver(syncModalLock).observe(m,{attributes:true,attributeFilter:['class','style']})});
  }
  document.addEventListener('click',function(){setTimeout(syncModalLock,0)},true);
  document.addEventListener('keydown',function(){setTimeout(syncModalLock,0)},true);

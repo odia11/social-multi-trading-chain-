@@ -265,9 +265,9 @@ function boot(){
       btn.addEventListener('click',function(){loadHistory()});
     });
   }
-  if($('oa-tip-stats'))setInterval(function(){if(!document.hidden)refreshStats()},30000);
+  if($('oa-tip-stats'))OrcPageLifecycle.setInterval(function(){if(!document.hidden)refreshStats()},30000);
   if($('oa-profile-balance')){
-    setInterval(function(){if(!document.hidden)refreshProfileBalance()},15000);
+    OrcPageLifecycle.setInterval(function(){if(!document.hidden)refreshProfileBalance()},15000);
     document.addEventListener('visibilitychange',function(){
       if(!document.hidden)refreshProfileBalance();
     });

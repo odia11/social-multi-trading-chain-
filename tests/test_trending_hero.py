@@ -152,7 +152,7 @@ check('...placed in the feed, right before the posts',
 check('...with the token card as its attachment and votes/like as its action row',
       'oa-th-embed' in js and 'oa-th-act oa-th-vote bull' in js and 'oa-th-act oa-th-like' in js)
 check('...autoplays the carousel calmly from right to left',
-      'AUTOPLAY_MS = 6500' in js and 'setInterval(advance,AUTOPLAY_MS)' in js
+      'AUTOPLAY_MS = 6500' in js and 'OrcPageLifecycle.setInterval(advance,AUTOPLAY_MS)' in js
       and 'translate3d(-' in js and 'oa-th-clone' in js)
 check('...uses each token banner as the full card background',
       'data-banner=' in js and 'card.style.backgroundImage' in js)

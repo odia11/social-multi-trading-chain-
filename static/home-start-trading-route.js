@@ -58,7 +58,7 @@ window.addEventListener('click',intercept,true);
 function boot(){
   normalize(document);
   try{
-    new MutationObserver(function(mutations){
+    OrcPageLifecycle.mutationObserver(function(mutations){
       mutations.forEach(function(m){
         m.addedNodes.forEach(function(n){
           if(n.nodeType!==1)return;

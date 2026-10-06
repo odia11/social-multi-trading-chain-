@@ -278,7 +278,7 @@ function _promotePollShowResult(text, colorVar){
 }
 
 async function _promotePollStatus(){
-  if(_promotePollTimer) clearInterval(_promotePollTimer);
+  if(_promotePollTimer) OrcPageLifecycle.clearInterval(_promotePollTimer);
   _promotePollAttempts = 0;
   _promotePollShowResult('Waiting for on-chain confirmation…', '--sub');
 
@@ -288,37 +288,37 @@ async function _promotePollStatus(){
       var r = await fetch('/api/promote/' + _promoId + '/status', {credentials: 'include'});
       var d = await r.json();
       if(!d.ok){
-        clearInterval(_promotePollTimer);
+        OrcPageLifecycle.clearInterval(_promotePollTimer);
         _promotePollShowResult(d.msg || 'Could not check status', '--red');
         return;
       }
       if(d.status === 'confirmed'){
-        clearInterval(_promotePollTimer);
+        OrcPageLifecycle.clearInterval(_promotePollTimer);
         _promotePollShowResult('✓ Payment confirmed — your promotion is live!', '--green');
         return;
       }
       if(d.status === 'failed'){
-        clearInterval(_promotePollTimer);
+        OrcPageLifecycle.clearInterval(_promotePollTimer);
         _promotePollShowResult('Payment failed — please try again or contact support.', '--red');
         return;
       }
       if(_promotePollAttempts >= PROMOTE_POLL_MAX_ATTEMPTS){
-        clearInterval(_promotePollTimer);
+        OrcPageLifecycle.clearInterval(_promotePollTimer);
         _promotePollShowResult('Still pending after 2 minutes — check back later or contact support.', '--red');
         return;
       }
       _promotePollShowResult('Waiting for on-chain confirmation… (' + _promotePollAttempts + '/' + PROMOTE_POLL_MAX_ATTEMPTS + ')', '--sub');
     }catch(e){
-      clearInterval(_promotePollTimer);
+      OrcPageLifecycle.clearInterval(_promotePollTimer);
       _promotePollShowResult('Network error while checking status.', '--red');
     }
   }
 
   // Assign the interval BEFORE the first tick runs, so _tick's clearInterval
   // calls (on confirmed/failed/timeout/error) actually stop it — otherwise
-  // clearInterval(_promotePollTimer) would clear `null` on that first check
+  // OrcPageLifecycle.clearInterval(_promotePollTimer) would clear `null` on that first check
   // and the interval would start regardless of its outcome.
-  _promotePollTimer = setInterval(_tick, 3000);
+  _promotePollTimer = OrcPageLifecycle.setInterval(_tick, 3000);
   _tick(); // fire the first check immediately instead of waiting 3s
 }
 

@@ -937,7 +937,7 @@ function _closeThreadView() {
   _activePeerId = null;
   _threadRequestSeq++;
   _renderedMessages = [];
-  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  if (_pollTimer) { OrcPageLifecycle.clearInterval(_pollTimer); _pollTimer = null; }
   _renderConvList();
   // Put the list back where it was before the thread covered it. Has to wait
   // a frame: the document only regains its full height once the lock above is
@@ -1022,8 +1022,8 @@ async function _openThread(peerId, peerUsername, peerWallet) {
   _renderedMessages = [];
   await loadThread(peerId, true);
 
-  if (_pollTimer) clearInterval(_pollTimer);
-  _pollTimer = setInterval(function() {
+  if (_pollTimer) OrcPageLifecycle.clearInterval(_pollTimer);
+  _pollTimer = OrcPageLifecycle.setInterval(function() {
     if (_activePeerId) loadThread(_activePeerId);
   }, 5000);
 }
@@ -1819,13 +1819,13 @@ async function _init() {
 
 _init();
 fetch('/api/heartbeat', {method:'POST', headers:{'X-CSRF-Token': _csrfToken}}).catch(function(){});
-setInterval(function(){
+OrcPageLifecycle.setInterval(function(){
   fetch('/api/heartbeat', {method:'POST', headers:{'X-CSRF-Token': _csrfToken}}).catch(function(){});
 }, 45000);
 // Re-poll the conversation list so peer online-status (and previews/unread
 // counts) stay fresh without a page reload -- same 5s cadence already used
 // by the embedded DM panel's auto-refresh, for consistency.
-setInterval(loadConversations, 5000);
+OrcPageLifecycle.setInterval(loadConversations, 5000);
 </script>
 <script src="/static/low-balance-modal.js?v={{ app_version }}"></script>
 <script src="/static/delete-convo-modal.js?v={{ app_version }}"></script>

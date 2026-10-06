@@ -59,6 +59,11 @@ def install(appmod) -> None:
             # pass actually runs before this hook in the real per-request
             # order, despite installing after it -- Flask runs after_request
             # hooks in reverse install() order (see app_entry.py).
+            # Install the page lifecycle before deferred first-party bundles.
+            # It owns poller/observer cleanup and aborts stale read requests
+            # when a document leaves the foreground or enters bfcache.
+            if 'page-lifecycle.js' not in html:
+                tags.append('<script src="/static/page-lifecycle.js?v=1"></script>')
             if 'bfcache-guard.js' not in html:
                 tags.append('<script src="/static/bfcache-guard.js?v=2"></script>')
 

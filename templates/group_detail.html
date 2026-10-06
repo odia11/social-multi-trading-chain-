@@ -1042,8 +1042,8 @@ function _toggleGroupNotify(){
    an in-progress reply aren't disrupted by a refresh that found nothing new. */
 var _postsPollTimer = null;
 function _startPostsPoll(){
-  clearInterval(_postsPollTimer);
-  _postsPollTimer = setInterval(function(){
+  OrcPageLifecycle.clearInterval(_postsPollTimer);
+  _postsPollTimer = OrcPageLifecycle.setInterval(function(){
     fetch('/api/groups/'+_groupId+'/posts', {credentials:'include'}).then(function(r){return r.json();}).then(function(d){
       if(!d.ok) return;
       var sig = d.posts.map(function(p){ return p.id; }).join(',');
@@ -1604,8 +1604,8 @@ function _submitPost(){
 var _typingPollTimer = null;
 var _typingPingTimer = null;
 function _startTypingPoll(){
-  clearInterval(_typingPollTimer);
-  _typingPollTimer = setInterval(_pollTyping, 3000);
+  OrcPageLifecycle.clearInterval(_typingPollTimer);
+  _typingPollTimer = OrcPageLifecycle.setInterval(_pollTyping, 3000);
   _pollTyping();
 }
 function _pollTyping(){

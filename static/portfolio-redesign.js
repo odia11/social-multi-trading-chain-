@@ -79,7 +79,7 @@ function boot(){
 
   if(holdings&&window.MutationObserver){
     var pctTimer=null;
-    new MutationObserver(function(){clearTimeout(pctTimer);pctTimer=setTimeout(function(){sanitizeAssetPercentages(holdings)},50)}).observe(holdings,{childList:true,subtree:true});
+    OrcPageLifecycle.mutationObserver(function(){clearTimeout(pctTimer);pctTimer=setTimeout(function(){sanitizeAssetPercentages(holdings)},50)}).observe(holdings,{childList:true,subtree:true});
     sanitizeAssetPercentages(holdings);
   }
 

@@ -33,7 +33,7 @@
   var cap=line('Market cap','Loading…');details.appendChild(cap);
   var capValue=cap.querySelector('b');
   if('IntersectionObserver' in window){
-   var observer=new IntersectionObserver(function(entries){
+   var observer=OrcPageLifecycle.intersectionObserver(function(entries){
     if(!entries.some(function(e){return e.isIntersecting}))return;
     observer.disconnect();
     fetch('/api/token/info/'+encodeURIComponent(data.mint)).then(function(r){return r.json()}).then(function(info){
