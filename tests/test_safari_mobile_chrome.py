@@ -22,9 +22,11 @@ checks={
       '#mobile-nav,#mob-bottom-nav{display:none!important}' in CSS,
  'bfcache helper does not silence native pageshow listeners':
       'stopImmediatePropagation' not in BF,
- 'service worker boot cache uses the corrected nav + lifecycle bundles':
-      'orcagent-static-v15' in SW and 'mobile-bottom-nav.js?v=10' in SW
-      and 'mobile-bottom-nav.css?v=9' in SW and 'page-lifecycle.js?v=2' in SW,
+ 'service worker boot cache is scoped to the current deploy and boots the corrected nav + lifecycle bundles':
+      "var OA_STATIC_CACHE = 'orcagent-static-'+OA_BUILD_VERSION" in SW
+      and "oaStaticBuild('/static/mobile-bottom-nav.js')" in SW
+      and "oaStaticBuild('/static/mobile-bottom-nav.css')" in SW
+      and "oaStaticBuild('/static/page-lifecycle.js')" in SW,
 }
 for label,ok in checks.items():
     print(('PASS' if ok else 'FAIL')+' - '+label)

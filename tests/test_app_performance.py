@@ -40,8 +40,9 @@ check('ordinary mobile bottom space is tightened from the old 132px reserve',
       and 'calc(132px + env' not in CSS)
 check('portfolio gets a compact but safe fixed-nav reserve',
       'body.oa-shared-ux.oa-portfolio .wlt-center' in CSS)
-check('every HTML response gets the current shared performance assets early',
-      'app-ux.css?v=9' in PERF and 'app-ux.js?v=12' in PERF)
+check('every HTML response gets the shared performance assets and normalizes them to the deploy hash',
+      "style('app-ux.css'" in PERF and "script('app-ux.js'" in PERF
+      and "lambda m: m.group(1) + '?v=' + version" in PERF)
 check('route-critical redesign assets are applied before first paint',
       'portfolio-redesign.css?v=6' in PERF
       and 'live-market-redesign.css?v=10' in PERF
@@ -50,8 +51,8 @@ check('route-critical redesign assets are applied before first paint',
 check('production WSGI installs the performance adapter',
       'from app_performance import install as _install_app_performance' in ENTRY
       and '_install_app_performance(_dashboard)' in ENTRY)
-check('fallback loader no longer duplicates document prefetching',
-      'app-ux.css?v=9' in LOADER and 'app-ux.js?v=12' in LOADER
+check('fallback loader uses the same deploy hash as the delivered document',
+      'oa-app-version' in LOADER and "encodeURIComponent(oaBuild)" in LOADER
       and 'fetchDocument' not in LOADER and 'primeCore' not in LOADER)
 check('nginx compresses text assets while retaining live proxy streaming',
       'gzip on;' in NGINX and 'application/javascript' in NGINX
@@ -66,8 +67,9 @@ check('route changes are instant: no cross-document slide or fade',
 check('navigation HTML warmup is service-worker RAM only, never document cache storage',
       'oa-nav-prefetch' in UX and 'OA_NAV_READY = new Map()' in SW
       and "cache:'no-store'" in SW and "l.as='document'" not in UX)
-check('route asset prefetch is restricted to public versioned CSS/JS',
-      "var ROUTE_ASSETS" in UX and "var key='/static/'+asset" in UX
+check('route asset prefetch uses the exact deploy URL the destination HTML will request',
+      "var ROUTE_ASSETS" in UX and 'staticBuildUrl(asset)' in UX
+      and "return '/static/'+asset+'?v='+encodeURIComponent(APP_VERSION||'1')" in UX
       and 'navigator.connection.saveData' in UX)
 check('portfolio boot does not hide its entire document',
       'visibility:hidden!important' not in (ROOT / 'static' / 'navbar.js').read_text(encoding='utf-8'))
@@ -83,24 +85,25 @@ check('normal deploys repair nginx static compression on Certbot sites',
 
 check('core route chunks warm only public static assets after first paint',
       'primeRouteAssets' in UX and 'CORE_ROUTES' in UX
-      and "var key='/static/'+asset" in UX
+      and 'staticBuildUrl(asset)' in UX
       and "fetch('/api/" not in UX)
-check('mobile navigations paint the destination shell synchronously without hijacking links',
+check('warm mobile navigations skip the skeleton while cold routes retain the synchronous safety shell',
       'showRouteShell' in UX and "n.className='oa-route-shell show'" in UX
-      and 'showRouteShell(path);' in UX and 'setTimeout(function(){showRouteShell(path)},120)' not in UX
+      and 'if(!warm)showRouteShell(path);' in UX and 'window.__oaSkipNextRouteShell=warm' in UX
       and "e.preventDefault()" not in LOADER)
 check('profile subroutes warm the profile asset family before navigation',
       'ROUTE_ASSETS[routeKey(path)]' in UX and "path.indexOf(base+'/')===0" in UX)
-check('programmatic navigation cannot leave stale page content painted',
-      'OrcAgentShowRouteShell' in UX and 'OrcAgentShowRouteShell' in LOADER)
+check('programmatic navigation keeps the cold shell fallback without reflashing warm clicks',
+      'OrcAgentShowRouteShell' in UX and 'OrcAgentShowRouteShell' in LOADER
+      and '!window.__oaSkipNextRouteShell' in LOADER)
 check('service worker persists only same-origin public static GETs',
       "url.pathname.indexOf('/static/')!==0" in SW
       and "url.origin!==self.location.origin" in SW
       and "req.method!=='GET'" in SW
       and 'OA_NAV_READY = new Map()' in SW and "cache:'no-store'" in SW)
-check('mobile app shell assets are preloaded from head',
+check('mobile app shell assets are preloaded from head and normalized to the deploy hash',
       'data-oa-shell-preload' in PERF
       and 'mobile-bottom-nav.css?v=9' in PERF
-      and 'mobile-bottom-nav.js?v=10' in PERF)
+      and "lambda m: m.group(1) + '?v=' + version" in PERF)
 
 print('\n27/27 checks passed')

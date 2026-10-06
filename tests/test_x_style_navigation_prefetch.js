@@ -8,6 +8,7 @@ const ROOT=path.resolve(__dirname,'..');
 const handlers={};
 let networkFetches=0;
 let cacheWrites=0;
+const readyMessages=[];
 
 const context={
   console,
@@ -40,7 +41,7 @@ const context={
     delete:async function(){return true}
   },
   self:{
-    location:{origin:'https://orcagent.fun'},
+    location:{origin:'https://orcagent.fun',href:'https://orcagent.fun/sw.js?v=test-build'},
     clients:{claim:async function(){}},
     skipWaiting:async function(){},
     registration:{showNotification:async function(){}},
@@ -62,7 +63,7 @@ async function warm(url,clientId='client-1'){
   let pending=Promise.resolve();
   handlers.message({
     data:{type:'oa-nav-prefetch',url},
-    source:{id:clientId},
+    source:{id:clientId,postMessage:function(msg){readyMessages.push(msg);}},
     waitUntil:function(p){pending=p;}
   });
   await pending;
@@ -89,6 +90,7 @@ async function navigate(url,clientId='client-1'){
 (async function(){
   await warm('/profile/alice');
   assert.equal(networkFetches,1,'intent performs one early network read');
+  assert.deepEqual(readyMessages.pop(),{type:'oa-nav-ready',url:'/profile/alice'},'page is told when the warmed HTML is actually ready');
 
   const response=await navigate('/profile/alice');
   assert.equal(response.status,200);
@@ -112,6 +114,7 @@ async function navigate(url,clientId='client-1'){
   assert.equal(cold.status,200);
   assert.equal(networkFetches,2,'cold navigation falls back to normal network fetch');
 
+  assert.ok(String(context.OA_STATIC_CACHE||'').endsWith('test-build'),'static cache is scoped to the service-worker build hash');
   console.log('PASS X-style navigation reuses one ephemeral per-client document');
   console.log('PASS authenticated HTML is RAM-only and never written to Cache Storage');
   console.log('PASS API, callback, cross-origin and non-allowlisted GET routes are excluded');

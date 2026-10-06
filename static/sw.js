@@ -2,7 +2,9 @@
 // SECURITY INVARIANT: only /static/ GETs enter Cache Storage. Authenticated
 // navigation HTML may be warmed only in short-lived per-client RAM; APIs,
 // balances and wallet data are never persisted by the service worker.
-var OA_STATIC_CACHE = 'orcagent-static-v15';
+var OA_BUILD_VERSION=(new URL(self.location.href)).searchParams.get('v')||'dev';
+OA_BUILD_VERSION=String(OA_BUILD_VERSION).replace(/[^A-Za-z0-9_.-]/g,'').slice(0,64)||'dev';
+var OA_STATIC_CACHE = 'orcagent-static-'+OA_BUILD_VERSION;
 var OA_DEPLOY_RETRY_DELAYS = [250,500,1000,1500,2000,2500,3000,3500,4000];
 // X-style navigation warmup: authenticated HTML is NEVER written to Cache
 // Storage. A target document may live for a few seconds in this service
@@ -124,12 +126,15 @@ function oaNavigationResponse(event,req,href){
   }
   return oaFetchThroughDeploy(req,0);
 }
+function oaStaticBuild(path){
+  return path+'?v='+encodeURIComponent(OA_BUILD_VERSION);
+}
 var OA_STATIC_BOOT = [
-  '/static/page-lifecycle.js?v=2',
-  '/static/app-ux.css?v=9',
-  '/static/app-ux.js?v=12',
-  '/static/mobile-bottom-nav.css?v=9',
-  '/static/mobile-bottom-nav.js?v=10'
+  oaStaticBuild('/static/page-lifecycle.js'),
+  oaStaticBuild('/static/app-ux.css'),
+  oaStaticBuild('/static/app-ux.js'),
+  oaStaticBuild('/static/mobile-bottom-nav.css'),
+  oaStaticBuild('/static/mobile-bottom-nav.js')
 ];
 self.addEventListener('install', function(event) {
   event.waitUntil(
@@ -153,7 +158,13 @@ self.addEventListener('message', function(event){
   var data=event.data||{};
   if(data.type!=='oa-nav-prefetch' || typeof data.url!=='string') return;
   var clientId=(event.source&&event.source.id)||'';
-  var work=oaStartNavPrefetch(clientId,data.url);
+  var source=event.source;
+  var work=oaStartNavPrefetch(clientId,data.url).then(function(resp){
+    if(resp&&source&&typeof source.postMessage==='function'){
+      try{source.postMessage({type:'oa-nav-ready',url:data.url})}catch(_){}
+    }
+    return resp;
+  });
   if(event.waitUntil) event.waitUntil(work);
 });
 self.addEventListener('fetch', function(event) {

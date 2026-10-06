@@ -3,6 +3,7 @@
 'use strict';
 var prefetched=new Set();
 var navWarmAt=new Map();
+var navReadyAt=new Map();
 var shellTimer=null;
 var shellNode=null;
 var APP_VERSION=(document.querySelector('meta[name=\"oa-app-version\"]')||{}).content||'';
@@ -16,20 +17,23 @@ function closestLink(e){var n=e.target;return n&&n.closest?n.closest('a[href]'):
    worker, which may hold one same-origin document briefly in RAM for this
    browser client and hand it to the subsequent native navigation. */
 var ROUTE_ASSETS={
-  '/':['home-mobile.css?v=14','home-mobile-polish.css?v=8','home-composer-mobile.css?v=7','home-desktop.css?v=1','home-mobile.js?v=15','home-desktop.js?v=1'],
-  '/wallet':['portfolio-redesign.css?v={app}','portfolio-history-redesign.css?v={app}','portfolio-redesign.js?v={app}','portfolio-history-redesign.js?v={app}','approved-portfolio.js?v={app}','portfolio-assets.js?v=1'],
-  '/live-market':['live-market-redesign.css?v=10','live-market-final.css?v=6','live-market-redesign.js?v=7','live-market-hotfix.js?v=9'],
-  '/groups':['groups-redesign.css?v=1','groups-redesign.js?v=1'],
-  '/messages':['messages-ui.css?v=1','messages-inbox.css?v=2','messages-thread.css?v=2','messages-ui.js?v=4'],
+  '/':['home-mobile.css','home-mobile-polish.css','home-composer-mobile.css','home-desktop.css','home-mobile.js','home-desktop.js'],
+  '/wallet':['portfolio-redesign.css','portfolio-history-redesign.css','portfolio-redesign.js','portfolio-history-redesign.js','approved-portfolio.js','portfolio-assets.js'],
+  '/live-market':['live-market-redesign.css','live-market-final.css','live-market-redesign.js','live-market-hotfix.js'],
+  '/groups':['groups-redesign.css','groups-redesign.js'],
+  '/messages':['messages-ui.css','messages-inbox.css','messages-thread.css','messages-ui.js'],
   '/notifications':[],
-  '/profile':['profile-v2.css?v={app}','profile-gold-tip.css?v={app}','tip-experience.css?v={app}','tip-experience.js?v={app}'],
-  '/bot':['approved-bot.css?v={app}'],
+  '/profile':['profile-v2.css','profile-gold-tip.css','tip-experience.css','tip-experience.js'],
+  '/bot':['approved-bot.css'],
   '/settings':[]
 };
 var CORE_ROUTES=['/','/live-market','/wallet','/groups','/messages','/notifications','/profile','/bot','/settings'];
+function staticBuildUrl(asset){
+  asset=String(asset||'').split('?')[0].replace(/^\/+static\//,'').replace(/^\/+/,'');
+  return '/static/'+asset+'?v='+encodeURIComponent(APP_VERSION||'1');
+}
 function warmAsset(asset,urgent){
-  asset=String(asset||'').replace(/\{app\}/g,encodeURIComponent(APP_VERSION||'1'));
-  var key='/static/'+asset;if(prefetched.has(key))return;
+  var key=staticBuildUrl(asset);if(prefetched.has(key))return;
   prefetched.add(key);
   var l=document.createElement('link');
   l.rel=urgent?'preload':'prefetch';l.href=key;
@@ -67,10 +71,27 @@ function navWarmable(u){
   }
   return false;
 }
+function navKey(u){return (u&&u.pathname?u.pathname:'')+(u&&u.search?u.search:'')}
+function markNavReady(raw){
+  var u=sameOriginUrl(raw);if(!u)return;
+  navReadyAt.set(navKey(u),Date.now());
+}
+function isNavReady(u){
+  var ts=navReadyAt.get(navKey(u))||0;
+  if(!ts)return false;
+  if(Date.now()-ts>7000){navReadyAt.delete(navKey(u));return false}
+  return true;
+}
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.addEventListener('message',function(e){
+    var d=e.data||{};
+    if(d.type==='oa-nav-ready'&&typeof d.url==='string')markNavReady(d.url);
+  });
+}
 function warmDocument(u){
   if(!navWarmable(u)||!('serviceWorker' in navigator))return;
   if(navigator.connection&&navigator.connection.saveData)return;
-  var key=u.pathname+u.search,now=Date.now(),last=navWarmAt.get(key)||0;
+  var key=navKey(u),now=Date.now(),last=navWarmAt.get(key)||0;
   if(now-last<2500)return;
   navWarmAt.set(key,now);
   var msg={type:'oa-nav-prefetch',url:key};
@@ -142,15 +163,25 @@ function showRouteShell(path){
   // contains the destination skeleton, never stale content from the old page.
   document.body.appendChild(n);shellNode=n;
 }
-function beginRoute(path){
+function beginRoute(u){
+  var path=u&&u.pathname?u.pathname:String(u||'/');
+  var warm=!!(u&&u.pathname&&isNavReady(u));
   optimisticNav(path);
   clearTimeout(shellTimer);shellTimer=null;
-  showRouteShell(path);
+  window.__oaSkipNextRouteShell=warm;
+  // A warmed document is already waiting in service-worker RAM. Showing a
+  // skeleton for that navigation creates the very flash we are trying to
+  // remove. Cold routes still get the synchronous shell before Safari can
+  // freeze the outgoing document.
+  if(!warm)showRouteShell(path);
+  setTimeout(function(){window.__oaSkipNextRouteShell=false},1200);
 }
 window.OrcAgentBeginRoute=beginRoute;
 window.OrcAgentShowRouteShell=showRouteShell;
+window.OrcAgentNavigationIsWarm=function(raw){var u=sameOriginUrl(raw);return !!(u&&isNavReady(u))};
 function clearRouteShell(){
   clearTimeout(shellTimer);shellTimer=null;
+  window.__oaSkipNextRouteShell=false;
   if(shellNode&&shellNode.parentNode)shellNode.parentNode.removeChild(shellNode);
   shellNode=null;
 }
@@ -159,7 +190,7 @@ document.addEventListener('click',function(e){
   var a=closestLink(e),u=navCandidate(a);if(!u)return;
   warmRoute(u.pathname,true);
   warmDocument(u);
-  beginRoute(u.pathname);
+  beginRoute(u);
 },true);
 window.addEventListener('pageshow',clearRouteShell,true);
 window.addEventListener('pagehide',function(){clearTimeout(shellTimer)},true);
@@ -206,7 +237,7 @@ function ready(){
   // RAM only and APIs are never navigation-prefetched.
   if('serviceWorker' in navigator){
     window.addEventListener('load',function(){
-      navigator.serviceWorker.register('/sw.js').catch(function(){});
+      navigator.serviceWorker.register('/sw.js?v='+encodeURIComponent(APP_VERSION||'1')).catch(function(){});
     },{once:true});
   }
   document.querySelectorAll(MODAL_SEL).forEach(observeModal);
