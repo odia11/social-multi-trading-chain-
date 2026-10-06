@@ -5,17 +5,20 @@ const events={},pending=[];
 let rect={left:80,top:330,bottom:420,width:285};
 const input={id:'postText',isConnected:true,value:'@oj',selectionStart:3,classList:{contains:()=>false},getBoundingClientRect:()=>rect,
  focus(){ctx.document.activeElement=this},setSelectionRange(a){this.selectionStart=a},dispatchEvent(){}};
-const box={style:{display:'none'},children:[],replaceChildren(){this.children=[]},appendChild(r){this.children.push(r)},contains(){return false},
+const originalParent={};
+const body={appendChild(node){node.parentNode=this;this.lastChild=node}};
+const box={style:{display:'none'},parentNode:originalParent,children:[],replaceChildren(){this.children=[]},appendChild(r){this.children.push(r)},contains(){return false},
  get scrollHeight(){return this.children.length*42},get offsetWidth(){return parseFloat(this.style.width)||240},
  get offsetHeight(){return Math.min(this.scrollHeight+2,parseFloat(this.style.maxHeight)||200)}};
 const viewport={offsetTop:0,offsetLeft:0,width:390,height:460,addEventListener:(n,f)=>events['vv'+n]=f};
-const ctx={document:{activeElement:input,getElementById:()=>box,addEventListener:(n,f)=>events[n]=f,
+const ctx={document:{activeElement:input,body,getElementById:()=>box,addEventListener:(n,f)=>events[n]=f,
  createElement:()=>({style:{},addEventListener(){}})},window:{visualViewport:viewport,addEventListener:(n,f)=>events['win'+n]=f},
  fetch:()=>new Promise(resolve=>pending.push(resolve)),requestAnimationFrame:f=>{f();return 0},setTimeout:f=>f(),clearTimeout:()=>{},Event:class{}};
 vm.createContext(ctx);vm.runInContext(code,ctx);
 const settle=async(users)=>{pending.shift()({ok:true,json:async()=>({users})});for(let i=0;i<6;i++)await Promise.resolve()};
 (async()=>{
  ctx._mentionCheck(input);await settle([{username:'OJ'}]);
+ assert.equal(box.parentNode,body,'suggestion layer is portaled to document.body');
  assert.equal(box.style.top,'280px','single row is six pixels above field');
  rect={...rect,top:260,bottom:350};events.winscroll();
  assert.equal(box.style.top,'356px','list follows field after scrolling, below when room exists');

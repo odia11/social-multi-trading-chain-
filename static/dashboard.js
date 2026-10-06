@@ -7413,6 +7413,10 @@ function _mentionQuery(el){
         || el.value!==val || el.selectionStart!==pos) return;
     var box = document.getElementById('mention-suggest');
     if(!box) return;
+    // Keep the fixed suggestion layer at document.body level. Mobile Safari can
+    // otherwise trap fixed descendants inside transformed/paint-contained app
+    // shells, making the list exist but render behind the reply thread.
+    if(document.body && box.parentNode!==document.body) document.body.appendChild(box);
     var users = ((d && d.users)||[]).filter(function(u){return /^[a-zA-Z0-9_]+$/.test(u.username||'')});
     if(!users.length){ _mentionHide(); return; }
     box.replaceChildren();
@@ -10582,7 +10586,21 @@ function _feedToggleNestedReply(parentId, postId, btn){
     +'</div>';
   box.style.display = '';
   var inp = document.getElementById(inpId);
-  if(inp) setTimeout(function(){ inp.focus(); }, 100);
+  if(inp){
+    // X-style nested reply: the person being replied to is already tagged.
+    // This also removes the iOS dependency on waiting for async autocomplete
+    // before a user can address OrcAgent in a reply.
+    if(/^[A-Za-z0-9_]{1,32}$/.test(authorName) && authorName!=='Trader'){
+      inp.value='@'+authorName+' ';
+      inp.dataset.replyMention=authorName;
+      _fcReplyCardSync(cardId);
+    }
+    setTimeout(function(){
+      inp.focus({preventScroll:true});
+      var end=inp.value.length;
+      try{inp.setSelectionRange(end,end);}catch(_){}
+    }, 100);
+  }
 }
 
 function _feedSubmitNestedReply(inp, postId, parentReplyId){
