@@ -12,8 +12,9 @@ INSTALL=(ROOT/'deploy'/'install.sh').read_text()
 checks={
   'native navigation remains authoritative':
       'document.write' not in UX and 'fetchDocument' not in UX,
-  'private HTML and APIs are not prefetched':
-      "l.as='document'" not in UX and "fetch('/api/" not in UX,
+  'navigation HTML is only warmed in ephemeral service-worker RAM':
+      'oa-nav-prefetch' in UX and 'OA_NAV_READY = new Map()' in SW
+      and "cache:'no-store'" in SW and "fetch('/api/" not in UX,
   'core route static chunks are warmed':
       'primeRouteAssets' in UX and 'CORE_ROUTES' in UX and 'warmRoute(path,false)' in UX,
   'touch/pointer intent upgrades the target route chunks':
@@ -31,15 +32,17 @@ checks={
   'shared shell assets preload from head':
       'data-oa-shell-preload' in PERF and 'mobile-bottom-nav.css?v=9' in PERF,
   'shared UX is cache-busted consistently':
-      'app-ux.css?v=9' in PERF and 'app-ux.js?v=11' in PERF
-      and 'app-ux.css?v=9' in LOADER and 'app-ux.js?v=11' in LOADER,
+      'app-ux.css?v=9' in PERF and 'app-ux.js?v=12' in PERF
+      and 'app-ux.css?v=9' in LOADER and 'app-ux.js?v=12' in LOADER,
   'service worker runtime cache is public static GET only':
       "url.pathname.indexOf('/static/')!==0" in SW
       and "url.origin!==self.location.origin" in SW
       and "req.method!=='GET'" in SW,
-  'service worker retries navigation through deploys without caching HTML':
+  'service worker reuses ephemeral navigation warmup without caching HTML':
       "if(req.mode==='navigate')" in SW
-      and 'event.respondWith(oaFetchThroughDeploy(req,0))' in SW
+      and 'oaNavigationResponse(event,req,navHref)' in SW
+      and 'OA_NAV_READY = new Map()' in SW
+      and "cache:'no-store'" in SW
       and "url.pathname.indexOf('/static/')!==0" in SW,
   'this performance contract is enforced by update and install':
       'check-performance-contract.sh' in UPDATE
