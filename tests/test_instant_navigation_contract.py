@@ -43,7 +43,7 @@ checks={
       "if(req.mode==='navigate')" in SW
       and 'oaNavigationResponse(event,req,navHref)' in SW
       and 'OA_NAV_READY = new Map()' in SW
-      and "cache:'no-store'" in SW
+      and "cache:'no-store'" in SW and 'resp.redirected' in SW
       and "url.pathname.indexOf('/static/')!==0" in SW,
   'this performance contract is enforced by update and install':
       'check-performance-contract.sh' in UPDATE
