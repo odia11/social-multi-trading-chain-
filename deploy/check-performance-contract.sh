@@ -19,4 +19,6 @@ do
   python3 "$REPO_DIR/$test_file"
 done
 
+node "$REPO_DIR/tests/test_x_style_navigation_prefetch.js"
+
 echo "protected instant-navigation contract passed"
