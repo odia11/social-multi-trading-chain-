@@ -54,11 +54,18 @@ class PublicData(unittest.TestCase):
         self.assertEqual(snap["rows"][0]["symbol"], "EMBER")
         topic, text = agent.answer("@orcagent what is the best call for today?", public=snap)
         self.assertEqual(topic, "calls_live")
-        self.assertIn("$EMBER", text)
-        self.assertIn("2.50x", text)
-        self.assertIn("#post-p7", text)
+        self.assertEqual(
+            text,
+            "Best call today: $EMBER\n"
+            "Peak: +150%\n"
+            "Entry: $1\n"
+            "Top: $2.5\n"
+            "View call: https://orcagent.fun/call/2",
+        )
         self.assertNotIn("OLD", text)
         self.assertLessEqual(len(text), 240)
+        self.assertEqual(public_data._price(0.00006769), "$0.00006769")
+        self.assertEqual(public_data._price(0.000133), "$0.000133")
 
     def test_market_movers_and_live_fee_use_public_app_state(self):
         q = public_data.query("what is trending?")
@@ -136,8 +143,11 @@ class ReplyIntegration(unittest.TestCase):
             message = c.execute(
                 "SELECT message FROM feed_replies WHERE id=?", (reply_id,)
             ).fetchone()[0]
-        self.assertIn("$EMBER", message)
-        self.assertIn("2.50x", message)
+        self.assertIn("Best call today: $EMBER", message)
+        self.assertIn("Peak: +150%", message)
+        self.assertIn("Entry: $0.01", message)
+        self.assertIn("Top: $0.025", message)
+        self.assertIn("View call: https://orcagent.fun/call/5", message)
         self.assertNotIn("guaranteed", message.lower())
 
 

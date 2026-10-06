@@ -10320,6 +10320,24 @@ function _agentPriceReplyHtml(message){
   return html;
 }
 
+function _agentBestCallReplyHtml(message){
+  // Only the verified OrcAgent account reaches this renderer. Keep the stored
+  // reply plain text and convert this exact first-party shape into a compact
+  // card + local button. No user-supplied HTML is ever trusted.
+  var text=String(message||'');
+  var m=text.match(/^Best call today: \$([A-Za-z0-9_+.-]{1,24})\nPeak: ([+-][0-9]+(?:\.[0-9]+)?)%\nEntry: \$([0-9,.]+(?:e[+-]?[0-9]+)?)\nTop: \$([0-9,.]+(?:e[+-]?[0-9]+)?)\nView call: https:\/\/orcagent\.fun\/call\/(\d+)$/i);
+  if(!m)return '';
+  var entry=Number(m[3].replace(/,/g,'')),top=Number(m[4].replace(/,/g,'')),callId=Number(m[5]);
+  if(!Number.isFinite(entry)||entry<=0||!Number.isFinite(top)||top<=0||!Number.isInteger(callId)||callId<=0)return '';
+  return '<div class="fc-agent-call-card">'
+    +'<div class="fc-agent-call-title">Best call today: <strong>$'+esc(m[1])+'</strong></div>'
+    +'<div class="fc-agent-call-row"><span>Peak</span><strong class="fc-agent-call-peak">'+esc(m[2])+'%</strong></div>'
+    +'<div class="fc-agent-call-row"><span>Entry</span><strong>$'+esc(m[3])+'</strong></div>'
+    +'<div class="fc-agent-call-row"><span>Top</span><strong>$'+esc(m[4])+'</strong></div>'
+    +'<button type="button" class="fc-agent-call-open" onclick="event.stopPropagation();location.href=\'/call/'+callId+'\'" aria-label="View $'+esc(m[1])+' call">View call</button>'
+    +'</div>';
+}
+
 function _renderReplyRow(r, postId, depth, tokenIdentity){
   depth = depth || 0;
   var name    = esc(r.username || (r.wallet ? r.wallet.slice(0,6)+'…' : '?'));
@@ -10346,17 +10364,18 @@ function _renderReplyRow(r, postId, depth, tokenIdentity){
     ? 'event.stopPropagation();_showAvatarLightbox('+esc(JSON.stringify(r.avatar_url))+')'
     : (r.wallet ? 'event.stopPropagation();location.href=\'/profile/'+encodeURIComponent(r.wallet)+'\'' : '');
   var isAgent = r.verified && String(r.username||'').toLowerCase()==='orcagent';
+  var compactCall = isAgent ? _agentBestCallReplyHtml(r.message) : '';
   var compactPrice = isAgent ? _agentPriceReplyHtml(r.message) : '';
   var exactQuestion=String(r.message||'').match(/^@orcagent \$([A-Za-z0-9_+.-]+) \(([1-9A-HJ-NP-Za-km-z]{32,44})\) what is the price\?$/i);
   if(exactQuestion)tokenIdentity={symbol:exactQuestion[1],mint:exactQuestion[2]};
   var displayMessage = String(r.message||'').replace(/(@orcagent\s+\$[A-Za-z0-9_+.-]+)\s+\(([1-9A-HJ-NP-Za-km-z]{32,44})\)(\s+what is the price\?)/i,'$1$3');
-  var msgHtml = compactPrice || _fcRichText(displayMessage,tokenIdentity);
+  var msgHtml = compactCall || compactPrice || _fcRichText(displayMessage,tokenIdentity);
   var tokenQuestion=String(r.message||'').match(/^(?:Automated · )?Do you mean \$([A-Z][A-Z0-9_+.-]{0,24})\?/);
   if(tokenQuestion && r.verified && String(r.username||'').toLowerCase()==='orcagent'){
     msgHtml=_fcRichText('Select the $'+tokenQuestion[1]+' token.');
     msgHtml+='<div class="fc-assistant-token-choices"><button type="button" class="fc-agent-token-choice" onclick="event.stopPropagation();_assistantTokenChoices(this,\''+tokenQuestion[1]+'\','+Number(r.id)+',\''+esc(postId)+'\')">Choose $'+tokenQuestion[1]+' token</button></div>';
   }
-  var longReply=!compactPrice && displayMessage.length>280;
+  var longReply=!compactCall && !compactPrice && displayMessage.length>280;
   var indentStyle = ''; // CSS applies one bounded indent at every nested depth.
   // Keep author and actions separate from the full-width message.
   return '<div class="fc-reply-item'+(depth>0?' fc-reply-nested':'')+'" data-reply-id="'+r.id+'" data-parent-id="'+(r.parent_reply_id||'')+'" data-token-choice="'+(isAgent && tokenQuestion ? tokenQuestion[1] : '')+'"'+indentStyle+'>'

@@ -30,6 +30,11 @@ const nativeSetInterval=setInterval;
 const nativeClearInterval=clearInterval;
 const nativeSetTimeout=setTimeout;
 const nativeClearTimeout=clearTimeout;
+const clearedIntervals=new Set();
+const clearedTimeouts=new Set();
+const cancelledRafs=new Set();
+global.clearInterval=function(handle){ clearedIntervals.add(handle); return nativeClearInterval(handle); };
+global.clearTimeout=function(handle){ clearedTimeouts.add(handle); return nativeClearTimeout(handle); };
 const windowEvents=new Emitter();
 const documentEvents=new Emitter();
 const root={isConnected:true};
@@ -61,8 +66,8 @@ global.history={
     location.pathname=u.pathname; location.href=u.href;
   }
 };
-global.requestAnimationFrame=fn=>nativeSetTimeout(()=>fn(Date.now()),100);
-global.cancelAnimationFrame=id=>nativeClearTimeout(id);
+global.requestAnimationFrame=fn=>nativeSetTimeout(()=>fn(Date.now()),30000);
+global.cancelAnimationFrame=id=>{ cancelledRafs.add(id); return nativeClearTimeout(id); };
 
 let abortedReads=0;
 global.fetch=function(_input,init){
@@ -87,9 +92,10 @@ vm.runInThisContext(fs.readFileSync('static/page-lifecycle.js','utf8'),{filename
     'named route scripts must share one scope');
 
   let ticks=0, timeoutFired=false, rafFired=false, events=0, customCleanups=0;
-  scope.setInterval(()=>{ticks++;},5);
-  scope.setTimeout(()=>{timeoutFired=true;},80);
-  scope.requestAnimationFrame(()=>{rafFired=true;});
+  const intervalHandle=scope.setInterval(()=>{ticks++;},5);
+  const nativeIntervalHandle=intervalHandle.id;
+  const timeoutHandle=scope.setTimeout(()=>{timeoutFired=true;},30000);
+  const rafHandle=scope.requestAnimationFrame(()=>{rafFired=true;});
 
   const target=new Emitter();
   scope.addEventListener(target,'ping',()=>{events++;});
@@ -114,8 +120,11 @@ vm.runInThisContext(fs.readFileSync('static/page-lifecycle.js','utf8'),{filename
   assert.equal(after.active,false,'scope becomes inactive on lazy route navigation');
   assert.equal(after.reads,0,'all scoped GET/HEAD requests are removed');
   assert.equal(after.intervals,0,'all intervals are cleared');
+  assert.equal(clearedIntervals.has(nativeIntervalHandle),true,'native interval is explicitly cancelled');
   assert.equal(after.timeouts,0,'all timeouts are cleared');
+  assert.equal(clearedTimeouts.has(timeoutHandle),true,'pending native timeout is explicitly cancelled');
   assert.equal(after.rafs,0,'all animation frames are cancelled');
+  assert.equal(cancelledRafs.has(rafHandle),true,'pending native animation frame is explicitly cancelled');
   assert.equal(after.listeners,0,'all event listeners are removed');
   assert.equal(after.observers,0,'all observers are disconnected');
   assert.equal(after.connections,0,'all tracked connections are closed');
@@ -129,11 +138,10 @@ vm.runInThisContext(fs.readFileSync('static/page-lifecycle.js','utf8'),{filename
 
   const frozenTicks=ticks;
   target.dispatchEvent({type:'ping'});
-  await new Promise(r=>nativeSetTimeout(r,110));
-  assert.equal(ticks,frozenTicks,'interval never resumes after unmount');
+  assert.equal(ticks,frozenTicks,'interval stays stopped after unmount');
   assert.equal(events,1,'removed listener never fires after unmount');
-  assert.equal(timeoutFired,false,'pending timeout never fires after unmount');
-  assert.equal(rafFired,false,'pending animation frame never fires after unmount');
+  assert.equal(timeoutFired,false,'cancelled timeout did not run before cleanup completed');
+  assert.equal(rafFired,false,'cancelled animation frame did not run before cleanup completed');
 
   const remount=OrcPageLifecycle.routeScope('lazy-live-market','#lazy-root');
   assert.notEqual(remount,scope,'a later lazy remount receives a fresh scope');
