@@ -19,13 +19,15 @@ def test_loader_keeps_native_navigation_and_safe_progress():
     assert "oa:bfcache-restore" in SRC
 
 
-def test_core_route_chunks_are_warmed_without_private_document_prefetch():
+def test_core_route_chunks_are_warmed_and_html_intent_goes_to_service_worker():
     assert 'primeRouteAssets' in UX
     assert 'CORE_ROUTES' in UX
     assert "warmRoute(path,false)" in UX
     assert "l.rel=urgent?'preload':'prefetch'" in UX
     assert "l.as='document'" not in UX
     assert 'fetchDocument' not in UX
+    assert "type:'oa-nav-prefetch'" in UX
+    assert 'navigator.serviceWorker.controller.postMessage(msg)' in UX
 
 
 def test_navigation_shell_is_visible_before_native_navigation_freezes_old_page():
