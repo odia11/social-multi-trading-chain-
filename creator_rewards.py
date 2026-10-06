@@ -282,9 +282,10 @@ def install(d):
 
     @app.route('/creator-rewards')
     def page():
-        uid=owner()
-        if uid is None:return d.redirect('/')
-        return d._render_no_cache('creator_rewards.html',reward=summary(d.DB_FILE,uid),csrf_token=d._get_csrf_token(),admin=d.get_user_role(d._authenticated_wallet()) in ('admin','executive'))
+        # The standalone call-based Creator Rewards page was retired from the
+        # product UI. Keep this redirect for old bookmarks/shared links so
+        # users land back in the main app instead of a dead page.
+        return d.redirect('/')
 
     @app.route('/api/creator-rewards')
     def own():
@@ -372,5 +373,3 @@ def install(d):
             else:raise ValueError('Unknown action')
         except (ValueError,sqlite3.IntegrityError) as e:return d.jsonify(ok=False,error=str(e)),409
         return d.jsonify(ok=True)
-
-    d._NAVBAR_MORE_LINKS.insert(0,('/creator-rewards','Creator Rewards','rewards'))
