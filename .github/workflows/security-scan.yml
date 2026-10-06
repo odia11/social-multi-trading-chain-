@@ -83,6 +83,7 @@ jobs:
           PYTHONPATH=.:tests python tests/test_platform_prices.py
           PYTHONPATH=.:tests python tests/test_agent_price_reliability.py
           python tests/test_bot_follows_settings.py
+          python tests/test_bot_entry_7pct_policy.py
           python tests/test_position_guardian.py
           python tests/test_stop_loss_safety.py
           python tests/test_sell_value_stop.py
