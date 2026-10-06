@@ -41,7 +41,7 @@ def specific(clean, context=None):
     if has(r'\b(?:notification|notificatie)\b'):
         return response('community', 'Tap the reply notification to open its post and highlighted reply. If it opens the wrong place, tell me which notification and what screen you reach.')
     if has(r'\b(?:creators?|reward|rewards)\b') and has(r'views|likes|post|posting|paid|earn'):
-        return response('creator', 'The separate call-based Creator Rewards page is no longer part of OrcAgent. Token-launch creator fees, when available, are managed from Token Launch: https://orcagent.fun/token-launch')
+        return response('creator', 'Posting or getting likes does not earn a payout. The separate call-based Creator Rewards page is no longer part of OrcAgent. Token-launch creator fees are managed from Token Launch: https://orcagent.fun/token-launch')
     if has(r'\b(?:referral|referrals)\b') and has(r'20|volume|fee|fees|percent'):
         return response('referral', 'The 20% referral share is a share of attributed trading fees, not 20% of the trade amount. View your link and earnings: https://orcagent.fun/referrals')
     if has(r'^\s*(?:how|where|what next|how do i do (?:that|it)|where do i find (?:that|it)|and then|hoe|waar)[\s?!.]*$') and context:
