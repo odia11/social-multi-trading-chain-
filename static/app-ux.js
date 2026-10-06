@@ -82,13 +82,16 @@ function warmDocument(u){
     if(reg&&reg.active)reg.active.postMessage(msg);
   }).catch(function(){});
 }
-function prefetch(a){
+function prefetch(a,warmHtml){
   var u=navCandidate(a);if(!u)return;
   warmRoute(u.pathname,true);
-  warmDocument(u);
+  if(warmHtml)warmDocument(u);
 }
-['pointerover','touchstart','focusin'].forEach(function(type){
-  document.addEventListener(type,function(e){prefetch(closestLink(e))},{passive:true,capture:true});
+['pointerover','focusin'].forEach(function(type){
+  document.addEventListener(type,function(e){prefetch(closestLink(e),false)},{passive:true,capture:true});
+});
+['pointerdown','touchstart'].forEach(function(type){
+  document.addEventListener(type,function(e){prefetch(closestLink(e),true)},{passive:true,capture:true});
 });
 
 /* Background priming remains static-assets-only. Authenticated HTML is warmed
