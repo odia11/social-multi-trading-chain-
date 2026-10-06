@@ -31,24 +31,29 @@ def test_core_route_chunks_are_warmed_and_html_intent_goes_to_service_worker():
     assert 'navigator.serviceWorker.controller.postMessage(msg)' in UX
 
 
-def test_navigation_shell_is_visible_before_native_navigation_freezes_old_page():
+def test_warm_navigation_skips_shell_but_cold_navigation_keeps_safe_fallback():
     assert 'showRouteShell' in UX
-    assert 'beginRoute(u.pathname)' in UX
+    assert 'beginRoute(u)' in UX
     assert "n.className='oa-route-shell show'" in UX
-    assert 'showRouteShell(path);' in UX
-    assert 'setTimeout(function(){showRouteShell(path)},120)' not in UX
+    assert 'if(!warm)showRouteShell(path);' in UX
+    assert 'window.__oaSkipNextRouteShell=warm' in UX
+    assert "d.type==='oa-nav-ready'" in UX
     section=UX[UX.index("document.addEventListener('click'"):UX.index("window.addEventListener('pageshow'")]
     assert 'preventDefault' not in section
 
 
-def test_nested_profile_routes_use_profile_asset_family():
+def test_nested_profile_routes_use_profile_asset_family_and_exact_build_urls():
     assert 'function routeKey(path)' in UX
     assert "path.indexOf(base+'/')===0" in UX
     assert 'ROUTE_ASSETS[routeKey(path)]' in UX
+    assert "return '/static/'+asset+'?v='+encodeURIComponent(APP_VERSION||'1')" in UX
+    route_block=UX[UX.index('var ROUTE_ASSETS='):UX.index('var CORE_ROUTES=')]
+    assert '?v=' not in route_block
 
 
-def test_beforeunload_covers_programmatic_navigation():
+def test_beforeunload_covers_programmatic_navigation_without_reflashing_warm_clicks():
     assert 'OrcAgentShowRouteShell' in SRC
+    assert '!window.__oaSkipNextRouteShell' in SRC
 
 
 if __name__ == '__main__':

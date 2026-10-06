@@ -22,10 +22,11 @@ checks={
       'orcaPortfolioLastConfirmedUSDCValue' in JS and '_homeCachedPortfolio()' in JS,
   'home snapshot also synchronizes the shared header':
       "new CustomEvent('orca:portfolio-value'" in JS,
-  'changed home bundles are cache-busted everywhere':
+  'changed home bundles resolve to the current deploy hash everywhere':
       'home-mobile.css?v=14' in NAV and 'home-mobile.js?v=15' in NAV
-      and 'home-mobile.css?v=14' in UX and 'home-mobile.js?v=15' in UX
-      and 'home-mobile.css?v=14' in PERF,
+      and "'home-mobile.css'" in UX and "'home-mobile.js'" in UX
+      and 'staticBuildUrl(asset)' in UX
+      and "lambda m: m.group(1) + '?v=' + version" in PERF,
 }
 for label,ok in checks.items():
     print(('PASS' if ok else 'FAIL')+' - '+label)
