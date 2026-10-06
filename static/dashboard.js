@@ -10603,11 +10603,6 @@ function _feedToggleNestedReply(parentId, postId, btn){
   }
 }
 
-function _feedPostComposerShown(postId, show){
-  var card = document.getElementById('rcard-'+postId);
-  if(card) card.style.display = show ? '' : 'none';
-}
-
 function _feedSubmitNestedReply(inp, postId, parentReplyId){
   if(!inp || inp.disabled) return Promise.resolve(false);
   var text = inp.value.trim();
@@ -10648,6 +10643,7 @@ function _feedSubmitNestedReply(inp, postId, parentReplyId){
         if(rcnt) rcnt.textContent = (parseInt(rcnt.textContent,10)||0)+1+(d.platform_reply_id?1:0)-(resolvedChoice?1:0);
       }
       if(d.platform_reply_id || resolvedChoice) _feedLoadReplies(postId);
+      if(d.platform_reply_pending) _feedAwaitAgentReply(postId, d.id);
     } else {
       openAlertModal({text:d.msg||'Could not post reply'});
     }
@@ -10660,6 +10656,48 @@ function _feedSubmitNestedReply(inp, postId, parentReplyId){
     openAlertModal({text:'Network error — could not post reply'});
     return false;
   });
+}
+
+/* @orcagent answers in the background (a real conversation takes a few
+   seconds). Show "OrcAgent is typing" under the user's reply and refresh the
+   thread until its answer is there. */
+function _feedAwaitAgentReply(postId, userReplyId){
+  if(!postId || !userReplyId) return;
+  var started = Date.now(), done = false, typingId = 'agent-typing-'+userReplyId;
+  if(!document.getElementById('oa-agent-typing-css')){
+    var st=document.createElement('style'); st.id='oa-agent-typing-css';
+    st.textContent='.fc-agent-typing{display:flex;align-items:center;gap:8px;margin:6px 0 10px 4px;color:var(--muted,#8a919c);font:500 13px/1.4 Geist,system-ui,sans-serif}'
+      +'.fc-agent-typing-ava{width:22px;height:22px;border-radius:50%;background:#16120a;border:1px solid rgba(247,185,85,.45);color:#f7b955;display:inline-flex;align-items:center;justify-content:center;font-size:10px}'
+      +'.fc-agent-typing-dots{display:inline-flex;gap:3px}.fc-agent-typing-dots i{width:5px;height:5px;border-radius:50%;background:#f7b955;opacity:.35;animation:oaTyping 1.2s infinite}'
+      +'.fc-agent-typing-dots i:nth-child(2){animation-delay:.2s}.fc-agent-typing-dots i:nth-child(3){animation-delay:.4s}'
+      +'@keyframes oaTyping{0%,60%,100%{opacity:.35;transform:none}30%{opacity:1;transform:translateY(-2px)}}';
+    document.head.appendChild(st);
+  }
+  function answered(){ return !!document.querySelector('#rlist-'+postId+' .fc-reply-item[data-parent-id="'+userReplyId+'"]'); }
+  function showTyping(){
+    if(done || document.getElementById(typingId)) return;
+    var list = document.getElementById('rlist-'+postId); if(!list) return;
+    var html = '<div class="fc-agent-typing" id="'+typingId+'" role="status"><span class="fc-agent-typing-ava">▲</span>'
+      +'<span>OrcAgent is typing</span><span class="fc-agent-typing-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>';
+    var row = list.querySelector('.fc-reply-item[data-reply-id="'+userReplyId+'"]');
+    if(row) row.insertAdjacentHTML('afterend', html); else list.insertAdjacentHTML('beforeend', html);
+  }
+  function stop(){ done = true; var t = document.getElementById(typingId); if(t) t.remove(); }
+  showTyping();
+  (function tick(){
+    setTimeout(function(){
+      if(done) return;
+      Promise.resolve(_feedLoadReplies(postId)).then(function(){
+        if(answered() || Date.now()-started > 45000){ stop(); return; }
+        showTyping(); tick();
+      });
+    }, Date.now()-started < 8000 ? 1500 : 3000);
+  })();
+}
+
+function _feedPostComposerShown(postId, show){
+  var card = document.getElementById('rcard-'+postId);
+  if(card) card.style.display = show ? '' : 'none';
 }
 
 function _feedRenderReplyTree(replies, postId){
@@ -10732,7 +10770,7 @@ function _feedLoadReplies(postId){
         if(typeof _agentHydrateCallCards==='function')_agentHydrateCallCards(list);
       }
       // A re-render drops any open reply-to-reply box: bring the post's own back.
-      _feedPostComposerShown(postId, true);
+      if(typeof _feedPostComposerShown==='function') _feedPostComposerShown(postId, true);
       if(count)count.textContent=String(list.querySelectorAll('.fc-reply-item').length);
       if(box)box.dataset.repliesLoaded='1';
       return true;
@@ -10829,6 +10867,7 @@ function _feedSubmitReply(inp, postId){
         if(rcnt) rcnt.textContent = (parseInt(rcnt.textContent,10)||0)+1+(d.platform_reply_id?1:0);
       }
       if(d.platform_reply_id) _feedLoadReplies(postId);
+      if(d.platform_reply_pending) _feedAwaitAgentReply(postId, d.id);
     } else {
       openAlertModal({text:d.msg||'Could not post reply'});
     }
