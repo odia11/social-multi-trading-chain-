@@ -82,6 +82,8 @@ jobs:
           node tests/test_agent_clean_replies.js
           node tests/test_agent_token_flow.js
           node tests/test_agent_token_identity.js
+          node tests/test_mention_anchor.cjs
+          node tests/test_nested_reply_mention.cjs
           node tests/test_feed_reply_loading.js
           node --check static/live-market-pro.js
           node --check static/home-feed-chart-redesign.js
