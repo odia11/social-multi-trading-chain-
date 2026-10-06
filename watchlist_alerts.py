@@ -169,10 +169,6 @@ def install(d):
         return
     app._orca_watchlist_alerts = True
     initialize(d.DB_FILE)
-    links = getattr(d, '_NAVBAR_MORE_LINKS', [])
-    if not any(item and item[0] == '/watchlist' for item in links):
-        links.insert(0, ('/watchlist', 'Watchlist & alerts', 'live-trades'))
-
     def owner():
         wallet = d._authenticated_wallet()
         if not wallet:
@@ -182,15 +178,13 @@ def install(d):
 
     @app.after_request
     def private_watchlist(response):
-        if request.path == '/watchlist' or request.path.startswith(('/api/watchlist', '/api/price-alerts')):
+        if request.path.startswith(('/api/watchlist', '/api/price-alerts')):
             response.headers['Cache-Control'] = 'private, no-store'
         return response
 
     @app.route('/watchlist')
     def watchlist_page():
-        if not owner():
-            return redirect('/?next=/watchlist')
-        return d._render_no_cache('watchlist.html', csrf_token=d._get_csrf_token())
+        return redirect('/')
 
     @app.route('/api/price-alerts', methods=['GET', 'POST'])
     @d.rate_limit(60, 60)

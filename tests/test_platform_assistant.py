@@ -95,11 +95,15 @@ INSERT INTO feed_posts(wallet,content,created_at) VALUES('member','A post','2026
             self.assertIn('OrcAgent today', reply)
             self.assertLessEqual(len(reply), 240)
         self.assertIn('Thanks for sharing!', p.answer("@orcagent I'm good, thanks!")[1])
-        for topic, query, route in [('portfolio','holdings','#app-portfolio'),('trading','charts','/live-market'),('calls','calls','#app-home'),('creator','creator','/token-launch'),('referral','referral','/referrals'),('share','share','/invitations')]:
+        for topic, query, route in [('portfolio','holdings','#app-portfolio'),('trading','charts','/live-market'),('calls','calls','#app-home'),('creator','creator','/token-launch'),('referral','referral','/referrals')]:
             result = p.answer('@orcagent '+query)
             self.assertEqual(result[0],topic)
             self.assertIn('https://orcagent.fun/'+('' if route.startswith('/') else '')+route.lstrip('/'),result[1])
             self.assertLessEqual(len(result[1]),240)
+        share=p.answer('@orcagent share')
+        self.assertEqual(share[0],'share')
+        self.assertIn('Share call',share[1])
+        self.assertNotIn('/invitations',share[1])
     def test_ambiguous_token_requires_user_choice(self):
         topic,message=p.answer('@orcagent cate token')
         self.assertEqual(topic,'token_choice')

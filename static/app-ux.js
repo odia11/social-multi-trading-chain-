@@ -53,9 +53,9 @@ function warmRoute(path,urgent){
 }
 var NAV_WARM_SAFE_PREFIXES=[
   '/live-market','/wallet','/profile','/messages','/notifications','/groups',
-  '/traders','/calls','/call','/following','/leaderboard','/watchlist','/history',
-  '/referrals','/rewards','/settings','/auto-trading-bot','/bot','/token-launch',
-  '/token-launches','/invitations','/live-trades','/promote','/info'
+  '/traders','/calls','/call','/leaderboard','/history',
+  '/referrals','/settings','/auto-trading-bot','/bot','/token-launch',
+  '/token-launches','/live-trades','/promote','/info'
 ];
 function navWarmable(u){
   if(!u)return false;

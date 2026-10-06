@@ -18646,7 +18646,6 @@ _NAVBAR_MORE_LINKS = [
     ('/token-launch', 'Token Launch', 'launch'),
     ('/launches', 'Launches', 'launch'),
     ('/referrals', 'Referrals', 'referrals'),
-    ('/rewards', 'Activity badges', 'traders'),
     ('/history', 'History', 'history'),
     ('/bot', 'Bot', 'bot', 'pt-nb-feature'),
     ('/live-trades', 'Live Trades', 'live-trades'),

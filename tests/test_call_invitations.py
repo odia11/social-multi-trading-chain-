@@ -44,11 +44,11 @@ assert '?v=4&via=' in shared['url']
 assert post(client,f'/api/calls/{evm}/share').status_code==404
 assert get(client,'/api/invitations?user_id=999').json['share_links']==1
 assert 'no-store' in get(client,'/api/invitations').headers['Cache-Control']
-assert get(client,'/invitations').status_code==200
+retired=get(client,'/invitations');assert retired.status_code==302 and retired.location.endswith('/')
 visitor=d.app.test_client()
 assert get(visitor,'/api/invitations').status_code==401
 assert post(visitor,f'/api/calls/{call}/share').status_code==401
-assert get(visitor,'/invitations').status_code==302
+retired=get(visitor,'/invitations');assert retired.status_code==302 and retired.location.endswith('/')
 page=get(visitor,path);assert page.status_code==200
 assert '<script>alert(1)</script>' not in page.text and '&lt;script&gt;' in page.text
 assert '<img src=x onerror' not in page.text and '&lt;img' in page.text

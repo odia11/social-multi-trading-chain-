@@ -36,7 +36,7 @@ with client.session_transaction(base_url='https://orcagent.fun') as s:s.update(w
 h={'Origin':'https://orcagent.fun','X-CSRF-Token':'x'*40}
 def get(path):return client.get(path,base_url='https://orcagent.fun')
 def put(mode,**extra):return client.put('/api/following/preferences/'+str(ids['actor']),json=dict(mode=mode,**extra),headers=h,base_url='https://orcagent.fun')
-page=get('/following');assert page.status_code==200 and b'following.js' in page.data
+page=get('/following');assert page.status_code==302 and page.location.endswith('/')
 prefs=get('/api/following/preferences');assert prefs.status_code==200 and prefs.json['traders'][0]['mode']=='calls'
 assert 'no-store' in prefs.headers['Cache-Control'] and 'private' in prefs.headers['Cache-Control']
 assert not any('balance' in key for key in prefs.json['traders'][0])

@@ -2,7 +2,7 @@
 // SECURITY INVARIANT: only /static/ GETs enter Cache Storage. Authenticated
 // navigation HTML may be warmed only in short-lived per-client RAM; APIs,
 // balances and wallet data are never persisted by the service worker.
-var OA_STATIC_CACHE = 'orcagent-static-v14';
+var OA_STATIC_CACHE = 'orcagent-static-v15';
 var OA_DEPLOY_RETRY_DELAYS = [250,500,1000,1500,2000,2500,3000,3500,4000];
 // X-style navigation warmup: authenticated HTML is NEVER written to Cache
 // Storage. A target document may live for a few seconds in this service
@@ -12,9 +12,9 @@ var OA_NAV_TTL_MS = 7000;
 var OA_NAV_MAX_READY = 6;
 var OA_NAV_SAFE_PREFIXES = [
   '/live-market','/wallet','/profile','/messages','/notifications','/groups',
-  '/traders','/calls','/call','/following','/leaderboard','/watchlist','/history',
-  '/referrals','/rewards','/settings','/auto-trading-bot','/bot','/token-launch',
-  '/token-launches','/invitations','/live-trades','/promote','/info'
+  '/traders','/calls','/call','/leaderboard','/history',
+  '/referrals','/settings','/auto-trading-bot','/bot','/token-launch',
+  '/token-launches','/live-trades','/promote','/info'
 ];
 var OA_NAV_READY = new Map();
 var OA_NAV_INFLIGHT = new Map();

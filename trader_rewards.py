@@ -103,7 +103,7 @@ def install(d):
     @d.app.before_request
     def record_activity():
         # Authenticated page visits, never anonymous requests, assets or API polls.
-        if d.request.method!='GET' or d.request.path not in ('/','/profile','/live-market','/wallet','/rewards','/referrals'):
+        if d.request.method!='GET' or d.request.path not in ('/','/profile','/live-market','/wallet','/referrals'):
             return
         wallet=d._authenticated_wallet()
         if not wallet:return
@@ -131,11 +131,7 @@ def install(d):
 
     @d.app.route('/rewards')
     def rewards_page():
-        wallet=d._authenticated_wallet()
-        if not wallet:return d.redirect('/')
-        value=progress(d.DB_FILE,wallet)
-        if not value:return d.redirect('/')
-        return d._render_no_cache('rewards.html',reward=value,benefit=benefits(d.DB_FILE,wallet),wallet=wallet,csrf_token=d._get_csrf_token())
+        return d.redirect('/')
 
     @d.app.route('/api/rewards/progress')
     def rewards_progress():
