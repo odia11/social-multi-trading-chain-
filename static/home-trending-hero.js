@@ -63,7 +63,7 @@ function syncTab(){
 function watchTabs(){
   var bar=document.querySelector('.feed-tabs');
   if(bar&&'MutationObserver' in window)
-    new MutationObserver(syncTab).observe(bar,{subtree:true,attributes:true,attributeFilter:['class']});
+    OrcPageLifecycle.mutationObserver(syncTab).observe(bar,{subtree:true,attributes:true,attributeFilter:['class']});
 }
 function ago(sec){
   var d=Math.max(0,Math.floor(Date.now()/1000-(Number(sec)||0)));
@@ -107,7 +107,7 @@ function slideHtml(entry,idx,clone){
     +'<div class="oa-th-pressure-mini" aria-hidden="true"><span style="width:'+buyPct+'%"></span></div>'
   +'</div>';
 }
-function stopAutoplay(){if(autoplayTimer){clearInterval(autoplayTimer);autoplayTimer=null;}}
+function stopAutoplay(){if(autoplayTimer){OrcPageLifecycle.clearInterval(autoplayTimer);autoplayTimer=null;}}
 function moveVisual(index,animate){
   var track=document.getElementById('oa-th-track');if(!track)return;
   var cards=track.children,card=cards[index];if(!card)return;
@@ -179,7 +179,7 @@ function startAutoplay(){
   stopAutoplay();
   if(slides.length<2||document.hidden)return;
   if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
-  autoplayTimer=setInterval(advance,AUTOPLAY_MS);
+  autoplayTimer=OrcPageLifecycle.setInterval(advance,AUTOPLAY_MS);
 }
 function render(slideData){
   var h=ensureHost();if(!h)return;
@@ -412,7 +412,7 @@ function watchSeen(){
   if(!host||!current||seenFor===current.mint||!('IntersectionObserver' in window))return;
   if(observer)observer.disconnect();
   var mint=current.mint;
-  observer=new IntersectionObserver(function(entries){
+  observer=OrcPageLifecycle.intersectionObserver(function(entries){
     if(!entries.some(function(e){return e.isIntersecting}))return;
     observer.disconnect();observer=null;
     if(seenFor===mint)return;
@@ -490,7 +490,7 @@ function boot(){
   if(path!=='/'&&path!=='/dashboard')return;
   watchTabs();
   refresh();
-  setInterval(refresh,POLL_MS);
+  OrcPageLifecycle.setInterval(refresh,POLL_MS);
   document.addEventListener('visibilitychange',function(){
     if(document.hidden)stopAutoplay();else{refresh();startAutoplay()}
   });

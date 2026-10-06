@@ -148,7 +148,7 @@
     sparkCache[key] = {at: Date.now(), promise: promise};
     promise.then(function(c){ drawSpark(svg, c); });
   }
-  var sparkObserver = ('IntersectionObserver' in window) ? new IntersectionObserver(function(entries){
+  var sparkObserver = ('IntersectionObserver' in window) ? OrcPageLifecycle.intersectionObserver(function(entries){
     entries.forEach(function(en){
       if(en.isIntersecting){ sparkObserver.unobserve(en.target); loadSpark(en.target); }
     });
@@ -163,7 +163,7 @@
     var feed = document.getElementById('center-feed');
     if(!feed) return;
     watchSparks(feed);
-    new MutationObserver(function(){ watchSparks(feed); }).observe(feed, {childList: true, subtree: true});
+    OrcPageLifecycle.mutationObserver(function(){ watchSparks(feed); }).observe(feed, {childList: true, subtree: true});
   }
 
   /* ── Calls tab: best calls today + a way in ── */

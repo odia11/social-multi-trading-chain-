@@ -54,14 +54,14 @@ check('...token names are escaped before they reach the page',
       "function esc(v){" in js and "<b>$'+esc(sym)+'</b>" in js and "esc(img)" in js and "esc(l.quote_asset)" in js)
 check('...refreshed on pull-to-refresh and every minute while visible',
       "document.getElementById('oa-m-opps')?loadOpps():null" in js
-      and 'setInterval(function(){if(!document.hidden)loadOpps()},60000);' in opps)
+      and 'OrcPageLifecycle.setInterval(function(){if(!document.hidden)loadOpps()},60000);' in opps)
 
 css = read('static', 'home-mobile.css')
 check('the cockpit has its own styles (four equal actions, Deposit as the primary)',
       'body.oa-home-mobile .oa-m-actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))' in css
       and 'body.oa-home-mobile .oa-m-actions .primary{background:#f7b955' in css)
 check('phones fetch the new Home files (versions bumped everywhere)',
-      all('home-mobile.js?v=13' in read(*f) and 'home-mobile.css?v=14' in read(*f)
+      all('home-mobile.js?v=15' in read(*f) and 'home-mobile.css?v=14' in read(*f)
           for f in (('static', 'navbar.js'), ('static', 'app-ux.js')))
       and 'home-mobile.css?v=14' in read('app_performance.py'))
 r = subprocess.run(['node', '-e', 'new Function(require("fs").readFileSync(0,"utf8"))'], input=js,

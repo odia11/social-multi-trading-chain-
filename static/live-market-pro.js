@@ -813,7 +813,7 @@ function startLivePrices(){
   // Small scheduler tick, actual network cadence is controlled by
   // _priceNextAt. This avoids overlapping requests and gives 429/503 an
   // exponential backoff instead of immediately hammering the same endpoint.
-  _priceTimer=setInterval(tickLivePrices,500);
+  _priceTimer=OrcPageLifecycle.setInterval(tickLivePrices,500);
   document.addEventListener('visibilitychange',function(){
     if(document.visibilityState==='visible'){
       _priceNextAt=0;
@@ -853,10 +853,10 @@ function mountChart(idx, mint, pairAddr, chain, seedPrice){
   chartTick(idx);
   // A one-point chart needs provider history as soon as the cache refreshes;
   // established charts can wait. Server caches chart responses for 30s.
-  st.timer = setInterval(function(){
+  st.timer = OrcPageLifecycle.setInterval(function(){
     if(!document.hidden && (st.candles||[]).length<2) chartTick(idx);
   }, 30000);
-  st.slowTimer=setInterval(function(){
+  st.slowTimer=OrcPageLifecycle.setInterval(function(){
     if(!document.hidden && (st.candles||[]).length>=2) chartTick(idx);
   }, 300000);
   attachChartSvgScrub(idx);
@@ -865,8 +865,8 @@ function unmountChart(idx){
   var st = _chartTimers[idx];
   if(!st) return;
   st.destroyed = true;
-  if(st.timer) clearInterval(st.timer);
-  if(st.slowTimer) clearInterval(st.slowTimer);
+  if(st.timer) OrcPageLifecycle.clearInterval(st.timer);
+  if(st.slowTimer) OrcPageLifecycle.clearInterval(st.slowTimer);
   if(st.liveRaf) cancelAnimationFrame(st.liveRaf);
   if(st.scrubTeardown) st.scrubTeardown();
   delete _chartTimers[idx];
@@ -976,7 +976,7 @@ function observeCards(){
     cards.forEach(activateCard);
     return;
   }
-  _cardObserver = new IntersectionObserver(function(entries){
+  _cardObserver = OrcPageLifecycle.intersectionObserver(function(entries){
     entries.forEach(function(entry){
       var idx = entry.target.dataset.idx;
       if(entry.isIntersecting) activateCard(entry.target);
@@ -1494,7 +1494,7 @@ function _pfMount(card, t){
   // re-apply the empty-state wording and the position value after each.
   if(_pfObserver) _pfObserver.disconnect();
   if('MutationObserver' in window){
-    _pfObserver = new MutationObserver(function(){ _pfDecorate(card); });
+    _pfObserver = OrcPageLifecycle.mutationObserver(function(){ _pfDecorate(card); });
     var stats = card.querySelector('.pt-card-stats');
     if(stats) _pfObserver.observe(stats, {subtree: true, childList: true, characterData: true});
   }
@@ -3153,8 +3153,8 @@ document.addEventListener('DOMContentLoaded', function(){
   // Background tabs do zero market polling. Mobile browsers otherwise keep
   // old pages alive long enough to burn through rate limits for data nobody
   // can see, then return to the foreground already throttled.
-  setInterval(function(){ if(!document.hidden) loadFeed(true); }, 15000);
-  setInterval(function(){
+  OrcPageLifecycle.setInterval(function(){ if(!document.hidden) loadFeed(true); }, 15000);
+  OrcPageLifecycle.setInterval(function(){
     if(!_focusedMint || document.hidden) return;
     fetch('/api/token/info/'+encodeURIComponent(_focusedMint)).then(function(r){return r.json();}).then(function(info){
       if(!info || !info.ok) return;
@@ -3167,11 +3167,11 @@ document.addEventListener('DOMContentLoaded', function(){
       patchFeedList();
     }).catch(function(){});
   }, 15000);
-  setInterval(function(){ if(!document.hidden) loadSurges(); }, 12000);
-  setInterval(function(){ if(!document.hidden) loadLaunches(); }, 60000);
-  setInterval(function(){ if(!document.hidden) loadTape(); }, 8000);
-  setInterval(function(){ if(!document.hidden) loadTraders(); }, 30000);
-  setInterval(function(){ if(!document.hidden) loadPulse(); }, 20000);
+  OrcPageLifecycle.setInterval(function(){ if(!document.hidden) loadSurges(); }, 12000);
+  OrcPageLifecycle.setInterval(function(){ if(!document.hidden) loadLaunches(); }, 60000);
+  OrcPageLifecycle.setInterval(function(){ if(!document.hidden) loadTape(); }, 8000);
+  OrcPageLifecycle.setInterval(function(){ if(!document.hidden) loadTraders(); }, 30000);
+  OrcPageLifecycle.setInterval(function(){ if(!document.hidden) loadPulse(); }, 20000);
   // The one that makes the charts move. Started once for the whole page, not
   // per card -- it batches every visible chart into a single request.
   startLivePrices();

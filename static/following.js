@@ -52,5 +52,5 @@
     }).catch(function(e){status.textContent=e.message;}).finally(function(){callsBusy=false;calls.setAttribute('aria-busy','false');});
   }
   more.addEventListener('click',function(){loadTraders(true);});
-  loadTraders(false);loadCalls();setInterval(function(){if(!document.hidden)loadCalls();},60000);
+  loadTraders(false);loadCalls();OrcPageLifecycle.setInterval(function(){if(!document.hidden)loadCalls();},60000);
 })();

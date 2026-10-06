@@ -201,7 +201,7 @@ async function _ltPollBotStatus(){
 }
 _ltRender(_ltInitial);
 _ltUpdateBotStatus(_ltBot);
-setInterval(function(){ if(!document.hidden){ _ltPoll(); _ltPollBotStatus(); } }, 12000);
+OrcPageLifecycle.setInterval(function(){ if(!document.hidden){ _ltPoll(); _ltPollBotStatus(); } }, 12000);
 </script>
 <script src="/static/live-trades-sell.js?v={{ app_version }}"></script>
 <script src="/static/pull-to-refresh.js?v={{ app_version }}"></script>

@@ -1446,7 +1446,7 @@ function _renderSubtabs() {
 function showView(name) {
   var allowed = _ROLE_TABS[_userRole] || Object.keys(_titles);
   if (allowed.indexOf(name) < 0) return;
-  if (name !== 'support' && _supChatPollTimer) { clearInterval(_supChatPollTimer); _supChatPollTimer = null; }
+  if (name !== 'support' && _supChatPollTimer) { OrcPageLifecycle.clearInterval(_supChatPollTimer); _supChatPollTimer = null; }
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('view-' + name).classList.add('active');
@@ -1521,7 +1521,7 @@ async function loadRisk(silent) {
       + '</div>';
   }).join('');
 }
-setInterval(function(){
+OrcPageLifecycle.setInterval(function(){
   var v = document.getElementById('view-risk');
   if (v && v.classList.contains('active')) loadRisk(true);
   else if ((_ROLE_TABS[_userRole] || []).indexOf('risk') >= 0) _a('/api/admin/positions-at-risk').then(function(d){ if (d && d.ok) _setBadge('risk', d.count); });
@@ -2098,8 +2098,8 @@ async function _supAdminOpenThread(id) {
   document.getElementById('sup-chat-input').value = '';
   document.getElementById('sup-ai-hint').style.display = 'none';
   await _supAdminLoadThreadMessages();
-  if (_supChatPollTimer) clearInterval(_supChatPollTimer);
-  _supChatPollTimer = setInterval(_supAdminLoadThreadMessages, 5000);
+  if (_supChatPollTimer) OrcPageLifecycle.clearInterval(_supChatPollTimer);
+  _supChatPollTimer = OrcPageLifecycle.setInterval(_supAdminLoadThreadMessages, 5000);
 }
 
 async function _supAdminLoadThreadMessages() {
@@ -2207,8 +2207,8 @@ function _supStartBadgePoll() {
     if (r && r.ok) _supSetNavBadge((r.threads||[]).reduce(function(s,t){return s+(t.unread||0);}, 0));
   };
   check();
-  if (_supBadgeTimer) clearInterval(_supBadgeTimer);
-  _supBadgeTimer = setInterval(check, 30000);
+  if (_supBadgeTimer) OrcPageLifecycle.clearInterval(_supBadgeTimer);
+  _supBadgeTimer = OrcPageLifecycle.setInterval(check, 30000);
 }
 
 // ══════════════════ SECURITY ══════════════════
@@ -2702,8 +2702,8 @@ async function deletePost(btn) {
 // ── AUTO-REFRESH every 30s ──
 var _refreshTimer = null;
 function _startAutoRefresh() {
-  if (_refreshTimer) clearInterval(_refreshTimer);
-  _refreshTimer = setInterval(function() {
+  if (_refreshTimer) OrcPageLifecycle.clearInterval(_refreshTimer);
+  _refreshTimer = OrcPageLifecycle.setInterval(function() {
     var active = document.querySelector('.view.active');
     if (!active) return;
     var name = active.id.replace('view-', '');

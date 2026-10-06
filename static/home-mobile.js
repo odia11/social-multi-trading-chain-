@@ -69,7 +69,7 @@ async function refreshHomePortfolio(){
 }
 function buildPortfolio(afterEl){
   var old=document.getElementById('oa-m-portfolio');if(old)old.remove();
-  if(_oaPortfolioTimer)clearInterval(_oaPortfolioTimer);
+  if(_oaPortfolioTimer)OrcPageLifecycle.clearInterval(_oaPortfolioTimer);
   var el=document.createElement('section');el.className='oa-m-portfolio';el.id='oa-m-portfolio';
   el.innerHTML='<div class="oa-m-pf-icon">▣</div><div class="oa-m-pf-main"><div class="oa-m-pf-label">Total Portfolio Value</div><div class="oa-m-pf-row"><strong id="oa-m-pf-value">—</strong><span>Live</span></div></div><div class="oa-m-pf-chart">'+spark()+'</div><a href="/wallet" class="oa-m-pf-btn">View Portfolio <span>→</span></a>';
   afterEl.insertAdjacentElement('afterend',el);
@@ -80,8 +80,8 @@ function startPortfolio(){
   var cached=_homeCachedPortfolio();
   if(cached!==null)_paintHomePortfolio(cached,false,false);
   refreshHomePortfolio();
-  if(_oaPortfolioTimer)clearInterval(_oaPortfolioTimer);
-  _oaPortfolioTimer=setInterval(refreshHomePortfolio,30000);
+  if(_oaPortfolioTimer)OrcPageLifecycle.clearInterval(_oaPortfolioTimer);
+  _oaPortfolioTimer=OrcPageLifecycle.setInterval(refreshHomePortfolio,30000);
 }
 /* ── Signed-in Home: a cockpit instead of the marketing hero ──────────────
    The hero ("Smarter Trading. Stronger Together.") is a pitch for someone
@@ -129,7 +129,7 @@ function buildOpps(afterEl){
     +'<div class="oa-m-opps-block" id="oa-m-launches" hidden><div class="oa-m-opps-hd"><span>New on OrcAgent</span><a href="/launches">All launches →</a></div><div class="oa-m-opps-rail" id="oa-m-launch-rail"></div></div>';
   afterEl.insertAdjacentElement('afterend',el);
   loadOpps();
-  setInterval(function(){if(!document.hidden)loadOpps()},60000);
+  OrcPageLifecycle.setInterval(function(){if(!document.hidden)loadOpps()},60000);
   return el;
 }
 function loadOpps(){
@@ -207,7 +207,7 @@ async function updateMajorMarkets(){
 }
 function buildMarkets(afterEl){
   var old=document.getElementById('oa-m-market-strip');if(old)old.remove();
-  if(_oaMarketTimer)clearInterval(_oaMarketTimer);
+  if(_oaMarketTimer)OrcPageLifecycle.clearInterval(_oaMarketTimer);
   var el=document.createElement('section');el.className='oa-m-market-strip';el.id='oa-m-market-strip';
   el.innerHTML=['BTC','ETH','SOL'].map(function(sym){
     return '<button class="oa-m-coin" data-sym="'+sym+'" aria-label="'+sym+' live USD price">'+
@@ -222,7 +222,7 @@ function buildMarkets(afterEl){
     card.onclick=function(){location.href='/live-market'};
   });
   updateMajorMarkets();
-  _oaMarketTimer=setInterval(updateMajorMarkets,15000);
+  _oaMarketTimer=OrcPageLifecycle.setInterval(updateMajorMarkets,15000);
   return el;
 }
 document.addEventListener('visibilitychange',function(){if(!document.hidden)updateMajorMarkets()});

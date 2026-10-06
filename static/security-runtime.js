@@ -164,7 +164,7 @@ function boot(){
   installWindowOpenGuard();
   safeCopyModal();
   try{
-    new MutationObserver(function(ms){
+    OrcPageLifecycle.mutationObserver(function(ms){
       ms.forEach(function(m){
         if(m.type==='attributes')scrub(m.target);
         m.addedNodes.forEach(function(n){if(n.nodeType===1)scrub(n)});

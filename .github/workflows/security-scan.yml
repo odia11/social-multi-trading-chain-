@@ -44,6 +44,9 @@ jobs:
       - name: Bot +7% entry regression
         run: python tests/test_bot_entry_7pct_policy.py
 
+      - name: PWA lifecycle cleanup regression
+        run: python tests/test_page_lifecycle_cleanup.py
+
       - name: OrcAgent security regression checks
         run: |
           node --check static/dashboard.js

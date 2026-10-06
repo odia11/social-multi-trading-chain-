@@ -101,8 +101,8 @@ function install(){
 }
 
 window.OrcAgentTradeCard={version:2,render:render,normalize:normalize,hydrate:hydrate,hydrateAll:hydrateAll};
-var tries=0,t=setInterval(function(){tries++;install();if(tries>80)clearInterval(t)},50);
-var mo=new MutationObserver(function(ms){for(var i=0;i<ms.length;i++){if(ms[i].addedNodes&&ms[i].addedNodes.length){requestAnimationFrame(function(){hydrateAll(document)});break}}});
+var tries=0,t=OrcPageLifecycle.setInterval(function(){tries++;install();if(tries>80)OrcPageLifecycle.clearInterval(t)},50);
+var mo=OrcPageLifecycle.mutationObserver(function(ms){for(var i=0;i<ms.length;i++){if(ms[i].addedNodes&&ms[i].addedNodes.length){requestAnimationFrame(function(){hydrateAll(document)});break}}});
 function start(){install();if(document.body)mo.observe(document.body,{childList:true,subtree:true});hydrateAll(document)}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();

@@ -63,5 +63,5 @@
     e.preventDefault();var button=this.querySelector('button[type="submit"]');button.disabled=true;
     api('/api/price-alerts','POST',{mint:current,direction:document.getElementById('watch-direction').value,target:document.getElementById('watch-target').value}).then(function(){dialog.close();status.textContent='Alert saved. We will notify you once when the target is reached.';return load();}).catch(function(err){document.getElementById('watch-alert-error').textContent=err.message;}).finally(function(){button.disabled=false;});
   });
-  load();setInterval(function(){if(!document.hidden&&!dialog.open)load();},60000);
+  load();OrcPageLifecycle.setInterval(function(){if(!document.hidden&&!dialog.open)load();},60000);
 })();

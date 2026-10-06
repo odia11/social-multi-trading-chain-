@@ -67,7 +67,7 @@
     return root>SCROLL_TOP_THRESHOLD || !!(feed && feed.scrollTop>SCROLL_TOP_THRESHOLD);
   }
 
-  setInterval(function(){
+  OrcPageLifecycle.setInterval(function(){
     if(document.hidden) return;
     if(_isTypingOrFocused()) return;
     if(_modalOpen()) return;

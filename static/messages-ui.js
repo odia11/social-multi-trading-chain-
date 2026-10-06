@@ -7,7 +7,7 @@ function fmtPct(n){n=parseFloat(n||0);return (n>=0?'+':'')+n.toFixed(2)+'%'}
 function upgradeBack(){var h=document.getElementById('msgs-thread-hdr');if(!h)return;var b=h.querySelector('.msgs-back');if(!b){b=document.createElement('button');b.type='button';b.className='msgs-back';b.setAttribute('aria-label','Back to messages');b.onclick=function(){if(typeof window._backToList==='function')window._backToList()};h.insertBefore(b,h.firstChild)}else{b.setAttribute('aria-label','Back to messages')}}
 function upgradeTradeCards(root){(root||document).querySelectorAll('.msg-bubble.msg-trade:not(.oa-trade-v3)').forEach(function(card){var txt=(card.innerText||card.textContent||'').replace(/\s+/g,' ').trim();var sym=(txt.match(/\$([^\s$]+)/)||[])[1]||'';var prices=txt.match(/\$([0-9][0-9.,]*(?:e[-+]?\d+)?)\s*(?:→|->)\s*\$([0-9][0-9.,]*(?:e[-+]?\d+)?)/i);var pnlm=txt.match(/([+-]\d+(?:\.\d+)?)\s*(SOL|USDC|USDG|USD)/i);var pctm=txt.match(/([+-]\d+(?:\.\d+)?)%/);if(!sym||!prices||!pctm)return;var entry='$'+prices[1],exit='$'+prices[2],pct=parseFloat(pctm[1]||0),pnl=pnlm?(pnlm[1]+' '+pnlm[2].toUpperCase()):'—';var pos=pct>=0?'pos':'neg';var holder=card.closest('[data-mint]');var mint=card.getAttribute('data-mint')||(holder&&holder.getAttribute('data-mint'))||'';var mintOk=/^(?:[1-9A-HJ-NP-Za-km-z]{32,44}|0x[a-fA-F0-9]{40})$/.test(mint);card.classList.add('oa-trade-v3');card.innerHTML='<div class="oa-dm-trade-card"><div class="oa-dm-trade-top"><div class="oa-dm-trade-token">$'+esc(sym)+'</div><div class="oa-dm-trade-pct '+pos+'">'+esc(fmtPct(pct))+'</div></div><div class="oa-dm-trade-stats"><div class="oa-dm-trade-stat"><span class="oa-dm-trade-label">Entry</span><span class="oa-dm-trade-value">'+esc(entry)+'</span></div><div class="oa-dm-trade-stat"><span class="oa-dm-trade-label">Exit</span><span class="oa-dm-trade-value">'+esc(exit)+'</span></div><div class="oa-dm-trade-stat"><span class="oa-dm-trade-label">Result</span><span class="oa-dm-trade-value oa-dm-trade-pnl '+pos+'">'+esc(pnl)+'</span></div></div><div class="oa-dm-trade-bottom"><span class="oa-dm-trade-caption">Shared trade</span><span class="oa-dm-trade-pnl '+pos+'">'+esc(fmtPct(pct))+'</span></div>'+(mintOk?'<a class="oa-dm-trade-link" href="/token/'+encodeURIComponent(mint)+'">View Trade Details →</a>':'')+'</div>'})}
 function run(){upgradeBack();upgradeTradeCards(document)}
-var mo=new MutationObserver(function(ms){for(var i=0;i<ms.length;i++){if(ms[i].addedNodes&&ms[i].addedNodes.length){requestAnimationFrame(run);break}}});
+var mo=OrcPageLifecycle.mutationObserver(function(ms){for(var i=0;i<ms.length;i++){if(ms[i].addedNodes&&ms[i].addedNodes.length){requestAnimationFrame(run);break}}});
 function start(){run();mo.observe(document.body,{childList:true,subtree:true})}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
@@ -93,7 +93,7 @@ function install(){
 }
 
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
-var tries=0,t=setInterval(function(){tries++;install();if(document.querySelector('.msgs-input-bar.oa-composer-v4')||tries>20)clearInterval(t);},100);
+var tries=0,t=OrcPageLifecycle.setInterval(function(){tries++;install();if(document.querySelector('.msgs-input-bar.oa-composer-v4')||tries>20)OrcPageLifecycle.clearInterval(t);},100);
 })();
 
 /* messages-thread-v5.js */
@@ -137,7 +137,7 @@ function markThreadState(){
 
 function run(){markThreadState();if(document.body.classList.contains('oa-thread-open'))decorateIncoming();}
 var pending=false;
-var mo=new MutationObserver(function(){
+var mo=OrcPageLifecycle.mutationObserver(function(){
   if(pending)return;
   pending=true;
   requestAnimationFrame(function(){pending=false;run();});
@@ -209,7 +209,7 @@ function sync(){
   }
 }
 var pending=false;
-var mo=new MutationObserver(function(){if(pending)return;pending=true;requestAnimationFrame(function(){pending=false;sync();});});
+var mo=OrcPageLifecycle.mutationObserver(function(){if(pending)return;pending=true;requestAnimationFrame(function(){pending=false;sync();});});
 function start(){
   sync();
   var main=document.querySelector('.msgs-main');
@@ -331,8 +331,8 @@ function install(){
   return true;
 }
 
-var tries=0,t=setInterval(function(){tries++;if(install()||tries>60)clearInterval(t)},50);
-var mo=new MutationObserver(function(ms){for(var i=0;i<ms.length;i++){if(ms[i].addedNodes&&ms[i].addedNodes.length){requestAnimationFrame(function(){hydrateAll(document)});break;}}});
+var tries=0,t=OrcPageLifecycle.setInterval(function(){tries++;if(install()||tries>60)OrcPageLifecycle.clearInterval(t)},50);
+var mo=OrcPageLifecycle.mutationObserver(function(ms){for(var i=0;i<ms.length;i++){if(ms[i].addedNodes&&ms[i].addedNodes.length){requestAnimationFrame(function(){hydrateAll(document)});break;}}});
 function start(){install();mo.observe(document.body,{childList:true,subtree:true});hydrateAll(document);}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();

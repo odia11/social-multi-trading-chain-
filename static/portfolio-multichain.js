@@ -102,8 +102,8 @@ function boot(){
      wait behind duplicate RPC work. First paint from the normal cached token
      snapshot, then keep revalidating quietly in the background. */
   queue(function(){refreshValue(false)},0);
-  if(_timer)clearInterval(_timer);
-  _timer=setInterval(function(){refreshValue(false)},AUTO_REFRESH_MS);
+  if(_timer)OrcPageLifecycle.clearInterval(_timer);
+  _timer=OrcPageLifecycle.setInterval(function(){refreshValue(false)},AUTO_REFRESH_MS);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 document.addEventListener('orca:trade-complete',function(){queue(refreshHoldings,150)});

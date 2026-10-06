@@ -757,14 +757,14 @@ async function connectWalletOnboard(type, afterLoginUrl){
     var clean = u.pathname + (u.searchParams.toString() ? '?'+u.searchParams.toString() : '') + u.hash;
     history.replaceState(null, '', clean);
     var attempts = 0;
-    var timer = setInterval(function(){
+    var timer = OrcPageLifecycle.setInterval(function(){
       attempts += 1;
       if(_phantomProvider()){
-        clearInterval(timer);
+        OrcPageLifecycle.clearInterval(timer);
         connectWalletOnboard('phantom', returnTo)
           .catch(function(e){ console.error('[phantom-browser-connect]', e); });
       }else if(attempts >= 20){
-        clearInterval(timer);
+        OrcPageLifecycle.clearInterval(timer);
         if(isMobile) _phantomMobileV1Connect(returnTo);
         else _walletConnectNotice('Phantom wallet not detected — install the Phantom browser extension and reload this page.');
       }
@@ -1114,7 +1114,7 @@ async function launchApp(){
   _oaIdle(function(){ _safeInit('fetchPnlChart', fetchPnlChart()); }, 1400);
   _oaIdle(function(){ fetch('/api/heartbeat', {method:'POST', headers:{'X-CSRF-Token': _csrfToken}}).catch(function(){}); }, 1600);
   if (!window._heartbeatTimer) {
-    window._heartbeatTimer = setInterval(function(){
+    window._heartbeatTimer = OrcPageLifecycle.setInterval(function(){
       fetch('/api/heartbeat', {method:'POST', headers:{'X-CSRF-Token': _csrfToken}}).catch(function(){});
       _checkAdminInvite();
     }, 45000);
@@ -1133,7 +1133,7 @@ async function _loadRightRail(){
   if(!_oaOnScreen('right-rail')) return;
   _loadRrMarket();
   _loadRrTraders();
-  if(!window._oaRailTimer) window._oaRailTimer=setInterval(_oaPollTask(_loadRrMarket),30000);
+  if(!window._oaRailTimer) window._oaRailTimer=OrcPageLifecycle.setInterval(_oaPollTask(_loadRrMarket),30000);
 }
 
 function _rrFeaturedMarketRow(p){
@@ -1291,7 +1291,7 @@ async function _fetchSolPrice(){
   }catch(e){}
 }
 _fetchSolPrice();
-setInterval(_oaPollTask(_fetchSolPrice),30000);
+OrcPageLifecycle.setInterval(_oaPollTask(_fetchSolPrice),30000);
 
 function _updateSolUsdc(sol){
   const _p=_getSolPrice();
@@ -2248,14 +2248,14 @@ function checkOwnerPanel(){
     _iadminSetVisible(true);
     iadminRefresh();
     fetchAudit();
-    if(!_adminTimer) _adminTimer=setInterval(()=>{ if(_adminView) fetchAdminOverview(); else iadminRefresh(); },60000);
+    if(!_adminTimer) _adminTimer=OrcPageLifecycle.setInterval(()=>{ if(_adminView) fetchAdminOverview(); else iadminRefresh(); },60000);
   } else {
     if(adminBtn) adminBtn.style.display='none';
     if(healthBtn) healthBtn.style.display='none';
     _iadminSetVisible(false);
     if(_adminView) toggleAdminView();
     closeHealthPanel();
-    if(_adminTimer){clearInterval(_adminTimer);_adminTimer=null;}
+    if(_adminTimer){OrcPageLifecycle.clearInterval(_adminTimer);_adminTimer=null;}
   }
 }
 
@@ -2898,7 +2898,7 @@ function _initPosChart(currentPrice){
   });
   _posChart.priceScale('pos-vol').applyOptions({scaleMargins:{top:0.70,bottom:0}});
   if(currentPrice>0) _posPriceLine=_posSeries.createPriceLine({price:currentPrice,color:'#ffc13a',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'now'});
-  new ResizeObserver(()=>{
+  OrcPageLifecycle.resizeObserver(()=>{
     if(container.clientWidth>0) _posChart.applyOptions({width:container.clientWidth,height:container.clientHeight});
   }).observe(container);
   attachChartScrub('pos-chart-container', container, _posChart, _posSeries, _posDataRef,
@@ -3150,11 +3150,11 @@ function showLfToast(icon,msg,type){
 }
 
 function _lfStartCountdown(){
-  if(_lfCountdownTimer) clearInterval(_lfCountdownTimer);
+  if(_lfCountdownTimer) OrcPageLifecycle.clearInterval(_lfCountdownTimer);
   _lfCountdownVal=10;
   const el=document.getElementById('lf-countdown');
   if(el) el.textContent='↻ '+_lfCountdownVal+'s';
-  _lfCountdownTimer=setInterval(()=>{
+  _lfCountdownTimer=OrcPageLifecycle.setInterval(()=>{
     _lfCountdownVal=Math.max(0,_lfCountdownVal-1);
     if(el) el.textContent=_lfCountdownVal>0?'↻ '+_lfCountdownVal+'s':'refreshing…';
     if(_lfCountdownVal===0) _lfCountdownVal=10;
@@ -3798,10 +3798,10 @@ async function loadWalletTokens(){
 }
 function _startWalletRefresh(){
   _stopWalletRefresh();
-  _wltInterval=setInterval(loadWalletTokens,30000);
+  _wltInterval=OrcPageLifecycle.setInterval(loadWalletTokens,30000);
 }
 function _stopWalletRefresh(){
-  if(_wltInterval){clearInterval(_wltInterval);_wltInterval=null;}
+  if(_wltInterval){OrcPageLifecycle.clearInterval(_wltInterval);_wltInterval=null;}
 }
 function _sbSetActive(id){
   document.querySelectorAll('#sidebar .sb-nav-item').forEach(el=>el.classList.remove('active'));
@@ -3888,7 +3888,7 @@ async function _botToggle(){
 
 // Initial fetch + 30s poll
 _botFetchStatus()
-_botPollTimer=setInterval(_oaPollTask(_botFetchStatus),30000)
+_botPollTimer=OrcPageLifecycle.setInterval(_oaPollTask(_botFetchStatus),30000)
 
 // ── bot PNL panel ──────────────────────────────────────
 async function _botLoadPositions(){
@@ -3932,7 +3932,7 @@ async function _botLoadPositions(){
   }catch(e){}
 }
 _botLoadPositions()
-setInterval(_oaPollTask(_botLoadPositions),10000)
+OrcPageLifecycle.setInterval(_oaPollTask(_botLoadPositions),10000)
 
 function _sbNav(section){
   if(section!=='wallet') _stopWalletRefresh();
@@ -4473,11 +4473,11 @@ let _lbCountdownTimer=null,_lbCountdownVal=30;
 
 
 function _lbStartCountdown(){
-  if(_lbCountdownTimer) clearInterval(_lbCountdownTimer);
+  if(_lbCountdownTimer) OrcPageLifecycle.clearInterval(_lbCountdownTimer);
   _lbCountdownVal=30;
   const el=document.getElementById('lb-countdown');
   if(el) el.textContent='↻ '+_lbCountdownVal+'s';
-  _lbCountdownTimer=setInterval(()=>{
+  _lbCountdownTimer=OrcPageLifecycle.setInterval(()=>{
     _lbCountdownVal=Math.max(0,_lbCountdownVal-1);
     if(el) el.textContent=_lbCountdownVal>0?'↻ '+_lbCountdownVal+'s':'refreshing…';
     if(_lbCountdownVal===0) _lbCountdownVal=30;
@@ -5025,7 +5025,7 @@ function _renderPnlcChart(pts){
       handleScroll:false,handleScale:false,
     });
     _pnlcSeries=_pnlcChart.addAreaSeries({lineColor:lineClr,topColor:topClr,bottomColor:botClr,lineWidth:2});
-    new ResizeObserver(()=>{
+    OrcPageLifecycle.resizeObserver(()=>{
       if(container.clientWidth>0) _pnlcChart.applyOptions({width:container.clientWidth});
     }).observe(container);
     // handleScroll/handleScale were already off here (this chart's range is
@@ -5046,7 +5046,7 @@ function _renderPnlcChart(pts){
 document.addEventListener('DOMContentLoaded',function(){
   var panel=document.getElementById('pnlc-container');
   if(panel && 'IntersectionObserver' in window){
-    var observer=new IntersectionObserver(function(entries){if(entries.some(function(e){return e.isIntersecting;}))fetchPnlChart();});
+    var observer=OrcPageLifecycle.intersectionObserver(function(entries){if(entries.some(function(e){return e.isIntersecting;}))fetchPnlChart();});
     observer.observe(panel);
   }
 });
@@ -5057,13 +5057,13 @@ function _pnlSetRange(range,btn){
   fetchPnlChart();
 }
 
-setInterval(_oaPollTask(fetchState),10000);
-setInterval(_oaPollTask(fetchMarketOnly),15000);
-setInterval(_oaPollTask(fetchTrades),30000);
-setInterval(_oaPollTask(fetchPnlChart),30000);
-setInterval(_oaPollTask(fetchLeaderboard),30000);
-setInterval(_oaPollTask(_refreshVisibleReactions),12000);
-setInterval(_oaPollTask(fetchPumpScanner),30000);
+OrcPageLifecycle.setInterval(_oaPollTask(fetchState),10000);
+OrcPageLifecycle.setInterval(_oaPollTask(fetchMarketOnly),15000);
+OrcPageLifecycle.setInterval(_oaPollTask(fetchTrades),30000);
+OrcPageLifecycle.setInterval(_oaPollTask(fetchPnlChart),30000);
+OrcPageLifecycle.setInterval(_oaPollTask(fetchLeaderboard),30000);
+OrcPageLifecycle.setInterval(_oaPollTask(_refreshVisibleReactions),12000);
+OrcPageLifecycle.setInterval(_oaPollTask(fetchPumpScanner),30000);
 
 // ── VERSION POLLING ──
 let _pageVersion=null;
@@ -5071,7 +5071,7 @@ let _pageVersion=null;
   const r=await fetch('/api/version').then(r=>r.json()).catch(()=>null);
   if(r?.version) _pageVersion=r.version;
 })();
-setInterval(async()=>{
+OrcPageLifecycle.setInterval(async()=>{
   if(document.hidden || !_pageVersion) return;
   const r=await fetch('/api/version').then(r=>r.json()).catch(()=>null);
   if(r?.version && r.version!==_pageVersion){
@@ -5293,7 +5293,7 @@ async function burnSelected(){
 })();
 
 
-setInterval(fetchBalance,30000);
+OrcPageLifecycle.setInterval(fetchBalance,30000);
 
 // ── HEALTH / AUDIT (owner-only) ──
 let _auditLastTs=0;
@@ -5623,10 +5623,10 @@ function toggleSupportChat(force){
   document.getElementById('support-panel').classList.toggle('open', _supportOpen);
   if(_supportOpen){
     _supportLoadThread();
-    if(!_supportPollTimer) _supportPollTimer=setInterval(_supportLoadThread,5000);
+    if(!_supportPollTimer) _supportPollTimer=OrcPageLifecycle.setInterval(_supportLoadThread,5000);
     document.getElementById('support-fab-badge').style.display='none';
   } else {
-    clearInterval(_supportPollTimer); _supportPollTimer=null;
+    OrcPageLifecycle.clearInterval(_supportPollTimer); _supportPollTimer=null;
   }
 }
 
@@ -5686,7 +5686,7 @@ async function sendSupportMessage(){
 }
 
 if(_SUPPORT_CHAT_ENABLED){
-  setInterval(_oaPollTask(_supportFetchUnread),30000);
+  OrcPageLifecycle.setInterval(_oaPollTask(_supportFetchUnread),30000);
   setTimeout(_supportFetchUnread, 2000);
 }
 
@@ -5694,14 +5694,14 @@ if(_SUPPORT_CHAT_ENABLED){
 // the widget once the wallet session is ready, then clean the URL.
 if(_SUPPORT_CHAT_ENABLED && new URLSearchParams(location.search).get('support')==='1'){
   let _supportDeepLinkTries=0;
-  const _supportDeepLinkTimer=setInterval(function(){
+  const _supportDeepLinkTimer=OrcPageLifecycle.setInterval(function(){
     _supportDeepLinkTries++;
     if(phantomKey){
-      clearInterval(_supportDeepLinkTimer);
+      OrcPageLifecycle.clearInterval(_supportDeepLinkTimer);
       toggleSupportChat(true);
       history.replaceState(null,'',location.pathname);
     } else if(_supportDeepLinkTries>20){
-      clearInterval(_supportDeepLinkTimer);
+      OrcPageLifecycle.clearInterval(_supportDeepLinkTimer);
     }
   },300);
 }
@@ -5783,14 +5783,14 @@ function openMessagesView(){
   _rrSetVisible(false);
   _dmSetUnreadBadge(0);
   dmLoadConversations();
-  _dmRefreshTimer=setInterval(_dmAutoRefresh,5000);
+  _dmRefreshTimer=OrcPageLifecycle.setInterval(_dmAutoRefresh,5000);
 }
 
 function closeMessagesView(){
   if(!_dmOpen) return;
   _dmOpen=false;
   _dmPeerId=null;
-  clearInterval(_dmRefreshTimer); _dmRefreshTimer=null;
+  OrcPageLifecycle.clearInterval(_dmRefreshTimer); _dmRefreshTimer=null;
   document.getElementById('dm-chat-placeholder').style.display='';
   document.getElementById('dm-chat-active').style.display='none';
   document.getElementById('dm-layout').classList.remove('convo-open');
@@ -5839,13 +5839,13 @@ function openCommunityView(){
   _sbSetActive('sbn-community');
   _rrSetVisible(false);
   gcFetch(true);
-  _gcTimer=setInterval(gcFetch,3000);
+  _gcTimer=OrcPageLifecycle.setInterval(gcFetch,3000);
 }
 
 function closeCommunityView(){
   if(!_gcOpen) return;
   _gcOpen=false;
-  clearInterval(_gcTimer); _gcTimer=null;
+  OrcPageLifecycle.clearInterval(_gcTimer); _gcTimer=null;
   gcCancelPreview();
   document.getElementById('dash-community').style.display='none';
   const bn=document.getElementById('mob-bottom-nav');
@@ -6865,7 +6865,7 @@ function _dmUpdateUnreadBadge(){
 }
 
 // Poll unread count on every page, even outside messages view
-setInterval(_oaPollTask(dmFetchUnread),30000);
+OrcPageLifecycle.setInterval(_oaPollTask(dmFetchUnread),30000);
 
 // ── PROFILE COMMENTS ──
 let _tvcCurrentUserId=null, _tvcCanComment=false, _tvcIsSelf=false;
@@ -8874,7 +8874,7 @@ async function _liveChartPoll(cardEl, pairAddress, symbol, mint){
   if(!document.contains(cardEl)){
     var _entry = _liveChartTimers[cardEl.id];
     if(_entry && _entry.cardEl === cardEl){
-      clearInterval(_entry.timer);
+      OrcPageLifecycle.clearInterval(_entry.timer);
       delete _liveChartTimers[cardEl.id];
       delete _liveChartHistory[cardEl.id];
     }
@@ -8982,7 +8982,7 @@ function startLiveChart(cardEl, pairAddress, symbol, mint){
     // card would otherwise be wrongly treated as "already handled" above and
     // never get its own timer, leaving its chart frozen forever. Clear it
     // immediately instead of waiting.
-    clearInterval(existing.timer);
+    OrcPageLifecycle.clearInterval(existing.timer);
   }
   /* immediately draw from stored embed priceChange values so sparkline is never blank */
   var snap = _ccSnapHistory(cardEl);
@@ -8991,7 +8991,7 @@ function startLiveChart(cardEl, pairAddress, symbol, mint){
     _ccDrawSparkline(cardEl.querySelector('[data-cc="line"]'), snap);
   }
   _liveChartPoll(cardEl, pairAddress, symbol, mint);
-  var timer = setInterval(function(){
+  var timer = OrcPageLifecycle.setInterval(function(){
     _liveChartPoll(cardEl, pairAddress, symbol, mint);
   }, 10000);
   _liveChartTimers[key] = {timer: timer, cardEl: cardEl};
@@ -9005,13 +9005,13 @@ function stopLiveChart(cardEl){
   var key = cardEl.id;
   var entry = _liveChartTimers[key];
   if(entry && entry.cardEl === cardEl){
-    clearInterval(entry.timer);
+    OrcPageLifecycle.clearInterval(entry.timer);
     delete _liveChartTimers[key];
   }
 }
 
 // Visibility-gated start/stop -- every trade-card in the feed used to get an
-// unconditional setInterval(10s) the moment it was rendered, including every
+// unconditional OrcPageLifecycle.setInterval(10s) the moment it was rendered, including every
 // post the user has already scrolled past. Those never stopped: each one
 // keeps fetching DexScreener and touching the DOM every 10s for as long as
 // the tab stays open, and a full feed re-render (60s auto-refresh, or every
@@ -9031,13 +9031,13 @@ function _initLiveCharts(){
   Object.keys(_liveChartTimers).forEach(function(key){
     var entry = _liveChartTimers[key];
     if(!document.contains(entry.cardEl)){
-      clearInterval(entry.timer);
+      OrcPageLifecycle.clearInterval(entry.timer);
       delete _liveChartTimers[key];
       delete _liveChartHistory[key];
     }
   });
   if(!_liveChartObserver){
-    _liveChartObserver = new IntersectionObserver(function(entries){
+    _liveChartObserver = OrcPageLifecycle.intersectionObserver(function(entries){
       entries.forEach(function(entry){
         if(entry.isIntersecting){
           startLiveChart(entry.target, entry.target.getAttribute('data-chart-pair'), entry.target.getAttribute('data-chart-sym'), entry.target.getAttribute('data-chart-mint'));
@@ -9146,7 +9146,7 @@ function _initTradeBanners(){
 /* ── feed view tracking ── */
 var _feedSeenViews    = new Set();  // post ids already counted this page session
 var _feedPendingViews = new Set();  // observed but not yet flushed to the server
-var _feedViewObserver = new IntersectionObserver(function(entries){
+var _feedViewObserver = OrcPageLifecycle.intersectionObserver(function(entries){
   entries.forEach(function(entry){
     if(!entry.isIntersecting) return;
     var id = entry.target.id.slice('fc-card-'.length);
@@ -9157,7 +9157,7 @@ var _feedViewObserver = new IntersectionObserver(function(entries){
   });
 }, {threshold: 0.5});
 
-setInterval(function(){
+OrcPageLifecycle.setInterval(function(){
   if(!_feedPendingViews.size) return;
   var ids = Array.from(_feedPendingViews);
   _feedPendingViews.clear();
@@ -9218,7 +9218,7 @@ function renderHomeFeed(appendItems){
 // answer "what's on screen right now". rootMargin gives a screen's worth of
 // read-ahead so a reaction update lands just before a card scrolls into view.
 var _onScreenCardIds = new Set();
-var _onScreenCardObserver = new IntersectionObserver(function(entries){
+var _onScreenCardObserver = OrcPageLifecycle.intersectionObserver(function(entries){
   entries.forEach(function(entry){
     var id = entry.target.id.slice('fc-card-'.length);
     if(entry.isIntersecting) _onScreenCardIds.add(id);
@@ -9288,7 +9288,7 @@ function _revirtualizeCard(card){
 }
 // Much wider margin than the reactions/chart observers above -- this should
 // only kick in for content many screens away, not the next screen down.
-var _virtObserver = new IntersectionObserver(function(entries){
+var _virtObserver = OrcPageLifecycle.intersectionObserver(function(entries){
   entries.forEach(function(entry){
     if(entry.isIntersecting) _revirtualizeCard(entry.target);
     else _devirtualizeCard(entry.target);
@@ -9486,7 +9486,7 @@ var _FEED_POSTER_URL_RE = /^\/media\/videos\/[a-f0-9]{32}\.jpg$/;
 // Instagram-style: a feed video plays (muted, looping) while it is mostly on
 // screen and pauses when scrolled away, so only what is being watched is
 // downloaded. Tapping the controls unmutes.
-var _feedVideoObserver = ('IntersectionObserver' in window) ? new IntersectionObserver(function(entries){
+var _feedVideoObserver = ('IntersectionObserver' in window) ? OrcPageLifecycle.intersectionObserver(function(entries){
   entries.forEach(function(en){
     var v = en.target;
     if(en.isIntersecting && en.intersectionRatio >= 0.6){ var p = v.play(); if(p && p.catch) p.catch(function(){}); }
@@ -10708,7 +10708,7 @@ function _refreshOnlineCount(){
 }
 document.addEventListener('DOMContentLoaded', function(){
   _refreshOnlineCount();
-  setInterval(_oaPollTask(_refreshOnlineCount),30000);
+  OrcPageLifecycle.setInterval(_oaPollTask(_refreshOnlineCount),30000);
 });
 
 // Pull down at the top of Home (like Instagram) to refresh the feed and the

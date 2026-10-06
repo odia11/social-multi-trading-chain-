@@ -148,7 +148,7 @@ try{
   }
 }catch(_){}
 try{
-  new MutationObserver(function(){
+  OrcPageLifecycle.mutationObserver(function(){
     var old=document.getElementById('oa-mobile-connect-wallet');
     if(old)old.remove();
     if(manualDisconnectRequested()){

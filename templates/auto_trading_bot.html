@@ -167,7 +167,7 @@ async function saveBotStrategy(){
 function fitBotInput(el){if(!el)return;var raw=String(el.value||'');var chars=Math.max(1,raw.length);el.style.width=(chars+.55)+'ch'}
 ['bot-min-trade','bot-max-trade','bot-tp','bot-sl','bot-loss-limit'].forEach(function(id){var el=document.getElementById(id);fitBotInput(el);el.addEventListener('input',function(){botFormDirty=true;fitBotInput(this)})});
 var _loadOverview=loadOverview;loadOverview=async function(){await _loadOverview();['bot-min-trade','bot-max-trade','bot-tp','bot-sl','bot-loss-limit'].forEach(function(id){fitBotInput(document.getElementById(id))})};
-refreshAll();setInterval(function(){if(!document.hidden)refreshAll()},20000);
+refreshAll();OrcPageLifecycle.setInterval(function(){if(!document.hidden)refreshAll()},20000);
 window.addEventListener('pageshow',function(e){if(e.persisted)refreshAll()});
 </script>
 <script src="/static/low-balance-modal.js?v=3"></script>

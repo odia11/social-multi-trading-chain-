@@ -1449,7 +1449,7 @@ function _modalSolUsdcSwap(){
   if(_convertBusy) return
   _convertInvalidate()
   if(_sx&&_sx.timer) clearTimeout(_sx.timer)
-  if(_sx&&_sx.refresh) clearInterval(_sx.refresh)
+  if(_sx&&_sx.refresh) OrcPageLifecycle.clearInterval(_sx.refresh)
   _sx={dir:'native_to_stable',bal:null,seq:0,timer:null,refresh:null,quote:null,loading:false,balanceAttempt:0}
   _showModal(
     '<div class="sx-hd"><div class="sx-title">Swap</div><span class="sx-net"><i></i>Solana</span></div>'
@@ -1484,8 +1484,8 @@ function _modalSolUsdcSwap(){
   _sxLoadBalance()
   // Refresh an idle quote so the shown price never goes stale (quotes live
   // ~45s; 20s keeps well inside the endpoint's 30/min limit).
-  _sx.refresh=setInterval(function(){
-    if(!_sxOpen()){clearInterval(_sx.refresh);return}
+  _sx.refresh=OrcPageLifecycle.setInterval(function(){
+    if(!_sxOpen()){OrcPageLifecycle.clearInterval(_sx.refresh);return}
     if(!_convertBusy&&!_sx.loading&&_sxAmount()>0&&!_sxOver()) _sxQuote()
   },20000)
   setTimeout(function(){var i=_sxEl('cv-amount'); if(i) i.focus()},60)
@@ -1660,9 +1660,9 @@ function _sxSwap(){
   _convertConfirm()
   // _convertConfirm closes the modal on success; on failure it re-enables
   // the controls and shows the reason, and the quote must be fetched again.
-  var wait=setInterval(function(){
+  var wait=OrcPageLifecycle.setInterval(function(){
     if(_convertBusy) return
-    clearInterval(wait)
+    OrcPageLifecycle.clearInterval(wait)
     var m=_sxEl('cv-quote')
     if(_sx&&_sx.uncertain){ _sxSetCta('Check Activity before retrying',false); return }
     if(m&&_sxOpen()){ var why=m.innerHTML; _sx.quote=null; _sxInput(); m.innerHTML=why }
