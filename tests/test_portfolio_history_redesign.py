@@ -121,9 +121,15 @@ def test_ui_replaces_history_only_and_keeps_assets_and_bridge_execution():
 def test_real_sources_scoped_to_user_not_mock_data():
     for path in ['/api/tips/mine?limit=100',
                  '/api/portfolio/transactions?limit=100',
+                 '/api/token-launch/creator-earnings',
                  '/api/portfolio/wallet-activity']:
         assert path in JS
     assert 'Promise.allSettled([tipRequest,tradeRequest])' in JS
+    assert 'Promise.all([primary,claimRequest])' in JS
+    assert 'normalizeClaims(results[1].history)' in JS
+    assert "['submitted','confirmed','confirmed_no_payout','failed']" in JS
+    assert "id:'claim:'+c.id" in JS and "url:c.signature?'https://solscan.io/tx/'" in JS
+    assert "if(c.status==='confirmed'&&c.received_raw!=='')" in JS
     assert 'Number.isFinite' in JS
     assert "'submitted'" in JS and "'confirmed'" in JS
     assert "'View on blockchain ↗'" in JS

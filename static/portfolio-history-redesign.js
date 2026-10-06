@@ -112,6 +112,25 @@ function normalizeTrades(trades){
     };
   }).filter(function(e){return Number.isFinite(e.time)});
 }
+function normalizeClaims(claims){
+  return (claims||[]).filter(function(c){
+    return c&&['submitted','confirmed','confirmed_no_payout','failed'].indexOf(c.status)!==-1&&c.signature;
+  }).map(function(c){
+    var t=parsedDate(c.confirmed_at||c.created_at),asset=c.quote_asset||'USDC';
+    var amount=null;
+    if(c.status==='confirmed'&&c.received_raw!==''){
+      try{amount=Number(BigInt(c.received_raw||'0'))/(asset==='SOL'?1e9:1e6)}catch(_){amount=null}
+    }else if(c.status==='confirmed_no_payout')amount=0;
+    var failed=c.status==='failed',pending=c.status==='submitted';
+    return {
+      id:'claim:'+c.id,type:'claim',filter:'wallet',icon:failed?'failed':'receive',chain:'solana',
+      title:failed?'Creator fee claim failed':pending?'Creator fee claim pending':'Creator fees claimed',
+      sub:(c.symbol?'$'+String(c.symbol).replace(/^\$/,''):'Token')+' · OrcAgent launch',
+      amount:amount,unit:asset,time:t.getTime(),status:c.status,
+      hash:c.signature||'',url:c.signature?'https://solscan.io/tx/'+c.signature:'',message:'',profile:''
+    };
+  }).filter(function(e){return Number.isFinite(e.time)});
+}
 function normalizeWallet(events){
   return (events||[]).map(function(e){
     var t=parsedDate(e.timestamp),incoming=e.type==='receive';
@@ -294,7 +313,7 @@ function render(){
   var p=$('oa-h-scope');
   if(p)p.textContent=state.walletUnavailable
     ? 'Wallet transfer history is temporarily unavailable; confirmed tips and recorded Live Market trades remain visible.'
-    : 'Only actual tips, Live Market trades and recent confirmed Solana SOL and token transfers are shown. No demo activity.';
+    : 'Only actual tips, Live Market trades, creator-fee claims and recent confirmed Solana SOL/token transfers are shown. No demo activity.';
 }
 function get(url){
   return fetch(url,{credentials:'same-origin',cache:'no-store'}).then(function(r){
@@ -310,9 +329,11 @@ function load(){
   }
   var tipRequest=get('/api/tips/mine?limit=100');
   var tradeRequest=get('/api/portfolio/transactions?limit=100');
+  var claimRequest=get('/api/token-launch/creator-earnings');
   var walletRequest=get('/api/portfolio/wallet-activity');
-  // Render tip/trade history as soon as its own sources finish. Solana
-  // historical RPC scans may take longer and must not freeze these rows.
+  // Tips/trades are local app data and render first. Claim reconciliation
+  // and historical wallet RPC may be slower; append them without blocking
+  // the first useful History paint.
   var primary=Promise.allSettled([tipRequest,tradeRequest]).then(function(results){
     if(seq!==state.request)return;
     var events=[];
@@ -320,7 +341,11 @@ function load(){
     if(results[1].status==='fulfilled')events.push.apply(events,normalizeTrades(results[1].value.transactions));
     state.events=events;state.loaded=true;render();
   });
-  return Promise.allSettled([primary,walletRequest]).then(function(results){
+  var claims=Promise.all([primary,claimRequest]).then(function(results){
+    if(seq!==state.request)return;
+    state.events=state.events.concat(normalizeClaims(results[1].history));render();
+  }).catch(function(){});
+  return Promise.allSettled([primary,walletRequest,claims]).then(function(results){
     if(seq!==state.request)return;
     if(results[1].status==='fulfilled'){
       state.events=state.events.concat(normalizeWallet(results[1].value.events));

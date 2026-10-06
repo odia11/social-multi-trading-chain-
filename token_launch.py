@@ -50,6 +50,14 @@ _SIG=re.compile(r'^[1-9A-HJ-NP-Za-km-z]{85,90}$')
 _DRAFT_ID=re.compile(r'^[0-9a-f]{32}$')
 
 
+class SolanaTransactionFailed(ValueError):
+    """The exact prepared transaction landed on-chain but failed.
+
+    This is intentionally distinct from an invalid/mismatched user supplied
+    signature: only an exact claim may be retired as failed and unblocked.
+    """
+
+
 def _optional_https_url(value,label,hosts=None):
     if value in (None,''):return ''
     if not isinstance(value,str):raise ValueError(label+' link is invalid')
@@ -652,8 +660,6 @@ def install(d):
         result=rpc('getTransaction',[signature,{'encoding':'base64',
                          'commitment':'confirmed','maxSupportedTransactionVersion':0}],verification=True)
         if not result:return False
-        if (result.get('meta') or {}).get('err') is not None:
-            raise ValueError('The Solana transaction failed')
         try:
             raw=result['transaction'][0]
             signed=SolanaTransaction.from_bytes(base64.b64decode(raw,validate=True))
@@ -681,6 +687,11 @@ def install(d):
             # Pump's bonding-curve program ID.
             if stage!='claim' and (row['mint'] not in keys or PUMP_PROGRAM not in keys):
                 raise ValueError('Unexpected token or launch program')
+            # Only after the exact prepared message and wallet signature have
+            # been authenticated may an on-chain failure retire this action.
+            # A random failed signature must never be able to cancel a claim.
+            if (result.get('meta') or {}).get('err') is not None:
+                raise SolanaTransactionFailed('The Solana transaction failed')
         except (IndexError,KeyError,TypeError,base64.binascii.Error) as exc:
             raise ValueError('Unrecognized on-chain transaction') from exc
         return True
@@ -733,76 +744,133 @@ def install(d):
         except (KeyError,ValueError,IndexError,TypeError,AttributeError) as exc:
             raise RuntimeError('Confirmed USDC recipient delta unavailable; retry claim confirmation') from exc
 
-    def reconcile_reward_claims(wallet_filter=None):
-        '''Recover on-chain creator rewards when Phantom changed tx wrappers.
+    def _settle_reward_claim_signature(claim,signature,timestamp=None):
+        """Settle one exact, already-signed creator-fee claim.
 
-        A wallet may return a signature but the client can be suspended before
-        OrcAgent saves it, or strict legacy message comparison can reject it.
-        Search only the originating wallet's already-confirmed transactions
-        near each locally prepared claim, verify the exact original Pump core,
-        every signer, actual SOL costs and actual USDC recipient delta.
-        No signing, sending, new claim creation or arbitrary wallet credit.
-        '''
+        The signature must authenticate the exact prepared transaction before
+        any final status is written. A confirmed failed transaction becomes
+        terminal failed so it cannot block a fresh claim forever.
+        """
+        exact={'prepare_tx_b64':claim['transaction_b64'],
+               'wallet':claim['wallet'],'mint':claim['mint']}
+        try:
+            confirmed=check_signature(signature,exact,'claim')
+        except SolanaTransactionFailed:
+            status='failed';received_raw=''
+        else:
+            if not confirmed:return {'status':'pending','changed':0,'received_raw':''}
+            if claim['reward_mode']=='creator' and claim['quote_asset']=='USDC':
+                try:
+                    received_raw=verified_creator_usdc_receipt(
+                        signature,claim['wallet'],allow_zero=True)
+                except RuntimeError:
+                    # The exact transaction is confirmed but token-balance
+                    # metadata can lag. Persist the signature and keep it
+                    # submitted so a later read settles the verified receipt.
+                    received_raw='';status='submitted'
+                else:
+                    status='confirmed' if int(received_raw)>0 else 'confirmed_no_payout'
+            else:
+                # Shared distributions and SOL creator claims are still bound
+                # to their exact prepared transaction. Do not invent a payout
+                # amount when the recipient delta is not independently proven.
+                received_raw=''
+                status='confirmed'
+        resolved_at=(0 if status=='submitted' else
+            (int(timestamp) if isinstance(timestamp,int) and timestamp>0 else int(time.time())))
+        with sqlite3.connect(d.DB_FILE,timeout=8) as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            duplicate=conn.execute('''SELECT id FROM token_reward_claims
+                WHERE wallet=? AND signature=? AND id<>? LIMIT 1''',
+                (claim['wallet'],signature,claim['id'])).fetchone()
+            if duplicate:
+                conn.rollback()
+                return {'status':'duplicate','changed':0,'received_raw':''}
+            updated=conn.execute('''UPDATE token_reward_claims
+                SET signature=?, status=?, received_raw=?, confirmed_at=?
+                WHERE id=? AND wallet=?
+                AND status IN ('prepared','submitted','expired_unverified')
+                AND (signature='' OR signature=?)''',
+                (signature,status,received_raw,resolved_at,claim['id'],
+                 claim['wallet'],signature))
+            if updated.rowcount!=1:
+                current=conn.execute('''SELECT status,received_raw FROM token_reward_claims
+                    WHERE id=? AND wallet=?''',(claim['id'],claim['wallet'])).fetchone()
+                if current and current[0] in ('confirmed','confirmed_no_payout','failed'):
+                    return {'status':current[0],'changed':0,'received_raw':current[1] or ''}
+                return {'status':'changed','changed':0,'received_raw':''}
+        return {'status':status,'changed':1,'received_raw':received_raw}
+
+    def reconcile_reward_claims(wallet_filter=None,*,scan_missing=True):
+        """Recover unresolved creator-fee claims from exact on-chain evidence.
+
+        Recorded submitted signatures are checked directly. When scan_missing
+        is true, prepared claims whose browser disappeared before saving a
+        signature are recovered from the originating wallet's recent Solana
+        history. This works for creator, community and SOL claims; no signing,
+        broadcasting or new claim creation happens here.
+        """
         with closing(sqlite3.connect(d.DB_FILE)) as conn:
             conn.row_factory=sqlite3.Row
             query='''SELECT * FROM token_reward_claims
-                WHERE status IN ('prepared','submitted','expired_unverified') AND reward_mode='creator'
-                AND quote_asset='USDC' AND created_at>?'''
+                WHERE status IN ('prepared','submitted','expired_unverified')
+                AND created_at>?'''
             params=[int(time.time())-7*86400]
             if wallet_filter:
                 query+=' AND wallet=?'
                 params.append(wallet_filter)
             rows=conn.execute(query+' ORDER BY created_at ASC LIMIT 30',params).fetchall()
-        if not rows:return {'checked':0,'recovered':0,'no_payout':0,'unavailable':0}
-        wallet_history={};recovered=no_payout=unavailable=0
+        if not rows:
+            return {'checked':0,'recovered':0,'no_payout':0,'unavailable':0}
+        wallet_history={};recovered=no_payout=failed=unavailable=0
         for source in rows:
             claim=dict(source);wallet=claim['wallet']
-            if wallet not in wallet_history:
-                try:
-                    found=rpc('getSignaturesForAddress',
-                        [wallet,{'limit':100}],verification=True)
-                    wallet_history[wallet]=found if isinstance(found,list) else []
-                except RuntimeError:
-                    unavailable+=1
-                    wallet_history[wallet]=[]
-            # The oldest transaction at/after the local quote belongs to the
-            # earliest pending record. No newer claim can adopt an earlier tx.
-            candidates=sorted(wallet_history[wallet],
-                 key=lambda x:x.get('blockTime') or 0)
+            candidates=[]
+            recorded=claim.get('signature') or ''
+            if isinstance(recorded,str) and _SIG.fullmatch(recorded):
+                candidates=[{'signature':recorded,'blockTime':None,'err':None}]
+            elif scan_missing:
+                if wallet not in wallet_history:
+                    try:
+                        found=rpc('getSignaturesForAddress',
+                            [wallet,{'limit':100}],verification=True)
+                        wallet_history[wallet]=found if isinstance(found,list) else []
+                    except RuntimeError:
+                        unavailable+=1
+                        wallet_history[wallet]=[]
+                # The oldest transaction at/after the local quote belongs to
+                # the earliest pending record. No newer claim can adopt an
+                # earlier transaction.
+                candidates=sorted(wallet_history[wallet],
+                    key=lambda x:x.get('blockTime') or 0)
             for tx in candidates:
                 timestamp=tx.get('blockTime');signature=tx.get('signature')
-                if (not isinstance(timestamp,int) or tx.get('err') is not None
-                    or not isinstance(signature,str) or not _SIG.fullmatch(signature)
-                    or not claim['created_at']-5<=timestamp<=claim['created_at']+180):
+                if (not isinstance(signature,str) or not _SIG.fullmatch(signature)):
                     continue
-                with closing(sqlite3.connect(d.DB_FILE)) as conn:
-                    already=conn.execute('''SELECT id FROM token_reward_claims
-                        WHERE wallet=? AND signature=? AND id<>? LIMIT 1''',
-                        (wallet,signature,claim['id'])).fetchone()
-                if already:continue
-                exact={'prepare_tx_b64':claim['transaction_b64'],
-                       'wallet':wallet,'mint':claim['mint']}
+                if not recorded and (not isinstance(timestamp,int)
+                      or not claim['created_at']-5<=timestamp<=claim['created_at']+180):
+                    continue
                 try:
-                    if not check_signature(signature,exact,'claim'):continue
-                    received_raw=verified_creator_usdc_receipt(
-                                      signature,wallet,allow_zero=True)
-                except (RuntimeError,ValueError,KeyError,TypeError):
+                    result=_settle_reward_claim_signature(claim,signature,timestamp)
+                except RuntimeError:
+                    # Failure to inspect one candidate must not globally block
+                    # cleanup of unrelated never-approved claims. A complete
+                    # wallet-history outage is tracked above and still blocks.
+                    break
+                except (ValueError,KeyError,TypeError):
                     continue
-                status='confirmed' if int(received_raw)>0 else 'confirmed_no_payout'
-                with sqlite3.connect(d.DB_FILE,timeout=8) as conn:
-                    updated=conn.execute('''UPDATE token_reward_claims
-                        SET signature=?, status=?, received_raw=?, confirmed_at=?
-                        WHERE id=? AND wallet=? AND status IN ('prepared','submitted','expired_unverified')
-                        AND (signature='' OR signature=?)''',
-                        (signature,status,received_raw,timestamp,claim['id'],wallet,
-                         signature))
-                    if updated.rowcount:
-                        recovered+=int(received_raw)>0
-                        no_payout+=int(received_raw)==0
-                break
+                status=result['status']
+                if status=='confirmed':
+                    recovered+=result['changed']
+                elif status=='confirmed_no_payout':
+                    no_payout+=result['changed']
+                elif status=='failed':
+                    failed+=result['changed']
+                if status in ('confirmed','confirmed_no_payout','failed','duplicate','changed'):
+                    break
         print('[pump-claim] chain reconciliation checked='+str(len(rows))+
-              ' received='+str(recovered)+' no_payout='+str(no_payout)+
-              ' unavailable='+str(unavailable),flush=True)
+              ' confirmed='+str(recovered)+' no_payout='+str(no_payout)+
+              ' failed='+str(failed)+' unavailable='+str(unavailable),flush=True)
         return {'checked':len(rows),'recovered':recovered,'no_payout':no_payout,
                 'unavailable':unavailable}
 
@@ -1074,6 +1142,10 @@ def install(d):
     def creator_earnings():
         wallet=identity()
         if not wallet:return fail('Connect your wallet',401)
+        # A Phantom callback can save a signature while the PWA is suspended.
+        # Settle that exact recorded transaction before rendering earnings so
+        # returning to the app updates status without another button press.
+        reconcile_reward_claims(wallet,scan_missing=False)
         expire_stale_claims(wallet)
         with closing(sqlite3.connect(d.DB_FILE)) as conn:
             conn.row_factory=sqlite3.Row
@@ -1084,12 +1156,12 @@ def install(d):
                     JOIN token_launches l ON l.id=c.launch_id AND l.wallet=c.wallet
                     WHERE c.wallet=? AND l.wallet=?
                     ORDER BY c.created_at DESC LIMIT 100''',(wallet,wallet)).fetchall()
-        totals={'USDC':0,'SOL':0};by_launch={};confirmed=pending=expired=0
+        totals={'USDC':0,'SOL':0};by_launch={};confirmed=pending=expired=failed=0
         for claim in claims:
             launch_id=claim['launch_id']
             item=by_launch.setdefault(launch_id,dict(quote_asset=claim['quote_asset'],
                 verified_received_raw=0,claim_count=0,confirmed_claims=0,
-                pending_claims=0,last_claim=None))
+                pending_claims=0,failed_claims=0,last_claim=None))
             item['claim_count']+=1
             if item['last_claim'] is None:
                 item['last_claim']=dict(status=claim['status'],created_at=claim['created_at'],
@@ -1100,6 +1172,8 @@ def install(d):
                 pending+=1;item['pending_claims']+=1
             elif claim['status']=='expired_unverified':
                 expired+=1
+            elif claim['status']=='failed':
+                failed+=1;item['failed_claims']+=1
             if claim['status']=='confirmed' and claim['received_raw']!='':
                 try:received=max(0,int(claim['received_raw']))
                 except (TypeError,ValueError):received=0
@@ -1112,6 +1186,7 @@ def install(d):
                 accrued_raw=c['accrued_raw'],accrued_scope=c['accrued_scope']) for c in claims]
         response=jsonify(ok=True,verified_claimed_raw={k:str(v) for k,v in totals.items()},
                  confirmed_claims=confirmed,pending_claims=pending,expired_claims=expired,
+                 failed_claims=failed,
                  by_launch={k:{**v,'verified_received_raw':str(v['verified_received_raw'])}
                             for k,v in by_launch.items()},history=history)
         response.headers['Cache-Control']='private, no-store'
@@ -1437,17 +1512,17 @@ def install(d):
         if row['status']!='live' or row['reward_mode']=='holder':
             return fail('Only confirmed creator/community launches can claim creator fees',409)
         # An on-chain Phantom approval can settle before the client successfully
-        # posts its signature. Reconcile BEFORE offering any fresh payable tx.
-        if wallet_vault(row):
-            with closing(sqlite3.connect(d.DB_FILE)) as conn:
-                unresolved=conn.execute('''SELECT id FROM token_reward_claims
-                    WHERE wallet=? AND quote_asset='USDC'
-                    AND status IN ('prepared','submitted') LIMIT 1''',
-                    (wallet,)).fetchone()
-            if unresolved:
-                result=reconcile_reward_claims(wallet)
-                if result['unavailable']:
-                    return fail('Existing creator claim cannot be checked on Solana right now. Do not approve a second payment.',503)
+        # posts its signature. Reconcile BEFORE offering any fresh payable tx,
+        # for every claim mode/asset rather than only the wallet-wide USDC case.
+        with closing(sqlite3.connect(d.DB_FILE)) as conn:
+            unresolved=conn.execute('''SELECT id FROM token_reward_claims
+                WHERE wallet=? AND quote_asset=?
+                AND status IN ('prepared','submitted') LIMIT 1''',
+                (wallet,row['quote_asset'])).fetchone()
+        if unresolved:
+            result=reconcile_reward_claims(wallet)
+            if result['unavailable']:
+                return fail('Existing creator claim cannot be checked on Solana right now. Do not approve a second payment.',503)
         if pilot_wallet(wallet):
             with closing(sqlite3.connect(d.DB_FILE)) as conn:
                 claimed=conn.execute('''SELECT id FROM token_reward_claims
@@ -1547,7 +1622,18 @@ def install(d):
             # approval and are never charged through this launch endpoint.
             pilot_claim_cost=claim_preflight(row,built['transaction_b64'])
             claim_id=secrets.token_hex(16)
-            with sqlite3.connect(d.DB_FILE) as conn:
+            with sqlite3.connect(d.DB_FILE,timeout=8) as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                # Re-check under a write lock. Two near-simultaneous taps may
+                # both finish the expensive read-only builder/preflight, but
+                # only one can ever become a payable claim record/response.
+                collision=conn.execute('''SELECT id FROM token_reward_claims
+                    WHERE wallet=? AND quote_asset=?
+                    AND status IN ('prepared','submitted') LIMIT 1''',
+                    (wallet,row['quote_asset'])).fetchone()
+                if collision:
+                    conn.rollback()
+                    return fail('A creator claim is already pending. Check claim history before another approval.',409)
                 conn.execute('''INSERT INTO token_reward_claims
                   (id,launch_id,wallet,mint,quote_asset,reward_mode,accrued_raw,accrued_scope,
                    transaction_b64,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)''',
@@ -1591,26 +1677,64 @@ def install(d):
             if claim['signature']!=sig:return fail('Claim signature does not match',409)
             return jsonify(ok=True,confirmed=True,signature=sig,status=claim['status'],
                            received_raw=claim['received_raw'])
+        if claim['status']=='failed':
+            if claim['signature']!=sig:return fail('Claim signature does not match',409)
+            return jsonify(ok=True,confirmed=False,signature=sig,status='failed',
+                           received_raw='',msg='The exact claim transaction failed on Solana. No creator fees were claimed.')
         if claim['status'] not in ('prepared','submitted','expired_unverified'):
             return fail('Claim is not pending',409)
         try:
-            exact={'prepare_tx_b64':claim['transaction_b64'],'wallet':wallet,'mint':row['mint']}
-            confirmed=check_signature(sig,exact,'claim')
-        except ValueError as exc:return fail(exc)
-        except RuntimeError as exc:return fail(exc,503)
-        received_raw=''
-        if confirmed and wallet_vault(row):
-            try:received_raw=verified_creator_usdc_receipt(sig,wallet,allow_zero=True)
-            except RuntimeError as exc:return fail(exc,503)
-        status=('confirmed' if int(received_raw)>0 else 'confirmed_no_payout') if confirmed and wallet_vault(row) else ('confirmed' if confirmed else 'submitted')
-        with sqlite3.connect(d.DB_FILE) as conn:
-            cur=conn.execute('''UPDATE token_reward_claims
-                 SET signature=?,status=?,confirmed_at=?,received_raw=?
-                 WHERE id=? AND wallet=? AND status IN ('prepared','submitted','expired_unverified')
-                 AND (signature='' OR signature=?)''',
-                 (sig,status,int(time.time()) if confirmed else 0,received_raw,claim_id,wallet,sig))
-            if cur.rowcount!=1:return fail('Claim changed during verification',409)
-        return jsonify(ok=True,confirmed=confirmed,signature=sig,status=status,received_raw=received_raw), (200 if confirmed else 202)
+            settled=_settle_reward_claim_signature(dict(claim),sig)
+        except ValueError as exc:
+            return fail(exc)
+        except RuntimeError as exc:
+            # The RPC may be temporarily unable to read the submitted tx.
+            # Preserve this signature before returning so the next page load
+            # can reconcile it and a second payable claim stays blocked.
+            if isinstance(sig,str) and _SIG.fullmatch(sig):
+                with sqlite3.connect(d.DB_FILE,timeout=8) as conn:
+                    conn.execute('BEGIN IMMEDIATE')
+                    cur=conn.execute('''UPDATE token_reward_claims
+                        SET signature=?,status='submitted'
+                        WHERE id=? AND wallet=?
+                        AND status IN ('prepared','submitted','expired_unverified')
+                        AND (signature='' OR signature=?)''',
+                        (sig,claim_id,wallet,sig))
+                    if cur.rowcount!=1:
+                        current=conn.execute('''SELECT signature,status FROM token_reward_claims
+                            WHERE id=? AND wallet=?''',(claim_id,wallet)).fetchone()
+                        if not current or current[0]!=sig:
+                            return fail('Claim changed during verification',409)
+            return fail(exc,503)
+        state=settled['status']
+        if state=='pending':
+            # getTransaction can legitimately be null for a just-submitted
+            # signature. Save it durably now and verify it on later reads.
+            with sqlite3.connect(d.DB_FILE,timeout=8) as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                cur=conn.execute('''UPDATE token_reward_claims
+                    SET signature=?,status='submitted'
+                    WHERE id=? AND wallet=?
+                    AND status IN ('prepared','submitted','expired_unverified')
+                    AND (signature='' OR signature=?)''',
+                    (sig,claim_id,wallet,sig))
+                if cur.rowcount!=1:
+                    current=conn.execute('''SELECT signature,status FROM token_reward_claims
+                        WHERE id=? AND wallet=?''',(claim_id,wallet)).fetchone()
+                    if not current or current[0]!=sig:
+                        return fail('Claim changed during verification',409)
+            return jsonify(ok=True,confirmed=False,signature=sig,status='submitted',
+                           received_raw='',msg='Claim submitted. Waiting for Solana confirmation.'),202
+        if state=='submitted':
+            return jsonify(ok=True,confirmed=False,signature=sig,status='submitted',
+                           received_raw='',msg='Claim confirmed on-chain; receipt indexing is still pending.'),202
+        if state=='failed':
+            return jsonify(ok=True,confirmed=False,signature=sig,status='failed',
+                           received_raw='',msg='The exact claim transaction failed on Solana. No creator fees were claimed.')
+        if state in ('confirmed','confirmed_no_payout'):
+            return jsonify(ok=True,confirmed=True,signature=sig,status=state,
+                           received_raw=settled.get('received_raw',''))
+        return fail('Claim changed during verification',409)
 
     @app.get('/api/token-launch/<launch_id>/claims')
     @d.rate_limit(25,60)
@@ -1619,6 +1743,8 @@ def install(d):
         if not wallet:return fail('Connect your wallet',401)
         row=lookup(launch_id,wallet)
         if not row:return fail('Launch not found',404)
+        reconcile_reward_claims(wallet,scan_missing=False)
+        expire_stale_claims(wallet)
         with closing(sqlite3.connect(d.DB_FILE)) as conn:
             claims=conn.execute('''SELECT id,quote_asset,accrued_raw,accrued_scope,
                              signature,status,created_at,confirmed_at,received_raw

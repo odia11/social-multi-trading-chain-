@@ -47,7 +47,7 @@ n = [0]
 def draft(mode, **extra):
     n[0] += 1
     body = {'client_nonce': 'fee-share-nonce-%06d' % n[0], 'name': 'Share Token', 'symbol': 'SHR',
-            'description': '', 'image_data': icon(), 'reward_mode': mode, 'quote_asset': 'USDC', **extra}
+            'description': '', 'image_data': icon(), 'reward_mode': mode, 'quote_asset': 'SOL', **extra}
     return client.post(P + 'draft', json=body, headers=H)
 
 r = draft('creator'); row = r.get_json()['draft']

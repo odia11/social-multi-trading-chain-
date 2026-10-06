@@ -114,7 +114,8 @@ check('a stale claim of another token no longer blocks a new claim',
       "and expire_stale_claims(wallet)" in src and "not _pending_claim(wallet,row['quote_asset'])" in src)
 check('a late approval of a retired claim is still confirmed',
       "if claim['status'] not in ('prepared','submitted','expired_unverified'):" in src
-      and "status IN ('prepared','submitted','expired_unverified')\n                 AND (signature='' OR signature=?)" in src)
+      and "AND status IN ('prepared','submitted','expired_unverified')" in src
+      and "_settle_reward_claim_signature(dict(claim),sig)" in src)
 
 # ── the page (its own functions, run in node) ──
 js = (ROOT / 'static' / 'token-launch.js').read_text()

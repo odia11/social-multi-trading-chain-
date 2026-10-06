@@ -49,6 +49,16 @@ jobs:
           python tests/test_page_lifecycle_cleanup.py
           node tests/test_lazy_route_unmount_cleanup.js
 
+      - name: Creator fee claim reliability
+        run: |
+          python tests/test_creator_claim_reliability.py
+          python tests/test_creator_claim_profile_privacy.py
+          python tests/test_creator_rewards_preflight.py
+          python tests/test_creator_claims_cleanup.py
+          python tests/test_phantom_claim_mobile.py
+          python tests/test_creator_fee_share.py
+          python tests/test_portfolio_history_redesign.py
+
       - name: OrcAgent security regression checks
         run: |
           node --check static/dashboard.js
