@@ -13,7 +13,7 @@ import sqlite3
 import threading
 import time
 import platform_learning as learning
-from platform_answers import specific
+from platform_answers import specific, trade_action_slots, merge_trade_action_slots
 import platform_prices as prices
 import platform_public_data as public_data
 import platform_reasoner as reasoner
@@ -82,7 +82,7 @@ LEARNABLE.update({
     ),
 })
 
-def answer(message, context=None, market=None, public=None):
+def answer(message, context=None, market=None, public=None, action_state=None):
     if not isinstance(message, str) or not MENTION.search(message):
         return None
     raw = MENTION.sub('', message)
@@ -99,7 +99,7 @@ def answer(message, context=None, market=None, public=None):
         live_answer = public_data.render(public_query, public)
         if live_answer:
             return live_answer
-    targeted = specific(clean, context)
+    targeted = specific(clean, context, action_state)
     if targeted:
         return targeted
     token = re.fullmatch(r'\s*(?:do you know\s+|tell me about\s+|what is\s+)?\$?([a-z][a-z0-9_]{1,19})\s+token[\s?!.]*',clean)
@@ -227,6 +227,56 @@ def _conversation_message(c,d,source,author_id,now):
             return '@orcagent '+message
     return message
 
+
+def _trade_thread_state(c,d,source,author_id):
+    """Recover trade slots only from this authenticated user + OrcAgent reply chain."""
+    user_id, post_id = source[0], source[1]
+    current = source
+    current_id = None
+    messages = []
+    visited = set()
+    for _ in range(12):
+        if not current or current[1] != post_id or current[0] not in (user_id, author_id):
+            break
+        if current[0] == user_id:
+            messages.append(current[2])
+        else:
+            if current_id is None:
+                break
+            event = c.execute(
+                "SELECT topic FROM platform_assistant_events "
+                "WHERE kind='reply' AND reply_id=? AND source_user_id=?",
+                (current_id, user_id),
+            ).fetchone()
+            if not event or event[0] != 'trade_action':
+                break
+        parent = current[4]
+        if not parent or parent in visited:
+            if current[0] == author_id and not parent and post_id.startswith('p'):
+                post = c.execute(
+                    'SELECT p.content FROM feed_posts p JOIN users u ON u.wallet_address=p.wallet '
+                    'WHERE p.id=? AND u.id=?',
+                    (post_id[1:], user_id),
+                ).fetchone()
+                if post:
+                    text = d._feed_text_part(post[0]) if hasattr(d,'_feed_text_part') else re.split(
+                        r'__(?:CHART|TRADE|CALL)__',post[0],maxsplit=1
+                    )[0]
+                    messages.append(text)
+            break
+        visited.add(parent)
+        current_id = parent
+        current = c.execute(
+            'SELECT user_id,post_id,message,created_at,parent_reply_id FROM feed_replies WHERE id=?',
+            (parent,),
+        ).fetchone()
+    state = None
+    for item in reversed(messages):
+        slots = trade_action_slots(MENTION.sub('', item))
+        if any(value is not None for value in slots.values()):
+            state = merge_trade_action_slots(state, slots)
+    return state
+
 def _prepare_market(d, source_id, wallet, kind, now):
     # External I/O finishes BEFORE BEGIN IMMEDIATE. Revalidate the source below.
     with sqlite3.connect(d.DB_FILE, timeout=2) as c:
@@ -299,6 +349,7 @@ def _prepare_reasoning(d, source_id, wallet, kind, now):
         if not author:
             return None
         context_topic = None
+        action_state = None
         if kind == 'post':
             row = c.execute(
                 'SELECT p.content,u.id FROM feed_posts p JOIN users u ON u.wallet_address=p.wallet '
@@ -323,6 +374,7 @@ def _prepare_reasoning(d, source_id, wallet, kind, now):
             text = _conversation_message(c,d,source,author[0],now)
             previous = learning.prior(c,d,source,author[0])
             context_topic = previous[0] if previous else None
+            action_state = _trade_thread_state(c,d,source,author[0]) if context_topic == 'trade_action' else None
         if not MENTION.search(text):
             return None
         raw = MENTION.sub('',text).strip()
@@ -330,7 +382,7 @@ def _prepare_reasoning(d, source_id, wallet, kind, now):
         # deterministic data modules are authoritative and privacy-scoped.
         if prices.query(raw) or public_data.query(raw):
             return None
-        deterministic = answer(text, context_topic)
+        deterministic = answer(text, context_topic, action_state=action_state)
     smart = reasoner.reason(d, raw, context_topic, deterministic)
     return (text, smart) if smart else None
 
@@ -403,7 +455,8 @@ def reply_to(d, source_id, wallet, now=None):
         use_learning = enabled(c,'learning')
         previous = learning.prior(c,d,source,author[0]) if use_learning else None
         message = _conversation_message(c,d,source,author[0],now)
-        explicit = answer(message, previous[0] if previous else None, market=_market_for(message,market), public=_public_for(message,public))
+        action_state = _trade_thread_state(c,d,source,author[0]) if previous and previous[0] == 'trade_action' else None
+        explicit = answer(message, previous[0] if previous else None, market=_market_for(message,market), public=_public_for(message,public), action_state=action_state)
         response = explicit
         if explicit and use_learning:
             if explicit[0]=='scope':
