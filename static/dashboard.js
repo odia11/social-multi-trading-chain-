@@ -9766,7 +9766,7 @@ function _homeCopyTrade(uid, username){
 }
 
 function _xShareIntent(postId){
-  var canonical=window.location.origin+'/post/'+encodeURIComponent(postId)+'?xv=9';
+  var canonical=window.location.origin+'/post/'+encodeURIComponent(postId)+'?xv=10';
   var text='View this post on OrcAgent @orcagent';
   return 'https://twitter.com/intent/tweet?text='+encodeURIComponent(text)
     +'&url='+encodeURIComponent(canonical);

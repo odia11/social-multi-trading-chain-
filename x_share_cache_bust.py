@@ -8,7 +8,7 @@ import re
 
 _INSTALLED = False
 _POST_LINK_RE = re.compile(r'(https://orcagent\.fun/post/[pt]\d+)(?!\?[^\s]*)')
-_PREVIEW_VERSION = '9'
+_PREVIEW_VERSION = '10'  # bumped: X re-fetches every post with the new picture card
 
 
 def _version_post_links(text):

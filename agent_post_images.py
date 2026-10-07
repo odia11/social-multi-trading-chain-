@@ -1,14 +1,17 @@
-"""Designed images for @orcagent's live feed posts.
+"""Token banner pictures for @orcagent's live feed posts.
 
-Every live post about a call or a trending token carries a picture drawn
-from the app's own live data, in one of several designs so the feed does
-not look the same post after post:
+Every live post about a trending token or a call carries a picture built on
+the token's own Live Market banner (DexScreener header; a backdrop in the
+logo's colour when a token has none) with its live numbers, in one of
+several layouts so the feed does not look the same post after post:
 
-  calls     - "phone":  a phone mockup with the caller's live call card in it
-            - "ticket": the multiplier large, with called -> peak -> now
-  trending  - "banner": the token's own Live Market banner, with the numbers
-            - "chart":  a price poster with the live price line
-            - "stats":  the token logo with market cap, liquidity, volume
+  trending  - "banner":        banner on top, price line and three stats
+            - "banner_square": banner full-bleed, price and change below
+            - "banner_poster": banner full-bleed, logo and TRENDING tag
+  calls     - "call_banner":   banner on top, multiplier, called/peak/now
+            - "call_banner_square": the same on a full-bleed banner
+
+No app screenshots or mockups: only the token itself.
 
 Images are 4:5 (1080x1350) or square (1080x1080) WebP files under
 DATA_DIR/agent_media, served at /media/agent/<hash>.webp. Logos and banners
@@ -33,8 +36,9 @@ BG = (9, 10, 13)
 PANEL, BORDER = (17, 19, 24), (36, 40, 48)
 TEXT, SUB, MUTED = (238, 241, 245), (196, 201, 209), (138, 145, 156)
 GOLD, GREEN, RED = (247, 185, 85), (58, 210, 155), (247, 107, 98)
-CALL_DESIGNS = ('phone', 'ticket')
-TRENDING_DESIGNS = ('banner', 'chart', 'stats')
+# Only token banners: the token's own Live Market banner with its live numbers.
+CALL_DESIGNS = ('call_banner', 'call_banner_square')
+TRENDING_DESIGNS = ('banner', 'banner_square', 'banner_poster')
 KEEP_DAYS = 30
 _NAME_RE = re.compile(r'^[0-9a-f]{40}\.webp$')
 _lock = threading.Lock()
@@ -165,101 +169,6 @@ def _finish(img, w, h):
     return buf.getvalue()
 
 
-# ── call designs ───────────────────────────────────────────────────────
-
-def _call_card(img, draw, x0, y0, w, c, logo, points):
-    """The in-app call card: token, multiplier, price line, three tiles, buttons."""
-    x1 = x0 + w
-    _round(draw, (x0, y0, x1, y0 + 560), 28, fill=PANEL, outline=BORDER)
-    if logo is not None:
-        _circle_image(img, logo, (x0 + 28, y0 + 28, x0 + 112, y0 + 112))
-    else:
-        _initials_circle(draw, (x0 + 28, y0 + 28, x0 + 112, y0 + 112), c['symbol'])
-    _t(draw, (x0 + 132, y0 + 52), '$' + c['symbol'], _fit(draw, '$' + c['symbol'], sans, 'Bold', 40, w - 360), TEXT, 'lm')
-    _t(draw, (x0 + 132, y0 + 92), (c.get('name') or c['symbol'])[:22] + ' · Solana', sans('Medium', 24), MUTED, 'lm')
-    color = GREEN if c['multiplier'] >= 1 else RED
-    _t(draw, (x1 - 28, y0 + 58), _mult(c['multiplier']), mono('ExtraBold', 60), color, 'rm')
-    _t(draw, (x1 - 28, y0 + 100), 'peak since call', sans('Medium', 20), MUTED, 'rm')
-    _spark(img, (x0 + 28, y0 + 140, x1 - 28, y0 + 300), points, color)
-    draw = ImageDraw.Draw(img)
-    tw = (w - 56 - 32) / 3
-    for i, (label, value, col) in enumerate((('Called at', c['called'], TEXT), ('Now', c['now'], color), ('Peak', c['peak'], GREEN))):
-        tx = x0 + 28 + i * (tw + 16)
-        _round(draw, (tx, y0 + 330, tx + tw, y0 + 430), 16, fill=(23, 26, 32))
-        _t(draw, (tx + 18, y0 + 360), label, sans('Medium', 21), MUTED, 'lm')
-        _t(draw, (tx + 18, y0 + 400), value, _fit(draw, value, mono, 'Bold', 30, tw - 30), col, 'lm')
-    bw = (w - 56 - 24) / 3
-    for i, (label, filled) in enumerate((('Buy $' + c['symbol'], True), ('Share call', False), ('Chart', False))):
-        bx = x0 + 28 + i * (bw + 12)
-        _round(draw, (bx, y0 + 458, bx + bw, y0 + 530), 18, fill=GOLD if filled else None,
-               outline=None if filled else (58, 62, 72))
-        _t(draw, (bx + bw / 2, y0 + 494), label, _fit(draw, label, sans, 'Bold', 26, bw - 24),
-           BG if filled else (GOLD if i == 1 else TEXT), 'mm')
-    return draw
-
-
-def call_phone(c, logo, points):
-    w, h = 1080, 1350
-    img = _canvas(w, h, GOLD, (0.9, 0.05))
-    draw = ImageDraw.Draw(img)
-    _brand(draw, w)
-    head = c['headline']
-    _t(draw, (64, 236), head, _fit(draw, head, sans, 'ExtraBold', 92, w - 128), TEXT, 'ls')
-    _t(draw, (64, 298), 'by @' + c['user'], sans('Bold', 44), GOLD, 'ls')
-    # phone
-    px0, py0, px1 = 150, 360, 930
-    _round(draw, (px0, py0, px1, h + 80), 70, fill=(20, 22, 27), outline=(52, 56, 64), width=3)
-    _round(draw, (px0 + 18, py0 + 18, px1 - 18, h + 80), 54, fill=(10, 11, 14))
-    _round(draw, ((px0 + px1) / 2 - 70, py0 + 34, (px0 + px1) / 2 + 70, py0 + 62), 14, fill=(20, 22, 27))
-    sx = px0 + 52
-    sw = px1 - px0 - 104
-    _initials_circle(draw, (sx, py0 + 100, sx + 76, py0 + 176), c['user'], fill=(26, 22, 16))
-    _t(draw, (sx + 96, py0 + 124), '@' + c['user'], sans('Bold', 30), TEXT, 'lm')
-    _round(draw, (sx + 96, py0 + 146, sx + 222, py0 + 182), 9, outline=(120, 92, 40), width=2)
-    _t(draw, (sx + 159, py0 + 164), 'CALLED', sans('Bold', 20), GOLD, 'mm')
-    _t(draw, (sx + 238, py0 + 164), '· ' + c['ago'], sans('Medium', 22), MUTED, 'lm')
-    y = py0 + 220
-    for line in _wrap(draw, c.get('note') or ('Calling $%s here.' % c['symbol']), sans('Medium', 30), sw, 2):
-        _t(draw, (sx, y), line, sans('Medium', 30), SUB, 'lm')
-        y += 44
-    _call_card(img, draw, sx, y + 12, sw, c, logo, points)
-    return _finish(img, w, h)
-
-
-def call_ticket(c, logo, points):
-    w, h = 1080, 1080
-    img = _canvas(w, h, GREEN if c['multiplier'] >= 1.2 else GOLD, (0.1, 0.9))
-    draw = ImageDraw.Draw(img)
-    _brand(draw, w)
-    _round(draw, (64, 170, 64 + 26 + draw.textlength(c['label'], font=sans('Bold', 24)) / S + 26, 216), 12, fill=GOLD)
-    _t(draw, (90, 193), c['label'], sans('Bold', 24), BG, 'lm')
-    if logo is not None:
-        _circle_image(img, logo, (64, 250, 164, 350))
-    else:
-        _initials_circle(draw, (64, 250, 164, 350), c['symbol'])
-    _t(draw, (190, 292), '$' + c['symbol'], _fit(draw, '$' + c['symbol'], sans, 'ExtraBold', 64, 560), TEXT, 'lm')
-    _t(draw, (190, 338), 'called by @' + c['user'] + ' · ' + c['ago'], sans('Medium', 28), MUTED, 'lm')
-    big = _mult(c['multiplier']) if c['multiplier'] >= 1.2 else c['called']
-    color = GREEN if c['multiplier'] >= 1.2 else TEXT
-    _t(draw, (64, 600), big, _fit(draw, big, mono, 'ExtraBold', 230, w - 128), color, 'ls')
-    _t(draw, (68, 650), 'peak since the call' if c['multiplier'] >= 1.2 else 'market cap at the call', sans('Medium', 30), MUTED, 'ls')
-    # called -> peak -> now
-    ys, xs = 790, (110, 540, 970)
-    draw.line([_s(xs[0], ys), _s(xs[2], ys)], fill=(52, 56, 64), width=4 * S)
-    for x, (label, value, col) in zip(xs, (('CALLED', c['called'], TEXT), ('PEAK', c['peak'], GREEN), ('NOW', c['now'], GREEN if c['now_x'] >= 1 else RED))):
-        draw.ellipse(_s(x - 14, ys - 14, x + 14, ys + 14), fill=col if label != 'CALLED' else GOLD)
-        _t(draw, (x, ys - 46), label, sans('Bold', 22), MUTED, 'mm')
-        _t(draw, (x, ys + 56), value, mono('Bold', 36), col, 'mm')
-    note = c.get('note')
-    if note:
-        lines = _wrap(draw, '“' + note + '”', sans('Medium', 30), w - 128, 2)
-        for i, line in enumerate(lines):
-            _t(draw, (64, 920 + i * 44), line, sans('Medium', 30), SUB, 'lm')
-    else:
-        _t(draw, (64, 940), 'Every call keeps its entry. Open it on OrcAgent.', sans('Medium', 30), SUB, 'lm')
-    return _finish(img, w, h)
-
-
 # ── trending designs ───────────────────────────────────────────────────
 
 def _flame(draw, cx, cy, size, fill):
@@ -341,66 +250,152 @@ def trend_banner(t, logo, banner, points):
     return _finish(img, w, h)
 
 
-def trend_chart(t, logo, banner, points):
+def _backdrop(banner, logo, w, h):
+    """The token's own Live Market banner covering w x h; for a token without
+    one, a backdrop drawn in its logo colour."""
+    if banner is not None:
+        return stc._cover(banner, *_s(w, h))
+    accent = _accent(logo)
+    top = stc._vgradient(*_s(w, h), tuple(int(c * 0.55) for c in accent), BG)
+    d2 = ImageDraw.Draw(top)
+    for i in range(-14, 30):
+        d2.line([_s(i * 90, 0), _s(i * 90 + h, h)], fill=tuple(min(255, int(c * 0.6) + 8) for c in accent), width=10 * S)
+    return top.filter(ImageFilter.GaussianBlur(6 * S))
+
+
+def _shade(img, start, end, strength=1.0):
+    """Darken from `start` to `end` (fractions of the height) towards BG."""
+    shade = Image.new('L', img.size, 0)
+    sd = ImageDraw.Draw(shade)
+    hh = img.size[1]
+    for i in range(hh):
+        f = min(1, max(0, (i / hh - start) / max(0.01, end - start)))
+        sd.line([(0, i), (img.size[0], i)], fill=int(255 * f * strength))
+    img.paste(Image.new('RGB', img.size, BG), (0, 0), shade)
+    return img
+
+
+def trend_banner_square(t, logo, banner, points):
     w, h = 1080, 1080
-    chg = float(t.get('price_change_24h') or 0)
-    color = GREEN if chg >= 0 else RED
-    img = _canvas(w, h, color, (0.5, 1.0))
+    img = _backdrop(banner, logo, w, h)
+    img = Image.blend(img, Image.new('RGB', img.size, BG), 0.25)
+    img = _shade(img, 0.25, 0.72)
     draw = ImageDraw.Draw(img)
-    _brand(draw, w)
+    _trend_pill(draw, 64, 64)
     if logo is not None:
-        _circle_image(img, logo, (64, 170, 164, 270))
+        _circle_image(img, logo, (64, 560, 204, 700), ring=GOLD)
     else:
-        _initials_circle(draw, (64, 170, 164, 270), t['symbol'])
+        _initials_circle(draw, (64, 560, 204, 700), t['symbol'])
     draw = ImageDraw.Draw(img)
-    _t(draw, (190, 206), '$' + t['symbol'], _fit(draw, '$' + t['symbol'], sans, 'ExtraBold', 60, 560), TEXT, 'lm')
-    _flame(draw, 204, 250, 24, GOLD)
-    _t(draw, (224, 251), 'Trending on Live Market', sans('Bold', 26), GOLD, 'lm')
+    _t(draw, (232, 610), '$' + t['symbol'], _fit(draw, '$' + t['symbol'], sans, 'ExtraBold', 88, w - 300), TEXT, 'lm')
+    _t(draw, (234, 670), (t.get('name') or t['symbol'])[:28] + ' · Solana', sans('Medium', 30), SUB, 'lm')
+    chg = float(t.get('price_change_24h') or 0)
     price = stc.fmt_price(t.get('price_usd'))
-    _t(draw, (64, 430), price, _fit(draw, price, mono, 'ExtraBold', 140, w - 128), TEXT, 'ls')
-    _t(draw, (68, 500), _pct(chg) + ' in 24 hours', sans('Bold', 48), color, 'ls')
-    _spark(img, (0, 560, w, 940), points, color, fill_alpha=0.32, width=7)
-    draw = ImageDraw.Draw(img)
-    _buy_bar(draw, 64, 990, w - 64, t)
+    _t(draw, (64, 800), price, _fit(draw, price, mono, 'ExtraBold', 80, 600), TEXT, 'ls')
+    _t(draw, (w - 64, 800), _pct(chg), mono('ExtraBold', 64), GREEN if chg >= 0 else RED, 'rs')
+    cw = (w - 128 - 32) / 3
+    for i, (label, val) in enumerate((('Market cap', stc.fmt_compact(t.get('market_cap'))),
+                                      ('Liquidity', stc.fmt_compact(t.get('liquidity_usd'))),
+                                      ('Volume 24h', stc.fmt_compact(t.get('volume_24h'))))):
+        x = 64 + i * (cw + 16)
+        _stat(draw, (x, 860, x + cw, 990), label, val)
+    _t(draw, (w - 64, 1036), 'orcagent.fun', mono('Medium', 22), MUTED, 'rm')
     return _finish(img, w, h)
 
 
-def trend_stats(t, logo, banner, points):
+def trend_banner_poster(t, logo, banner, points):
     w, h = 1080, 1350
-    accent = _accent(logo)
-    img = _canvas(w, h, accent, (0.5, 0.28))
+    img = _backdrop(banner, logo, w, h)
+    img = _shade(img, 0.3, 0.66)
     draw = ImageDraw.Draw(img)
-    _brand(draw, w)
     cx = w / 2
-    glow = Image.new('L', img.size, 0)
-    ImageDraw.Draw(glow).ellipse(_s(cx - 200, 220, cx + 200, 620), fill=110)
-    glow = glow.filter(ImageFilter.GaussianBlur(50 * S))
-    img.paste(Image.new('RGB', img.size, accent), (0, 0), glow)
     if logo is not None:
-        _circle_image(img, logo, (cx - 140, 280, cx + 140, 560), ring=GOLD)
+        _circle_image(img, logo, (cx - 130, 430, cx + 130, 690), ring=GOLD)
     else:
-        _initials_circle(ImageDraw.Draw(img), (cx - 140, 280, cx + 140, 560), t['symbol'])
+        _initials_circle(draw, (cx - 130, 430, cx + 130, 690), t['symbol'])
     draw = ImageDraw.Draw(img)
-    _t(draw, (cx, 680), '$' + t['symbol'], _fit(draw, '$' + t['symbol'], sans, 'ExtraBold', 110, w - 128), TEXT, 'ms')
+    _t(draw, (cx, 830), '$' + t['symbol'], _fit(draw, '$' + t['symbol'], sans, 'ExtraBold', 120, w - 128), TEXT, 'ms')
     chg = float(t.get('price_change_24h') or 0)
     label = 'TRENDING · ' + _pct(chg) + ' TODAY'
-    lw = draw.textlength(label, font=sans('Bold', 30)) / S + 90
-    _round(draw, (cx - lw / 2, 712, cx + lw / 2, 772), 18, fill=GOLD)
-    _flame(draw, cx - lw / 2 + 36, 742, 28, BG)
-    _t(draw, (cx + 18, 742), label, sans('Bold', 30), BG, 'mm')
-    cw = (w - 128 - 24) / 2
-    tiles = (('Price', stc.fmt_price(t.get('price_usd'))), ('Market cap', stc.fmt_compact(t.get('market_cap'))),
-             ('Liquidity', stc.fmt_compact(t.get('liquidity_usd'))), ('Volume 24h', stc.fmt_compact(t.get('volume_24h'))))
-    for i, (lab, val) in enumerate(tiles):
-        x = 64 + (i % 2) * (cw + 24)
-        y = 830 + (i // 2) * 170
-        _stat(draw, (x, y, x + cw, y + 146), lab, val)
-    _buy_bar(draw, 64, 1220, w - 64, t)
+    lw = draw.textlength(label, font=sans('Bold', 32)) / S + 92
+    _round(draw, (cx - lw / 2, 866, cx + lw / 2, 930), 20, fill=GOLD)
+    _flame(draw, cx - lw / 2 + 38, 898, 30, BG)
+    _t(draw, (cx + 18, 898), label, sans('Bold', 32), BG, 'mm')
+    price = stc.fmt_price(t.get('price_usd'))
+    _t(draw, (cx, 1040), price, _fit(draw, price, mono, 'ExtraBold', 84, w - 128), TEXT, 'ms')
+    _buy_bar(draw, 64, 1120, w - 64, t)
+    _t(draw, (64, 1270), 'Live Market', sans('Bold', 26), GOLD, 'lm')
+    _t(draw, (w - 64, 1270), 'orcagent.fun', mono('Medium', 24), MUTED, 'rm')
     return _finish(img, w, h)
 
 
-RENDER = {'phone': call_phone, 'ticket': call_ticket,
-          'banner': trend_banner, 'chart': trend_chart, 'stats': trend_stats}
+def _call_row(draw, y, c, x0=64, x1=1016):
+    xs = (x0 + 46, (x0 + x1) / 2, x1 - 46)
+    draw.line([_s(xs[0], y), _s(xs[2], y)], fill=(70, 74, 82), width=4 * S)
+    for x, (label, value, col) in zip(xs, (('CALLED', c['called'], TEXT), ('PEAK', c['peak'], GREEN),
+                                            ('NOW', c['now'], GREEN if c['now_x'] >= 1 else RED))):
+        draw.ellipse(_s(x - 14, y - 14, x + 14, y + 14), fill=GOLD if label == 'CALLED' else col)
+        _t(draw, (x, y - 46), label, sans('Bold', 22), SUB, 'mm')
+        _t(draw, (x, y + 54), value, _fit(draw, value, mono, 'Bold', 36, 300), col, 'mm')
+
+
+def _called_pill(draw, x, y, c):
+    text = c['label'] + ' · @' + c['user']
+    tw = draw.textlength(text, font=sans('Bold', 24)) / S
+    _round(draw, (x, y, x + tw + 48, y + 50), 14, fill=GOLD)
+    _t(draw, (x + 24, y + 26), text, sans('Bold', 24), BG, 'lm')
+
+
+def call_banner(c, logo, banner, points):
+    w, h = 1080, 1350
+    img = _canvas(w, h, _accent(logo), (0.5, 0.0))
+    top = _backdrop(banner, logo, w, 600)
+    keep = Image.new('L', top.size, 0)
+    kd = ImageDraw.Draw(keep)
+    for i in range(top.size[1]):
+        kd.line([(0, i), (top.size[0], i)], fill=int(255 * (1 - min(1, max(0, (i / top.size[1] - 0.4) / 0.6)))))
+    img.paste(top, (0, 0), keep)
+    draw = ImageDraw.Draw(img)
+    _called_pill(draw, 64, 64, c)
+    if logo is not None:
+        _circle_image(img, logo, (64, 440, 224, 600), ring=BG)
+    else:
+        _initials_circle(draw, (64, 440, 224, 600), c['symbol'])
+    draw = ImageDraw.Draw(img)
+    _t(draw, (64, 710), '$' + c['symbol'], _fit(draw, '$' + c['symbol'], sans, 'ExtraBold', 100, w - 128), TEXT, 'ls')
+    _t(draw, (68, 758), 'called by @' + c['user'] + ' · ' + c['ago'], sans('Medium', 30), MUTED, 'ls')
+    up = c['multiplier'] >= 1.2
+    big = _mult(c['multiplier']) if up else c['called']
+    _t(draw, (64, 950), big, _fit(draw, big, mono, 'ExtraBold', 190, w - 128), GREEN if up else TEXT, 'ls')
+    _t(draw, (68, 1000), 'peak since the call' if up else 'market cap at the call', sans('Medium', 30), MUTED, 'ls')
+    _call_row(draw, 1120, c)
+    _t(draw, (w - 64, 1290), 'orcagent.fun', mono('Medium', 24), MUTED, 'rm')
+    return _finish(img, w, h)
+
+
+def call_banner_square(c, logo, banner, points):
+    w, h = 1080, 1080
+    img = _backdrop(banner, logo, w, h)
+    img = Image.blend(img, Image.new('RGB', img.size, BG), 0.35)
+    img = _shade(img, 0.2, 0.6)
+    draw = ImageDraw.Draw(img)
+    _called_pill(draw, 64, 64, c)
+    if logo is not None:
+        _circle_image(img, logo, (64, 440, 184, 560), ring=GOLD)
+    else:
+        _initials_circle(draw, (64, 440, 184, 560), c['symbol'])
+    draw = ImageDraw.Draw(img)
+    _t(draw, (210, 500), '$' + c['symbol'], _fit(draw, '$' + c['symbol'], sans, 'ExtraBold', 80, w - 280), TEXT, 'lm')
+    up = c['multiplier'] >= 1.2
+    big = _mult(c['multiplier']) if up else c['called']
+    _t(draw, (64, 760), big, _fit(draw, big, mono, 'ExtraBold', 170, w - 128), GREEN if up else TEXT, 'ls')
+    _t(draw, (68, 806), 'peak since the call' if up else 'market cap at the call', sans('Medium', 28), SUB, 'ls')
+    _call_row(draw, 920, c)
+    return _finish(img, w, h)
+
+
+RENDER = {'banner': trend_banner, 'banner_square': trend_banner_square, 'banner_poster': trend_banner_poster,
+          'call_banner': call_banner, 'call_banner_square': call_banner_square}
 
 
 # ── storage and the public route ───────────────────────────────────────
@@ -462,6 +457,17 @@ def _call_view(d, m):
             'ago': ago, 'headline': head, 'label': label}
 
 
+def _token_art(d, mint, pair=''):
+    """(banner, logo) URLs from the token's live DexScreener row -- the same
+    lookup the share cards use. The scanner's own rows carry no banner."""
+    try:
+        p = stc._live_pair(d, {'mint': mint, 'chain': 'solana', 'pairAddress': pair or ''}) or {}
+        info = p.get('info') or {}
+        return info.get('header') or '', info.get('imageUrl') or ''
+    except Exception:
+        return '', ''
+
+
 def make(d, media, seed, variant=None):
     """Render the picture for one live post; returns its URL or None.
 
@@ -478,18 +484,21 @@ def make(d, media, seed, variant=None):
         import trending_share as ts
         if kind == 'call':
             view = _call_view(d, data)
-            logo = stc._fetch_image(d, data.get('image_url'))
-            pts = ts.price_points(d, {'mint': data['mint'], 'chain': 'solana', 'pair_address': '',
-                                      'price_usd': float(data.get('last_price') or data['price_at_call'])})
-            if len(pts) < 3:
-                p0 = float(data['price_at_call'])
-                pts = [p0, (p0 + float(data.get('peak_price') or p0)) / 2, float(data.get('peak_price') or p0),
-                       float(data.get('last_price') or p0)]
-            data_bytes = RENDER[design](view, logo, pts)
+            banner_url, logo_url = (data.get('banner_url'), data.get('image_url'))
+            if not banner_url:
+                banner_url, found_logo = _token_art(d, data.get('mint'))
+                logo_url = logo_url or found_logo
+            logo = stc._fetch_image(d, logo_url)
+            banner = stc._fetch_image(d, banner_url)
+            data_bytes = RENDER[design](view, logo, banner, [])
         else:
             data.setdefault('chain', 'solana')
-            logo = stc._fetch_image(d, data.get('image_url'))
-            banner = stc._fetch_image(d, data.get('banner_url'))
+            banner_url, logo_url = data.get('banner_url'), data.get('image_url')
+            if not banner_url:
+                banner_url, found_logo = _token_art(d, data.get('mint'), data.get('pair_address'))
+                logo_url = logo_url or found_logo
+            logo = stc._fetch_image(d, logo_url)
+            banner = stc._fetch_image(d, banner_url)
             # No banner on DexScreener: the banner design draws its own
             # backdrop in the token's colour, so the turn order still holds.
             pts = ts.price_points(d, data)
