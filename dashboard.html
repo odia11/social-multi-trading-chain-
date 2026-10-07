@@ -4652,6 +4652,17 @@ __IMAGE_LIGHTBOX__
 
         <div class="st-tog-row">
           <div>
+            <div class="st-tog-label">Light mode</div>
+            <div class="st-tog-sub">White with gold, on this device</div>
+          </div>
+          <label class="st-toggle">
+            <input type="checkbox" id="pref-theme-light" onchange="window.OrcTheme&&OrcTheme.set(this.checked?'light':'dark')">
+            <span class="st-track"></span>
+          </label>
+        </div>
+
+        <div class="st-tog-row">
+          <div>
             <div class="st-tog-label">Trade Notifications</div>
             <div class="st-tog-sub">Alert when a position closes</div>
           </div>

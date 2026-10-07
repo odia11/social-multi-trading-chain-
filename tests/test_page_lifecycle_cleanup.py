@@ -29,7 +29,10 @@ for label, ok in checks.items():
     print(('PASS' if ok else 'FAIL') + ' - ' + label)
     assert ok, label
 
-skip_names = {'page-lifecycle.js', 'sw.js', 'token-launch-web3.js'}
+# theme-light.js is document infrastructure like page-lifecycle.js itself: it
+# runs first in <head> (before the lifecycle exists) and its observers keep
+# light mode applied for the whole life of the document, bfcache included.
+skip_names = {'page-lifecycle.js', 'sw.js', 'token-launch-web3.js', 'theme-light.js'}
 bad = []
 for root_name in ('static', 'templates'):
     for path in (ROOT / root_name).rglob('*'):
