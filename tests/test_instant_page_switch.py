@@ -16,11 +16,15 @@ ROOT = os.path.join(os.path.dirname(__file__), '..')
 sys.path.insert(0, ROOT)
 os.environ.update({'DATA_DIR': tempfile.mkdtemp(),
                    'ENCRYPTION_KEY': '6UorqYgQpSk59aqy_MY73E0nlUjevVeCj0clmTGE_Ck='})
-import requests  # noqa: E402
+import requests, threading  # noqa: E402
 outbound = []
 _orig = requests.Session.request
+_ME = threading.get_ident()   # the test client serves requests on this thread
 def _spy(self, method, url, *a, **k):
-    if _spy.on:
+    # Only calls made while serving the page count: the app's background
+    # loops (prices, bots) also make RPC calls, and under load one of them
+    # landing in the window made this fail at random.
+    if _spy.on and threading.get_ident() == _ME:
         outbound.append(str(url))
     return _orig(self, method, url, *a, **k)
 _spy.on = False

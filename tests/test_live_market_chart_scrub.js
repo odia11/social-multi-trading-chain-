@@ -51,5 +51,5 @@ assert(/scrubbing = !!\(_chartTimers\[idx\] && _chartTimers\[idx\]\.scrubbing\)/
 const liveTemplate=fs.readFileSync('templates/live_market_pro.html','utf8');
 assert(liveTemplate.includes("initPullToRefresh({ scope: liveMarketScope, ignoreTarget: '.pt-chart-wrap'"));
 for(const f of ['app_performance.py','static/app-ux.js','static/live-market-redesign.js'])
-  assert(fs.readFileSync(f,'utf8').includes('live-market-final.css?v=6'),f+' loads live-market-final.css?v=6');
+  assert(fs.readFileSync(f,'utf8').includes('live-market-final.css'),f+' loads live-market-final.css');
 console.log('PASS Live Market chart scrub: finger on the chart shows the price at that point');

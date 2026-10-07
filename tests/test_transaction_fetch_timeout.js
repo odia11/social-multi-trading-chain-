@@ -16,7 +16,8 @@ async function test(files){
   resolve({ok:true});await p;
  }
  timers=[];const p=ctx.window.fetch('/api/wallet/tokens');
- assert.equal(timers[0].ms,15000);timers[0].fn();assert(calls.at(-1).signal.aborted);resolve({});await p;
+ // 30 s: a read must survive a deploy restart (5a9f317); both wrappers agree
+ assert.equal(timers[0].ms,30000);timers[0].fn();assert(calls.at(-1).signal.aborted);resolve({});await p;
  timers=[];const ctl=new AbortController(),q=ctx.window.fetch('/api/tip',{method:'POST',signal:ctl.signal});
  assert.equal(timers.length,0);assert.strictEqual(calls.at(-1).signal,ctl.signal);resolve({});await q;
  timers=[];const r=ctx.window.fetch(new Request('https://orcagent.fun/api/tip',{method:'POST'}));

@@ -27,6 +27,10 @@ function makeCtx(stored){
     chartTick:()=>{}, _chartTimers:{}, _priceNextAt:0, tickLivePrices(){},
     chartBucketSeconds:()=>300,
   };
+  // live-market-pro.js runs its fetches and timers through the page's route
+  // scope (cleaned up when the page is left); here it is the plain globals.
+  ctx._routeScope={fetch:(u,o)=>ctx.fetch(u,o),setTimeout:(f,ms)=>ctx.setTimeout(f,ms),clearTimeout(){},
+                   setInterval(){return 1},addEventListener(){},requestAnimationFrame(){return 1}};
   vm.createContext(ctx);
   vm.runInContext(src.slice(qStart,qEnd)+src.slice(primeStart,primeEnd)+src.slice(tfStart,tfEnd),ctx);
   return {ctx,pending,renders,store};

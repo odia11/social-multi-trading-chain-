@@ -18,5 +18,5 @@ for(const [id,label] of [['chart-pill-btn','Chart'],['trade-pill-btn','Trade'],[
   assert(new RegExp('id="'+id+'"[^>]*>[\\s\\S]*?<svg[\\s\\S]*?</svg>\\s*<span class="feed-pill-label">'+label+'</span>').test(html),id+' has an icon + short label');
 }
 for(const f of ['static/app-ux.js','static/mobile-bottom-nav.js','app_performance.py'])
-  assert(fs.readFileSync(f,'utf8').includes('home-composer-mobile.css?v=7'),f+' must cache-bust the composer CSS');
+  assert(fs.readFileSync(f,'utf8').includes('home-composer-mobile.css'),f+' must load the composer CSS (stamped with the deploy version)');
 console.log('PASS Home composer: attachment buttons in one tidy row on every phone width');

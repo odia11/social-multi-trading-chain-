@@ -25,6 +25,9 @@ const ctx={
   _pricePollBaseMs:2000,
   Number, Math, isNaN,
 };
+// the route scope live-market-pro.js schedules its frames through
+ctx._routeScope={requestAnimationFrame:(fn)=>ctx.requestAnimationFrame(fn),
+                 cancelAnimationFrame:(id)=>ctx.cancelAnimationFrame(id)};
 vm.createContext(ctx);
 vm.runInContext(js.slice(fmtStart,fmtEnd)+'\n'+js.slice(fnStart,fnEnd), ctx);
 
