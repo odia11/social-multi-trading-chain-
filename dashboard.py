@@ -22944,7 +22944,7 @@ def _feed_call_payloads(conn, targets):
         now_price = last_price if last_price and last_price > 0 else price_at_call
         peak = max(peak_price or 0, price_at_call)
         payload = {
-            'id': cid, 'mint': mint, 'symbol': symbol or '', 'name': name or '',
+            'id': cid, 'post_id': int(post_id or 0), 'mint': mint, 'symbol': symbol or '', 'name': name or '',
             'chain': chain or ('solana' if is_valid_solana_address(mint) else ''),
             'image_url': image_url or '',
             'price_at_call': price_at_call, 'peak_price': peak, 'last_price': now_price,

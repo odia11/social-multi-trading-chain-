@@ -158,7 +158,10 @@ CREATE TABLE token_calls(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,wa
             rows = c.execute("SELECT content, image_url FROM feed_posts WHERE wallet LIKE 'official%' ORDER BY id").fetchall()
         self.assertEqual(len(rows), 3)
         self.assertTrue(all(img and img.startswith('/media/agent/') for _, img in rows))
-        self.assertTrue(all('__CALL__' not in t and '__CHART__' not in t for t, _ in rows))
+        # The picture replaces the card, but the post still says which call or
+        # token it is about, so "$SYMBOL" opens exactly that one.
+        self.assertTrue(rows[0][0].endswith('__CALL__' + json.dumps({'id': cid})))
+        self.assertTrue(all('__CALL__' in t or '__CHART__' in t for t, _ in rows))
         self.assertEqual(seen[0][0], 'call')
         self.assertIn('trending', [k for k, _, _ in seen])
         self.assertEqual(len({s for _, s, _ in seen}), 3)   # each picture its own seed
@@ -174,6 +177,42 @@ CREATE TABLE token_calls(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,wa
             content, img = c.execute("SELECT content, image_url FROM feed_posts WHERE wallet LIKE 'official%'").fetchone()
         self.assertIsNone(img)
         self.assertTrue(content.endswith('__CALL__' + json.dumps({'id': cid})))
+
+    def test_the_most_called_token_post_names_its_latest_call(self):
+        self.call(2, 'ATTN+', 0.001, 0.002, DAY0 - dt.timedelta(hours=3))
+        last = self.call(3, 'ATTN+', 0.0012, 0.0013, DAY0 - dt.timedelta(hours=1))
+        with sqlite3.connect(self.db) as c:
+            out = live.most_called(c, DAY0.timestamp())
+        self.assertEqual(len(out), 1)
+        self.assertIn('$ATTN+', ' '.join(out[0][1]))
+        self.assertEqual(out[0][3], '\n__CALL__' + json.dumps({'id': last}))
+
+    def test_earlier_posts_get_the_marker_of_their_call_or_token_once(self):
+        cid = self.call(2, 'Attention+', 0.0001, 0.001, DAY0 - dt.timedelta(days=3))
+        mint = TOKENS[0]['mint']
+        posts = {}
+        with sqlite3.connect(self.db) as c:
+            for topic, text in (('milestone:%d:10' % cid, '$Attention+ just hit 10x since @chartwizard called it.'),
+                                ('trending:' + mint, '$POPCAT+ is trending on Solana.'),
+                                ('pulse:1', 'Market pulse: quiet day.')):
+                pid = c.execute("INSERT INTO feed_posts(wallet,content,image_url) VALUES"
+                                "('officialwalletaddr111111111111111111111',?,'/media/agent/x.webp')", (text,)).lastrowid
+                c.execute('INSERT INTO platform_assistant_events VALUES(?,?,?,?,?,?,?)',
+                          (topic, 'post', None, 'p%d' % pid, None, topic, 0))
+                posts[topic.split(':')[0]] = pid
+            member = c.execute("INSERT INTO feed_posts(wallet,content) VALUES('w','$Attention+ to the moon')").lastrowid
+            c.execute("DELETE FROM platform_assistant_settings WHERE key='token_marker_backfill_v1'")
+        p.initialize(self.db)
+        p.initialize(self.db)   # a second start changes nothing more
+        with sqlite3.connect(self.db) as c:
+            got = {k: c.execute('SELECT content FROM feed_posts WHERE id=?', (v,)).fetchone()[0] for k, v in posts.items()}
+            mem = c.execute('SELECT content FROM feed_posts WHERE id=?', (member,)).fetchone()[0]
+        self.assertTrue(got['milestone'].endswith('called it.\n__CALL__' + json.dumps({'id': cid})))
+        chart = json.loads(got['trending'].split('__CHART__', 1)[1])
+        self.assertEqual((chart['symbol'], chart['mint']), ('POPCAT+', mint))
+        self.assertEqual(got['pulse'], 'Market pulse: quiet day.')
+        self.assertEqual(mem, '$Attention+ to the moon')
+        self.assertEqual(got['milestone'].count('__CALL__'), 1)
 
     def test_formatting(self):
         self.assertEqual(live.price(0.000207), '$0.0002070')

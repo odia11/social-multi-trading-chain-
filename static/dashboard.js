@@ -1552,18 +1552,40 @@ function renderLog(lines){
    never become a link however they are typed. */
 function _fcTagText(t,tokenIdentity){
   if(!t) return '';
+  // A post that is about one known token (a call, a chart, an @orcagent
+  // post) links "$" + its exact symbol to exactly that token or call --
+  // whatever characters the ticker has. "$Attention+" used to link only
+  // "$Attention", which searched for a different token by name.
+  var idSym = tokenIdentity && String(tokenIdentity.symbol||'');
+  if(idSym && /[^A-Za-z0-9_]/.test(idSym)){
+    var needle = '$'+idSym, parts = String(t).split(needle);
+    if(parts.length > 1){
+      var mint0 = safeMint(tokenIdentity.mint);
+      var tag0 = _fcTokenTagHtml(idSym, mint0, +tokenIdentity.callPostId||0, +tokenIdentity.callId||0);
+      return parts.map(function(part){ return _fcTagText(part, {symbol:'', mint:''}); }).join(tag0);
+    }
+  }
   // A ticker starts with a LETTER. /\$([^\s<]+)/ matched anything after a
   // dollar sign, so "$500 profit" and "$0.000002346" became clickable token
   // tags that resolve to nothing -- any post quoting a price or an amount
   // got them. Bounded length too: a ticker is not forty characters long.
-  var out = esc(t).replace(/\$([A-Za-z][A-Za-z0-9_]{0,19})\b/g,function(match,symbol){
-    var mint=tokenIdentity && String(tokenIdentity.symbol||'').toUpperCase()===symbol.toUpperCase() ? safeMint(tokenIdentity.mint) : '';
-    return '<span class="token-tag" data-sym="'+symbol+'"'+(mint?' data-mint="'+mint+'"':'')+' onclick="event.stopPropagation();showTokenCard(this.dataset.sym,this.dataset.mint)">$'+symbol+'</span>';
+  // Tickers like "$Attention+" end in a plus; it belongs to the ticker.
+  var out = esc(t).replace(/\$([A-Za-z][A-Za-z0-9_]{0,19}\+*)(?![A-Za-z0-9_])/g,function(match,symbol){
+    var same=tokenIdentity && String(tokenIdentity.symbol||'').toUpperCase()===symbol.toUpperCase();
+    return _fcTokenTagHtml(symbol, same ? safeMint(tokenIdentity.mint) : '',
+                           same ? +tokenIdentity.callPostId||0 : 0, same ? +tokenIdentity.callId||0 : 0);
   });
   // The @ has to START a word. Without that guard "me@example.com" renders as
   // "me" followed by a link to /profile/example -- the same class of bug the
   // URL split above exists to prevent, one character earlier.
   return out.replace(/(^|[^A-Za-z0-9_])@([a-zA-Z0-9_]+)/g,'$1<a href="/profile/$2" onclick="event.stopPropagation()" style="color:#f7b955;font-weight:600;text-decoration:none">@$2</a>');
+}
+function _fcTokenTagHtml(symbol,mint,callPostId,callId){
+  var open = callPostId ? '_feedCallOpenPost('+callPostId+')'
+    : callId ? 'location.href=\'/call/'+callId+'\''
+    : 'showTokenCard(this.dataset.sym,this.dataset.mint)';
+  return '<span class="token-tag" data-sym="'+esc(symbol)+'"'+(mint?' data-mint="'+mint+'"':'')
+    +' onclick="event.stopPropagation();'+open+'">$'+esc(symbol)+'</span>';
 }
 function _fcLinkHtml(url){
   // Trailing punctuation is almost always the sentence's, not the URL's:
@@ -9546,10 +9568,19 @@ function _renderFeedCard(e, cardIndex){
   if(e.content){
     var _rawContent = e.content;
     // ── Token call (feed-calls.js draws it from the server's numbers) ──
+    var _postToken = null;   // the one token this post is about, if any
+    var _isAgentPost = !!(e.verified && String(e.username||'').toLowerCase()==='orcagent');
     var _callIdx = _rawContent.indexOf('__CALL__');
     if(_callIdx >= 0){
       _rawContent = _rawContent.slice(0, _callIdx).trim();
-      if(e.call && typeof window._feedCallCardHtml === 'function') callHtml = window._feedCallCardHtml(e.call, postId);
+      if(e.call){
+        _postToken = {symbol: e.call.symbol, mint: e.call.mint, callId: e.call.id,
+                      callPostId: (e.call.post_id && String(e.call.post_id) !== String(e.id)) ? e.call.post_id : 0};
+        // @orcagent's designed picture already shows the call; the marker
+        // is kept only so "$SYMBOL" opens exactly this call.
+        var _pictureIsCard = _isAgentPost && e.image_url && e.call.featured;
+        if(!_pictureIsCard && typeof window._feedCallCardHtml === 'function') callHtml = window._feedCallCardHtml(e.call, postId);
+      }
     }
     // ── Terminal trade card ──────────────────────────────────────────
     var _tradeIdx = _rawContent.indexOf('__TRADE__');
@@ -9576,8 +9607,11 @@ function _renderFeedCard(e, cardIndex){
       var _chartJson = _rawContent.slice(_chartMatch + 9);
       var _chartData = null;
       try{ _chartData = JSON.parse(_chartJson); }catch(ex){}
+      if(_chartData && _chartData.symbol && !_postToken) _postToken = {symbol: _chartData.symbol, mint: _chartData.mint};
+      // @orcagent's token banner picture takes the place of the chart card.
+      if(_isAgentPost && e.image_url) _chartData = null;
       if(_textPart){
-        var _safeText = _fcRichText(_textPart);
+        var _safeText = _fcRichText(_textPart,_postToken);
         textBody += '<div style="font-size:14.5px;line-height:1.55;color:#c7ccd4;margin:6px 0 10px">'+_safeText+'</div>';
       }
       if(_chartData){
@@ -9652,7 +9686,7 @@ function _renderFeedCard(e, cardIndex){
           +'</div>';
       }
     } else if(_rawContent.trim()) {
-      var _safeContent = _fcRichText(_rawContent);
+      var _safeContent = _fcRichText(_rawContent,_postToken);
       textBody += '<div style="font-size:14.5px;line-height:1.55;color:#c7ccd4;margin:6px 0 10px">'+_safeContent+'</div>';
     }
   }

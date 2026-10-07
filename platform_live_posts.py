@@ -243,7 +243,13 @@ def most_called(c, now):
         'Most called token in the last 24 hours: $%s, called by %d different traders. Compare their reasoning on the Calls tab.' % (sym, n),
         '%d traders called $%s in the last day. Open the Calls tab to see who called it, when, and why.' % (n, sym),
     ]
-    return [(topic, _pick(texts, topic), None, '')]
+    # The latest call on it travels with the post, so "$SYMBOL" opens that
+    # exact token whatever characters its ticker has.
+    try:
+        latest = c.execute('SELECT id FROM token_calls WHERE mint=? ORDER BY id DESC LIMIT 1', (mint,)).fetchone()
+    except Exception:
+        latest = None
+    return [(topic, _pick(texts, topic), None, _call_embed(latest[0]) if latest else '')]
 
 
 def top_caller(c, now):
