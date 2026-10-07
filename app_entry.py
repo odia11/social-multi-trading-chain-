@@ -200,4 +200,9 @@ _install_portfolio_inventory(_dashboard)
 from memory_hygiene import install as _install_memory_hygiene
 _install_memory_hygiene(_dashboard)
 
+# Registered last so it runs first among the response passes: a page the
+# browser navigates to gets an OrcAgent error page, never bare JSON.
+from friendly_errors import install as _install_friendly_errors
+_install_friendly_errors(_dashboard)
+
 app = _dashboard.app

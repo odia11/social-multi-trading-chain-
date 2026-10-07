@@ -456,6 +456,10 @@ def _jinja_fmtprice(v):
     decimals = max(0, 2 - exponent)
     return f'${v:.{decimals}f}'
 
+GLOBAL_LIMIT_ANON = 500     # requests per minute per IP, signed out
+GLOBAL_LIMIT_MEMBER = 1500  # requests per minute per signed-in account
+_GLOBAL_LIMIT_EXEMPT = ('/static/', '/theme-light/', '/sw.js', '/app.webmanifest', '/favicon')
+
 @app.before_request
 def _security_gate():
     """Runs before every other before_request hook (registration order).
@@ -483,8 +487,15 @@ def _security_gate():
             return jsonify({'error': 'Forbidden'}), 403
         _log_security_event('bot_probe', session.get('wallet', 'anonymous'),
                             f'{request.method} {request.path} ua={ua!r:.120} from {ip}')
-    if (ip not in _OWNER_IPS and not _is_owner(session.get('wallet', ''))
-            and not _rate_ok('global:' + ip, 500, 60)):
+    # Signed-in members are counted per account, not per IP: people on one
+    # mobile network or office Wi-Fi share an address, and together they
+    # tripped the per-IP limit -- a page then came back as a bare JSON error.
+    # Static files and the light-mode stylesheets are never counted.
+    _wallet = session.get('wallet', '')
+    if (ip not in _OWNER_IPS and not _is_owner(_wallet)
+            and not request.path.startswith(_GLOBAL_LIMIT_EXEMPT)
+            and not (_rate_ok('global:w:' + _wallet, GLOBAL_LIMIT_MEMBER, 60) if _wallet
+                     else _rate_ok('global:' + ip, GLOBAL_LIMIT_ANON, 60))):
         return jsonify({'error': 'Too many requests'}), 429
     _ext_hit('api')
     return None
@@ -18727,7 +18738,7 @@ def _nav_icon(key: str) -> str:
     body = _NAV_ICONS.get(key)
     if not body:
         return ''
-    return ('<svg class="pt-nb-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    return ('<svg class="pt-nb-ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
             'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
             'aria-hidden="true">%s</svg>' % body)
 
@@ -18809,6 +18820,42 @@ def _navbar_more_items_html(extra_class: str = '') -> str:
 # number first. The "SOL" unit span is legacy markup from when the chip showed
 # a raw SOL amount -- kept only so old cached HTML without a fresh navbar.css
 # still hides it via .pt-nb-sol-unit.
+# If a page's own stylesheets did not arrive (a dropped connection, a refused
+# request), the browser shows raw markup: screen-filling icons, link lists,
+# a giant avatar. Never show that: once the page has loaded, check that every
+# /static/ and /theme-light/ stylesheet really applied; if one did not, cover
+# the page with a small OrcAgent screen and reload it (twice at most, then
+# offer a button). Plain inline markup; the server adds the CSP nonce.
+_CSS_GUARD = '''<script>(function(){
+var KEY='oa-css-retry',done=false;
+function n(){try{return +sessionStorage.getItem(KEY)||0}catch(e){return 0}}
+function cover(){
+  if(done)return;done=true;var tries=n();
+  try{sessionStorage.setItem(KEY,tries+1)}catch(e){}
+  var o=document.createElement('div');o.id='oa-css-cover';o.setAttribute('role','status');
+  o.setAttribute('style','position:fixed;inset:0;z-index:2147483647;background:#0a0b0e;color:#eef1f5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;font:600 20px system-ui,-apple-system,sans-serif');
+  var m=document.createElement('div');m.setAttribute('style','width:56px;height:56px;border-radius:16px;background:#f7b955;display:flex;align-items:center;justify-content:center');
+  m.innerHTML='<svg width="24" height="22" viewBox="0 0 22 20" aria-hidden="true"><path d="M11 0 22 20H0z" fill="#0a0b0e"/></svg>';
+  var t=document.createElement('div');t.textContent='One moment';
+  var p=document.createElement('div');p.setAttribute('style','font-weight:400;font-size:15px;color:#a0a7b1;max-width:300px;line-height:1.5');
+  o.appendChild(m);o.appendChild(t);o.appendChild(p);
+  if(tries<2){p.textContent='Loading OrcAgent again.';setTimeout(function(){location.reload()},700+tries*1500);}
+  else{p.textContent='The page did not load completely. Check your connection and try again.';
+    var b=document.createElement('button');b.type='button';b.textContent='Try again';
+    b.setAttribute('style','margin-top:6px;padding:12px 22px;border:0;border-radius:12px;background:#f7b955;color:#0a0b0e;font:700 15px system-ui,sans-serif');
+    b.addEventListener('click',function(){try{sessionStorage.removeItem(KEY)}catch(e){}location.reload()});o.appendChild(b);}
+  (document.body||document.documentElement).appendChild(o);
+}
+function check(){
+  var links=document.querySelectorAll('link[rel="stylesheet"]'),bad=false;
+  for(var i=0;i<links.length;i++){var h=links[i].getAttribute('href')||'';
+    if((h.indexOf('/static/')===0||h.indexOf('/theme-light/')===0)&&!links[i].sheet){bad=true;break}}
+  if(bad)cover();else{try{sessionStorage.removeItem(KEY)}catch(e){}}
+}
+if(document.readyState==='complete')setTimeout(check,0);else window.addEventListener('load',check);
+})();</script>'''
+
+
 def _navbar_html(active_nav: str = '') -> Markup:
     nav_links = ''.join(
         '<a href="%s" class="%s">%s<span>%s</span></a>'
@@ -18822,14 +18869,14 @@ def _navbar_html(active_nav: str = '') -> Markup:
     bottom_wallet = ' active' if active_nav == 'wallet' else ''
     bottom_nav = '''
 <nav id="oa-bottom-nav" class="oa-bottom-nav" aria-label="Mobile navigation">
-  <a href="/" class="%(home)s" aria-label="Home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7"/><path d="M5 9v11h14V9"/><path d="M9 20v-6h6v6"/></svg><span class="oa-nav-label">Home</span></a>
-  <a href="/live-market" class="%(market)s" aria-label="Live Market"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V11"/><path d="M10 19V6"/><path d="M16 19V9"/><path d="M22 19V3"/></svg><span class="oa-nav-label">Live Market</span></a>
-  <button type="button" class="oa-trade-main oa-post-main%(home)s" aria-label="Create post"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg><span>POST</span></button>
-  <a href="/wallet" class="%(wallet)s" aria-label="Portfolio"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="3"/><path d="M8 6V4h8v2"/><path d="M15 11h6v4h-6a2 2 0 0 1 0-4Z"/></svg><span class="oa-nav-label">Portfolio</span></a>
-  <button type="button" class="oa-menu-btn" aria-label="Open menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span class="oa-nav-label">Menu</span></button>
+  <a href="/" class="%(home)s" aria-label="Home"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 10 9-7 9 7"/><path d="M5 9v11h14V9"/><path d="M9 20v-6h6v6"/></svg><span class="oa-nav-label">Home</span></a>
+  <a href="/live-market" class="%(market)s" aria-label="Live Market"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V11"/><path d="M10 19V6"/><path d="M16 19V9"/><path d="M22 19V3"/></svg><span class="oa-nav-label">Live Market</span></a>
+  <button type="button" class="oa-trade-main oa-post-main%(home)s" aria-label="Create post"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg><span>POST</span></button>
+  <a href="/wallet" class="%(wallet)s" aria-label="Portfolio"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="3"/><path d="M8 6V4h8v2"/><path d="M15 11h6v4h-6a2 2 0 0 1 0-4Z"/></svg><span class="oa-nav-label">Portfolio</span></a>
+  <button type="button" class="oa-menu-btn" aria-label="Open menu"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span class="oa-nav-label">Menu</span></button>
 </nav>
 ''' % {'home': bottom_home, 'market': bottom_market, 'wallet': bottom_wallet}
-    return Markup('''
+    return Markup(_CSS_GUARD + '''
 <link rel="stylesheet" href="/static/navbar.css?v=%(v)s">
 <link rel="stylesheet" href="/static/mobile-bottom-nav.css?v=9">
 <header class="pt-nb-topbar">
