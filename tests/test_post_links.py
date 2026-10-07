@@ -132,7 +132,7 @@ check('a ticker is length-bounded — forty characters after a $ is not a symbol
 # ── every place a post is rendered uses it ──
 check('the feed post, the post-with-chart, the inline edit and the replies all '
       'go through the one function, so none of them can drift',
-      JS.count('_fcRichText(') - 1 == 4)   # minus its own definition
+      JS.count('_fcRichText(') - 1 >= 4)   # minus its own definition; @orcagent's token question uses it too
 check('no call site still does the old inline escape+replace',
       "esc(_rawContent).replace(/\\$(" not in JS and "esc(r.message).replace(/@(" not in JS)
 

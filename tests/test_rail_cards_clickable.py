@@ -93,12 +93,13 @@ check('a real drag still suppresses the click it ends with, so panning never '
 check('...via one capture-phase listener bound once, not a listener added on '
       'each release (which is left behind when a drag ends off the rail and '
       'fires no click, and then eats the next genuine tap)',
-      drag_fn_nc.count("addEventListener('click'") == 1
-      and re.search(r"addEventListener\('click'.*?\}\s*,\s*true\s*\)", drag_fn_nc, re.DOTALL))
+      # route-scoped listeners: _routeScope.addEventListener(el,'click', fn, true)
+      drag_fn_nc.count("addEventListener(el,'click'") == 1
+      and re.search(r"addEventListener\(el,'click'.*?\}\s*,\s*true\s*\)", drag_fn_nc, re.DOTALL))
 
 check('mousedown clears the flag, so a stale suppression can never outlive '
       'the gesture that set it',
-      re.search(r"addEventListener\('mousedown'.*?swallowClick\s*=\s*false", drag_fn_nc, re.DOTALL))
+      re.search(r"addEventListener\(el,'mousedown'.*?swallowClick\s*=\s*false", drag_fn_nc, re.DOTALL))
 
 check('the flag is consumed when it fires, so it suppresses one click and '
       'not every click after it',

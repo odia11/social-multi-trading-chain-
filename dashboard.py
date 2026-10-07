@@ -25821,10 +25821,10 @@ def api_token_info(mint_address):
 @app.route('/api/trade/buy', methods=['POST'])
 @rate_limit(10, 60)
 def api_trade_buy():
-    """Backward-compatible Solana buy, funded in USDC.
+    """Backward-compatible Solana buy, funded in SOL.
 
     A few older dashboard and Live Market buttons still call this endpoint.
-    It must therefore use the same USDC-funded flow as every newer Solana
+    It must therefore use the same SOL-funded flow as every newer Solana
     surface; leaving the historical SOL implementation here made the funding
     currency depend on which button happened to be pressed.
     """

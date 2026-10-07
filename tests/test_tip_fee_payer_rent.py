@@ -6,12 +6,10 @@ but less than a plain wallet's rent-exempt minimum (890,880 lamports):
 20,000 lamports, so a trading wallet at 890,946 lamports looked ready, the
 transfer went out, and Solana rejected it -- the member saw an error.
 
-Now:
-- every SOL check counts that floor (read from the chain, 890,880 fallback);
-- with $0.20+ USDC to spare beside the tip, SOL is created from USDC FIRST
-  and the tip goes through on the first send, with no rejected attempt;
-- without it, the member is told exactly what to do (tip up to $X now, or
-  add $Y USDC), not "Solana tip failed".
+Now every SOL check counts that floor (read from the chain, 890,880
+fallback), and a USDC tip from a wallet below it is refused up front with what
+is missing -- nothing is sent. (The old fallback that sold spare USDC for SOL
+went with the SOL | USDC tip switch: the sender's SOL pays the fee.)
 """
 import os, sqlite3, sys, tempfile
 from decimal import Decimal
@@ -49,15 +47,6 @@ def fake_accounts(_d, owner, mint):
         'owner': 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
         'data': {'parsed': {'info': {'tokenAmount': {'amount': str(chain['usdc_raw']), 'decimals': 6}}}}}}]
 
-m._fee_payer_rent_cache.update(value=0, at=0.0)
-with patch.object(m, '_rpc_call_any', side_effect=fake_rpc), \
-     patch.object(m, '_solana_source_accounts', side_effect=fake_accounts), \
-     patch.object(d, '_get_trading_wallet_address', return_value=TRADING):
-    ready = m._tip_solana_ready(d, sender, Decimal('0.10'), recipient)
-check("the wallet's own rent floor counts: 890,880 + 20,000 lamports are needed, not 20,000",
-      ready['required_lamports'] == 910_880)
-check('...so a wallet at 890,946 lamports is NOT ready (it was, and Solana then rejected the tip)',
-      ready['native_ready'] is False and ready['lamports'] == 890_946)
 with patch.object(m, '_rpc_call_any', side_effect=RuntimeError('rpc down')):
     m._fee_payer_rent_cache.update(value=0, at=0.0)
     check('without an RPC answer the floor falls back to 890,880', m._fee_payer_rent_lamports(d) == 890_880)
@@ -72,11 +61,12 @@ with cl.session_transaction(base_url=B) as s:
 H = {'X-CSRF-Token': 'c' * 64}
 sent, topups = [], []
 def fake_transfer(_d, wallet, mint, to, amount, **kw):
+    # what _solana_transfer does at the floor check when it may not sell USDC for gas
     if chain['lamports'] < 910_880:
-        raise m._SolanaPreflightError('Insufficient SOL', gas_shortfall=True, reason_code='insufficient_sol')
+        raise ValueError('Not enough SOL in your trading wallet to pay the network fee and token-account rent')
     sent.append(amount); return 'SIG' + str(len(sent)), float(amount)
-def fake_topup(wallet, spare, target_sol=0.0035):
-    topups.append((spare, target_sol)); chain['lamports'] = int(target_sol * 1e9)
+def fake_topup(*a, **k):
+    topups.append(a)
 
 def tip(amount):
     m._RECENT.clear()
@@ -87,20 +77,20 @@ def tip(amount):
          patch.object(d, '_validate_csrf', return_value=True), \
          patch.object(d, '_get_trading_wallet_address', return_value=TRADING), \
          patch.object(d, '_gasless_solana_native_topup', side_effect=fake_topup, create=True):
-        r = cl.post('/api/tip', json={'recipient_user_id': r_uid, 'amount': amount}, headers=H, base_url=B)
+        r = cl.post('/api/tip', json={'recipient_user_id': r_uid, 'amount': amount, 'currency': 'USDC'},
+                    headers=H, base_url=B)
         return r.status_code, r.get_json()
 
 code, body = tip('0.10')
-check('$0.13 USDC and no spare SOL: a $0.10 tip is refused up front, nothing is sent',
-      code == 400 and body['reason'] == 'needs_sol' and not sent and not topups)
-check('...with what to do instead of "Solana tip failed"',
-      'Add $0.17 USDC (or 0.002 SOL)' in body['error'] and 'Solana tip failed' not in body['error'])
-chain.update(usdc_raw=5_000_000)
-code, body = tip('4.90')
-check('$5 USDC, $4.90 tip: told the maximum tip right now', code == 400 and 'tip up to $4.80 right now' in body['error'])
+check('a wallet at 890,946 lamports: a $0.10 USDC tip is refused up front, nothing is sent, no USDC sold',
+      code == 400 and not sent and not topups)
+check('...saying what is missing instead of "Solana tip failed"',
+      'Not enough SOL' in body['error'] and 'Solana tip failed' not in body['error'])
+check('the transfer refuses below the floor rather than selling USDC for gas, for a tip',
+      "allow_user_funded_gas=False" in src[src.index("@app.post('/api/tip')"):src.index("@app.post('/api/wallet/send-token')")]
+      and "'Not enough SOL in your trading wallet to pay the network fee and token-account rent'" in transfer)
+chain.update(lamports=5_000_000)
 code, body = tip('1.00')
-check('$5 USDC, $1 tip: SOL is made from spare USDC first, then the tip goes out on the FIRST send',
-      code == 200 and body['ok'] and body['tx_hash'] == 'SIG1' and len(topups) == 1 and sent == [Decimal('1.00')])
-check('...only from the USDC beside the tip, never the tip itself',
-      topups[0][0] == Decimal('4.00') and topups[0][1] >= 0.0025)
+check('with SOL above the floor the tip goes out on the FIRST send, in full',
+      code == 200 and body['ok'] and body['tx_hash'] == 'SIG1' and sent == [Decimal('1.00')] and not topups)
 raise SystemExit(0 if all(checks) else 1)

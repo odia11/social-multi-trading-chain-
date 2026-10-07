@@ -80,71 +80,8 @@ check('Blocking in an essential check is a failure too, unchanged',
       status_of(raiser(vl.Blocking('x')), essential=True) == vl.BAD)
 
 
-# ── 2. the sponsor check draws the line at "can it serve one more user" ──
-ONE_GWEI, GAS_UNITS, MULT = 10 ** 9, 200000, 3
-ONE_GRANT = ONE_GWEI * GAS_UNITS * MULT / 1e18
-
-
-def fake_dashboard(balances):
-    d = types.SimpleNamespace()
-    d.ORCAGENT_FRONTS_GAS = True
-    d.EVM_CHAINS = {'bsc': {'native_symbol': 'BNB'},
-                    'robinhood': {'native_symbol': 'ETH'}}
-    d._gas_sponsor_address = lambda: '0xSPONSOR'
-    d.get_evm_native_balance = lambda a, c: balances[c]
-    d.GAS_TOPUP_TX_GAS_UNITS = GAS_UNITS
-    d.GAS_SPONSOR_TX_MULTIPLIER = MULT
-    d._get_web3 = lambda c: types.SimpleNamespace(
-        eth=types.SimpleNamespace(gas_price=ONE_GWEI))
-    return d
-
-
-def evm_sponsor_with(balances, addr='0xSPONSOR'):
-    """The REAL evm_sponsor(), lifted out of main() and run against
-    stand-in balances -- so this tests the shipped arithmetic, not a copy."""
-    body = SRC[SRC.index('    def evm_sponsor():'):
-               SRC.index("    attempt('EVM gas sponsor funding'")]
-    body = ''.join(l[4:] if l.startswith('    ') else l for l in body.splitlines(True))
-    d = fake_dashboard(balances)
-    d._gas_sponsor_address = lambda: addr
-    ns = {'d': d, 'Blocking': vl.Blocking, '_fronting': True,
-          'WARN_BELOW_GRANTS': 5, 'TARGET_GRANTS': 30,
-          '_grants_left': lambda b, g: int(b // g) if g > 0 else 0}
-    exec(body, ns)
-    vl.results.clear()
-    vl.attempt('EVM gas sponsor funding', ns['evm_sponsor'], essential=False)
-    return vl.results[0][0], vl.results[0][2]
-
-
-st, _ = evm_sponsor_with({'bsc': ONE_GRANT * 40, 'robinhood': ONE_GRANT * 40})
-check('sponsors with plenty in them pass', st == vl.OK)
-
-st, detail = evm_sponsor_with({'bsc': ONE_GRANT * 40, 'robinhood': ONE_GRANT * 3})
-check('a sponsor that is low but can still activate users only WARNS — a '
-      'float to top up soon is not an outage', st == vl.WARN)
-check('...and says how much to send to get back to a comfortable margin',
-      'send ' in detail and 'robinhood' in detail)
-
-st, detail = evm_sponsor_with({'bsc': ONE_GRANT * 40, 'robinhood': 0.0})
-check('a sponsor that cannot activate a single user FAILS the run', st == vl.BAD)
-check('...naming the chain nobody can use', 'robinhood' in detail)
-check('...in words that say what it means for a person, not "low balance"',
-      'NOBODY can trade or withdraw' in detail)
-check('...and still says exactly what to send', 'send ' in detail and 'ETH' in detail)
-check('...while a healthy chain in the same run is not dragged in with it',
-      'NOBODY can trade or withdraw on: robinhood' in detail)
-
-st, detail = evm_sponsor_with({'bsc': 0.0, 'robinhood': 0.0})
-check('several blocked chains are all named, not just the first',
-      st == vl.BAD and 'bsc' in detail and 'robinhood' in detail)
-
-# ── 3. no key at all, while the deployment says it fronts gas ────────────
-st, detail = evm_sponsor_with({'bsc': ONE_GRANT * 40, 'robinhood': ONE_GRANT * 40},
-                               addr='')
-check('fronting gas with no sponsor key configured is a FAILURE, not a note '
-      '— it is every EVM chain blocked at once', st == vl.BAD)
-check('...and it offers the honest alternative rather than only an error',
-      'ORCAGENT_FRONTS_GAS=0' in detail)
+# (Sections 2-3 checked the EVM gas-sponsor wallets; those went with the EVM
+# chains, and gas fronting is forced off in production.)
 
 # ── 4. the deploy still must not roll back over this ────────────────────
 UPD = open(REPO + '/deploy/update.sh', encoding='utf-8').read()

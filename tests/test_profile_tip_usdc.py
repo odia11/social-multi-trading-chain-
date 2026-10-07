@@ -5,7 +5,8 @@ PROFILE = (ROOT / 'templates' / 'profile.html').read_text()
 WITHDRAW = (ROOT / 'portfolio_token_withdraw.py').read_text()
 
 checks = {
-    'tip button is visible on another user profile': 'Tip USDC' in PROFILE and 'pf-btn-tip' in PROFILE,
+    'tip button is visible on another user profile, with SOL and USDC in its sheet':
+        'pf-btn-tip' in PROFILE and "_tipSetCur('USDC')" in PROFILE and "_tipSetCur('SOL')" in PROFILE,
     'tip uses dedicated chain-agnostic endpoint': "fetch('/api/tip'" in PROFILE,
     'tip no longer exposes a client-side token mint': '_tipMint' not in PROFILE,
     'tip recipient is server-resolved by immutable user id': 'recipient_user_id:_tipPeerId' in PROFILE and '_tipRecipient' not in PROFILE,
@@ -54,9 +55,10 @@ _design = {
     'five presets, and the chosen one is marked':
         PROFILE.count('_tipPreset(') >= 2 and '.tip-preset.active' in PROFILE,
     'the button says what it will do, with the amount in it':
-        'tip-submit-label' in PROFILE and "'Tip ' + (+a) + ' USDC'" in PROFILE,
-    'network routing is automatic and costs remain user-funded':
-        'Automatic USDC routing' in PROFILE and 'Network costs are paid from your own wallet' in PROFILE,
+        'tip-submit-label' in PROFILE and "('Tip ' + _tipFmt(a, cur) + ' ' + cur)" in PROFILE,
+    'the sheet says who pays the network fee, per currency (user-funded, never OrcAgent)':
+        'The network fee comes out of your amount' in PROFILE
+        and 'The tiny network fee is paid in SOL from your trading wallet' in PROFILE,
     'the optional note counts its characters against the limit it enforces':
         'maxlength="100"' in PROFILE and 'tip-count' in PROFILE,
     # A memo does not ride along on this transfer, so a message field that

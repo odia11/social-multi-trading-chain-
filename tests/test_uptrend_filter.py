@@ -23,12 +23,17 @@ _TREE = ast.parse(_SRC)
 
 _func_src = None
 _age_buckets_src = None
+_age_buckets_src_floor = None
 for node in _TREE.body:
     if isinstance(node, ast.FunctionDef) and node.name == 'api_market_scanner':
         _func_src = ast.get_source_segment(_SRC, node)
     elif isinstance(node, ast.Assign) and len(node.targets) == 1 \
             and isinstance(node.targets[0], ast.Name) and node.targets[0].id == '_AGE_BUCKET_SECONDS':
         _age_buckets_src = ast.get_source_segment(_SRC, node)
+    elif isinstance(node, ast.Assign) and len(node.targets) == 1 \
+            and isinstance(node.targets[0], ast.Name) and node.targets[0].id == '_LIVE_MARKET_MIN_MCAP_USD':
+        # the page-wide market-cap floor the route applies first ($30K)
+        _age_buckets_src_floor = ast.get_source_segment(_SRC, node)
 
 assert _func_src is not None, 'api_market_scanner not found in dashboard.py'
 assert _age_buckets_src is not None, '_AGE_BUCKET_SECONDS not found in dashboard.py'
@@ -98,6 +103,7 @@ def _run_scanner(sort_mode='trending', **extra_params):
         '_scanner_score': lambda tok, safety: 3,
     }
     exec(_age_buckets_src, namespace)
+    exec(_age_buckets_src_floor, namespace)
     exec(_func_src, namespace)
     return namespace['api_market_scanner']()
 
@@ -136,7 +142,10 @@ check("'gainers' still excludes the negative-change token", 'DUMPING' not in g_s
 
 trending = _run_scanner('trending')
 t_symbols = [t['symbol'] for t in trending['tokens']]
-check("'trending' (default) still returns every fixture token", len(t_symbols) == len(FIXTURES), detail=str(t_symbols))
+# Live Market hides anything under its $30K market-cap floor on every sort,
+# so TOOSMALL ($29,999) is the one fixture trending does not show.
+check("'trending' (default) returns every fixture token above the $30K floor",
+      sorted(t_symbols) == sorted(t['symbol'] for t in FIXTURES if t['market_cap'] >= 30_000), detail=str(t_symbols))
 
 volume = _run_scanner('volume')
 check("'volume' sort mode untouched by this change", 'counts' in volume and 'volume' in volume['counts'])

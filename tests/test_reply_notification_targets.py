@@ -37,7 +37,7 @@ bot=nested.get_json().get('platform_reply_id')
 assert bot,'explicit platform tag must produce a reply'
 with sqlite3.connect(d.DB_FILE) as c:
     message=c.execute('SELECT message FROM feed_replies WHERE id=?',(bot,)).fetchone()[0]
-    assert 'collected platform fees' in message
+    assert 'platform fee' in message   # the reviewed fees answer
     assert c.execute('SELECT 1 FROM notifications WHERE user_id=? AND link=?',(ids[1],f'/#post-{pid}-reply-{bot}')).fetchone()
     c.execute("INSERT INTO notifications(user_id,type,content,link) VALUES(?,'reply','Other post','/#post-p999-reply-1')",(ids[0],))
     d._delete_post_notifications(c,'/#post-'+pid)
