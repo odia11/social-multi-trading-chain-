@@ -32,7 +32,7 @@ _WANTED_FUNCS = {
     '_get_scanner_candidates',
     '_get_narrative_candidates',
 }
-_WANTED_CONSTS = {'_MARKET_MAJOR_ADDRESSES', '_MARKET_MAJOR_SYMBOLS', '_MARKET_LIVE_CHAINS'}
+_WANTED_CONSTS = {'_MARKET_MAJOR_ADDRESSES', '_MARKET_MAJOR_SYMBOLS', '_MARKET_LIVE_CHAINS', '_SCANNER_SEARCHES'}
 
 _func_src, _const_src = {}, {}
 for node in _TREE.body:
@@ -109,6 +109,7 @@ namespace = {
     '_LIVE_MARKET_MIN_MCAP_USD': 30000,
 }
 exec(_const_src['_MARKET_LIVE_CHAINS'], namespace)
+exec(_const_src['_SCANNER_SEARCHES'], namespace)
 exec(_const_src['_MARKET_MAJOR_ADDRESSES'], namespace)
 exec(_const_src['_MARKET_MAJOR_SYMBOLS'], namespace)
 exec(_func_src['_is_market_major_or_impersonator'], namespace)

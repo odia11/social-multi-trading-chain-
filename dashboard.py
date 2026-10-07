@@ -30358,7 +30358,7 @@ _MARKET_MAJOR_ADDRESSES = {
 }
 _MARKET_MAJOR_SYMBOLS = {'sol', 'wsol', 'usdc', 'usdt', 'bnb', 'wbnb', 'busd', 'eth', 'weth',
                           'btc', 'wbtc', 'matic', 'wmatic', 'pol', 'wpol', 'usdg', 'arb'}
-_LIVE_MARKET_MIN_MCAP_USD = 30_000  # hard visibility floor for Home + /live-market
+_LIVE_MARKET_MIN_MCAP_USD = 15_000  # hard visibility floor for Home + /live-market
 _DEX_SOLANA_DISCOVERY_META = {}  # mint -> DexScreener icon/header/openGraph metadata
 _DEX_SOLANA_DISCOVERY_META_LOCK = threading.Lock()
 
@@ -30533,6 +30533,16 @@ def api_market_live():
 _scanner_cache: dict = {'ts': 0.0, 'data': []}
 _scanner_lock = threading.Lock()
 _scanner_refresh_lock = threading.Lock()  # one upstream refresh shared by all bots
+# mint -> (last seen, token). A refresh where some DexScreener calls fail (a
+# timeout, a 429) returns only part of the market, or nothing at all -- and
+# Live Market then showed "No tokens match these filters". A token seen in
+# the last few minutes stays listed until the next refresh that does work.
+_scanner_seen: dict = {}
+_SCANNER_CARRY_SECONDS = 300
+# DexScreener searches that add the most-traded Solana pairs to the discovery
+# surfaces (boosts, profiles, takeovers, ads), which on their own are small
+# and mostly brand-new micro caps.
+_SCANNER_SEARCHES = ('solana', 'SOL', 'pump', 'raydium', 'meteora', 'USDC')
 _scanner_safety_cache: dict = {}  # (chain,mint,include_lp) -> (ts, normalized safety result)
 _scanner_safety_lock = threading.Lock()
 _SCANNER_SAFETY_TTL = 600  # 10 min -- mint/freeze authority + LP-lock state rarely change
@@ -30682,12 +30692,16 @@ def _get_scanner_candidates() -> list:
             except Exception:
                 pass
 
-    rt = _dex_get('https://api.dexscreener.com/latest/dex/search?q=solana&rankBy=trendingScoreH6')
-    if rt and rt.status_code == 200:
+    searches = ['https://api.dexscreener.com/latest/dex/search?q=solana&rankBy=trendingScoreH6']
+    searches += ['https://api.dexscreener.com/latest/dex/search?q=' + q for q in _SCANNER_SEARCHES]
+    for search_url in searches:
+        rt = _dex_get(search_url)
+        if not rt or rt.status_code != 200:
+            continue
         try:
             d = rt.json()
             for p in (d.get('pairs') if isinstance(d, dict) else (d if isinstance(d, list) else [])):
-                if p.get('chainId') == 'solana':
+                if isinstance(p, dict) and p.get('chainId') == 'solana':
                     a = (p.get('baseToken') or {}).get('address', '')
                     key = ('solana', a.lower()) if a else None
                     if key and key not in best_pair:
@@ -30716,10 +30730,38 @@ def _get_scanner_cached() -> list:
     # The 2s decision loops must not each launch a full network refresh when
     # the shared 15s cache expires. Double-check under the refresh lock.
     with _scanner_lock:
-        if time.time() - _scanner_cache['ts'] < 15 and _scanner_cache['data']:
-            return _scanner_cache['data']
+        data, age = _scanner_cache['data'], time.time() - _scanner_cache['ts']
+    if data and age < 15:
+        return data
+    if data:
+        # Someone opening Live Market never waits on DexScreener: they get the
+        # list from a moment ago at once, and it is refreshed in the background
+        # (one refresh at a time, shared by everybody).
+        if _scanner_refresh_lock.acquire(blocking=False):
+            def _refresh_in_background():
+                try:
+                    _refresh_scanner_cached()
+                except Exception as e:
+                    print(f'[scanner] background refresh failed: {e}', flush=True)
+                finally:
+                    _scanner_refresh_lock.release()
+            threading.Thread(target=_refresh_in_background, daemon=True, name='scanner-refresh').start()
+        return data
     with _scanner_refresh_lock:
         return _refresh_scanner_cached()
+
+
+def _scanner_carry_over(fresh: list, now: float) -> list:
+    """fresh + every token seen in the last _SCANNER_CARRY_SECONDS that this
+    refresh missed. Remembers what it saw; forgets what has gone quiet."""
+    for tok in fresh:
+        _scanner_seen[tok['mint']] = (now, tok)
+    for mint in [m for m, (seen, _) in _scanner_seen.items() if now - seen > _SCANNER_CARRY_SECONDS]:
+        _scanner_seen.pop(mint, None)
+    have = {tok['mint'] for tok in fresh}
+    out = list(fresh) + [tok for mint, (_, tok) in _scanner_seen.items() if mint not in have]
+    out.sort(key=lambda t: t.get('volume_24h', 0), reverse=True)
+    return out
 
 
 def _refresh_scanner_cached() -> list:
@@ -30727,7 +30769,9 @@ def _refresh_scanner_cached() -> list:
     with _scanner_lock:
         if now - _scanner_cache['ts'] < 15 and _scanner_cache['data']:
             return _scanner_cache['data']
-    data = _get_scanner_candidates()
+    fresh = _get_scanner_candidates()   # network: never while holding a lock
+    with _scanner_lock:
+        data = _scanner_carry_over(fresh, time.time())
     # The scanner already receives a real USD price and the exact pool for
     # every token.  Persist that free data on every scanner refresh, not only
     # while somebody happens to have a chart visible.  This is the history
