@@ -8721,7 +8721,7 @@ async function loadMoreHomeFeed(){
           if(linkedCard) linkedCard.scrollIntoView({behavior:'auto',block:'center'});
         }
       } else {
-        renderHomeFeed(data.items); // normal feed retains fast append-only paging
+        await renderHomeFeed(data.items); // normal feed retains fast append-only paging
       }
     }
   }catch(e){
@@ -9199,91 +9199,73 @@ function renderHomeFeed(appendItems){
     if(!appendItems) el.innerHTML = '<div class="fc-empty">No activity yet — start trading to appear in the feed.</div>';
     return;
   }
-  var html = items.map(_renderFeedCard).join('');
-  if(appendItems) el.insertAdjacentHTML('beforeend', html);
-  else el.innerHTML = html;
-  _observeFeedVideos(el);
+  var gen = ++_feedRenderGen;
+  if(appendItems) return _appendFeedCards(el, items, gen);
+  el.innerHTML = items.map(_renderFeedCard).join('');
+  _afterFeedCardsAdded(el);
+}
+
+// Bumped by every render, so a page still being appended a few cards at a
+// time stops the moment the feed is rebuilt underneath it.
+var _feedRenderGen = 0;
+var _FEED_APPEND_PER_FRAME = 4;
+function _afterFeedCardsAdded(root){
+  _observeFeedVideos(root);
   _initLiveCharts();
   _initTradeBanners();
   _hydrateFumbles();
-  el.querySelectorAll('.fc-card[id^="fc-card-"]').forEach(function(card){
+  root.querySelectorAll('.fc-card[id^="fc-card-"]').forEach(function(card){
     _feedViewObserver.observe(card);
-    _virtObserver.observe(card);
+  });
+}
+// The next page arrives while the reader is still scrolling towards it.
+// Inserting all of it at once -- parse, style and layout of twenty cards in
+// one task -- was a 200ms+ freeze each time, felt as the feed catching
+// every so often on the way down. A few cards per frame keeps each frame
+// short; the page is still in place well before it is scrolled into view.
+function _appendFeedCards(el, items, gen){
+  return new Promise(function(done){
+    var i = 0;
+    function step(){
+      if(gen !== _feedRenderGen || !el.isConnected) return done();
+      var box = document.createElement('div');
+      box.innerHTML = items.slice(i, i + _FEED_APPEND_PER_FRAME)
+        .map(function(e, k){ return _renderFeedCard(e, i + k); }).join('');
+      while(box.firstChild) el.appendChild(box.firstChild);
+      i += _FEED_APPEND_PER_FRAME;
+      if(i < items.length) requestAnimationFrame(step);
+      else { _afterFeedCardsAdded(el); done(); }
+    }
+    step();
   });
 }
 
-// ── VIRTUALIZATION — Twitter-style windowing ──────────────────────────────
-// content-visibility:auto (see .fc-card in dashboard.html) already tells the
-// browser to skip layout/paint for off-screen cards, which is most of the
-// per-frame scroll cost. What it *doesn't* do is shrink the DOM itself: a
-// long session's worth of loaded posts still all sit in the tree, so any
-// full-document querySelectorAll, style recalc, or browser bookkeeping that
-// scans the whole tree keeps scaling with total feed size, not what's
-// on screen -- the same "grows with a session" shape as the other two feed
-// bugs fixed today. This is what actually makes it feel "the same" as
-// Twitter/X: a post many screens away has its DOM subtree torn down to a
-// single height-matched placeholder div, and gets its real content rebuilt
-// on demand from _feedPostById the moment it's scrolled back within range.
-// content-visibility keeps this correct at the render level (each card's
-// paint/layout is skipped once its wide enough anyway); this keeps it
-// correct at the DOM-size level.
-var _feedPostById = {}; // postId -> the post object _renderFeedCard(e) last used, for re-rendering
-function _virtCardInnerHtml(post){
-  var tmp = document.createElement('div');
-  tmp.innerHTML = _renderFeedCard(post);
-  var built = tmp.firstElementChild;
-  return built ? built.innerHTML : '';
+// No DOM windowing. Cards far off screen used to be torn down to a
+// height-matched placeholder and rebuilt from _feedPostById when scrolled
+// back within 5000px. Rebuilding while scrolling up was itself the stutter:
+// every card re-parsed, re-laid-out and re-decoded its images mid-fling
+// (56 dropped frames per long scroll back up, 3 without it), and a rebuilt
+// card came back shorter until its picture loaded, so in Safari -- no scroll
+// anchoring -- the posts being read jumped. content-visibility:auto on
+// .fc-card already skips style, layout and paint for off-screen cards, and
+// live charts stop polling on their own once out of view (_liveChartObserver).
+var _feedPostById = {}; // postId -> the post object _renderFeedCard(e) last used (deep links)
+// image_url -> 'w / h' of that picture once it has loaded, so a card that
+// is rendered again (feed refresh, deep link) is its full height straight
+// away instead of growing when the picture arrives.
+var _feedImgRatio = {};
+function _fcImgLoaded(img){
+  var w = img.naturalWidth, h = img.naturalHeight;
+  if(w > 0 && h > 0) _feedImgRatio[img.getAttribute('src')] = w + ' / ' + h;
 }
-function _devirtualizeCard(card){
-  if(card.dataset.virtualized === '1') return;
-  // Never blow away a card mid-interaction (an open reply box, a focused
-  // input) -- same reasoning _checkBottomHold uses for the same guard.
-  if(card.contains(document.activeElement)) return;
-  var h = card.offsetHeight;
-  if(!h) return; // never measured (e.g. still content-visibility-skipped) -- leave it alone
-  if(_feedVideoObserver) card.querySelectorAll('video[data-feed-video]').forEach(function(v){ _feedVideoObserver.unobserve(v); });
-  // Stop this card's own live-chart poller before tearing its DOM out --
-  // don't rely on _initLiveCharts()'s document.contains() sweep, which only
-  // runs on the next full/append render and would otherwise keep fetching
-  // and touching a detached node every 10s until then.
-  card.querySelectorAll('[data-chart-sym]').forEach(function(el){ stopLiveChart(el); });
-  card.dataset.virtualized = '1';
-  card.style.height = h + 'px';
-  card.style.overflow = 'hidden';
-  card.innerHTML = '';
-}
-function _revirtualizeCard(card){
-  if(card.dataset.virtualized !== '1') return;
-  var postId = card.id.slice('fc-card-'.length);
-  var post = _feedPostById[postId];
-  if(!post) return; // shouldn't happen, but leave the placeholder rather than show a blank card
-  card.innerHTML = _virtCardInnerHtml(post);
-  card.style.height = '';
-  card.style.overflow = '';
-  delete card.dataset.virtualized;
-  _observeFeedVideos(card);
-  // Restore chart polling / trade-banner images for the content just rebuilt
-  // -- scoped to this one card, not the whole-document versions those
-  // helpers normally do at full-feed-render time.
-  card.querySelectorAll('[data-chart-sym]').forEach(function(el){ _liveChartObserver.observe(el); });
-  card.querySelectorAll('[data-mint]').forEach(function(el){
-    if(!el.dataset.mint) return;
-    var bannerEl = el.querySelector('[data-cc="banner"]');
-    if(bannerEl && !bannerEl.style.backgroundImage) _hydrateTradeBanner(el);
-  });
-}
-// Much wider margin than the reactions/chart observers above -- this should
-// only kick in for content many screens away, not the next screen down.
-var _virtObserver = OrcPageLifecycle.intersectionObserver(function(entries){
-  entries.forEach(function(entry){
-    if(entry.isIntersecting) _revirtualizeCard(entry.target);
-    else _devirtualizeCard(entry.target);
-  });
-}, {rootMargin: '5000px 0px'});
 
 // Infinite pagination only: scrolling must never replace the feed with page 1.
 var _bottomHoldLastCheck = 0;
 var _BOTTOM_HOLD_THROTTLE_MS = 100;
+// Fetch the next page about three screens ahead. Cards appended that far
+// below the viewport are skipped by content-visibility:auto, so adding them
+// costs no layout or paint mid-scroll; at 600px they landed on screen.
+var _FEED_PREFETCH_PX = 2500;
 function _checkBottomHold() {
   var now = Date.now();
   if (now - _bottomHoldLastCheck < _BOTTOM_HOLD_THROTTLE_MS) return;
@@ -9296,7 +9278,7 @@ function _checkBottomHold() {
   var scroller = /^(auto|scroll)$/.test(getComputedStyle(mainEl).overflowY)
     ? mainEl : (document.scrollingElement || document.documentElement);
   var distanceToBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
-  if (distanceToBottom < 600 && _homeFeedNextCursor && !_homeFeedLoadingMore) {
+  if (distanceToBottom < _FEED_PREFETCH_PX && _homeFeedNextCursor && !_homeFeedLoadingMore) {
     loadMoreHomeFeed();
   }
 }
@@ -9539,7 +9521,7 @@ function _renderFeedCard(e, cardIndex){
     : 'm'+uid+'_'+(e.timestamp||'').replace(/\D/g,'').slice(0,12))));
   var safePostId = postId.replace(/['"\\]/g,'');
   var cardId = 'fc-card-'+postId;
-  _feedPostById[postId] = e; // lets a de-virtualized card (see below) re-render itself later
+  _feedPostById[postId] = e; // a deep link to an already-loaded post reuses it
   var isOwn = !!(e.user_id && _myProfileId && e.user_id === _myProfileId);
   var isAdminWallet = !!(phantomKey && phantomKey === 'HC5ahspSox3XRmDbzXjXVoAASuY89RCmGUKwp87FRJS5');
   var canDelete = !!(e.id && (isOwn || e.is_own || _isAdmin || isAdminWallet));
@@ -9631,7 +9613,7 @@ function _renderFeedCard(e, cardIndex){
           +'<div data-cc="banner" style="position:absolute;inset:0;background-size:cover;background-position:center'+(_c.banner?';background-image:url('+esc(_c.banner)+')':'')+'"></div>'
           +'<div style="position:absolute;inset:0;background:linear-gradient(to bottom,rgba(0,0,0,0.45),rgba(16,18,22,0.97))"></div>'
           +'<div style="position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;padding:18px 16px 12px">'
-          +'<div data-cc="logo" style="width:64px;height:64px;border-radius:50%;background:#21252c;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:22px;color:#f7b955;margin-bottom:10px;overflow:hidden;flex-shrink:0">'+(_c.image?'<img src="'+esc(_c.image)+'" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.remove()">':esc((_c.symbol||'??').slice(0,2).toUpperCase()))+'</div>'
+          +'<div data-cc="logo" style="width:64px;height:64px;border-radius:50%;background:#21252c;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:22px;color:#f7b955;margin-bottom:10px;overflow:hidden;flex-shrink:0">'+(_c.image?'<img src="'+esc(_c.image)+'" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.remove()">':esc((_c.symbol||'??').slice(0,2).toUpperCase()))+'</div>'
           +'<div style="font-size:20px;font-weight:700;color:#eef1f5;letter-spacing:-.01em;margin-bottom:5px">$'+esc(_c.symbol||'')+'</div>'
           +'<span data-cc="chain" style="background:rgba(247,185,85,0.15);color:#f7b955;border-radius:5px;padding:2px 10px;font-size:10px;font-weight:700;letter-spacing:.06em">'+_chartChainLbl+'</span>'
           +'</div>'
@@ -9727,7 +9709,7 @@ function _renderFeedCard(e, cardIndex){
     +'</div>'
     +callHtml
     +(e.image_url
-      ? '<div class="fc-post-image-wrap" onclick="event.stopPropagation();_openImgLightbox('+esc(JSON.stringify(e.image_url))+')"><img class="fc-post-image" src="'+esc(e.image_url)+'" alt="" loading="lazy"></div>'
+      ? '<div class="fc-post-image-wrap" onclick="event.stopPropagation();_openImgLightbox('+esc(JSON.stringify(e.image_url))+')"><img class="fc-post-image" src="'+esc(e.image_url)+'" alt="" loading="lazy" decoding="async" onload="_fcImgLoaded(this)"'+(_feedImgRatio[e.image_url]?' style="aspect-ratio:'+_feedImgRatio[e.image_url]+'"':'')+'></div>'
       : '')
     +(_FEED_VIDEO_URL_RE.test(e.video_url||'')
       ? '<div class="fc-post-video-wrap" onclick="event.stopPropagation()"><video class="fc-post-video" data-feed-video="1" src="'+esc(e.video_url)+'"'
@@ -10115,7 +10097,7 @@ async function _jumpToPost(postId, notifType, replyId){
   }
 
   var card=document.getElementById('fc-card-'+postId);
-  if(!card || card.dataset.virtualized==='1'){
+  if(!card){
     try{
       var r=await fetch('/api/feed/post/'+encodeURIComponent(postId), {credentials:'include'});
       if(!r.ok) throw new Error('HTTP '+r.status);
@@ -10132,7 +10114,6 @@ async function _jumpToPost(postId, notifType, replyId){
     _activeDeepLinkedPost={id:postId,post:_feedPostById[postId]};
   }
   if(!card) return false;
-  if(card.dataset.virtualized==='1') _revirtualizeCard(card);
   // One frame allows the inserted card and mobile scroller to lay out before
   // scrolling; auto instead of smooth gets the user to their post immediately.
   await new Promise(function(resolve){requestAnimationFrame(resolve)});

@@ -163,7 +163,18 @@
     var feed = document.getElementById('center-feed');
     if(!feed) return;
     watchSparks(feed);
-    OrcPageLifecycle.mutationObserver(function(){ watchSparks(feed); }).observe(feed, {childList: true, subtree: true});
+    // Only look inside what was just added. Re-scanning the whole feed on
+    // every mutation ran a feed-wide query for each card built or torn down
+    // while scrolling.
+    OrcPageLifecycle.mutationObserver(function(muts){
+      muts.forEach(function(m){
+        m.addedNodes.forEach(function(n){
+          if(n.nodeType !== 1) return;
+          if(n.matches('svg.fcall-spark')){ if(!n.hasAttribute('data-watched')){ n.setAttribute('data-watched','1'); if(sparkObserver) sparkObserver.observe(n); else loadSpark(n); } return; }
+          if(n.firstElementChild) watchSparks(n);
+        });
+      });
+    }).observe(feed, {childList: true, subtree: true});
   }
 
   /* ── Calls tab: best calls today + a way in ── */
