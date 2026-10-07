@@ -5,7 +5,14 @@
 <script src="/static/platform-assistant-admin.js?v={{ app_version }}" defer></script></head>
 <body>{{ navbar_html('home') }}<main class="oa-watch">
 <p class="eyebrow">ORCAGENT · ADMIN</p><h1>Platform assistant</h1>
-<p class="muted">English platform guidance and short feed theses. No external AI service or API costs.</p>
+<p class="muted">@orcagent answers in English. With an Anthropic API key it talks freely (like an AI on X); without one it uses OrcAgent's own built-in brain. It never shares anyone's private account details.</p>
+<section class="panel" id="ai-key-panel"><h2>AI conversation</h2>
+<p id="ai-key-state">{% if state.ai.configured %}Connected · key {{ state.ai.hint }} · from {{ 'the server environment' if state.ai.source == 'environment' else 'this console' }}{% if state.ai.rejected_by_api %} · <strong>the API rejected this key</strong>{% endif %}{% else %}Not connected · @orcagent uses its built-in brain{% endif %}</p>
+<p class="muted">Paste an Anthropic API key (sk-ant-…). It is checked first, stored encrypted and never shown again; only its last four characters appear here. It takes effect immediately, also for AI token analysis. A key set in the server environment always takes precedence.</p>
+<form id="ai-key-form" autocomplete="off">
+<label>Anthropic API key <input type="password" name="key" autocomplete="new-password" spellcheck="false" placeholder="sk-ant-…" style="max-width:100%"></label>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="button" type="submit">Save key</button>{% if state.ai.configured and state.ai.source != 'environment' %}<button class="button" type="button" id="ai-key-remove">Remove key</button>{% endif %}</div>
+<p id="ai-key-status" role="status" aria-live="polite"></p></form></section>
 <section class="panel"><h2>Official author</h2><p>{% if state.author %}@{{ state.author }} · Verified{% else %}Paused: a single verified @Orcagent account is required. No account is created automatically.{% endif %}</p>
 <p class="muted">The author is pinned by user ID. Changing or removing that verified identity stops publication.</p></section>
 <section class="panel" style="margin-top:16px"><h2>Publication settings</h2>

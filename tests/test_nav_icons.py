@@ -54,8 +54,8 @@ check('every destination in the menu carries an icon and a label',
       anchors and all('<svg' in a and '<span>' in a for a in anchors))
 check('...the primary links too, not only the secondary ones',
       primary.count('<svg') == len(ns['_NAVBAR_PRIMARY']))
-check('Calls is not a primary navigation option anymore',
-      not any(label == 'Calls' or href == '/calls' for _, label, href in ns['_NAVBAR_PRIMARY']))
+check('Calls is a primary navigation option again (users could no longer find the Calls page)',
+      ('calls', 'Calls', '/calls') in ns['_NAVBAR_PRIMARY'])
 check('...and Disconnect, which is the one row where hitting the wrong thing '
       'actually costs something', 'Disconnect Wallet' in more
       and more[more.index('Disconnect Wallet') - 400:].count('<svg') >= 1)

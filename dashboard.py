@@ -18727,6 +18727,7 @@ def _nav_icon(key: str) -> str:
 _NAVBAR_PRIMARY = [
     ('live-market', 'Live Market', '/live-market'),
     ('feed',        'Feed',        '/'),
+    ('calls',       'Calls',       '/calls'),
     ('leaderboard', 'Leaderboard', '/leaderboard'),
     ('wallet',      'Wallet',      '/wallet'),
 ]
