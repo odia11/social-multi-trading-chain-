@@ -99,7 +99,7 @@ check('the desktop pills stay sized to their content instead of stretching',
 check('...and drop their icons when the row is tight, rather than squeezing '
       'the tap targets that matter more',
       '.pt-nb-nav a .pt-nb-ic{display:none}' in CSS
-      and '@media (min-width:1100px)' in CSS)
+      and '@media (min-width:1400px)' in CSS)
 check('inside the mobile menu the icons always show, since there the entries '
       'are rows and there is room', "display:block;width:18px" in CSS)
 check('the stylesheet still has balanced braces — one stray brace silently '

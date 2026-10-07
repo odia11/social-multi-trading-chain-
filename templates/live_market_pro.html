@@ -97,6 +97,9 @@ input{font-family:inherit}
 .pt-bot-card{background:var(--accent-soft);border:1px solid var(--accent-border);border-radius:16px;padding:14px;margin-top:auto}
 .pt-bot-title{font-size:13px;font-weight:700;color:var(--accent);margin-bottom:5px;display:flex;align-items:center;gap:7px}
 .pt-bot-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:ptPulse 1.6s ease-in-out infinite}
+.pt-bot-card.off{background:var(--card2);border-color:var(--line2)}
+.pt-bot-card.off .pt-bot-title{color:var(--text)}
+.pt-bot-card.off .pt-bot-dot{background:var(--muted2);animation:none}
 .pt-bot-sub{font-size:11.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
 .pt-bot-btn{width:100%;background:var(--card2);border:1px solid var(--accent-border);color:var(--accent);font-size:12px;font-weight:700;border-radius:10px;padding:9px;transition:background .15s}
 .pt-bot-btn:hover{background:var(--line)}
@@ -110,9 +113,7 @@ input{font-family:inherit}
 .pt-scanning-pill{display:flex;align-items:center;gap:6px;background:rgba(58,210,155,.12);border-radius:999px;padding:6px 12px;font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--green)}
 .pt-scan-dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:ptPulse 1.4s ease-in-out infinite}
 
-/* ── story rail ── */
-.pt-story-rail{display:flex;gap:16px;padding:16px 22px;overflow-x:auto;overflow-y:hidden;border-bottom:1px solid var(--line);scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;cursor:grab}
-.pt-story-rail::-webkit-scrollbar{display:none}
+/* ── round avatars (top traders rail) ── */
 .pt-story{flex-shrink:0;width:66px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer}
 .pt-story-ring{width:62px;height:62px;border-radius:50%;padding:2.5px;background:linear-gradient(135deg,var(--accent),var(--green))}
 .pt-story-ring.down{background:linear-gradient(135deg,var(--red),var(--accent))}
@@ -122,8 +123,7 @@ input{font-family:inherit}
 .pt-story-chg{font-family:var(--mono);font-size:9.5px;font-weight:700}
 
 /* ── top traders spotlight ──
-   Same visual language as the story rail above (ring + circle + name +
-   stat) but for people, sitting inside the always-visible center feed --
+   Ring + circle + name + stat, for people, sitting inside the always-visible center feed --
    unlike the fuller "Top traders" card in the desktop-only right rail,
    this is reachable on mobile without scrolling past the whole token list
    first, which is what made that existing widget effectively invisible
@@ -179,7 +179,7 @@ input{font-family:inherit}
    story circles and trader circles all stopped opening.
    Suppressing the click that a REAL drag ends with is done in JS instead,
    where it can tell a drag from a tap. */
-.pt-story-rail.pt-rail-dragging,.pt-surge-rail.pt-rail-dragging,.pt-trader-rail.pt-rail-dragging{cursor:grabbing;user-select:none}
+.pt-surge-rail.pt-rail-dragging,.pt-trader-rail.pt-rail-dragging{cursor:grabbing;user-select:none}
 .pt-surge-card{flex:0 0 auto;width:196px;background:var(--card);border:1px solid rgba(255,107,94,.32);border-radius:12px;padding:10px 12px;cursor:pointer;transition:border-color .12s,transform .12s}
 .pt-surge-card:hover{border-color:rgba(255,107,94,.6);transform:translateY(-1px)}
 .pt-surge-card.cooling{border-color:var(--line);opacity:.62}
@@ -620,7 +620,8 @@ input{font-family:inherit}
 
 .pt-card-ft{display:flex;flex-direction:column;gap:7px;padding:10px 15px;border-top:1px solid var(--line);grid-column:1/3}
 .pt-friends{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)}
-.pt-friends-empty{color:var(--muted2)}
+.pt-friends:empty,.pt-card-ft-right:empty{display:none}
+.pt-card-ft:not(:has(.pt-friends:not(:empty),.pt-card-ft-right:not(:empty))){display:none}
 .pt-friend-avs{display:flex}
 .pt-friend-avs img,.pt-friend-avs .ph{width:20px;height:20px;border-radius:50%;object-fit:cover;border:2px solid var(--card);margin-left:-7px;background:var(--line2);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:var(--muted)}
 .pt-friend-avs img:first-child,.pt-friend-avs .ph:first-child{margin-left:0}
@@ -763,7 +764,7 @@ input{font-family:inherit}
 body.pt-profile-mode .pt-shell{max-width:1120px!important;min-width:0!important}
 body.pt-profile-mode .pt-panel{grid-template-columns:minmax(0,1fr)!important;overflow:visible!important}
 body.pt-profile-mode .pt-left,body.pt-profile-mode .pt-right,
-body.pt-profile-mode .pt-surge-wrap,body.pt-profile-mode .pt-story-rail,body.pt-profile-mode .pt-launch-wrap,
+body.pt-profile-mode .pt-surge-wrap,body.pt-profile-mode .pt-launch-wrap,
 body.pt-profile-mode .pt-trader-rail-wrap,body.pt-profile-mode .pt-scanning-pill{display:none!important}
 body.pt-profile-mode .pt-center{max-height:none!important;overflow:visible!important}
 body.pt-profile-mode .pt-feed-list{padding:12px!important}
@@ -947,9 +948,9 @@ body.pt-profile-mode .pt-card.pt-profile-open .pt-chart-waiting{left:50%!importa
         </div>
       </details>
 
-      <div class="pt-bot-card">
-        <div class="pt-bot-title"><span class="pt-bot-dot"></span>Bot is scanning</div>
-        <div class="pt-bot-sub"><span id="pt-bot-count">0</span> tokens tracked · auto-buys on ≥5% breakout with these filters</div>
+      <div class="pt-bot-card off" id="pt-bot-card">
+        <div class="pt-bot-title"><span class="pt-bot-dot"></span><span id="pt-bot-state">Auto-trading bot</span></div>
+        <div class="pt-bot-sub" id="pt-bot-sub">Trades for you with your own bot settings. The filters above only sort this feed.</div>
         <a class="pt-bot-btn" href="/bot">Bot settings</a>
       </div>
     </aside>
@@ -959,7 +960,7 @@ body.pt-profile-mode .pt-card.pt-profile-open .pt-chart-waiting{left:50%!importa
       <div class="pt-feed-hd">
         <div>
           <div class="pt-feed-title">Live Market</div>
-          <div class="pt-feed-sub"><span id="pt-tok-count">0</span> tokens tracked · refreshes every 15s</div>
+          <div class="pt-feed-sub">Live prices · update every second</div>
         </div>
         <button class="pt-mobile-filters-btn" id="pt-mobile-filters-btn">⚙ Filters</button>
         <div class="pt-scanning-pill"><span class="pt-scan-dot"></span>SCANNING</div>
@@ -983,8 +984,6 @@ body.pt-profile-mode .pt-card.pt-profile-open .pt-chart-waiting{left:50%!importa
         </div>
         <div class="pt-launch-rail" id="pt-launch-rail"></div>
       </div>
-
-      <div class="pt-story-rail" id="pt-story-rail"></div>
 
       <div class="pt-trader-rail-wrap" id="pt-trader-rail-wrap" style="display:none">
         <div class="pt-trader-rail-hd">

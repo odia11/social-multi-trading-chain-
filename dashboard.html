@@ -101,6 +101,9 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
 #right-rail::-webkit-scrollbar-track{background:transparent}
 #right-rail::-webkit-scrollbar-thumb{background:#21252c;border-radius:4px}
 .rr-search{width:100%;background:#101216;border:1px solid #21252c;border-radius:13px;padding:11px 15px;color:#eef1f5;font-family:'Geist',system-ui,sans-serif;font-size:14px;outline:none;margin-bottom:16px}
+/* The navbar search (token, address, trader) is always on screen next to
+   this rail on desktop -- a second search box here was a duplicate. */
+#right-rail .rr-search{display:none}
 .rr-search::placeholder{color:#565d68}
 .rr-card{background:#101216;border:1px solid #16191f;border-radius:18px;overflow:hidden;margin-bottom:16px}
 .rr-card-top{display:flex;align-items:center;justify-content:space-between;padding:15px 17px 11px}

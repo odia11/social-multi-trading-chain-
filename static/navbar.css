@@ -31,12 +31,28 @@
 .pt-nb-nav a{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;color:#8a919c;padding:8px 13px;border-radius:9px;transition:color .15s,background .15s;white-space:nowrap}
 /* The desktop row is tight on width, so the icons come back only once there
    is room for them -- below this the labels alone say enough, and squeezing
-   both in would shrink the tap targets that matter more. */
+   both in would shrink the tap targets that matter more. With six pills
+   (Calls, Admin Console) icons from 1100px squeezed the search box to a
+   sliver at 1280px, hence 1400px. */
 .pt-nb-nav a .pt-nb-ic{display:none}
-@media (min-width:1100px){ .pt-nb-nav a .pt-nb-ic{display:block} }
+@media (min-width:1400px){ .pt-nb-nav a .pt-nb-ic{display:block} }
 .pt-nb-nav a:hover{color:#eef1f5;background:#16191f}
 .pt-nb-nav a.active{color:#f7b955;background:rgba(247,185,85,.12)}
 .pt-nb-search-wrap{flex:1;position:relative;max-width:380px;margin-left:4px;min-width:0}
+/* Narrow desktops (an admin has six pills): compact pills, no wordmark
+   below 1100px, and the search box may shrink to its icon -- it opens out
+   over the pills while typing. From 1280px it keeps a readable width. */
+@media (min-width:1280px){ .pt-nb-search-wrap{min-width:170px} }
+@media (min-width:901px) and (max-width:1279px){
+  .pt-nb-topbar{gap:12px}
+  .pt-nb-nav a{padding:8px 9px;font-size:13px}
+  .pt-nb-search-wrap{min-width:38px;container-type:inline-size}
+  .pt-nb-search-wrap:focus-within .pt-nb-search{position:absolute;right:0;top:50%;transform:translateY(-50%);width:300px;z-index:5}
+  .pt-nb-search-wrap:focus-within .pt-nb-search-icon{z-index:6;left:auto;right:274px}
+  .pt-nb-search-results{left:auto;width:300px}
+}
+@container (max-width:110px){ .pt-nb-search:not(:focus)::placeholder{color:transparent} }
+@media (min-width:901px) and (max-width:1099px){ .pt-nb-wordmark{display:none} }
 .pt-nb-search{width:100%;background:#101216;border:1px solid #21252c;border-radius:11px;padding:9px 14px 9px 34px;color:#eef1f5;font-size:12.5px;outline:none;transition:border-color .15s}
 .pt-nb-search:focus{border-color:#f7b955}
 .pt-nb-search::placeholder{color:#565d68}

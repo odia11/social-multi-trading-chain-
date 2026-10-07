@@ -914,20 +914,15 @@ function fetchSafety(idx, mint){
 
 function fetchFriends(idx, mint){
   var friendsEl = document.getElementById('pt-friends-'+idx);
-  // Always shows something -- including "0 friends hold this" -- instead of
-  // going blank when nobody you follow holds it, so the Friends section
-  // reads as a real, always-there stat rather than something that only
-  // appears sometimes.
+  // Shown only when someone you follow holds it: a zero chip on every card
+  // was noise (and the footer hides itself when it has nothing to show).
   _routeScope.fetch('/api/token/'+encodeURIComponent(mint)+'/co-traders', {credentials:'include'})
     .then(function(r){ return r.json(); })
     .then(function(d){
       var users = (d && d.ok && d.users) || [];
       (_pfCommunity[mint] = _pfCommunity[mint] || {}).users = users; _pfRefresh(mint);
       if(!friendsEl) return;
-      if(!users.length){
-        friendsEl.innerHTML = '<span class="pt-friends-empty">👥 0 friends</span>';
-        return;
-      }
+      if(!users.length){ friendsEl.innerHTML = ''; return; }
       var avs = users.slice(0,3).map(function(u){
         return u.avatar_url
           ? '<img src="'+esc(u.avatar_url)+'">'
@@ -935,7 +930,7 @@ function fetchFriends(idx, mint){
       }).join('');
       friendsEl.innerHTML = '<div class="pt-friend-avs">'+avs+'</div><span>'+users.length+' friend'+(users.length===1?'':'s')+'</span>';
     }).catch(function(){
-      if(friendsEl) friendsEl.innerHTML = '<span class="pt-friends-empty">👥 0 friends</span>';
+      if(friendsEl) friendsEl.innerHTML = '';
     });
 
   _routeScope.fetch('/api/token/'+encodeURIComponent(mint)+'/holders', {credentials:'include'})
@@ -947,15 +942,15 @@ function fetchFriends(idx, mint){
       var t = ST.tokens[Number(idx)];
       var txns = t ? ((Number(t.buys_24h)||0)+(Number(t.sells_24h)||0)) : 0;
       var txnsStr = txns >= 1000 ? (txns/1000).toFixed(1)+'K' : String(txns);
-      var ratio = t ? ratioStr(t.buys_24h, t.sells_24h) : '—';
       // 'holders' here is a count of OrcAgent users with a position in this
       // token, NOT the real on-chain holder count (DexScreener's API, which
       // powers every other stat on this card, doesn't expose that) -- kept
       // as its own small chip, clearly scoped to "on OrcAgent" rather than
-      // implying it's the token's total holder count.
-      ftEl.innerHTML = '<span class="pt-ft-chip">👤 '+(d.platform_holders||0)+' on OrcAgent</span>'
-        + '<span class="pt-ft-chip">'+txnsStr+' txns</span>'
-        + '<span class="pt-ft-chip">'+ratio+'</span>';
+      // implying it's the token's total holder count. Shown only when
+      // someone holds it; the buy/sell split is already in the stats above.
+      var holders = Number(d.platform_holders)||0;
+      ftEl.innerHTML = (holders ? '<span class="pt-ft-chip">👤 '+holders+' on OrcAgent</span>' : '')
+        + (txns ? '<span class="pt-ft-chip">'+txnsStr+' txns</span>' : '');
     }).catch(function(){});
 }
 
@@ -1085,17 +1080,6 @@ function socialsHtml(t){
   }).join('') + '</div>';
 }
 
-function storyHtml(t, idx){
-  var down = (t.price_change_24h||0) < 0;
-  return '<div class="pt-story" data-action="story" data-idx="'+idx+'">'
-    + '<div class="pt-story-ring'+(down?' down':'')+'"><div class="pt-story-inner">'
-    +   logoTile(t.image_url, t.symbol, 'pt-story-img', 'pt-story-img-ph')
-    + '</div></div>'
-    + '<div class="pt-story-name">$'+esc(t.symbol||'?')+'</div>'
-    + '<div class="pt-story-chg mono '+(down?'down':'up')+'">'+(t.price_change_24h==null?'—':fmtPct(t.price_change_24h))+'</div>'
-    + '</div>';
-}
-
 function cardHtml(t, idx){
   var down = (t.price_change_24h||0) < 0;
   var isWatched = watchSet.has(t.mint);
@@ -1142,7 +1126,7 @@ function cardHtml(t, idx){
     + '</div>'
     + '<div class="pt-card-ft">'
     +   '<div class="pt-friends" id="pt-friends-'+idx+'"></div>'
-    +   '<div class="pt-card-ft-right mono" id="pt-ft-stats-'+idx+'">'+(t.buys_24h+t.sells_24h)+' txns · '+ratioStr(t.buys_24h,t.sells_24h)+'</div>'
+    +   '<div class="pt-card-ft-right mono" id="pt-ft-stats-'+idx+'"></div>'
     + '</div>'
     + '<section class="pt-profile-about" aria-label="Token profile details"></section>'
     + '</div>';
@@ -1219,7 +1203,6 @@ function hydrateInitialFeed(){
   ST.tokens=payload.tokens.slice(0,30);
   ST.counts=payload.counts||{};
   renderSortList();
-  renderStoryRail();
   renderFeedList();
   updateHeaderCounts();
   return true;
@@ -1234,18 +1217,10 @@ function patchWatchButtons(){
 function updateHeaderCounts(){
   var n = ST.tokens.length;
   var el;
-  if((el=document.getElementById('pt-tok-count'))) el.textContent = n;
-  if((el=document.getElementById('pt-bot-count'))) el.textContent = n;
   if((el=document.getElementById('pt-pulse-tokens'))) el.textContent = n;
 }
 
-function renderStoryRail(){
-  var el = document.getElementById('pt-story-rail');
-  var list = ST.tokens.slice(0, 14);
-  el.innerHTML = list.map(function(t,i){ return storyHtml(t,i); }).join('');
-}
-
-// Horizontal rails (surge strip, story rail, trader rail) only ever got
+// Horizontal rails (surge strip, trader rail) only ever got
 // native overflow-x:auto. That works fine for a touch swipe on its own --
 // what made it feel broken was two separate things layered on top:
 //
@@ -1776,7 +1751,6 @@ function loadFeed(isPoll){
       } else {
         ST.tokens = d.tokens || [];
         renderSortList();
-        renderStoryRail();
         renderFeedList();
       }
       updateHeaderCounts();
@@ -2878,9 +2852,36 @@ function loadTraders(){
   }).catch(function(){});
 }
 
-/* Compact horizontal spotlight, same visual language as the token story
-   rail directly above it (ring + circle avatar + name + a stat underneath)
-   but for people instead of tokens -- sits inside the always-visible center
+/* The bot card says what YOUR bot is doing. It read "Bot is scanning ·
+   auto-buys on ≥5% breakout with these filters" for everyone: true for no
+   one with the bot off, and the bot buys on its own settings (breakout
+   trigger, market-cap floor...), not on this feed's filters. */
+function loadBotCard(){
+  var card = document.getElementById('pt-bot-card');
+  if(!card) return;
+  _routeScope.fetch('/api/bot/status', {credentials:'include'})
+    .then(function(r){ return r.status === 401 ? {ok:false, guest:true} : r.json(); })
+    .then(function(d){
+      var state = document.getElementById('pt-bot-state'), sub = document.getElementById('pt-bot-sub');
+      if(!d || !d.ok){
+        if(d && d.guest){
+          state.textContent = 'Auto-trading bot';
+          sub.textContent = 'Connect a wallet and the bot trades for you with your own settings.';
+        }
+        card.classList.add('off');
+        return;
+      }
+      var running = !!d.running, open = Number(d.open_positions)||0;
+      card.classList.toggle('off', !running);
+      state.textContent = running ? 'Your bot is on' : 'Your bot is off';
+      sub.textContent = running
+        ? (open ? open+' open position'+(open===1?'':'s')+' · ' : '')+'Buys with your bot settings, not these filters.'
+        : 'Turn it on to trade automatically with your own settings.';
+    }).catch(function(){});
+}
+
+/* Compact horizontal spotlight (ring + circle avatar + name + a stat
+   underneath) for people -- sits inside the always-visible center
    feed so it doesn't need the desktop-only right rail to be seen, and
    answers exactly what was asked: which traders are actually up real money
    (shown in USD, see fmtTraderPnl()) today, one tap to their profile. */
@@ -2974,7 +2975,6 @@ function prependSearchedToken(mint, sym, pairAddr){
         price_change_24h:0, pair_created_at:null, verified_socials:false, score:3};
     }
     ST.tokens = [tok].concat(ST.tokens.filter(function(t){ return t.mint !== tok.mint; }));
-    renderStoryRail();
     renderFeedList();
     updateHeaderCounts();
     _routeScope.setTimeout(function(){ if(_profileMint===tok.mint) syncTokenProfile(); else scrollToCard(0); }, 60);
@@ -2985,7 +2985,6 @@ function prependSearchedToken(mint, sym, pairAddr){
 _routeScope.addEventListener(document,'click', function(e){
   var el;
   if((el = e.target.closest('[data-action="token-profile"]'))){ setTokenProfile(el.dataset.mint); return; }
-  if((el = e.target.closest('[data-action="story"]'))){ scrollToCard(el.dataset.idx); return; }
   if((el = e.target.closest('[data-action="watch"]'))){ toggleWatch(el.dataset.mint, el.dataset.sym, el); return; }
   if((el = e.target.closest('[data-action="buy-open"]'))){ openBuyPanel(el.dataset.idx); return; }
   if((el = e.target.closest('[data-action="confirm-buy"]'))){ confirmBuy(el.dataset.idx); return; }
@@ -3093,7 +3092,6 @@ _routeScope.addEventListener(document,'DOMContentLoaded', function(){
     }, 200);
   });
 
-  enableDragScroll(document.getElementById('pt-story-rail'));
   enableDragScroll(document.getElementById('pt-surge-rail'));
   enableDragScroll(document.getElementById('pt-launch-rail'));
   enableDragScroll(document.getElementById('pt-trader-rail'));
@@ -3177,6 +3175,8 @@ _routeScope.addEventListener(document,'DOMContentLoaded', function(){
   _routeScope.setInterval(function(){ if(!document.hidden) loadLaunches(); }, 60000);
   _routeScope.setInterval(function(){ if(!document.hidden) loadTape(); }, 8000);
   _routeScope.setInterval(function(){ if(!document.hidden) loadTraders(); }, 30000);
+  loadBotCard();
+  _routeScope.setInterval(function(){ if(!document.hidden) loadBotCard(); }, 30000);
   _routeScope.setInterval(function(){ if(!document.hidden) loadPulse(); }, 20000);
   // The one that makes the charts move. Started once for the whole page, not
   // per card -- it batches every visible chart into a single request.

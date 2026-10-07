@@ -54,9 +54,11 @@ console.log(String(open)+' open')'''], capture_output=True, text=True).stdout.st
 check('...(evaluated: ' + out + ')', out == '0 open')
 check('no fake "For You / Following" label above the real feed tabs', 'addFeedLabel' not in hd)
 hcss = read('static', 'home-desktop.css')
-check('the old feed bot card is hidden next to the new one, and the brand stacks',
-      'body.oa-home-desktop .feed-bot-card{display:none!important}' in hcss
-      and '.oa-desk-brand-copy{min-width:0;display:flex;flex-direction:column' in hcss)
+check('the old feed bot card is hidden next to the new one',
+      'body.oa-home-desktop .feed-bot-card{display:none!important}' in hcss)
+check('no second logo, bell or search on desktop Home: the navbar above already has them',
+      'oa-desk-brand' not in hd and 'oa-home-head-btn' not in hd
+      and '#right-rail .rr-search{display:none}' in read('dashboard.html'))
 
 ntf = read('templates', 'notifications.html')
 check('Notifications: header and list share one centred column',
