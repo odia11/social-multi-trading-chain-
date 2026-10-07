@@ -179,15 +179,11 @@ V = open(REPO + '/tools/verify_live.py').read()
 check('the live check reads the rule before judging the balances, so the same '
       'reading is used for the headline and the checks below it',
       '_fronting = bool(getattr(d, ' in V)
-check('...saying, when fronting is on, that these wallets are float rather than '
-      'an expense — the reason the owner is being asked to fund them',
-      'OrcAgent fronts gas' in V and 'it comes back' in V)
-check('...and still saying, when it is off, that empty wallets are the expected '
-      'state rather than a fault',
-      'fronts nothing' in V and 'meant to be' in V and 'a problem to fix' in V)
-check('an empty sponsor wallet is now a FINDING, because with fronting on it is '
-      'the thing that silently breaks the first trade of every USDC-only user',
-      'top these up' in V and 'raise RuntimeError(line' in V)
+# Production forces the rule off (app_entry.py: OrcAgent does not subsidise
+# user gas), so the live check reports that as the healthy state and only
+# warns if a deployment somehow runs with fronting on.
+check('...saying that OrcAgent fronts no gas is the expected, healthy state',
+      'OrcAgent fronts no user gas' in V and 'forces ORCAGENT_FRONTS_GAS=0' in V)
 # Measured in GRANTS, not in hand-picked token amounts. Those answered a
 # different question from the app's own: the journal said "needs 0.0200" while
 # this check said "below 0.05", so the operator had two numbers for "how much
@@ -195,24 +191,17 @@ check('an empty sponsor wallet is now a FINDING, because with fronting on it is 
 check('...measured in what a grant actually costs, so the check and the app '
       'cannot disagree about when the sponsor is short',
       'WARN_BELOW_GRANTS' in V and '_grants_left(' in V)
-check('...on EVM using the same arithmetic _gas_sponsor_needs_funding uses, so '
-      'it follows the gas price instead of a constant someone picked once',
-      'w3.eth.gas_price * d.GAS_TOPUP_TX_GAS_UNITS' in V
-      and 'd.GAS_SPONSOR_TX_MULTIPLIER' in V)
 check('...and on Solana the grant plus the reserve, which is exactly the sum '
       '_sponsor_solana_gas requires before it hands anything out',
       'd.SOL_GAS_SPONSOR_GRANT + d.SOL_GAS_SPONSOR_MIN_RESERVE' in V)
 check('the balance is reported as how many users it can still activate, which '
       'is the thing the number is for', "({left} users)" in V)
-check('the shortfall names the amount to reach the TARGET, not the amount to '
-      'clear the warning — topping up to just above the line means being back '
-      'here after a handful of users',
-      'one_grant * TARGET_GRANTS - bal' in V and 'target - bal' in V)
 check('...and a missing key is called out as the contradiction it is when the '
       'deployment says it fronts',
       'is not set, but this ' in V and 'deployment fronts gas' in V)
-check('the checks are still skipped, not failed, where the rule is off',
-      V.count("not used (ORCAGENT_FRONTS_GAS is off)") == 2)
+check('the sponsor check is skipped, not failed, where the rule is off (only the '
+      'Solana sponsor is left; the EVM ones went with the EVM chains)',
+      V.count("not used (ORCAGENT_FRONTS_GAS is off)") >= 1)
 
 # ── the dead end still names the way out, cheapest first ───────────────────
 # Reached only once the sponsor has declined, so it is the rare case again —
@@ -247,16 +236,6 @@ check('the env example documents the rule, so an operator can find it without '
       'reading the source', 'ORCAGENT_FRONTS_GAS' in ENV)
 check('...naming the default rather than showing a line that changes nothing '
       'when uncommented', 'ORCAGENT_FRONTS_GAS=0' in ENV)
-# This asked the env file to explain what funding the sponsor wallets is
-# for. Under the rule it now documents there is no funding to explain:
-# ORCAGENT_FRONTS_GAS is 0, users fund their own gas, and the sponsor keys
-# are deliberately left empty. So it asks for what the owner now needs to
-# know instead -- that filling those keys in is not a step they are missing.
-_env = ENV.lower()
-check('...and saying what the rule asks of the owner, which under this one is '
-      'to leave the sponsor keys alone rather than to fund them',
-      'sponsor' in _env
-      and ('intentionally unused' in _env or 'leave them empty' in _env))
 check('...with the keys present but empty, so an operator copying this file '
       'does not go hunting for a setting that is deliberately off',
       'GAS_SPONSOR_PRIVATE_KEY=\n' in ENV or 'GAS_SPONSOR_PRIVATE_KEY=' in ENV)

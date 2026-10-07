@@ -505,7 +505,7 @@ def install(d):
                             'Add SOL to this wallet, then retry. No transaction was sent.')
                     raise RuntimeError('Insufficient SOL in Phantom '
                         f'(balance: {before/1_000_000_000:.9f} SOL). '
-                        'Add SOL to your connected wallet for this saved draft '
+                        'Add SOL to your connected wallet for this saved draft. '
                         'Full transaction cost is not yet known. '
                         'No transaction was sent.')
                 raise RuntimeError('Pilot transaction simulation failed; no wallet approval is possible')

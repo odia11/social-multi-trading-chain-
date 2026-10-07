@@ -27,11 +27,14 @@ html = c.get('/', base_url='https://orcagent.fun', headers=H).get_data(as_text=T
 def meta(attr, name):
     m = re.search(r'<meta %s="%s" content="([^"]*)">' % (attr, re.escape(name)), html)
     return m.group(1) if m else None
+# X caches a card image by URL, so the image carries a cache-busting query
+# (x_share_cache_bust.py); the file itself is what is checked here.
+img = lambda v: (v or '').split('?')[0]
 
 check('home has a large-image X card', meta('name', 'twitter:card') == 'summary_large_image')
-check('...with twitter:image set to the 1200x630 preview', meta('name', 'twitter:image') == IMG)
+check('...with twitter:image set to the 1200x630 preview', img(meta('name', 'twitter:image')) == IMG)
 check('...and og:image the same, with its size and type',
-      meta('property', 'og:image') == IMG and meta('property', 'og:image:width') == '1200'
+      img(meta('property', 'og:image')) == IMG and meta('property', 'og:image:width') == '1200'
       and meta('property', 'og:image:height') == '630' and meta('property', 'og:image:type') == 'image/png')
 check('...plus title, description, alt text and the @Orcagent handle',
       meta('name', 'twitter:title') and meta('name', 'twitter:description')
@@ -51,5 +54,5 @@ check('...served as a crawlable PNG', r.status_code == 200 and r.mimetype == 'im
       and 'noindex' not in (r.headers.get('X-Robots-Tag') or ''))
 
 lm = c.get('/live-market', base_url='https://orcagent.fun', headers=H).get_data(as_text=True)
-check('other public pages get the same preview', 'name="twitter:image" content="' + IMG + '"' in lm)
+check('other public pages get the same preview', 'name="twitter:image" content="' + IMG in lm)
 raise SystemExit(0 if all(checks) else 1)

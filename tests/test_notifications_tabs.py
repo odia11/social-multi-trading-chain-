@@ -52,6 +52,7 @@ av = re.search(r'#msgs-left \.oa-active-av\{([^}]*)\}', css).group(1)
 ring = max(int(x) for x in re.findall(r'0 0 0 (\d+)px', av))
 check(f'the "Active now" ring ({ring}px outside the avatar) fits inside its scrolling row ({pad_top}px)',
       pad_top >= ring)
-check('phones fetch the new stylesheet', 'messages-inbox.css?v=2' in read('messages_premium_ui.py')
-      and 'messages-inbox.css?v=2' in read('static', 'app-ux.js'))
+check('phones fetch the new stylesheet (stamped with the deploy version)',
+      'href="/static/messages-inbox.css' in read('messages_premium_ui.py')
+      and "'messages-inbox.css'" in read('static', 'app-ux.js'))
 raise SystemExit(0 if all(checks) else 1)

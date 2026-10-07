@@ -1,4 +1,4 @@
-"""USDC-first Token Launch: isolated Flask/SQLite + actual official SDK builder.
+"""SOL-paired Token Launch (#155): isolated Flask/SQLite + actual official SDK builder.
 
 Never contacts mainnet or signs with a real wallet. Transaction payloads are
 partially signed only by an ephemeral mint key, never the creator wallet.
@@ -67,7 +67,7 @@ def test_all():
     path='/api/token-launch/'
     payload={'client_nonce':'test-client-nonce-00001','name':'Example Token','symbol':'exmp',
        'description':'Example description','image_data':icon(),'reward_mode':'community',
-       'quote_asset':'USDC','community_wallet':community,'community_bps':1000}
+       'quote_asset':'SOL','community_wallet':community,'community_bps':1000}
     os.environ.pop('ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED',None)
     assert client.get('/token-launch').status_code==302
     assert client.post(path+'draft',json=payload).status_code==401
@@ -87,7 +87,7 @@ def test_all():
     r=client.post(path+'draft',json=payload,headers=h)
     assert r.status_code==201,r.get_data(as_text=True)
     draft=r.get_json()['draft'];draft_id=draft['id']
-    assert len(draft_id)==32 and draft['quote_asset']=='USDC'
+    assert len(draft_id)==32 and draft['quote_asset']=='SOL'
     assert draft['symbol']=='EXMP' and draft['community_bps']==1000
     repeated=client.post(path+'draft',json=payload,headers=h)
     assert repeated.status_code==200 and repeated.get_json()['draft']['id']==draft_id
@@ -124,7 +124,7 @@ def test_all():
         assert built['mint'].endswith('orc')
         assert 'mint_secret' not in built
         assert built['needs_finalization'] is True
-        assert built['quote_asset']=='USDC'
+        assert built['quote_asset']=='SOL'
         tx=Transaction.from_bytes(base64.b64decode(built['transaction_b64']))
         assert len(base64.b64decode(built['transaction_b64']))<=1232
         assert tx.verify_with_results().count(False)==1
@@ -143,9 +143,9 @@ def test_all():
         assert sig.get_json()['confirmed'] is False
         assert sig.get_json()['draft']['status']=='submitted'
         assert client.post(path+draft_id+'/prepare-finalize',json={},headers=h).status_code==409
-    print('PASS official Pump SDK USDC create+initial sharing instruction under 1232 bytes')
+    print('PASS official Pump SDK SOL create+initial sharing instruction under 1232 bytes')
     print('PASS creator wallet cannot be signed server-side; unconfirmed/mismatched transaction cannot become live')
-    # Finalization is its own USDC-quote transaction, separate from create.
+    # Finalization is its own SOL-quote transaction, separate from create.
     # The first fee share allocation is 100% creator until this confirmation.
     with sqlite3.connect(d.DB_FILE) as conn:
         conn.execute("UPDATE token_launches SET status='pending_shares' WHERE id=?",(draft_id,))
@@ -175,7 +175,7 @@ def test_all():
         assert second.status_code==200 and second.get_json()['reused'] is True
         assert second.get_json()['transaction_b64']==result.get_json()['transaction_b64']
     print('PASS retry after Phantom rejection reuses identical signed mint and share transactions')
-    print('PASS USDC fee-sharing finalization fits transaction size and needs only creator signature')
+    print('PASS SOL fee-sharing finalization fits transaction size and needs only creator signature')
     print('PASS public fee-sharing approval refuses simulated charges above 0.05 SOL')
     # Gated creator claim endpoint must reject holder mode and never debit
     # without a confirmed Pump transaction. Claims are isolated from trading.
@@ -225,7 +225,7 @@ def test_creator_pilot_wallet_budget():
         sess['wallet']=wallet;sess['csrf_token']='test-csrf'
     headers={'X-CSRF-Token':'test-csrf'}
     base={'name':'OrcAgent Pilot Test','symbol':'ORCAP','image_data':icon(),
-          'quote_asset':'USDC','reward_mode':'creator',
+          'quote_asset':'SOL','reward_mode':'creator',
           'client_nonce':'creator-pilot-100pc-0001'}
     flags={'ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED':'0',
            'ORCAGENT_PUMP_TOKEN_LAUNCH_TEST_ENABLED':'1',
@@ -242,12 +242,14 @@ def test_creator_pilot_wallet_budget():
       assert 'value="community" disabled' in html
       assert 'value="creator" checked' in html
       assert 'value="holder"' not in html
-      assert 'value="SOL" disabled' in html
+      # Launches are paired with native SOL since #155; USDC is no longer offered.
+      assert 'name="tl-asset" value="SOL" checked' in html
+      assert 'name="tl-asset" value="USDC"' not in html
       assert client.post('/api/token-launch/draft',json={**base,
           'reward_mode':'community','community_wallet':other,
           'community_bps':1000},headers=headers).status_code==400
       assert client.post('/api/token-launch/draft',json={**base,
-          'quote_asset':'SOL'},headers=headers).status_code==400
+          'quote_asset':'USDC'},headers=headers).status_code==400
       first=client.post('/api/token-launch/draft',json=base,headers=headers)
       assert first.status_code==201,first.get_data(as_text=True)[:150]
       draft_id=first.get_json()['draft']['id']
@@ -292,7 +294,7 @@ def test_creator_pilot_wallet_budget():
         state['logs']=['Program log: Transfer: insufficient lamports 880880, need 1838960']
         prefixed=client.post(path,json={},headers=headers)
         assert prefixed.status_code==503 and 'Insufficient SOL' in prefixed.get_json()['msg']
-        assert 'Fund launch with USDC' in prefixed.get_json()['msg']
+        assert 'Add SOL to your connected wallet' in prefixed.get_json()['msg']
         state['logs']=None
         generic=client.post(path,json={},headers=headers)
         assert generic.status_code==503 and 'simulation failed' in generic.get_json()['msg']
@@ -308,7 +310,7 @@ def test_creator_pilot_wallet_budget():
         second=client.post('/api/token-launch/'+next_draft.get_json()['draft']['id']+'/prepare',
                json={},headers=headers)
         assert second.status_code==409 and 'one test token' in second.get_json()['msg']
-    print('PASS creator-only USDC pilot has 0.03 SOL cost gate and 2 USDC guidance')
+    print('PASS creator-only SOL pilot has 0.03 SOL cost gate')
     print('PASS simulated network failure, excess SOL charges and second mint fail closed')
     print('PASS insufficient SOL/rent/fee failures are actionable; unknown errors stay generic; no transaction returned')
     tmp.cleanup()
@@ -324,7 +326,7 @@ def test_exact_onchain_transaction_verification():
     draft=client.post('/api/token-launch/draft',json={
         'client_nonce':'exact-signature-test-0001','name':'Exact Test',
         'symbol':'EXACT','image_data':icon(),'reward_mode':'creator',
-        'quote_asset':'USDC'},headers=headers).get_json()['draft']
+        'quote_asset':'SOL'},headers=headers).get_json()['draft']
     draft_id=draft['id'];path='/api/token-launch/'+draft_id
     blockhash=str(Keypair().pubkey())
     state={'result':None,'curve_exists':True}
@@ -379,7 +381,7 @@ def test_prepared_recovery():
     draft=client.post('/api/token-launch/draft',json={
         'client_nonce':'recovery-test-nonce-0001','name':'Recovery Test',
         'symbol':'RECOV','image_data':icon(),'reward_mode':'community',
-        'quote_asset':'USDC','community_wallet':community,'community_bps':1000
+        'quote_asset':'SOL','community_wallet':community,'community_bps':1000
     },headers=headers).get_json()['draft']
     path='/api/token-launch/'+draft['id']+'/prepare'
     state={'blockhash_valid':True,'curve_exists':False}
@@ -443,7 +445,7 @@ def test_public_creators_share_safe_launch_path():
         assert 'Preflight mode' not in client.get('/token-launch').get_data(as_text=True)
         body={'client_nonce':f'public-creator-{index}-nonce-0001',
              'name':'Public Creator','symbol':f'PUB{index}',
-             'reward_mode':'creator','quote_asset':'USDC','image_data':icon()}
+             'reward_mode':'creator','quote_asset':'SOL','image_data':icon()}
         created=client.post('/api/token-launch/draft',json=body,headers=header)
         assert created.status_code==201,created.get_data(as_text=True)[:160]
         ident=created.get_json()['draft']['id']

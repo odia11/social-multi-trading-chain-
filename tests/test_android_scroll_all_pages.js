@@ -16,7 +16,9 @@ const fs=require('node:fs');
 // left-edge zone, and removes it the moment that touch ends or turns out
 // not to be a horizontal back-swipe.
 const ALLOWED={'static/swipe-back.js':1};
-const GLOBAL=/(?:\bwindow|\bdocument(?:\.body|\.documentElement)?)\.addEventListener\(\s*['"](touchstart|touchmove|wheel)['"][^;]*?passive\s*:\s*false/g;
+// Both forms: window.addEventListener('touchmove',...) and the route-scoped
+// _routeScope.addEventListener(window,'touchmove',...) (removed on page leave).
+const GLOBAL=/(?:(?:\bwindow|\bdocument(?:\.body|\.documentElement)?)\.addEventListener\(\s*|addEventListener\(\s*(?:window|document(?:\.body|\.documentElement)?)\s*,\s*)['"](touchstart|touchmove|wheel)['"][^;]*?passive\s*:\s*false/g;
 const files=[...fs.readdirSync('static').filter(f=>f.endsWith('.js')).map(f=>'static/'+f),
              ...fs.readdirSync('templates').filter(f=>f.endsWith('.html')).map(f=>'templates/'+f),'dashboard.html'];
 for(const f of files){
@@ -28,8 +30,8 @@ for(const f of files){
 // Live Market's slide-to-confirm: passive touch, CSS does the blocking.
 const lm=fs.readFileSync('static/live-market-pro.js','utf8');
 const slide=lm.slice(lm.indexOf('(function bindSlide(){'),lm.indexOf('(function bindSheetDrag(){'));
-assert(/document\.addEventListener\('touchstart', down, \{passive:true\}\)/.test(slide));
-assert(/document\.addEventListener\('touchmove',  move, \{passive:true\}\)/.test(slide));
+assert(/addEventListener\(document,'touchstart', down, \{passive:true\}\)/.test(slide));
+assert(/addEventListener\(document,'touchmove',\s*move, \{passive:true\}\)/.test(slide));
 assert(/if\(!e\.touches\) e\.preventDefault\(\)/.test(slide),'only mouse drags may preventDefault');
 assert(/\.pt-slide-knob\{touch-action:none;/.test(fs.readFileSync('templates/live_market_pro.html','utf8')),'the knob itself must opt out of panning');
 
@@ -38,10 +40,12 @@ for(const [f,re] of [['static/app-ux.css',/body\{max-width:100%;overflow-x:hidde
                      ['static/live-market-mobile-drawer-fix.css',/overflow-x:hidden!important;overflow-x:clip!important/],
                      ['static/live-market-redesign.css',/body\.oa-live-v2\{[^}]*overflow-x:hidden!important;overflow-x:clip!important/]])
   assert(re.test(fs.readFileSync(f,'utf8')),f+': body needs overflow-x:clip after the hidden fallback');
-for(const [f,n] of [['app_performance.py','app-ux.css?v=7'],['app_performance.py','live-market-redesign.css?v=9'],
-                    ['static/page-loader.js','app-ux.css?v=7'],['static/navbar.js','live-market-redesign.css?v=9'],
-                    ['static/app-ux.js','live-market-redesign.css?v=9'],['mobile_ui_hotfix.py','live-market-mobile-drawer-fix.css?v=2']])
-  assert(fs.readFileSync(f,'utf8').includes(n),f+' must cache-bust '+n);
+// Phones fetch these on every deploy: each /static URL is stamped with the
+// deploy's version (app_performance, deployAsset, staticBuildUrl).
+for(const [f,n] of [['app_performance.py','app-ux.css'],['app_performance.py','live-market-redesign.css'],
+                    ['static/page-loader.js','app-ux.css'],['static/navbar.js','live-market-redesign.css'],
+                    ['static/app-ux.js','live-market-redesign.css'],['mobile_ui_hotfix.py','live-market-mobile-drawer-fix.css']])
+  assert(fs.readFileSync(f,'utf8').includes(n),f+' must load '+n);
 
 // /history: the filter bar only exists when there are trades.
 assert(/function _fval\(id, dflt\)/.test(fs.readFileSync('templates/history.html','utf8')));

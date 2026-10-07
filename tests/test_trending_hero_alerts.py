@@ -86,7 +86,8 @@ check('the push payload carries the tag', "'tag': tag" in snd)
 sw = open(os.path.join(ROOT, 'static', 'sw.js')).read()
 js = r'''
 var listeners={}, shown=null;
-var self={location:{origin:'https://orcagent.fun'},addEventListener:function(n,f){listeners[n]=f},
+// sw.js reads the deploy version from its own URL (?v=), so the fake self has one
+var self={location:{origin:'https://orcagent.fun',href:'https://orcagent.fun/sw.js?v=test'},addEventListener:function(n,f){listeners[n]=f},
   registration:{showNotification:function(t,o){shown={title:t,opts:o};return Promise.resolve()}}};
 var clients={matchAll:function(){return Promise.resolve([])},openWindow:function(){return Promise.resolve()}};
 ''' + sw + r'''

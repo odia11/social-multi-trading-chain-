@@ -18,7 +18,8 @@ assert(
   'header-stable-balance.js is the only thing that writes it, in dollars'
 );
 assert(js.includes("getElementById('pt-nb-avatar')"), 'the same /api/me fetch must still update the avatar');
-assert(js.includes('d.is_admin'), 'the same /api/me fetch must still reveal admin-only nav links');
+// can_access_admin covers admins and executives (the Admin Console's own rule)
+assert(js.includes('d.can_access_admin===true'), 'the same /api/me fetch must still reveal admin-only nav links');
 
 // The unit label must be hidden unconditionally, not only inside a mobile
 // media query -- the chip is a dollar total everywhere, not just on phones.

@@ -83,7 +83,9 @@ st = bob.get('/api/push/status', base_url=BASE).get_json()
 check('push status reports whether this user has a registered device', st['ok'] and st['devices'] == 0)
 r = bob.post('/api/push/test', json={}, headers=H, base_url=BASE)
 check('a test push without any registered device explains what to do',
-      r.status_code in (409, 503) and r.get_json()['msg'])
+      # 409 either way (no device, or push not set up on the server): a 5xx
+      # body would be redacted and the reason lost
+      r.status_code == 409 and r.get_json()['msg'])
 bob.post('/api/push/subscribe', json={'endpoint': 'https://push.example/abc',
                                       'keys': {'p256dh': 'x' * 20, 'auth': 'y' * 10}}, headers=H, base_url=BASE)
 st = bob.get('/api/push/status?endpoint=https://push.example/abc', base_url=BASE).get_json()
@@ -104,7 +106,8 @@ check('every app load re-registers an already-subscribed phone with the server (
       and 'boot() { _syncPushSubscription(); _armPwaDefaultPush(); _mountPushPrompt(); }' in ps)
 check('...and on the standalone pages, where it used to stop as soon as the phone had a subscription',
       'if(sub) return;' not in np and "sessionStorage.getItem('oa_push_synced')" in np
-      and "body:JSON.stringify(sub.toJSON())" in np)
+      # the subscription, plus the previous endpoint when the phone rotated it
+      and "var payload=sub.toJSON();" in np and "body:JSON.stringify(payload)" in np)
 check('an iPhone in Safari is told to add OrcAgent to the Home Screen (push only works there)',
       "'ios-browser'" in ps and 'Add to Home Screen' in ps)
 check('the in-page fallback never buzzes twice on a device that gets real pushes',

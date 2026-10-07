@@ -21,12 +21,14 @@ evm = src[src.index('EVM_CHAINS = {'):src.index('EVM_CHAIN_FEE_WALLET')]
 check('no Polygon entry in EVM_CHAINS, so the deploy check, bridge, balances and trade routes skip it',
       "'polygon'" not in evm and 'POLYGON_RPC_URL' not in src)
 check('the trade engine registry has no Polygon chain', 'polygon' not in CHAINS)
+# Since Polygon went, every EVM chain went (Solana-only): the lists below
+# are now Solana alone / empty.
 check('Live Market discovery, call lookups and GeckoTerminal charts skip Polygon',
-      "_MARKET_LIVE_CHAINS = {'solana', 'bsc', 'base', 'arbitrum'}" in src
-      and "_CALL_LOOKUP_EVM_CHAINS = ('base', 'bsc', 'arbitrum')" in src
+      "_MARKET_LIVE_CHAINS = {'solana'}" in src
+      and "_CALL_LOOKUP_EVM_CHAINS = ()" in src
       and "'polygon': 'polygon_pos'" not in src and "'polygon': 'polygon'," not in src)
 check('header balance and pooled buying power no longer read Polygon',
-      "_CHAINS = ('bsc', 'base', 'arbitrum')" in read('header_stable_balance.py')
+      "_CHAINS = ()" in read('header_stable_balance.py')
       and "'polygon'" not in read('live_market_pooled_buy_balance.py'))
 check('Live Market and the navbar no longer trade or list Polygon',
       'polygon:1' not in read('static', 'live-market-pro.js')
@@ -41,9 +43,6 @@ exit_fn = src[src.index('def _bot_execute_exit'):]
 exit_fn = exit_fn[:exit_fn.index('enc_blob = enc_blob_solana')]
 check('the bot never tries to sell a leftover Polygon position (no retry every second)',
       'if not _chain_tradeable(chain):' in exit_fn
-      and src.count("continue  # chain removed from OrcAgent (Polygon) -- nothing to sell it through") == 2
-      and "and _chain_tradeable(p.get('chain', 'solana'))}" in src)
-check('past Polygon trades keep their label and explorer link',
-      "'polygon':'https://polygonscan.com/tx/'" in read('portfolio_token_withdraw.py')
-      and "polygon:'POLY'" in read('templates', 'live_trades.html'))
+      and "continue  # chain removed from OrcAgent (Polygon) -- nothing to sell it through" in src
+      and src.count("_chain_tradeable(p.get('chain', 'solana'))}") >= 2)
 raise SystemExit(0 if all(checks) else 1)

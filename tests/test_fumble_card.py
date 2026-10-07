@@ -67,7 +67,7 @@ check('...deduplicated, since the same token appears in several posts',
       re.search(r'in seen:\s*\n\s*continue', ep) and 'seen.add(' in ep)
 check('addresses are validated before any of them reaches a URL — this builds '
       'an outbound request from something a caller controls',
-      '_SOLANA_ADDR_RE.match(a) or is_valid_evm_address(a)' in ep)
+      'if not _SOLANA_ADDR_RE.match(a):' in ep)   # Solana-only since EVM was retired
 check('the DEEPEST pool sets the price, not whichever was listed first — a '
       'dead pool would quote a price the token does not really have',
       'liq > best[addr][0]' in ep)

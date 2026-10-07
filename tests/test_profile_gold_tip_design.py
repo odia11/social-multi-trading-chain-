@@ -29,7 +29,8 @@ def test_reference_gold_pill_and_dark_coin():
 
 def test_original_tip_route_and_other_profile_elements_intact():
     assert '<button class="pf-btn-tip" type="button" onclick="_openTip()">' in HTML
-    assert 'Tip USDC' in HTML
+    # SOL or USDC is chosen in the sheet (#214), so the button just says Tip.
+    assert '</svg>Tip\n        </button>' in HTML
     assert 'id="oa-profile-balance"' in HTML
     assert 'id="oa-tip-stats"' in HTML
     assert 'pf-btn-primary' in HTML

@@ -15,7 +15,8 @@ const mc=fs.readFileSync('static/portfolio-multichain.js','utf8');
 
 assert(!/preventDefault\s*\(/.test(src),'pull-to-refresh must never cancel touches (native scroll/zoom stay untouched)');
 for(const ev of ['touchstart','touchmove','touchend']){
-  assert(new RegExp("addEventListener\\('"+ev+"'[^]*?\\{passive:true\\}").test(src),ev+' listener must be passive');
+  // listen(document,'touchstart',fn,{passive:true}) -- route-scoped when a scope exists
+  assert(new RegExp("listen\\(document,'"+ev+"'[^]*?\\{passive:true\\}").test(src),ev+' listener must be passive');
 }
 // A reload is only the fallback for pages without their own loader.
 const reloadAt=src.indexOf('location.reload()');
@@ -52,7 +53,7 @@ assert(home.indexOf('/static/pull-to-refresh.js')>0&&home.indexOf('/static/pull-
 assert(/initPullToRefresh\(\{\s*onRefresh:[^]*OrcAgentRefreshHome\(\)[^]*return loadHomeFeed\(\)/.test(dash),'Home refresh must reload the feed and the Home cards');
 assert(homeMobile.includes("window.OrcAgentRefreshHome=function(){return Promise.allSettled([refreshHomePortfolio(),updateMajorMarkets(),refreshBot(),document.getElementById('oa-m-opps')?loadOpps():null])}"),'Home pull-to-refresh refreshes the portfolio, markets, bot and the opportunity rails');
 for(const f of ['static/navbar.js','static/app-ux.js'])
-  assert(fs.readFileSync(f,'utf8').includes('home-mobile.js?v=13'),f+' must cache-bust home-mobile.js');
+  assert(fs.readFileSync(f,'utf8').includes('home-mobile.js'),f+' must load home-mobile.js (stamped with the deploy version)');
 
 // Portfolio: one forced-fresh snapshot, then every painter reads it.
 assert(/_getPortfolioSnapshot\(true\)/.test(wallet.slice(wallet.indexOf('initPullToRefresh('))),'Portfolio refresh must force one fresh snapshot fetch');

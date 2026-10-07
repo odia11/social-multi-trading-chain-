@@ -57,12 +57,11 @@ assert uid
 d._authenticated_wallet = lambda: WALLET
 d.fetch_user_balances = lambda w: None
 d.get_user_state = lambda w: {'sol': 1.0, 'positions': {}}
-# Solana trades are funded with USDC now, so the route reads a USDC balance on
-# the TRADING wallet -- which it derives from the stored key. Both are real
-# calls this probe has no network or key for.
 d._get_trading_wallet_address = lambda w: 'TrAdInG1111111111111111111111111111111111111'
-USDC_BAL = [500.0]
-d._get_solana_usdc_balance = lambda addr: USDC_BAL[0]
+# Trades are funded with native SOL (#155): the route reads the trading
+# wallet's SOL once and prices the buy from the fill at the SOL price.
+d._get_user_sol = lambda addr: 1.0
+d._sol_price_usd = 150.0
 d.add_user_log = lambda *a, **k: None
 d._dex_get = lambda *a, **k: None
 
@@ -78,7 +77,7 @@ SWAPS, FEES = [], []
 SWAP_RESULT = [(True, '0xSIG', '', 1234.5, 0.049)]
 FEE_BUNDLED = [True]
 SWAP_DELAY = [0.0]
-def fake_swap(wallet, pk, action, mint, amount_str, base='SOL', capture=None):
+def fake_swap(wallet, pk, action, mint, amount_str, base='SOL', capture=None, **kw):
     SWAPS.append({'action': action, 'mint': mint, 'amount': amount_str})
     time.sleep(SWAP_DELAY[0])
     if capture is not None:
@@ -110,7 +109,7 @@ def tokens_row():
     finally:
         conn.close()
 
-BUY = {'symbol': 'BONK', 'token_address': MINT, 'side': 'buy', 'amount_sol': 0.05}
+BUY = {'symbol': 'BONK', 'token_address': MINT, 'side': 'buy', 'currency': 'SOL', 'amount_sol': 0.05}
 
 # ── a buy ──
 reset()
@@ -164,26 +163,14 @@ SWAP_RESULT[0] = (True, '', '', 1234.5, 0.049)
 out['nosig_status'], out['nosig'] = post(BUY)
 SWAP_RESULT[0] = (True, '0xSIG', '', 1234.5, 0.049)
 
-# ── two balances, two jobs ──
-# SOL pays the network fee; USDC funds the trade. A check that conflates them
-# tells the user the wrong currency is short.
+# ── too little SOL in the TRADING wallet ──
+# SOL funds the trade and its network costs (#155); the reserve for fees is
+# kept back from what may be spent.
 reset()
-d.get_user_state = lambda w: {'sol': 0.001, 'positions': {}}
+d._get_user_sol = lambda addr: 0.001
 out['nofee_sol_status'], out['nofee_sol'] = post(BUY)
 out['nofee_sol_swaps'] = len(SWAPS)
-d.get_user_state = lambda w: {'sol': 1.0, 'positions': {}}
-
-reset()
-USDC_BAL[0] = 0.02          # plenty of SOL for fees, nothing to trade with
-out['nousdc_status'], out['nousdc'] = post(BUY)
-out['nousdc_swaps'] = len(SWAPS)
-USDC_BAL[0] = 500.0
-# Solana trades are funded with USDC now, so the route reads a USDC balance on
-# the TRADING wallet -- which it derives from the stored key. Both are real
-# calls this probe has no network or key for.
-d._get_trading_wallet_address = lambda w: 'TrAdInG1111111111111111111111111111111111111'
-USDC_BAL = [500.0]
-d._get_solana_usdc_balance = lambda addr: USDC_BAL[0]
+d._get_user_sol = lambda addr: 1.0
 
 # ── a FULL sell zeroes the holding ──
 reset()
@@ -207,9 +194,9 @@ out['tokens_after_partial'] = tokens_row()
 
 # ── refusals ──
 out['badside_status'], _ = post({'symbol': 'X', 'token_address': MINT, 'side': 'hold'})
-out['nomint_status'], _   = post({'symbol': 'X', 'side': 'buy', 'amount_sol': 1})
+out['nomint_status'], _   = post({'symbol': 'X', 'side': 'buy', 'currency': 'SOL', 'amount_sol': 1})
 out['zero_status'], _     = post({'symbol': 'X', 'token_address': MINT,
-                                  'side': 'buy', 'amount_sol': 0})
+                                  'side': 'buy', 'currency': 'SOL', 'amount_sol': 0})
 
 print('__RESULT__' + json.dumps(out, default=str))
 '''
@@ -241,10 +228,10 @@ check('the realized fill comes back rather than being re-parsed by hand',
       b['token_amount'] == 1234.5)
 # Trades are funded in USDC: the fee rides inside the swap and is booked as a
 # bundled stablecoin fee, 0.75% of what was spent -- no second transfer.
+# Recorded through _charge_txn_fee(bundled=True) -- the one place that
+# books a fee the swap itself collected (no second transfer).
 check('the fee is recorded as bundled, on the amount spent',
-      R['buy_fees'] == [] and len(R['buy_fee_rows']) == 1
-      and R['buy_fee_rows'][0][1:] == ['bundled-in-swap', 'buy', 'solana']
-      and abs(R['buy_fee_rows'][0][0] - round(0.05 * 0.0075, 6)) < 1e-9)
+      R['buy_fees'] == [{'sol': 0.05, 'kind': 'buy', 'bundled': True}])
 check('...and the holding is credited', R['tokens_after_buy'])
 
 check('a wallet that cannot pay the network fee now fails with the wrapper\'s own '
@@ -268,26 +255,21 @@ check('a buy that FAILED releases the repeat window, so a retry is not blocked '
 check('...and reports the real reason', 'Jupiter route' in R['fail']['error'])
 check('a swap with no signature is a failure, never a reported trade',
       R['nosig_status'] == 500 and 'no signature' in R['nosig']['error'])
-check('too little SOL is refused as a NETWORK FEE problem, and says so — the '
-      'trade itself is not funded in SOL any more, so naming SOL as the trading '
-      'currency would send the user to buy the wrong thing',
+check('too little SOL in the trading wallet is refused before any swap, saying '
+      'what is available, what is needed and where to send SOL',
       R['nofee_sol_status'] == 400 and R['nofee_sol_swaps'] == 0
-      and 'network fees' in R['nofee_sol']['error']
-      and 'funded with USDC' in R['nofee_sol']['error'])
-check('too little USDC is a separate refusal, naming USDC and what to send',
-      R['nousdc_status'] == 400 and R['nousdc_swaps'] == 0
-      and 'Not enough USDC' in R['nousdc']['error']
-      and 'SOL is only used for network fees' in R['nousdc']['error'])
+      and 'Not enough SOL' in R['nofee_sol']['error']
+      and 'Send SOL to your trading wallet' in R['nofee_sol']['error'])
 
 # ── sells ──
 s = R['sell']
 check('a full sell succeeds and reports what it received',
       R['sell_status'] == 200 and s['success'] and s['sol_amount'] == 0.049)
-_sell_rows = [r for r in R['sell_fee_rows'] if r[2] == 'sell']
 check('...charging the fee on what was actually received',
-      R['sell_fees'] == [] and len(_sell_rows) == 1 and _sell_rows[0][1] == 'bundled-in-swap'
-      # 0.049 arrived net of the fee, so the fee is 0.75% of the gross swap.
-      and abs(_sell_rows[0][0] - round(0.049 / (1 - 0.0075) * 0.0075, 6)) < 1e-9)
+      # 0.049 arrived net of the fee, so the fee is booked on the gross swap.
+      len(R['sell_fees']) == 1 and R['sell_fees'][0]['kind'] == 'sell'
+      and R['sell_fees'][0]['bundled'] is True
+      and abs(R['sell_fees'][0]['sol'] - 0.049 / (1 - 0.0075)) < 1e-9)
 check('...and zeroing the holding', R['tokens_after_full_sell'][0] == 0)
 
 check('a PARTIAL sell still sells', R['partial_status'] == 200

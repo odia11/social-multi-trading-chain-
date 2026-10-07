@@ -567,7 +567,7 @@ const _CLIENT_SECRET = window.__API_SHARED_SECRET||'';
 // outermost layer once both are in place; order between the two doesn't
 // otherwise matter, each just delegates to whatever window.fetch already is.
 (function(){
-  var DEFAULT_FETCH_TIMEOUT_MS=15000, UPLOAD_FETCH_TIMEOUT_MS=60000;
+  var DEFAULT_FETCH_TIMEOUT_MS=30000, UPLOAD_FETCH_TIMEOUT_MS=60000;
   var TRANSACTION_FETCH_TIMEOUT_MS=180000;
   var original=window.fetch.bind(window);
   window.fetch=function(input,init){

@@ -1,7 +1,8 @@
 """Portfolio shows the same, correct numbers everywhere.
 
-One fixed wallet: 30 USDC on Solana + 10 USDC on Base, 0.5 SOL at $150 and
-$20 of another token -- $135 in total. The header, mobile Home, Wallet page
+One fixed wallet: 30 USDC + 0.5 SOL at $150 + $20 of another token, all on
+Solana -- $125 in total. (It used to hold 10 USDC on Base as well; the app is
+Solana-only now, so EVM balances are not counted -- see the stub below.) The header, mobile Home, Wallet page
 and profile already used the multi-chain /api/portfolio/snapshot; three
 places did their own maths and showed something else:
 
@@ -47,12 +48,15 @@ BASE = 'https://orcagent.fun'
 with client.session_transaction(base_url=BASE) as s:
     s['wallet'] = wallet; s['user_id'] = uid; s['csrf_token'] = 'x' * 30
 snap = client.get('/api/portfolio/snapshot', base_url=BASE).get_json()
-check('the snapshot totals every chain: $40 USDC + $75 SOL + $20 other = $135',
-      snap['ok'] and snap['total_usd'] == 135 and snap['stable']['total_usdc'] == 40
+check('the snapshot totals the Solana wallet: $30 USDC + $75 SOL + $20 other = $125, '
+      'and an EVM balance is not counted (Solana-only)',
+      snap['ok'] and snap['total_usd'] == 125 and snap['stable']['total_usdc'] == 30
+      and snap['stable']['evm_chains'] == {}
       and snap['sol']['value_usd'] == 75 and snap['other_assets_value_usd'] == 20
-      and snap['available_to_trade_usdc'] == 40)
+      and snap['available_to_trade_usdc'] == 30)
 prof = client.get(f'/api/profile/{uid}/portfolio-balance', base_url=BASE).get_json()
-check('the profile card shows that same total', prof['portfolio_value_usdc_approx'] == 135)
+check('the profile card shows that same total (in SOL: 0.8333 x $150 = $125)',
+      prof['ok'] and abs(prof['portfolio_value_sol_approx'] * 150.0 - 125.0) < 0.01)
 
 home = read('static', 'home-desktop.js')
 check('desktop Home "Portfolio" card reads the snapshot (it showed SOL as $0)',
@@ -63,9 +67,10 @@ check('the in-app wallet overview total reads the snapshot (it missed EVM USDC)'
       "fetch('/api/portfolio/snapshot').then(r=>r.json()).catch(()=>null)" in dash
       and "fetch('/api/wallet/total')" not in dash)
 bot = read('templates', 'auto_trading_bot.html')
-check('the bot page Capital is the USDC it can trade with on every chain',
-      'async function loadCapital(ov)' in bot and 's.available_to_trade_usdc' in bot
-      and 'loadCapital(ov)])' in bot)
+check('the bot page Capital is the SOL it can trade with, from the same snapshot '
+      '(0.5 SOL less the network reserve)',
+      'async function loadCapital(ov)' in bot and 's.available_to_trade_sol' in bot
+      and 'loadCapital(ov)])' in bot and abs(snap['available_to_trade_sol'] - 0.495) < 1e-9)
 for name, src in (('header', read('static', 'header-stable-balance.js')),
                   ('mobile Home', read('static', 'home-mobile.js')),
                   ('Wallet page', read('templates', 'wallet.html'))):

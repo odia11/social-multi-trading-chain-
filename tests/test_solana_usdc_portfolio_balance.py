@@ -34,7 +34,7 @@ def test_wallet_token_scanner_aggregates_duplicate_mints():
     b=section('def _fetch_wallet_tokens', "@app.route('/api/wallet/tokens'")
     assert '_raw_by_mint: dict = {}' in b
     assert "existing['amount'] += ui_amount" in b
-    assert 'mint in _seen_mints' not in b[b.index('for acc in _prog_accounts:'):b.index("print(f'[wallet-tokens] total SPL")]
+    assert 'mint in _seen_mints' not in b[b.index('for acc in _prog_accounts:'):b.index("print(f'[wallet-tokens] total verified SPL")]
 
 
 def test_verified_empty_token_scan_is_authoritative_and_does_not_hit_stale_db():
@@ -49,7 +49,10 @@ def test_wallet_token_scan_fails_closed_only_when_every_rpc_is_invalid():
     b=section('def _fetch_wallet_tokens', "@app.route('/api/wallet/tokens'")
     assert "_prog_accounts = None" in b
     assert "if _prog_accounts is None:" in b
-    assert "SPL token accounts unavailable" in b
+    # When every RPC fails the indexed scan, the scan no longer errors out: it
+    # reads the known mints directly and says the inventory is incomplete,
+    # rather than showing stale DB rows as on-chain holdings.
+    assert "_indexed_incomplete = True" in b and "'inventory_complete': not _indexed_incomplete" in b
     assert "non-JSON response" in b and "invalid result shape" in b
 
 

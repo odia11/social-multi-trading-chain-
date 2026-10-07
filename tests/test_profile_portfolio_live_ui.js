@@ -21,8 +21,9 @@ const doc={
   getElementById:(id)=>nodes[id]||null,
   addEventListener:()=>{}
 };
-let response={ok:true,user_id:42,portfolio_value_usdc_approx:0.106,
-  available_usdc:0,other_assets_usdc_approx:0.106,
+// The profile card shows SOL since #155 (portfolio_value_sol_approx etc.).
+let response={ok:true,user_id:42,portfolio_value_sol_approx:0.106,
+  available_sol:0,other_assets_sol_approx:0.106,
   generated_at:1780000000,stale:false};
 let networkError=false;
 const win={addEventListener:()=>{}};
@@ -32,30 +33,30 @@ vm.runInNewContext(source,{
 });
 (async()=>{
  await win.OrcAgentRefreshProfileBalance();
- assert(nodes['oa-profile-balance-value'].textContent.includes('0.106 USDC'));
- assert.strictEqual(nodes['oa-profile-balance-available'].textContent,'0.00 USDC');
- assert(nodes['oa-profile-balance-other'].textContent.includes('0.106 USDC'));
+ assert(nodes['oa-profile-balance-value'].textContent.includes('0.106 SOL'));
+ assert.strictEqual(nodes['oa-profile-balance-available'].textContent,'0.00 SOL');
+ assert(nodes['oa-profile-balance-other'].textContent.includes('0.106 SOL'));
  assert(!source.includes('oa-profile-balance-state'));
  assert(source.includes('},15000);'));
- console.log('PASS market value and actual USDC remain distinct; refresh stays background-only');
+ console.log('PASS market value and spendable SOL remain distinct; refresh stays background-only');
 
- response={ok:true,user_id:42,portfolio_value_usdc_approx:7.5,
-   available_usdc:7.5,other_assets_usdc_approx:null,partial:true,stale:false};
+ response={ok:true,user_id:42,portfolio_value_sol_approx:7.5,
+   available_sol:7.5,other_assets_sol_approx:null,partial:true,stale:false};
  await win.OrcAgentRefreshProfileBalance();
- assert.strictEqual(nodes['oa-profile-balance-value'].textContent,'7.50 USDC');
- assert.strictEqual(nodes['oa-profile-balance-available'].textContent,'7.50 USDC');
+ assert.strictEqual(nodes['oa-profile-balance-value'].textContent,'7.50 SOL');
+ assert.strictEqual(nodes['oa-profile-balance-available'].textContent,'7.50 SOL');
  assert.strictEqual(nodes['oa-profile-balance-other'].textContent,'—');
- assert.strictEqual(nodes['oa-profile-balance-unit'].textContent,'Live Solana USDC balance');
- console.log('PASS indexed-token outage still shows the real live USDC balance');
+ assert.strictEqual(nodes['oa-profile-balance-unit'].textContent,'Live Solana SOL balance');
+ console.log('PASS indexed-token outage still shows the real live SOL balance');
 
  networkError=true;
  await win.OrcAgentRefreshProfileBalance();
- assert.strictEqual(nodes['oa-profile-balance-value'].textContent,'7.50 USDC');
+ assert.strictEqual(nodes['oa-profile-balance-value'].textContent,'7.50 SOL');
  console.log('PASS RPC failure preserves last known real balance without status text');
 
- networkError=false;response={...response,user_id:999,portfolio_value_usdc_approx:50};
+ networkError=false;response={...response,user_id:999,portfolio_value_sol_approx:50};
  await win.OrcAgentRefreshProfileBalance();
- assert.strictEqual(nodes['oa-profile-balance-value'].textContent,'7.50 USDC');
+ assert.strictEqual(nodes['oa-profile-balance-value'].textContent,'7.50 SOL');
  console.log('PASS wrong profile response cannot overwrite visible balance');
  console.log('ALL LIVE PROFILE BALANCE UI REGRESSIONS PASSED');
 })().catch(e=>{console.error(e);process.exitCode=1});

@@ -14,8 +14,9 @@ assert "_escHtml(u.username || wf)" in html
 assert "(u.username||'').toLowerCase().includes(q)" in html
 assert '.cell-user-link{display:flex' in html and 'min-height:44px' in html
 assert "'username':    username or ''" in server
-assert "is_valid_solana_address(wallet_address) or is_valid_evm_address(wallet_address)" in server
-# A public profile (Solana or EVM) renders without waiting on any RPC call.
+# OrcAgent is Solana-only: a profile is a Solana wallet (EVM was removed).
+assert "is_wallet = is_valid_solana_address(wallet_address)" in server
+# A public profile renders without waiting on any RPC call.
 _pv = server.split('def profile_view(')[1].split('\n@app.route')[0]
 assert 'requests.post(' not in _pv
 

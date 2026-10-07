@@ -122,10 +122,10 @@ check('a drag that starts on the keypad, the slider or the percentages '
 check('the minimum spend is handed to the page by the server rather than '
       'written into the JS again, so it cannot drift from what the trade '
       'routes enforce',
-      'PT_MIN_BUY_USDC = {{ min_buy_usdc' in HTML
-      and 'min_buy_usdc=SOLANA_MIN_SPEND_USDC' in open(REPO + '/dashboard.py', encoding='utf-8').read())
+      'PT_MIN_BUY_SOL = {{ min_buy_sol' in HTML
+      and 'min_buy_sol=SOLANA_MIN_SPEND_SOL' in open(REPO + '/dashboard.py', encoding='utf-8').read())
 check('the sheet reads that value rather than a literal of its own',
-      'PT_MIN_BUY_USDC' in JS and not re.search(r'amt\s*<\s*[12](\.0)?\b', JS))
+      'var min = PT_MIN_BUY_SOL;' in JS and not re.search(r'amt\s*<\s*0?\.\d+\b|amt\s*<\s*[12](\.0)?\b', JS))
 
 # ── 3b. a refused buy must leave a usable screen ─────────────────────────
 # confirmBuy() used to reset with btn.textContent='Confirm Buy'. Pointed at
@@ -203,26 +203,38 @@ server = subprocess.Popen(
     [sys.executable, '-c',
      'import os;os.environ.update({"DATA_DIR":%r,"SECRET_KEY":"x"*32,'
      '"ENCRYPTION_KEY":"K"*43+"=","DEV":"1"});'
-     'import sys;sys.path.insert(0,%r);import dashboard as d;'
+     # app_entry, as production runs it: bare dashboard lacks the page
+     # lifecycle script the Live Market page now needs (OrcPageLifecycle).
+     'import sys;sys.path.insert(0,%r);import app_entry as d;'
      'd.app.run(host="127.0.0.1",port=%d,debug=False,use_reloader=False,threaded=True)'
      % (DATA, REPO, PORT)],
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 DRIVER = r'''
-import asyncio, json, sys
+import asyncio, json, os, sys
 from playwright.async_api import async_playwright
 PORT = %d
 TOK = {"mint":"M"+"1"*39,"symbol":"UPONLY","name":"Up Only","chain":"solana",
   "pair_address":"P1","image_url":"","price_usd":0.0013,"market_cap":1300000,
   "liquidity_usd":90000,"volume_24h":200000,"buys_24h":50,"sells_24h":20,
   "price_change_24h":180.51,"pair_created_at":None,"verified_socials":False,"score":4}
-BAL = {"ok":True,"solana_usdc":12.4,"total_usdc":12.4,"evm_chains":{}}
+# Trades are in SOL (#155): the sheet reads the trading wallet's spendable
+# SOL and the position's worth in SOL. At $100/SOL: 1.24 SOL available,
+# 8,000 tokens at $0.0013 = $10.40 = 0.104 SOL.
+BAL = {"ok":True,"available_sol":1.24,"sol_price_usd":100.0}
 HOLD = {"ok":True,"chain":"solana","amount":8000.0,"price_usd":0.0013,
-        "value_usd":10.4,"symbol":"UPONLY","source":"position"}
+        "value_usd":10.4,"value_sol":0.104,"sol_price_usd":100.0,
+        "symbol":"UPONLY","source":"position"}
 async def main():
     out = {}
     async with async_playwright() as p:
-        b = await p.chromium.launch(args=['--no-sandbox'])
+        try:
+            b = await p.chromium.launch(args=['--no-sandbox'])
+        except Exception:
+            # A Playwright whose own browser build is not installed: use the
+            # system Chromium (CHROMIUM_PATH, or the usual preinstalled one).
+            b = await p.chromium.launch(args=['--no-sandbox'], executable_path=os.environ.get(
+                'CHROMIUM_PATH') or '/opt/pw-browsers/chromium')
         ctx = await b.new_context(viewport={'width':390,'height':844},
                                   is_mobile=True, has_touch=True)
         page = await ctx.new_page()
@@ -231,7 +243,7 @@ async def main():
         await page.route('**/api/market/scanner*', lambda r: r.fulfill(
             status=200, content_type='application/json',
             body=json.dumps({"ok":True,"counts":{},"tokens":[TOK]})))
-        await page.route('**/api/wallet/usdc-summary*', lambda r: r.fulfill(
+        await page.route('**/api/wallet/trading-balance*', lambda r: r.fulfill(
             status=200, content_type='application/json', body=json.dumps(BAL)))
         # Selling now asks what there is to sell, and converts a dollar
         # figure into tokens against the price this answers with.
@@ -285,7 +297,7 @@ async def main():
             return o;
         }""")
 
-        for k in ['0','.','1','5']:
+        for k in ['0','.','0','0','5']:   # 0.005 SOL, under the 0.006 minimum
             await page.click('#pt-keys .pt-key[data-k="%%s"]' %% k)
             await page.wait_for_timeout(90)
         out['typed'] = await page.evaluate("""() => ({
@@ -456,16 +468,16 @@ check('BROWSER: the slider label is readable — it also carries '
       '.pt-buy-confirm, the old button style, which painted amber text on '
       'an amber ground until that was scoped away',
       B.get('label_readable'))
-check('BROWSER: the keypad types into the amount', B['typed']['shown'] == '$0.15')
+check('BROWSER: the keypad types into the amount', B['typed']['shown'] == '0.005')
 check('BROWSER: ...and into the hidden field confirmBuy() reads, so what is '
-      'on screen is what gets bought', B['typed']['hidden'] == '0.15')
+      'on screen is what gets bought', B['typed']['hidden'] == '0.005')
 check('BROWSER: below the minimum the control says so instead of failing '
       'after a round trip', 'minimum' in B['typed']['label'])
 check('BROWSER: ...and is not armed, so it cannot be slid', not B['typed']['ready'])
 check('BROWSER: Max fills in the whole balance and never more',
-      float(B['max']['hidden']) == 12.4 and B['max']['ready'])
-check('BROWSER: the balance is shown to the cent, not rounded to "$12" while '
-      'Max fills in 12.40', '$12.40' in B['max']['avail'])
+      float(B['max']['hidden']) == 1.24 and B['max']['ready'])
+check('BROWSER: the balance is shown in full, not rounded to "1 SOL" while '
+      'Max fills in 1.24', '1.240000 SOL' in B['max']['avail'])
 check('BROWSER: it closes', B.get('closed'))
 check('BROWSER: ...and gives the ids back, so the next token can use it',
       B.get('ids_returned'))
@@ -489,12 +501,12 @@ check('BROWSER: ...with the same keypad, because a sale names a figure now '
       'rather than being all-or-nothing', B['sell']['keypad'] == 'grid')
 check('BROWSER: ...opening on the whole position, which is what the button '
       'always did — now filled in, so it can be edited down',
-      B['sell']['amt'] == '$10.4')
+      B['sell']['amt'] == '0.104')
 check('BROWSER: ...converted to tokens at the price the server quoted, the '
       'same conversion the buy screen does the other way',
       '8,000' in B['sell']['get'] and 'UPONLY' in B['sell']['get'])
 check('BROWSER: ...measured against what is actually held',
-      '$10.40' in B['sell']['held'] and 'held' in B['sell']['held'])
+      '0.104000 SOL' in B['sell']['held'] and 'held' in B['sell']['held'])
 check('BROWSER: ...in red, and asking for the same gesture',
       B['sell']['red'] and 'Slide to sell' in B['sell']['label'])
 check('BROWSER: a completed slide sells', B.get('sell_traded') == ['/instant-trade'])

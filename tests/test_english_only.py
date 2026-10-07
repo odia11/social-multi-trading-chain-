@@ -99,6 +99,13 @@ def _spelling_hit(frag):
     return False
 
 
+# @orcagent and the platform assistant understand questions typed in Dutch
+# (and refuse private ones), and answer in English. Their input-matching
+# regexes ("winst|verlies", "\\bhoe\\b") contain Dutch words but are never
+# shown: an alternation between words, or regex syntax, marks them.
+REGEX = re.compile(r'\w\|\w|\)\||\|\(|\\[bsdwS]|\(\?[:=!]|\.\?')
+
+
 def shippable_strings(text):
     """Quoted strings and text between tags -- the things that can be seen.
 
@@ -135,6 +142,8 @@ def scan():
             except Exception:
                 continue
             for lineno, frag in shippable_strings(text):
+                if REGEX.search(frag):
+                    continue           # a pattern that READS input, not text shown
                 dutch = (len(SENT.findall(frag)) >= 2
                          or bool(LABEL.search(frag))
                          or _spelling_hit(frag))

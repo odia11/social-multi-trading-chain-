@@ -19,13 +19,13 @@ const code=route.replace(/\/\*[\s\S]*?\*\//g,'');
 assert(!/addEventListener\(\s*'(touchstart|touchmove|pointerdown)'/.test(code),'the Start Trading guard must not listen to touch/pointerdown');
 assert(!/passive\s*:\s*false/.test(code),'no non-passive listeners in the Start Trading guard');
 assert(/window\.addEventListener\('click',intercept,true\)/.test(code),'the guard still intercepts the click in capture phase');
-assert(fs.readFileSync('mobile_ui_hotfix.py','utf8').includes('home-start-trading-route.js?v=2'),'the fixed guard must be cache-busted');
+assert(fs.readFileSync('mobile_ui_hotfix.py','utf8').includes('home-start-trading-route.js'),'the fixed guard must be cache-busted');
 
 // The app-wide Start Trading guard must not navigate on touchend: that also
 // fires when a scroll merely started on the CTA.
 const guard=fs.readFileSync('static/auto-bot-route-guard.js','utf8').replace(/\/\*[\s\S]*?\*\//g,'').replace(/\/\/.*$/gm,'');
 assert(!/addEventListener\(\s*'(touchstart|touchend|touchmove|pointerdown|pointerup)'/.test(guard),'auto-bot-route-guard.js must only use click');
-assert(fs.readFileSync('auto_trading_bot_route.py','utf8').includes('auto-bot-route-guard.js?v=2'),'the fixed app-wide guard must be cache-busted');
+assert(fs.readFileSync('auto_trading_bot_route.py','utf8').includes('auto-bot-route-guard.js'),'the fixed app-wide guard must be cache-busted');
 
 // No inline touch handlers anywhere a page renders from: they are always
 // non-passive and there is no way to make them passive.
@@ -52,9 +52,9 @@ assert(/body\.oa-home-mobile\{overflow:visible!important/.test(polish));
 
 // Every place that loads these assets agrees on the new versions.
 for(const [f,needles] of Object.entries({
-  'static/navbar.js':['home-mobile.css?v=14','home-mobile.js?v=13'],
-  'static/app-ux.js':['home-mobile.css?v=14','home-mobile-polish.css?v=8','home-mobile.js?v=13'],
-  'static/home-mobile.js':['home-mobile-polish.css?v=8'],
-  'app_performance.py':['home-mobile.css?v=14','home-mobile-polish.css?v=8']}))
+  'static/navbar.js':['home-mobile.css','home-mobile.js'],
+  'static/app-ux.js':['home-mobile.css','home-mobile-polish.css','home-mobile.js'],
+  'static/home-mobile.js':['home-mobile-polish.css'],
+  'app_performance.py':['home-mobile.css','home-mobile-polish.css']}))
   for(const n of needles) assert(fs.readFileSync(f,'utf8').includes(n),f+' must reference '+n);
 console.log('PASS Android Home scroll: no blocking touch listeners, no inline touch handlers, html is the only scroller');

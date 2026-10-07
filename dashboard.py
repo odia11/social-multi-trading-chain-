@@ -18388,7 +18388,9 @@ def push_test():
     if not wallet:
         return jsonify({'ok': False, 'msg': 'Not logged in'}), 401
     if not (_PYWEBPUSH_OK and VAPID_PRIVATE_KEY):
-        return jsonify({'ok': False, 'msg': 'Phone notifications are not set up on the server yet'}), 503
+        # 409, not 503: a state to explain, not a server fault -- a 5xx body
+        # is redacted by response_privacy_hardening, which hid this reason.
+        return jsonify({'ok': False, 'msg': 'Phone notifications are not set up on the server yet'}), 409
     conn = sqlite3.connect(DB_FILE)
     try:
         uid = _get_uid(conn, wallet)
@@ -25819,10 +25821,10 @@ def api_token_info(mint_address):
 @app.route('/api/trade/buy', methods=['POST'])
 @rate_limit(10, 60)
 def api_trade_buy():
-    """Backward-compatible Solana buy, funded in USDC.
+    """Backward-compatible Solana buy, funded in SOL.
 
     A few older dashboard and Live Market buttons still call this endpoint.
-    It must therefore use the same USDC-funded flow as every newer Solana
+    It must therefore use the same SOL-funded flow as every newer Solana
     surface; leaving the historical SOL implementation here made the funding
     currency depend on which button happened to be pressed.
     """

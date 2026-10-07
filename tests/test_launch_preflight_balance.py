@@ -39,7 +39,8 @@ def test_low_sol_is_actionable_and_preserves_draft():
         assert first.status_code==409, first.get_data(as_text=True)
         msg=first.get_json()['msg']
         assert 'Insufficient SOL' in msg and '0.004300 SOL' in msg
-        assert 'Fund launch with USDC' in msg and '0.01 SOL' in msg
+        # Launches are funded with native SOL (#155): it says to add SOL, and how much.
+        assert 'Add SOL to your connected wallet' in msg and '0.01 SOL' in msg
         assert 'No token was created' in msg
         assert 'transaction_b64' not in first.get_json()
         assert c.post(path,json={},headers=h).status_code==409

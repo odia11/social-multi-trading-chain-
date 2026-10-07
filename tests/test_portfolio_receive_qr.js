@@ -26,10 +26,10 @@ function grab(name){const a=script.indexOf('function '+name+'(');assert(a>=0,nam
 const dep=grab('_modalDeposit');
 assert(/_qrSvg\(addr,'H'\)/.test(dep),'receive QR uses error correction H (logo in the middle)');
 assert(/el\.style\.display='none'; return   \/\/ never show a fake code/.test(dep));
-// OrcAgent runs on USDC: the mark in the middle is USDC's, and the screen says so.
-assert(/_RX_USDC_MARK\+'<\/div>'/.test(dep),'USDC logo in the middle of the QR');
-assert(/Receive USDC/.test(dep)&&/Scan to send USDC on the Solana network/.test(dep));
-assert(!/_RX_SOL_MARK/.test(html));
+// OrcAgent runs on SOL (#155): the mark in the middle is SOL's, and the screen says so.
+assert(/<div class="rx-logo">◎<\/div>/.test(dep),'SOL mark in the middle of the QR');
+assert(/Receive SOL/.test(dep)&&/Scan to send SOL on the Solana network/.test(dep));
+assert(!/_RX_USDC_MARK/.test(html),'no unused USDC mark left behind');
 
 // _qrSvg draws exactly the modules the encoder produced, with a quiet zone.
 const ctx={String,Math};
@@ -46,4 +46,4 @@ assert(/fill="#fff"/.test(svg)&&/fill="#0b0f14"/.test(svg),'dark on white for re
 // Without the library: no QR at all rather than a fake one.
 const ctx2={String,Math}; vm.createContext(ctx2); vm.runInContext(grab('_qrSvg'),ctx2);
 assert.equal(ctx2._qrSvg(addr),'');
-console.log('PASS Portfolio receive: real scannable USDC QR code of the wallet address');
+console.log('PASS Portfolio receive: real scannable SOL QR code of the wallet address');

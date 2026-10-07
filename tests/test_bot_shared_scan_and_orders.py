@@ -31,8 +31,10 @@ def test_personal_tp_sl():
 def test_singleflight_scanner():
     assert '_scanner_refresh_lock = threading.Lock()' in SOURCE
     assert 'with _scanner_refresh_lock:' in SOURCE
-    assert "pair_key = (p.get('chainId'), a.lower())" in SOURCE
-    assert "key = (_chain, a.lower())" in SOURCE
+    # One entry per token: the scanner is Solana-only and keys every pair by
+    # (chain, lower-cased mint), keeping the deepest pool.
+    assert "key = ('solana', address.lower())" in SOURCE
+    assert "key = ('solana', a.lower()) if a else None" in SOURCE
     assert 'return _refresh_scanner_cached()' in SOURCE
 
 

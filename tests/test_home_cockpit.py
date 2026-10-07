@@ -60,10 +60,15 @@ css = read('static', 'home-mobile.css')
 check('the cockpit has its own styles (four equal actions, Deposit as the primary)',
       'body.oa-home-mobile .oa-m-actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))' in css
       and 'body.oa-home-mobile .oa-m-actions .primary{background:#f7b955' in css)
-check('phones fetch the new Home files (versions bumped everywhere)',
-      all('home-mobile.js?v=15' in read(*f) and 'home-mobile.css?v=14' in read(*f)
-          for f in (('static', 'navbar.js'), ('static', 'app-ux.js')))
-      and 'home-mobile.css?v=14' in read('app_performance.py'))
+# Phones fetch the new files on every deploy: each /static URL is stamped with
+# the deploy's version (deployAsset in navbar.js, staticBuildUrl in app-ux.js),
+# so a hand-bumped ?v=N no longer decides it.
+nav, ux = read('static', 'navbar.js'), read('static', 'app-ux.js')
+check('phones fetch the new Home files on every deploy',
+      "ensureScript('/static/home-mobile.js" in nav and "ensureStyle('/static/home-mobile.css" in nav
+      and "u.searchParams.set('v',_OA_ASSET_VERSION)" in nav
+      and "'home-mobile.css'" in ux and "'home-mobile.js'" in ux
+      and "'?v='+encodeURIComponent(APP_VERSION" in ux)
 r = subprocess.run(['node', '-e', 'new Function(require("fs").readFileSync(0,"utf8"))'], input=js,
                    capture_output=True, text=True, timeout=20)
 check('home-mobile.js still parses', r.returncode == 0)

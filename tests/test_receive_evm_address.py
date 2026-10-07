@@ -18,7 +18,7 @@ check('Receive has no EVM network switch',
       "_modalDeposit(\'evm\')" not in html and '>EVM chains</button>' not in html)
 check('Receive copy/share are Solana only',
       "function _rxCopy(){\n  _copyAddr()" in html
-      and "title:'My USDC address (Solana)'" in html)
+      and "title:'My SOL address (Solana)'" in html)   # SOL-funded since #155
 check('send chain options contain only Solana',
       "{v:'solana', label:'Solana (SOL)'" in html
       and "{v:'bsc'" not in html[html.index('var _SEND_CHAINS=['):html.index('function _sendChain')])

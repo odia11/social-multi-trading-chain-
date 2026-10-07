@@ -18,7 +18,6 @@ assert 'if(newMarkup!==_surgeMarkup)' in market
 assert 'if(identity===_tapeIdentity) return;' in market
 assert 'if(identity===_traderIdentity) return;' in market
 assert "if (incremental) area.insertAdjacentHTML('beforeend',renderedHtml);" in messages
-assert 'if(tilesMarkup!==_usdcEvmTilesMarkup)' in wallet
 assert "el.insertAdjacentHTML('afterbegin',d.posts.slice(0,added).map(_postHtml).join(''));" in groups
 for path in ['static/dashboard.js','static/live-market-pro.js','static/auto-refresh.js','static/messages-ui.js']:
     check=subprocess.run(['node','--check',str(root/path)],capture_output=True,text=True)
@@ -28,6 +27,5 @@ print('PASS unchanged logs and open-position controls do not get recreated on po
 print('PASS auto-refresh checks desktop as well as document scrolling')
 print('PASS Live Market does not rebuild unchanged surge/tape/trader rails')
 print('PASS Messages appends new messages without replacing unchanged bubbles')
-print('PASS Portfolio preserves unchanged USDC chain tiles')
 print('PASS Groups prepends new posts without rebuilding the existing thread')
 print('PASS JavaScript syntax across Home, Live Market, shared refresh and Messages')

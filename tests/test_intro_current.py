@@ -41,14 +41,15 @@ SUB   = strip(HTML[HTML.index('<div class="ob-sub">'):HTML.index('<div class="ob
 STEP1 = strip(HTML[HTML.index('id="step-1"'):HTML.index('id="ob-privkey"')])
 
 # ── the chains ────────────────────────────────────────────────────────────
-chains = re.search(r'SURGE_ALERT_CHAIN_NAMES = \{(.*?)\}', SRC, re.S).group(1)
-names = re.findall(r":\s*'([^']+)'", chains)
-missing = [n for n in names if n.split()[0] not in SUB]
-check('the opening line names the chains the app actually trades'
-      + ('' if not missing else ': ' + ', '.join(missing) + ' missing'),
-      not missing)
+# The app trades Solana only now (ACTIVE_EVM_CHAINS is empty), so the
+# opening line names Solana and no retired chain.
+check('the code says the app is Solana-only', 'ACTIVE_EVM_CHAINS = {}' in SRC and 'SOLANA_ONLY = True' in SRC)
+retired = [n for n in ('BNB Chain', 'Base,', 'Arbitrum', 'Robinhood', 'Polygon') if n in SUB]
+check('the opening line names the chain the app actually trades, and no retired one'
+      + ('' if not retired else ': ' + ', '.join(retired) + ' named'),
+      'Solana' in SUB and not retired)
 check('...and no longer says the app trades Solana meme coins, full stop, '
-      'which is what it said while five other chains were live',
+      'which described a bot and not the rest of the app',
       'trading Solana meme coins' not in INTRO)
 
 # ── the currency ──────────────────────────────────────────────────────────
@@ -57,8 +58,8 @@ check(f'the opening line says what a trade is funded in ({base}), since that '
       f'is the first thing somebody has to get right', base in SUB)
 check(f'...and step two says it again where the wallet is actually set up',
       base in STEP1)
-check('...without telling anyone to hold a gas token, which the app arranges',
-      'network fees are handled' in STEP1.lower())
+check('...and that the same SOL pays the network fees, with a reserve kept for them',
+      'funds trades and network fees' in STEP1 and 'reserve' in STEP1)
 
 # ── what the trading key is for ───────────────────────────────────────────
 check('the trading key is not described as a bot-only thing — it is what buys '

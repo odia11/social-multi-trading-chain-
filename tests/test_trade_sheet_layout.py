@@ -46,11 +46,13 @@ check('the sale costs read as labelled lines, not a block of monospace', 'Geist'
 js = read('static', 'live-market-pro.js')
 check('...with short values that fit a phone', "'% of the sale</span></div>'" in js
       and 'of what the sale returns' not in js)
-drag = js[js.index('(function bindSheetDrag(){'):js.index("document.addEventListener('touchcancel',end);", js.index('(function bindSheetDrag(){'))]
+drag = js[js.index('(function bindSheetDrag(){'):js.index("_routeScope.addEventListener(document,'touchcancel',end);", js.index('(function bindSheetDrag(){'))]
 check('scrolling the sheet back up never closes it: swipe-to-close only starts at the top',
       'if(!sheet || sheet.scrollTop > 0) return;' in drag)
 check('...and a drag that turns into a scroll stops moving the sheet',
       "if(sh.scrollTop > 0){" in drag and "sh.style.transform = '';" in drag)
+# Every /static URL is stamped with the deploy's version (app_performance,
+# deployAsset, staticBuildUrl), so a new stylesheet reaches phones on deploy.
 for f in ('app_performance.py', 'static/navbar.js', 'static/app-ux.js'):
-    check(f'phones fetch the new stylesheet ({f})', 'live-market-redesign.css?v=10' in read(*f.split('/')))
+    check(f'phones fetch the new stylesheet ({f})', 'live-market-redesign.css' in read(*f.split('/')))
 raise SystemExit(0 if all(checks) else 1)

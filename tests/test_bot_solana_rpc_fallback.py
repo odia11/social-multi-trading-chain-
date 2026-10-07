@@ -103,7 +103,8 @@ def test_untrusted_ata_wrong_owner_mint_or_format_rejected():
 
 def test_bot_loop_wires_read_only_snapshot_and_backoff():
  assert 'us_sol, _bot_usdc_avail = _get_bot_solana_balances(_trading_wallet)' in SRC
- assert "us_solana_avail = us_sol if _solana_base == 'SOL' else _bot_usdc_avail" in SRC
+ # SOL-funded: the network reserve is kept back from what the bot may spend.
+ assert "us_solana_avail = max(0, us_sol - SOL_NETWORK_RESERVE) if _solana_base == 'SOL' else _bot_usdc_avail" in SRC
  assert 'stop_event.wait(12)' in SRC
  # Do not replace fresh recheck in trade execution or automatically transfer.
  assert '_get_solana_usdc_balance(trading_wallet)' in SRC

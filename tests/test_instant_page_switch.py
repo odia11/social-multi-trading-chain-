@@ -16,11 +16,15 @@ ROOT = os.path.join(os.path.dirname(__file__), '..')
 sys.path.insert(0, ROOT)
 os.environ.update({'DATA_DIR': tempfile.mkdtemp(),
                    'ENCRYPTION_KEY': '6UorqYgQpSk59aqy_MY73E0nlUjevVeCj0clmTGE_Ck='})
-import requests  # noqa: E402
+import requests, threading  # noqa: E402
 outbound = []
 _orig = requests.Session.request
+_ME = threading.get_ident()   # the test client serves requests on this thread
 def _spy(self, method, url, *a, **k):
-    if _spy.on:
+    # Only calls made while serving the page count: the app's background
+    # loops (prices, bots) also make RPC calls, and under load one of them
+    # landing in the window made this fail at random.
+    if _spy.on and threading.get_ident() == _ME:
         outbound.append(str(url))
     return _orig(self, method, url, *a, **k)
 _spy.on = False
@@ -70,6 +74,11 @@ check("Home loads page-loader.js once (the shared fallback sees Home's own copy)
 ux = read('static', 'app-ux.js'); prof = read('templates', 'profile.html')
 warm = re.search(r"'/profile':\[(.*?)\]", ux).group(1)
 check("the profile's tip files are warmed under the URL the page really loads",
-      "'tip-experience.js?v={app}'" in warm and '/static/tip-experience.js?v={{ app_version }}"' in prof
-      and "'profile-gold-tip.css?v={app}'" in warm and '/static/profile-gold-tip.css?v={{ app_version }}"' in prof)
+      # warmed as /static/<file>?v=<_APP_VERSION> (staticBuildUrl + the
+      # oa-app-version meta), loaded as ?v={{ app_version }} -- the same value
+      "'tip-experience.js'" in warm and '/static/tip-experience.js?v={{ app_version }}"' in prof
+      and "'profile-gold-tip.css'" in warm and '/static/profile-gold-tip.css?v={{ app_version }}"' in prof
+      and "return '/static/'+asset+'?v='+encodeURIComponent(APP_VERSION||'1');" in ux
+      and "version = str(getattr(appmod, '_APP_VERSION', '1'))" in read('app_performance.py')
+      and "'app_version': _APP_VERSION" in read('dashboard.py'))
 raise SystemExit(0 if all(checks) else 1)

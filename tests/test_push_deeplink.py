@@ -39,6 +39,8 @@ check('...and that url reaches the payload the browser receives',
       "'url': url" in snd)
 
 # ── 2 + 3. the service worker, actually executed ──
+# (its fake `self.location` carries the worker's own URL: sw.js reads the
+# deploy version from its ?v= since the per-deploy cache naming)
 harness = SW + r'''
 // --- a fake window registry ---
 var _opened = null, _focused = null, _navigated = null;
@@ -54,7 +56,7 @@ var clients = {
 };
 var self_listeners = {};
 var self = {
-  location: { origin: 'https://orcagent.fun' },
+  location: { origin: 'https://orcagent.fun', href: 'https://orcagent.fun/sw.js?v=test' },
   addEventListener: function(n, f){ self_listeners[n] = f; },
   registration: { showNotification: function(t, o){ self.__shown = {title:t, opts:o}; return Promise.resolve(); } },
   clients: clients
@@ -109,7 +111,7 @@ var _shown=null,_opened=null,_focused=null,_navigated=null,_clients=[];
 var clients={matchAll:function(){return Promise.resolve(_clients);},
              openWindow:function(u){_opened=u;return Promise.resolve(null);}};
 var listeners={};
-var self={location:{origin:'https://orcagent.fun'},
+var self={location:{origin:'https://orcagent.fun',href:'https://orcagent.fun/sw.js?v=test'},
           addEventListener:function(n,f){listeners[n]=f;},
           registration:{showNotification:function(t,o){_shown={title:t,opts:o};return Promise.resolve();}},
           clients:clients};

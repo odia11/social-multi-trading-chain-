@@ -145,7 +145,7 @@ check('the admin gas-sponsor endpoint returns the subsidy figure',
       "'subsidy': subsidy," in src)
 check('...and returns the same shape when sponsorship is switched off, so the '
       'panel never has to guess whether the field exists',
-      "'zero_subsidy': True}})" in src)
+      "'subsidy': {'granted_usd': '0'," in src and "'zero_subsidy': True}" in src)
 check('the migration runs at startup', 'te_subsidy.apply_migrations(conn)' in src)
 
 
