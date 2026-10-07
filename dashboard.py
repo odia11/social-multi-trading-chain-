@@ -22581,10 +22581,6 @@ def api_instant_trade():
                                              f'{SOLANA_BUY_REPEAT_WINDOW}s to buy more.',
                                     'duplicate': True}), 429
 
-                # Jupiter Ultra can pay the network side of a USDC-funded BUY
-                # from inside the swap. Do not reject that gasless path merely
-                # because the wallet has little/no native SOL. Legacy/non-USDC
-                # swaps still keep their native-gas precheck.
                 # One balance read, on the TRADING wallet: the funds live there.
                 # A second check here used to read the login (Phantom) wallet --
                 # a different keypair -- so a user whose SOL sat only in the

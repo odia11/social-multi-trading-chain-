@@ -37,10 +37,13 @@ def test_ultra_adapter_exposes_configured_capability():
     assert "d._solana_ultra_gasless_configured = bool(_api_key())" in GASLESS
 
 
-def test_instant_usdc_buy_does_not_require_sol_when_ultra_is_configured():
-    # Live market/instant trade occurrence before _solana_buy_flow.
-    first = DASH.index('if not _solana_usdc_buy_gasless_enabled():')
-    assert 'current_sol < SOL_NETWORK_RESERVE' in DASH[first:first+900]
+def test_instant_buy_has_no_login_wallet_sol_gate():
+    # /api/instant-trade used to gate (when Ultra was off) on the LOGIN
+    # wallet's SOL -- a different keypair from the trading wallet that pays.
+    # Only the trading-wallet check remains (tests/test_instant_trade_fast.py).
+    b = block(DASH, "@app.route('/api/instant-trade'", 'def _solana_buy_flow')
+    assert 'fetch_user_balances(wallet)' not in b
+    assert 'current_sol = _get_user_sol(trading_wallet)' in b and 'current_sol - SOL_NETWORK_RESERVE' in b
 
 
 def test_manual_buy_legacy_sol_gate_is_conditional():
