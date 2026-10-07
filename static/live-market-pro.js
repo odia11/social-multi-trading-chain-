@@ -700,7 +700,7 @@ var _priceTimer = null;
 var _priceInFlight = false;
 var _priceFailures = 0;
 var _priceNextAt = 0;
-var _pricePollBaseMs = 2000;
+var _pricePollBaseMs = 1000;   // the chart price ticks every second
 
 // The big price, the 24h change and the market cap on the card follow the
 // same live tick as the chart. They used to change only with the 15s feed
@@ -782,6 +782,10 @@ function tickLivePrices(){
     var seen={};groups[c]=groups[c].filter(function(p){var k=String(p).toLowerCase();if(seen[k])return false;seen[k]=1;return true;});
   });
   _priceInFlight=true;
+  // The next tick is due one interval after THIS one started, not after its
+  // answer arrived: otherwise every tick drifts by the request time and the
+  // scheduler granularity (it ran every ~1.5 s instead of every second).
+  var tickStarted=Date.now();
   var qs=new URLSearchParams();
   qs.set('groups',JSON.stringify(groups));
   _routeScope.fetch('/api/market/prices-batch?'+qs.toString(),{credentials:'include',cache:'no-store'})
@@ -800,7 +804,7 @@ function tickLivePrices(){
         });
       });
       _priceFailures=0;
-      _priceNextAt=Date.now()+_pricePollBaseMs;
+      _priceNextAt=tickStarted+_pricePollBaseMs;
     })
     .catch(function(){
       _priceFailures=Math.min(_priceFailures+1,3);
@@ -815,7 +819,7 @@ function startLivePrices(){
   // Small scheduler tick, actual network cadence is controlled by
   // _priceNextAt. This avoids overlapping requests and gives 429/503 an
   // exponential backoff instead of immediately hammering the same endpoint.
-  _priceTimer=_routeScope.setInterval(tickLivePrices,500);
+  _priceTimer=_routeScope.setInterval(tickLivePrices,250);
   _routeScope.addEventListener(document,'visibilitychange',function(){
     if(document.visibilityState==='visible'){
       _priceNextAt=0;

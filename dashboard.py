@@ -30997,7 +30997,29 @@ _GECKOTERMINAL_NETWORK = {
 # How long a live price may be reused. Short, because this is the number that
 # makes a chart look alive -- but not zero: one window still collapses every
 # viewer of the same token into a single upstream request.
-_LIVE_PRICE_TTL = 2
+_LIVE_PRICE_TTL = 1   # Live Market charts tick every second
+# Every viewer's tick collapses into at most one upstream read per chain at a
+# time (single flight), and all of them together stay under DexScreener's
+# ~300 requests/minute: past the budget a viewer gets the last known price
+# (a few seconds old) instead of an error.
+_LIVE_PRICE_UPSTREAM_PER_MIN = 200
+_LIVE_PRICE_STALE_OK = 20
+_live_price_fetch_locks = {}
+_live_price_budget = {'tokens': float(_LIVE_PRICE_UPSTREAM_PER_MIN), 'at': time.time()}
+_live_price_budget_lock = threading.Lock()
+
+
+def _live_price_take() -> bool:
+    with _live_price_budget_lock:
+        now = time.time()
+        b = _live_price_budget
+        b['tokens'] = min(float(_LIVE_PRICE_UPSTREAM_PER_MIN),
+                          b['tokens'] + (now - b['at']) * _LIVE_PRICE_UPSTREAM_PER_MIN / 60.0)
+        b['at'] = now
+        if b['tokens'] < 1:
+            return False
+        b['tokens'] -= 1
+        return True
 
 # Cached per POOL, not per request.
 #
@@ -31207,6 +31229,38 @@ def _market_prices_for_pairs(chain: str, wanted: list) -> dict:
                 stale.append(a)
     if not stale:
         return prices
+    # Single flight per chain: a second viewer arriving while the first one's
+    # read is in flight waits for it and takes its answer from the cache.
+    with _live_price_lock:
+        flight = _live_price_fetch_locks.setdefault(chain, threading.Lock())
+    held = flight.acquire(timeout=8)
+    try:
+        now = time.time()
+        with _live_price_lock:
+            still = []
+            for a in stale:
+                hit = _live_price_cache.get((chain, a.lower()))
+                if hit and now - hit[0] < _LIVE_PRICE_TTL:
+                    prices[a.lower()] = hit[1]
+                else:
+                    still.append(a)
+        stale = still
+        if stale and _live_price_take():
+            _market_prices_fetch(chain, dex_chain_id, stale, prices, now)
+        elif stale:
+            # Over the upstream budget: the last known price, a few seconds old.
+            with _live_price_lock:
+                for a in stale:
+                    hit = _live_price_cache.get((chain, a.lower()))
+                    if hit and now - hit[0] < _LIVE_PRICE_STALE_OK:
+                        prices[a.lower()] = hit[1]
+    finally:
+        if held:
+            flight.release()
+    return prices
+
+
+def _market_prices_fetch(chain, dex_chain_id, stale, prices, now):
     try:
         r = _dex_get('https://api.dexscreener.com/latest/dex/pairs/'
                      + dex_chain_id + '/' + ','.join(stale),
@@ -31260,7 +31314,7 @@ def api_market_prices():
 
 
 @app.route('/api/market/prices-batch')
-@rate_limit(90, 60)
+@rate_limit(150, 60)   # one tick per second plus headroom
 def api_market_prices_batch():
     """One browser request for every visible Live Market chain.
 

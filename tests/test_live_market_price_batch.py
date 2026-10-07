@@ -33,7 +33,7 @@ def test_hidden_tabs_do_not_poll_market_panels():
 
 def test_server_batch_route_is_bounded_and_parallel():
     block=DASH[DASH.index("@app.route('/api/market/prices-batch')"):DASH.index("@app.route('/api/chart/<mint>')")]
-    assert '@rate_limit(90, 60)' in block
+    assert '@rate_limit(150, 60)' in block   # one tick per second plus headroom
     assert 'room = max(0, 60 - total)' in block
     assert 'ThreadPoolExecutor' in block
     assert '_market_prices_for_pairs' in block
