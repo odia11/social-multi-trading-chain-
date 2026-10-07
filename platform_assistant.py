@@ -23,7 +23,11 @@ from zoneinfo import ZoneInfo
 from flask import jsonify, request
 
 TZ = ZoneInfo('Europe/Amsterdam')
-HOURS = (9, 15, 21)
+# One platform post every 30 minutes, around the clock (Amsterdam time).
+SLOT_MINUTES = 30
+# A slot is published only within this many seconds of its start; a slot
+# missed during downtime is skipped rather than posted late.
+SLOT_WINDOW = 600
 MENTION = re.compile(r'(?<![\w@])@orcagent(?![\w])', re.I)
 LABEL = ''
 # Approved product copy, not generated claims about prices or user performance.
@@ -55,6 +59,29 @@ THESES = (
 ('recorded', 'Recorded entry prices preserve the reference point of a call. They do not change into a promise about future performance. Put your analysis alongside that reference when you publish a call.'),
 ('private_tracking', 'Share a call with your personal invitation link to track the people it brings in. Existing accounts and self-invitations do not count as new accounts. Check Invitations for the rules and your private totals.'),
 ('fees_not_volume', 'Reward percentages on OrcAgent refer to collected platform fees. They are not percentages of the full trade amount. Read the referral rules to understand what qualifies.'),
+('live_market', 'Live Market lists Solana tokens with prices that refresh every second. Open a token to see its chart, liquidity and recent activity before you decide anything. Explore it at your own pace.'),
+('stop_loss', 'A stop loss and take profit can be set when you buy on Live Market. They are checked continuously and sell automatically when reached. Choose levels that fit your own risk; they cannot guarantee a price.'),
+('bot', 'The Auto Trading Bot follows the settings you choose, including your stop loss and take profit. It trades from your own trading wallet and you can stop it at any time. Review its settings before you start it.'),
+('live_trades', 'Live Trades shows buys and sells on OrcAgent as they happen, with entry and exit. Use it to see what the community is doing, then do your own research before following any trade.'),
+('tips', 'Liked someone\'s analysis? You can tip them from their profile. Your wallet approves every tip, and the amount goes straight to the person you chose.'),
+('dm_cards', 'Discussing a token in DMs? Share it as a token card so the chart and details travel with the conversation. Keep wallet secrets out of every message.'),
+('dm_reactions', 'Long-press a message in your DMs to react with an emoji. A quick reaction keeps a conversation going without another message.'),
+('notifications', 'Turn on notifications so you know when someone replies, follows you or sends a DM. You can switch push messages off again in Settings whenever you like.'),
+('groups', 'Groups bring traders with a shared interest into one conversation. Join a group, share calls and discuss ideas with people who watch the same tokens.'),
+('leaderboard', 'The leaderboard shows which traders are doing well on OrcAgent. Open a profile to read their calls and reasoning. Past results never guarantee future returns.'),
+('video', 'Posts can include a short video of up to 30 seconds. Show a chart walkthrough or explain your idea in your own words, right in the feed.'),
+('images', 'Add a picture to your post to show the chart or setup you are talking about. A screenshot with your reasoning says more than a ticker alone.'),
+('token_launch', 'Thinking of launching a Solana token? Token Launch walks you through it step by step, and you approve the launch in your own wallet. Read every step before you confirm.'),
+('withdraw', 'Your Portfolio shows what you hold. You can withdraw a token to another wallet; the balance is checked on-chain first and you pay the network fee yourself.'),
+('light_mode', 'Prefer a lighter screen? Switch on Light mode from the menu or in Settings. OrcAgent remembers your choice on each device.'),
+('calls_tab', 'The Calls tab in the feed gathers the latest calls in one place. Open one to see who made it, the recorded entry and how the token has moved since.'),
+('watchlist', 'On Live Market, add tokens you are interested in to your watchlist. Come back to them when you are ready to take a closer look.'),
+('pwa', 'Add OrcAgent to your home screen for an app-like experience: faster to open and with push notifications. Use Share and then Add to Home Screen in your browser.'),
+('replies', 'Reply to a post to ask about the reasoning or add your own view. Good conversations under a call help everyone understand the idea better.'),
+('reposts', 'Found a call worth sharing with your followers? Repost it. The original author keeps the credit and your followers see it in their feed.'),
+('profile', 'Your profile is where others get to know you as a trader. Add a picture and a username so people recognise your calls and replies in the feed.'),
+('risk', 'Memecoins move fast in both directions. Only trade with money you can afford to lose, and use a stop loss if that suits your plan. OrcAgent gives you the tools; the decision is always yours.'),
+('feed_filters', 'Switch between For You, Following, Calls and Trends at the top of the feed. Each view shows a different side of the community.'),
 )
 
 # English platform guidance; both English and Dutch keywords are understood.
@@ -179,12 +206,14 @@ def utcstamp(now):
 
 def due_slot(now):
     local = dt.datetime.fromtimestamp(now, TZ)
-    for hour in reversed(HOURS):
-        slot = local.replace(hour=hour,minute=0,second=0,microsecond=0)
-        age = now - slot.timestamp()
-        if 0 <= age < 1800:
-            return slot
+    slot = local.replace(minute=local.minute - local.minute % SLOT_MINUTES, second=0, microsecond=0)
+    if 0 <= now - slot.timestamp() < SLOT_WINDOW:
+        return slot
     return None
+
+def slot_index(slot):
+    """Position of this slot within its day: 0 at 00:00 ... 47 at 23:30."""
+    return (slot.hour * 60 + slot.minute) // SLOT_MINUTES
 
 def publish_due(db, now=None):
     now = time.time() if now is None else now
@@ -201,7 +230,9 @@ def publish_due(db, now=None):
         key = 'post:' + slot.isoformat()
         if c.execute('SELECT 1 FROM platform_assistant_events WHERE event_key=?', (key,)).fetchone():
             return None
-        sequence = (slot.date() - dt.date(2026,10,4)).days * 3 + HOURS.index(slot.hour)
+        # 50 texts over 48 slots a day: every text appears once a day, at a
+        # time that moves forward a little each day.
+        sequence = (slot.date() - dt.date(2026,10,4)).days * (24 * 60 // SLOT_MINUTES) + slot_index(slot)
         topic, text = THESES[sequence % len(THESES)]
         content = text
         cur = c.execute('INSERT INTO feed_posts(wallet,content,created_at) VALUES(?,?,?)',
