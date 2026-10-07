@@ -46,7 +46,7 @@ CASES = [
     '',
 ]
 
-harness = fn('esc') + '\n' + fn('_fcTagText') + '\n' + fn('_fcLinkHtml') + '\n' + fn('_fcRichText') + '''
+harness = fn('esc') + '\n' + fn('_fcTagText') + '\n' + fn('_fcTokenTagHtml') + '\n' + fn('_fcLinkHtml') + '\n' + fn('_fcRichText') + '''
 var out = [];
 ''' + 'var CASES = ' + json.dumps(CASES) + ';\n' + '''
 CASES.forEach(function(c){ out.push(_fcRichText(c)); });

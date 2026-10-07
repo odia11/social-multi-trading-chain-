@@ -177,6 +177,7 @@ def initialize(db):
         c.execute('CREATE INDEX IF NOT EXISTS platform_assistant_limits ON platform_assistant_events(kind,source_user_id,created_at)')
         _clean_existing_prefixes(c)
         _remove_retired_posts(c)
+        _add_token_markers(c)
 
 def _clean_existing_prefixes(c):
     """Remove only fixed intros from recorded posts/replies of the verified agent."""
@@ -237,6 +238,49 @@ def _remove_retired_posts(c):
     if ids:
         print('[platform-assistant] removed %d earlier post(s) with an untrue product text' % len(ids), flush=True)
     return len(ids)
+
+
+_EMBED_MARKERS = ('__CALL__', '__CHART__', '__TRADE__')
+
+
+def _add_token_markers(c):
+    """Once: give OrcAgent's earlier posts about one call or token the marker
+    that names it. Picture posts were published without it, so "$Attention+"
+    linked only "$Attention" and searched for another token by name. The
+    call or token comes from the topic recorded when the post went out."""
+    key = 'token_marker_backfill_v1'
+    if c.execute('SELECT 1 FROM platform_assistant_settings WHERE key=?', (key,)).fetchone():
+        return 0
+    author = identity(c)
+    if not author:
+        return 0
+    rows = c.execute("SELECT p.id, p.content, e.topic FROM feed_posts p JOIN platform_assistant_events e "
+                     "ON e.post_id='p'||p.id AND e.kind='post' WHERE p.wallet=?", (author[1],)).fetchall()
+    fixed = 0
+    for post_id, content, topic in rows:
+        if not isinstance(content, str) or any(m in content for m in _EMBED_MARKERS):
+            continue
+        kind, _, rest = str(topic or '').partition(':')
+        embed = ''
+        try:
+            if kind in ('milestone', 'call', 'best'):
+                cid = int(rest.split(':')[0])
+                if c.execute('SELECT 1 FROM token_calls WHERE id=?', (cid,)).fetchone():
+                    embed = live_posts._call_embed(cid)
+            elif kind == 'mostcalled':
+                row = c.execute('SELECT id FROM token_calls WHERE mint=? ORDER BY id DESC LIMIT 1', (rest,)).fetchone()
+                embed = live_posts._call_embed(row[0]) if row else ''
+            elif kind == 'trending':
+                sym = re.search(r'\$(\S+?)[.,!?;:)]*(?:\s|$)', content)
+                if sym:
+                    embed = live_posts._chart_embed({'symbol': sym.group(1), 'mint': rest})
+        except (ValueError, sqlite3.Error):
+            embed = ''
+        if embed:
+            c.execute('UPDATE feed_posts SET content=? WHERE id=? AND content=?', (content + embed, post_id, content))
+            fixed += 1
+    c.execute('INSERT OR IGNORE INTO platform_assistant_settings VALUES(?,?)', (key, str(fixed)))
+    return fixed
 
 
 def enabled(c, key):
@@ -334,7 +378,11 @@ def publish_due(db, now=None, live_data=None, render=None):
                     image_url = render(media, topic + '|' + slot.isoformat(), variant)
                 except Exception:
                     image_url = None
-            picked = (topic, text if image_url else text + embed, image_url)
+            # The call / chart marker stays in the post even when a picture
+            # replaces its card: it is how the feed knows exactly which call
+            # and token the post is about, so "$SYMBOL" opens that one --
+            # whatever characters the ticker has ("$Attention+").
+            picked = (topic, text + embed, image_url)
 
     with sqlite3.connect(db, timeout=8) as c:
         c.execute('BEGIN IMMEDIATE')
