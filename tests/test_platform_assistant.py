@@ -254,12 +254,27 @@ INSERT INTO feed_posts(wallet,content,created_at) VALUES('member','A post','2026
         self.assertEqual(self.count('feed_posts'),2)
         p.initialize(self.db)
         self.assertIsNone(p.publish_due(self.db,self.now+60))
-        self.assertIsNone(p.publish_due(self.db,self.now+1800))
+        # Every 30 minutes: 09:30 gets its own post...
+        self.assertIsNotNone(p.publish_due(self.db,self.now+1800))
+        # ...but a slot missed during downtime is skipped, not posted late.
+        self.assertIsNone(p.publish_due(self.db,self.now+3600+p.SLOT_WINDOW+60))
         self.assertIsNotNone(p.publish_due(self.db,self.now+6*3600))
         for day in [dt.datetime(2026,3,29,9,tzinfo=p.TZ),dt.datetime(2026,10,25,9,tzinfo=p.TZ)]:
             self.assertEqual(p.due_slot(day.timestamp()).hour,9)
-            self.assertIsNone(p.due_slot(day.replace(hour=8).timestamp()))
+            self.assertEqual(p.due_slot(day.replace(minute=30).timestamp()).minute,30)
+            self.assertIsNone(p.due_slot(day.replace(minute=15).timestamp()))
         self.assertTrue(all(len(t)<=500 for _,t in p.THESES))
+    def test_a_post_every_thirty_minutes_without_repeating_within_a_day(self):
+        day=dt.datetime(2026,10,8,0,0,tzinfo=p.TZ).timestamp()
+        posted=[p.publish_due(self.db,day+i*1800) for i in range(48)]
+        self.assertTrue(all(posted))
+        self.assertIsNone(p.publish_due(self.db,day+47*1800+60))
+        with sqlite3.connect(self.db) as c:
+            texts=[r[0] for r in c.execute("SELECT content FROM feed_posts WHERE wallet='official' ORDER BY id")]
+        self.assertEqual(len(texts),48)
+        self.assertEqual(len(set(texts)),48)
+        self.assertEqual(len({t for _,t in p.THESES}),len(p.THESES))
+        self.assertGreater(len(p.THESES),48)
     def test_nested_response_idempotency_and_no_group_or_self_reply(self):
         source=self.source()
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
