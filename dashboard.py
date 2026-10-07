@@ -22585,18 +22585,15 @@ def api_instant_trade():
                 # from inside the swap. Do not reject that gasless path merely
                 # because the wallet has little/no native SOL. Legacy/non-USDC
                 # swaps still keep their native-gas precheck.
-                if not _solana_usdc_buy_gasless_enabled():
-                    fetch_user_balances(wallet)
-                    current_sol = get_user_state(wallet).get('sol', 0)
-                    if current_sol < SOL_NETWORK_RESERVE:
-                        return jsonify({'error':
-                            f'Not enough SOL for network fees — you have {current_sol:.4f} '
-                            f'and about {SOL_NETWORK_RESERVE} is needed. Trades themselves '
-                            f'are funded with SOL, including their network costs.'}), 400
-                # The trading wallet, not the session wallet: they are two
-                # different keypairs and the funds live on the first.
+                # One balance read, on the TRADING wallet: the funds live there.
+                # A second check here used to read the login (Phantom) wallet --
+                # a different keypair -- so a user whose SOL sat only in the
+                # trading wallet was told "Not enough SOL for network fees", and
+                # it cost an extra RPC round trip on every buy. The check below
+                # keeps the network reserve on the wallet that actually pays.
                 trading_wallet = _get_trading_wallet_address(wallet) or wallet
                 current_sol = _get_user_sol(trading_wallet)
+                known_sol = current_sol
                 available_sol = max(0.0, current_sol - SOL_NETWORK_RESERVE)
                 if available_sol < amount_sol:
                     return jsonify({'error':
@@ -22621,6 +22618,8 @@ def api_instant_trade():
             else:
                 amount_str = str(amount_token) if amount_token > 0 else '0'
             swap_info = {}
+            if side != 'buy':
+                known_sol = None
             with _use_key(enc_blob, wallet) as pk:
                 # One wrapper for every Solana swap in the app: it guarantees
                 # the gas top-up, routes the fee to the right recipient, parses
@@ -22628,7 +22627,8 @@ def api_instant_trade():
                 # actually rode along.
                 ok, sig, err_msg, token_amount, sol_amount = _execute_user_swap_ex(
                     wallet, pk, side, token_address, amount_str,
-                    base=SOLANA_BASE_CURRENCY, capture=swap_info, fee_rate=execution_fee_rate)
+                    base=SOLANA_BASE_CURRENCY, capture=swap_info, fee_rate=execution_fee_rate,
+                    known_sol_balance=known_sol)
 
             if not ok:
                 if side == 'buy':
@@ -22651,7 +22651,12 @@ def api_instant_trade():
             # write in the process queued behind an HTTP request and could time
             # out with "database is locked".
             buy_price_usd = 0.0
-            if side == 'buy':
+            # The fill itself prices the buy: SOL spent / tokens received, at
+            # the SOL price the app already holds. No DexScreener round trip
+            # (up to 6 s) between the confirmed swap and the user's receipt.
+            if side == 'buy' and sol_amount > 0 and token_amount > 0 and _sol_price_usd > 0:
+                buy_price_usd = sol_amount * _sol_price_usd / token_amount
+            if side == 'buy' and buy_price_usd <= 0:
                 try:
                     pr = _dex_get('https://api.dexscreener.com/latest/dex/tokens/'
                                   + token_address, timeout=6)
@@ -22792,20 +22797,10 @@ def api_instant_trade():
                     _trigger_copy_sell(wallet, token_address, chain='solana',
                                        fraction=_share)
 
-        # Best-effort balance refresh, outside the lock -- it is display only.
+        # No balance read here: it was display-only, unused by the app, read
+        # the login wallet instead of the trading wallet, and held the
+        # receipt back by up to 5 s per RPC. The app refreshes balances itself.
         new_balance = None
-        try:
-            for _rpc in _PROXY_RPCS:
-                try:
-                    _rb = requests.post(_rpc, json={
-                        'jsonrpc': '2.0', 'id': 1, 'method': 'getBalance', 'params': [wallet]
-                    }, timeout=5)
-                    new_balance = round(_rb.json()['result']['value'] / 1e9, 4)
-                    break
-                except Exception:
-                    continue
-        except Exception:
-            pass
 
         return jsonify({
             'success':        True,

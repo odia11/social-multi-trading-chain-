@@ -207,7 +207,7 @@ CONFIRM_TIMEOUT_S = 90.0
 # First confirmation should feel instant without hammering RPCs for the entire
 # blockhash window. Poll quickly while a normal Solana transaction is expected
 # to land; _confirm_transaction backs off to 1s after the first few seconds.
-CONFIRM_POLL_INTERVAL_S = 0.4
+CONFIRM_POLL_INTERVAL_S = 0.25
 
 
 def _confirm_transaction(sig: str, timeout_s: float = CONFIRM_TIMEOUT_S) -> dict:
