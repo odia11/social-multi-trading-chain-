@@ -383,7 +383,7 @@ html,body{background:#0a0b0e;color:#eef1f5;font-family:'Geist',system-ui,sans-se
           <input class="msgs-input" id="msgs-input" type="text"
                  placeholder="Write a message…" maxlength="2000"
                  onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();_sendMessage();}">
-          <button class="msgs-send" id="msgs-send" title="Send" aria-label="Send" onclick="_sendMessage()">
+          <button class="msgs-send" id="msgs-send" type="button" title="Send" aria-label="Send" onmousedown="event.preventDefault()" onclick="_sendMessage()">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
           </button>
         </div>
@@ -404,6 +404,9 @@ var _threadRequestSeq = 0;  // ignore responses for a previous thread or older p
 var _renderedMessages = []; // preserve already-painted DOM across message polls
 var _conversations = [];
 var _listScrollY   = 0;       /* where the conversation list was when a thread opened */
+var _threadCache   = {};      /* peerId -> last loaded messages: reopening a chat is instant */
+var _threadFetches = {};      /* peerId -> request in flight, shared by prefetch and open */
+var _pendingSeq    = 0;       /* ids for messages shown before the server has saved them */
 
 /* ── HELPERS ── */
 function _avatarColor(s) {
@@ -470,10 +473,24 @@ function _dmPostLinkText(raw){
 }
 
 function _scrollToBottom() {
+  var area = document.getElementById('msgs-area');
+  if (!area) return;
+  // At the newest message right now, so the very first frame of a thread is
+  // drawn there -- waiting two frames showed the top of the thread and then
+  // jumped. Then again just before the next two frames, for anything the
+  // mobile layer adds to the rows in between (avatars, trade cards), unless
+  // the reader has scrolled away meanwhile.
+  var lastSet;
+  var goToBottom = function(){ area.scrollTop = area.scrollHeight; lastSet = area.scrollTop; };
+  goToBottom();
+  // And once the mobile layer has dressed the new rows (it runs right after
+  // this, before anything is painted).
+  Promise.resolve().then(function(){ if (area.scrollTop === lastSet) goToBottom(); });
   requestAnimationFrame(function(){
+    if (area.scrollTop === lastSet) goToBottom();
     requestAnimationFrame(function(){
-      var area = document.getElementById('msgs-area');
-      if (!area) return;
+      if (area.scrollTop !== lastSet) return;
+      goToBottom();
       // Images (trade cards have none, but photo messages do) can still be
       // loading at this point -- once one finishes, its real height pushes
       // the layout down and leaves the view short of the bottom. Re-scroll
@@ -481,9 +498,6 @@ function _scrollToBottom() {
       // where we last put it -- comparing against the freshly grown
       // scrollHeight instead would confuse "user scrolled away" with "the
       // image itself just grew the layout by more than the threshold".
-      var lastSet;
-      var goToBottom = function(){ area.scrollTop = area.scrollHeight; lastSet = area.scrollTop; };
-      goToBottom();
       area.querySelectorAll('img').forEach(function(img){
         if (img.complete) return;
         img.addEventListener('load', function(){
@@ -738,6 +752,7 @@ function _renderConvList() {
       },
       onDelete: function(){ _deleteConversation(peerId, wrap); }
     });
+    wrap.addEventListener('pointerdown', function(){ _prefetchThread(peerId); }, {passive: true});
     var icon = wrap.querySelector('.conv-del-icon');
     icon.addEventListener('click', function(ev){
       ev.stopPropagation();
@@ -1028,10 +1043,15 @@ async function _openThread(peerId, peerUsername, peerWallet) {
 
   _refreshCopyTradesBtn();
 
-  document.getElementById('msgs-area').innerHTML = '<div class="msgs-area-empty">Loading…</div>';
   _lastMsgsSig = null;
   _renderedMessages = [];
-  await loadThread(peerId, true);
+  // A conversation seen before (or prefetched when it was touched) opens at
+  // once from memory, at its newest message; the fresh copy then only adds
+  // what is new. Only a never-loaded one shows Loading.
+  var cached = _threadCache[peerId];
+  if (cached) _renderMessages(cached, true);
+  else document.getElementById('msgs-area').innerHTML = '<div class="msgs-area-empty">Loading…</div>';
+  await loadThread(peerId, !cached);
 
   if (_pollTimer) OrcPageLifecycle.clearInterval(_pollTimer);
   _pollTimer = OrcPageLifecycle.setInterval(function() {
@@ -1062,11 +1082,29 @@ document.addEventListener('click', function(e) {
   }
 });
 
+function _fetchThread(peerId) {
+  if (_threadFetches[peerId]) return _threadFetches[peerId];
+  var req = fetch('/api/messages/' + peerId).then(function(r){ return r.json(); }).then(function(d){
+    if (d && d.ok) _threadCache[peerId] = d.messages || [];
+    return d;
+  });
+  _threadFetches[peerId] = req;
+  var done = function(){ if (_threadFetches[peerId] === req) delete _threadFetches[peerId]; };
+  req.then(done, done);
+  return req;
+}
+
+/* Touching a conversation starts loading it, so by the time the finger is
+   lifted it is usually there. */
+function _prefetchThread(peerId) {
+  if (!peerId || _threadCache[peerId] || _threadFetches[peerId]) return;
+  _fetchThread(peerId).catch(function(){});
+}
+
 async function loadThread(peerId, forceScroll) {
   var requestSeq = ++_threadRequestSeq;
   try {
-    var r = await fetch('/api/messages/' + peerId);
-    var d = await r.json();
+    var d = await _fetchThread(peerId);
     if (requestSeq !== _threadRequestSeq || peerId !== _activePeerId) return;
     if (d.ok) _renderMessages(d.messages || [], !!forceScroll);
   } catch(e) {
@@ -1157,6 +1195,7 @@ function _renderMessages(msgs, forceScroll) {
   _lastMsgsSig = sig;
   var atBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 80;
   if (!msgs.length) {
+    if (area.querySelector('.msg-wrap.pending')) return;   // the first message is on its way
     if (old.length || !area.querySelector('.msgs-area-empty')) area.innerHTML = '<div class="msgs-area-empty">No messages yet. Say hello!</div>';
     _renderedMessages = [];
     return;
@@ -1177,13 +1216,42 @@ function _renderMessages(msgs, forceScroll) {
     if (msgs.length === old.length) { _renderedMessages=msgs.map(function(m){return Object.assign({},m)}); return; }
   }
   var lastDayKey = incremental ? _dayKey(old[old.length-1].created_at) : null;
-  var renderedHtml = (incremental ? msgs.slice(old.length) : msgs).map(function(m) {
+  var added = incremental ? msgs.slice(old.length) : msgs;
+  // A message this device just sent is already on screen as "Sending…". When
+  // the server's copy arrives first, it replaces that row instead of showing
+  // the same message twice.
+  added.forEach(function(m){
+    if (m.sender_id !== _myUserId || m.message_type !== 'text') return;
+    var pend = Array.prototype.find.call(area.querySelectorAll('.msg-wrap.pending'), function(row){ return row.dataset.text === m.message; });
+    if (pend) pend.remove();
+  });
+  var renderedHtml = added.map(function(m) {
     var dayKey = _dayKey(m.created_at);
     var divider = '';
     if (dayKey && dayKey !== lastDayKey) {
       divider = '<div class="msgs-day-divider">'+_esc(_dayLabel(m.created_at))+'</div>';
       lastDayKey = dayKey;
     }
+    return divider + _msgRowHtml(m);
+  }).join('');
+  // Anything that arrives while a message is still sending goes above it,
+  // the way every chat app keeps your own unsent message last.
+  var firstPending = incremental ? area.querySelector('.msg-wrap.pending') : null;
+  if (firstPending) firstPending.insertAdjacentHTML('beforebegin', renderedHtml);
+  else if (incremental) area.insertAdjacentHTML('beforeend',renderedHtml);
+  else {
+    var sending = Array.prototype.slice.call(area.querySelectorAll('.msg-wrap.pending'));
+    area.innerHTML=renderedHtml;
+    sending.forEach(function(row){ area.appendChild(row); });
+  }
+  _renderedMessages=msgs.map(function(m){return Object.assign({},m)});
+  _hydrateDmTradeCards(area);
+  if (forceScroll || atBottom) _scrollToBottom();
+  var conv = _conversations.find(function(c){ return c.peer_id === _activePeerId; });
+  if (conv && conv.unread > 0) { conv.unread = 0; _renderConvList(); }
+}
+
+function _msgRowHtml(m) {
     var mine = _myUserId != null ? (m.sender_id === _myUserId) : false;
     var bubble;
     if (m.message_type === 'image') {
@@ -1210,8 +1278,7 @@ function _renderMessages(msgs, forceScroll) {
     var reactionHtml = _dmReactionPills(m.reactions || []);
     var editedTag = m.edited_at ? '<span class="msg-edited-tag">(edited)</span>' : '';
     var seenTag = (mine && m.is_read) ? '<span class="msg-seen-tag"> · Seen</span>' : '';
-    return divider
-      + '<div class="msg-wrap '+(mine?'mine':'theirs')+'" data-mid="'+m.id+'">'
+    return '<div class="msg-wrap '+(mine?'mine':'theirs')+'" data-mid="'+m.id+'">'
       + '<div class="msg-bubble-wrap">'
       +   menu
       +   bubble
@@ -1219,14 +1286,6 @@ function _renderMessages(msgs, forceScroll) {
       + reactionHtml
       + '<span class="msg-time">'+_esc(_timeAgo(m.created_at))+editedTag+seenTag+'</span>'
       + '</div>';
-  }).join('');
-  if (incremental) area.insertAdjacentHTML('beforeend',renderedHtml);
-  else area.innerHTML=renderedHtml;
-  _renderedMessages=msgs.map(function(m){return Object.assign({},m)});
-  _hydrateDmTradeCards(area);
-  if (forceScroll || atBottom) _scrollToBottom();
-  var conv = _conversations.find(function(c){ return c.peer_id === _activePeerId; });
-  if (conv && conv.unread > 0) { conv.unread = 0; _renderConvList(); }
 }
 
 
@@ -1628,37 +1687,87 @@ async function _saveEditMsg(id) {
 }
 
 /* ── SEND ── */
+/* A sent message shows at once, at the bottom, marked "Sending…" -- like
+   Instagram, X or WhatsApp -- and becomes the saved message when the server
+   answers. The field is cleared and keeps the keyboard, so the next message
+   can be typed straight away. */
+function _showPendingMessage(text) {
+  var area = document.getElementById('msgs-area');
+  if (!area) return null;
+  var empty = area.querySelector('.msgs-area-empty');
+  if (empty) area.innerHTML = '';
+  var id = 'tmp' + (++_pendingSeq);
+  var now = new Date().toISOString();
+  var last = _renderedMessages[_renderedMessages.length - 1];
+  var divider = (!last || _dayKey(last.created_at) !== _dayKey(now))
+    && !area.querySelector('.msg-wrap.pending') ? '<div class="msgs-day-divider">Today</div>' : '';
+  area.insertAdjacentHTML('beforeend', divider
+    + '<div class="msg-wrap mine pending" data-mid="'+id+'" data-text="'+_esc(text)+'">'
+    + '<div class="msg-bubble-wrap"><div class="msg-bubble">'+_dmPostLinkText(text)+'</div></div>'
+    + '<span class="msg-time">Sending…</span></div>');
+  _scrollToBottom();
+  return id;
+}
+
+function _savedPendingMessage(id, saved) {
+  var area = document.getElementById('msgs-area');
+  var row = area && area.querySelector('.msg-wrap[data-mid="'+id+'"]');
+  if (!row) return;   // the server's copy already took its place
+  if (area.querySelector('.msg-wrap[data-mid="'+saved.id+'"]')) { row.remove(); return; }
+  var atBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 80;
+  row.outerHTML = _msgRowHtml(saved);
+  // Only rows above every still-sending one count as rendered, so the next
+  // poll keeps appending in the right place.
+  if (!area.querySelector('.msg-wrap.pending')) _renderedMessages.push(Object.assign({}, saved));
+  if (atBottom) _scrollToBottom();
+}
+
+function _failedPendingMessage(id, text) {
+  var area = document.getElementById('msgs-area');
+  var row = area && area.querySelector('.msg-wrap[data-mid="'+id+'"]');
+  if (row) row.remove();
+  var input = document.getElementById('msgs-input');
+  if (input && !input.value) { input.value = text; try { input.dispatchEvent(new Event('input')); } catch(e) {} }
+  _toast('Message not sent. Try again.');
+}
+
 async function _sendMessage() {
   var input = document.getElementById('msgs-input');
-  var btn   = document.getElementById('msgs-send');
   if (!input || !_activePeerId) return;
   var text = input.value.trim();
   if (!text) return;
+  var peerId = _activePeerId;
 
   input.value = '';
-  btn.disabled = true;
+  // Let the composer shrink back to one line, and keep the keyboard open:
+  // focusing inside the tap itself is what iOS allows.
+  try { input.dispatchEvent(new Event('input')); } catch(e) {}
+  input.focus();
+  var pendingId = _showPendingMessage(text);
   try {
-    var r = await fetch('/api/messages/' + _activePeerId, {
+    var r = await fetch('/api/messages/' + peerId, {
       method: 'POST',
       headers: {'Content-Type': 'application/json', 'X-CSRF-Token': _csrfToken},
       body: JSON.stringify({message: text})
     });
     var d = await r.json();
     if (d.ok) {
-      await loadThread(_activePeerId, true);
-      var conv = _conversations.find(function(c){ return c.peer_id === _activePeerId; });
+      var saved = {id: d.message_id, sender_id: _myUserId, receiver_id: peerId, message: text,
+                   message_type: 'text', created_at: d.created_at, is_read: 0, reactions: []};
+      if (peerId === _activePeerId) _savedPendingMessage(pendingId, saved);
+      if (_threadCache[peerId] && !_threadCache[peerId].some(function(m){ return m.id === saved.id; }))
+        _threadCache[peerId] = _threadCache[peerId].concat([saved]);
+      var conv = _conversations.find(function(c){ return c.peer_id === peerId; });
       if (conv) { conv.last_msg = text; conv.last_ts = d.created_at; conv.last_type = 'text'; conv.last_is_mine = true; }
-      else { _conversations.unshift({peer_id:_activePeerId, peer_wallet:_activePeer.wallet, peer_username:_activePeer.username, last_msg:text, last_ts:d.created_at, last_type:'text', last_is_mine:true, unread:0}); }
+      else { _conversations.unshift({peer_id:peerId, peer_wallet:_activePeer.wallet, peer_username:_activePeer.username, last_msg:text, last_ts:d.created_at, last_type:'text', last_is_mine:true, unread:0}); }
       _renderConvList();
     } else {
-      input.value = text;
+      _failedPendingMessage(pendingId, text);
     }
   } catch(e) {
-    input.value = text;
+    _failedPendingMessage(pendingId, text);
     console.error('[messages] send error', e);
   }
-  btn.disabled = false;
-  input.focus();
 }
 
 function _toggleEmojiPanel(e) {
@@ -1876,6 +1985,22 @@ function searchUsers(q) {
 }
 
 /* ── INIT ── */
+/* When the chat area gets shorter -- the keyboard opening, the composer
+   growing a line -- someone reading the newest message keeps seeing it, as
+   in any chat app. Whether they were at the bottom is known from their own
+   scrolling, before the resize: measuring after it would always say no. */
+(function(){
+  var area = document.getElementById('msgs-area');
+  if (!area || !window.ResizeObserver || !window.OrcPageLifecycle) return;
+  var stick = true;
+  area.addEventListener('scroll', function(){
+    stick = area.scrollHeight - area.scrollTop - area.clientHeight < 80;
+  }, {passive: true});
+  OrcPageLifecycle.resizeObserver(function(){
+    if (stick) area.scrollTop = area.scrollHeight;
+  }).observe(area);
+})();
+
 async function _init() {
   try {
     var me = await fetch('/api/me').then(function(r){ return r.json(); });

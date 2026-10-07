@@ -7,7 +7,9 @@ function fmtPct(n){n=parseFloat(n||0);return (n>=0?'+':'')+n.toFixed(2)+'%'}
 function upgradeBack(){var h=document.getElementById('msgs-thread-hdr');if(!h)return;var b=h.querySelector('.msgs-back');if(!b){b=document.createElement('button');b.type='button';b.className='msgs-back';b.setAttribute('aria-label','Back to messages');b.onclick=function(){if(typeof window._backToList==='function')window._backToList()};h.insertBefore(b,h.firstChild)}else{b.setAttribute('aria-label','Back to messages')}}
 function upgradeTradeCards(root){(root||document).querySelectorAll('.msg-bubble.msg-trade:not(.oa-trade-v3)').forEach(function(card){var txt=(card.innerText||card.textContent||'').replace(/\s+/g,' ').trim();var sym=(txt.match(/\$([^\s$]+)/)||[])[1]||'';var prices=txt.match(/\$([0-9][0-9.,]*(?:e[-+]?\d+)?)\s*(?:→|->)\s*\$([0-9][0-9.,]*(?:e[-+]?\d+)?)/i);var pnlm=txt.match(/([+-]\d+(?:\.\d+)?)\s*(SOL|USDC|USDG|USD)/i);var pctm=txt.match(/([+-]\d+(?:\.\d+)?)%/);if(!sym||!prices||!pctm)return;var entry='$'+prices[1],exit='$'+prices[2],pct=parseFloat(pctm[1]||0),pnl=pnlm?(pnlm[1]+' '+pnlm[2].toUpperCase()):'—';var pos=pct>=0?'pos':'neg';var holder=card.closest('[data-mint]');var mint=card.getAttribute('data-mint')||(holder&&holder.getAttribute('data-mint'))||'';var mintOk=/^(?:[1-9A-HJ-NP-Za-km-z]{32,44}|0x[a-fA-F0-9]{40})$/.test(mint);card.classList.add('oa-trade-v3');card.innerHTML='<div class="oa-dm-trade-card"><div class="oa-dm-trade-top"><div class="oa-dm-trade-token">$'+esc(sym)+'</div><div class="oa-dm-trade-pct '+pos+'">'+esc(fmtPct(pct))+'</div></div><div class="oa-dm-trade-stats"><div class="oa-dm-trade-stat"><span class="oa-dm-trade-label">Entry</span><span class="oa-dm-trade-value">'+esc(entry)+'</span></div><div class="oa-dm-trade-stat"><span class="oa-dm-trade-label">Exit</span><span class="oa-dm-trade-value">'+esc(exit)+'</span></div><div class="oa-dm-trade-stat"><span class="oa-dm-trade-label">Result</span><span class="oa-dm-trade-value oa-dm-trade-pnl '+pos+'">'+esc(pnl)+'</span></div></div><div class="oa-dm-trade-bottom"><span class="oa-dm-trade-caption">Shared trade</span><span class="oa-dm-trade-pnl '+pos+'">'+esc(fmtPct(pct))+'</span></div>'+(mintOk?'<a class="oa-dm-trade-link" href="/token/'+encodeURIComponent(mint)+'">View Trade Details →</a>':'')+'</div>'})}
 function run(){upgradeBack();upgradeTradeCards(document)}
-var mo=OrcPageLifecycle.mutationObserver(function(ms){for(var i=0;i<ms.length;i++){if(ms[i].addedNodes&&ms[i].addedNodes.length){requestAnimationFrame(run);break}}});
+// Only what was just added, and before it is painted: rescanning the whole
+// page a frame later redrew trade cards after the thread had been shown.
+var mo=OrcPageLifecycle.mutationObserver(function(ms){var back=false;for(var i=0;i<ms.length;i++){ms[i].addedNodes.forEach(function(n){if(n.nodeType!==1)return;if(n.id==='msgs-thread-hdr'||n.closest&&n.closest('#msgs-thread-hdr'))back=true;upgradeTradeCards(n.matches&&n.matches('.msg-bubble.msg-trade')?n.parentNode:n)})}if(back)upgradeBack()});
 function start(){run();mo.observe(document.body,{childList:true,subtree:true})}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
@@ -74,10 +76,9 @@ function install(){
     // keyboard opens, rather than lifting the composer over the messages.
     document.documentElement.style.setProperty('--oa-dm-viewport-h',Math.round(vv.height)+'px');
     document.documentElement.style.setProperty('--oa-dm-viewport-top',Math.round(vv.offsetTop)+'px');
-    var area=document.getElementById('msgs-area');
-    if(area && area.scrollHeight-area.scrollTop-area.clientHeight<100){
-      requestAnimationFrame(function(){area.scrollTop=area.scrollHeight;});
-    }
+    // Keeping the newest message in view as the chat shrinks is done by the
+    // page itself (messages.html), which knows whether the reader was at the
+    // bottom before the keyboard came up.
   }
 
   ta.addEventListener('focus',function(){setTyping(true);});
@@ -136,12 +137,9 @@ function markThreadState(){
 }
 
 function run(){markThreadState();if(document.body.classList.contains('oa-thread-open'))decorateIncoming();}
-var pending=false;
-var mo=OrcPageLifecycle.mutationObserver(function(){
-  if(pending)return;
-  pending=true;
-  requestAnimationFrame(function(){pending=false;run();});
-});
+// Straight away, not a frame later: a row drawn without its avatar and then
+// given one moved the thread after it had been shown at its newest message.
+var mo=OrcPageLifecycle.mutationObserver(function(){run();});
 function start(){
   run();
   var main=document.querySelector('.msgs-main');
@@ -208,8 +206,10 @@ function sync(){
     [app,main,right,thread].forEach(function(el){clear(el,['position','top','right','bottom','left','width','height','max-height','margin','padding','overflow','display','flex-direction'])});
   }
 }
-var pending=false;
-var mo=OrcPageLifecycle.mutationObserver(function(){if(pending)return;pending=true;requestAnimationFrame(function(){pending=false;sync();});});
+// Applied as soon as the thread opens, before anything is painted: a frame
+// later the bar above the chat disappeared after the thread was already
+// shown at its newest message, and the chat grew under the reader.
+var mo=OrcPageLifecycle.mutationObserver(function(){sync();});
 function start(){
   sync();
   var main=document.querySelector('.msgs-main');
@@ -332,7 +332,7 @@ function install(){
 }
 
 var tries=0,t=OrcPageLifecycle.setInterval(function(){tries++;if(install()||tries>60)OrcPageLifecycle.clearInterval(t)},50);
-var mo=OrcPageLifecycle.mutationObserver(function(ms){for(var i=0;i<ms.length;i++){if(ms[i].addedNodes&&ms[i].addedNodes.length){requestAnimationFrame(function(){hydrateAll(document)});break;}}});
+var mo=OrcPageLifecycle.mutationObserver(function(ms){for(var i=0;i<ms.length;i++){ms[i].addedNodes.forEach(function(n){if(n.nodeType!==1)return;if(n.matches&&n.matches('.dm-home-token-card'))hydrateCard(n);else hydrateAll(n);});}});
 function start(){install();mo.observe(document.body,{childList:true,subtree:true});hydrateAll(document);}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
