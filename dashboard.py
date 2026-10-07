@@ -18729,7 +18729,7 @@ _NAVBAR_PRIMARY = [
     ('feed',        'Feed',        '/'),
     ('calls',       'Calls',       '/calls'),
     ('leaderboard', 'Leaderboard', '/leaderboard'),
-    ('wallet',      'Wallet',      '/wallet'),
+    ('wallet',      'Portfolio',   '/wallet'),
 ]
 
 # (href, label, icon key, extra class, inline style)

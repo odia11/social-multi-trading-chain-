@@ -15,7 +15,10 @@
   from 1280px, and narrower desktops get compact pills with a search that
   opens out while typing.
 - Desktop Home showed a second logo, bell and two more search boxes under the
-  navbar that already has them.
+  navbar that already has them; Portfolio a second search button.
+- The navbar called the same page "Wallet" everywhere except on that page
+  itself, where a script renamed it "Portfolio" (as do the Home sidebar and
+  the phone tab bar). It is "Portfolio" everywhere.
 """
 import os, re, sys
 ROOT = os.path.join(os.path.dirname(__file__), '..')
@@ -57,4 +60,9 @@ hd = read('static', 'home-desktop.js')
 check('desktop Home: no second logo, bell or search under the navbar',
       'oa-desk-brand' not in hd and 'oa-home-head-btn' not in hd and "icon('search')" not in hd
       and '#right-rail .rr-search{display:none}' in read('dashboard.html'))
+pf = read('static', 'portfolio-redesign.css')
+check('Portfolio: no second search button on desktop', '@media(min-width:768px){body.oa-portfolio .pf-search-link{display:none!important}}' in pf)
+src = read('dashboard.py')
+check('the navbar says Portfolio on every page', "('wallet',      'Portfolio',   '/wallet')," in src
+      and "replace(/wallet/ig,'Portfolio')" not in read('static', 'navbar.js'))
 raise SystemExit(0 if all(checks) else 1)

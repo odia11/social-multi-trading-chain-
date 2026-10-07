@@ -144,7 +144,6 @@ function rememberNavIdentity(d){var key=navIdentityStorageKey();if(!key||!d)retu
 
 document.addEventListener('DOMContentLoaded',function(){
   var root=document.querySelector('.pt-nb-topbar');if(!root)return;markCurrentNavItem();restoreNavIdentity();
-  if(location.pathname.replace(/\/+$/,'')==='/wallet')document.querySelectorAll('a[href="/wallet"],a[href^="/wallet?"]').forEach(function(a){if(/wallet/i.test(a.textContent||''))a.textContent=(a.textContent||'').replace(/wallet/ig,'Portfolio')});
   var menuBtn=document.getElementById('pt-nb-menu-btn'),navEl=document.getElementById('pt-nb-nav'),moreBtn=document.getElementById('pt-nb-more-btn'),moreDd=document.getElementById('pt-nb-more-dd'),scrimEl=document.getElementById('pt-nb-scrim'),searchIn=document.getElementById('pt-nb-search-input'),searchRes=document.getElementById('pt-nb-search-results'),searchWrap=searchIn&&searchIn.closest('.pt-nb-search-wrap'),searchClose=document.getElementById('pt-nb-search-close');
   if(searchIn){searchIn.type='search';searchIn.setAttribute('inputmode','search');searchIn.setAttribute('aria-label','Search tokens and traders')}
   if(searchWrap&&!searchClose){searchClose=document.createElement('button');searchClose.id='pt-nb-search-close';searchClose.className='pt-nb-search-close';searchClose.type='button';searchClose.setAttribute('aria-label','Close search');searchClose.innerHTML='&times;';searchWrap.insertBefore(searchClose,searchRes||null)}
