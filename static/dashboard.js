@@ -5062,7 +5062,6 @@ OrcPageLifecycle.setInterval(_oaPollTask(fetchMarketOnly),15000);
 OrcPageLifecycle.setInterval(_oaPollTask(fetchTrades),30000);
 OrcPageLifecycle.setInterval(_oaPollTask(fetchPnlChart),30000);
 OrcPageLifecycle.setInterval(_oaPollTask(fetchLeaderboard),30000);
-OrcPageLifecycle.setInterval(_oaPollTask(_refreshVisibleReactions),12000);
 OrcPageLifecycle.setInterval(_oaPollTask(fetchPumpScanner),30000);
 
 // ── VERSION POLLING ──
@@ -6657,7 +6656,7 @@ function _emojiPickerToggle(e, palId, inputId){
   var inp=typeof inputId==='string'?document.getElementById(inputId):inputId;
   if(!pal) return;
   var wasOpen=pal.style.display==='flex';
-  document.querySelectorAll('.ep-palette,.fc-react-palette').forEach(function(p){ p.style.display='none'; });
+  document.querySelectorAll('.ep-palette').forEach(function(p){ p.style.display='none'; });
   if(wasOpen) return;
   if(!pal.dataset.built){
     _buildEmojiPicker(pal, function(emoji){
@@ -6693,7 +6692,7 @@ function _emojiPickerToggle(e, palId, inputId){
   pal.style.visibility='';
 }
 document.addEventListener('click',function(){
-  document.querySelectorAll('.ep-palette,.fc-react-palette').forEach(function(p){ p.style.display='none'; });
+  document.querySelectorAll('.ep-palette').forEach(function(p){ p.style.display='none'; });
 });
 
 async function _dmCopyTrade(btn, btnId, errId, tokenAddr, entryPrice, amtSol){
@@ -9209,23 +9208,9 @@ function renderHomeFeed(appendItems){
   _hydrateFumbles();
   el.querySelectorAll('.fc-card[id^="fc-card-"]').forEach(function(card){
     _feedViewObserver.observe(card);
-    _onScreenCardObserver.observe(card);
     _virtObserver.observe(card);
   });
 }
-
-// Ongoing (non-one-shot) on-screen tracking for _refreshVisibleReactions below
-// -- _feedViewObserver above unobserves after the first hit, so it can't
-// answer "what's on screen right now". rootMargin gives a screen's worth of
-// read-ahead so a reaction update lands just before a card scrolls into view.
-var _onScreenCardIds = new Set();
-var _onScreenCardObserver = OrcPageLifecycle.intersectionObserver(function(entries){
-  entries.forEach(function(entry){
-    var id = entry.target.id.slice('fc-card-'.length);
-    if(entry.isIntersecting) _onScreenCardIds.add(id);
-    else _onScreenCardIds.delete(id);
-  });
-}, {rootMargin: '400px 0px'});
 
 // ── VIRTUALIZATION — Twitter-style windowing ──────────────────────────────
 // content-visibility:auto (see .fc-card in dashboard.html) already tells the
@@ -9760,10 +9745,6 @@ function _renderFeedCard(e, cardIndex){
       +'<span class="fc-heart-ico">'+(e.liked_by_me ? '❤️' : '♡')+'</span>'
       +'<span class="fc-like-count" onclick="event.stopPropagation();_fcOpenLikedBy(\''+esc(safePostId)+'\')" title="See who liked this">'+esc(String(e.like_count||0))+'</span>'
     +'</button>'
-    +'<div class="fc-react-wrap">'
-    +'<button class="fc-action fc-emoji-react-btn" id="rbtn-'+esc(safePostId)+'" onclick="_feedReactOpen(event,\''+esc(safePostId)+'\')" title="Choose emoji" aria-label="Choose emoji" style="display:inline-flex;align-items:center;gap:5px;padding:4px 6px;margin:-4px -6px;border:0;background:transparent;font-size:22px;line-height:1">😊<span class="fc-react-count" id="rcount-'+esc(safePostId)+'" style="font-size:13px;color:#8a919c;font-family:JetBrains Mono,monospace">0</span></button>'
-    +'<div class="fc-react-palette" id="rpal-'+esc(safePostId)+'"></div>'
-    +'</div>'
     +'<div class="fc-share-wrap">'
     +'<button class="fc-action fc-share-btn" onclick="event.stopPropagation();_fcShareToggle(\''+esc(safePostId)+'\')" title="Share">'+_SHARE_ICON_SVG+'</button>'
     +'<div class="fc-share-dd" id="fc-share-dd-'+esc(safePostId)+'" style="display:none">'
@@ -9966,84 +9947,6 @@ function _renderLikedByRow(u){
     +'<div class="liked-by-avatar" style="background:'+bg+'">'+ini+avatarImg+'</div>'
     +'<div class="liked-by-text"><div class="liked-by-name">'+name+verified+'</div><div class="liked-by-handle">'+handle+'</div></div>'
   +'</a>';
-}
-
-const _FEED_EMOJIS = ['👍','❤️','😂','🔥','💰','🚀','😢','😮'];
-
-function _feedReactOpen(e, postId){
-  e.stopPropagation();
-  var pal = document.getElementById('rpal-'+postId);
-  if(!pal) return;
-  var wasOpen = pal.style.display === 'flex';
-  document.querySelectorAll('.fc-react-palette,.ep-palette').forEach(function(p){ p.style.display='none'; });
-  if(wasOpen) return;
-  if(!pal.childElementCount){
-    _FEED_EMOJIS.forEach(function(emoji){
-      var b = document.createElement('button');
-      b.textContent = emoji;
-      b.onclick = function(ev){ ev.stopPropagation(); _feedReactSend(postId, emoji); pal.style.display='none'; };
-      pal.appendChild(b);
-    });
-  }
-  // Escape overflow:hidden clipping by reparenting to body and using position:fixed
-  var btn=e.currentTarget||e.target;
-  var rect=btn.getBoundingClientRect();
-  document.body.appendChild(pal);
-  pal.style.position='fixed';
-  pal.style.transform='none';
-  pal.style.right='auto';
-  pal.style.bottom='auto';
-  pal.style.visibility='hidden';
-  pal.style.display='flex';
-  var pw=pal.offsetWidth, ph=pal.offsetHeight;
-  var left=Math.max(4,Math.min(rect.left+rect.width/2-pw/2, window.innerWidth-pw-4));
-  var top=rect.top-ph-8;
-  // Same clamp as _emojiPickerToggle() -- without it, a react button low in
-  // the feed can push the picker's bottom rows off the viewport.
-  if(top<4) top=Math.max(4,Math.min(rect.bottom+8, window.innerHeight-ph-4));
-  pal.style.left=left+'px';
-  pal.style.top=top+'px';
-  pal.style.visibility='';
-}
-
-async function _feedReactSend(postId, emoji){
-  try{
-    var r = await fetch('/api/feed/react/'+encodeURIComponent(postId),{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({emoji: emoji})
-    }).then(function(r){ return r.json(); });
-    if(r.ok) _feedRenderPills(postId, r.counts, r.mine);
-  }catch(e){ console.error('[react]', e); }
-}
-
-function _feedRenderPills(postId, counts, mine){
-  var countEl = document.getElementById('rcount-'+postId);
-  var btn = document.getElementById('rbtn-'+postId);
-  var total = 0;
-  Object.keys(counts || {}).forEach(function(emoji){ total += Number(counts[emoji]) || 0; });
-  if(countEl) countEl.textContent = String(total);
-  if(btn) btn.classList.toggle('reacted', Array.isArray(mine) && mine.length > 0);
-}
-
-
-async function _refreshVisibleReactions(){
-  // Despite the name, this used to refresh EVERY loaded card, not just
-  // visible ones -- a feed grown to hundreds of posts via infinite scroll
-  // meant an innerHTML write per card, every 12s, for posts nowhere near
-  // the screen. Scoped to _onScreenCardIds (see the observer above) so the
-  // cost tracks what's actually on screen instead of total feed size.
-  var ids = Array.from(_onScreenCardIds);
-  if(!ids.length) return;
-  try{
-    var r = await fetch('/api/feed/reactions/batch?ids='+ids.map(encodeURIComponent).join(','))
-              .then(function(res){ return res.json(); });
-    if(!r.ok) return;
-    var reactions = r.reactions || {};
-    ids.forEach(function(pid){
-      var data = reactions[pid];
-      if(data) _feedRenderPills(pid, data.counts, data.mine);
-    });
-  }catch(_){}
 }
 
 // Reply composer card: border goes amber the moment the input has text or
