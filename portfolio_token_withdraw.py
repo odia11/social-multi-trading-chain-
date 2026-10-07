@@ -638,12 +638,16 @@ def install(d):
             recipient_user_id = int(body.get('recipient_user_id'))
         except (TypeError, ValueError):
             return jsonify({'ok':False,'error':'Invalid recipient'}), 400
-        if body.get('currency') != 'SOL':
-            return jsonify({'ok':False,'error':'Refresh the app: tips now use SOL'}), 409
+        # Tips go in native SOL or in Solana USDC (an SPL token).
+        currency = str(body.get('currency') or '').upper()
+        if currency not in ('SOL', 'USDC'):
+            return jsonify({'ok':False,'error':'Refresh the app: choose SOL or USDC'}), 409
         amount = _amount(body.get('amount'))
         if amount is None:
-            return jsonify({'ok':False,'error':'Enter a positive SOL amount'}), 400
-        if amount > Decimal('100'):
+            return jsonify({'ok':False,'error':'Enter a positive %s amount' % currency}), 400
+        if currency == 'USDC' and amount < Decimal('0.01'):
+            return jsonify({'ok':False,'error':'The smallest USDC tip is $0.01'}), 400
+        if amount > (Decimal('100') if currency == 'SOL' else Decimal('10000')):
             return jsonify({'ok':False,'error':'Tip amount is above the per-transfer limit'}), 400
 
         conn = sqlite3.connect(d.DB_FILE, timeout=8.0)
@@ -663,7 +667,7 @@ def install(d):
         if not recipient:
             return jsonify({'ok':False,'error':'Recipient account not found'}), 404
 
-        key = ('tip', sender_wallet, recipient_user_id, str(amount.normalize()))
+        key = ('tip', sender_wallet, recipient_user_id, currency, str(amount.normalize()))
         now = time.time()
         with _RECENT_GUARD:
             if now - _RECENT.get(key, 0) < 45:
@@ -675,9 +679,17 @@ def install(d):
         try:
             from sol_native_payments import native_transfer, lamports
             try:
-                lamports(amount)
                 recipient_address = recipient['solana']
-                tx_hash, sent = native_transfer(d, sender_wallet, recipient_address, amount, body.get('request_id'))
+                if currency == 'USDC':
+                    # The recipient gets the full amount; the sender's SOL pays
+                    # the network fee (and the recipient's USDC account rent if
+                    # they never held USDC).
+                    tx_hash, sent = _solana_transfer(
+                        d, sender_wallet, str(d.USDC_MINT), recipient_address, amount,
+                        allow_user_funded_gas=False)
+                else:
+                    lamports(amount)
+                    tx_hash, sent = native_transfer(d, sender_wallet, recipient_address, amount, body.get('request_id'))
                 chain = 'solana'
             except _SolanaPreflightError as exc:
                 return jsonify({'ok':False,'error':str(exc),'reason_code':exc.reason_code,'status':'failed'}), 400
@@ -689,7 +701,7 @@ def install(d):
             tip_id = _record_tip(
                 d, sender_wallet, sender_user_id, recipient_user_id,
                 recipient_address, sent, chain, tx_hash,
-                currency='SOL', note=str(body.get('message') or '')[:100])
+                currency=currency, note=str(body.get('message') or '')[:100])
             try:
                 d._wallet_tokens_cache.pop(sender_wallet, None)
                 d._wallet_tokens_cache.pop(recipient['session'], None)
@@ -697,12 +709,14 @@ def install(d):
                 pass
             try:
                 d.add_user_log(sender_wallet,
-                    'TIP: %.9f SOL sent to user %s · tx %s' %
-                    (float(sent), recipient_user_id, tx_hash[:12]))
+                    'TIP: %s %s sent to user %s · tx %s' %
+                    (('%.2f' if currency == 'USDC' else '%.9f') % float(sent), currency,
+                     recipient_user_id, tx_hash[:12]))
             except Exception:
                 pass
             return jsonify({
-                'ok':True, 'amount_sent':sent, 'max_spend_sol':str(amount), 'currency':'SOL',
+                'ok':True, 'amount_sent':sent, 'max_spend_sol':str(amount) if currency == 'SOL' else None,
+                'currency':currency,
                 'chain':chain, 'tx_hash':tx_hash, 'tip_id':tip_id,
                 'status':'submitted',
                 'explorer':_explorer(chain, tx_hash)

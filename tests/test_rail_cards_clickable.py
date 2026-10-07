@@ -67,7 +67,7 @@ check('no rule makes the drag rails\' children pointer-events:none -- that '
       'stops matching',
       re.search(r'\.pt-rail-dragging\s*\*', HTML_NC) is None)
 
-for rail in ('pt-story-rail', 'pt-surge-rail', 'pt-trader-rail'):
+for rail in ('pt-surge-rail', 'pt-trader-rail'):
     rule = re.search(re.escape('.' + rail) + r'\.pt-rail-dragging[^{]*\{([^}]*)\}', HTML_NC)
     body = rule.group(1) if rule else ''
     check(f'.{rail}.pt-rail-dragging styles the cursor without disabling '

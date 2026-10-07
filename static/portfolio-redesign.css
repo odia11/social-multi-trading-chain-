@@ -61,6 +61,8 @@ body.oa-portfolio .rt-sidebar{display:none}
 /* Legacy injected UI is never a second source of truth. */
 body.oa-portfolio .pf-tabs,body.oa-portfolio .pf-balance-card,body.oa-portfolio .pf-allocation{display:none!important}
 @media(max-width:767px){body.oa-portfolio .pt-nb-search-wrap{display:none!important}}
+/* ...and from 768px the navbar search is there, so no second search button */
+@media(min-width:768px){body.oa-portfolio .pf-search-link{display:none!important}}
 body.oa-portfolio .pf-search-link{margin-left:auto;width:37px;height:37px;display:flex;align-items:center;justify-content:center;border:1px solid #303d44;border-radius:11px;color:#dae2e4;text-decoration:none;background:#141d22}body.oa-portfolio .pf-search-link:hover{color:#ffcb66;border-color:#ffcb66}
 
 /* Live Portfolio QA: keep Assets visually identical to approved reference. */

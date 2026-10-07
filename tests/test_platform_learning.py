@@ -41,7 +41,9 @@ class Learning(unittest.TestCase):
         alien=self.parent('@orcagent where do I find that?',bot,uid=3)
         self.assertEqual(self.topic(p.reply_to(self.d,alien,self.user(3),self.now)),'scope')
         unrelated=self.parent('@orcagent tell me a joke',bot)
-        self.assertEqual(self.topic(p.reply_to(self.d,unrelated,'member',self.now+1802)),'scope')
+        # The earlier 'share' context must not leak into an unrelated question.
+        # (OrcAgent now simply tells the joke: orcagent_brain.)
+        self.assertIn(self.topic(p.reply_to(self.d,unrelated,'member',self.now+1802)),('scope','chat'))
         direct=self.parent('@orcagent Phantom connection?',bot)
         self.assertEqual(self.topic(p.reply_to(self.d,direct,'member',self.now+2703)),'wallet')
         other=self.parent('@orcagent where do I find that?',bot,post='t1')

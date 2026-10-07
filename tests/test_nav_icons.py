@@ -54,8 +54,8 @@ check('every destination in the menu carries an icon and a label',
       anchors and all('<svg' in a and '<span>' in a for a in anchors))
 check('...the primary links too, not only the secondary ones',
       primary.count('<svg') == len(ns['_NAVBAR_PRIMARY']))
-check('Calls is not a primary navigation option anymore',
-      not any(label == 'Calls' or href == '/calls' for _, label, href in ns['_NAVBAR_PRIMARY']))
+check('Calls is a primary navigation option again (users could no longer find the Calls page)',
+      ('calls', 'Calls', '/calls') in ns['_NAVBAR_PRIMARY'])
 check('...and Disconnect, which is the one row where hitting the wrong thing '
       'actually costs something', 'Disconnect Wallet' in more
       and more[more.index('Disconnect Wallet') - 400:].count('<svg') >= 1)
@@ -99,7 +99,7 @@ check('the desktop pills stay sized to their content instead of stretching',
 check('...and drop their icons when the row is tight, rather than squeezing '
       'the tap targets that matter more',
       '.pt-nb-nav a .pt-nb-ic{display:none}' in CSS
-      and '@media (min-width:1100px)' in CSS)
+      and '@media (min-width:1400px)' in CSS)
 check('inside the mobile menu the icons always show, since there the entries '
       'are rows and there is room', "display:block;width:18px" in CSS)
 check('the stylesheet still has balanced braces — one stray brace silently '

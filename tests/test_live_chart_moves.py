@@ -42,7 +42,8 @@ def fn(name):
 # ── the server side ───────────────────────────────────────────────────────
 # The route validates, then prices; both halves are shared helpers now (the
 # batch endpoint uses them too), so read them in that order.
-prices = fn('api_market_prices') + fn('_validated_market_pairs') + fn('_market_prices_for_pairs')
+prices = (fn('api_market_prices') + fn('_validated_market_pairs') + fn('_market_prices_for_pairs')
+          + fn('_market_prices_fetch'))   # the upstream read itself, split out for single flight
 check('there is one endpoint that answers for many pools at once, so a screen '
       'of tokens costs one upstream request rather than one per card',
       # Many pools go into ONE url. Which list is joined changed when the

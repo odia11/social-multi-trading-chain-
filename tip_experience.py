@@ -145,7 +145,9 @@ def _transition(d, tip_id, state, reason=None):
         if state == 'confirmed':
             link = f'/wallet?tab=history&tip={tip_id}'
             name = (row['sender_name'] or 'An OrcAgent user')[:70]
-            content = f'{name} sent you {float(row["amount"]):.9f} {row["currency"]}'
+            amount_text = ('%.2f' % float(row['amount'])) if row['currency'] == 'USDC' \
+                else ('%.9f' % float(row['amount'])).rstrip('0').rstrip('.')
+            content = f'{name} sent you {amount_text} {row["currency"]}'
             if row['note']:
                 content += ' · ' + row['note']
             # Older tips already have a generic notification. Enrich it

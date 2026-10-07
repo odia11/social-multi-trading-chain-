@@ -39,7 +39,7 @@ check('gas helper accepts an already-verified balance',
 check('full anti-double-spend confirmation window is unchanged',
       'CONFIRM_TIMEOUT_S = 90.0' in O)
 check('normal confirmation polling is sub-second',
-      'CONFIRM_POLL_INTERVAL_S = 0.4' in O and 'elapsed < 5.0 else 1.0' in O)
+      'CONFIRM_POLL_INTERVAL_S = 0.25' in O and 'elapsed < 5.0 else 1.0' in O)
 check('post-confirm balance reconciliation is faster but still retries',
       'attempts: int = 12, delay_s: float = 0.4' in O)
 
@@ -58,8 +58,8 @@ with patch.object(eng,'_rpc_post',side_effect=lambda *a,**kw: next(statuses)), \
      patch.object(eng.time,'sleep') as sleep:
     out=eng._confirm_transaction('fixture',timeout_s=5)
 check('confirmation remains authoritative',out['confirmed'] is True and out['status']=='confirmed')
-check('first confirmation retry waits only 0.4s',
-      bool(sleep.call_args_list) and sleep.call_args_list[0].args[0]==0.4)
+check('first confirmation retry waits only 0.25s',
+      bool(sleep.call_args_list) and sleep.call_args_list[0].args[0]==0.25)
 
 # The UI performs one forced authoritative portfolio snapshot immediately after
 # success instead of sleeping 1.5 seconds and then firing several reads.

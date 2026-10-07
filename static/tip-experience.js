@@ -20,9 +20,11 @@ function refreshStats(){
   if(!box)return;
   json('/api/profile/'+encodeURIComponent(box.dataset.userId)+'/tip-stats').then(function(d){
     if(!d.ok)return;
-    if($('oa-tip-received'))$('oa-tip-received').textContent=money(d.received_sol)+' SOL';
+    // Tips come in SOL and USDC: show USDC next to SOL once there is any.
+    var both=function(sol,usdc){return money(sol)+' SOL'+(Number(usdc)>0?' · $'+Number(usdc).toFixed(2)+' USDC':'');};
+    if($('oa-tip-received'))$('oa-tip-received').textContent=both(d.received_sol,d.received_usdc);
     if($('oa-tip-supporters'))$('oa-tip-supporters').textContent=String(d.supporters);
-    if($('oa-tip-sent')&&d.sent_sol!==undefined)$('oa-tip-sent').textContent=money(d.sent_sol)+' SOL';
+    if($('oa-tip-sent')&&d.sent_sol!==undefined)$('oa-tip-sent').textContent=both(d.sent_sol,d.sent_usdc);
   }).catch(function(){});
 }
 var profileBalanceInFlight=false;

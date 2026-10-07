@@ -87,7 +87,7 @@ check('enableDragScroll also tracks touch start/end so callers can tell '
       and ("_routeScope.addEventListener(el,'touchend'" in drag_fn
            or "_routeScope.addEventListener(el,'touchcancel'" in drag_fn))
 
-for rail_id in ('pt-story-rail', 'pt-surge-rail', 'pt-trader-rail'):
+for rail_id in ('pt-surge-rail', 'pt-trader-rail'):
     check(f'enableDragScroll is actually called on #{rail_id}',
           re.search(r"enableDragScroll\(\s*document\.getElementById\(['\"]"
                      + re.escape(rail_id) + r"['\"]\)\s*\)", JS) is not None)
@@ -119,7 +119,7 @@ check('the capture happens before the rebuild, and the restore happens '
       capture_idx < innerhtml_idx < restore_idx)
 
 # ── 3. CSS: touch momentum, scroll containment, and a visible drag cursor ─
-for rail_class in ('.pt-story-rail', '.pt-surge-rail', '.pt-trader-rail'):
+for rail_class in ('.pt-surge-rail', '.pt-trader-rail'):
     rule_m = re.search(re.escape(rail_class) + r'\{([^}]*)\}', HTML)
     assert rule_m, f'{rail_class} base rule not found'
     rule = rule_m.group(1)

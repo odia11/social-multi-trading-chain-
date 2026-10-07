@@ -18,6 +18,7 @@ import platform_prices as prices
 import platform_public_data as public_data
 import platform_reasoner as reasoner
 import orcagent_chat as chat
+import orcagent_brain as brain
 from zoneinfo import ZoneInfo
 from flask import jsonify, request
 
@@ -474,6 +475,36 @@ def chat_then_reply(d, source_id, wallet, kind):
             pass
 
 
+def member_name(c, user_id):
+    row = c.execute('SELECT username FROM users WHERE id=?', (user_id,)).fetchone()
+    return row[0] if row and row[0] else 'user'
+
+
+def _local_brain(text, asker, thread, response):
+    """OrcAgent's own conversational answer (orcagent_brain) when no model
+    answered: never for live data, actions, secrets or privacy, which their
+    deterministic modules own."""
+    # Only for a message addressed to OrcAgent (a tag, or a reply in a
+    # conversation with it, which _conversation_message prefixes): the
+    # deterministic layer answered None for everything else.
+    if not isinstance(text, str) or not response or not MENTION.search(text):
+        return response
+    if response[0] in chat.DETERMINISTIC_TOPICS:
+        return response
+    raw = MENTION.sub('', text).strip()
+    if not raw or chat.private_request(raw) or prices.query(raw) or public_data.query(raw):
+        return response
+    try:
+        local = brain.reply(chat.redact(raw, chat.MAX_QUESTION), asker, thread, response)
+    except Exception:
+        local = None
+    if local:
+        clean = chat.safe_output(local[1])
+        if clean:
+            return (local[0], clean)
+    return response
+
+
 def _privacy_guard(text, response):
     """Absolute: a question about anyone's private account matters is always
     answered with the refusal, whatever any other layer produced."""
@@ -511,6 +542,8 @@ def reply_to_post(d,post_number,wallet,now=None,chat_answer=None):
         talk = _reasoning_for(text,chat_answer)
         if talk and (not response or response[0] not in chat.DETERMINISTIC_TOPICS):
             response = talk
+        elif not talk:
+            response = _local_brain(text, member_name(c, member[0]), [], response)
         response = _privacy_guard(text, response)
         key = 'post-reply:'+str(post_number)
         if not response or c.execute('SELECT 1 FROM platform_assistant_events WHERE event_key=?',(key,)).fetchone() or not within_reply_limits(c,member[0],now):
@@ -576,6 +609,9 @@ def reply_to(d, source_id, wallet, now=None, chat_answer=None):
         talk = _reasoning_for(message,chat_answer)
         if talk and (not explicit or explicit[0] not in chat.DETERMINISTIC_TOPICS):
             response = talk
+        elif not talk:
+            response = _local_brain(message, member_name(c, source[0]),
+                                    chat.thread_context(c, d, source[1], source[4], author[0]), response)
         response = _privacy_guard(message, response)
         key = 'reply:' + str(source_id)
         if not response or c.execute('SELECT 1 FROM platform_assistant_events WHERE event_key=?', (key,)).fetchone():
@@ -605,6 +641,8 @@ def install(d):
         return
     initialize(d.DB_FILE)
     app._orca_platform_assistant = True
+    import ai_key_admin
+    ai_key_admin.install(d)
 
     @app.after_request
     def mentioned(response):
@@ -641,6 +679,8 @@ def install(d):
         with sqlite3.connect(d.DB_FILE,timeout=8) as c:
             author = identity(c)
             state = dict(posts=enabled(c,'posts'),replies=enabled(c,'replies'),learning=enabled(c,'learning'),author=author[2] if author else None)
+            import ai_key_admin
+            state['ai'] = ai_key_admin.status(d)
             questions = learning.dashboard(c,d,MENTION,LEARNABLE,time.time())
             recent = c.execute('SELECT kind,post_id,reply_id,topic,created_at FROM platform_assistant_events ORDER BY created_at DESC LIMIT 20').fetchall()
         return d._render_no_cache('platform_assistant_admin.html',state=state,recent=recent,theses=THESES,questions=questions,topics=LEARNABLE,csrf_token=d._get_csrf_token())

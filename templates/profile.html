@@ -277,6 +277,9 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
 .tip-label{display:block;font-size:13px;font-weight:600;color:#c8ced6;margin:16px 0 8px}
 .tip-input-wrap{display:flex;align-items:center;border:1px solid #2a313a;background:#10151b;border-radius:14px;padding:0 16px}
 .tip-input{min-width:0;flex:1;background:none;border:0;outline:none;color:#eef1f5;font-size:30px;font-weight:600;padding:14px 0;font-family:'JetBrains Mono',monospace}
+.tip-cur{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:4px;margin:4px 0 14px;border:1px solid #232a34;border-radius:14px;background:#0d1117}
+.tip-cur-btn{height:38px;border:0;border-radius:10px;background:transparent;color:#9aa3ae;font:700 14px/1 'Geist',system-ui,sans-serif;cursor:pointer}
+.tip-cur-btn.active{background:#f7b955;color:#0a0b0e}
 .tip-input::-webkit-outer-spin-button,.tip-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .tip-input[type=number]{-moz-appearance:textfield}
 .tip-input-sym{font-size:14px;color:#a0a8b3;font-weight:600}
@@ -1098,10 +1101,10 @@ async function _removeBanner(){
      The recipient is rendered by the server; there is no field to type one
      into, so a tip cannot be redirected by editing the page. -->
 <div class="tip-back" id="tip-back" onclick="if(event.target===this)_closeTip()">
-  <div class="tip-sheet" role="dialog" aria-modal="true" aria-label="Tip SOL">
+  <div class="tip-sheet" role="dialog" aria-modal="true" aria-label="Send a tip">
     <div class="tip-handle"></div>
     <div class="tip-head">
-      <div class="tip-title">Tip SOL</div>
+      <div class="tip-title" id="tip-title">Send a tip</div>
       <button class="tip-close" type="button" onclick="_closeTip()" aria-label="Close">&times;</button>
     </div>
 
@@ -1137,23 +1140,30 @@ async function _removeBanner(){
       </div>
     </div>
 
+    <div class="tip-cur" role="radiogroup" aria-label="Tip currency">
+      <button type="button" class="tip-cur-btn active" data-cur="SOL" role="radio" aria-checked="true" onclick="_tipSetCur('SOL')">SOL</button>
+      <button type="button" class="tip-cur-btn" data-cur="USDC" role="radio" aria-checked="false" onclick="_tipSetCur('USDC')">USDC</button>
+    </div>
     <label class="tip-label" for="tip-amount">Amount</label>
     <div class="tip-input-wrap">
       <input class="tip-input" id="tip-amount" type="number" inputmode="decimal" min="0" step="0.000000001"
              placeholder="0" oninput="_tipTouched()">
-      <span class="tip-input-sym">SOL</span>
+      <span class="tip-input-sym" id="tip-input-sym">SOL</span>
     </div>
     <div class="tip-approx" id="tip-approx">&asymp; $0.00</div>
     <div class="tip-presets">
       {% for v in [0.001, 0.005, 0.01, 0.025, 0.05] %}
-      <button class="tip-preset" type="button" onclick="_tipPreset({{ v }}, this)">{{ v }} SOL</button>
+      <button class="tip-preset" data-cur="SOL" data-v="{{ v }}" type="button" onclick="_tipPreset({{ v }}, this)">{{ v }} SOL</button>
+      {% endfor %}
+      {% for v in [1, 2, 5, 10, 25] %}
+      <button class="tip-preset" data-cur="USDC" data-v="{{ v }}" type="button" onclick="_tipPreset({{ v }}, this)" hidden>${{ v }}</button>
       {% endfor %}
     </div>
 
     <label class="tip-label">Routing</label>
     <div class="tip-network">
       <span class="tip-sol">$</span>
-      <div>Native SOL on Solana<small>The network fee comes out of your amount. The recipient receives the remainder.</small></div>
+      <div id="tip-route">Native SOL on Solana<small>The network fee comes out of your amount. The recipient receives the remainder.</small></div>
     </div>
 
     <label class="tip-label" for="tip-message">Add a message (optional)</label>
@@ -1166,7 +1176,7 @@ async function _removeBanner(){
     <div class="tip-summary">
       <span class="tip-usdc-mark">◎</span>
       <span class="tip-summary-left">You send</span>
-      <span class="tip-summary-val"><span id="tip-send-val">0.00</span> SOL
+      <span class="tip-summary-val"><span id="tip-send-val">0.00</span> <span id="tip-send-cur">SOL</span>
         <span class="tip-summary-usd" id="tip-send-usd">&asymp; $0.00</span></span>
     </div>
 
@@ -1184,7 +1194,7 @@ async function _removeBanner(){
       <span class="tip-info-mark">&#9889;</span>
       <div>
         <strong>Instant. Secure. On-Chain.</strong>
-        <p>Your tip is sent directly to their SOL wallet. It cannot be reversed once it is sent.</p>
+        <p>Your tip is sent directly to their OrcAgent wallet on Solana. It cannot be reversed once it is sent.</p>
       </div>
     </div>
   </div>
@@ -1200,23 +1210,47 @@ function _tipEl(id){ return document.getElementById(id); }
 function _openTip(){ _tipEl('tip-back').classList.add('open'); _tipEl('tip-amount').focus(); }
 function _closeTip(){ if(!_tipSending) _tipEl('tip-back').classList.remove('open'); }
 
+// Tips go in SOL or USDC (Solana USDC, an SPL token). SOL tips take the
+// network fee out of the amount; USDC tips arrive in full and the network
+// fee is paid in SOL from the sender's trading wallet.
+var _tipCur = 'SOL';
+var _TIP_ROUTE = {
+  SOL: 'Native SOL on Solana<small>The network fee comes out of your amount. The recipient receives the remainder.</small>',
+  USDC: 'USDC on Solana<small>The recipient receives the full amount. The tiny network fee is paid in SOL from your trading wallet.</small>'
+};
+function _tipFmt(a, cur){ return cur === 'USDC' ? (+a).toFixed(2) : (+(+a).toFixed(9)).toString(); }
+
 function _tipAmount(){
   var v = parseFloat(_tipEl('tip-amount').value);
   return (isFinite(v) && v > 0) ? v : 0;
 }
 
-// SOL is a dollar, so the dollar figure is the same number. It is shown
-// anyway because the design asks the question "how much is that?" and a
-// blank answer reads as a missing price rather than as one-to-one.
+function _tipSetCur(cur){
+  if(_tipSending || (cur !== 'SOL' && cur !== 'USDC')) return;
+  _tipCur = cur;
+  Array.prototype.forEach.call(document.querySelectorAll('.tip-cur-btn'), function(b){
+    var on = b.dataset.cur === cur;
+    b.classList.toggle('active', on); b.setAttribute('aria-checked', on ? 'true' : 'false');
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.tip-preset'), function(b){ b.hidden = b.dataset.cur !== cur; });
+  var input = _tipEl('tip-amount');
+  input.step = cur === 'USDC' ? '0.01' : '0.000000001';
+  input.value = '';
+  _tipEl('tip-input-sym').textContent = cur;
+  _tipEl('tip-send-cur').textContent = cur;
+  _tipEl('tip-route').innerHTML = _TIP_ROUTE[cur];
+  _tipTouched();
+}
+
 function _tipTouched(){
-  var a = _tipAmount(), fixed = a.toFixed(9);
-  _tipEl('tip-approx').textContent = 'Total budget including the network fee';
-  _tipEl('tip-send-val').textContent = fixed;
-  _tipEl('tip-send-usd').textContent = 'Recipient receives budget minus network fee';
-  _tipEl('tip-submit-label').textContent = a > 0 ? ('Tip ' + (+a) + ' SOL') : 'Tip SOL';
+  var a = _tipAmount(), cur = _tipCur;
+  _tipEl('tip-approx').textContent = cur === 'USDC' ? ('≈ $' + a.toFixed(2)) : 'Total budget including the network fee';
+  _tipEl('tip-send-val').textContent = cur === 'USDC' ? a.toFixed(2) : a.toFixed(9);
+  _tipEl('tip-send-usd').textContent = cur === 'USDC' ? 'Recipient receives the full amount' : 'Recipient receives budget minus network fee';
+  _tipEl('tip-submit-label').textContent = a > 0 ? ('Tip ' + _tipFmt(a, cur) + ' ' + cur) : ('Tip ' + cur);
   _tipEl('tip-submit').disabled = !(a > 0) || _tipSending;
   Array.prototype.forEach.call(document.querySelectorAll('.tip-preset'),
-    function(b){ b.classList.toggle('active', parseFloat(b.textContent) === a); });
+    function(b){ b.classList.toggle('active', b.dataset.cur === cur && parseFloat(b.dataset.v) === a); });
 }
 
 function _tipPreset(v, btn){
@@ -1238,20 +1272,22 @@ function _tipSay(text, ok){
 // confirmed. A Solana transfer carries no memo here, so a message field that
 // only looked like it sent something would be decoration -- and a message
 // delivered for a tip that failed would be worse.
-function _tipSendNote(amount){
+function _tipSendNote(amount, cur){
+  cur = cur || _tipCur;
   var note = (_tipEl('tip-message').value || '').trim();
   if(!note || !_tipPeerId) return;
   fetch('/api/messages/' + _tipPeerId, {
     method: 'POST',
     headers: {'Content-Type':'application/json','X-CSRF-Token':_csrf},
     body: JSON.stringify({message_type:'text',
-                          message: 'Tipped ' + amount.toFixed(9) + ' SOL \u2014 ' + note})
+                          message: 'Tipped ' + _tipFmt(amount, cur) + ' ' + cur + ' \u2014 ' + note})
   }).catch(function(){ /* the money arrived; a missing note is not worth an alarm */ });
 }
 
 function _tipRecentMatch(tips, amount, startedAt){
   return (tips||[]).find(function(t){
     if(!t || t.direction!=='sent' || Number(t.recipient_user_id)!==Number(_tipPeerId)) return false;
+    if(t.currency && t.currency !== _tipCur) return false;
     if((Number(t.amount||0)>Number(amount)||Number(amount)-Number(t.amount||0)>0.0001)) return false;
     var ts=Date.parse(String(t.created_at||'').replace(' ','T')+'Z');
     return Number.isFinite(ts) && ts >= startedAt-5000;
@@ -1306,14 +1342,15 @@ function _sendTip(){
   fetch('/api/tip', {
     method: 'POST',
     headers: {'Content-Type':'application/json','X-CSRF-Token':_csrf},
-    body: JSON.stringify({recipient_user_id:_tipPeerId, amount:amount, currency:'SOL', request_id:crypto.randomUUID(),
+    body: JSON.stringify({recipient_user_id:_tipPeerId, amount:amount, currency:_tipCur, request_id:crypto.randomUUID(),
                           message:(_tipEl('tip-message').value||'').trim().slice(0,100)})
   }).then(function(r){ return r.json().catch(function(){ return {}; }); })
     .then(function(d){
       if(d && d.ok){
         _tipSending = false;
         if(typeof window.OrcAgentTipReceipt === 'function'){
-          window.OrcAgentTipReceipt(d, amount, function(){ _tipSendNote(amount); });
+          var sentCur = _tipCur;
+          window.OrcAgentTipReceipt(d, amount, function(){ _tipSendNote(amount, sentCur); });
         } else {
           _tipSay('Tip submitted — awaiting blockchain confirmation', true);
         }
