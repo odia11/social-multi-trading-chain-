@@ -13826,21 +13826,24 @@ def api_top_trades_week():
     try:
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
+        # Each trader's best trade of the week, in one pass. This used to
+        # re-scan that trader's week for every one of their trades, which for
+        # a bot with thousands of trades kept a thread busy for over a minute.
         c.execute('''
             SELECT u.username, u.avatar_url, u.is_verified, u.wallet_address,
                    t.token, t.pnl, t.mint_address, t.timestamp
-            FROM trades t
+            FROM (
+                SELECT user_id, token, pnl, mint_address, timestamp,
+                       ROW_NUMBER() OVER (PARTITION BY user_id
+                                          ORDER BY pnl DESC, id) AS rn
+                FROM trades
+                WHERE timestamp >= ? AND pnl > 0
+            ) t
             JOIN users u ON u.id = t.user_id
-            WHERE t.timestamp >= ? AND t.pnl > 0
-              AND t.pnl = (
-                  SELECT MAX(t2.pnl) FROM trades t2
-                  WHERE t2.user_id = t.user_id
-                    AND t2.timestamp >= ? AND t2.pnl > 0
-              )
-            GROUP BY t.user_id
+            WHERE t.rn = 1
             ORDER BY t.pnl DESC
             LIMIT 10
-        ''', (cutoff, cutoff))
+        ''', (cutoff,))
         rows = c.fetchall()
         conn.close()
     except Exception as e:

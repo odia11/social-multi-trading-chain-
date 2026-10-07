@@ -214,6 +214,26 @@ The app keeps three compressed copies of its own in `/data/backups`. That
 protects you from a bad write. It does not protect you from losing the
 server, so copy that directory somewhere else too.
 
+### How much memory it really uses
+
+The Proxmox summary is not the number to go by. Without the QEMU guest agent
+it counts the VM's page cache as used: Linux keeps recently read files (the
+database, its backups, the journal) in otherwise idle RAM and hands that back
+the moment a program needs it. A VM that has been up a while therefore always
+looks nearly full there. Ask the VM itself:
+
+```bash
+free -m                                   # "available" is what is really free
+ps -eo pid,rss,cmd --sort=-rss | head -8  # biggest processes, RSS in KB
+sudo journalctl -u orcagent --since "1 hour ago" | grep '\[memory\]'
+```
+
+The last line shows the app's own memory pass every ten minutes (expired
+cache entries dropped, RSS before and after). The app itself should sit in
+the low hundreds of MB. To make Proxmox show the real figure, install the
+guest agent (`sudo apt install qemu-guest-agent`, then enable *QEMU Guest
+Agent* under the VM's Options in Proxmox and restart the VM).
+
 ---
 
 ## Two notes on how this is set up
@@ -222,7 +242,7 @@ server, so copy that directory somewhere else too.
 manager and the surge radar all run inside the web process. A second worker
 is a second copy of all of it — two processes buying the same token, two gas
 grants for one empty wallet. `deploy/orcagent.service` pins it to one worker
-with four threads; please don't raise it.
+with sixteen threads; please don't raise the worker count.
 
 There is now a second reason. The guards that stop a double-click becoming
 two buys or two sells are in-process locks: a second worker holds its own

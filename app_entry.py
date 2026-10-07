@@ -195,4 +195,9 @@ _install_live_trades_truth(_dashboard)
 from portfolio_inventory import install as _install_portfolio_inventory
 _install_portfolio_inventory(_dashboard)
 
+# Drops long-expired cache entries and returns freed heap to the OS every few
+# minutes, so the one long-running process does not creep up in memory.
+from memory_hygiene import install as _install_memory_hygiene
+_install_memory_hygiene(_dashboard)
+
 app = _dashboard.app
