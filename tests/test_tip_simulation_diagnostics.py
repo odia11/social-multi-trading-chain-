@@ -63,9 +63,11 @@ def test_native_tip_has_no_automatic_usdc_gas_retry():
     src=(Path(__file__).resolve().parents[1]/'portfolio_token_withdraw.py').read_text()
     block=src[src.index("@app.post('/api/tip')"):src.index("@app.post('/api/wallet/send-token')")]
     assert 'native_transfer(d, sender_wallet' in block
-    assert "body.get('currency') != 'SOL'" in block
+    # Tips are SOL or USDC (the user chose both). A USDC tip is a plain SPL
+    # transfer: still no automatic USDC->SOL gas top-up for a tip.
+    assert "if currency not in ('SOL', 'USDC'):" in block
     assert 'topup(' not in block
-    assert '_solana_transfer(' not in block
+    assert block.count('_solana_transfer(') == 1 and 'allow_user_funded_gas=False' in block
 
 
 def test_stale_blockhash_is_not_relabelled_as_gas():
