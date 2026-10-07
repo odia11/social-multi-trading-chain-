@@ -139,8 +139,8 @@ with patch.object(d, '_dex_get', lambda *a, **k: None), patch.object(d, '_gt_try
     check('a Solana address DexScreener cannot serve is found via GeckoTerminal',
           got and got[0]['symbol'] == 'CRUMB' and got[0]['chain'] == 'solana' and got[0]['price'] == 0.00042)
     got = alice.get('/api/calls/lookup?q=' + EVM_ADDR, base_url=BASE).get_json()['tokens']
-    check('an EVM address is tried on the EVM chains until found (Base)', bool(got) and got[0]['chain'] == 'base'
-      and got[0]['price'] == 1.5 and got[0]['market_cap'] == 9_000_000)
+    # Solana-only: an EVM address is not looked up on the (retired) EVM chains.
+    check('an EVM address finds nothing: calls are Solana tokens only', not got)
     d._scanner_cache['data'] = [{'mint': 'Scan1111111111111111111111111111111111pump', 'symbol': 'SCAN', 'name': 'Scanned',
                                  'chain': 'solana', 'price_usd': 0.01, 'market_cap': 10_000_000, 'image_url': ''}]
     n_before = len(gt_calls)

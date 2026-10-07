@@ -70,6 +70,11 @@ check("Home loads page-loader.js once (the shared fallback sees Home's own copy)
 ux = read('static', 'app-ux.js'); prof = read('templates', 'profile.html')
 warm = re.search(r"'/profile':\[(.*?)\]", ux).group(1)
 check("the profile's tip files are warmed under the URL the page really loads",
-      "'tip-experience.js?v={app}'" in warm and '/static/tip-experience.js?v={{ app_version }}"' in prof
-      and "'profile-gold-tip.css?v={app}'" in warm and '/static/profile-gold-tip.css?v={{ app_version }}"' in prof)
+      # warmed as /static/<file>?v=<_APP_VERSION> (staticBuildUrl + the
+      # oa-app-version meta), loaded as ?v={{ app_version }} -- the same value
+      "'tip-experience.js'" in warm and '/static/tip-experience.js?v={{ app_version }}"' in prof
+      and "'profile-gold-tip.css'" in warm and '/static/profile-gold-tip.css?v={{ app_version }}"' in prof
+      and "return '/static/'+asset+'?v='+encodeURIComponent(APP_VERSION||'1');" in ux
+      and "version = str(getattr(appmod, '_APP_VERSION', '1'))" in read('app_performance.py')
+      and "'app_version': _APP_VERSION" in read('dashboard.py'))
 raise SystemExit(0 if all(checks) else 1)

@@ -136,7 +136,8 @@ check('the height is MEASURED, not assumed — the search field wraps onto a '
       'second line at this width, so the bar has no one fixed height',
       'getBoundingClientRect().height' in JS and "setProperty('--pt-nb-h'" in JS)
 check('...re-measured when the layout can have changed under it',
-      "addEventListener('resize', syncNavbarHeight)" in JS
+      # route-scoped, so the listener is removed when the page is left
+      "_routeScope.addEventListener(window,'resize', syncNavbarHeight)" in JS
       and 'orientationchange' in JS)
 check('...after webfonts settle, which is how a bar ends up a few pixels '
       'taller than it measured on first paint', 'document.fonts.ready' in JS)

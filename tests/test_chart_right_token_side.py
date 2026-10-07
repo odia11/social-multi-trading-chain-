@@ -2,7 +2,8 @@
 its pool. GeckoTerminal's `token=base` is GeckoTerminal's idea of the base
 token, which doesn't always match DexScreener's (where the card's mint, header
 price and live ticks come from): a $0.001979 token on Robinhood Chain was drawn
-as a $773 line. The chart now asks GeckoTerminal for the token by address."""
+as a $773 line. The chart now asks GeckoTerminal for the token by address.
+(Checked on Solana, the only chain the app trades; the EVM chains are off.)"""
 import os, sys, time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 os.environ.setdefault('ENCRYPTION_KEY', '6UorqYgQpSk59aqy_MY73E0nlUjevVeCj0clmTGE_Ck=')
@@ -14,9 +15,9 @@ checks = []
 def check(name, cond):
     checks.append(bool(cond)); print(('PASS ' if cond else 'FAIL ') + name, flush=True)
 
-MINT = '0xcd00000000000000000000000000000000aa93c0'
-PAIR = '0x1111111111111111111111111111111111111111'
-OTHER = '0x2222222222222222222222222222222222222222'
+MINT = 'CdXm9ZtqXjYbJ3x8R8B5u1kq7m6FvK2wQyH4pZ5aa93c'   # Solana mints keep their case
+PAIR = '8sLbNZoA1cfnvMJLPfp98ZLAnFSYCFApfJKMbiXNLwxj'
+OTHER = 'So11111111111111111111111111111111111111112'
 urls = []
 
 class R:
@@ -27,7 +28,7 @@ def fake_get(url, *a, **k):
     urls.append(url)
     if '/ohlcv/' in url:
         # GeckoTerminal answers for whichever side it was asked for.
-        px = 0.001979 if ('token=' + MINT.lower()) in url else 773.32
+        px = 0.001979 if ('token=' + MINT) in url else 773.32
         return R({'data': {'attributes': {'ohlcv_list': [
             [1700000000 + i * 300, px, px, px, px, 10] for i in range(20)]}}})
     if url.rstrip('/').endswith('/pools/' + PAIR):
@@ -35,8 +36,8 @@ def fake_get(url, *a, **k):
         return R({'data': {'attributes': {'base_token_price_usd': '773.32',
                                           'quote_token_price_usd': '0.001979'},
                            'relationships': {
-                               'base_token': {'data': {'id': 'robinhood_' + OTHER}},
-                               'quote_token': {'data': {'id': 'robinhood_' + MINT.lower()}}}}})
+                               'base_token': {'data': {'id': 'solana_' + OTHER}},
+                               'quote_token': {'data': {'id': 'solana_' + MINT}}}}})
     raise AssertionError('unexpected upstream call: ' + url)
 
 d.requests.get = fake_get
@@ -45,10 +46,10 @@ with d._chart_cache_lock: d._chart_cache.clear()
 with d._gt_budget_lock: d._gt_budget['tokens'] = 25.0; d._gt_budget['at'] = time.time()
 
 with app.test_client() as c:
-    j = c.get(f'/api/chart/{MINT}?tf=5m&pair={PAIR}&chain=robinhood').get_json()
+    j = c.get(f'/api/chart/{MINT}?tf=5m&pair={PAIR}&chain=solana').get_json()
 ohlcv = [u for u in urls if '/ohlcv/' in u]
 check('OHLCV is requested for the token address, not token=base',
-      ohlcv and ('token=' + MINT.lower()) in ohlcv[0] and 'token=base' not in ohlcv[0])
+      ohlcv and ('token=' + MINT) in ohlcv[0] and 'token=base' not in ohlcv[0])
 check('the chart plots the token\'s own price', j['candles'] and abs(j['candles'][-1]['c'] - 0.001979) < 1e-9)
 
 # The no-history fallback reads the same side of the pool.
@@ -56,7 +57,7 @@ with d._chart_cache_lock: d._chart_cache.clear()
 d._gt_fetch_ohlcv = lambda *a, **k: []
 urls.clear()
 with app.test_client() as c:
-    j = c.get(f'/api/chart/{MINT}?tf=5m&pair={PAIR}&chain=robinhood').get_json()
+    j = c.get(f'/api/chart/{MINT}?tf=5m&pair={PAIR}&chain=solana').get_json()
 check('current price falls back to the token\'s side of the pool', abs((j.get('current_price') or 0) - 0.001979) < 1e-9)
 
 check('Solana mints keep their case', d._gt_token_param('solana', 'AbCdEf') == 'AbCdEf')

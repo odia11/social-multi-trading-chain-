@@ -1,4 +1,4 @@
-"""Current Solana-only USDC tip contract."""
+"""Current Solana tip contract: SOL or USDC."""
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,14 +26,15 @@ check('recipient resolver is Solana-only',
       and "return {'session': session_wallet, 'solana': solana_wallet}" in BACKEND)
 check('tips transfer real Solana USDC',
       "_solana_transfer(" in tip and 'd.USDC_MINT' in tip)
-check('tip amount is never silently reduced for gas',
-      'Never reduce the tip amount.' in tip
-      and "spare = sol['balance'] - amount" in tip)
-check('low gas can bootstrap only from spare user USDC',
-      "_gasless_solana_native_topup" in tip
-      and "spare >= Decimal('0.20')" in tip)
-check('duplicate submissions are guarded independent of RPC',
-      "key = ('tip', sender_wallet, recipient_user_id, str(amount.normalize()))" in tip
+# SOL or USDC since #214. A USDC tip arrives in full: the sender's own SOL
+# pays the network fee; no USDC is swapped into SOL behind their back
+# (that bootstrap belonged to the USDC-only design and is not used).
+check('a USDC tip sends the full amount and never sells USDC for gas',
+      "str(d.USDC_MINT), recipient_address, amount," in tip
+      and 'allow_user_funded_gas=False' in tip and '_gasless_solana_native_topup' not in tip)
+check('only SOL or USDC', "if currency not in ('SOL', 'USDC'):" in tip)
+check('duplicate submissions are guarded independent of RPC, per currency',
+      "key = ('tip', sender_wallet, recipient_user_id, currency, str(amount.normalize()))" in tip
       and "_RECENT.get(key, 0) < 45" in tip)
 check('tip mutation is authenticated, CSRF checked and rate limited',
       'd._authenticated_wallet()' in tip

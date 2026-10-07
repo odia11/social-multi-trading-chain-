@@ -1,4 +1,7 @@
-"""Every Solana trade the app starts is funded in USDC.
+"""Copy amounts are USD figures, never the leader's amount.
+
+(Trades are funded in native SOL since #155; a copier's USD amount is spent
+as its SOL equivalent. The original premise, below, is history.)
 
 Copy trading, DM "copy trade", the narrative agent and manual/admin sells used
 to fall back to SOL: copy amounts were 0.01-100 SOL, copy buys spent SOL, and
@@ -105,6 +108,7 @@ class CopyBuyTests(unittest.TestCase):
             _check_price_impact=Mock(return_value={'ok': True, 'price_impact_pct': 0.1}),
             _solana_buy_flow=self.buy, app=types.SimpleNamespace(app_context=contextlib.nullcontext),
             add_user_log=lambda *a: None, print=lambda *a, **k: None,
+            _daily_realized_pnl_usd=lambda w: 0.0,
             _get_user_sol=Mock(side_effect=AssertionError('copy checked SOL')),
             threading=types.SimpleNamespace(Thread=lambda target, daemon: types.SimpleNamespace(start=target)))
         self.copy = load('_trigger_copy_buy', self.ns)
@@ -117,7 +121,8 @@ class CopyBuyTests(unittest.TestCase):
         for kw in calls.values():
             self.assertEqual((kw['source'], kw['copy_of_wallet'], kw['trigger_copies'], kw['respect_max']),
                              ('copy', 'leader', False, False))
-        self.ns['_check_price_impact'].assert_any_call('mint', 25.0, input_mint='usdc', input_decimals=6)
+        # priced as the SOL it will spend: $25 at $120/SOL
+        self.ns['_check_price_impact'].assert_any_call('mint', 25.0 / 120.0)
 
 
 class WiringTests(unittest.TestCase):

@@ -114,42 +114,56 @@ check('a position that is itself a copy never propagates either, on any '
       'path', SRC.count("get('copy_of_wallet')") >= 3)
 
 # ── 3. the copier's limits are the copier's ──────────────────────────────
+# Solana, the only chain the app trades. The loss limit is read from the
+# copier's realised trades today, valued in USD at the SOL price (unknown
+# price = refuse, since the limit cannot be checked).
 WALLET = 'Cdn8WftaYycdudV9yeeQPY1A1Tgo1bMa9eV4Tv9SeAM9'
-MINT = '0x2170Ed0880ac9A755fd29B2688956BD959F933F8'
-m.get_or_create_user(WALLET)
+MINT = 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'
+uid = m.get_or_create_user(WALLET)
 us = m.get_user_state(WALLET)
-us['daily_stats']['total_pnl'] = 0
 us['positions'].clear()
+_saved_sol = m._sol_price_usd
+m._sol_price_usd = 150.0
+import sqlite3  # noqa: E402
 
 check('a copy goes ahead when nothing is in its way',
-      m._copy_guards_pass(WALLET, 5, 50.0, MINT, 'TKN', 'base') is True)
+      m._copy_guards_pass(WALLET, 5, 50.0, MINT, 'TKN', 'solana') is True)
 
-us['daily_stats']['total_pnl'] = -80.0
+with sqlite3.connect(m.DB_FILE) as _c:   # lost 0.6 SOL = $90 today
+    _c.execute("INSERT INTO trades (user_id, token, pnl, timestamp) VALUES (?,?,?,datetime('now'))", (uid, 'X', -0.6))
 check('...and is refused once the copier has hit their OWN daily loss '
       'limit, which a copy does not get to override',
-      m._copy_guards_pass(WALLET, 5, 50.0, MINT, 'TKN', 'base') is False)
+      m._copy_guards_pass(WALLET, 5, 50.0, MINT, 'TKN', 'solana') is False)
 check('...using the copier\'s own figure, not a number in the code',
-      m._copy_guards_pass(WALLET, 5, 200.0, MINT, 'TKN', 'base') is True)
-us['daily_stats']['total_pnl'] = 0
+      m._copy_guards_pass(WALLET, 5, 200.0, MINT, 'TKN', 'solana') is True)
+with sqlite3.connect(m.DB_FILE) as _c:
+    _c.execute('DELETE FROM trades WHERE user_id=?', (uid,))
+m._sol_price_usd = 0.0
+check('...and refused while the SOL price is unknown, since the limit cannot be checked',
+      m._copy_guards_pass(WALLET, 5, 50.0, MINT, 'TKN', 'solana') is False)
+m._sol_price_usd = 150.0
 
 for i in range(5):
-    us['positions']['0x%040d' % i] = {'amount': 1.0, 'chain': 'base'}
+    us['positions']['Mint%040d' % i] = {'amount': 1.0, 'chain': 'solana'}
 check('...and refused at the copier\'s position ceiling',
-      m._copy_guards_pass(WALLET, 5, 50.0, MINT, 'TKN', 'base') is False)
-check('...counted per chain, because a ceiling of five means five on the '
-      'chain being traded',
-      m._copy_guards_pass(WALLET, 5, 50.0, MINT, 'TKN', 'polygon') is True)
+      m._copy_guards_pass(WALLET, 5, 50.0, MINT, 'TKN', 'solana') is False)
+us['positions'].clear()
+for i in range(5):   # old rows from the retired EVM chains
+    us['positions']['0x%040d' % i] = {'amount': 1.0, 'chain': 'base'}
+check('...counted on the chain being traded, so leftover rows from another '
+      'chain do not block a Solana copy',
+      m._copy_guards_pass(WALLET, 5, 50.0, MINT, 'TKN', 'solana') is True)
 us['positions'].clear()
 
-us['positions'][MINT] = {'amount': 10.0, 'chain': 'base'}
+us['positions'][MINT] = {'amount': 10.0, 'chain': 'solana'}
 check('...and refused when the copier already holds it, rather than '
-      'doubling up', m._copy_guards_pass(WALLET, 5, 50.0, MINT, 'TKN', 'base') is False)
+      'doubling up', m._copy_guards_pass(WALLET, 5, 50.0, MINT, 'TKN', 'solana') is False)
 us['positions'].clear()
+m._sol_price_usd = _saved_sol
 
-# ── 4. the EVM copy itself, with the buy flow stood in for ───────────────
+# ── 4. who copies whom ───────────────────────────────────────────────────
 LEADER = 'FwdxAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'
 FOLLOW = '9pXQwftaYycdudV9yeeQPY1A1Tgo1bMa9eV4Tv9SeAM9'
-import sqlite3  # noqa: E402
 f_uid = m.get_or_create_user(FOLLOW)
 m.get_or_create_user(LEADER)
 con = sqlite3.connect(m.DB_FILE)
@@ -179,72 +193,10 @@ _con.execute('UPDATE users SET copy_amount_usdc=7.5, copy_amount=NULL WHERE wall
 _con.commit()
 _con.close()
 
-calls = []
-
-
 class _Resp:
     def __init__(self, body): self._b = body
     def get_json(self): return self._b
 
-
-def _fake_buy(w, data, chain, wallet_label='EVM', is_copy=False):
-    calls.append({'wallet': w, 'chain': chain, 'is_copy': is_copy,
-                  'amount': data.get('amount_usdc'), 'token': data.get('token_address')})
-    m.get_user_state(w)['positions'][data['token_address']] = {
-        'amount': 100.0, 'buy_price': 0.25, 'spend': data['amount_usdc'],
-        'symbol': 'TKN', 'chain': chain, 'opened_at': time.time()}
-    return _Resp({'ok': True, 'chain': chain, 'entry_price': 0.25, 'symbol': 'TKN'})
-
-
-_real_buy = m._evm_buy_flow
-m._evm_buy_flow = _fake_buy
-try:
-    m.get_user_state(FOLLOW)['positions'].clear()
-    m.get_user_state(FOLLOW)['daily_stats']['total_pnl'] = 0
-    m._trigger_copy_buy(LEADER, MINT, 0.25, 'TKN', 0.0, chain='base')
-    for _ in range(60):
-        if calls:
-            break
-        time.sleep(0.05)
-    time.sleep(0.3)
-finally:
-    m._evm_buy_flow = _real_buy
-
-check('a leader\'s EVM buy reaches their copier', len(calls) == 1)
-check('...on the chain the leader traded, not on Solana',
-      calls and calls[0]['chain'] == 'base')
-check('...through the same flow the copier\'s own Buy button runs through, '
-      'rather than a second implementation of an EVM buy',
-      calls and calls[0]['token'] == MINT)
-check('...told that it IS a copy, so it does not copy onward',
-      calls and calls[0]['is_copy'] is True)
-check('...spending the copier\'s own copy amount, never the leader\'s — '
-      'following a whale must not spend like one',
-      calls and calls[0]['amount'] == 7.5)
-
-pos = m.get_user_state(FOLLOW)['positions'].get(MINT, {})
-check('the copied position is marked with whose trade it was, which is what '
-      'a profile counts', pos.get('copy_of_wallet') == LEADER)
-con = sqlite3.connect(m.DB_FILE)
-row = con.execute('SELECT source, copy_of_wallet, chain FROM open_positions '
-                  'WHERE user_id=? AND mint_address=?', (f_uid, MINT)).fetchone()
-con.close()
-check('...and it survives a restart, because the row on disk carries it too',
-      row is not None and row[0] == 'copy' and row[1] == LEADER and row[2] == 'base')
-
-# the guard, live: a copier at their limit is not bought into anything
-calls.clear()
-m._evm_buy_flow = _fake_buy
-try:
-    m.get_user_state(FOLLOW)['positions'].clear()
-    m.get_user_state(FOLLOW)['daily_stats']['total_pnl'] = -500.0
-    m._trigger_copy_buy(LEADER, '0x' + 'b' * 40, 0.25, 'OTHER', 0.0, chain='base')
-    time.sleep(0.6)
-finally:
-    m._evm_buy_flow = _real_buy
-    m.get_user_state(FOLLOW)['daily_stats']['total_pnl'] = 0
-check('a copier past their daily loss limit is not bought into anything, '
-      'however often the trader they follow moves', calls == [])
 
 # ── 4b. the exit, with the sell flow stood in for ────────────────────────
 sells = []

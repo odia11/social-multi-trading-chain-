@@ -84,5 +84,5 @@ with c.session_transaction(base_url='https://orcagent.fun') as s:
     s['wallet'] = w; s['user_id'] = uid; s['csrf_token'] = 'tok' * 10
 page = c.get('/messages', base_url='https://orcagent.fun').get_data(as_text=True)
 check('/messages loads the inbox stylesheet after the older bundle',
-      'messages-inbox.css?v=2' in page and page.index('messages-ui.css') < page.index('messages-inbox.css'))
+      'messages-inbox.css?v=' in page and page.index('messages-ui.css') < page.index('messages-inbox.css'))
 raise SystemExit(0 if all(checks) else 1)

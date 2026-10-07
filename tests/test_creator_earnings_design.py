@@ -9,7 +9,7 @@ checks={
  'OrcAgent creator earnings header and private state':
    'Creator Earnings' in HTML and 'Earnings from tokens you created on OrcAgent.' in HTML and 'tl-private-chip' in HTML,
  'large real claimable balance and CTA':
-   'id="tl-available-usdc"' in HTML and 'id="tl-claim-now"' in HTML and 'Available to claim' in HTML,
+   'id="tl-available-usdc"' in HTML and 'id="tl-claim-now"' in HTML and 'class="tl-ce-available"' in HTML,
  'overview metrics preserve verified data':
    all(x in HTML for x in ('id="tl-claimed-usdc"','id="tl-claim-count"','id="tl-creator-share"')),
  'recent activity uses actual claim history':
@@ -18,8 +18,8 @@ checks={
    'creatorClaimLaunch()' in JS and 'claimRewards(launch)' in JS,
  'pending claim CTA opens history instead of preparing a duplicate':
    "btn.dataset.mode='history'" in JS and "if(this.dataset.mode==='history')" in JS,
- 'available and claimed USD hints come from raw verified USDC':
-   "rawNumber(creatorAvailableRaw,'USDC')" in JS and "rawNumber(claimedRaw,'USDC')" in JS,
+ 'available and claimed USD hints come from raw verified USDC (claimed also shows SOL since #155)':
+   "rawNumber(creatorAvailableRaw,'USDC')" in JS and "rawAmount(claimedRaw,'USDC')+(hasSol?' + '+rawAmount(claimedSol,'SOL')" in JS,
  'new card system exists':
    '.tl-ce-available{' in CSS and '.tl-ce-metrics{' in CSS and '.tl-ce-recent{' in CSS,
  'user-facing launch UI has no third-party launch branding':

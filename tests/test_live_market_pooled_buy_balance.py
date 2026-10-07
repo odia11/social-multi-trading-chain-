@@ -14,8 +14,8 @@ check('retired multichain pooled-balance patch is not installed',
       'live_market_pooled_buy_balance import install' not in ENTRY)
 check('backend declares Solana-only live trading',
       'SOLANA_ONLY = True' in DASH and 'ACTIVE_EVM_CHAINS = {}' in DASH)
-check('Live Market buy sends USDC amount to the Solana instant-trade route',
-      "'/api/instant-trade'" in JS and 'amount_usdc' in JS)
+check('Live Market buy sends a SOL amount to the Solana instant-trade route (#155)',
+      "'/api/instant-trade'" in JS and "currency:'SOL', amount_sol:amt" in JS)
 check('Live Market no longer routes buys through EVM or bridge endpoints',
       "'/api/evm/trade/buy'" not in JS
       and "'/api/bsc/trade/buy'" not in JS

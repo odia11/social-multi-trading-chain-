@@ -18388,7 +18388,9 @@ def push_test():
     if not wallet:
         return jsonify({'ok': False, 'msg': 'Not logged in'}), 401
     if not (_PYWEBPUSH_OK and VAPID_PRIVATE_KEY):
-        return jsonify({'ok': False, 'msg': 'Phone notifications are not set up on the server yet'}), 503
+        # 409, not 503: a state to explain, not a server fault -- a 5xx body
+        # is redacted by response_privacy_hardening, which hid this reason.
+        return jsonify({'ok': False, 'msg': 'Phone notifications are not set up on the server yet'}), 409
     conn = sqlite3.connect(DB_FILE)
     try:
         uid = _get_uid(conn, wallet)
