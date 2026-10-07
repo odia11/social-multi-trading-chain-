@@ -186,6 +186,10 @@ _install_call_invitations(_dashboard)
 from creator_rewards import install as _install_creator_rewards
 _install_creator_rewards(_dashboard)
 
+# Pictures for @orcagent's live posts, served at /media/agent/<hash>.webp.
+from agent_post_images import install as _install_agent_post_images
+_install_agent_post_images(_dashboard)
+
 from platform_assistant import install as _install_platform_assistant
 _install_platform_assistant(_dashboard)
 
@@ -199,5 +203,10 @@ _install_portfolio_inventory(_dashboard)
 # minutes, so the one long-running process does not creep up in memory.
 from memory_hygiene import install as _install_memory_hygiene
 _install_memory_hygiene(_dashboard)
+
+# Registered last so it runs first among the response passes: a page the
+# browser navigates to gets an OrcAgent error page, never bare JSON.
+from friendly_errors import install as _install_friendly_errors
+_install_friendly_errors(_dashboard)
 
 app = _dashboard.app

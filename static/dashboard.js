@@ -9700,7 +9700,7 @@ function _renderFeedCard(e, cardIndex){
     +'<div class="fc-header">'
     +_aProf+'<span class="fc-name" style="font-weight:700">'+esc(e.username||'Trader')+(e.verified ? ' <svg width="14" height="14" viewBox="0 0 24 24" style="vertical-align:-2px"><circle cx="12" cy="12" r="12" fill="#f7b955"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#0a0b0e" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '')+_teamBadgeHtml(e.team_role,e.username,e.verified)+'</span></a>'
     +_aProf+'<span class="fc-handle">'+esc(handle)+'</span></a>'
-    +(callHtml ? '<span class="fc-call-badge">CALLED</span>' : '')
+    +(callHtml && !(e.call && e.call.featured) ? '<span class="fc-call-badge">CALLED</span>' : '')
     +(timeStr ? '<span class="fc-sep">·</span><span class="fc-time">'+esc(timeStr)+'</span>' : '')
     +'</div>'
     +tradeHtml
@@ -9766,7 +9766,7 @@ function _homeCopyTrade(uid, username){
 }
 
 function _xShareIntent(postId){
-  var canonical=window.location.origin+'/post/'+encodeURIComponent(postId)+'?xv=9';
+  var canonical=window.location.origin+'/post/'+encodeURIComponent(postId)+'?xv=10';
   var text='View this post on OrcAgent @orcagent';
   return 'https://twitter.com/intent/tweet?text='+encodeURIComponent(text)
     +'&url='+encodeURIComponent(canonical);

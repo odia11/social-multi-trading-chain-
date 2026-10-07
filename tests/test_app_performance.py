@@ -46,8 +46,8 @@ check('every HTML response gets the shared performance assets and normalizes the
 check('route-critical redesign assets are applied before first paint',
       'portfolio-redesign.css?v=6' in PERF
       and 'live-market-redesign.css?v=10' in PERF
-      and 'home-mobile.css?v=14' in PERF
-      and 'home-mobile-polish.css?v=8' in PERF)
+      and 'home-mobile.css?v=15' in PERF
+      and 'home-mobile-polish.css?v=9' in PERF)
 check('production WSGI installs the performance adapter',
       'from app_performance import install as _install_app_performance' in ENTRY
       and '_install_app_performance(_dashboard)' in ENTRY)
