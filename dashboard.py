@@ -22848,6 +22848,27 @@ def _feed_text_part(content: str) -> str:
     idxs = [i for i in (content.find(m) for m in _FEED_EMBED_MARKERS) if i != -1]
     return content[:min(idxs)].strip() if idxs else content
 
+def _official_agent_posts(conn, post_ids):
+    """The ones among post_ids written by the official @orcagent account (the
+    pinned, verified author platform_assistant posts as). Only the server
+    writes those, so their call cards may show a call made by someone else:
+    "New call from @trader" carries that trader's live card."""
+    if not post_ids:
+        return set()
+    try:
+        row = conn.execute(
+            "SELECT u.wallet_address FROM platform_assistant_settings s JOIN users u "
+            "ON s.key='author_id' AND s.value=CAST(u.id AS TEXT) AND u.is_verified=1").fetchone()
+        if not row or not row[0]:
+            return set()
+        ids = list(post_ids)
+        ph = ','.join('?' * len(ids))
+        return {r[0] for r in conn.execute(
+            f'SELECT id FROM feed_posts WHERE wallet=? AND id IN ({ph})', [row[0]] + ids)}
+    except sqlite3.Error:
+        return set()
+
+
 def _feed_call_payloads(conn, targets):
     """targets: [(feed_post_id, item_dict)]. Attaches item['call'] -- the
     live numbers of the token call that post carries -- to every post whose
@@ -22865,6 +22886,7 @@ def _feed_call_payloads(conn, targets):
         return
     ids = list(wanted)
     ph = ','.join('?' * len(ids))
+    official = _official_agent_posts(conn, {p for pairs in wanted.values() for p, _ in pairs})
     for (cid, post_id, mint, symbol, name, chain, image_url, price_at_call, mcap_at_call,
          peak_price, last_price, called_at) in conn.execute(
             f'''SELECT id, post_id, mint, symbol, token_name, COALESCE(chain,''), COALESCE(image_url,''),
@@ -22889,6 +22911,9 @@ def _feed_call_payloads(conn, targets):
         for want_post, item in wanted.get(cid, []):
             if post_id and int(post_id) == want_post:
                 item['call'] = payload
+            elif want_post in official:
+                # Featured by @orcagent, not called by it: no "CALLED" badge.
+                item['call'] = dict(payload, featured=True)
 
 
 def _attach_feed_calls(items):

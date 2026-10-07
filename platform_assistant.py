@@ -13,6 +13,7 @@ import sqlite3
 import threading
 import time
 import platform_learning as learning
+import platform_live_posts as live_posts
 from platform_answers import specific, trade_action_slots, merge_trade_action_slots
 import platform_prices as prices
 import platform_public_data as public_data
@@ -215,11 +216,30 @@ def slot_index(slot):
     """Position of this slot within its day: 0 at 00:00 ... 47 at 23:30."""
     return (slot.hour * 60 + slot.minute) // SLOT_MINUTES
 
-def publish_due(db, now=None):
+def publish_due(db, now=None, live_data=None):
+    """Publish this slot's post, if it is due and not yet published.
+
+    live_data(), when given, returns (trending tokens, SOL price in USD); it is
+    read before the write transaction so a slow price source never holds the
+    database lock. The post is then the best current live post about calls or
+    trending tokens (platform_live_posts); only when there is none does a
+    product text go out. OrcAgent never posts a text it has posted before:
+    if every option was already used, the slot is skipped.
+    """
     now = time.time() if now is None else now
     slot = due_slot(now)
     if slot is None:
         return None  # Skip missed slots; never flood the feed after downtime.
+    key = 'post:' + slot.isoformat()
+    tokens, sol_usd = [], 0.0
+    if live_data is not None:
+        with sqlite3.connect(db, timeout=8) as c:
+            if c.execute('SELECT 1 FROM platform_assistant_events WHERE event_key=?', (key,)).fetchone():
+                return None
+        try:
+            tokens, sol_usd = live_data()
+        except Exception:
+            tokens, sol_usd = [], 0.0
     with sqlite3.connect(db, timeout=8) as c:
         c.execute('BEGIN IMMEDIATE')
         if not enabled(c, 'posts'):
@@ -227,14 +247,29 @@ def publish_due(db, now=None):
         author = identity(c)
         if not author:
             return None
-        key = 'post:' + slot.isoformat()
         if c.execute('SELECT 1 FROM platform_assistant_events WHERE event_key=?', (key,)).fetchone():
             return None
-        # 50 texts over 48 slots a day: every text appears once a day, at a
-        # time that moves forward a little each day.
-        sequence = (slot.date() - dt.date(2026,10,4)).days * (24 * 60 // SLOT_MINUTES) + slot_index(slot)
-        topic, text = THESES[sequence % len(THESES)]
-        content = text
+        def fresh(text):
+            return not c.execute('SELECT 1 FROM feed_posts WHERE wallet=? AND content=?', (author[1], text)).fetchone()
+        picked = None
+        if live_data is not None:
+            for topic, texts in live_posts.candidates(c, now, slot_index(slot), tokens, sol_usd):
+                text = next((t for t in texts if fresh(t)), None)
+                if text:
+                    picked = (topic, text)
+                    break
+        if picked is None:
+            # A product text, in the daily rotation order, that OrcAgent has
+            # never posted before.
+            sequence = (slot.date() - dt.date(2026,10,4)).days * (24 * 60 // SLOT_MINUTES) + slot_index(slot)
+            for i in range(len(THESES)):
+                topic, text = THESES[(sequence + i) % len(THESES)]
+                if fresh(text):
+                    picked = (topic, text)
+                    break
+        if picked is None:
+            return None
+        topic, content = picked
         cur = c.execute('INSERT INTO feed_posts(wallet,content,created_at) VALUES(?,?,?)',
                         (author[1], content, utcstamp(now)))
         post_id = 'p'+str(cur.lastrowid)
@@ -755,10 +790,14 @@ def install(d):
             return jsonify(ok=False,error=str(e)),404
         return jsonify(ok=True)
 
+    def _trending(d):
+        import trending_hero
+        return trending_hero.current_trending(d)
+
     def loop():
         while True:
             try:
-                publish_due(d.DB_FILE)
+                publish_due(d.DB_FILE, live_data=lambda: (_trending(d), float(getattr(d, '_sol_price_usd', 0) or 0)))
             except Exception:
                 app.logger.exception('platform thesis publication failed')
             time.sleep(30)
