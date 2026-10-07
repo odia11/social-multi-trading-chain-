@@ -32,7 +32,7 @@ for node in _TREE.body:
         _age_buckets_src = ast.get_source_segment(_SRC, node)
     elif isinstance(node, ast.Assign) and len(node.targets) == 1 \
             and isinstance(node.targets[0], ast.Name) and node.targets[0].id == '_LIVE_MARKET_MIN_MCAP_USD':
-        # the page-wide market-cap floor the route applies first ($30K)
+        # the page-wide market-cap floor the route applies first ($15K)
         _age_buckets_src_floor = ast.get_source_segment(_SRC, node)
 
 assert _func_src is not None, 'api_market_scanner not found in dashboard.py'
@@ -142,10 +142,10 @@ check("'gainers' still excludes the negative-change token", 'DUMPING' not in g_s
 
 trending = _run_scanner('trending')
 t_symbols = [t['symbol'] for t in trending['tokens']]
-# Live Market hides anything under its $30K market-cap floor on every sort,
-# so TOOSMALL ($29,999) is the one fixture trending does not show.
-check("'trending' (default) returns every fixture token above the $30K floor",
-      sorted(t_symbols) == sorted(t['symbol'] for t in FIXTURES if t['market_cap'] >= 30_000), detail=str(t_symbols))
+# Live Market hides anything under its $15K market-cap floor on every sort;
+# TOOSMALL ($29,999) is above it, so only Uptrend's own $30K bar leaves it out.
+check("'trending' (default) returns every fixture token above the $15K floor",
+      sorted(t_symbols) == sorted(t['symbol'] for t in FIXTURES if t['market_cap'] >= 15_000), detail=str(t_symbols))
 
 volume = _run_scanner('volume')
 check("'volume' sort mode untouched by this change", 'counts' in volume and 'volume' in volume['counts'])
