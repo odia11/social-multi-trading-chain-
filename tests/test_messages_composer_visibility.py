@@ -22,7 +22,7 @@ assert 'var(--oa-dm-viewport-h,100dvh)' in end
 assert "style.setProperty('--oa-dm-viewport-h',Math.round(vv.height)+'px')" in js
 assert "style.setProperty('--oa-dm-viewport-top',Math.round(vv.offsetTop)+'px')" in js
 assert "style.removeProperty('--oa-dm-viewport-h')" in js
-assert 'messages-thread.css?v=2' in ui and 'messages-ui.js?v=4' in ui
+assert 'messages-thread.css?v=2' in ui and 'messages-ui.js?v=5' in ui
 assert subprocess.run(['node','--check',str(root/'static/messages-ui.js')],capture_output=True).returncode==0
 print('PASS composer occupies real flex height instead of covering last message')
 print('PASS Seen/time labels have a non-overlapping scrollable bottom')
