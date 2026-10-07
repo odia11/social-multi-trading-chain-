@@ -102,7 +102,11 @@ function install(){
 
 window.OrcAgentTradeCard={version:2,render:render,normalize:normalize,hydrate:hydrate,hydrateAll:hydrateAll};
 var tries=0,t=OrcPageLifecycle.setInterval(function(){tries++;install();if(tries>80)OrcPageLifecycle.clearInterval(t)},50);
-var mo=OrcPageLifecycle.mutationObserver(function(ms){for(var i=0;i<ms.length;i++){if(ms[i].addedNodes&&ms[i].addedNodes.length){requestAnimationFrame(function(){hydrateAll(document)});break}}});
+/* Hydrate only what was added (once per frame). A whole-document query on
+   every mutation ran for each feed card built or torn down while scrolling. */
+var pendingRoots=[],pendingFrame=0;
+function flushPending(){pendingFrame=0;var roots=pendingRoots;pendingRoots=[];roots.forEach(function(n){if(!n.isConnected)return;if(n.matches&&n.matches('[data-oa-stc="1"]'))hydrate(n);if(n.firstElementChild)hydrateAll(n)})}
+var mo=OrcPageLifecycle.mutationObserver(function(ms){for(var i=0;i<ms.length;i++){var a=ms[i].addedNodes;for(var j=0;a&&j<a.length;j++){if(a[j].nodeType===1)pendingRoots.push(a[j])}}if(pendingRoots.length&&!pendingFrame)pendingFrame=requestAnimationFrame(flushPending)});
 function start(){install();if(document.body)mo.observe(document.body,{childList:true,subtree:true});hydrateAll(document)}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
