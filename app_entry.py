@@ -56,6 +56,12 @@ from audit_hardening import install as _install_audit_hardening
 from security_monitoring import install as _install_security_monitoring
 from backup_scheduler import install as _install_backup_scheduler
 
+# Light mode is registered before everything else so its pass over the page
+# runs last (after_request hooks run in reverse order) and sees every
+# stylesheet the other passes added.
+from theme_light import install as _install_theme_light
+_install_theme_light(_dashboard)
+
 # Register SEO first so its response pass runs last, after preview decorators.
 _install_search_seo(_dashboard)
 

@@ -18711,6 +18711,8 @@ _NAV_ICONS = {
     'admin':       '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
     'about':       '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/>'
                    '<line x1="12" y1="8" x2="12.01" y2="8"/>',
+    'theme':       '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41'
+                   'M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>',
     'disconnect':  '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>'
                    '<polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
 }
@@ -18782,6 +18784,11 @@ def _navbar_more_items_html(extra_class: str = '') -> str:
         attrs     = (' ' + entry[5]) if len(entry) > 5 else ''
         parts.append('<a class="pt-nb-more-item%s%s" href="%s"%s%s>%s<span>%s</span></a>'
                      % (cls_suffix, extra_cls, href, style, attrs, icon, label))
+    # Light mode (white with gold): theme-light.js handles every
+    # [data-oa-theme-switch] click and keeps aria-checked in step.
+    parts.append('<button type="button" class="pt-nb-more-item%s pt-nb-theme-item" data-oa-theme-switch '
+                 'role="switch" aria-checked="false">%s<span>Light mode</span>'
+                 '<i class="oa-theme-pill" aria-hidden="true"></i></button>' % (cls_suffix, _nav_icon('theme')))
     parts.append('<div class="pt-nb-more-sep%s"></div>' % cls_suffix)
     parts.append('<button class="pt-nb-more-item%s danger pt-nb-disconnect-btn">%s<span>Disconnect Wallet</span></button>'
                  % (cls_suffix, _nav_icon('disconnect')))

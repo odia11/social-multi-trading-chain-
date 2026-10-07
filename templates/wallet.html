@@ -1115,7 +1115,8 @@ function _qrSvg(text, ecc){
     var qr=qrcode(0, ecc||'M'); qr.addData(String(text)); qr.make()
     var n=qr.getModuleCount(), q=4, size=n+q*2, d=''
     for(var r=0;r<n;r++) for(var c=0;c<n;c++) if(qr.isDark(r,c)) d+='M'+(c+q)+' '+(r+q)+'h1v1h-1z'
-    return '<svg class="rx-code" viewBox="0 0 '+size+' '+size+'" role="img" aria-label="QR code of the wallet address" xmlns="http://www.w3.org/2000/svg">'
+    // data-oa-keep: a QR is dark-on-white in both themes, or it does not scan
+    return '<svg class="rx-code" data-oa-keep viewBox="0 0 '+size+' '+size+'" role="img" aria-label="QR code of the wallet address" xmlns="http://www.w3.org/2000/svg">'
       +'<rect width="'+size+'" height="'+size+'" fill="#fff"/><path d="'+d+'" fill="#0b0f14"/></svg>'
   }catch(e){ return '' }
 }

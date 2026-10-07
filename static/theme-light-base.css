@@ -1,0 +1,17 @@
+/* Light mode (white with gold): the hand-made part. The bulk of the theme is
+   derived from the dark stylesheets (theme_light.py); this holds the base,
+   the switch itself, and the few places where a derived colour reads wrong. */
+html[data-theme="light"]{color-scheme:light;background:#f7f6f2}
+html[data-theme="light"] body{background-color:#f7f6f2}
+
+/* the switch pill, shown in the menus */
+.oa-theme-pill{margin-left:auto;flex:0 0 30px;width:30px;height:18px;border-radius:999px;background:#2a2f37;position:relative;transition:background .18s}
+.oa-theme-pill::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#eef1f5;transition:transform .18s}
+[data-oa-theme-switch][aria-checked="true"] .oa-theme-pill{background:#f7b955}
+[data-oa-theme-switch][aria-checked="true"] .oa-theme-pill::after{transform:translateX(12px);background:#fff}
+html[data-theme="light"] .oa-theme-pill{background:#d9d5cc}
+html[data-theme="light"] [data-oa-theme-switch][aria-checked="true"] .oa-theme-pill{background:#f7b955}
+.oa-app-menu-item.oa-theme-tile .oa-theme-pill{position:absolute;top:10px;right:10px;margin:0}
+.oa-app-menu-item.oa-theme-tile{position:relative}
+
+/* ── corrections ── */
