@@ -186,6 +186,10 @@ _install_call_invitations(_dashboard)
 from creator_rewards import install as _install_creator_rewards
 _install_creator_rewards(_dashboard)
 
+# Pictures for @orcagent's live posts, served at /media/agent/<hash>.webp.
+from agent_post_images import install as _install_agent_post_images
+_install_agent_post_images(_dashboard)
+
 from platform_assistant import install as _install_platform_assistant
 _install_platform_assistant(_dashboard)
 

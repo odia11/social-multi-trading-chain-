@@ -44,7 +44,7 @@ CREATE TABLE users(id INTEGER PRIMARY KEY,wallet_address TEXT,username TEXT,is_v
 INSERT INTO users VALUES(1,'officialwalletaddr111111111111111111111','Orcagent',1),
   (2,'chartwizardwalletaddr22222222222222222','chartwizard',1),(3,'solqueenwalletaddr3333333333333333333','solqueen',0),
   (4,'nonamewalletaddr44444444444444444444',NULL,0);
-CREATE TABLE feed_posts(id INTEGER PRIMARY KEY AUTOINCREMENT,wallet TEXT,content TEXT,created_at TEXT);
+CREATE TABLE feed_posts(id INTEGER PRIMARY KEY AUTOINCREMENT,wallet TEXT,content TEXT,created_at TEXT,image_url TEXT);
 CREATE TABLE feed_replies(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,post_id TEXT,message TEXT,created_at TEXT,parent_reply_id INTEGER);
 CREATE TABLE notifications(user_id INTEGER,type TEXT,content TEXT,link TEXT,actor_wallet TEXT);
 CREATE TABLE token_calls(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,wallet TEXT,mint TEXT,symbol TEXT,
@@ -121,6 +121,8 @@ CREATE TABLE token_calls(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,wa
                 per_mint[t] = per_mint.get(t, 0) + 1
         self.assertTrue(all(n <= 4 for n in per_mint.values()), per_mint)
         self.assertEqual(sum(1 for t in self.topics() if t.startswith('mostcalled:')), 1)
+        openings = [' '.join(x.split()[:3]).lower() for x in posts]
+        self.assertTrue(all(a != b for a, b in zip(openings, openings[1:])), 'two posts in a row opened the same way')
 
     def test_never_posts_wallets_or_unnamed_users(self):
         self.call(4, 'ANON', 0.001, 0.005, DAY0 - dt.timedelta(minutes=20))
@@ -142,6 +144,36 @@ CREATE TABLE token_calls(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,wa
         def broken():
             raise RuntimeError('scanner down')
         self.assertIsNotNone(p.publish_due(self.db, DAY0.timestamp(), live_data=broken))
+
+    def test_call_and_trending_posts_carry_a_designed_picture_instead_of_the_card(self):
+        cid = self.call(2, 'POPCAT', 0.0001, 0.00024, DAY0 - dt.timedelta(days=2), mc=141_000_000)
+        seen = []
+        def render(media, seed, variant):
+            seen.append((media['kind'], seed, variant))
+            return '/media/agent/%040x.webp' % len(seen)
+        for i in range(3):
+            p.publish_due(self.db, (DAY0 + dt.timedelta(minutes=30 * i)).timestamp(),
+                          live_data=lambda: (TOKENS, 152.0), render=render)
+        with sqlite3.connect(self.db) as c:
+            rows = c.execute("SELECT content, image_url FROM feed_posts WHERE wallet LIKE 'official%' ORDER BY id").fetchall()
+        self.assertEqual(len(rows), 3)
+        self.assertTrue(all(img and img.startswith('/media/agent/') for _, img in rows))
+        self.assertTrue(all('__CALL__' not in t and '__CHART__' not in t for t, _ in rows))
+        self.assertEqual(seen[0][0], 'call')
+        self.assertIn('trending', [k for k, _, _ in seen])
+        self.assertEqual(len({s for _, s, _ in seen}), 3)   # each picture its own seed
+        trend = [v for k, _, v in seen if k == 'trending']
+        self.assertEqual(trend, list(range(len(trend))))   # designs taken in turn
+
+    def test_a_picture_that_cannot_be_drawn_falls_back_to_the_live_card(self):
+        cid = self.call(2, 'POPCAT', 0.0001, 0.00024, DAY0 - dt.timedelta(days=2))
+        def broken(media, seed, variant):
+            raise RuntimeError('logo host down')
+        p.publish_due(self.db, DAY0.timestamp(), live_data=lambda: (TOKENS, 152.0), render=broken)
+        with sqlite3.connect(self.db) as c:
+            content, img = c.execute("SELECT content, image_url FROM feed_posts WHERE wallet LIKE 'official%'").fetchone()
+        self.assertIsNone(img)
+        self.assertTrue(content.endswith('__CALL__' + json.dumps({'id': cid})))
 
     def test_formatting(self):
         self.assertEqual(live.price(0.000207), '$0.0002070')

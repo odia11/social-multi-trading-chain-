@@ -458,7 +458,7 @@ def _jinja_fmtprice(v):
 
 GLOBAL_LIMIT_ANON = 500     # requests per minute per IP, signed out
 GLOBAL_LIMIT_MEMBER = 1500  # requests per minute per signed-in account
-_GLOBAL_LIMIT_EXEMPT = ('/static/', '/theme-light/', '/sw.js', '/app.webmanifest', '/favicon')
+_GLOBAL_LIMIT_EXEMPT = ('/static/', '/theme-light/', '/media/agent/', '/sw.js', '/app.webmanifest', '/favicon')
 
 @app.before_request
 def _security_gate():
@@ -18876,7 +18876,7 @@ def _navbar_html(active_nav: str = '') -> Markup:
   <button type="button" class="oa-menu-btn" aria-label="Open menu"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span class="oa-nav-label">Menu</span></button>
 </nav>
 ''' % {'home': bottom_home, 'market': bottom_market, 'wallet': bottom_wallet}
-    return Markup(_CSS_GUARD + '''
+    return Markup('''%(css_guard)s
 <link rel="stylesheet" href="/static/navbar.css?v=%(v)s">
 <link rel="stylesheet" href="/static/mobile-bottom-nav.css?v=9">
 <header class="pt-nb-topbar">
@@ -18914,7 +18914,7 @@ def _navbar_html(active_nav: str = '') -> Markup:
 %(bottom_nav)s
 <script src="/static/navbar.js?v=%(v)s" defer></script>
 <script src="/static/mobile-bottom-nav.js?v=10" defer></script>
-''' % {'v': _APP_VERSION, 'nav_links': nav_links, 'more_items_desktop': more_items_desktop, 'more_items_mobile': more_items_mobile, 'bottom_nav': bottom_nav})
+''' % {'css_guard': _CSS_GUARD, 'v': _APP_VERSION, 'nav_links': nav_links, 'more_items_desktop': more_items_desktop, 'more_items_mobile': more_items_mobile, 'bottom_nav': bottom_nav})
 
 @app.route('/api/version')
 @rate_limit(120, 60)

@@ -14,6 +14,7 @@ import threading
 import time
 import platform_learning as learning
 import platform_live_posts as live_posts
+import agent_post_images
 from platform_answers import specific, trade_action_slots, merge_trade_action_slots
 import platform_prices as prices
 import platform_public_data as public_data
@@ -216,30 +217,73 @@ def slot_index(slot):
     """Position of this slot within its day: 0 at 00:00 ... 47 at 23:30."""
     return (slot.hour * 60 + slot.minute) // SLOT_MINUTES
 
-def publish_due(db, now=None, live_data=None):
+def _opening(text):
+    """The first three words: how a post opens."""
+    return ' '.join(str(text or '').split()[:3]).lower()
+
+def publish_due(db, now=None, live_data=None, render=None):
     """Publish this slot's post, if it is due and not yet published.
 
-    live_data(), when given, returns (trending tokens, SOL price in USD); it is
-    read before the write transaction so a slow price source never holds the
-    database lock. The post is then the best current live post about calls or
-    trending tokens (platform_live_posts); only when there is none does a
-    product text go out. OrcAgent never posts a text it has posted before:
-    if every option was already used, the slot is skipped.
+    live_data(), when given, returns (trending tokens, SOL price in USD). The
+    post is then the best current live post about calls or trending tokens
+    (platform_live_posts); render(picture spec, seed), when given, draws its
+    picture (agent_post_images) and returns the image URL. Both happen before
+    the write transaction, so slow logo or price sources never hold the
+    database lock. A post whose picture could not be drawn carries the live
+    call or chart card instead. Only when nothing is live does a product text
+    go out. OrcAgent never posts a text it has posted before: if every option
+    was already used, the slot is skipped.
     """
     now = time.time() if now is None else now
     slot = due_slot(now)
     if slot is None:
         return None  # Skip missed slots; never flood the feed after downtime.
     key = 'post:' + slot.isoformat()
-    tokens, sol_usd = [], 0.0
+
+    def fresh(c, wallet, text):
+        return not c.execute('SELECT 1 FROM feed_posts WHERE wallet=? AND content=?', (wallet, text)).fetchone()
+
+    picked = None   # (topic, content, image_url)
     if live_data is not None:
         with sqlite3.connect(db, timeout=8) as c:
             if c.execute('SELECT 1 FROM platform_assistant_events WHERE event_key=?', (key,)).fetchone():
+                return None
+            if not enabled(c, 'posts'):
+                return None
+            author = identity(c)
+            if not author:
                 return None
         try:
             tokens, sol_usd = live_data()
         except Exception:
             tokens, sol_usd = [], 0.0
+        choice = None
+        with sqlite3.connect(db, timeout=8) as c:
+            last = c.execute('SELECT content FROM feed_posts WHERE wallet=? ORDER BY id DESC LIMIT 1',
+                             (author[1],)).fetchone()
+            opening = _opening(last[0]) if last else ''
+            for topic, texts, media, embed in live_posts.candidates(c, now, slot_index(slot), tokens, sol_usd):
+                usable = [t for t in texts if fresh(c, author[1], t) and fresh(c, author[1], t + embed)]
+                # Never open the way the previous post did.
+                text = next((t for t in usable if _opening(t) != opening), None) or (usable[0] if usable else None)
+                if text:
+                    choice = (topic, text, media, embed)
+                    break
+            variant = 0
+            if choice and choice[2]:
+                prefixes = ('trending:',) if choice[2]['kind'] == 'trending' else ('call:', 'milestone:', 'best:')
+                variant = sum(c.execute("SELECT COUNT(*) FROM platform_assistant_events WHERE kind='post' AND topic LIKE ?",
+                                        (p_ + '%',)).fetchone()[0] for p_ in prefixes)
+        if choice:
+            topic, text, media, embed = choice
+            image_url = None
+            if media and render is not None:
+                try:
+                    image_url = render(media, topic + '|' + slot.isoformat(), variant)
+                except Exception:
+                    image_url = None
+            picked = (topic, text if image_url else text + embed, image_url)
+
     with sqlite3.connect(db, timeout=8) as c:
         c.execute('BEGIN IMMEDIATE')
         if not enabled(c, 'posts'):
@@ -249,29 +293,26 @@ def publish_due(db, now=None, live_data=None):
             return None
         if c.execute('SELECT 1 FROM platform_assistant_events WHERE event_key=?', (key,)).fetchone():
             return None
-        def fresh(text):
-            return not c.execute('SELECT 1 FROM feed_posts WHERE wallet=? AND content=?', (author[1], text)).fetchone()
-        picked = None
-        if live_data is not None:
-            for topic, texts in live_posts.candidates(c, now, slot_index(slot), tokens, sol_usd):
-                text = next((t for t in texts if fresh(t)), None)
-                if text:
-                    picked = (topic, text)
-                    break
+        if picked is not None and not fresh(c, author[1], picked[1]):
+            picked = None
         if picked is None:
             # A product text, in the daily rotation order, that OrcAgent has
             # never posted before.
             sequence = (slot.date() - dt.date(2026,10,4)).days * (24 * 60 // SLOT_MINUTES) + slot_index(slot)
             for i in range(len(THESES)):
                 topic, text = THESES[(sequence + i) % len(THESES)]
-                if fresh(text):
-                    picked = (topic, text)
+                if fresh(c, author[1], text):
+                    picked = (topic, text, None)
                     break
         if picked is None:
             return None
-        topic, content = picked
-        cur = c.execute('INSERT INTO feed_posts(wallet,content,created_at) VALUES(?,?,?)',
-                        (author[1], content, utcstamp(now)))
+        topic, content, image_url = picked
+        if image_url:
+            cur = c.execute('INSERT INTO feed_posts(wallet,content,created_at,image_url) VALUES(?,?,?,?)',
+                            (author[1], content, utcstamp(now), image_url))
+        else:
+            cur = c.execute('INSERT INTO feed_posts(wallet,content,created_at) VALUES(?,?,?)',
+                            (author[1], content, utcstamp(now)))
         post_id = 'p'+str(cur.lastrowid)
         c.execute('INSERT INTO platform_assistant_events VALUES(?,?,?,?,?,?,?)',
                   (key,'post',None,post_id,None,topic,now))
@@ -795,9 +836,17 @@ def install(d):
         return trending_hero.current_trending(d)
 
     def loop():
+        pruned_at = 0.0
         while True:
+            if time.time() - pruned_at > 86400:
+                pruned_at = time.time()
+                try:
+                    agent_post_images.prune(d)
+                except Exception:
+                    app.logger.exception('agent image cleanup failed')
             try:
-                publish_due(d.DB_FILE, live_data=lambda: (_trending(d), float(getattr(d, '_sol_price_usd', 0) or 0)))
+                publish_due(d.DB_FILE, live_data=lambda: (_trending(d), float(getattr(d, '_sol_price_usd', 0) or 0)),
+                            render=lambda media, seed, variant: agent_post_images.make(d, media, seed, variant))
             except Exception:
                 app.logger.exception('platform thesis publication failed')
             time.sleep(30)

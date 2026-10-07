@@ -88,11 +88,21 @@ def _calls(c, where, args=()):
     try:
         return c.execute(
             'SELECT tc.id, tc.mint, tc.symbol, tc.token_name, tc.price_at_call, tc.mcap_at_call, '
-            'tc.peak_price, tc.last_price, tc.note, tc.timestamp, u.username, u.id '
+            'tc.peak_price, tc.last_price, tc.note, tc.timestamp, u.username, u.id, '
+            "COALESCE(tc.image_url, '') "
+
             'FROM token_calls tc JOIN users u ON u.id = tc.user_id '
             "WHERE tc.price_at_call > 0 AND COALESCE(u.username,'') != '' AND " + where, args).fetchall()
     except Exception:
         return []
+
+
+def _call_media(event, cid, mint, sym, name, p0, mc0, peak, last, note, ts, user, img, **extra):
+    data = {'id': cid, 'mint': mint, 'symbol': sym or '', 'token_name': name or '', 'price_at_call': p0,
+            'mcap_at_call': mc0 or 0, 'peak_price': peak or p0, 'last_price': last or p0, 'note': _note(note, 160),
+            'timestamp': ts or '', 'user': user, 'image_url': img or '', 'event': event}
+    data.update(extra)
+    return {'kind': 'call', 'data': data}
 
 
 def _call_embed(call_id):
@@ -123,7 +133,7 @@ def _note(text, limit=120):
 def milestone(c, now):
     since = (dt.datetime.utcfromtimestamp(now) - dt.timedelta(days=MILESTONE_WINDOW_DAYS)).strftime('%Y-%m-%d %H:%M:%S')
     out = []
-    for cid, mint, sym, name, p0, mc0, peak, last, note, ts, user, uid in _calls(c, 'tc.timestamp >= ?', (since,)):
+    for cid, mint, sym, name, p0, mc0, peak, last, note, ts, user, uid, img in _calls(c, 'tc.timestamp >= ?', (since,)):
         x = (peak or 0) / p0
         hit = [m for m in MILESTONES if x >= m]
         if not hit:
@@ -138,15 +148,16 @@ def milestone(c, now):
             '%dx on the call: @%s called $%s at %s, and it has now reached %s at its peak. %s' % (m, user, sym, usd(mc0), usd((mc0 or 0) * x), NFA),
             'Call milestone: $%s, called by @%s, is up %dx from the recorded entry. Calls keep their entry, so the result is there for everyone to check. %s' % (sym, user, m, NFA),
         ]
-        out.append((topic, [t + _call_embed(cid) for t in _pick(texts, topic)], x))
-    out.sort(key=lambda o: -o[2])
-    return [(t, txt) for t, txt, _ in out]
+        media = _call_media('milestone', cid, mint, sym, name, p0, mc0, peak, last, note, ts, user, img, milestone=m)
+        out.append((topic, _pick(texts, topic), media, _call_embed(cid), x))
+    out.sort(key=lambda o: -o[4])
+    return [o[:4] for o in out]
 
 
 def new_calls(c, now):
     since = (dt.datetime.utcfromtimestamp(now - NEW_CALL_WINDOW)).strftime('%Y-%m-%d %H:%M:%S')
     out = []
-    for cid, mint, sym, name, p0, mc0, peak, last, note, ts, user, uid in _calls(c, 'tc.timestamp >= ? ORDER BY tc.timestamp DESC', (since,)):
+    for cid, mint, sym, name, p0, mc0, peak, last, note, ts, user, uid, img in _calls(c, 'tc.timestamp >= ? ORDER BY tc.timestamp DESC', (since,)):
         topic = 'call:%d' % cid
         if _posted(c, topic):
             continue
@@ -158,7 +169,8 @@ def new_calls(c, now):
             '@%s just called $%s at %s.%s The entry is recorded, so you can follow how it does from here.' % (user, sym, usd(mc0), quoted),
             'Fresh on the Calls tab: @%s on $%s, called at a %s market cap.%s What do you think?' % (user, sym, usd(mc0), quoted),
         ]
-        out.append((topic, [t + _call_embed(cid) for t in _pick(texts, topic)]))
+        media = _call_media('new', cid, mint, sym, name, p0, mc0, peak, last, note, ts, user, img)
+        out.append((topic, _pick(texts, topic), media, _call_embed(cid)))
     return out
 
 
@@ -182,7 +194,7 @@ def trending(c, now, tokens):
             'On the move on Live Market: $%s trades at %s, %s in 24 hours with %s in volume. %s' % (sym, price(t.get('price_usd')), pct(chg), usd(t.get('volume_24h')), NFA),
         ]
         topic = 'trending:%s' % mint
-        out.append((topic, [x + _chart_embed(t) for x in _pick(texts, topic + str(int(now // HOUR)))]))
+        out.append((topic, _pick(texts, topic + str(int(now // HOUR))), {'kind': 'trending', 'data': dict(t)}, _chart_embed(t)))
     return out
 
 
@@ -194,7 +206,7 @@ def best_call(c, now):
     if not rows:
         return []
     top = max(rows, key=lambda r: (r[6] or 0) / r[4])
-    cid, mint, sym, name, p0, mc0, peak, last, note, ts, user, uid = top
+    cid, mint, sym, name, p0, mc0, peak, last, note, ts, user, uid, img = top
     x = (peak or 0) / p0
     if x < BEST_CALL_MIN:
         return []
@@ -207,7 +219,8 @@ def best_call(c, now):
         'Today\'s top call: $%s by @%s, up %s at its peak from a %s entry. Read the reasoning on the call. %s' % (sym, user, mult(x), usd(mc0), NFA),
         '@%s leads today\'s calls: $%s, called at %s and %s at its best since. %s' % (user, sym, usd(mc0), mult(x), NFA),
     ]
-    return [(topic, [t + _call_embed(cid) for t in _pick(texts, topic)])]
+    media = _call_media('best', cid, mint, sym, name, p0, mc0, peak, last, note, ts, user, img)
+    return [(topic, _pick(texts, topic), media, _call_embed(cid))]
 
 
 def most_called(c, now):
@@ -230,7 +243,7 @@ def most_called(c, now):
         'Most called token in the last 24 hours: $%s, called by %d different traders. Compare their reasoning on the Calls tab.' % (sym, n),
         '%d traders called $%s in the last day. Open the Calls tab to see who called it, when, and why.' % (n, sym),
     ]
-    return [(topic, _pick(texts, topic))]
+    return [(topic, _pick(texts, topic), None, '')]
 
 
 def top_caller(c, now):
@@ -239,7 +252,7 @@ def top_caller(c, now):
     since = (dt.datetime.utcfromtimestamp(now - 7 * 24 * HOUR)).strftime('%Y-%m-%d %H:%M:%S')
     rows = _calls(c, 'tc.timestamp >= ?', (since,))
     by_user = {}
-    for cid, mint, sym, name, p0, mc0, peak, last, note, ts, user, uid in rows:
+    for cid, mint, sym, name, p0, mc0, peak, last, note, ts, user, uid, img in rows:
         x = (peak or 0) / p0
         u = by_user.setdefault(uid, {'user': user, 'n': 0, 'best': 0, 'sym': '', 'wins': 0})
         u['n'] += 1
@@ -258,7 +271,7 @@ def top_caller(c, now):
         'Top caller this week: @%s. %d calls in 7 days, the best one $%s at %s since the call. Follow them from their profile.' % (u['user'], u['n'], u['sym'], mult(u['best'])),
         'This week\'s sharpest caller so far is @%s: %d of their %d calls reached 1.5x or more, led by $%s at %s.' % (u['user'], u['wins'], u['n'], u['sym'], mult(u['best'])),
     ]
-    return [(topic, _pick(texts, topic))]
+    return [(topic, _pick(texts, topic), None, '')]
 
 
 def pulse(c, now, tokens, sol_usd):
@@ -274,11 +287,14 @@ def pulse(c, now, tokens, sol_usd):
         'Market pulse: SOL is at %s. %d of the %d trending tokens on Live Market are up over 24 hours. Biggest move: $%s, %s. %s' % (price(sol_usd), up, len(ts), top['symbol'], pct(top.get('price_change_24h')), NFA),
         'Quick look at Solana: SOL %s, and %d of %d trending tokens are green today. $%s leads with %s. %s' % (price(sol_usd), up, len(ts), top['symbol'], pct(top.get('price_change_24h')), NFA),
     ]
-    return [(topic, _pick(texts, topic))]
+    return [(topic, _pick(texts, topic), None, '')]
 
 
 def candidates(c, now, slot_index, tokens=None, sol_usd=0.0):
-    """Every post that could go out now, best first: (topic, [texts])."""
+    """Every post that could go out now, best first:
+    (topic, [phrasings], picture spec or None, live-card embed or '').
+    The post carries the picture; only when no picture could be made does
+    it carry the live card instead."""
     out = []
     out += milestone(c, now)
     out += new_calls(c, now)
