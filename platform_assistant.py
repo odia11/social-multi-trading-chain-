@@ -88,6 +88,21 @@ THESES = (
 ('feed_filters', 'At the top of the feed, switch between For You, Following and Calls. Each view shows a different side of the community.'),
 )
 
+# Product texts OrcAgent used to post that were not true: video posts, an
+# invitations dashboard, token cards in DMs, calls in groups, the wallet
+# approving each tip, Token Launch. Posts it already published with exactly
+# one of these texts are removed once, at start-up.
+RETIRED = (
+    'A useful invitation starts with an idea worth discussing. Share a personal call link and track the new accounts and qualifying trades it brings in. Your invitation totals are private.',
+    'Your shared calls can be explored by others. Your invitation dashboard totals are private. OrcAgent keeps the public idea and your personal tracking in their respective places.',
+    'Share a call with your personal invitation link to track the people it brings in. Existing accounts and self-invitations do not count as new accounts. Check Invitations for the rules and your private totals.',
+    'Liked someone\'s analysis? You can tip them from their profile. Your wallet approves every tip, and the amount goes straight to the person you chose.',
+    'Discussing a token in DMs? Share it as a token card so the chart and details travel with the conversation. Keep wallet secrets out of every message.',
+    'Groups bring traders with a shared interest into one conversation. Join a group, share calls and discuss ideas with people who watch the same tokens.',
+    'Posts can include a short video of up to 30 seconds. Show a chart walkthrough or explain your idea in your own words, right in the feed.',
+    'Thinking of launching a Solana token? Token Launch walks you through it step by step, and you approve the launch in your own wallet. Read every step before you confirm.',
+)
+
 # English platform guidance; both English and Dutch keywords are understood.
 FAQ = (
     ('secrets', 'seed|recovery phrase|private key|secret key|herstelzin|priv[eé]sleutel', 'Never post your recovery phrase or private key. Describe your wallet issue without credentials; OrcAgent will never ask for those secrets.'),
@@ -161,6 +176,7 @@ def initialize(db):
             post_id TEXT,reply_id INTEGER,topic TEXT NOT NULL,created_at REAL NOT NULL)""")
         c.execute('CREATE INDEX IF NOT EXISTS platform_assistant_limits ON platform_assistant_events(kind,source_user_id,created_at)')
         _clean_existing_prefixes(c)
+        _remove_retired_posts(c)
 
 def _clean_existing_prefixes(c):
     """Remove only fixed intros from recorded posts/replies of the verified agent."""
@@ -187,6 +203,40 @@ def _clean_existing_prefixes(c):
             c.execute('UPDATE feed_replies SET message=? WHERE id=? AND message=?',
                       (message[len(prefix):].lstrip(), reply_id, message))
     c.execute('INSERT OR IGNORE INTO platform_assistant_settings VALUES(?,?)', (key, '1'))
+
+
+def _remove_retired_posts(c):
+    """Once: delete the posts OrcAgent itself published with a RETIRED text,
+    with their replies, likes, reposts and notifications. Only posts recorded
+    as published by this assistant, from the official account, are touched."""
+    key = 'retired_posts_cleanup_v1'
+    if c.execute('SELECT 1 FROM platform_assistant_settings WHERE key=?', (key,)).fetchone():
+        return 0
+    author = identity(c)
+    if not author:
+        return 0   # no official account yet; try again next start
+    marks = ','.join('?' * len(RETIRED))
+    ids = [r[0] for r in c.execute(
+        "SELECT p.id FROM feed_posts p JOIN platform_assistant_events e ON e.post_id='p'||p.id AND e.kind='post' "
+        "WHERE p.wallet=? AND p.content IN (%s)" % marks, (author[1],) + tuple(RETIRED))]
+    for post_id in ids:
+        pid, link = 'p%d' % post_id, '/#post-p%d' % post_id
+        for sql, args in (
+                ('DELETE FROM feed_reply_likes WHERE reply_id IN (SELECT id FROM feed_replies WHERE post_id=?)', (pid,)),
+                ('DELETE FROM feed_replies WHERE post_id=?', (pid,)),
+                ('DELETE FROM post_likes WHERE post_id=?', (pid,)),
+                ('DELETE FROM post_reactions WHERE post_id=?', (pid,)),
+                ('DELETE FROM feed_reposts WHERE post_id=?', (pid,)),
+                ('DELETE FROM notifications WHERE link=? OR link LIKE ?', (link, link + '-reply-%'))):
+            try:
+                c.execute(sql, args)
+            except sqlite3.OperationalError:
+                pass   # a table this database does not have
+        c.execute('DELETE FROM feed_posts WHERE id=?', (post_id,))
+    c.execute('INSERT OR IGNORE INTO platform_assistant_settings VALUES(?,?)', (key, str(len(ids))))
+    if ids:
+        print('[platform-assistant] removed %d earlier post(s) with an untrue product text' % len(ids), flush=True)
+    return len(ids)
 
 
 def enabled(c, key):

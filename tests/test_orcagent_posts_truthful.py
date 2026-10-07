@@ -103,5 +103,47 @@ check('no post about sharing token cards in DMs or calls in groups',
 check('no post about Token Launch while it can be switched off on the server',
       'launch' not in text and "ORCAGENT_PUMP_TOKEN_LAUNCH_ENABLED" in read('token_launch.py'))
 
+# ── posts already published with an untrue text are removed, once ─────────
+import sqlite3, tempfile
+db = os.path.join(tempfile.mkdtemp(), 'retired.db')
+with sqlite3.connect(db) as c:
+    c.executescript("""
+CREATE TABLE users(id INTEGER PRIMARY KEY,wallet_address TEXT,username TEXT,is_verified INTEGER);
+INSERT INTO users VALUES(1,'officialwallet','Orcagent',1),(2,'memberwallet','member',0);
+CREATE TABLE feed_posts(id INTEGER PRIMARY KEY AUTOINCREMENT,wallet TEXT,content TEXT,created_at TEXT,image_url TEXT);
+CREATE TABLE feed_replies(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,post_id TEXT,message TEXT,created_at TEXT,parent_reply_id INTEGER);
+CREATE TABLE post_likes(post_id TEXT,user_id INTEGER);
+CREATE TABLE notifications(user_id INTEGER,type TEXT,content TEXT,link TEXT,actor_wallet TEXT);
+""")
+p.initialize(db)
+video = next(t for t in p.RETIRED if 'video' in t)
+with sqlite3.connect(db) as c:
+    bad_id = c.execute("INSERT INTO feed_posts(wallet,content) VALUES('officialwallet',?)", (video,)).lastrowid
+    good_id = c.execute("INSERT INTO feed_posts(wallet,content) VALUES('officialwallet',?)", (p.THESES[0][1],)).lastrowid
+    member_id = c.execute("INSERT INTO feed_posts(wallet,content) VALUES('memberwallet',?)", (video,)).lastrowid
+    for pid in (bad_id, good_id):
+        c.execute("INSERT INTO platform_assistant_events VALUES(?,?,?,?,?,?,?)", ('slot%d' % pid, 'post', None, 'p%d' % pid, None, 't', 0))
+    c.execute("INSERT INTO feed_replies(user_id,post_id,message) VALUES(2,?,'nice')", ('p%d' % bad_id,))
+    c.execute("INSERT INTO post_likes VALUES(?,2)", ('p%d' % bad_id,))
+    c.execute("INSERT INTO notifications VALUES(1,'like','x',?, 'memberwallet')", ('/#post-p%d' % bad_id,))
+    c.execute("DELETE FROM platform_assistant_settings WHERE key='retired_posts_cleanup_v1'")
+p.initialize(db)   # a restart after the deploy
+with sqlite3.connect(db) as c:
+    left = {r[0] for r in c.execute('SELECT id FROM feed_posts')}
+    leftovers = [c.execute(q, ('p%d' % bad_id,)).fetchone()[0] for q in
+                 ('SELECT COUNT(*) FROM feed_replies WHERE post_id=?', 'SELECT COUNT(*) FROM post_likes WHERE post_id=?')]
+    leftovers.append(c.execute('SELECT COUNT(*) FROM notifications WHERE link=?', ('/#post-p%d' % bad_id,)).fetchone()[0])
+check("OrcAgent's own post about video is removed, with its replies, likes and notifications",
+      bad_id not in left and leftovers == [0, 0, 0])
+check("...its posts that are true stay, and a member's own post is never touched",
+      good_id in left and member_id in left)
+with sqlite3.connect(db) as c:
+    again = c.execute("INSERT INTO feed_posts(wallet,content) VALUES('officialwallet',?)", (video,)).lastrowid
+    c.execute("INSERT INTO platform_assistant_events VALUES(?,?,?,?,?,?,?)", ('again', 'post', None, 'p%d' % again, None, 't', 0))
+p.initialize(db)
+with sqlite3.connect(db) as c:
+    check('the clean-up runs once, not on every start',
+          c.execute('SELECT COUNT(*) FROM feed_posts WHERE id=?', (again,)).fetchone()[0] == 1)
+
 print('%d/%d' % (sum(checks), len(checks)))
 sys.exit(0 if all(checks) else 1)
