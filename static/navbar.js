@@ -41,6 +41,33 @@ ensureScript('/static/in-app-notifications.js?v=1','in-app-notifications.js','oa
   ensureScript('/static/portfolio-assets.js?v=1','portfolio-assets.js');
 })();
 
+/* Home is built once, for the width it loaded at: the mobile dashboard up to
+   767px (where the page frame switches too), the desktop dashboard from
+   1025px, the plain layout in between. Each build loads its own scripts and
+   styles. Turning a phone or tablet moves the width across those lines
+   while the page keeps the old build -- mobile blocks without their
+   mobile-only styles showed as bare links and screen-filling icons. When the width crosses a line, build Home again
+   (after typing, if someone is mid-sentence); meanwhile mobile blocks are
+   never shown unstyled. */
+(function(){
+  var here=location.pathname.replace(/\/+$/,'')||'/';
+  if(here!=='/'||!window.matchMedia)return;
+  var st=document.createElement('style');
+  st.textContent='@media (min-width:768px){.oa-m-hero,.oa-m-bot,.oa-m-portfolio,.oa-m-today,.oa-m-opps,.oa-m-market-strip,.oa-m-shortcuts,.oa-m-feed-label{display:none!important}}';
+  document.head.appendChild(st);
+  var qs=[window.matchMedia('(max-width:767px)'),window.matchMedia('(min-width:1025px)')];
+  var built=qs.map(function(q){return q.matches}),going=false;
+  function rebuild(){
+    if(going)return;
+    if(qs.every(function(q,i){return q.matches===built[i]}))return;
+    if((location.pathname.replace(/\/+$/,'')||'/')!=='/')return;
+    var a=document.activeElement;
+    if(a&&(a.tagName==='TEXTAREA'||a.tagName==='INPUT')&&a.value){a.addEventListener('blur',rebuild,{once:true});return}
+    going=true;location.reload();
+  }
+  qs.forEach(function(q){if(q.addEventListener)q.addEventListener('change',rebuild);else if(q.addListener)q.addListener(rebuild)});
+})();
+
 (function(){
   var here=location.pathname.replace(/\/+$/,'')||'/';
   if(here!=='/'||!window.matchMedia('(min-width:1025px)').matches)return;
@@ -50,10 +77,10 @@ ensureScript('/static/in-app-notifications.js?v=1','in-app-notifications.js','oa
 
 (function(){
   var here=location.pathname.replace(/\/+$/,'')||'/';
-  if(here!=='/'||!window.matchMedia('(max-width:768px)').matches)return;
+  if(here!=='/'||!window.matchMedia('(max-width:767px)').matches)return;
   document.documentElement.classList.add('oa-home-mobile-root');
-  ensureStyle('/static/home-mobile.css?v=14','home-mobile.css');
-  ensureScript('/static/home-mobile.js?v=15','home-mobile.js');
+  ensureStyle('/static/home-mobile.css?v=15','home-mobile.css');
+  ensureScript('/static/home-mobile.js?v=16','home-mobile.js');
 })();
 
 (function(){

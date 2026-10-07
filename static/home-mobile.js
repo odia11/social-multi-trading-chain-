@@ -2,12 +2,12 @@
 (function(){
 'use strict';
 var path=location.pathname.replace(/\/+$/,'')||'/';
-if(path!=='/' || !window.matchMedia('(max-width:768px)').matches) return;
+if(path!=='/' || !window.matchMedia('(max-width:767px)').matches) return;
 /* Do not rely on CSS :has() to unlock document scrolling. Older Android
    WebViews either do not support it or can evaluate it too late, leaving the
    dashboard's base html{overflow:hidden} rule active for the whole page. */
 document.documentElement.classList.add('oa-home-mobile-root');
-var polish=document.createElement('link');polish.rel='stylesheet';polish.href='/static/home-mobile-polish.css?v=8';document.head.appendChild(polish);
+var polish=document.createElement('link');polish.rel='stylesheet';polish.href='/static/home-mobile-polish.css?v=9';document.head.appendChild(polish);
 function money(v){var n=Number(v||0);if(!isFinite(n))n=0;return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:n>=1000?0:2,maximumFractionDigits:n>=1000?0:2}).format(n)}
 function num(v){var n=Number(v||0);return isFinite(n)?n:0}
 function ready(fn){if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fn);else fn()}

@@ -745,6 +745,22 @@ input{font-family:inherit}
   .pt-chart-wrap{height:210px}
   .pt-chart-svg{height:188px}
 }
+/* ── tablet landscape (iPad 1024/1180): the three columns need 1220px, so
+   between the phone layout and that width the right column was pushed off
+   the screen. Here the filters move behind the same "Filters" drawer the
+   phone uses and the feed + token panel share the width. ── */
+@media (min-width: 901px) and (max-width: 1219px){
+  .pt-shell{min-width:0;padding:14px 14px 32px}
+  .pt-panel{grid-template-columns:minmax(0,1fr) 290px}
+  .pt-left{display:none}
+  .pt-left.mobile-open{
+    display:flex;position:fixed;top:var(--pt-nb-h,80px);bottom:0;left:0;width:340px;z-index:95;
+    background:var(--panel);border-right:1px solid var(--panel-border);box-shadow:0 0 50px rgba(0,0,0,.6);
+    max-height:none;overflow-y:auto;padding:16px 14px calc(16px + env(safe-area-inset-bottom));gap:14px;
+  }
+  .pt-mobile-filters-btn{display:flex}
+  .pt-feed-hd{flex-wrap:wrap;row-gap:8px}
+}
 @media (max-width: 480px){
   .pt-story{width:58px}
   .pt-story-ring{width:54px;height:54px}
