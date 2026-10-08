@@ -129,3 +129,5 @@ html.fcall-sheet-open,html.fcall-sheet-open body{overflow:hidden}
   .fcall-stat{padding:6px 7px}
   .fcall-stat b{font-size:11.5px}
 }
+
+.fcall-live-status{display:block;color:var(--muted,#8b929d);font-size:11px;margin:8px 0;}

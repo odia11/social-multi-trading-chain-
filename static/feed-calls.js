@@ -88,7 +88,7 @@
       return '<div class="fcall-stat"><span>' + label + '</span><b' + (cls ? ' class="' + cls + '"' : '') + '>' + value + '</b></div>';
     };
     var nowCls = now >= 1 ? 'up' : 'down';
-    return '<div class="fcall-card" data-call-id="' + esc(c.id) + '" onclick="event.stopPropagation()">'
+    return '<div class="fcall-card" data-call-id="' + esc(c.id) + '" data-mint="' + esc(c.mint) + '" onclick="event.stopPropagation()">'
       + '<div class="fcall-top">'
         + tileHtml(c, 'fcall-tile')
         + '<div class="fcall-id"><div class="fcall-sym">$' + esc(sym) + '</div>'
@@ -97,12 +97,13 @@
       + '</div>'
       + '<svg class="fcall-spark" viewBox="0 0 300 44" preserveAspectRatio="none" aria-hidden="true"'
         + ' data-mint="' + esc(c.mint) + '" data-chain="' + esc(c.chain || 'solana') + '"'
-        + ' data-entry="' + esc(num(c.price_at_call)) + '" data-called="' + esc(c.called_at || '') + '"></svg>'
+        + ' data-entry="' + esc(num(c.price_at_call)) + '" data-called="' + esc(c.called_at || '') + '" data-now="' + esc(num(c.last_price)) + '"></svg>'
       + '<div class="fcall-stats">'
         + stat(hasMcap ? 'Called at' : 'Entry', hasMcap ? fmtUsd(c.mcap_at_call) : fmtPrice(c.price_at_call))
         + stat('Now', hasMcap ? fmtUsd(c.mcap_now) : fmtPrice(c.last_price), nowCls)
-        + stat('Peak', hasMcap ? fmtUsd(c.mcap_peak) : fmtPrice(c.peak_price), peak > 1 ? 'up' : '')
+        + stat('Peak price', fmtPrice(c.peak_price), peak > 1 ? 'up' : '')
       + '</div>'
+      + '<small class="fcall-live-status" role="status">Updating…</small>'
       + '<div class="fcall-actions">'
         + '<button type="button" class="fcall-buy" onclick="event.stopPropagation();if(typeof showTokenCard===\'function\')showTokenCard(' + jsArg(sym) + ',' + jsArg(c.mint) + ')">Buy $' + esc(sym) + '</button>'
         + '<button type="button" class="oa-share-call" data-call-id="' + esc(c.id) + '">Share call</button>'
@@ -120,9 +121,12 @@
   function drawSpark(svg, candles){
     var entry = num(svg.getAttribute('data-entry'));
     var called = parseTs(svg.getAttribute('data-called')) / 1000;
-    var pts = (candles || []).filter(function(k){ return num(k.t) >= called - 3600 && num(k.c) > 0; });
-    if(pts.length < 2) pts = (candles || []).slice(-24);
+    var pts = (candles || []).filter(function(k){ return num(k.t) >= called && num(k.c) > 0; });
+    if(entry > 0) pts.unshift({t:called, c:entry});
+    var latest = num(svg.getAttribute('data-now'));
+    if(latest > 0) pts.push({t:Date.now()/1000, c:latest});
     if(pts.length < 2){ svg.classList.add('fcall-spark-empty'); return; }
+    svg.classList.remove('fcall-spark-empty');
     var vals = pts.map(function(k){ return num(k.c); });
     var lo = Math.min.apply(null, vals.concat(entry > 0 ? [entry] : [])),
         hi = Math.max.apply(null, vals.concat(entry > 0 ? [entry] : []));
@@ -140,8 +144,8 @@
     var age = Date.now() - (parseTs(svg.getAttribute('data-called')) || Date.now());
     var tf = tfForAge(age), key = chain + ':' + mint + ':' + tf;
     var hit = sparkCache[key];
-    if(hit && Date.now() - hit.at < 120000){ hit.promise.then(function(c){ drawSpark(svg, c); }); return; }
-    var promise = fetch('/api/chart/' + encodeURIComponent(mint) + '?chain=' + encodeURIComponent(chain) + '&tf=' + tf)
+    if(hit && Date.now() - hit.at < 10000){ hit.promise.then(function(c){ drawSpark(svg, c); }); return; }
+    var promise = fetch('/api/chart/' + encodeURIComponent(mint) + '?chain=' + encodeURIComponent(chain) + '&tf=' + tf, {cache:'no-store'})
       .then(function(r){ return r.ok ? r.json() : {}; })
       .then(function(d){ return Array.isArray(d.candles) ? d.candles : []; })
       .catch(function(){ return []; });
@@ -150,19 +154,66 @@
   }
   var sparkObserver = ('IntersectionObserver' in window) ? OrcPageLifecycle.intersectionObserver(function(entries){
     entries.forEach(function(en){
-      if(en.isIntersecting){ sparkObserver.unobserve(en.target); loadSpark(en.target); }
+      if(en.isIntersecting){ sparkObserver.unobserve(en.target); loadSpark(en.target); scheduleLive(); }
     });
   }, {rootMargin: '200px 0px'}) : null;
   function watchSparks(root){
     (root || document).querySelectorAll('svg.fcall-spark:not([data-watched])').forEach(function(svg){
       svg.setAttribute('data-watched', '1');
       if(sparkObserver) sparkObserver.observe(svg); else loadSpark(svg);
+      scheduleLive();
     });
+  }
+  var liveBusy = false, liveTimer = null;
+  function refreshLiveCalls(){
+    if(liveBusy || document.hidden) return;
+    var cards = Array.from(document.querySelectorAll('.fcall-card')).filter(function(card){
+      var r = card.getBoundingClientRect();
+      return r.bottom >= -200 && r.top <= window.innerHeight + 200;
+    });
+    var ids = Array.from(new Set(cards.map(function(c){ return c.getAttribute('data-call-id'); }))).slice(0,30);
+    if(!ids.length) return;
+    liveBusy = true;
+    fetch('/api/calls/live?ids=' + ids.join(','), {cache:'no-store'})
+      .then(function(r){ if(!r.ok) throw new Error('quote unavailable'); return r.json(); })
+      .then(function(d){
+        if(!d.ok) throw new Error('quote unavailable');
+        (d.calls || []).forEach(function(c){
+          cards.forEach(function(card){
+            if(!card.isConnected || card.getAttribute('data-call-id') !== String(c.id) || card.getAttribute('data-mint') !== c.mint) return;
+            var cap = num(c.mcap_at_call) > 0, nowUp = num(c.now_multiplier) >= 1;
+            var values = card.querySelectorAll('.fcall-stat b');
+            if(values.length !== 3) return;
+            values[1].textContent = cap ? fmtUsd(c.mcap_now) : fmtPrice(c.last_price);
+            values[1].className = nowUp ? 'up' : 'down';
+            values[2].textContent = fmtPrice(c.peak_price);
+            values[2].className = num(c.multiplier) > 1 ? 'up' : '';
+            var multi = card.querySelector('.fcall-multi b');
+            multi.textContent = fmtMulti(c.multiplier);
+            multi.className = num(c.multiplier) > 1 ? 'up' : '';
+            card.querySelector('.fcall-live-status').textContent = c.stale ? 'Last known data · retrying…' : 'Updated ' + new Date(num(c.quote_at)*1000).toLocaleTimeString();
+            var svg = card.querySelector('.fcall-spark');
+            svg.setAttribute('data-now', String(num(c.last_price)));
+            svg.removeAttribute('data-loaded');
+            loadSpark(svg);
+          });
+        });
+      }).catch(function(){
+        cards.forEach(function(card){ var status = card.querySelector('.fcall-live-status'); if(status) status.textContent = 'Update unavailable · retrying…'; });
+      }).finally(function(){ liveBusy = false; });
+  }
+  function scheduleLive(){
+    if(liveTimer) clearTimeout(liveTimer);
+    liveTimer = setTimeout(function(){ liveTimer = null; refreshLiveCalls(); }, 100);
   }
   function startWatching(){
     var feed = document.getElementById('center-feed');
     if(!feed) return;
     watchSparks(feed);
+    scheduleLive();
+    setInterval(refreshLiveCalls, 15000);
+    document.addEventListener('visibilitychange', scheduleLive);
+    window.addEventListener('pageshow', scheduleLive);
     // Only look inside what was just added. Re-scanning the whole feed on
     // every mutation ran a feed-wide query for each card built or torn down
     // while scrolling.

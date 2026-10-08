@@ -214,7 +214,7 @@ console.log(JSON.stringify({html: window._feedCallCardHtml(evil, 'p1'), empty: w
 out = json.loads(subprocess.run(['node', '-e', harness], capture_output=True, text=True, timeout=30).stdout or '{}')
 card = out.get('html', '')
 check('the call card shows the multiplier and the market caps',
-      '3.4x' in card and '$1.8M' in card and '$5.2M' in card and '$6.1M' in card and 'Buy $' in card)
+      '3.4x' in card and '$1.8M' in card and '$5.2M' in card and 'Peak price' in card and '$0.000340' in card and 'Buy $' in card)
 check('...and escapes everything that came from the token', '<b>X</b>' not in card and '<script>' not in card
       and '<img src=x' not in card and 'javascript:' not in card)
 check('...and draws nothing for a post without call data', out.get('empty') == '')

@@ -3133,6 +3133,9 @@ def run_migrations():
         "ALTER TABLE token_calls ADD COLUMN chain TEXT DEFAULT ''",
         "ALTER TABLE token_calls ADD COLUMN image_url TEXT DEFAULT ''",
         "ALTER TABLE token_calls ADD COLUMN last_price REAL DEFAULT NULL",
+        "ALTER TABLE token_calls ADD COLUMN live_mcap REAL DEFAULT NULL",
+        "ALTER TABLE token_calls ADD COLUMN live_peak_mcap REAL DEFAULT NULL",
+        "ALTER TABLE token_calls ADD COLUMN quote_at REAL DEFAULT NULL",
         "ALTER TABLE feed_posts ADD COLUMN image_url TEXT DEFAULT NULL",
         "ALTER TABLE follows ADD COLUMN notify_enabled INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE follows ADD COLUMN notify_mode TEXT NOT NULL DEFAULT 'all'",
@@ -21227,7 +21230,9 @@ def _calls_peak_loop():
                 conn.close()
             mints = [r[0] for r in rows]
             chain_of = {r[0]: (r[1] or ('solana' if is_valid_solana_address(r[0]) else '')) for r in rows}
-            price_by_mint, image_by_mint = {}, {}
+            fetched_at = time.time()
+            price_by_mint, image_by_mint, quote_by_mint, quote_time = {}, {}, {}, {}
+            from call_live_data import select_quote, record_quote
             for i in range(0, len(mints), 30):
                 chunk = mints[i:i+30]
                 try:
@@ -21236,13 +21241,18 @@ def _calls_peak_loop():
                     if not r:
                         continue
                     pairs = r.json().get('pairs', []) or []
+                    url = 'https://api.dexscreener.com/latest/dex/tokens/' + ','.join(chunk)
+                    cached_at = (_dex_resp_cache.get(url) or (0,))[0]
+                    for m in chunk:
+                        quote = select_quote(pairs, m)
+                        if quote and cached_at:
+                            price_by_mint[m] = quote['price']
+                            quote_by_mint[m] = quote
+                            quote_time[m] = cached_at
                     for p in pairs:
                         m = (p.get('baseToken') or {}).get('address', '')
-                        price = float(p.get('priceUsd', 0) or 0)
-                        if m and price > 0 and m not in price_by_mint:
-                            price_by_mint[m] = price
-                        if m and (p.get('info') or {}).get('imageUrl') and m not in image_by_mint:
-                            image_by_mint[m] = p['info']['imageUrl']
+                        if p.get('chainId') == 'solana' and m in chunk and (p.get('info') or {}).get('imageUrl'):
+                            image_by_mint.setdefault(m, p['info']['imageUrl'])
                 except Exception as e:
                     print(f'[calls-peak] chunk error: {e}', flush=True)
                 time.sleep(0.3)
@@ -21293,14 +21303,8 @@ def _calls_peak_loop():
                 conn = sqlite3.connect(DB_FILE)
                 try:
                     for mint, price in price_by_mint.items():
-                        conn.execute(
-                            'UPDATE token_calls SET peak_price=?, peak_at=CURRENT_TIMESTAMP '
-                            'WHERE mint=? AND ?>peak_price',
-                            (price, mint, price)
-                        )
-                        # "Now" on a feed call card -- the same observation,
-                        # no extra request.
-                        conn.execute('UPDATE token_calls SET last_price=? WHERE mint=?', (price, mint))
+                        record_quote(conn, mint, quote_by_mint.get(mint) or {'price': price, 'mcap': 0},
+                                     quote_time.get(mint, fetched_at))
                     conn.commit()
                 finally:
                     conn.close()
@@ -23134,9 +23138,9 @@ def _feed_call_payloads(conn, targets):
     ph = ','.join('?' * len(ids))
     official = _official_agent_posts(conn, {p for pairs in wanted.values() for p, _ in pairs})
     for (cid, post_id, mint, symbol, name, chain, image_url, price_at_call, mcap_at_call,
-         peak_price, last_price, called_at) in conn.execute(
+         peak_price, last_price, called_at, live_mcap, live_peak_mcap, quote_at) in conn.execute(
             f'''SELECT id, post_id, mint, symbol, token_name, COALESCE(chain,''), COALESCE(image_url,''),
-                       price_at_call, mcap_at_call, peak_price, last_price, timestamp
+                       price_at_call, mcap_at_call, peak_price, last_price, timestamp, live_mcap, live_peak_mcap, quote_at
                 FROM token_calls WHERE id IN ({ph})''', ids):
         if not price_at_call or price_at_call <= 0:
             continue
@@ -23150,8 +23154,10 @@ def _feed_call_payloads(conn, targets):
             'multiplier': round(peak / price_at_call, 4),
             'now_multiplier': round(now_price / price_at_call, 4),
             'mcap_at_call': mcap_at_call or 0,
-            'mcap_peak': (mcap_at_call or 0) * peak / price_at_call,
-            'mcap_now': (mcap_at_call or 0) * now_price / price_at_call,
+            'mcap_peak': live_peak_mcap if quote_at else (mcap_at_call or 0) * peak / price_at_call,
+            'mcap_now': live_mcap if quote_at else (mcap_at_call or 0) * now_price / price_at_call,
+            'quote_at': quote_at,
+            'stale': time.time() - (quote_at or 0) > 30,
             'called_at': called_at or '',
         }
         for want_post, item in wanted.get(cid, []):
