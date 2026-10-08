@@ -185,9 +185,9 @@ def install(d):
             return resp
         html = resp.get_data(as_text=True)
         if '</head>' in html and '/static/new-wallet.css' not in html:
-            html = html.replace('</head>', '<link rel="stylesheet" href="/static/new-wallet.css?v=1"></head>', 1)
+            html = html.replace('</head>', '<link rel="stylesheet" href="/static/new-wallet.css?v=2"></head>', 1)
         if '</body>' in html and '/static/new-wallet.js' not in html:
             vendor = '' if '/static/vendor/tweetnacl-1.0.3.min.js' in html else '<script src="/static/vendor/tweetnacl-1.0.3.min.js" defer></script>'
-            html = html.replace('</body>', vendor + '<script src="/static/new-wallet.js?v=1" defer></script></body>', 1)
+            html = html.replace('</body>', vendor + '<script src="/static/new-wallet.js?v=2" defer></script></body>', 1)
         resp.set_data(html)
         return resp
