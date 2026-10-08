@@ -71,6 +71,37 @@ CREATE TABLE token_calls(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,wa
     def publish(self, when, tokens=TOKENS, sol=152.0):
         return p.publish_due(self.db, when.timestamp(), live_data=lambda: (tokens, sol))
 
+    def test_extreme_pair_change_is_never_amplified_in_posts_or_pulse(self):
+        bad = token('JupSOL', 'unverified-pair', 441994.0)
+        with sqlite3.connect(self.db) as c:
+            trends = live.trending(c, DAY0.timestamp(), [bad] + TOKENS)
+            pulse = live.pulse(c, DAY0.timestamp(), [bad] + TOKENS, 108.78)
+        self.assertNotIn('trending:unverified-pair', [x[0] for x in trends])
+        self.assertTrue(pulse)
+        texts = ' '.join(pulse[0][1])
+        self.assertNotIn('JupSOL', texts)
+        self.assertNotIn('441994', texts)
+        self.assertIn('4', texts)
+        self.assertEqual(bad['price_change_24h'], 441994.0, 'raw data is not rewritten')
+
+    def test_bad_market_numbers_cannot_break_or_poison_publication(self):
+        for key, value in [('price_usd', float('nan')), ('price_usd', -1),
+                           ('price_change_24h', None), ('price_change_24h', 'invalid'),
+                           ('price_change_24h', float('inf')), ('price_change_24h', -101),
+                           ('volume_24h', float('inf')), ('liquidity_usd', -1),
+                           ('buys_24h', 'invalid')]:
+            with self.subTest(key=key, value=value):
+                t = dict(TOKENS[0], **{key: value})
+                with sqlite3.connect(self.db) as c:
+                    self.assertEqual(live.trending(c, DAY0.timestamp(), [t]), [])
+                    self.assertEqual(live.pulse(c, DAY0.timestamp(), [t] * 4, 108.78), [])
+        with sqlite3.connect(self.db) as c:
+            for sol in [float('nan'), float('inf'), 'invalid', -1]:
+                self.assertEqual(live.pulse(c, DAY0.timestamp(), TOKENS, sol), [])
+        self.assertTrue(live._postable_token(token('BORDR', 'valid', 752)))
+        self.assertTrue(live._postable_token(token('FLAT', 'valid', 0)))
+        self.assertTrue(live._postable_token(token('DOWN', 'valid', -100)))
+
     def test_call_posts_come_now_and_then_not_every_half_hour(self):
         # A post every 30 minutes, as before -- but posts about calls only now
         # and then (at most one per CALL_MIN_GAP, in a slot the draw picks),
