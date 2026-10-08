@@ -42,7 +42,7 @@ class Key:
  def __exit__(self,*a):return False
 d._use_key=lambda *a:Key()
 calls=[]
-def execute(w,pk,side,mint,amount,base='SOL',capture=None,fee_rate=None):
+def execute(w,pk,side,mint,amount,base='SOL',capture=None,fee_rate=None,known_sol_balance=None):
  calls.append(fee_rate)
  capture.update(fee_bundled=True,fee_base=.05,fee_rate=fee_rate)
  return True,('8'*86+str(len(calls))), '',20,.05 if side=='buy' else .0993

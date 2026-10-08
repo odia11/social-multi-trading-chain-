@@ -49,7 +49,7 @@ from portfolio_trade_history import install as _install_portfolio_trade_history
 from portfolio_token_withdraw import install as _install_portfolio_token_withdraw
 from live_market_sheet_overlap_fix import install as _install_live_market_sheet_overlap_fix
 from mobile_footer_visibility_fix import install as _install_mobile_footer_visibility_fix
-from wallet_onboarding import install as _install_wallet_onboarding
+from new_wallet_accounts import install as _install_new_wallet_accounts
 from trading_wallet_generator import install as _install_trading_wallet_generator
 from response_privacy_hardening import install as _install_response_privacy_hardening
 from audit_hardening import install as _install_audit_hardening
@@ -151,10 +151,9 @@ _install_live_market_sheet_overlap_fix(_dashboard)
 # its labels and safe-area padding, instead of letting the lower half clip off.
 _install_mobile_footer_visibility_fix(_dashboard)
 
-# Guest homepage onboarding mirrors the familiar wallet-app choice: create a
-# new self-custodial wallet, import an existing private key, or connect Phantom.
-# Generated/imported wallet keys are encrypted before storage and never logged.
-_install_wallet_onboarding(_dashboard)
+# Guest accounts: server-generated wallet, backup + credentials, or local
+# signature-only key import through the existing wallet authentication route.
+_install_new_wallet_accounts(_dashboard)
 
 # Existing authenticated users can still create a dedicated Solana trading wallet
 # from Settings/Manage Wallet without replacing any funded wallet.

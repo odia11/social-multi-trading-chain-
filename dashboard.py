@@ -3936,12 +3936,14 @@ def _generate_referral_code(cursor) -> str:
             return code
     return secrets.token_hex(6).upper()  # pathological-collision fallback
 
-def get_or_create_user(wallet: str, ref_code: str = None) -> int:
+def get_or_create_user(wallet: str, ref_code: str = None, *, connection=None) -> int:
     # Serialize creation and referral assignment. Only a genuinely new row
     # may be attributed; returning users can never be reassigned by a link.
-    conn = sqlite3.connect(DB_FILE, timeout=10)
+    owns_connection = connection is None
+    conn = connection if connection is not None else sqlite3.connect(DB_FILE, timeout=10)
     try:
-        conn.execute('BEGIN IMMEDIATE')
+        if owns_connection:
+            conn.execute('BEGIN IMMEDIATE')
         c = conn.cursor()
         c.execute("INSERT OR IGNORE INTO users (wallet_address, pref_solana_base_currency) VALUES (?, 'SOL')", (wallet,))
         created = c.rowcount == 1
@@ -3955,10 +3957,12 @@ def get_or_create_user(wallet: str, ref_code: str = None) -> int:
             ref_row = c.execute('SELECT wallet_address FROM users WHERE referral_code=?', (ref_code,)).fetchone()
             if ref_row and ref_row[0] != wallet:
                 c.execute('UPDATE users SET referred_by=? WHERE wallet_address=?', (ref_row[0], wallet))
-        conn.commit()
+        if owns_connection:
+            conn.commit()
         return row[0] if row else None
     finally:
-        conn.close()
+        if owns_connection:
+            conn.close()
 
 
 def _current_wallet() -> str:
@@ -12820,6 +12824,13 @@ def _security_headers(resp):
         path = getattr(request, 'path', '')
         try:
             body = resp.get_data(as_text=True)
+            # Guest creation intentionally exports exactly one freshly generated
+            # wallet for backup. Validate before scanning/logging any key value.
+            if path == '/api/account/create-wallet/start' and resp.status_code == 200:
+                from new_wallet_accounts import valid_key_export
+                if valid_key_export(json.loads(body)):
+                    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+                    return resp
             # ── 1. Block Solana private key material on sensitive endpoints ──
             # Walk the decoded JSON field-by-field with _scan_obj_for_key_leak so we
             # can skip image/avatar fields and distinguish base64 blobs from base58 keys.

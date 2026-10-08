@@ -9,8 +9,8 @@ All API 5xx responses are also normalized to a generic client-facing error. Inte
 SQL/provider/path details belong in server logs, never in a browser response.
 
 One legacy authenticated trading-wallet generator has a deliberately narrow,
-validated one-time export exception. Guest onboarding generates keys in the browser,
-so onboarding responses never need a secret-field exception.
+validated one-time export exception. Guest account creation also has a validated,
+exact-shape one-time export exception; importing a key signs locally and never exports it to the server.
 """
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ _ALWAYS_SECRET = {
 _AUTH_ALLOWED_PATHS = {
     '/api/wallet/set', '/api/session/remember', '/api/session/resume',
     '/api/pair/claim', '/api/csrf',
+    '/api/account/create-wallet/confirm',
 }
 _FULL_KEY_EXPORT_PATHS = {
     '/api/wallet/generate-trading-wallet',
@@ -141,6 +142,14 @@ def install(dashboard_module):
                 return _write_json(response, _generic_5xx_payload(payload))
 
             if request.path in _FULL_KEY_EXPORT_PATHS and _valid_full_key_export(payload):
+                return _mark_no_store(response)
+
+            # Explicit one-time guest export: only the exact start response
+            # shape is allowed. Other routes retain recursive key redaction.
+            if request.path == '/api/account/create-wallet/start' and isinstance(payload, dict) and payload.get('ok') is True:
+                from new_wallet_accounts import valid_key_export
+                if response.status_code != 200 or not valid_key_export(payload):
+                    return _replace_with_blocked(response)
                 return _mark_no_store(response)
 
             cleaned = _clean(payload, request.path in _AUTH_ALLOWED_PATHS)

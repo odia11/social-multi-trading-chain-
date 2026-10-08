@@ -404,7 +404,7 @@ _file_cache = {}
 
 
 def light_css_cached(css):
-    key = hashlib.sha1(css.encode('utf-8', 'replace')).hexdigest()
+    key = hashlib.sha1(css.encode('utf-8', 'replace'), usedforsecurity=False).hexdigest()
     with _cache_lock:
         hit = _inline_cache.get(key)
     if hit is not None:
