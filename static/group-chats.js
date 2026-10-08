@@ -181,6 +181,11 @@ function threadEl(){
   input.addEventListener('keydown',function(e){
     if(e.key==='Enter'&&!e.shiftKey&&!('ontouchstart' in window)){e.preventDefault();form.requestSubmit?form.requestSubmit():form.dispatchEvent(new Event('submit',{cancelable:true}));}
   });
+  var bodyEl=t.querySelector('.gc-th-body');
+  bodyEl.addEventListener('scroll',function(){atBottom=bodyEl.scrollHeight-bodyEl.scrollTop-bodyEl.clientHeight<80;},{passive:true});
+  // iOS may still scroll the page to show the field; keep the chat on screen.
+  input.addEventListener('focus',function(){setTimeout(fitViewport,50);setTimeout(fitViewport,350);});
+  input.addEventListener('blur',function(){setTimeout(fitViewport,50);});
   form.addEventListener('submit',function(e){e.preventDefault();emojiPanel(false);sendText();});
   var smile=t.querySelector('.gc-emoji'),panel=t.querySelector('.gc-emoji-panel');
   smile.addEventListener('click',function(){emojiPanel(panel.hidden);});
@@ -270,7 +275,7 @@ function openGroup(id,push){
   var c=chats.find(function(x){return x.id===id;})||{id:id,name:'Group',members:0};
   open={id:id,name:c.name,role:c.role,photo:c.photo||'',members:[],messages:[],lastId:0};
   window.__oaOpenGroupId=id;
-  var t=threadEl();t.hidden=false;
+  var t=threadEl();t.hidden=false;atBottom=true;fitViewport();
   document.documentElement.classList.add('gc-lock');document.body.classList.add('gc-open');
   t.querySelector('.gc-msgs').innerHTML='<div class="gc-empty">Loading…</div>';
   paintHeader();
@@ -300,10 +305,29 @@ function adopt(chat){
   if(c){c.name=chat.name;c.photo=open.photo;c.role=chat.role;renderList();}
   paintHeader();
 }
+// On a phone the keyboard does not shrink the page: iOS slides the visible
+// part up instead, so a chat pinned to the page showed what lies under it
+// between the composer and the keyboard, and lost its header. The chat is
+// sized to exactly what is visible, as direct messages do.
+var atBottom=true;
+function fitViewport(){
+  var t=document.getElementById('gc-thread'),vv=window.visualViewport;
+  if(!t||t.hidden||!vv||!open)return;
+  if(window.innerWidth>=768&&!window.matchMedia('(pointer:coarse)').matches)return;
+  t.style.top=Math.round(vv.offsetTop)+'px';
+  t.style.height=Math.round(vv.height)+'px';
+  t.style.bottom='auto';
+  if(atBottom){var b=t.querySelector('.gc-th-body');b.scrollTop=b.scrollHeight;}
+}
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize',fitViewport);
+  window.visualViewport.addEventListener('scroll',fitViewport);
+}
 function closeGroup(fromPop){
   if(pollTimer){window.clearInterval(pollTimer);pollTimer=null;}
   open=null;window.__oaOpenGroupId=null;emojiPanel(false);
-  var t=document.getElementById('gc-thread');if(t)t.hidden=true;
+  var t=document.getElementById('gc-thread');
+  if(t){t.hidden=true;t.style.removeProperty('top');t.style.removeProperty('height');t.style.removeProperty('bottom');}
   closeSheet();
   document.documentElement.classList.remove('gc-lock');document.body.classList.remove('gc-open');
   if(!fromPop&&/[?&]group=/.test(location.search)){
