@@ -408,7 +408,7 @@ def media_dir(d):
 
 
 def save(d, data: bytes) -> str:
-    name = hashlib.sha1(data).hexdigest() + '.webp'
+    name = hashlib.sha1(data, usedforsecurity=False).hexdigest() + '.webp'
     path = os.path.join(media_dir(d), name)
     if not os.path.exists(path):
         tmp = path + '.tmp'

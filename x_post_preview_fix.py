@@ -73,7 +73,7 @@ def _x_card(data):
     """The post's picture as the 1200x630 JPEG X shows: the whole picture,
     fitted, on a blurred and darkened copy of itself. Square and portrait
     photos used to be declared 1200x630 and then cropped or skipped by X."""
-    key = hashlib.sha1(data).hexdigest()
+    key = hashlib.sha1(data, usedforsecurity=False).hexdigest()
     hit = _card_cache.get(key)
     if hit:
         return hit
