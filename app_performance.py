@@ -174,8 +174,52 @@ def install(appmod) -> None:
             # hand-maintained ?v=7/?v=13 numbers in markup lets Safari combine
             # fresh HTML with a week-old JS/CSS bundle after a deploy. Normalize
             # all of them to the git/version hash carried by this response.
+            # The route a page is, on <html> from the first byte: CSS that
+            # used to wait for a page script to add a body class (the mobile
+            # header losing its search row on Home, Portfolio and Bot) now
+            # applies before the first paint, so nothing below it jumps.
+            # Live Market's and Groups' page scripts add oa-live-v2 /
+            # oa-live-v2-root / oa-groups-v2 on every width as soon as they
+            # run; sending them with the page is the same layout without the
+            # first frame in the old one.
+            html_cls, body_cls = {
+                '/': ('oa-route-home', ''),
+                '/wallet': ('oa-route-wallet', ''),
+                '/bot': ('oa-route-bot', ''),
+                '/live-market': ('oa-route-live-market oa-live-v2-root', 'oa-live-v2'),
+                '/groups': ('oa-route-groups', 'oa-groups-v2'),
+            }.get(path, ('', ''))
+
+            def add_class(markup, tag_name, classes):
+                m = re.search(r'<%s\b[^>]*>' % tag_name, markup, re.I)
+                if not m or not classes:
+                    return markup
+                tag = m.group(0)
+                cm = re.search(r'\bclass="([^"]*)"', tag)
+                have = cm.group(1).split() if cm else []
+                missing = [c for c in classes.split() if c not in have]
+                if not missing:
+                    return markup
+                if cm:
+                    new_tag = tag.replace(cm.group(0), 'class="%s"' % ' '.join(have + missing), 1)
+                else:
+                    new_tag = tag[:-1] + ' class="%s">' % ' '.join(missing)
+                return markup[:m.start()] + new_tag + markup[m.end():]
+
+            html = add_class(html, 'html', html_cls)
+            # app-ux.js (on every page, added above) sets oa-shared-ux as soon
+            # as it runs; with the page it is there for the first paint too.
+            html = add_class(html, 'body', (body_cls + ' oa-shared-ux').strip())
             if tags:
                 html = html.replace('</head>', '\n'.join(tags) + '\n</head>', 1)
+            # Webfonts never re-flow a page that is already on screen. With
+            # display=swap the text was drawn in the fallback font and jumped
+            # when Geist arrived (a 5-13% shorter page: the section someone
+            # had scrolled to moved hundreds of pixels). optional uses the
+            # font when it is there in time -- from the cache on every page
+            # after the first -- and otherwise keeps the fallback for that view.
+            html = re.sub(r'(https://fonts\.googleapis\.com/css2\?[^"\'\s>]*?)display=swap',
+                          r'\1display=optional', html)
             html = re.sub(
                 r'(/static/[A-Za-z0-9_./-]+)\?v=[A-Za-z0-9_.-]+',
                 lambda m: m.group(1) + '?v=' + version,

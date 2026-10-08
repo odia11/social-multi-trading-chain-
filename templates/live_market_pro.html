@@ -135,6 +135,8 @@ input{font-family:inherit}
 .pt-trader-rail-link{font-size:11px;font-weight:600;color:var(--accent);text-decoration:none}
 .pt-trader-rail{display:flex;gap:16px;padding:10px 22px 16px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;cursor:grab}
 .pt-trader-rail::-webkit-scrollbar{display:none}
+.pt-trader-rail.pt-rail-reserved:empty{min-height:122px}
+@media (max-width:767px){.pt-trader-rail.pt-rail-reserved:empty{min-height:114px}}
 .pt-trader-story{position:relative}
 .pt-trader-rank-badge{position:absolute;top:-2px;right:2px;z-index:1;width:17px;height:17px;border-radius:50%;background:var(--panel);border:1.5px solid var(--bg);color:var(--text);font-family:var(--mono);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center}
 .pt-trader-rank-badge.gold{background:var(--accent);color:#1a1400;border-color:var(--accent)}
@@ -981,6 +983,7 @@ body.pt-profile-mode .pt-card.pt-profile-open .pt-chart-waiting{left:50%!importa
         <button class="pt-mobile-filters-btn" id="pt-mobile-filters-btn">⚙ Filters</button>
         <div class="pt-scanning-pill"><span class="pt-scan-dot"></span>SCANNING</div>
       </div>
+      <div id="oa-lm-quick" class="oa-lm-quick"><button type="button" data-sort="trending" class="active">🔥 Trending</button><button type="button" data-sort="gainers">↗ Gainers</button><button type="button" data-sort="new">◉ New</button><button type="button" data-sort="volume">◌ Volume</button></div>
 
       <!-- Surges sit above everything else in this column on purpose: they
            are time-critical in a way the sorted feed below is not. -->
@@ -1008,8 +1011,14 @@ body.pt-profile-mode .pt-card.pt-profile-open .pt-chart-waiting{left:50%!importa
         </div>
         <div class="pt-trader-rail" id="pt-trader-rail"></div>
       </div>
+      <script>
+      /* Before the first paint: if this session already saw traders in the
+         Top traders rail, show its frame now, at its full height, so the
+         token list below does not move when the cards are drawn into it. */
+      (function(){try{var rows=JSON.parse(sessionStorage.getItem('oa_lm_traders_v1')||'null');if(rows&&rows.some(function(t){return Number(t.total_pnl||0)>0})){document.getElementById('pt-trader-rail-wrap').style.display='';document.getElementById('pt-trader-rail').classList.add('pt-rail-reserved')}}catch(e){}})();
+      </script>
 
-      <div class="pt-feed-list" id="pt-feed-list"><div class="pt-empty">Loading…</div></div>
+      <div class="pt-feed-list" id="pt-feed-list"><div class="pt-empty pt-loading">Loading…</div></div>
     </main>
 
     <!-- RIGHT RAIL -->
