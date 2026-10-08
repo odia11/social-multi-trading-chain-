@@ -5,7 +5,9 @@
    - Groups are listed above your chats, with unread counts.
    - The chat opens full screen: text and photos, the sender's name over
      their messages, small grey lines for joins, leaves and renames.
-   - Group info: rename (admins), add people (admins), remove (admins), leave.
+   - Group info: whoever started the group owns it -- they choose admins and
+     can delete the group. Admins rename it, change its photo and add or
+     remove members; anyone can leave.
    - /messages?group=<id> (what a notification opens) opens the group. */
 (function(){
 'use strict';
@@ -68,8 +70,13 @@ var ICON={
   photo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
   send:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>',
   check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg>',
+  camera:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
+  smile:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01"/><path d="M15 9h.01"/></svg>',
+  more:'<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
   close:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>'
 };
+// The same set as the emoji panel in direct messages.
+var EMOJI=['😀','😂','🤣','😍','🥰','😎','🤔','😅','😉','😢','😭','😡','😱','😴','🥳','🤯','🙌','👏','👍','👎','🙏','🤝','💪','👀','🔥','💯','✅','❌','🚀','📈','📉','💰','💎','❤️','🎉'];
 var VERIFIED='<svg class="conv-verified" viewBox="0 0 24 24" aria-label="Verified"><circle cx="12" cy="12" r="12" fill="#f7b955"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#0a0b0e" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 function avatarHtml(cls,name,seed,url){
@@ -117,7 +124,7 @@ function renderList(){
     var unread=c.unread>0;
     return '<div class="conv-row-wrap gc-row-wrap'+(unread?' is-unread':'')+'" data-gc="'+c.id+'">'
       +'<div class="conv-row" role="button" tabindex="0" aria-label="Open group '+esc(c.name)+'">'
-      +'<div class="conv-avatar-wrap">'+avatarHtml('conv-avatar gc-avatar',c.name,'g'+c.id,'')
+      +'<div class="conv-avatar-wrap">'+avatarHtml('conv-avatar gc-avatar',c.name,'g'+c.id,c.photo)
       +'<span class="gc-people-badge" aria-hidden="true">'+ICON.group+'</span></div>'
       +'<div class="conv-info"><div class="conv-top"><div class="conv-name">'+esc(c.name)+'</div>'
       +'<span class="conv-time">'+esc(c.last?ago(c.last.created_at):'')+'</span></div>'
@@ -161,6 +168,8 @@ function threadEl(){
     +'<form class="gc-composer" autocomplete="off">'
     +'<button type="button" class="gc-icon-btn gc-photo" aria-label="Send a photo">'+ICON.photo+'</button>'
     +'<input type="file" accept="image/jpeg,image/png,image/gif,image/webp" class="gc-file" hidden>'
+    +'<button type="button" class="gc-icon-btn gc-emoji" aria-label="Emoji" aria-expanded="false">'+ICON.smile+'</button>'
+    +'<div class="gc-emoji-panel" role="dialog" aria-label="Emoji" hidden>'+EMOJI.map(function(e){return '<button type="button" aria-label="'+e+'">'+e+'</button>';}).join('')+'</div>'
     +'<textarea class="gc-input" rows="1" maxlength="1000" placeholder="Message" aria-label="Message"></textarea>'
     +'<button type="submit" class="gc-send" aria-label="Send" disabled>'+ICON.send+'</button></form>';
   document.body.appendChild(t);
@@ -172,14 +181,35 @@ function threadEl(){
   input.addEventListener('keydown',function(e){
     if(e.key==='Enter'&&!e.shiftKey&&!('ontouchstart' in window)){e.preventDefault();form.requestSubmit?form.requestSubmit():form.dispatchEvent(new Event('submit',{cancelable:true}));}
   });
-  form.addEventListener('submit',function(e){e.preventDefault();sendText();});
+  form.addEventListener('submit',function(e){e.preventDefault();emojiPanel(false);sendText();});
+  var smile=t.querySelector('.gc-emoji'),panel=t.querySelector('.gc-emoji-panel');
+  smile.addEventListener('click',function(){emojiPanel(panel.hidden);});
+  // pointerdown + preventDefault keeps the keyboard (and the cursor) where it is.
+  panel.addEventListener('pointerdown',function(e){if(e.target.closest('button'))e.preventDefault();});
+  panel.addEventListener('click',function(e){
+    var b=e.target.closest('button');if(!b)return;
+    var em=b.textContent,a=input.selectionStart,z=input.selectionEnd;
+    if(typeof a!=='number'){a=z=input.value.length;}
+    if((input.value.length+em.length)>1000)return;
+    input.value=input.value.slice(0,a)+em+input.value.slice(z);
+    input.selectionStart=input.selectionEnd=a+em.length;
+    input.dispatchEvent(new Event('input'));
+  });
+  document.addEventListener('pointerdown',function(e){
+    if(!panel.hidden&&!panel.contains(e.target)&&!smile.contains(e.target))emojiPanel(false);
+  });
   t.querySelector('.gc-photo').addEventListener('click',function(){t.querySelector('.gc-file').click();});
   t.querySelector('.gc-file').addEventListener('change',function(){var f=this.files&&this.files[0];this.value='';if(f)sendPhoto(f);});
   return t;
 }
+function emojiPanel(show){
+  var t=document.getElementById('gc-thread');if(!t)return;
+  var panel=t.querySelector('.gc-emoji-panel');
+  panel.hidden=!show;t.querySelector('.gc-emoji').setAttribute('aria-expanded',show?'true':'false');
+}
 function paintHeader(){
   var t=threadEl();if(!open)return;
-  t.querySelector('.gc-th-av').outerHTML=avatarHtml('gc-th-av',open.name,'g'+open.id,'');
+  t.querySelector('.gc-th-av').outerHTML=avatarHtml('gc-th-av',open.name,'g'+open.id,open.photo);
   t.querySelector('.gc-th-name').textContent=open.name;
   var names=(open.members||[]).map(function(m){return m.username;});
   t.querySelector('.gc-th-sub').textContent=names.length?(names.length+' members · '+names.slice(0,4).join(', ')+(names.length>4?'…':'')):'';
@@ -223,14 +253,22 @@ function fetchNew(){
   if(!open||document.hidden)return;
   var id=open.id;
   api('/api/group-chats/'+id+'/messages?after='+open.lastId).then(function(d){
-    if(!open||open.id!==id||!d.ok)return;
+    if(!open||open.id!==id)return;
+    if(!d.ok){
+      // Deleted by its owner, or you were removed.
+      if(/not found/i.test(d.msg||'')){chats=chats.filter(function(c){return c.id!==id;});toast('This group is no longer available');closeGroup();}
+      return;
+    }
+    var news=(d.messages||[]).filter(function(m){return m.kind==='system';}).length;
     if(mergeMessages(d.messages||[]))renderMessages(false);
+    // Someone renamed it, changed the photo, or changed who is in it.
+    if(news)api('/api/group-chats/'+id).then(function(x){if(x.ok)adopt(x.chat);});
   });
 }
 function openGroup(id,push){
   id=Number(id);if(!id)return;
   var c=chats.find(function(x){return x.id===id;})||{id:id,name:'Group',members:0};
-  open={id:id,name:c.name,role:c.role,members:[],messages:[],lastId:0};
+  open={id:id,name:c.name,role:c.role,photo:c.photo||'',members:[],messages:[],lastId:0};
   window.__oaOpenGroupId=id;
   var t=threadEl();t.hidden=false;
   document.documentElement.classList.add('gc-lock');document.body.classList.add('gc-open');
@@ -242,8 +280,7 @@ function openGroup(id,push){
   api('/api/group-chats/'+id).then(function(d){
     if(!open||open.id!==id)return;
     if(!d.ok){toast(d.msg||'Group not found');closeGroup();return;}
-    open.name=d.chat.name;open.role=d.chat.role;open.members=d.chat.members;open.createdBy=d.chat.created_by;
-    paintHeader();
+    adopt(d.chat);
   });
   api('/api/group-chats/'+id+'/messages').then(function(d){
     if(!open||open.id!==id||!d.ok)return;
@@ -254,9 +291,18 @@ function openGroup(id,push){
   pollTimer=window.setInterval(fetchNew,3000);
   setTimeout(function(){var i=t.querySelector('.gc-input');if(i&&!('ontouchstart' in window))i.focus();},60);
 }
+// The group as the server sees it now: name, photo, members, my role.
+function adopt(chat){
+  if(!open||open.id!==chat.id)return;
+  open.name=chat.name;open.role=chat.role;open.owner=!!chat.is_owner;open.photo=chat.photo||'';
+  open.members=chat.members;open.createdBy=chat.created_by;
+  var c=chats.find(function(x){return x.id===chat.id;});
+  if(c){c.name=chat.name;c.photo=open.photo;c.role=chat.role;renderList();}
+  paintHeader();
+}
 function closeGroup(fromPop){
   if(pollTimer){window.clearInterval(pollTimer);pollTimer=null;}
-  open=null;window.__oaOpenGroupId=null;
+  open=null;window.__oaOpenGroupId=null;emojiPanel(false);
   var t=document.getElementById('gc-thread');if(t)t.hidden=true;
   closeSheet();
   document.documentElement.classList.remove('gc-lock');document.body.classList.remove('gc-open');
@@ -432,29 +478,40 @@ function addPeople(){
   picker({title:'Add people',next:'Add',chatId:id,done:function(ids,reset){
     api('/api/group-chats/'+id+'/members',{method:'POST',body:{user_ids:ids}}).then(function(d){
       if(!d.ok){reset();toast(d.msg||'Could not add them');return;}
-      if(open&&open.id===id){open.members=d.chat.members;paintHeader();fetchNew();}
+      adopt(d.chat);fetchNew();
       showInfo();
     });
   }});
 }
+function roleLabel(m){
+  return m.owner?'<small class="gc-admin">Group owner</small>'
+    :m.role==='admin'?'<small class="gc-admin">Group admin</small>':'<small>Member</small>';
+}
 function showInfo(){
   if(!open)return;
-  var admin=open.role==='admin';
+  var admin=open.role==='admin',owner=!!open.owner;
   var el=sheet('<div class="gc-sheet-hd"><button type="button" class="gc-icon-btn" data-sheet-close aria-label="Close">'+ICON.close+'</button><h3>Group info</h3><span></span></div>'
-    +'<div class="gc-info-top">'+avatarHtml('gc-info-av',open.name,'g'+open.id,'')
+    +'<div class="gc-info-top">'
+    +(admin?'<button type="button" class="gc-info-photo" aria-label="Change group photo">'+avatarHtml('gc-info-av',open.name,'g'+open.id,open.photo)
+           +'<span class="gc-info-cam">'+ICON.camera+'</span></button>'
+           +'<input type="file" accept="image/jpeg,image/png,image/gif,image/webp" class="gc-photo-file" hidden>'
+           +(open.photo?'<button type="button" class="gc-link gc-photo-remove">Remove photo</button>':'')
+           :avatarHtml('gc-info-av',open.name,'g'+open.id,open.photo))
     +(admin?'<div class="gc-rename"><input class="gc-name-input" maxlength="40" value="'+esc(open.name)+'" aria-label="Group name"><button type="button" class="gc-ghost gc-save" disabled>Save</button></div>'
            :'<div class="gc-info-name">'+esc(open.name)+'</div>')
     +'<small>'+open.members.length+' members</small></div>'
     +(admin?'<button type="button" class="gc-add-row">'+'<span class="gc-cta-ico">'+ICON.groupAdd+'</span><b>Add people</b></button>':'')
     +'<div class="gc-members">'+open.members.map(function(m){
-      var canRemove=admin&&m.user_id!==open.createdBy&&!isMe(m);
+      // The owner manages everyone; an admin manages members only.
+      var manage=!isMe(m)&&!m.owner&&(owner||(admin&&m.role!=='admin'));
       return '<div class="gc-member">'+avatarHtml('gc-person-av',m.username,m.wallet,m.avatar)
         +'<a class="gc-person-copy" href="/profile/'+encodeURIComponent(m.wallet)+'"><b>'+esc(isMe(m)?'You':m.username)+(m.verified?VERIFIED:'')+'</b>'
-        +(m.role==='admin'?'<small class="gc-admin">Group admin</small>':'<small>Member</small>')+'</a>'
-        +(canRemove?'<button type="button" class="gc-remove" data-uid="'+m.user_id+'" aria-label="Remove '+esc(m.username)+'">Remove</button>':'')
+        +roleLabel(m)+'</a>'
+        +(manage?'<button type="button" class="gc-more" data-uid="'+m.user_id+'" aria-label="Options for '+esc(m.username)+'">'+ICON.more+'</button>':'')
         +'</div>';
     }).join('')+'</div>'
-    +'<button type="button" class="gc-leave">Leave group</button>','gc-sheet-info');
+    +'<div class="gc-info-foot"><button type="button" class="gc-leave">Leave group</button>'
+    +(owner?'<button type="button" class="gc-leave gc-delete">Delete group</button>':'')+'</div>','gc-sheet-info');
   el.querySelector('[data-sheet-close]').onclick=closeSheet;
   var add=el.querySelector('.gc-add-row');if(add)add.onclick=addPeople;
   var rename=el.querySelector('.gc-rename input'),save=el.querySelector('.gc-save');
@@ -464,27 +521,35 @@ function showInfo(){
       var id=open.id;save.disabled=true;
       api('/api/group-chats/'+id,{method:'PUT',body:{name:rename.value.trim()}}).then(function(d){
         if(!d.ok){toast(d.msg||'Could not rename');save.disabled=false;return;}
-        if(open&&open.id===id){open.name=d.chat.name;paintHeader();fetchNew();}
+        adopt(d.chat);fetchNew();
         toast('Group renamed');
       });
     };
   }
-  el.querySelectorAll('.gc-remove').forEach(function(b){
+  var pick=el.querySelector('.gc-info-photo'),file=el.querySelector('.gc-photo-file');
+  if(pick){
+    pick.onclick=function(){file.click();};
+    file.addEventListener('change',function(){var f=this.files&&this.files[0];this.value='';if(f)setPhoto(f);});
+  }
+  var drop=el.querySelector('.gc-photo-remove');
+  if(drop)drop.onclick=function(){
+    var id=open.id;drop.disabled=true;
+    api('/api/group-chats/'+id+'/photo',{method:'DELETE'}).then(function(d){
+      if(!d.ok){toast(d.msg||'Could not remove the photo');drop.disabled=false;return;}
+      adopt(d.chat);fetchNew();showInfo();
+    });
+  };
+  el.querySelectorAll('.gc-more').forEach(function(b){
     b.onclick=function(){
-      var id=open.id,uid=Number(b.dataset.uid);b.disabled=true;
-      api('/api/group-chats/'+id+'/members/'+uid,{method:'DELETE'}).then(function(d){
-        if(!d.ok){toast(d.msg||'Could not remove');b.disabled=false;return;}
-        if(open&&open.id===id){open.members=d.chat.members;paintHeader();fetchNew();showInfo();}
-      });
+      var m=open.members.find(function(x){return x.user_id===Number(b.dataset.uid);});
+      if(m)memberMenu(m);
     };
   });
-  el.querySelector('.gc-leave').onclick=function(){
+  el.querySelector('.gc-leave:not(.gc-delete)').onclick=function(){
     var id=open.id;
-    var ask=typeof window.openConfirmModal==='function'
-      ?window.openConfirmModal({text:'Leave “'+open.name+'”? You will stop getting its messages.',danger:true})
-      :Promise.resolve(window.confirm('Leave this group?'));
-    Promise.resolve(ask).then(function(yes){
-      if(!yes)return;
+    confirmThen(owner&&open.members.length>1
+      ?'Leave “'+open.name+'”? You own this group, so an admin (or the longest-standing member) takes over.'
+      :'Leave “'+open.name+'”? You will stop getting its messages.',function(){
       api('/api/group-chats/'+id+'/leave',{method:'POST',body:{}}).then(function(d){
         if(!d.ok){toast(d.msg||'Could not leave');return;}
         chats=chats.filter(function(c){return c.id!==id;});
@@ -492,6 +557,75 @@ function showInfo(){
       });
     });
   };
+  var del=el.querySelector('.gc-delete');
+  if(del)del.onclick=function(){
+    var id=open.id;
+    confirmThen('Delete “'+open.name+'” for everyone? All messages and photos in it are removed. This cannot be undone.',function(){
+      api('/api/group-chats/'+id,{method:'DELETE'}).then(function(d){
+        if(!d.ok){toast(d.msg||'Could not delete the group');return;}
+        chats=chats.filter(function(c){return c.id!==id;});
+        closeSheet();closeGroup();toast('Group deleted');
+      });
+    });
+  };
+}
+function confirmThen(text,yes){
+  var ask=typeof window.openConfirmModal==='function'
+    ?window.openConfirmModal({text:text,danger:true})
+    :Promise.resolve(window.confirm(text));
+  Promise.resolve(ask).then(function(ok){if(ok)yes();});
+}
+// What the owner (or an admin) can do with one member.
+function memberMenu(m){
+  var id=open.id,owner=!!open.owner;
+  var el=sheet('<div class="gc-menu-who">'+avatarHtml('gc-person-av',m.username,m.wallet,m.avatar)
+    +'<span class="gc-person-copy"><b>'+esc(m.username)+(m.verified?VERIFIED:'')+'</b>'+roleLabel(m)+'</span></div>'
+    +'<div class="gc-menu">'
+    +(owner?(m.role==='admin'
+      ?'<button type="button" data-act="member">Dismiss as admin<small>They can no longer change the group or its members</small></button>'
+      :'<button type="button" data-act="admin">Make group admin<small>Can rename the group, change its photo and add or remove members</small></button>'):'')
+    +'<a href="/profile/'+encodeURIComponent(m.wallet)+'">View profile</a>'
+    +'<button type="button" data-act="remove" class="gc-menu-danger">Remove from group</button>'
+    +'<button type="button" data-act="back">Cancel</button></div>','gc-sheet-menu');
+  el.addEventListener('click',function(e){
+    var b=e.target.closest('[data-act]');if(!b)return;
+    var act=b.dataset.act;
+    if(act==='back'){showInfo();return;}
+    b.disabled=true;
+    var req=act==='remove'
+      ?api('/api/group-chats/'+id+'/members/'+m.user_id,{method:'DELETE'})
+      :api('/api/group-chats/'+id+'/members/'+m.user_id,{method:'PUT',body:{role:act}});
+    req.then(function(d){
+      if(!d.ok){toast(d.msg||'That did not work');b.disabled=false;return;}
+      adopt(d.chat);fetchNew();showInfo();
+      toast(act==='remove'?m.username+' removed':act==='admin'?m.username+' is now an admin':m.username+' is no longer an admin');
+    });
+  });
+}
+function setPhoto(file){
+  if(!open)return;
+  if(!/^image\/(jpeg|png|gif|webp)$/.test(file.type)){toast('Choose a JPEG, PNG, GIF or WebP photo');return;}
+  if(file.size>12*1024*1024){toast('That photo is too large');return;}
+  var id=open.id,reader=new FileReader();
+  reader.onload=function(){
+    var img=new Image();
+    img.onload=function(){
+      // Square, centred, 512 px: what an avatar needs.
+      var side=Math.min(img.naturalWidth,img.naturalHeight),out=Math.min(512,side);
+      var cv=document.createElement('canvas');cv.width=cv.height=out;
+      cv.getContext('2d').drawImage(img,(img.naturalWidth-side)/2,(img.naturalHeight-side)/2,side,side,0,0,out,out);
+      toast('Updating photo…');
+      api('/api/group-chats/'+id+'/photo',{method:'PUT',body:{photo:cv.toDataURL('image/jpeg',0.86)}}).then(function(d){
+        if(!d.ok){toast(d.msg||'Could not change the photo');return;}
+        adopt(d.chat);fetchNew();
+        if(document.querySelector('.gc-sheet-info'))showInfo();
+        toast('Group photo updated');
+      });
+    };
+    img.onerror=function(){toast('That photo could not be read');};
+    img.src=String(reader.result||'');
+  };
+  reader.readAsDataURL(file);
 }
 function isMe(m){return !!(window._myWallet&&m.wallet===window._myWallet);}
 
@@ -518,6 +652,8 @@ document.addEventListener('click',function(e){
 document.addEventListener('keydown',function(e){
   if(e.key!=='Escape')return;
   if(document.getElementById('gc-sheet')){closeSheet();return;}
+  var ep=document.querySelector('#gc-thread .gc-emoji-panel');
+  if(ep&&!ep.hidden){emojiPanel(false);return;}
   if(open)closeGroup();
 });
 window.addEventListener('popstate',function(){
