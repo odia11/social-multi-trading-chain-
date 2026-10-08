@@ -26596,6 +26596,19 @@ def api_wallet_balance():
                      'in_positions_sol': in_positions_sol})
 
 
+@app.route('/api/price/sol', methods=['GET'])
+@rate_limit(60, 60)
+def api_price_sol():
+    """SOL in dollars, for showing what an amount is worth while it is typed
+    (the tip sheet). The price token_loop keeps fresh every scan cycle from
+    SOL/USDC pairs -- no upstream call per visitor. null when it is unknown,
+    never a guess."""
+    price = float(_sol_price_usd or 0)
+    resp = jsonify({'ok': True, 'sol_price_usd': round(price, 4) if price > 1 else None})
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
 _sol_usdc_balance_cache = {}
 _sol_usdc_balance_lock = threading.Lock()
 _SOL_USDC_BALANCE_TTL = 3.0

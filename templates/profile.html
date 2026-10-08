@@ -283,11 +283,16 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
 .tip-input::-webkit-outer-spin-button,.tip-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .tip-input[type=number]{-moz-appearance:textfield}
 .tip-input-sym{font-size:14px;color:#a0a8b3;font-weight:600}
-.tip-approx{font:12px 'JetBrains Mono',monospace;color:#68717d;margin-top:8px}
+.tip-usd-line{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-top:9px;flex-wrap:wrap}
+.tip-approx{font:700 17px/1.2 'JetBrains Mono',monospace;color:#eef1f5;font-variant-numeric:tabular-nums}
+.tip-rate{font:12px 'JetBrains Mono',monospace;color:#68717d;font-variant-numeric:tabular-nums}
+.tip-rate.live::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:#3ad29b;margin-right:6px;vertical-align:1px}
 .tip-presets{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;margin-top:12px}
 .tip-preset{border:1px solid #252b33;background:#10151b;color:#eef1f5;border-radius:12px;padding:12px 4px;font-size:13px;font-weight:700;cursor:pointer}
 .tip-preset:hover{border-color:rgba(247,185,85,.5)}
 .tip-preset.active{background:#f7b955;color:#0a0b0e;border-color:#f7b955}
+.tip-preset{white-space:nowrap}
+@media(max-width:380px){.tip-preset-unit{display:none}}
 .tip-network{display:flex;align-items:center;gap:11px;border:1px solid #252b33;background:#10151b;border-radius:14px;padding:13px 15px;color:#eef1f5;font-size:14px;font-weight:600}
 .tip-sol{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#0b0d12;color:#9b7cff;font-weight:900;font-size:10px;flex-shrink:0}
 .tip-network small{display:block;color:#68717d;font-weight:500;margin-top:2px;font-size:11.5px}
@@ -296,10 +301,11 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
 .tip-message:focus,.tip-input-wrap:focus-within{border-color:rgba(247,185,85,.65)}
 .tip-count{position:absolute;right:13px;bottom:10px;font:11px 'JetBrains Mono',monospace;color:#68717d;pointer-events:none}
 .tip-summary{display:flex;align-items:center;gap:13px;background:#10151b;border:1px solid #252b33;border-radius:16px;padding:16px;margin-top:18px}
+.tip-usdc-mark.sol{background:#1b1530;color:#9b7cff}
 .tip-usdc-mark{width:38px;height:38px;border-radius:50%;background:#2775ca;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;flex-shrink:0}
 .tip-summary-left{color:#c8ced6;font-size:14px;font-weight:600;flex:1}
 .tip-summary-val{text-align:right;font-weight:800;font-size:16px}
-.tip-summary-usd{display:block;color:#68717d;font-size:11.5px;font-weight:500;margin-top:3px;font-family:'JetBrains Mono',monospace}
+.tip-summary-usd{display:block;color:#c8ced6;font-size:13px;font-weight:700;margin-top:3px;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}
 .tip-submit{width:100%;border:0;border-radius:14px;background:#f7b955;color:#0a0b0e;font-size:16px;font-weight:800;padding:16px;margin-top:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px}
 .tip-submit:disabled{opacity:.5;cursor:not-allowed}
 .tip-note{display:flex;align-items:center;justify-content:center;gap:7px;color:#68717d;font-size:12px;margin-top:12px}
@@ -1113,6 +1119,7 @@ async function _removeBanner(){
       <div class="oa-tip-receipt-icon">✓</div>
       <h2 id="oa-tip-receipt-title">Tip submitted</h2>
       <div class="oa-tip-receipt-amount" id="oa-tip-receipt-amount">— SOL</div>
+      <div class="oa-tip-receipt-usd" id="oa-tip-receipt-usd"></div>
       <div class="oa-tip-receipt-peer" id="oa-tip-receipt-peer">Waiting for blockchain confirmation</div>
       <div class="oa-tip-receipt-meta">
         <span id="oa-tip-receipt-network">Network —</span>
@@ -1151,10 +1158,14 @@ async function _removeBanner(){
              placeholder="0" oninput="_tipTouched()">
       <span class="tip-input-sym" id="tip-input-sym">SOL</span>
     </div>
-    <div class="tip-approx" id="tip-approx">&asymp; $0.00</div>
+    <!-- What the amount is worth in dollars, live: SOL at the current price, USDC one to one. -->
+    <div class="tip-usd-line" aria-live="polite">
+      <span class="tip-approx" id="tip-approx">&asymp; $0.00</span>
+      <span class="tip-rate" id="tip-rate">1 SOL = $ —</span>
+    </div>
     <div class="tip-presets">
       {% for v in [0.001, 0.005, 0.01, 0.025, 0.05] %}
-      <button class="tip-preset" data-cur="SOL" data-v="{{ v }}" type="button" onclick="_tipPreset({{ v }}, this)">{{ v }} SOL</button>
+      <button class="tip-preset" data-cur="SOL" data-v="{{ v }}" type="button" onclick="_tipPreset({{ v }}, this)">{{ v }}<span class="tip-preset-unit"> SOL</span></button>
       {% endfor %}
       {% for v in [1, 2, 5, 10, 25] %}
       <button class="tip-preset" data-cur="USDC" data-v="{{ v }}" type="button" onclick="_tipPreset({{ v }}, this)" hidden>${{ v }}</button>
@@ -1175,7 +1186,7 @@ async function _removeBanner(){
     </div>
 
     <div class="tip-summary">
-      <span class="tip-usdc-mark">◎</span>
+      <span class="tip-usdc-mark sol" id="tip-send-mark">◎</span>
       <span class="tip-summary-left">You send</span>
       <span class="tip-summary-val"><span id="tip-send-val">0.00</span> <span id="tip-send-cur">SOL</span>
         <span class="tip-summary-usd" id="tip-send-usd">&asymp; $0.00</span></span>
@@ -1208,7 +1219,7 @@ var _tipPeerId = {{ user_id|tojson }};
 var _tipSending = false;
 
 function _tipEl(id){ return document.getElementById(id); }
-function _openTip(){ _tipEl('tip-back').classList.add('open'); _tipEl('tip-amount').focus(); }
+function _openTip(){ _tipEl('tip-back').classList.add('open'); _tipPrice(); _tipEl('tip-amount').focus(); }
 function _closeTip(){ if(!_tipSending) _tipEl('tip-back').classList.remove('open'); }
 
 // Tips go in SOL or USDC (Solana USDC, an SPL token). SOL tips take the
@@ -1220,6 +1231,26 @@ var _TIP_ROUTE = {
   USDC: 'USDC on Solana<small>The recipient receives the full amount. The tiny network fee is paid in SOL from your trading wallet.</small>'
 };
 function _tipFmt(a, cur){ return cur === 'USDC' ? (+a).toFixed(2) : (+(+a).toFixed(9)).toString(); }
+
+// The dollar value of what is being sent, live while typing: SOL at the
+// current SOL price (refreshed every 10s while the sheet is open), USDC one
+// to one. No price -> no dollar figure, never a guess.
+var _tipSolUsd = 0, _tipPriceTimer = null;
+function _tipUsd(v){
+  if(!(v > 0)) return '$0.00';
+  if(v < 0.01) return '< $0.01';
+  return '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function _tipPrice(){
+  fetch('/api/price/sol', {credentials:'same-origin', cache:'no-store'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ var p = Number(d && d.sol_price_usd); if(p > 0){ _tipSolUsd = p; _tipTouched(); } })
+    .catch(function(){});
+  clearTimeout(_tipPriceTimer);
+  _tipPriceTimer = setTimeout(function(){
+    if(_tipEl('tip-back').classList.contains('open')){ if(!document.hidden) _tipPrice(); else _tipPriceTimer = setTimeout(_tipPrice, 10000); }
+  }, 10000);
+}
 
 function _tipAmount(){
   var v = parseFloat(_tipEl('tip-amount').value);
@@ -1245,9 +1276,17 @@ function _tipSetCur(cur){
 
 function _tipTouched(){
   var a = _tipAmount(), cur = _tipCur;
-  _tipEl('tip-approx').textContent = cur === 'USDC' ? ('≈ $' + a.toFixed(2)) : 'Total budget including the network fee';
-  _tipEl('tip-send-val').textContent = cur === 'USDC' ? a.toFixed(2) : a.toFixed(9);
-  _tipEl('tip-send-usd').textContent = cur === 'USDC' ? 'Recipient receives the full amount' : 'Recipient receives budget minus network fee';
+  var usd = cur === 'USDC' ? a : (_tipSolUsd > 0 ? a * _tipSolUsd : null);
+  var worth = usd == null ? '≈ $ —' : (usd > 0 && usd < 0.01) ? _tipUsd(usd) : (cur === 'USDC' ? '= ' : '≈ ') + _tipUsd(usd);
+  var rate = _tipEl('tip-rate');
+  _tipEl('tip-approx').textContent = worth;
+  rate.textContent = cur === 'USDC' ? '1 USDC = $1.00'
+    : (_tipSolUsd > 0 ? '1 SOL = ' + _tipUsd(_tipSolUsd) + ' · live' : 'Dollar value unavailable right now');
+  rate.classList.toggle('live', cur === 'SOL' && _tipSolUsd > 0);
+  _tipEl('tip-send-val').textContent = _tipFmt(a, cur);
+  _tipEl('tip-send-usd').textContent = worth;
+  var mark = _tipEl('tip-send-mark');
+  mark.textContent = cur === 'USDC' ? '$' : '◎'; mark.classList.toggle('sol', cur !== 'USDC');
   _tipEl('tip-submit-label').textContent = a > 0 ? ('Tip ' + _tipFmt(a, cur) + ' ' + cur) : ('Tip ' + cur);
   _tipEl('tip-submit').disabled = !(a > 0) || _tipSending;
   Array.prototype.forEach.call(document.querySelectorAll('.tip-preset'),

@@ -24,7 +24,7 @@ check('breakdown is repainted from the same authoritative snapshot',
       'window.OrcAgentPaintPortfolioBreakdown=_paintPortfolioBreakdown' in W
       and '_paintPortfolioBreakdown(snap)' in W)
 check('UI distinguishes a temporarily incomplete discovery scan',
-      'Verified balances · full token scan retrying' in W)
+      'Checking all tokens…' in W)   # one short status line on the balance card
 check('indexed RPC outage falls back to direct verified token accounts',
       'def _known_wallet_token_accounts' in D
       and 'getMultipleAccounts' in D

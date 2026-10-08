@@ -142,6 +142,10 @@ function renderReceipt(tip){
   var state=tip.status||'submitted';
   $('oa-tip-receipt-title').textContent=state==='confirmed'?'Tip delivered!':state==='failed'?'Tip failed':'Tip submitted';
   $('oa-tip-receipt-amount').textContent=money(tip.amount)+' '+(tip.currency||'USDC');
+  // ...and what that is in dollars: USDC one to one, SOL at the live price the sheet showed.
+  var cur=tip.currency||'USDC',amt=Number(tip.amount||0),px=Number(window._tipSolUsd||0),usdEl=$('oa-tip-receipt-usd');
+  var usd=cur==='USDC'?amt:(cur==='SOL'&&px>0?amt*px:null);
+  if(usdEl)usdEl.textContent=usd==null||!(usd>0)?'':usd<0.01?'< $0.01':(cur==='USDC'?'= $':'≈ $')+usd.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   $('oa-tip-receipt-peer').textContent=(state==='confirmed'?'Delivered to ':'To ')+(tip.recipient_username?'@'+tip.recipient_username.replace(/^@/,''):'OrcAgent member');
   $('oa-tip-receipt-network').textContent=(tip.chain||'Solana').replace(/^./,function(x){return x.toUpperCase()});
   var badge=$('oa-tip-receipt-status');

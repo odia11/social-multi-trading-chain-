@@ -3,9 +3,9 @@
 - every member with notifications on gets an in-app notification, and
   those with a registered phone get a push, tagged 'orc-trending' so a newer
   one replaces the older one on the phone;
-- tapping it opens the home feed scrolled to the card (/?trending=1#trending);
-- once the card is on screen the app closes the phone notification and
-  marks the in-app one read (POST /api/home/trending-hero/seen);
+- tapping it opens that token in the Live Market (the home feed no longer
+  has a trending card);
+- POST /api/home/trending-hero/seen still marks the in-app one read;
 - it never becomes noise: a token is announced at most once per 12h, and at
   most one announcement per 30 minutes overall; members who turned
   notifications off get nothing.
@@ -56,13 +56,16 @@ T0 = 1_800_000_000
 n = th.announce(d, WOJAK, now=T0)
 check('a new trending token notifies members in-app', n >= 2 and trending_notes(a) and trending_notes(b))
 check('...with the ticker and the numbers', trending_notes(a)[-1][0] == '🔥 $WOJAK is trending · +184.2% · $482K volume · Solana')
-check('...linking straight to the card on the home feed', trending_notes(a)[-1][1] == '/?trending=1#trending')
+check('...linking straight to the token in the Live Market (the home card is gone)',
+      trending_notes(a)[-1][1] == '/live-market?mint=WojakMint1111111111111111111111111111111pump&profile=1')
+check('...or, for a token on another chain, to its trending page',
+      th.trend_link({'mint': '0x' + 'a' * 40, 'chain': 'base'}) == '/trending/base/0x' + 'a' * 40)
 check('members who turned notifications off get nothing', not trending_notes(c_off))
 check('a push goes to members with a phone registered (and notifications on)',
       len(pushed) == 1 and pushed[0][0] == [a])
 check('...tagged so a newer alert replaces the older one', pushed[0][5] == 'orc-trending')
-check('...with the token logo (https only) and the home-card link',
-      pushed[0][4] == 'https://cdn.example/wojak.png' and pushed[0][3] == '/?trending=1#trending')
+check('...with the token logo (https only) and the same link',
+      pushed[0][4] == 'https://cdn.example/wojak.png' and pushed[0][3] == trending_notes(a)[-1][1])
 
 check('the same token is not announced again soon', th.announce(d, WOJAK, now=T0 + 3600) == 0)
 check('a new token within 30 minutes of the last alert waits', th.announce(d, PEPE, now=T0 + 600) == 0)
@@ -91,19 +94,13 @@ var self={location:{origin:'https://orcagent.fun',href:'https://orcagent.fun/sw.
   registration:{showNotification:function(t,o){shown={title:t,opts:o};return Promise.resolve()}}};
 var clients={matchAll:function(){return Promise.resolve([])},openWindow:function(){return Promise.resolve()}};
 ''' + sw + r'''
-var p; listeners.push({data:{json:function(){return {title:'T',body:'B',url:'/?trending=1#trending',tag:'orc-trending'}}},waitUntil:function(x){p=x}});
+var p; listeners.push({data:{json:function(){return {title:'T',body:'B',url:'/live-market?mint=M&profile=1',tag:'orc-trending'}}},waitUntil:function(x){p=x}});
 p.then(function(){console.log(JSON.stringify(shown))});
 '''
 out = subprocess.run(['node', '-e', js], capture_output=True, text=True, timeout=30).stdout.strip()
 shown = json.loads(out) if out else {}
 check('the service worker shows it with that tag (replacing older ones)',
       shown.get('opts', {}).get('tag') == 'orc-trending' and shown['opts'].get('renotify') is True)
-check('...and keeps the home-card link for the tap', shown.get('opts', {}).get('data', {}).get('url') == '/?trending=1#trending')
+check('...and keeps the link for the tap', shown.get('opts', {}).get('data', {}).get('url') == '/live-market?mint=M&profile=1')
 
-# The app: arriving from the alert scrolls to the card; seeing it clears the alert.
-hero_js = open(os.path.join(ROOT, 'static', 'home-trending-hero.js')).read()
-check('arriving via the alert scrolls to the card', "location.hash==='#trending'" in hero_js and 'scrollTo' in hero_js)
-check('once on screen it closes the phone notification',
-      "getNotifications({tag:'orc-trending'})" in hero_js and 'n.close()' in hero_js)
-check('...and marks the in-app alert read', "'/api/home/trending-hero/seen'" in hero_js)
 raise SystemExit(0 if all(checks) else 1)

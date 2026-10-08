@@ -93,13 +93,4 @@ check('an unknown chain is refused', c.get(f'/trending/dogechain/{M}', base_url=
 check('a malformed token is refused', c.get('/trending/solana/<script>', base_url=BASE).status_code == 404
       and c.get('/api/trending-card/base/0x123.png', base_url=BASE).status_code == 404)
 
-# ── the button ──
-js = open(os.path.join(os.path.dirname(__file__), '..', 'static', 'home-trending-hero.js')).read()
-check('the card has a Share button', 'oa-th-act oa-th-share' in js)
-check('...Post on X uses the share link', "https://x.com/intent/post?text=" in js and "'/trending/'+encodeURIComponent(t.chain)" in js)
-check('...Copy link and the phone share sheet', 'oa-th-share-copy' in js and 'navigator.share(' in js)
-check('...anyone may share (checked before the sign-in gate)',
-      js.index("if(b.classList.contains('oa-th-share')){openShare(b);return;}") < js.index("checkGuest()"))
-css = open(os.path.join(os.path.dirname(__file__), '..', 'static', 'home-trending-hero.css')).read()
-check('...icon-only on phones so the row fits', '.oa-th-share span{display:none}' in css)
 raise SystemExit(0 if all(checks) else 1)
