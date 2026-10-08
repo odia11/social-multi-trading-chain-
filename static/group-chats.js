@@ -101,6 +101,10 @@ function previewOf(c){
   var who=l.mine?'You: ':(l.sender?esc(l.sender)+': ':'');
   return who+(l.kind==='image'?'📷 Photo':esc(l.text));
 }
+function setListHtml(s,html){
+  if(typeof window._reconcileInbox==='function') window._reconcileInbox(s,html,'data-gc');
+  else if(s.innerHTML!==html) s.innerHTML=html;
+}
 function renderList(){
   var s=section();if(!s)return;
   var filter=window._convFilter==='unread';
@@ -114,13 +118,13 @@ function renderList(){
   var chips=document.getElementById('oa-inbox-filters');
   if(chips&&chats.length)chips.hidden=false;
   if(!chats.length){
-    s.innerHTML=q||filter?'':'<button type="button" class="gc-cta" data-gc-new>'
+    setListHtml(s,q||filter?'':'<button type="button" class="gc-cta" data-gc-new>'
       +'<span class="gc-cta-ico">'+ICON.groupAdd+'</span>'
-      +'<span class="gc-cta-copy"><b>New group</b><small>Chat with your followers, together</small></span></button>';
+      +'<span class="gc-cta-copy"><b>New group</b><small>Chat with your followers, together</small></span></button>');
     return;
   }
-  if(!shown.length){s.innerHTML='';return;}
-  s.innerHTML='<div class="oa-active-title gc-title">Groups</div>'+shown.map(function(c){
+  if(!shown.length){setListHtml(s,'');return;}
+  setListHtml(s,'<div class="oa-active-title gc-title">Groups</div>'+shown.map(function(c){
     var unread=c.unread>0;
     return '<div class="conv-row-wrap gc-row-wrap'+(unread?' is-unread':'')+'" data-gc="'+c.id+'">'
       +'<div class="conv-row" role="button" tabindex="0" aria-label="Open group '+esc(c.name)+'">'
@@ -131,7 +135,7 @@ function renderList(){
       +'<div class="conv-bottom"><div class="conv-preview'+(unread?' unread':'')+'">'+previewOf(c)+'</div>'
       +(unread?'<span class="conv-badge" aria-label="'+c.unread+' unread">'+(c.unread>99?'99+':c.unread)+'</span>':'')
       +'</div></div></div></div>';
-  }).join('');
+  }).join(''));
 }
 // What the list looked like, for the next visit to paint before the chats.
 function remember(){
