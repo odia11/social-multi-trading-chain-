@@ -125,12 +125,23 @@ async def run(b, theme, w, h):
     await ctx.add_init_script("try{localStorage.setItem('oa_theme','%%s');localStorage.setItem('orcagent_tips_seen','1')}catch(e){}" %% theme)
     await ctx.add_cookies([{'name': 'orca_s', 'value': COOKIE, 'domain': '127.0.0.1', 'path': '/'},
                            {'name': 'oa_theme', 'value': theme, 'domain': '127.0.0.1', 'path': '/'}])
+    # A stand-in for the phone's visible area, so the keyboard can be opened.
+    await ctx.add_init_script("(()=>{const vv=new EventTarget();Object.assign(vv,{height:innerHeight,width:innerWidth,offsetTop:0,offsetLeft:0,pageTop:0,pageLeft:0,scale:1});"
+                              "Object.defineProperty(window,'visualViewport',{configurable:true,get:()=>vv});window.__vv=vv})()")
     page = await ctx.new_page(); errors = []
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.on('dialog', lambda dlg: asyncio.ensure_future(dlg.accept()))
     tag = '%%s_%%d' %% (theme, w); out = {}
     await page.goto('http://127.0.0.1:%%d/messages?group=%%d' %% (PORT, GID), wait_until='load')
     await page.wait_for_selector('#gc-thread:not([hidden]) .gc-sys', timeout=15000)
+    if w < 600:
+        # The keyboard takes the lower 420 px and iOS slides the page up by 300.
+        out['keyboard'] = await page.evaluate("(()=>{const vv=window.__vv;vv.height=innerHeight-420;vv.offsetTop=300;vv.dispatchEvent(new Event('resize'));"
+            "const t=document.getElementById('gc-thread').getBoundingClientRect(),c=document.querySelector('.gc-composer').getBoundingClientRect(),"
+            "h=document.querySelector('.gc-th-hd').getBoundingClientRect();"
+            "return [Math.round(t.top),Math.round(c.bottom),Math.round(h.top),innerHeight-420+300]})()")
+        await page.evaluate("(()=>{const vv=window.__vv;vv.height=innerHeight;vv.offsetTop=0;vv.dispatchEvent(new Event('resize'))})()")
+        out['keyboardClosed'] = await page.evaluate("Math.round(document.querySelector('.gc-composer').getBoundingClientRect().bottom)===innerHeight")
     await page.click('.gc-emoji'); await page.wait_for_selector('.gc-emoji-panel:not([hidden])', timeout=5000)
     out['emojiPanel'] = await page.evaluate("(()=>{const r=document.querySelector('.gc-emoji-panel').getBoundingClientRect();"
                                             "return [document.querySelectorAll('.gc-emoji-panel button').length, r.left>=0&&r.right<=innerWidth&&r.top>=0]})()")
@@ -194,6 +205,11 @@ finally:
 
 for i, tag in enumerate(('dark_390', 'light_360', 'dark_1280')):
     m = B.get(tag, {})
+    if tag != 'dark_1280':
+        k = m.get('keyboard') or [0, 0, 0, -1]
+        check('BROWSER %s: with the keyboard open the chat fills exactly what is visible: header on top, composer on the keyboard' % tag,
+              k[0] == 300 and k[1] == k[3] and k[2] == 300, str(k))
+        check('BROWSER %s: ...and fills the screen again when it closes' % tag, m.get('keyboardClosed') is True, str(m.get('keyboardClosed')))
     check('BROWSER %s: the composer has an emoji panel like DMs, fully on screen' % tag, m.get('emojiPanel') == [35, True], str(m.get('emojiPanel')))
     check('BROWSER %s: tapping emojis types them into the message' % tag, m.get('emojiInput') == 'to the moon 🚀💎', str(m.get('emojiInput')))
     check('BROWSER %s: ...and they are sent, the panel closes' % tag, m.get('emojiSent') == ['to the moon 🚀💎', True], str(m.get('emojiSent')))
