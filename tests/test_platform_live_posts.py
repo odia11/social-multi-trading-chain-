@@ -78,7 +78,7 @@ CREATE TABLE token_calls(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,wa
         self.publish(DAY0 + dt.timedelta(minutes=30))
         first, second = self.posts()
         self.assertIn('$POPCAT', first)
-        self.assertIn('2x', first)
+        self.assertIn('2.4x', first)   # where it stands now, not the rounded milestone
         self.assertIn('@chartwizard', first)
         self.assertTrue(first.endswith('__CALL__' + json.dumps({'id': cid})))
         self.assertIn('@solqueen', second)
@@ -177,6 +177,24 @@ CREATE TABLE token_calls(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,wa
             content, img = c.execute("SELECT content, image_url FROM feed_posts WHERE wallet LIKE 'official%'").fetchone()
         self.assertIsNone(img)
         self.assertTrue(content.endswith('__CALL__' + json.dumps({'id': cid})))
+
+    def test_a_milestone_is_posted_only_while_the_token_is_still_there(self):
+        # $Sirius: called at $8.98K, peaked at 8.48x, then fell to $3.2K -- and
+        # was still posted as "5x on the call".
+        crashed = self.call(2, 'SIRIUS', 0.0001, 0.000848, DAY0 - dt.timedelta(days=5), mc=8_980)
+        with sqlite3.connect(self.db) as c:
+            c.execute('UPDATE token_calls SET last_price=? WHERE id=?', (0.0000357, crashed))
+        holding = self.call(3, 'HOLD', 0.0001, 0.0007, DAY0 - dt.timedelta(days=1), mc=10_000)
+        with sqlite3.connect(self.db) as c:
+            c.execute('UPDATE token_calls SET last_price=? WHERE id=?', (0.0006, holding))
+            out = live.milestone(c, DAY0.timestamp())
+        topics = [o[0] for o in out]
+        self.assertNotIn('milestone:%d:5' % crashed, topics)
+        self.assertFalse(any(t.startswith('milestone:%d:' % crashed) for t in topics))
+        self.assertIn('milestone:%d:5' % holding, topics)
+        text = ' '.join(next(o[1] for o in out if o[0] == 'milestone:%d:5' % holding))
+        self.assertIn('6x', text)          # the real multiple, not the milestone's
+        self.assertNotIn('8.48x', text)
 
     def test_the_most_called_token_post_names_its_latest_call(self):
         self.call(2, 'ATTN+', 0.001, 0.002, DAY0 - dt.timedelta(hours=3))

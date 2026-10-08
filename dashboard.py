@@ -4643,6 +4643,61 @@ _phantom_sessions: dict = {}   # token_hex → {sk: bytes, created: float}
 _B58_ALPHA = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 _B58_MAP   = {c: i for i, c in enumerate(_B58_ALPHA)}
 
+_SOL_USD_QUOTES = ('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',   # USDC
+                   'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB')   # USDT
+
+
+def _sol_usd_from_pairs(pairs) -> float:
+    """SOL's dollar price from DexScreener pairs, or 0.0 when none is usable.
+
+    Only pairs where SOL is the BASE token and the quote is USDC or USDT count,
+    deepest liquidity first. DexScreener's /tokens/<SOL> answer also lists
+    TOKEN/SOL pairs, whose priceUsd is that token's price: falling back to
+    "the first pair" could make a memecoin's price OrcAgent's SOL price.
+    """
+    best, best_liq = 0.0, -1.0
+    for p in pairs or []:
+        if not isinstance(p, dict):
+            continue
+        if (p.get('baseToken') or {}).get('address') != SOL_MINT:
+            continue
+        if (p.get('quoteToken') or {}).get('address') not in _SOL_USD_QUOTES:
+            continue
+        try:
+            price = float(p.get('priceUsd') or 0)
+            liq = float((p.get('liquidity') or {}).get('usd') or 0)
+        except (TypeError, ValueError):
+            continue
+        if 1 < price < 100_000 and liq > best_liq:
+            best, best_liq = price, liq
+    return best
+
+
+def _fetch_sol_price_usd() -> float:
+    """SOL/USD from DexScreener, else from Jupiter (the router trades go
+    through). 0.0 when neither answers -- never a guess."""
+    try:
+        r = _dex_get('https://api.dexscreener.com/latest/dex/tokens/' + SOL_MINT, timeout=6)
+        if r and r.status_code == 200:
+            price = _sol_usd_from_pairs((r.json() or {}).get('pairs'))
+            if price:
+                return price
+    except Exception:
+        pass
+    for host in ('https://lite-api.jup.ag', 'https://api.jup.ag'):
+        try:
+            r = requests.get(host + '/price/v3?ids=' + SOL_MINT, timeout=6,
+                             headers={'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 OrcAgent/1.0'})
+            if r.status_code != 200:
+                continue
+            price = float(((r.json() or {}).get(SOL_MINT) or {}).get('usdPrice') or 0)
+            if 1 < price < 100_000:
+                return price
+        except (requests.RequestException, ValueError, TypeError, AttributeError):
+            continue
+    return 0.0
+
+
 def _b58enc(buf: bytes) -> str:
     d = []
     for byte in buf:
@@ -6102,17 +6157,12 @@ def token_loop():
             # Refresh SOL/USD price once per scan cycle
             global _sol_price_usd, _trade_size_units_migrated
             try:
-                _sr = _dex_get('https://api.dexscreener.com/latest/dex/tokens/' + SOL_MINT, timeout=6)
-                if _sr and _sr.status_code == 200:
-                    _pairs = (_sr.json().get('pairs') or [])
-                    _p = next((p for p in _pairs if (p.get('quoteToken') or {}).get('address') == USDC_MINT), _pairs[0] if _pairs else None)
-                    if _p:
-                        _sp = float(_p.get('priceUsd', 0) or 0)
-                        if _sp > 1:
-                            _sol_price_usd = _sp
-                            if not _trade_size_units_migrated:
-                                _migrate_trade_size_units(_sp)
-                                _trade_size_units_migrated = True
+                _sp = _fetch_sol_price_usd()
+                if _sp > 1:
+                    _sol_price_usd = _sp
+                    if not _trade_size_units_migrated:
+                        _migrate_trade_size_units(_sp)
+                        _trade_size_units_migrated = True
             except Exception:
                 pass
         except: pass

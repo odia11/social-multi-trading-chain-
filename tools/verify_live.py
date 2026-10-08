@@ -166,20 +166,18 @@ def main():
         works. It checks the feed itself now, and hands the result to the
         module so the Solana gas figures below have something to work with.
         """
-        r = d._dex_get('https://api.dexscreener.com/latest/dex/tokens/' + d.SOL_MINT,
-                       timeout=8)
-        if not r or r.status_code != 200:
-            raise RuntimeError(f'price feed returned HTTP '
-                               f'{getattr(r, "status_code", "no response")}')
-        pairs = r.json().get('pairs') or []
-        p = next((x for x in pairs
-                  if (x.get('quoteToken') or {}).get('address') == d.USDC_MINT),
-                 pairs[0] if pairs else None)
-        price = float((p or {}).get('priceUsd', 0) or 0)
-        if price <= 1:
-            raise RuntimeError('no usable SOL/USDC pair in the feed response')
-        d._sol_price_usd = price
-        return f'SOL = ${price:.2f}'
+        # The same function the app prices SOL with (DexScreener's SOL/USDC
+        # pairs, Jupiter when DexScreener has nothing usable). A few tries:
+        # right after a restart DexScreener now and then answers one request
+        # with no pairs at all, which says nothing about the app.
+        import time as _t
+        for attempt_no in range(3):
+            price = d._fetch_sol_price_usd()
+            if price > 1:
+                d._sol_price_usd = price
+                return f'SOL = ${price:.2f}'
+            _t.sleep(3)
+        raise RuntimeError('no SOL price from DexScreener or Jupiter after 3 tries')
     attempt('SOL price feed', sol_price)
 
     def jupiter():

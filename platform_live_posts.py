@@ -135,7 +135,11 @@ def milestone(c, now):
     out = []
     for cid, mint, sym, name, p0, mc0, peak, last, note, ts, user, uid, img in _calls(c, 'tc.timestamp >= ?', (since,)):
         x = (peak or 0) / p0
-        hit = [m for m in MILESTONES if x >= m]
+        # A milestone is only news while the token is still there. A call that
+        # touched 8.5x and is now 64% under its entry was posted as "5x on
+        # the call" -- true about its past, misleading about the token.
+        now_x = (last or 0) / p0
+        hit = [m for m in MILESTONES if now_x >= m]
         if not hit:
             continue
         m = hit[-1]
@@ -143,10 +147,11 @@ def milestone(c, now):
         if _posted(c, topic):
             continue
         sym = sym or 'this token'
+        now_mc, peak_mc = usd((mc0 or 0) * now_x), usd((mc0 or 0) * max(x, now_x))
         texts = [
-            '$%s just hit %dx since @%s called it at a %s market cap. Open the call to see the entry and the reasoning. %s' % (sym, m, user, usd(mc0), NFA),
-            '%dx on the call: @%s called $%s at %s, and it has now reached %s at its peak. %s' % (m, user, sym, usd(mc0), usd((mc0 or 0) * x), NFA),
-            'Call milestone: $%s, called by @%s, is up %dx from the recorded entry. Calls keep their entry, so the result is there for everyone to check. %s' % (sym, user, m, NFA),
+            '$%s is up %s since @%s called it at a %s market cap; it is at %s now. Open the call to see the entry and the reasoning. %s' % (sym, mult(now_x), user, usd(mc0), now_mc, NFA),
+            '%s on the call: @%s called $%s at %s. It is at %s now, %s at its peak. %s' % (mult(now_x), user, sym, usd(mc0), now_mc, peak_mc, NFA),
+            'Call milestone: $%s, called by @%s, is up %s from the recorded entry. Calls keep their entry, so the result is there for everyone to check. %s' % (sym, user, mult(now_x), NFA),
         ]
         media = _call_media('milestone', cid, mint, sym, name, p0, mc0, peak, last, note, ts, user, img, milestone=m)
         out.append((topic, _pick(texts, topic), media, _call_embed(cid), x))
@@ -205,9 +210,10 @@ def best_call(c, now):
     rows = _calls(c, 'date(tc.timestamp) = ?', (day,))
     if not rows:
         return []
-    top = max(rows, key=lambda r: (r[6] or 0) / r[4])
+    # Ranked by where the call stands now, not by a peak it may have lost.
+    top = max(rows, key=lambda r: (r[7] or 0) / r[4])
     cid, mint, sym, name, p0, mc0, peak, last, note, ts, user, uid, img = top
-    x = (peak or 0) / p0
+    x = (last or 0) / p0
     if x < BEST_CALL_MIN:
         return []
     topic = 'best:%d:%d' % (cid, int(x * 4))
@@ -215,9 +221,9 @@ def best_call(c, now):
         return []
     sym = sym or 'a token'
     texts = [
-        'Best call of the day so far: @%s called $%s at a %s market cap. It has reached %s since. %s' % (user, sym, usd(mc0), mult(x), NFA),
-        'Today\'s top call: $%s by @%s, up %s at its peak from a %s entry. Read the reasoning on the call. %s' % (sym, user, mult(x), usd(mc0), NFA),
-        '@%s leads today\'s calls: $%s, called at %s and %s at its best since. %s' % (user, sym, usd(mc0), mult(x), NFA),
+        'Best call of the day so far: @%s called $%s at a %s market cap. It is up %s since. %s' % (user, sym, usd(mc0), mult(x), NFA),
+        'Today\'s top call: $%s by @%s, up %s from a %s entry. Read the reasoning on the call. %s' % (sym, user, mult(x), usd(mc0), NFA),
+        '@%s leads today\'s calls: $%s, called at %s and up %s since. %s' % (user, sym, usd(mc0), mult(x), NFA),
     ]
     media = _call_media('best', cid, mint, sym, name, p0, mc0, peak, last, note, ts, user, img)
     return [(topic, _pick(texts, topic), media, _call_embed(cid))]
