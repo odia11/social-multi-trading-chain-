@@ -28,7 +28,7 @@ class RecoveryTests(unittest.TestCase):
         class Session(dict):
             pass
         self.ns = dict(sqlite3=sqlite3, hashlib=hashlib, secrets=secrets, time=time,
-                       DB_FILE=self.db, DEVICE_TOKEN_DAYS=3650, DEVICE_COOKIE_NAME='orca_device',
+                       DB_FILE=self.db, DEVICE_TOKEN_DAYS=3650, DEVICE_RENEW_SECONDS=3600, DEVICE_COOKIE_NAME='orca_device',
                        request=SimpleNamespace(json={}, cookies={}), session=Session(),
                        jsonify=Response, get_or_create_user=lambda w: 1,
                        _get_csrf_token=lambda: 'csrf', _set_device_cookie=lambda r,t:r)

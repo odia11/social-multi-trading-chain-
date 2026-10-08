@@ -174,10 +174,17 @@ def _social_tags(title: str, description: str, url: str) -> str:
     ])
 
 
+_HEAD_CLOSE_RE = re.compile(r"</head>", re.I)
+_OG_TITLE_RE = re.compile(r"""property=["']og:title["']""", re.I)
+
+
 def _inject_before_head_close(body: str, markup: str) -> str:
-    index = body.lower().find("</head>")
-    if index < 0:
+    # A case-insensitive search, not body.lower(): that copied the whole page
+    # (400 KB for Home) on every page view just to find one tag.
+    found = _HEAD_CLOSE_RE.search(body)
+    if not found:
         return body
+    index = found.start()
     return body[:index] + markup + "\n" + body[index:]
 
 
@@ -206,8 +213,7 @@ def _decorate_html(body: str, path: str) -> str:
         '<meta name="robots" content="index,follow,max-image-preview:large">',
         '<link rel="canonical" href="' + canonical + '">',
     ]
-    lower = body.lower()
-    if 'property="og:title"' not in lower and "property='og:title'" not in lower:
+    if not _OG_TITLE_RE.search(body):
         body = _inject_early_in_head(body, _social_tags(safe_title, safe_description, canonical))
     if path == "/":
         tags.append('<script type="application/ld+json">' + _graph_json() + "</script>")

@@ -23,7 +23,7 @@ TREE = ast.parse(SRC)
 FUNCS = {'_is_market_major_or_impersonator', '_dexscreener_solana_discovery_addresses', '_get_scanner_candidates',
          '_get_scanner_cached', '_refresh_scanner_cached', '_scanner_carry_over'}
 CONSTS = {'_MARKET_MAJOR_ADDRESSES', '_MARKET_MAJOR_SYMBOLS', '_MARKET_LIVE_CHAINS', '_SCANNER_SEARCHES',
-          '_SCANNER_CARRY_SECONDS', '_LIVE_MARKET_MIN_MCAP_USD'}
+          '_SCANNER_CARRY_SECONDS', '_LIVE_MARKET_MIN_MCAP_USD', '_SCANNER_RETRY_SECONDS', '_SCANNER_COLD_WAIT_SECONDS'}
 found = {}
 for node in TREE.body:
     if isinstance(node, ast.FunctionDef) and node.name in FUNCS:
@@ -87,7 +87,7 @@ ns = {'time': clock, 'threading': threading, '_dex_get': fake_dex_get,
       '_scanner_cache': {'ts': 0.0, 'data': []}, '_scanner_lock': threading.Lock(),
       '_scanner_refresh_lock': threading.Lock(), '_scanner_seen': {}}
 for name in ('_MARKET_LIVE_CHAINS', '_MARKET_MAJOR_ADDRESSES', '_MARKET_MAJOR_SYMBOLS', '_SCANNER_SEARCHES',
-             '_SCANNER_CARRY_SECONDS', '_LIVE_MARKET_MIN_MCAP_USD'):
+             '_SCANNER_CARRY_SECONDS', '_LIVE_MARKET_MIN_MCAP_USD', '_SCANNER_RETRY_SECONDS', '_SCANNER_COLD_WAIT_SECONDS'):
     exec(found[name], ns)
 for name in FUNCS:
     exec(found[name], ns)
@@ -115,6 +115,7 @@ check('...but a token not seen for over five minutes is dropped', data == [], st
 # 3. nobody waits on DexScreener
 MODE['up'] = True
 ns['_scanner_cache']['ts'] = 0.0
+clock.offset += ns['_SCANNER_RETRY_SECONDS'] + 1  # an empty refresh is retried after this, not on every request
 ns['_get_scanner_cached']()                      # fill it again
 clock.offset += 20                               # now stale
 MODE['delay'] = 0.4                              # DexScreener is slow: a full refresh takes ~5s

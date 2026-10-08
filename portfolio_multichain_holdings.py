@@ -24,6 +24,15 @@ _SNAPSHOT_CACHE = {}
 _SNAPSHOT_LOCK = threading.Lock()
 _SNAPSHOT_TTL = 5.0
 _SNAPSHOT_FLIGHTS = {}
+_SNAPSHOT_FAILED = {}          # key -> when reading that wallet last failed
+_SNAPSHOT_RETRY_SECONDS = 10.0
+# At most this many balance reads talk to the Solana RPC at once. A read
+# normally takes well under a second, but while the RPC is slow each one
+# holds a server thread for seconds; with every open tab asking, they could
+# take all sixteen and the whole app stood still. Past this, a request gets
+# the last known balance (or "unavailable" at once) instead of waiting.
+_SNAPSHOT_FETCH_SLOTS = threading.BoundedSemaphore(6)
+_SNAPSHOT_SLOT_WAIT = 0.3
 
 
 def _merge_evm_positions(d, wallet, tokens):
@@ -41,14 +50,29 @@ def _portfolio_snapshot(d, wallet, bust=False):
         previous = _SNAPSHOT_CACHE.get(key)
         if not bust and previous and now - previous['generated_at'] < _SNAPSHOT_TTL:
             return previous
+        # A wallet whose balance just could not be read is not read again on
+        # the next poll: every open tab asks for this, and each failed attempt
+        # held a server thread for seconds while the RPC timed out -- during
+        # an RPC hiccup that alone could take all of them. Refresh (bust)
+        # always tries.
+        if not bust and now - _SNAPSHOT_FAILED.get(key, 0) < _SNAPSHOT_RETRY_SECONDS:
+            raise RuntimeError('complete portfolio snapshot unavailable')
         if bust:
             d._wallet_tokens_cache.pop(wallet, None)
+        if not _SNAPSHOT_FETCH_SLOTS.acquire(timeout=_SNAPSHOT_SLOT_WAIT):
+            if previous:
+                return dict(previous, stale=True, partial=True, unavailable=['full_token_index'])
+            raise RuntimeError('complete portfolio snapshot unavailable')
         try:
             token_data = d._fetch_wallet_tokens(wallet, owner)
         except Exception:
             if previous:
                 return dict(previous, stale=True, partial=True, unavailable=['full_token_index'])
+            _SNAPSHOT_FAILED[key] = time.time()
             raise RuntimeError('complete portfolio snapshot unavailable')
+        finally:
+            _SNAPSHOT_FETCH_SLOTS.release()
+        _SNAPSHOT_FAILED.pop(key, None)
         inventory_complete = bool(token_data.get('inventory_complete', True))
         if not inventory_complete and previous:
             return dict(previous, stale=True, partial=True, unavailable=['full_token_index'])

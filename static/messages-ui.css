@@ -66,7 +66,7 @@ body{background:radial-gradient(circle at 50% -20%,rgba(247,185,85,.055),transpa
 .msg-trade-pnl{font-size:18px!important}
 
 /* Composer */
-.msgs-compose,.msgs-input-row,.msgs-composer{background:rgba(8,11,16,.98)!important;border-color:rgba(247,185,85,.14)!important;backdrop-filter:blur(18px)}
+.msgs-compose,.msgs-input-row,.msgs-composer{background:rgba(8,11,16,.98)!important;border-color:rgba(247,185,85,.14)!important}
 .msgs-input{height:46px!important;border-radius:24px!important;background:#10151c!important;border:1px solid #252c35!important;color:#eef1f5!important;padding:0 17px!important;font-size:16px!important}
 .msgs-input:focus{border-color:rgba(247,185,85,.5)!important;box-shadow:0 0 0 3px rgba(247,185,85,.06)!important}
 .msgs-emoji-btn,.msgs-trade-btn,.msgs-attach-btn{border-radius:14px!important;background:#0e1319!important;border-color:#252c35!important;color:#aeb6c1!important}
@@ -84,7 +84,7 @@ body{background:radial-gradient(circle at 50% -20%,rgba(247,185,85,.055),transpa
   body{padding-bottom:calc(86px + env(safe-area-inset-bottom))!important}
   #app,.msgs-main{background:var(--oa-msg-bg)!important}
   .msgs-left{padding-bottom:4px!important}
-  .msgs-left-hdr{position:sticky!important;top:0!important;height:88px!important;padding:12px 18px 10px!important;display:flex!important;align-items:flex-start!important;background:rgba(8,11,16,.96)!important;backdrop-filter:blur(20px)!important}
+  .msgs-left-hdr{position:sticky!important;top:0!important;height:88px!important;padding:12px 18px 10px!important;display:flex!important;align-items:flex-start!important;background:rgba(8,11,16,.96)!important}
   .msgs-left-title-row{height:64px!important;align-items:center!important}
   .msgs-left-title{font-size:24px!important}
   .msgs-left-title-row:after{left:40px;top:44px;font-size:11px}

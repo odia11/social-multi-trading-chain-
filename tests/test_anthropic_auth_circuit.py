@@ -28,10 +28,11 @@ def test_x_buzz_obeys_breaker_and_marks_401_once():
 
 
 def test_empty_buzz_is_a_real_cache_hit():
-    b=block('def get_multichain_x_buzz()', '\ndef _match_buzz_to_mints')
+    b=block('def _buzz_refresh_locked()', '\ndef _match_buzz_to_mints')
     assert "if _buzz_cache['ts'] and now - _buzz_cache['ts'] < _BUZZ_TTL:" in b
     assert "and _buzz_cache['data']" not in b
-    assert 'with _buzz_refresh_lock:' in b
+    # Single flight: one refresh at a time, in the background once a list exists.
+    assert '_buzz_refresh_lock.acquire(blocking=False)' in b and '_buzz_refresh_lock.acquire(timeout=2.5)' in b
     assert "_buzz_cache['ts'] = now" in b
 
 

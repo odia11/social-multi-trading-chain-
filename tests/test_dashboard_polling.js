@@ -14,6 +14,7 @@ vm.createContext(context);
 vm.runInContext(source.slice(source.indexOf('let lastLogCount=0;'),source.indexOf('async function fetchMarketOnly(')),context);
 vm.runInContext(source.slice(source.indexOf('let _pnlcChart='),source.indexOf('function _renderPnlcChart(')),context);
 (async()=>{
+ onScreen=true;   // the panels fetchState paints are on screen
  await context.fetchState();
  const rendered=counters.renderLiveFeed;
  await context.fetchState();
@@ -23,11 +24,13 @@ vm.runInContext(source.slice(source.indexOf('let _pnlcChart='),source.indexOf('f
  payload={...payload,sol_price:110};await context.fetchState();
  assert.equal(counters.renderPositions,2,'SOL valuation change must refresh positions');
  assert.equal(counters.renderLiveFeed,rendered+1,'SOL valuation change must refresh trade values');
- hidden=true;let before=requests;await context.fetchState();assert.equal(requests,before);
+ onScreen=false;let before=requests;await context.fetchState();await context.fetchState();
+ assert.equal(requests,before,'panels not on screen: state is refreshed at most every 30 s, not every 10');
+ hidden=true;before=requests;await context.fetchState();assert.equal(requests,before);
  let polls=0;const poll=context._oaPollTask(async()=>{polls++;await new Promise(r=>resolveFetch=r)});
  poll();await Promise.resolve();assert.equal(polls,0,'hidden polling pauses');
  hidden=false;const active=poll();await Promise.resolve();poll();assert.equal(polls,1,'overlapping poll is skipped');resolveFetch();await active;resolveFetch=null;
  before=requests;await context.fetchPnlChart();assert.equal(requests,before,'offscreen chart must not fetch');
  onScreen=true;payload={data:[]};await context.fetchPnlChart();assert.equal(requests,before+1,'visible chart fetches');
- console.log('PASS identical state, live valuation, hidden state, hidden polling, overlapping polling, offscreen/visible chart');
+ console.log('PASS identical state, live valuation, off-screen panels poll slower, hidden state, hidden polling, overlapping polling, offscreen/visible chart');
 })().catch(e=>{console.error(e);process.exitCode=1});

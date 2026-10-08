@@ -25,7 +25,7 @@ body.oa-home-mobile #right-rail{display:none!important}
 body.oa-home-mobile .oa-m-legacy-hidden{display:none!important}
 
 /* Header: keep the shared OrcAgent navbar functional, restyle only Home mobile. */
-body.oa-home-mobile .pt-nb-topbar, html.oa-route-home body .pt-nb-topbar{display:grid!important;grid-template-columns:auto 1fr auto;align-items:center!important;gap:9px!important;padding:9px 14px 7px!important;background:rgba(5,11,17,.96)!important;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border-bottom:0!important;position:sticky!important;top:0!important;z-index:220!important}
+body.oa-home-mobile .pt-nb-topbar, html.oa-route-home body .pt-nb-topbar{display:grid!important;grid-template-columns:auto 1fr auto;align-items:center!important;gap:9px!important;padding:9px 14px 7px!important;background:rgba(5,11,17,.96)!important;border-bottom:0!important;position:sticky!important;top:0!important;z-index:220!important}
 body.oa-home-mobile .pt-nb-logo, html.oa-route-home body .pt-nb-logo{grid-column:1;gap:8px!important}
 body.oa-home-mobile .pt-nb-logo-mark, html.oa-route-home body .pt-nb-logo-mark{width:38px!important;height:38px!important;border-radius:11px!important;background:linear-gradient(145deg,#ffd36a,#f7b955)!important;box-shadow:inset 0 1px rgba(255,255,255,.35),0 6px 18px rgba(247,185,85,.14)}
 body.oa-home-mobile .pt-nb-logo-mark::before, html.oa-route-home body .pt-nb-logo-mark::before{border-left-width:7px!important;border-right-width:7px!important;border-bottom-width:13px!important}
@@ -94,7 +94,7 @@ body.oa-home-mobile .feed-composer-actions{padding-left:48px!important;gap:12px!
 body.oa-home-mobile .feed-card,body.oa-home-mobile .post-card,body.oa-home-mobile [class*="feed-card"]{border-radius:15px!important;border-color:var(--oa-line)!important;background:#091119!important;box-shadow:none!important}
 
 /* Bottom nav */
-body.oa-home-mobile #mobile-nav{height:calc(78px + env(safe-area-inset-bottom,0px))!important;background:rgba(6,13,19,.97)!important;border-top:1px solid rgba(255,255,255,.08)!important;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);box-shadow:0 -18px 44px rgba(0,0,0,.35);z-index:500!important}
+body.oa-home-mobile #mobile-nav{height:calc(78px + env(safe-area-inset-bottom,0px))!important;background:rgba(6,13,19,.97)!important;border-top:1px solid rgba(255,255,255,.08)!important;box-shadow:0 -18px 44px rgba(0,0,0,.35);z-index:500!important}
 body.oa-home-mobile #mobile-nav .mn-balance-strip{display:none!important}
 body.oa-home-mobile #mobile-nav a,body.oa-home-mobile #mobile-nav button{border-radius:14px}
 body.oa-home-mobile #mobile-nav .active{color:#f7b955!important}

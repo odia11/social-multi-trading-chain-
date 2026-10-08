@@ -3,7 +3,7 @@ body .oa-feed-chart-v2{background:linear-gradient(180deg,#0b1118 0%,#0a0f15 100%
 body .oa-feed-chart-v2 .oa-fc-hero{height:122px;position:relative;overflow:hidden;background:#0d131a}
 body .oa-feed-chart-v2 .oa-fc-banner{position:absolute;inset:0;background-size:cover;background-position:center;transform:scale(1.01)}
 body .oa-feed-chart-v2 .oa-fc-hero-shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(4,8,12,.05),rgba(7,11,16,.18) 58%,rgba(7,11,16,.9))}
-body .oa-feed-chart-v2 .oa-fc-chain{position:absolute;right:10px;top:10px;z-index:2;display:inline-flex;align-items:center;gap:6px;padding:6px 9px;border:1px solid rgba(255,255,255,.12);border-radius:10px;background:rgba(6,10,15,.76);backdrop-filter:blur(10px);font-size:10px;font-weight:800;color:#eef1f5}
+body .oa-feed-chart-v2 .oa-fc-chain{position:absolute;right:10px;top:10px;z-index:2;display:inline-flex;align-items:center;gap:6px;padding:6px 9px;border:1px solid rgba(255,255,255,.12);border-radius:10px;background:rgba(6,10,15,.86);font-size:10px;font-weight:800;color:#eef1f5}
 body .oa-feed-chart-v2 .oa-fc-chain-dot{width:7px;height:7px;border-radius:50%;background:linear-gradient(135deg,#8b5cf6,#22d3ee)}
 body .oa-feed-chart-v2 .oa-fc-head{position:relative;display:flex;align-items:flex-end;gap:10px;padding:0 14px 8px;margin-top:-28px;z-index:3}
 body .oa-feed-chart-v2 .oa-fc-logo{width:58px;height:58px;flex:0 0 58px;border-radius:50%;border:3px solid #f7b955;background:#171d25;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;color:#f7b955;box-shadow:0 5px 14px rgba(0,0,0,.32)}
