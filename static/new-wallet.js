@@ -66,12 +66,34 @@ function finish() {
   // Reload the current route so every guest widget picks up the full session.
   location.reload();
 }
+function icon(name) {
+  const paths = {
+    wallet: '<path d="M20 8V5a2 2 0 0 0-2-2H5a3 3 0 0 0 0 6h15v11H5a3 3 0 0 1-3-3V6"/><path d="M20 12h-5v4h5M8 13v6m-3-3h6"/>',
+    phantom: '<path d="M4 18V11a8 8 0 0 1 16 0v8l-4-2-4 2-4-2-4 2Z"/><path d="M9 10v2m6-2v2"/>',
+    eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+    key: '<circle cx="8" cy="8" r="5"/><path d="m12 12 9 9m-3-3 3-3m-6 0 3-3"/>',
+    shield: '<path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/>',
+    arrow: '<path d="m9 5 7 7-7 7"/>'
+  };
+  return '<svg data-nw-icon="' + name + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths[name] + '</svg>';
+}
+function choice(action, symbol, title, subtitle, featured) {
+  return '<button type="button" aria-label="' + title + '" class="nw-option' + (featured ? ' nw-featured' : '') + '" data-' + action + '>' +
+    '<span class="nw-icon nw-icon-' + symbol + '">' + icon(symbol) + '</span><span class="nw-copy">' +
+    '<span class="nw-option-title">' + title + '</span>' +
+    (featured ? '<span class="nw-recommended">RECOMMENDED</span>' : '') +
+    '<span class="nw-option-sub">' + subtitle + '</span></span><span class="nw-arrow">' + icon('arrow') + '</span></button>';
+}
 function open() {
   wipe();
-  shell('<h2 id="nw-title">Set up your wallet</h2><p>Create an account or connect a wallet.</p>' +
-    '<div class="nw-choices"><button data-create>Create new wallet</button><button data-phantom>Connect Phantom</button>' +
-    '<button data-address>Enter address</button><button data-import>Import key / sign in</button></div>' +
-    '<p>OrcAgent stores your trading key encrypted to sign trades. Back up your key before continuing.</p>');
+  shell('<div class="nw-handle" aria-hidden="true"></div><div class="nw-brand">ORCAGENT</div>' +
+    '<h2 id="nw-title">Set up your wallet</h2><p class="nw-subtitle">Choose how you want to continue.</p>' +
+    '<div class="nw-choices">' +
+    choice('create', 'wallet', 'Create new wallet', 'No wallet app needed. Start trading.', true) +
+    choice('phantom', 'phantom', 'Connect Phantom', 'Use your existing Phantom wallet.') +
+    choice('address', 'eye', 'Enter address', 'View only · trading is disabled.') +
+    choice('import', 'key', 'Import key / sign in', 'Sign in with your saved private key.') + '</div>' +
+    '<div class="nw-security">' + icon('shield') + '<p>Trading keys are stored encrypted.<br>Back up your key before continuing.</p></div>');
   dialog.querySelector('[data-create]').onclick = create;
   dialog.querySelector('[data-import]').onclick = importView;
   dialog.querySelector('[data-address]').onclick = addressView;
