@@ -1,0 +1,17 @@
+#oa-new-wallet{box-sizing:border-box;width:min(440px,calc(100vw - 24px));max-height:calc(100dvh - 32px);padding:28px;border:1px solid #34414c;border-radius:20px;background:#101820;color:#edf2f5;font:inherit;overflow:auto;overscroll-behavior:contain}
+#oa-new-wallet::backdrop{background:rgba(0,0,0,.65)}
+#oa-new-wallet h2{font-size:24px;margin:12px 30px 16px 0}
+#oa-new-wallet p{color:#b6c1ca;line-height:1.5}
+#oa-new-wallet label{display:block;margin:16px 0 8px}
+#oa-new-wallet input:not([type=checkbox]){box-sizing:border-box;width:100%;margin-top:8px;padding:12px;border:1px solid #41515e;border-radius:10px;background:#18232d;color:#edf2f5;font:inherit;min-width:0}
+#oa-new-wallet button{min-height:44px;padding:10px 16px;border:1px solid #4a5a67;border-radius:10px;background:#22303b;color:#edf2f5;font:inherit;cursor:pointer}
+#oa-new-wallet button:disabled{opacity:.45;cursor:default}
+#oa-new-wallet button:focus-visible,#oa-new-wallet input:focus-visible{outline:2px solid #d4af37;outline-offset:3px}
+#oa-new-wallet .nw-close{position:absolute;top:12px;right:12px;border:0;background:transparent;font-size:26px;padding:4px 12px}
+#oa-new-wallet .nw-choices{display:grid;gap:12px}
+#oa-new-wallet [data-create],#oa-new-wallet [data-activate]{background:#d4af37;color:#101820;font-weight:700}
+#oa-new-wallet .nw-row{display:flex;gap:12px;margin-top:12px}
+#oa-new-wallet .nw-backup{display:flex;align-items:flex-start;gap:10px;line-height:1.5}
+#oa-new-wallet .nw-backup input{margin-top:5px;flex-shrink:0}
+#oa-new-wallet [role=status]{margin-top:16px;color:#e2ba66;line-height:1.5;overflow-wrap:anywhere}
+@media(max-width:480px){#oa-new-wallet{padding:22px;margin:auto auto 12px;border-radius:20px;width:calc(100vw - 16px)}}

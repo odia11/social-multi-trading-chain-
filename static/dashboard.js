@@ -672,13 +672,17 @@ function nextStep(n){currentStep=n+1;showStep(currentStep);}
 function gotoSetupGuide(){currentStep=1;showStep(1);}
 
 // The legacy #onboard panel (and its #wallet-install-msg) is never displayed
-// any more -- Connect now starts from the wallet sheet in wallet-onboarding.js
+// any more -- Connect now starts from the wallet sheet in new-wallet.js
 // -- so wallet connect feedback has to go to a toast the user can actually see.
 function _walletConnectNotice(msg){
   if(typeof showLfToast==='function') showLfToast('👛', msg, 'warn');
 }
 
 async function connectWalletOnboard(type, afterLoginUrl){
+  if(type==='create' && window.OrcAgentNewWallet){
+    window.OrcAgentNewWallet.create();
+    return;
+  }
   try{ localStorage.removeItem('orca_manual_disconnect'); }catch(e){}
   const isPhantom=type==='phantom';
   const provider=window.OrcAgentWalletAdapter?window.OrcAgentWalletAdapter.provider(type):(isPhantom?_phantomProvider():window.solflare);
