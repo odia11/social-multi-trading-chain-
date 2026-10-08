@@ -102,7 +102,9 @@ from playwright.async_api import async_playwright
 PORT, COOKIE, SHOTS, DB, BOB = %d, %r, %r, %r, %d
 async def run(b, theme, w, h):
     ctx = await b.new_context(viewport={'width': w, 'height': h}, is_mobile=w < 600, has_touch=w < 600)
-    await ctx.add_init_script("try{localStorage.setItem('oa_theme','%%s');localStorage.setItem('orcagent_tips_seen','1')}catch(e){}" %% theme)
+    await ctx.add_init_script("try{localStorage.setItem('oa_theme','%%s');localStorage.setItem('orcagent_tips_seen','1');"
+                            # the "turn on notifications" card has its own place below the chats
+                            "localStorage.setItem('oa_push_prompt_dismissed',String(Date.now()+864e5))}catch(e){}" %% theme)
     await ctx.add_cookies([{'name': 'orca_s', 'value': COOKIE, 'domain': '127.0.0.1', 'path': '/'},
                            {'name': 'oa_theme', 'value': theme, 'domain': '127.0.0.1', 'path': '/'}])
     page = await ctx.new_page(); errors = []

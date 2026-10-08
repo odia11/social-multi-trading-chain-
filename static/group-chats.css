@@ -136,6 +136,25 @@ html.gc-lock,html.gc-lock body{overflow:hidden!important}
 .gc-remove{height:32px;padding:0 12px;border-radius:10px;border:1px solid rgba(255,93,108,.4);background:transparent;color:var(--gc-red);font:700 12.5px Geist,system-ui,sans-serif;cursor:pointer;flex-shrink:0}
 .gc-leave{margin:12px 16px 0;height:48px;border-radius:15px;border:1px solid rgba(255,93,108,.35);background:rgba(255,93,108,.06);color:var(--gc-red);
   font:800 15px Geist,system-ui,sans-serif;cursor:pointer;flex-shrink:0}
+.gc-info-photo{position:relative;padding:0;border:0;background:transparent;border-radius:50%;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.gc-info-cam{position:absolute;right:-2px;bottom:-2px;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background:var(--gc-gold);color:#14110a;border:3px solid #0d1117}
+.gc-info-cam svg{width:15px;height:15px}
+.gc-link{border:0;background:transparent;color:var(--gc-sub);font:650 13px Geist,system-ui,sans-serif;cursor:pointer;padding:2px 6px;margin-top:-4px}
+.gc-more{width:38px;height:38px;flex-shrink:0;border-radius:12px;border:1px solid #232b36;background:#121821;color:var(--gc-sub);
+  display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.gc-more svg{width:18px;height:18px}
+.gc-info-foot{display:flex;gap:10px;margin:12px 16px 0;flex-shrink:0}
+.gc-info-foot .gc-leave{margin:0;flex:1;min-width:0}
+.gc-delete{background:var(--gc-red);border-color:var(--gc-red);color:#fff}
+.gc-menu-who{display:flex;align-items:center;gap:12px;padding:6px 18px 12px;border-bottom:1px solid var(--gc-line)}
+.gc-menu{display:flex;flex-direction:column;padding:6px 8px 0}
+.gc-menu>button,.gc-menu>a{display:flex;flex-direction:column;gap:3px;width:100%;padding:13px 12px;border:0;border-radius:14px;background:transparent;
+  color:var(--gc-text);text-align:left;text-decoration:none;font:700 15.5px/1.2 Geist,system-ui,sans-serif;cursor:pointer}
+.gc-menu>button:active,.gc-menu>a:active{background:rgba(255,255,255,.05)}
+.gc-menu small{color:var(--gc-muted);font:500 12.5px/1.35 Geist,system-ui,sans-serif}
+.gc-menu .gc-menu-danger{color:var(--gc-red)}
+.gc-menu>button:disabled{opacity:.5}
 .gc-toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 90px);transform:translateX(-50%);z-index:1400;padding:10px 16px;border-radius:12px;
   background:#1b222c;color:#f3f5f7;font:600 13.5px Geist,system-ui,sans-serif;box-shadow:0 10px 30px rgba(0,0,0,.4)}
 
