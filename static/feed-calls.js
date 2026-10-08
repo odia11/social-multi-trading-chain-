@@ -101,7 +101,7 @@
       + '<div class="fcall-stats">'
         + stat(hasMcap ? 'Called at' : 'Entry', hasMcap ? fmtUsd(c.mcap_at_call) : fmtPrice(c.price_at_call))
         + stat('Now', hasMcap ? fmtUsd(c.mcap_now) : fmtPrice(c.last_price), nowCls)
-        + stat('Peak', hasMcap ? fmtUsd(c.mcap_peak) : fmtPrice(c.peak_price), peak > 1 ? 'up' : '')
+        + stat('Peak price', fmtPrice(c.peak_price), peak > 1 ? 'up' : '')
       + '</div>'
       + '<small class="fcall-live-status" role="status">Updating…</small>'
       + '<div class="fcall-actions">'
@@ -186,7 +186,7 @@
             if(values.length !== 3) return;
             values[1].textContent = cap ? fmtUsd(c.mcap_now) : fmtPrice(c.last_price);
             values[1].className = nowUp ? 'up' : 'down';
-            values[2].textContent = cap ? fmtUsd(c.mcap_peak) : fmtPrice(c.peak_price);
+            values[2].textContent = fmtPrice(c.peak_price);
             values[2].className = num(c.multiplier) > 1 ? 'up' : '';
             var multi = card.querySelector('.fcall-multi b');
             multi.textContent = fmtMulti(c.multiplier);

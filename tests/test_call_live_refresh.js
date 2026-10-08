@@ -39,7 +39,7 @@ const settle = () => new Promise(resolve=>setImmediate(resolve));
   const firstCard = card;
   quote = {...base,last_price:.5,mcap_now:55,now_multiplier:.5};tick();await settle();
   assert.equal(stats[1].textContent,'$55.00');assert.equal(stats[1].className,'down');
-  assert.equal(stats[2].textContent,'$330.00');assert.equal(card,firstCard);
+  assert.equal(stats[2].textContent,'$3.00');assert.equal(card,firstCard);
   quote = {...base,mint:'B'.repeat(32)};tick();await settle();
   assert.equal(stats[1].textContent,'$55.00');
   const count=requests.length;hidden=true;tick();await settle();assert.equal(requests.length,count);
