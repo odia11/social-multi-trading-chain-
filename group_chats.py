@@ -1,0 +1,464 @@
+"""Group chats in Messages, WhatsApp-style.
+
+A member starts a group with people they are connected to -- their followers
+and the people they follow -- found by username, and gives it a name. Admins
+(the creator, to begin with) add and remove people and rename the group;
+anyone can leave. Messages are text or a photo; joining, leaving, adding and
+renaming show as small system lines in the chat, as in WhatsApp.
+
+Unread is one number per member (the last message id they have seen), so it
+costs nothing per message. Every member gets a phone push per message, tagged
+per group so a busy group updates one alert instead of stacking them, and at
+most one unread bell notification per group.
+"""
+from __future__ import annotations
+
+import datetime
+import re
+import sqlite3
+
+MAX_MEMBERS = 50
+MAX_NAME = 40
+MAX_TEXT = 1000
+PAGE = 100
+_IMAGE_PREFIXES = ('data:image/jpeg;base64,', 'data:image/jpg;base64,', 'data:image/png;base64,',
+                   'data:image/gif;base64,', 'data:image/webp;base64,')
+
+
+def initialize(path):
+    with sqlite3.connect(path, timeout=10) as c:
+        c.executescript('''
+            CREATE TABLE IF NOT EXISTS group_chats (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT NOT NULL,
+                created_by INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS group_chat_members (
+                chat_id      INTEGER NOT NULL,
+                user_id      INTEGER NOT NULL,
+                role         TEXT NOT NULL DEFAULT 'member',
+                joined_at    TEXT NOT NULL,
+                last_read_id INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (chat_id, user_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_gcm_user ON group_chat_members(user_id);
+            CREATE TABLE IF NOT EXISTS group_chat_messages (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id    INTEGER NOT NULL,
+                sender_id  INTEGER,
+                kind       TEXT NOT NULL DEFAULT 'text',
+                body       TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_gcmsg_chat ON group_chat_messages(chat_id, id);
+        ''')
+
+
+def _now():
+    return datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _name_of(row):
+    """users row (id, username, wallet_address) -> what people see."""
+    username, wallet = row[1], row[2] or ''
+    return username or (wallet[:4] + '…' + wallet[-4:] if len(wallet) > 8 else wallet)
+
+
+def connections(c, uid):
+    """Everyone this member may put in a group: followers and followed."""
+    return {r[0] for r in c.execute(
+        'SELECT following_id FROM follows WHERE follower_id=? '
+        'UNION SELECT follower_id FROM follows WHERE following_id=?', (uid, uid))}
+
+
+def unread_total(c, uid):
+    """Unread group messages for the Messages badge (others' messages only)."""
+    row = c.execute(
+        'SELECT COUNT(*) FROM group_chat_members m JOIN group_chat_messages g '
+        'ON g.chat_id=m.chat_id AND g.id>m.last_read_id '
+        "WHERE m.user_id=? AND g.kind!='system' AND COALESCE(g.sender_id,0)!=?", (uid, uid)).fetchone()
+    return int(row[0] or 0)
+
+
+def _system(c, chat_id, text):
+    return c.execute('INSERT INTO group_chat_messages (chat_id, sender_id, kind, body, created_at) '
+                     "VALUES (?,NULL,'system',?,?)", (chat_id, text, _now())).lastrowid
+
+
+def _member_role(c, chat_id, uid):
+    row = c.execute('SELECT role FROM group_chat_members WHERE chat_id=? AND user_id=?', (chat_id, uid)).fetchone()
+    return row[0] if row else None
+
+
+def _users(c, ids):
+    ids = list(ids)
+    if not ids:
+        return {}
+    marks = ','.join('?' * len(ids))
+    return {r[0]: r for r in c.execute(
+        'SELECT id, username, wallet_address, avatar_url, is_verified FROM users WHERE id IN (%s)' % marks, ids)}
+
+
+def install(d):
+    from flask import jsonify, request
+    app = d.app
+    if getattr(app, '_orca_group_chats', False):
+        return
+    app._orca_group_chats = True
+    initialize(d.DB_FILE)
+    d._group_chat_unread_total = unread_total
+
+    def me(c):
+        wallet = d._authenticated_wallet()
+        return (wallet, d._get_uid(c, wallet)) if wallet else (None, None)
+
+    def fail(msg, status):
+        return jsonify({'ok': False, 'msg': msg}), status
+
+    def connect():
+        return sqlite3.connect(d.DB_FILE, timeout=10)
+
+    def add_people(c, chat_id, actor_uid, actor_name, user_ids):
+        """Add connections of the actor; returns the names added."""
+        allowed = connections(c, actor_uid)
+        present = {r[0] for r in c.execute('SELECT user_id FROM group_chat_members WHERE chat_id=?', (chat_id,))}
+        wanted = [u for u in dict.fromkeys(user_ids) if u not in present and u != actor_uid]
+        if any(u not in allowed for u in wanted):
+            raise ValueError('You can add people who follow you or whom you follow')
+        if len(present) + len(wanted) > MAX_MEMBERS:
+            raise ValueError('A group can have up to %d members' % MAX_MEMBERS)
+        people = _users(c, wanted)
+        if len(people) != len(wanted):
+            raise ValueError('Member not found')
+        now = _now()
+        top = c.execute('SELECT COALESCE(MAX(id),0) FROM group_chat_messages WHERE chat_id=?', (chat_id,)).fetchone()[0]
+        names = []
+        for u in wanted:
+            c.execute('INSERT INTO group_chat_members (chat_id, user_id, role, joined_at, last_read_id) '
+                      "VALUES (?,?,'member',?,?)", (chat_id, u, now, top))
+            names.append(_name_of(people[u]))
+        return names
+
+    def summary(c, uid, chat_id):
+        row = c.execute('SELECT id, name, created_by, created_at FROM group_chats WHERE id=?', (chat_id,)).fetchone()
+        members = c.execute('SELECT user_id, role FROM group_chat_members WHERE chat_id=? ORDER BY joined_at, user_id',
+                            (chat_id,)).fetchall()
+        people = _users(c, [m[0] for m in members])
+        return {'id': row[0], 'name': row[1], 'created_by': row[2], 'created_at': row[3],
+                'role': dict(members).get(uid),
+                'members': [{'user_id': m[0], 'role': m[1], 'username': _name_of(people[m[0]]),
+                             'wallet': people[m[0]][2], 'avatar': people[m[0]][3] or '',
+                             'verified': bool(people[m[0]][4])} for m in members if m[0] in people]}
+
+    @app.after_request
+    def _group_chats_private(response):
+        if request.path.startswith('/api/group-chats'):
+            response.headers['Cache-Control'] = 'private, no-store'
+        return response
+
+    @app.route('/api/group-chats', methods=['GET'])
+    @d.rate_limit(60, 60)
+    def group_chats_list():
+        with connect() as c:
+            wallet, uid = me(c)
+            if not uid:
+                return fail('No wallet connected', 401)
+            rows = c.execute(
+                'SELECT g.id, g.name, m.role, m.last_read_id, '
+                '(SELECT COUNT(*) FROM group_chat_members x WHERE x.chat_id=g.id), '
+                '(SELECT COUNT(*) FROM group_chat_messages y WHERE y.chat_id=g.id AND y.id>m.last_read_id '
+                "   AND y.kind!='system' AND COALESCE(y.sender_id,0)!=?), "
+                '(SELECT MAX(id) FROM group_chat_messages z WHERE z.chat_id=g.id) '
+                'FROM group_chat_members m JOIN group_chats g ON g.id=m.chat_id WHERE m.user_id=?',
+                (uid, uid)).fetchall()
+            last_ids = [r[6] for r in rows if r[6]]
+            last = {}
+            if last_ids:
+                marks = ','.join('?' * len(last_ids))
+                for r in c.execute('SELECT g.chat_id, g.kind, g.body, g.created_at, g.sender_id, u.username, u.wallet_address '
+                                   'FROM group_chat_messages g LEFT JOIN users u ON u.id=g.sender_id '
+                                   'WHERE g.id IN (%s)' % marks, last_ids):
+                    last[r[0]] = {'kind': r[1], 'text': '' if r[1] == 'image' else r[2][:120], 'created_at': r[3],
+                                  'mine': r[4] == uid, 'sender': (_name_of((r[4], r[5], r[6])) if r[4] else '')}
+            # A few faces per group for its avatar.
+            faces = {}
+            for chat_id, uid2, avatar, username, wallet2 in c.execute(
+                    'SELECT m.chat_id, u.id, u.avatar_url, u.username, u.wallet_address FROM group_chat_members m '
+                    'JOIN users u ON u.id=m.user_id WHERE m.chat_id IN (SELECT chat_id FROM group_chat_members WHERE user_id=?) '
+                    'AND u.id!=? ORDER BY m.joined_at', (uid, uid)):
+                lst = faces.setdefault(chat_id, [])
+                if len(lst) < 3:
+                    lst.append({'avatar': avatar or '', 'name': _name_of((uid2, username, wallet2)), 'wallet': wallet2})
+        chats = [{'id': r[0], 'name': r[1], 'role': r[2], 'members': r[4], 'unread': r[5],
+                  'last': last.get(r[0]), 'faces': faces.get(r[0], [])} for r in rows]
+        chats.sort(key=lambda x: (x['last'] or {}).get('created_at', ''), reverse=True)
+        return jsonify({'ok': True, 'chats': chats})
+
+    @app.route('/api/group-chats/candidates', methods=['GET'])
+    @d.rate_limit(60, 60)
+    def group_chats_candidates():
+        q = (request.args.get('q') or '').strip().lstrip('@').lower()[:40]
+        try:
+            chat_id = int(request.args.get('chat_id') or 0)
+        except ValueError:
+            chat_id = 0
+        with connect() as c:
+            wallet, uid = me(c)
+            if not uid:
+                return fail('No wallet connected', 401)
+            ids = connections(c, uid)
+            if chat_id:
+                ids -= {r[0] for r in c.execute('SELECT user_id FROM group_chat_members WHERE chat_id=?', (chat_id,))}
+            ids.discard(uid)
+            people = _users(c, ids)
+            follows_me = {r[0] for r in c.execute('SELECT follower_id FROM follows WHERE following_id=?', (uid,))}
+        out = []
+        for u, row in people.items():
+            name = _name_of(row)
+            if q and q not in name.lower() and q not in (row[2] or '').lower():
+                continue
+            out.append({'user_id': u, 'username': name, 'wallet': row[2], 'avatar': row[3] or '',
+                        'verified': bool(row[4]), 'follows_you': u in follows_me})
+        out.sort(key=lambda x: (not x['follows_you'], x['username'].lower()))
+        return jsonify({'ok': True, 'people': out[:40]})
+
+    @app.route('/api/group-chats', methods=['POST'])
+    @d.rate_limit(10, 60)
+    def group_chats_create():
+        body = request.get_json(silent=True) or {}
+        name = re.sub(r'\s+', ' ', d._sanitize(str(body.get('name') or ''))).strip()
+        try:
+            user_ids = [int(x) for x in (body.get('user_ids') or [])][:MAX_MEMBERS]
+        except (TypeError, ValueError):
+            return fail('Invalid members', 400)
+        if not name:
+            return fail('Give the group a name', 400)
+        if len(name) > MAX_NAME:
+            return fail('Name too long (max %d characters)' % MAX_NAME, 400)
+        if not user_ids:
+            return fail('Add at least one person', 400)
+        with connect() as c:
+            wallet, uid = me(c)
+            if not uid:
+                return fail('No wallet connected', 401)
+            c.execute('BEGIN IMMEDIATE')
+            chat_id = c.execute('INSERT INTO group_chats (name, created_by, created_at) VALUES (?,?,?)',
+                                (name, uid, _now())).lastrowid
+            c.execute("INSERT INTO group_chat_members (chat_id, user_id, role, joined_at) VALUES (?,?,'admin',?)",
+                      (chat_id, uid, _now()))
+            actor = _name_of(_users(c, [uid])[uid])
+            _system(c, chat_id, '%s created the group' % actor)
+            try:
+                names = add_people(c, chat_id, uid, actor, user_ids)
+            except ValueError as e:
+                c.rollback()
+                return fail(str(e), 400)
+            _system(c, chat_id, '%s added %s' % (actor, ', '.join(names)))
+            out = summary(c, uid, chat_id)
+            added = [m['user_id'] for m in out['members'] if m['user_id'] != uid]
+        _announce(added, out['name'], '%s added you to %s' % (actor, out['name']), chat_id)
+        return jsonify({'ok': True, 'chat': out})
+
+    @app.route('/api/group-chats/<int:chat_id>', methods=['GET'])
+    @d.rate_limit(60, 60)
+    def group_chats_get(chat_id):
+        with connect() as c:
+            wallet, uid = me(c)
+            if not uid:
+                return fail('No wallet connected', 401)
+            if not _member_role(c, chat_id, uid):
+                return fail('Group not found', 404)
+            return jsonify({'ok': True, 'chat': summary(c, uid, chat_id)})
+
+    @app.route('/api/group-chats/<int:chat_id>', methods=['PUT'])
+    @d.rate_limit(20, 60)
+    def group_chats_rename(chat_id):
+        name = re.sub(r'\s+', ' ', d._sanitize(str((request.get_json(silent=True) or {}).get('name') or ''))).strip()
+        if not name or len(name) > MAX_NAME:
+            return fail('Name must be 1-%d characters' % MAX_NAME, 400)
+        with connect() as c:
+            wallet, uid = me(c)
+            if not uid:
+                return fail('No wallet connected', 401)
+            role = _member_role(c, chat_id, uid)
+            if not role:
+                return fail('Group not found', 404)
+            if role != 'admin':
+                return fail('Only admins can rename the group', 403)
+            c.execute('UPDATE group_chats SET name=? WHERE id=?', (name, chat_id))
+            _system(c, chat_id, '%s renamed the group to "%s"' % (_name_of(_users(c, [uid])[uid]), name))
+            return jsonify({'ok': True, 'chat': summary(c, uid, chat_id)})
+
+    @app.route('/api/group-chats/<int:chat_id>/members', methods=['POST'])
+    @d.rate_limit(20, 60)
+    def group_chats_add(chat_id):
+        try:
+            user_ids = [int(x) for x in ((request.get_json(silent=True) or {}).get('user_ids') or [])][:MAX_MEMBERS]
+        except (TypeError, ValueError):
+            return fail('Invalid members', 400)
+        if not user_ids:
+            return fail('Choose someone to add', 400)
+        with connect() as c:
+            wallet, uid = me(c)
+            if not uid:
+                return fail('No wallet connected', 401)
+            role = _member_role(c, chat_id, uid)
+            if not role:
+                return fail('Group not found', 404)
+            if role != 'admin':
+                return fail('Only admins can add people', 403)
+            c.execute('BEGIN IMMEDIATE')
+            actor = _name_of(_users(c, [uid])[uid])
+            before = {r[0] for r in c.execute('SELECT user_id FROM group_chat_members WHERE chat_id=?', (chat_id,))}
+            try:
+                names = add_people(c, chat_id, uid, actor, user_ids)
+            except ValueError as e:
+                c.rollback()
+                return fail(str(e), 400)
+            if names:
+                _system(c, chat_id, '%s added %s' % (actor, ', '.join(names)))
+            out = summary(c, uid, chat_id)
+        _announce([m['user_id'] for m in out['members'] if m['user_id'] not in before], out['name'],
+                  '%s added you to %s' % (actor, out['name']), chat_id)
+        return jsonify({'ok': True, 'chat': out})
+
+    @app.route('/api/group-chats/<int:chat_id>/members/<int:member_id>', methods=['DELETE'])
+    @d.rate_limit(20, 60)
+    def group_chats_remove(chat_id, member_id):
+        with connect() as c:
+            wallet, uid = me(c)
+            if not uid:
+                return fail('No wallet connected', 401)
+            role = _member_role(c, chat_id, uid)
+            if not role:
+                return fail('Group not found', 404)
+            if member_id == uid:
+                return fail('Use Leave group', 400)
+            if role != 'admin':
+                return fail('Only admins can remove people', 403)
+            target = _member_role(c, chat_id, member_id)
+            if not target:
+                return fail('Not in this group', 404)
+            creator = c.execute('SELECT created_by FROM group_chats WHERE id=?', (chat_id,)).fetchone()[0]
+            if member_id == creator:
+                return fail('The creator of the group cannot be removed', 403)
+            people = _users(c, [uid, member_id])
+            c.execute('DELETE FROM group_chat_members WHERE chat_id=? AND user_id=?', (chat_id, member_id))
+            _system(c, chat_id, '%s removed %s' % (_name_of(people[uid]), _name_of(people[member_id])))
+            return jsonify({'ok': True, 'chat': summary(c, uid, chat_id)})
+
+    @app.route('/api/group-chats/<int:chat_id>/leave', methods=['POST'])
+    @d.rate_limit(20, 60)
+    def group_chats_leave(chat_id):
+        with connect() as c:
+            wallet, uid = me(c)
+            if not uid:
+                return fail('No wallet connected', 401)
+            if not _member_role(c, chat_id, uid):
+                return fail('Group not found', 404)
+            name = _name_of(_users(c, [uid])[uid])
+            c.execute('DELETE FROM group_chat_members WHERE chat_id=? AND user_id=?', (chat_id, uid))
+            left = c.execute('SELECT user_id, role FROM group_chat_members WHERE chat_id=? ORDER BY joined_at, user_id',
+                             (chat_id,)).fetchall()
+            if not left:
+                c.execute('DELETE FROM group_chat_messages WHERE chat_id=?', (chat_id,))
+                c.execute('DELETE FROM group_chats WHERE id=?', (chat_id,))
+            else:
+                _system(c, chat_id, '%s left' % name)
+                if not any(r[1] == 'admin' for r in left):
+                    c.execute("UPDATE group_chat_members SET role='admin' WHERE chat_id=? AND user_id=?",
+                              (chat_id, left[0][0]))
+            c.execute("UPDATE notifications SET is_read=1 WHERE user_id=? AND link=? AND is_read=0",
+                      (uid, '/messages?group=%d' % chat_id))
+        return jsonify({'ok': True})
+
+    @app.route('/api/group-chats/<int:chat_id>/messages', methods=['GET'])
+    @d.rate_limit(120, 60)
+    def group_chats_messages(chat_id):
+        try:
+            after = max(0, int(request.args.get('after') or 0))
+        except ValueError:
+            after = 0
+        with connect() as c:
+            wallet, uid = me(c)
+            if not uid:
+                return fail('No wallet connected', 401)
+            if not _member_role(c, chat_id, uid):
+                return fail('Group not found', 404)
+            if after:
+                rows = c.execute('SELECT id, sender_id, kind, body, created_at FROM group_chat_messages '
+                                 'WHERE chat_id=? AND id>? ORDER BY id LIMIT ?', (chat_id, after, PAGE)).fetchall()
+            else:
+                rows = c.execute('SELECT * FROM (SELECT id, sender_id, kind, body, created_at FROM group_chat_messages '
+                                 'WHERE chat_id=? ORDER BY id DESC LIMIT ?) ORDER BY id', (chat_id, PAGE)).fetchall()
+            people = _users(c, {r[1] for r in rows if r[1]})
+            if rows:
+                c.execute('UPDATE group_chat_members SET last_read_id=MAX(last_read_id, ?) WHERE chat_id=? AND user_id=?',
+                          (rows[-1][0], chat_id, uid))
+                c.execute("UPDATE notifications SET is_read=1 WHERE user_id=? AND link=? AND is_read=0",
+                          (uid, '/messages?group=%d' % chat_id))
+        return jsonify({'ok': True, 'messages': [
+            {'id': r[0], 'sender_id': r[1], 'kind': r[2], 'body': r[3], 'created_at': r[4], 'mine': r[1] == uid,
+             'sender': _name_of(people[r[1]]) if r[1] in people else '',
+             'sender_wallet': people[r[1]][2] if r[1] in people else '',
+             'sender_avatar': (people[r[1]][3] or '') if r[1] in people else ''} for r in rows]})
+
+    @app.route('/api/group-chats/<int:chat_id>/messages', methods=['POST'])
+    @d.rate_limit(30, 60)
+    def group_chats_send(chat_id):
+        body = request.get_json(silent=True) or {}
+        kind = 'image' if body.get('message_type') == 'image' else 'text'
+        text = str(body.get('message') or '')
+        if kind == 'image':
+            text = text.strip()
+            if not text.startswith(_IMAGE_PREFIXES):
+                return fail('Only JPEG, PNG, GIF, or WebP images are accepted', 400)
+            text = d._shrink_image_data_uri(text)
+            if len(text.split(',', 1)[-1]) * 3 // 4 > 3 * 1024 * 1024:
+                return fail('Image too large (max 3 MB)', 400)
+        else:
+            text = d._sanitize(text).strip()
+            if not text:
+                return fail('Message cannot be empty', 400)
+            if len(text) > MAX_TEXT:
+                return fail('Message too long (max %d characters)' % MAX_TEXT, 400)
+        with connect() as c:
+            wallet, uid = me(c)
+            if not uid:
+                return fail('No wallet connected', 401)
+            if not _member_role(c, chat_id, uid):
+                return fail('Group not found', 404)
+            now = _now()
+            mid = c.execute('INSERT INTO group_chat_messages (chat_id, sender_id, kind, body, created_at) '
+                            'VALUES (?,?,?,?,?)', (chat_id, uid, kind, text, now)).lastrowid
+            c.execute('UPDATE group_chat_members SET last_read_id=? WHERE chat_id=? AND user_id=?', (mid, chat_id, uid))
+            group = c.execute('SELECT name FROM group_chats WHERE id=?', (chat_id,)).fetchone()[0]
+            sender = _name_of(_users(c, [uid])[uid])
+            others = [r[0] for r in c.execute('SELECT user_id FROM group_chat_members WHERE chat_id=? AND user_id!=?',
+                                              (chat_id, uid))]
+        preview = '📷 Photo' if kind == 'image' else (text[:60] + ('…' if len(text) > 60 else ''))
+        _announce(others, group, '%s: %s' % (sender, preview), chat_id, actor_wallet=wallet)
+        return jsonify({'ok': True, 'message': {'id': mid, 'sender_id': uid, 'kind': kind, 'body': text,
+                                                'created_at': now, 'mine': True, 'sender': sender,
+                                                'sender_wallet': wallet, 'sender_avatar': ''}})
+
+    def _announce(user_ids, group_name, line, chat_id, actor_wallet=None):
+        """One unread bell entry per group per member, and a push per message
+        that replaces the previous one for this group on the phone."""
+        if not user_ids:
+            return
+        link = '/messages?group=%d' % chat_id
+        try:
+            with connect() as c:
+                marks = ','.join('?' * len(user_ids))
+                c.execute("DELETE FROM notifications WHERE type='message' AND link=? AND is_read=0 "
+                          'AND user_id IN (%s)' % marks, [link] + list(user_ids))
+                c.executemany('INSERT INTO notifications (user_id, type, content, link, actor_wallet) VALUES (?,?,?,?,?)',
+                              [(u, 'message', '%s · %s' % (group_name, line), link, actor_wallet) for u in user_ids])
+        except sqlite3.Error as e:
+            print('[group-chats] notification failed: %s' % type(e).__name__, flush=True)
+        try:
+            d._send_push_notifications_bulk(list(user_ids), group_name, line, link, '', 'gc-%d' % chat_id)
+        except Exception as e:
+            print('[group-chats] push failed: %s' % type(e).__name__, flush=True)

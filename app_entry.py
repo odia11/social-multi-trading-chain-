@@ -180,6 +180,9 @@ _install_watchlist_alerts(_dashboard)
 from following_traders import install as _install_following_traders
 _install_following_traders(_dashboard)
 
+from group_chats import install as _install_group_chats
+_install_group_chats(_dashboard)
+
 from call_invitations import install as _install_call_invitations
 _install_call_invitations(_dashboard)
 
