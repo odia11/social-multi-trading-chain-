@@ -8578,7 +8578,7 @@ function _homeFeedApiFilter(){
 function _feedTab(btn, tab){
   document.querySelectorAll('.feed-tab').forEach(function(t){ t.classList.remove('active'); });
   btn.classList.add('active');
-  if(_homeFeedFilter !== tab) _homeFeedData = [];  // never show one tab's posts under another
+  if(_homeFeedFilter !== tab){ _homeFeedData = []; _homeFeedLoadedOlder=false; }  // never show one tab's posts under another
   _homeFeedFilter = tab;
   if(typeof window._feedCallsTabChanged === 'function') window._feedCallsTabChanged(tab);
   if(tab === 'following' && _homeFeedData.length){
@@ -8595,6 +8595,7 @@ var _homeFeedFilter = 'foryou';
 var _homeFeedData   = [];
 var _homeFeedNextCursor = null;
 var _homeFeedLoadingMore = false;
+var _homeFeedLoadedOlder = false;
 
 function _showAvatarLightbox(url){
   var lb = document.getElementById('avatar-lightbox');
@@ -8710,13 +8711,26 @@ async function loadHomeFeed(){
       // reply fields and scroll position) when a background poll is identical.
       var currentTop=_homeFeedData.slice(0,data.items.length);
       var unchanged=_homeFeedLastRenderedFilter===filter && currentTop.length===data.items.length
+        && (_homeFeedLoadedOlder || _homeFeedData.length===data.items.length)
         && currentTop.every(function(item,i){return JSON.stringify(item)===JSON.stringify(data.items[i]);});
-      if(unchanged && document.querySelector('#center-feed .fc-card')) return;
-      _homeFeedData = data.items;
+      if(unchanged && document.querySelector('#center-feed .fc-card')){
+        if(!_homeFeedLoadedOlder) _homeFeedNextCursor=data.next_cursor||null;
+        return;
+      }
+      // A refresh updates page one, not the older pages already being read.
+      var sameFilter=_homeFeedLastRenderedFilter===filter;
+      var hadOlderPages=sameFilter && _homeFeedLoadedOlder;
+      if(!sameFilter) _homeFeedLoadedOlder=false;
+      var boundary=data.items.length ? _feedItemTime(data.items[data.items.length-1]) : NaN;
+      var older=hadOlderPages ? _homeFeedData.filter(function(item,index){
+        return index>=currentTop.length || _feedItemTime(item)<=boundary;
+      }) : [];
+      var incoming=new Set(data.items.map(_feedItemKey));
+      _homeFeedData = data.items.concat(older.filter(function(item){return !incoming.has(_feedItemKey(item));}));
       _homeFeedLastRenderedFilter=filter;
       // The shared post is merged at its chronological position only when
       // rendering. Never move an old post ahead of newer feed updates.
-      _homeFeedNextCursor = data.next_cursor || null;
+      if(!hadOlderPages) _homeFeedNextCursor = data.next_cursor || null;
       try{
         // If the target was already opened while this feed request was
         // loading, keep it in view after the chronological re-render.
@@ -8761,6 +8775,7 @@ async function loadMoreHomeFeed(){
     if(!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
     if(data && Array.isArray(data.items)){
+      if(data.items.length) _homeFeedLoadedOlder=true;
       _homeFeedData = _homeFeedData.concat(data.items);
       _homeFeedNextCursor = data.next_cursor || null;
       if(_activeDeepLinkedPost && location.hash==='#post-'+_activeDeepLinkedPost.id){
@@ -9254,9 +9269,101 @@ function renderHomeFeed(appendItems){
     return;
   }
   var gen = ++_feedRenderGen;
-  if(appendItems) return _appendFeedCards(el, items, gen);
-  el.innerHTML = items.map(_renderFeedCard).join('');
+  if(appendItems){
+    if(appendItems.length) _homeFeedLoadedOlder=true;
+    return _appendFeedCards(el, items, gen);
+  }
+  _reconcileFeedCards(el, items);
   _afterFeedCardsAdded(el);
+}
+
+// API counters change on nearly every refresh (including our own view
+// receipts). Replacing center-feed.innerHTML discarded decoded profile
+// photos, lazy-loaded them again and erased reply drafts. Reconcile by the
+// feed item's identity, patch counters, and retain unchanged DOM/media.
+function _feedItemKey(e){
+  return JSON.stringify([e.type||'', e.id||'', e.trade_id||'', e.repost_of||'',
+    e.type==='open' ? [e.user_id,e.token_address||e.token,e.opened_at] : null,
+    !e.id && !e.trade_id ? [e.user_id,e.timestamp] : null]);
+}
+function _feedItemTime(e){
+  var stamp=String(e.created_at||e.timestamp||e.opened_at||'').replace(' ','T');
+  if(stamp && !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(stamp)) stamp+='Z';
+  return Date.parse(stamp);
+}
+function _feedStableData(e){
+  return JSON.stringify(e, function(k,v){
+    return ['like_count','reply_count','view_count','repost_count','liked_by_me',
+      'reposted_by_me','last_reply_at'].indexOf(k)>=0 ? undefined : v;
+  });
+}
+function _newFeedRoot(e, index){
+  var box=document.createElement('div');
+  box.innerHTML=_renderFeedCard(e,index);
+  var root=box.firstElementChild;
+  if(root){ root._oaFeedKey=_feedItemKey(e); root._oaFeedStable=_feedStableData(e); root._oaFeedData=JSON.stringify(e); }
+  return root;
+}
+function _syncFeedCounters(oldRoot, fresh){
+  ['.fc-like-count','.fc-heart-ico','.fc-reply-count','.fc-repost-count','.fc-view-count','.fc-time'].forEach(function(sel){
+    var a=oldRoot.querySelector(sel), b=fresh.querySelector(sel);
+    if(a && b && a.textContent!==b.textContent) a.textContent=b.textContent;
+  });
+  [['.fc-like-btn','liked'],['.fc-repost-btn','reposted'],['.fc-reply-btn','has-new']].forEach(function(pair){
+    var a=oldRoot.querySelector(pair[0]), b=fresh.querySelector(pair[0]);
+    if(!a || !b) return;
+    a.classList.toggle(pair[1], b.classList.contains(pair[1]));
+    ['aria-label','aria-pressed','title','data-last-reply'].forEach(function(attr){
+      if(b.hasAttribute(attr)) a.setAttribute(attr,b.getAttribute(attr));
+    });
+    if(pair[1]==='has-new'){
+      var dot=a.querySelector('.fc-reply-new-dot'), next=b.querySelector('.fc-reply-new-dot');
+      if(dot && !next) dot.remove();
+      else if(!dot && next) a.appendChild(next);
+    }
+  });
+}
+function _reuseFeedMedia(oldRoot, fresh){
+  // A real edit still refreshes its text, while an unchanged photo URL
+  // keeps the decoded Image element. A changed avatar URL loads normally.
+  ['.fc-avatar img','.fc-post-image','.fc-post-video'].forEach(function(sel){
+    var a=oldRoot.querySelector(sel), b=fresh.querySelector(sel);
+    if(a && b && a.getAttribute('src')===b.getAttribute('src')) b.replaceWith(a);
+  });
+  var reply=oldRoot.querySelector('.fc-reply-box'), next=fresh.querySelector('.fc-reply-box');
+  if(reply && next && reply.id===next.id) next.replaceWith(reply);
+}
+function _reconcileFeedCards(el, items){
+  var pool=new Map(), retained=new Set();
+  Array.from(el.children).forEach(function(root){
+    if(root._oaFeedKey){
+      if(!pool.has(root._oaFeedKey)) pool.set(root._oaFeedKey,[]);
+      pool.get(root._oaFeedKey).push(root);
+    }
+  });
+  var cursor=el.firstElementChild;
+  items.forEach(function(e,index){
+    var bucket=pool.get(_feedItemKey(e));
+    var old=bucket && bucket.shift(), data=JSON.stringify(e), root=old;
+    if(!old || old._oaFeedData!==data){
+      var fresh=_newFeedRoot(e,index);
+      if(!fresh) return;
+      root=fresh;
+      if(old && old._oaFeedStable===fresh._oaFeedStable){
+        _syncFeedCounters(old,fresh); root=old; root._oaFeedData=data;
+      } else if(old){
+        _reuseFeedMedia(old,fresh);
+      }
+    }
+    if(root!==cursor) el.insertBefore(root,cursor);
+    retained.add(root); cursor=root.nextElementSibling;
+  });
+  Array.from(el.children).forEach(function(root){
+    if(retained.has(root)) return;
+    var card=root.matches('.fc-card') ? root : root.querySelector('.fc-card');
+    if(card && _feedViewObserver) _feedViewObserver.unobserve(card);
+    root.remove();
+  });
 }
 
 // Bumped by every render, so a page still being appended a few cards at a
@@ -9293,10 +9400,10 @@ function _appendFeedCards(el, items, gen){
     var i = 0;
     function step(){
       if(gen !== _feedRenderGen || !el.isConnected) return done();
-      var box = document.createElement('div');
-      box.innerHTML = items.slice(i, i + _FEED_APPEND_PER_FRAME)
-        .map(function(e, k){ return _renderFeedCard(e, i + k); }).join('');
-      while(box.firstChild) el.appendChild(box.firstChild);
+      items.slice(i, i + _FEED_APPEND_PER_FRAME).forEach(function(e,k){
+        var root=_newFeedRoot(e,i+k);
+        if(root) el.appendChild(root);
+      });
       i += _FEED_APPEND_PER_FRAME;
       if(i < items.length) _feedNextSlice(step);
       else { _afterFeedCardsAdded(el); done(); }
