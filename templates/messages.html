@@ -14,6 +14,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@700;900&display=swap" media="print" onload="this.media='all'">
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@700;900&display=swap"></noscript>
+<link rel="stylesheet" href="/static/group-chats.css?v={{ app_version }}">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{background:#0a0b0e;color:#eef1f5;font-family:'Geist',system-ui,sans-serif;font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
@@ -327,6 +328,7 @@ html,body{background:#0a0b0e;color:#eef1f5;font-family:'Geist',system-ui,sans-se
             <div class="msgs-left-title">Messages</div>
             <div class="oa-inbox-sub" id="oa-inbox-sub" aria-live="polite"></div>
           </div>
+          <button type="button" class="gc-new-btn" title="New group" aria-label="New group" data-gc-new><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/></svg></button>
           <button class="msgs-new-btn" title="New message" aria-label="New message" onclick="_openNewMessage()">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>
           </button>
@@ -349,10 +351,22 @@ html,body{background:#0a0b0e;color:#eef1f5;font-family:'Geist',system-ui,sans-se
 
       <div class="oa-active-strip" id="oa-active-strip" hidden></div>
 
-      <div id="oa-push-prompt"></div>
+      <div class="gc-section" id="gc-section"></div>
+      <script>
+      // The groups seen last in this tab are painted before anything below
+      // them, and fresh ones are asked for now, alongside the chats, so the
+      // chats never jump down when the groups arrive.
+      try{var _gcPrev=JSON.parse(sessionStorage.getItem('oa_gc_html')||'null');
+        if(_gcPrev&&_gcPrev.w==={{ wallet|tojson }})document.getElementById('gc-section').innerHTML=_gcPrev.h;}catch(_){}
+      try{window.__gcFirst=fetch('/api/group-chats',{credentials:'same-origin',cache:'no-store'})
+        .then(function(r){return r.json();}).catch(function(){return null;});}catch(_){}
+      </script>
       <div class="conv-list" id="conv-list">
         <div class="msgs-left-empty">Loading…</div>
       </div>
+      <!-- Below the chats: it is filled once the page has loaded, and above
+           them it would push every chat down when it appears. -->
+      <div id="oa-push-prompt"></div>
     </div>
 
     <!-- RIGHT PANE: Chat thread -->
@@ -523,6 +537,10 @@ async function loadConversations() {
   try {
     var r = await fetch('/api/messages');
     var d = await r.json();
+    // The first time, wait briefly for the groups so they land together.
+    if (_lastConvSig === null && window.__gcFirst) {
+      await Promise.race([window.__gcFirst, new Promise(function(res){ setTimeout(res, 800); })]);
+    }
     if (d.ok) {
       _conversations = d.conversations || [];
       // Skip the (expensive, main-thread-blocking) full conv-list rebuild on
@@ -616,7 +634,8 @@ function _renderInboxChrome() {
   var cnt = document.getElementById('oa-unread-count');
   if (cnt) cnt.textContent = unreadChats ? String(unreadChats) : '';
   var filters = document.getElementById('oa-inbox-filters');
-  if (filters) filters.hidden = !_conversations.length;
+  // Groups (group-chats.js) are filtered too, so they keep the chips.
+  if (filters) filters.hidden = !_conversations.length && !document.querySelector('#gc-section .gc-row-wrap');
   var strip = document.getElementById('oa-active-strip');
   if (strip) {
     var online = _conversations.filter(function(c){ return c.peer_online; }).slice(0, 12);
@@ -2036,6 +2055,7 @@ OrcPageLifecycle.setInterval(loadConversations, 5000);
 <script src="/static/page-loader.js?v={{ app_version }}"></script>
 <script src="/static/auto-refresh.js?v={{ app_version }}"></script>
 <script src="/static/pull-to-refresh.js?v={{ app_version }}"></script>
+<script src="/static/group-chats.js?v={{ app_version }}" defer></script>
 <script>
 /* This page has TWO different scrollers, so pull-to-refresh can't be armed
    with the bare defaults the other pages use.

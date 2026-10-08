@@ -28365,6 +28365,13 @@ def wallet_unread_count():
             count += conn.execute(
                 'SELECT COUNT(*) FROM direct_messages WHERE receiver_id=? AND is_read=0', (uid,)
             ).fetchone()[0]
+            # Unread messages in group chats count towards the same badge.
+            _group_unread = globals().get('_group_chat_unread_total')
+            if callable(_group_unread):
+                try:
+                    count += _group_unread(conn, uid)
+                except sqlite3.Error:
+                    pass
     finally:
         conn.close()
     return jsonify({'count': count})

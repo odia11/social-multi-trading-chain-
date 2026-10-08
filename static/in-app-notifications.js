@@ -192,6 +192,11 @@ function alreadyOnScreen(n){
     if(box&&getComputedStyle(box).display!=='none'&&inView(box))return true;
     return false;
   }
+  // A group chat that is open on screen.
+  if(u.pathname==='/messages'&&!document.hidden){
+    var gc=u.searchParams.get('group');
+    if(gc&&String(window.__oaOpenGroupId||'')===gc)return true;
+  }
   var dm=/^\/messages\/([^/?#]+)/.exec(u.pathname);
   if(dm&&!document.hidden){
     var peer=decodeURIComponent(dm[1]);
