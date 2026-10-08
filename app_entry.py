@@ -212,3 +212,6 @@ from friendly_errors import install as _install_friendly_errors
 _install_friendly_errors(_dashboard)
 
 app = _dashboard.app
+
+from call_live_data import install as _install_call_live_data
+_install_call_live_data(_dashboard)
