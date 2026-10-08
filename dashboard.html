@@ -464,6 +464,13 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;height:1px;backgroun
    No-op (silently ignored) on browsers that don't support it -- purely
    additive, nothing to fall back to. */
 .fc-card{padding:18px 22px;border-bottom:1px solid #16191f;display:flex;gap:14px;cursor:pointer;transition:background .12s;position:relative;content-visibility:auto;contain-intrinsic-size:auto 220px}
+/* Media can arrive after an off-screen card's intrinsic height is cached.
+   Avoid relying on a skipped layout's cached height for decoded media;
+   the image and actions must fit before the next card. Keep media posts in
+   normal layout; text-only posts retain off-screen paint skipping. Cards
+   must also never shrink as items of the column flex feed. */
+.fc-card{flex-shrink:0}
+.fc-card:has(.fc-post-image-wrap,.fc-post-video-wrap,[data-chart-mint],.fcall-card,.fc-agent-call-card){content-visibility:visible;contain-intrinsic-size:none}
 .fc-card-highlight{background:rgba(247,185,85,.09);box-shadow:inset 3px 0 0 0 #f7b955;transition:background .4s ease,box-shadow .4s ease}
 @media(prefers-reduced-motion:reduce){.fc-card-highlight{transition:none}}
 .token-tag{color:#f7b955;font-weight:700;text-decoration:underline;cursor:pointer}

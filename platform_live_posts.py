@@ -29,6 +29,9 @@ import math
 HOUR = 3600
 TRENDING_COOLDOWN = 6 * HOUR
 TRENDING_MIN_CHANGE = 5.0
+# Editorial guard, not a corrected price: a 100x daily move needs independent
+# verification before the agent amplifies it. Keep the raw market data intact.
+MAX_POST_CHANGE_24H = 10_000.0
 MOST_CALLED_COOLDOWN = 24 * HOUR
 NEW_CALL_WINDOW = 6 * HOUR   # call posts come every few hours, so a new call can wait for one
 MILESTONES = (2, 3, 5, 10)
@@ -187,19 +190,44 @@ def new_calls(c, now):
     return out
 
 
+def _postable_token(t):
+    """Reject missing, malformed and unverified outlier data for public posts.
+
+    Dex pair changes are imported verbatim into Live Market. A tiny starting
+    pool price can make a pair's 24h change enormous; it is not evidence of
+    a token-wide return. Do not advertise that number as a biggest mover.
+    """
+    if not isinstance(t, dict) or not t.get('mint') or not t.get('symbol'):
+        return False
+    try:
+        px = float(t.get('price_usd'))
+        change = float(t.get('price_change_24h'))
+        if not math.isfinite(px) or px <= 0:
+            return False
+        if not math.isfinite(change) or not -100 <= change <= MAX_POST_CHANGE_24H:
+            return False
+        for key in ('volume_24h', 'liquidity_usd', 'market_cap', 'buys_24h', 'sells_24h'):
+            value = float(t.get(key) or 0)
+            if not math.isfinite(value) or value < 0:
+                return False
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return True
+
+
 def trending(c, now, tokens):
     out = []
     for t in tokens or []:
-        mint, sym = t.get('mint'), t.get('symbol')
-        if not mint or not sym or float(t.get('price_usd') or 0) <= 0:
+        if not _postable_token(t):
             continue
+        mint, sym = t.get('mint'), t.get('symbol')
         since = _since(c, 'trending:%s' % mint, now)
         if since is not None and since < TRENDING_COOLDOWN:
             continue
         chg = float(t.get('price_change_24h') or 0)
         if chg < TRENDING_MIN_CHANGE:
             continue  # a token that is falling is not "trending" in a post
-        buys, sells = int(t.get('buys_24h') or 0), int(t.get('sells_24h') or 0)
+        buys, sells = int(float(t.get('buys_24h') or 0)), int(float(t.get('sells_24h') or 0))
         share = round(100 * buys / (buys + sells)) if buys + sells else None
         texts = [
             '$%s is trending on Live Market: %s in 24 hours, %s traded and %s in liquidity. Look at the chart before you decide. %s' % (sym, pct(chg), usd(t.get('volume_24h')), usd(t.get('liquidity_usd')), NFA),
@@ -297,8 +325,12 @@ def top_caller(c, now):
 def pulse(c, now, tokens, sol_usd):
     if (_since(c, 'pulse:%', now) or 1e12) < 6 * HOUR:
         return []
-    ts = [t for t in (tokens or []) if t.get('symbol')][:12]
-    if len(ts) < 4 or not sol_usd:
+    ts = [t for t in (tokens or []) if _postable_token(t)][:12]
+    try:
+        sol_usd = float(sol_usd)
+    except (TypeError, ValueError, OverflowError):
+        return []
+    if len(ts) < 4 or not math.isfinite(sol_usd) or sol_usd <= 0:
         return []
     up = sum(1 for t in ts if float(t.get('price_change_24h') or 0) > 0)
     top = max(ts, key=lambda t: float(t.get('price_change_24h') or 0))
