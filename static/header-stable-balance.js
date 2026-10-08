@@ -6,7 +6,9 @@
 'use strict';
 var timer=null,inFlight=false,last='',lastAt=0,lastStored=null,lastStoredAt=0;
 var here=location.pathname.replace(/\/+$/,'')||'/';
-var ON_PORTFOLIO=here==='/wallet',POLL_MS=5000,MIN_GAP_MS=1200;
+// 20 s, not 5: a balance changes on a trade or a deposit, and a trade
+// refreshes it at once (orca:trade-complete below). Every open tab polled this.
+var ON_PORTFOLIO=here==='/wallet',POLL_MS=20000,MIN_GAP_MS=1200;
 var scopeNode=document.querySelector('[data-orca-wallet-scope]');
 var scope=scopeNode?scopeNode.getAttribute('data-orca-wallet-scope'):'';
 var STORAGE_KEY='orcaPortfolioLastConfirmedUSDCValue:v3:'+scope;
@@ -92,6 +94,7 @@ document.addEventListener('orca:portfolio-value',function(e){
 });
 window.addEventListener('pageshow',function(){start();refresh(true)});
 window.addEventListener('focus',function(){refresh(true)});
+document.addEventListener('orca:trade-complete',function(){refresh(true)});
 document.addEventListener('visibilitychange',function(){if(!document.hidden)refresh(true)});
 window.OrcAgentRefreshStableBalance=function(){return refresh(true)};
 if(!ON_PORTFOLIO)window.OrcAgentRefreshPortfolioValue=function(){return refresh(true)};

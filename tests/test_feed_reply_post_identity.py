@@ -94,7 +94,7 @@ class ReplyIdentityTests(unittest.TestCase):
             'hashlib': __import__('hashlib'),
             'urllib': __import__('urllib.parse'),
         }
-        extract(self.ns, '_feed_post_created_at', '_valid_post_interaction_sql', '_feed_avatar_photo_url',
+        extract(self.ns, '_feed_post_created_at', '_post_row_by_id_sql', '_valid_post_interaction_sql', '_feed_avatar_photo_url',
                 '_require_interaction_post', '_delete_feed_post_interactions',
                 'get_feed_replies', 'post_feed_reply', '_notify_reply_mentions', '_post_link', '_group_post_link',
                 'social_feed', 'get_feed_post',

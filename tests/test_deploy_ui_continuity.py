@@ -21,7 +21,11 @@ checks = {
     'transient deploy errors retry only idempotent same-origin reads':
         "DEPLOY_RETRY_DELAYS" in NAV
         and "(method==='GET'||method==='HEAD')&&sameOrigin(input)" in NAV
-        and "resp.status===502||resp.status===503||resp.status===504" in NAV,
+        and "if(resp.status===502)return true;" in NAV,
+    '...but a busy server (504) or an app that answered 503 is not hammered with retries':
+        "if(resp.status===504)return n<1;" in NAV
+        and "if(resp.status===503)return !/json/i.test(resp.headers.get('content-type')||'');" in NAV
+        and 'DEPLOY_RETRY_DELAYS[n]*(0.7+Math.random()*0.6)' in NAV,
     'active PWA navigation waits through the backend restart without caching HTML':
         "if(req.mode==='navigate')" in (ROOT / 'static' / 'sw.js').read_text(encoding='utf-8')
         and 'oaFetchThroughDeploy(req,0)' in (ROOT / 'static' / 'sw.js').read_text(encoding='utf-8'),

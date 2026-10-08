@@ -140,10 +140,23 @@ var _NB_CHAIN_LABELS={solana:'SOL'};
     var ctl=new AbortController(),timer=setTimeout(function(){ctl.abort()},timeout);
     var opts=Object.assign({},init||{},{signal:ctl.signal});
     var retryable=(method==='GET'||method==='HEAD')&&sameOrigin(input);
+    // A restart shows up as 502 (nothing listening yet) or nginx's own 503
+    // page, and is worth waiting through. But an app answer of 503 (JSON:
+    // "temporarily unavailable") was already decided, and a 504 means the
+    // server is busy: retrying those nine times made every open tab ten times
+    // the load at exactly the moment the server had too much -- and it then
+    // stood still for everyone. Delays are spread out so tabs do not return
+    // in step.
+    function deployRetryable(resp,n){
+      if(resp.status===502)return true;
+      if(resp.status===503)return !/json/i.test(resp.headers.get('content-type')||'');
+      if(resp.status===504)return n<1;
+      return false;
+    }
     function attempt(n){
       return original(input,opts).then(function(resp){
-        if(retryable&&n<DEPLOY_RETRY_DELAYS.length&&(resp.status===502||resp.status===503||resp.status===504))
-          return wait(DEPLOY_RETRY_DELAYS[n]).then(function(){return attempt(n+1)});
+        if(retryable&&n<DEPLOY_RETRY_DELAYS.length&&deployRetryable(resp,n))
+          return wait(DEPLOY_RETRY_DELAYS[n]*(0.7+Math.random()*0.6)).then(function(){return attempt(n+1)});
         return resp;
       });
     }

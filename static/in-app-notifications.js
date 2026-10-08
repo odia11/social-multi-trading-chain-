@@ -8,7 +8,10 @@
 if(window.__oaInAppNotificationsStarted)return;
 window.__oaInAppNotificationsStarted=true;
 
-var POLL_MS=3000;
+// Every open tab asks the server; at every 3 s, a few hundred members with the
+// app open were most of the server's traffic. Start at 6 s, slow down to 15 s
+// while nothing new comes in, and ask at once when the tab comes back.
+var POLL_MS=6000,POLL_MAX_MS=15000,pollDelay=POLL_MS,pollTimer=null;
 var AUTO_DISMISS_MS=4200;
 var MAX_BATCH=8;
 var STORAGE_KEY='oa_live_notification_last_id_v1';
@@ -295,7 +298,8 @@ function poll(initial){
         return;
       }
       var fresh=items.filter(function(n){return Number(n.id)>lastId});
-      if(!fresh.length)return;
+      if(!fresh.length){pollDelay=Math.min(POLL_MAX_MS,Math.round(pollDelay*1.5));return;}
+      pollDelay=POLL_MS;
       lastId=Math.max(lastId,Math.max.apply(null,fresh.map(function(n){return Number(n.id)||0})));
       writeLastId(lastId);
       enqueue(fresh);
@@ -304,13 +308,22 @@ function poll(initial){
     .finally(function(){inFlight=false});
 }
 
+function schedule(){
+  if(pollTimer)window.clearTimeout(pollTimer);
+  pollTimer=window.setTimeout(function(){
+    pollTimer=null;
+    if(!document.hidden)poll(false);
+    schedule();
+  },pollDelay);
+}
+
 function boot(){
   ensureRoot();
   primeCsrf();
   poll(true);
-  window.setInterval(function(){if(!document.hidden)poll(false)},POLL_MS);
-  document.addEventListener('visibilitychange',function(){if(!document.hidden){syncTop();poll(false)}});
-  window.addEventListener('focus',function(){poll(false)});
+  schedule();
+  document.addEventListener('visibilitychange',function(){if(!document.hidden){syncTop();pollDelay=POLL_MS;poll(false);schedule()}});
+  window.addEventListener('focus',function(){pollDelay=POLL_MS;poll(false);schedule()});
   window.addEventListener('online',function(){poll(false)});
   window.addEventListener('resize',syncTop,{passive:true});
   window.addEventListener('orientationchange',function(){window.setTimeout(syncTop,100)},{passive:true});

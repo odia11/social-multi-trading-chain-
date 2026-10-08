@@ -74,7 +74,7 @@ with tempfile.TemporaryDirectory() as tmp:
     _noise = ('issued', 'resumed', 'refused')
     complaints = []
     ns = {'sqlite3': sqlite3, 'hashlib': hashlib, 'secrets': secrets,
-          'time': time, 'DB_FILE': db, 'DEVICE_TOKEN_DAYS': days,
+          'time': time, 'DB_FILE': db, 'DEVICE_TOKEN_DAYS': days, 'DEVICE_RENEW_SECONDS': 3600,
           'print': lambda *a, **k: (lambda line: complaints.append(line)
                                     if not any(w in line for w in _noise) else None
                                     )(' '.join(str(x) for x in a))}

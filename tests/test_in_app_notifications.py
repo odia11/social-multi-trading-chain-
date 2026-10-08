@@ -9,14 +9,15 @@ backend = (ROOT / 'dashboard.py').read_text(encoding='utf-8')
 checks = {
     'shared navbar loads foreground notification controller':
         'in-app-notifications.js?v=1' in nav and 'in-app-notifications.css?v=1' in nav,
-    'polls the personal notification source every three seconds while visible':
-        'var POLL_MS=3000;' in js and '/api/notifications/mine?category=all&limit=' in js,
+    'polls the personal notification source while visible: every 6 s, easing to 15 s when quiet':
+        'var POLL_MS=6000,POLL_MAX_MS=15000' in js and '/api/notifications/mine?category=all&limit=' in js
+        and 'pollDelay=Math.min(POLL_MAX_MS,Math.round(pollDelay*1.5))' in js and 'pollDelay=POLL_MS;' in js,
     'uses incremental after_id queries instead of repeatedly downloading the inbox':
         '&after_id=' in js and "after_id = max(0, int(request.args.get('after_id', 0) or 0))" in backend,
     'first page load baselines existing notifications instead of replaying old alerts':
         "var baseline=(lastId===0);" in js and "if(baseline){" in js,
     'new events are shown while the app is visible and checked immediately on resume':
-        "visibilitychange" in js and "if(!document.hidden){syncTop();poll(false)}" in js,
+        "visibilitychange" in js and "if(!document.hidden){syncTop();pollDelay=POLL_MS;poll(false);schedule()}" in js,
     'banner auto-dismisses and all close/open paths share one cleanup flow':
         'var AUTO_DISMISS_MS=4200;' in js
         and 'timer=window.setTimeout(finishCard,AUTO_DISMISS_MS);' in js

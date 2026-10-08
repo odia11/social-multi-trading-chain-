@@ -29,12 +29,34 @@ check('the next page is fetched well ahead of the end of the feed',
       re.search(r'var _FEED_PREFETCH_PX = (\d+);', JS)
       and int(re.search(r'var _FEED_PREFETCH_PX = (\d+);', JS).group(1)) >= 2000
       and 'distanceToBottom < _FEED_PREFETCH_PX' in JS)
-check('...and added a few cards per frame, stopping if the feed is rebuilt meanwhile',
-      'function _appendFeedCards(el, items, gen)' in JS and 'requestAnimationFrame(step)' in JS
+check('...and added two cards at a time in the gaps between frames, stopping if the feed is rebuilt meanwhile',
+      'function _appendFeedCards(el, items, gen)' in JS and 'if(i < items.length) _feedNextSlice(step);' in JS
+      and 'var _FEED_APPEND_PER_FRAME = 2;' in JS and 'window.requestIdleCallback(fn, {timeout: 120})' in JS
       and 'gen !== _feedRenderGen' in JS and 'await renderHomeFeed(data.items)' in JS)
 check('feed pictures decode off the main thread and keep their shape once known',
       'loading="lazy" decoding="async" onload="_fcImgLoaded(this)"' in JS
       and "aspect-ratio:'+_feedImgRatio[e.image_url]" in JS)
+check('feed action buttons arrive in their final form (no second restyle of every card after insert)',
+      JS.count('data-oa-icon="1"') >= 3 and "_OA_FEED_ICON.reply+_oaHiddenIcon(_REPLY_ICON_SVG)" in JS
+      and "' oa-action-like\" data-oa-icon=\"1\"" in JS)
+check('a new page re-observes only cards whose view is not counted yet',
+      "if(!_feedSeenViews.has(card.id.slice('fc-card-'.length))) _feedViewObserver.observe(card);" in JS)
+MSG = read('templates', 'messages.html')
+check('the inbox does not paint and composite every conversation on every frame of a scroll',
+      '.conv-row-wrap{position:relative;overflow:hidden;content-visibility:auto;contain-intrinsic-size:auto 80px}' in MSG)
+import re as _re
+def _rule(css, sel):
+    m = _re.search(_re.escape(sel) + r'[^{]*\{([^}]*)\}', css)
+    assert m, 'rule not found: ' + sel
+    return m.group(1)
+HM = read('static', 'home-mobile.css'); MU = read('static', 'messages-ui.css')
+check('bars that sit over scrolling content are not re-blurred every frame (they are opaque anyway)',
+      'backdrop-filter' not in _rule(HM, 'body.oa-home-mobile .pt-nb-topbar, html.oa-route-home body .pt-nb-topbar')
+      and 'backdrop-filter' not in _rule(HM, 'body.oa-home-mobile #mobile-nav')
+      and 'backdrop-filter' not in _rule(MU, '.msgs-compose,.msgs-input-row,.msgs-composer')
+      and '.msgs-left-hdr{position:sticky!important;' in MU
+      and 'backdrop-filter' not in MU[MU.index('.msgs-left-hdr{position:sticky!important;'):].split('}', 1)[0]
+      and 'backdrop-filter' not in _rule(read('static', 'home-feed-chart-redesign.css'), 'body .oa-feed-chart-v2 .oa-fc-chain'))
 CALLS = read('static', 'feed-calls.js'); STC = read('static', 'shared-trade-card-v2.js')
 check('call sparklines are looked for only in what was just added',
       'mutationObserver(function(){ watchSparks(feed); })' not in CALLS and 'm.addedNodes.forEach' in CALLS)

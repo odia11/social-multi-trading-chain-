@@ -1354,6 +1354,16 @@ function _oaOnScreen(id){
   var el=document.getElementById(id); if(!el || !el.getClientRects().length) return false;
   var r=el.getBoundingClientRect(); return r.bottom>0 && r.top<window.innerHeight;
 }
+// Is any of these elements on screen? Home's older dashboard panels are in the
+// page but hidden on the current layouts, and their pollers kept asking the
+// server every 10-15 s for numbers nobody could see -- from every open tab.
+function _oaShown(){
+  for(var i=0;i<arguments.length;i++){
+    var el=document.getElementById(arguments[i]);
+    if(el&&el.getClientRects().length) return true;
+  }
+  return false;
+}
 function _oaPollTask(task){
   var busy=false;
   return function(){
@@ -1365,8 +1375,13 @@ function _oaPollTask(task){
 let _stateInFlight=false;
 let _stateTokensKey=null,_statePositionsKey=null,_stateLogsKey=null;
 
+let _stateLastAt=0;
 async function fetchState(){
   if(_stateInFlight) return;
+  // Still kept up to date while hidden (it also carries the admin flag and
+  // closed-position checks), but every 30 s instead of every 10.
+  if(!_oaShown('state-sol','s-pos','s-sol','sb-sol','top-pos-list','lf-list') && Date.now()-_stateLastAt<30000) return;
+  _stateLastAt=Date.now();
   _stateInFlight=true;
   try{
   if(!document.getElementById('sol-balance-display')&&!document.getElementById('state-sol')) return
@@ -1414,6 +1429,7 @@ async function fetchState(){
 
 async function fetchMarketOnly(){
   if(!appVisible()) return;
+  if(!_oaShown('lm-tbody','ticker-track','token-count')) return;
   const r=await fetch('/api/market/live').then(r=>r.json()).catch(()=>null);
   if(r?.tokens?.length) renderLiveMarket(r.tokens);
 }
@@ -3915,6 +3931,7 @@ _botPollTimer=OrcPageLifecycle.setInterval(_oaPollTask(_botFetchStatus),30000)
 // ── bot PNL panel ──────────────────────────────────────
 async function _botLoadPositions(){
   if(!phantomKey) return;
+  if(!_oaShown('bot-pnl-list','bot-pnl-total')) return;
   var listEl=document.getElementById('bot-pnl-list')
   var totalEl=document.getElementById('bot-pnl-total')
   try{
@@ -7664,6 +7681,17 @@ document.addEventListener('click',function(ev){
 },true);
 
 /* ── Feed post reply icon ── */
+// The feed's action icons, rendered in their final form. feed-action-icons.js
+// used to swap these in after every card was inserted (hide the old icon,
+// add a class, insert a new SVG), so each card was styled and laid out twice
+// -- while the reader was scrolling into the next page. It still upgrades any
+// other action row; these arrive already done (data-oa-icon="1").
+var _OA_FEED_ICON={
+  reply:'<svg class="oa-feed-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3 1.5-4.5A8 8 0 1 1 21 15Z"/></svg>',
+  repost:'<svg class="oa-feed-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3l4 4-4 4"/><path d="M3 7h18"/><path d="M7 21l-4-4 4-4"/><path d="M21 17H3"/></svg>',
+  like:'<svg class="oa-feed-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.4 5.4 0 0 0-7.6 0L12 5.8l-1.2-1.2a5.4 5.4 0 0 0-7.6 7.6L12 21l8.8-8.8a5.4 5.4 0 0 0 0-7.6Z"/></svg>'
+};
+function _oaHiddenIcon(svg){ return svg.replace('style="vertical-align:-2px"','style="vertical-align:-2px;display:none"'); }
 var _REPLY_ICON_SVG='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg>';
 /* ── Reply composer send icon ── */
 var _RC_SEND_ICON_SVG='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>';
@@ -9230,14 +9258,25 @@ function renderHomeFeed(appendItems){
 // Bumped by every render, so a page still being appended a few cards at a
 // time stops the moment the feed is rebuilt underneath it.
 var _feedRenderGen = 0;
-var _FEED_APPEND_PER_FRAME = 4;
+var _FEED_APPEND_PER_FRAME = 2;
+// Cards are added in the gaps between frames rather than at the start of
+// one: the next page is fetched three screens ahead, so there is time, and
+// a fling no longer pays for the inserts frame by frame. The timeout keeps
+// it moving when the page is never idle.
+function _feedNextSlice(fn){
+  if(window.requestIdleCallback) return window.requestIdleCallback(fn, {timeout: 120});
+  return requestAnimationFrame(fn);
+}
 function _afterFeedCardsAdded(root){
   _observeFeedVideos(root);
   _initLiveCharts();
   _initTradeBanners();
   _hydrateFumbles();
+  // Only cards whose view is not counted yet: this runs for every page the
+  // feed grows by, and re-observing every earlier card made each page cost
+  // more than the one before.
   root.querySelectorAll('.fc-card[id^="fc-card-"]').forEach(function(card){
-    _feedViewObserver.observe(card);
+    if(!_feedSeenViews.has(card.id.slice('fc-card-'.length))) _feedViewObserver.observe(card);
   });
 }
 // The next page arrives while the reader is still scrolling towards it.
@@ -9255,7 +9294,7 @@ function _appendFeedCards(el, items, gen){
         .map(function(e, k){ return _renderFeedCard(e, i + k); }).join('');
       while(box.firstChild) el.appendChild(box.firstChild);
       i += _FEED_APPEND_PER_FRAME;
-      if(i < items.length) requestAnimationFrame(step);
+      if(i < items.length) _feedNextSlice(step);
       else { _afterFeedCardsAdded(el); done(); }
     }
     step();
@@ -9752,13 +9791,13 @@ function _renderFeedCard(e, cardIndex){
       : '')
     +editHtml
     +'<div class="fc-actions" onclick="event.stopPropagation()">'
-    +'<button class="fc-action fc-reply-btn'+(hasNewReply?' has-new':'')+'" data-last-reply="'+esc(e.last_reply_at||'')+'" onclick="_feedToggleReply(this,\''+esc(safePostId)+'\')">'+_REPLY_ICON_SVG+'<span class="fc-reply-label">Reply</span><span class="fc-reply-count">'+esc(String(e.reply_count||0))+'</span>'+(hasNewReply?'<span class="fc-reply-new-dot"></span>':'')+'</button>'
-    +'<button class="fc-action fc-repost-btn'+(e.reposted_by_me ? ' reposted' : '')+'" onclick="event.stopPropagation();_feedToggleRepost(this,\''+esc(safePostId)+'\')" title="'+(e.reposted_by_me?'Undo repost':'Repost')+'">'+_REPOST_ICON_SVG+'<span class="fc-repost-count">'+esc(String(e.repost_count||0))+'</span></button>'
-    +'<button type="button" class="fc-action fc-like-btn'+(e.liked_by_me ? ' liked' : '')+'" id="lkbtn-'+esc(safePostId)+'" aria-label="'+(e.liked_by_me?'Unlike post':'Like post')+'" aria-pressed="'+(e.liked_by_me?'true':'false')+'" '
+    +'<button class="fc-action fc-reply-btn'+(hasNewReply?' has-new':'')+' oa-action-reply" data-oa-icon="1" data-last-reply="'+esc(e.last_reply_at||'')+'" onclick="_feedToggleReply(this,\''+esc(safePostId)+'\')">'+_OA_FEED_ICON.reply+_oaHiddenIcon(_REPLY_ICON_SVG)+'<span class="fc-reply-label">Reply</span><span class="fc-reply-count">'+esc(String(e.reply_count||0))+'</span>'+(hasNewReply?'<span class="fc-reply-new-dot"></span>':'')+'</button>'
+    +'<button class="fc-action fc-repost-btn'+(e.reposted_by_me ? ' reposted' : '')+' oa-action-repost" data-oa-icon="1" onclick="event.stopPropagation();_feedToggleRepost(this,\''+esc(safePostId)+'\')" title="'+(e.reposted_by_me?'Undo repost':'Repost')+'">'+_OA_FEED_ICON.repost+_oaHiddenIcon(_REPOST_ICON_SVG)+'<span class="fc-repost-count">'+esc(String(e.repost_count||0))+'</span></button>'
+    +'<button type="button" class="fc-action fc-like-btn'+(e.liked_by_me ? ' liked' : '')+' oa-action-like" data-oa-icon="1" id="lkbtn-'+esc(safePostId)+'" aria-label="'+(e.liked_by_me?'Unlike post':'Like post')+'" aria-pressed="'+(e.liked_by_me?'true':'false')+'" '
       +'onclick="_feedToggleLike(this,\''+esc(safePostId)+'\')" '
       +'onmousedown="_fcLikePressStart(\''+esc(safePostId)+'\')" onmouseup="_fcLikePressEnd()" onmouseleave="_fcLikePressEnd()" '
       +'data-like-press="'+esc(safePostId)+'">'
-      +'<span class="fc-heart-ico">'+(e.liked_by_me ? '❤️' : '♡')+'</span>'
+      +_OA_FEED_ICON.like+'<span class="fc-heart-ico" style="display:none">'+(e.liked_by_me ? '❤️' : '♡')+'</span>'
       +'<span class="fc-like-count" onclick="event.stopPropagation();_fcOpenLikedBy(\''+esc(safePostId)+'\')" title="See who liked this">'+esc(String(e.like_count||0))+'</span>'
     +'</button>'
     +'<div class="fc-share-wrap">'

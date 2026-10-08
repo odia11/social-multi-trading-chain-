@@ -56,7 +56,10 @@ html,body{background:#0a0b0e;color:#eef1f5;font-family:'Geist',system-ui,sans-se
 .new-msg-input::placeholder{color:#565d68}
 .new-msg-input:focus{border-color:rgba(247,185,85,.4)}
 .conv-list{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
-.conv-row-wrap{position:relative;overflow:hidden}
+.conv-row-wrap{position:relative;overflow:hidden;content-visibility:auto;contain-intrinsic-size:auto 80px}
+/* content-visibility: rows far outside the list are not painted or composited
+   on every frame of a scroll -- with a long inbox that compositing was most of
+   each frame. "auto" keeps a row's real height once it has been shown. */
 .conv-delete-btn{position:absolute;top:0;right:0;height:100%;width:84px;background:#ff3b3b;color:#fff;border:none;font-size:12px;font-weight:700;letter-spacing:.02em;display:flex;align-items:center;justify-content:center;cursor:pointer;touch-action:manipulation}
 .conv-row{position:relative;display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #0d0f12;cursor:pointer;transition:background .12s;background:#0a0b0e;touch-action:pan-y}
 .conv-row:hover{background:#0e1014}

@@ -30,7 +30,10 @@ def test_personal_tp_sl():
 
 def test_singleflight_scanner():
     assert '_scanner_refresh_lock = threading.Lock()' in SOURCE
-    assert 'with _scanner_refresh_lock:' in SOURCE
+    # One caller fetches; the others wait a moment at most (they used to
+    # queue behind the network call and each fetch again).
+    assert '_scanner_refresh_lock.acquire(timeout=_SCANNER_COLD_WAIT_SECONDS)' in SOURCE
+    assert '_scanner_refresh_lock.acquire(blocking=False)' in SOURCE
     # One entry per token: the scanner is Solana-only and keys every pair by
     # (chain, lower-cased mint), keeping the deepest pool.
     assert "key = ('solana', address.lower())" in SOURCE

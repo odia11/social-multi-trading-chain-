@@ -233,6 +233,8 @@ def install(d):
                   (uid,time.time(),json.dumps(invite) if invite else None))
     app._orca_invitation_user_created=created
 
+    _signup_settled=set()   # wallets whose signup bookkeeping is done
+
     def owner():
         wallet=d._authenticated_wallet()
         if not wallet:return None
@@ -276,10 +278,19 @@ def install(d):
                 response.set_cookie(COOKIE,serializer.dumps(invite),max_age=WINDOW,httponly=True,
                                     secure=request.is_secure,samesite='Lax',path='/')
                 response.headers['Cache-Control']='private, no-store'
-            uid=owner()
-            if uid:
-                try:complete_signup(d.DB_FILE,uid,pending())
-                except sqlite3.Error:app.logger.warning('Invitation signup bookkeeping temporarily unavailable')
+            # complete_signup settles an account once (it sets verified_at or
+            # finds nothing to do), so a wallet it has run for is remembered:
+            # running it on every request took a database write lock each
+            # time, and under load every signed-in request queued behind it.
+            wallet=d._authenticated_wallet()
+            if wallet and wallet not in _signup_settled:
+                uid=owner()
+                if uid:
+                    try:
+                        complete_signup(d.DB_FILE,uid,pending())
+                        if len(_signup_settled)>=50000:_signup_settled.clear()
+                        _signup_settled.add(wallet)
+                    except sqlite3.Error:app.logger.warning('Invitation signup bookkeeping temporarily unavailable')
         if response.status_code==200 and response.mimetype=='text/html' and request.path in ('/','/calls'):
             body=response.get_data(as_text=True)
             if 'src="/static/call-sharing.js' not in body:

@@ -55,9 +55,11 @@ function oaTrimNavWarm(now){
 }
 function oaFetchThroughDeploy(req, attempt){
   return fetch(req.clone()).then(function(resp){
+    // Wait through a restart (502, nginx's 503), but a busy server (504) is
+    // asked once more, not nine times -- see navbar.js.
     if(attempt < OA_DEPLOY_RETRY_DELAYS.length &&
-       (resp.status===502 || resp.status===503 || resp.status===504)){
-      return oaWait(OA_DEPLOY_RETRY_DELAYS[attempt]).then(function(){
+       (resp.status===502 || resp.status===503 || (resp.status===504 && attempt<1))){
+      return oaWait(OA_DEPLOY_RETRY_DELAYS[attempt]*(0.7+Math.random()*0.6)).then(function(){
         return oaFetchThroughDeploy(req, attempt+1);
       });
     }

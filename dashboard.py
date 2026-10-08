@@ -428,6 +428,38 @@ if IS_PRODUCTION and PUBLIC_HOST:
     app.config['SESSION_COOKIE_DOMAIN'] = '.' + PUBLIC_HOST
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
+
+class _OrcResponse(app.response_class):
+    """Response that remembers its body as text between after_request hooks.
+
+    About a dozen hooks each read the finished HTML page as text, change a
+    little, and write it back. Every read decoded the whole page again -- for
+    Home 400 KB, some fifty times per page view -- and that was a third of
+    the server's CPU under load. The decoded text is kept until the body is
+    replaced, so each hook gets the same text without decoding it again.
+    """
+
+    def get_data(self, as_text=False):
+        if not as_text:
+            return super().get_data(as_text=False)
+        cached = self.__dict__.get('_orc_text')
+        if cached is not None and cached[0] is self.response:
+            return cached[1]
+        text = super().get_data(as_text=True)
+        if isinstance(self.response, list):
+            self.__dict__['_orc_text'] = (self.response, text)
+        return text
+
+    def set_data(self, value):
+        super().set_data(value)
+        if isinstance(value, str):
+            self.__dict__['_orc_text'] = (self.response, value)
+        else:
+            self.__dict__.pop('_orc_text', None)
+
+
+app.response_class = _OrcResponse
+
 @app.template_filter('fmtk')
 def _jinja_fmtk(v):
     """Format a large number as 1.2K / 3.4M for use in Jinja2 templates."""
@@ -2907,6 +2939,16 @@ def init_db():
     )''')
     c.execute('CREATE INDEX IF NOT EXISTS idx_feed_posts_created ON feed_posts(created_at)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_feed_posts_wallet_created ON feed_posts(wallet, created_at)')
+    # The feed sorts on the timestamp written one way ('YYYY-MM-DD HH:MM:SS'),
+    # whichever way it was stored. Indexing that exact expression lets the
+    # newest page be read straight off the index (social_feed).
+    for _tbl, _col in (('feed_posts', 'created_at'), ('trades', 'timestamp'), ('feed_reposts', 'created_at')):
+        try:
+            c.execute(f"CREATE INDEX IF NOT EXISTS idx_{_tbl}_norm_ts ON {_tbl}("
+                      f"(CASE WHEN {_col} LIKE '%T%' THEN replace(replace({_col},'T',' '),'Z','') "
+                      f"ELSE {_col} END))")
+        except sqlite3.OperationalError:
+            pass   # a table not created yet in this database; the next start adds it
     c.execute('''CREATE TABLE IF NOT EXISTS user_tokens (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id       INTEGER NOT NULL,
@@ -3734,6 +3776,16 @@ def _security_check_loop():
             print(f'[security] ERROR in check loop: {e}', flush=True)
         time.sleep(60)
 
+# Events a client can trigger on every request (a scanner, a bot, garbage in a
+# query string). Each was a database write plus a log line per request, so a
+# flood of them became a flood of writes that slowed everyone else down. The
+# same event from the same address is recorded at most once per window.
+_SEC_FLOOD_EVENTS = frozenset({'bot_probe', 'suspicious_input', 'honeypot_hit', 'bot_blocked'})
+_SEC_FLOOD_WINDOW = 10.0
+_sec_flood_last: dict = {}
+_sec_flood_lock = threading.Lock()
+
+
 def _log_security_event(event_type: str, wallet: str, details: str = '') -> None:
     short   = (wallet[:4] + '...' + wallet[-4:]) if len(wallet) >= 8 else wallet
     details = _redact_keys(str(details))  # scrub before printing — belt-and-suspenders
@@ -3741,6 +3793,14 @@ def _log_security_event(event_type: str, wallet: str, details: str = '') -> None
         ip = request.remote_addr or 'system'
     except RuntimeError:
         ip = 'system'  # no request context (background thread)
+    if event_type in _SEC_FLOOD_EVENTS:
+        now = time.time()
+        with _sec_flood_lock:
+            if now - _sec_flood_last.get((event_type, ip), 0) < _SEC_FLOOD_WINDOW:
+                return
+            if len(_sec_flood_last) > 50000:
+                _sec_flood_last.clear()
+            _sec_flood_last[(event_type, ip)] = now
     print(f'SEC [{event_type}] {short} {details}', flush=True)
     try:
         conn = sqlite3.connect(DB_FILE)
@@ -5765,40 +5825,70 @@ _buzz_cache = {'ts': 0.0, 'data': []}
 _buzz_lock = threading.Lock()
 _buzz_refresh_lock = threading.Lock()
 
+def _buzz_refresh_locked() -> list:
+    """The refresh itself; the caller holds _buzz_refresh_lock."""
+    now = time.time()
+    with _buzz_lock:
+        if _buzz_cache['ts'] and now - _buzz_cache['ts'] < _BUZZ_TTL:
+            return list(_buzz_cache['data'])
+        stale = list(_buzz_cache['data'])
+    try:
+        found = _resolve_buzz_pairs(_discover_x_buzz(), set(_MARKET_LIVE_CHAINS))
+    except Exception as e:
+        print(f'[x-buzz] multichain resolve failed: {type(e).__name__}', flush=True)
+        found = []
+    with _buzz_lock:
+        _buzz_cache['ts'] = now
+        if found:
+            _buzz_cache['data'] = found
+        data = list(_buzz_cache['data'] if _buzz_cache['data'] else stale)
+    if found:
+        by_chain = {}
+        for c in found:
+            by_chain[c['chain']] = by_chain.get(c['chain'], 0) + 1
+        print(f'[x-buzz] {len(found)} token(s) buzzing on X: ' +
+              ', '.join(f'{n} on {ch}' for ch, n in sorted(by_chain.items())), flush=True)
+    return data
+
+
 def get_multichain_x_buzz() -> list:
     """Cached display-only X buzz across supported chains.
 
     Empty is a valid cached result. Refresh is single-flight so surge radar,
     Live Market and narrative discovery cannot independently pay for the same
     request or independently rediscover a broken credential.
+
+    A refresh is a web search that can take many seconds. When the cache had
+    expired, the first visitor used to make it inside their request, and every
+    other visitor (Home and Live Market both ask) waited on the lock behind it
+    -- every 15 minutes the server's request threads all stood still. Now an
+    expired list is returned at once and refreshed in the background; only the
+    very first fetch after a start is waited for, and briefly.
     """
     now = time.time()
     with _buzz_lock:
         if _buzz_cache['ts'] and now - _buzz_cache['ts'] < _BUZZ_TTL:
             return list(_buzz_cache['data'])
-    with _buzz_refresh_lock:
-        now = time.time()
-        with _buzz_lock:
-            if _buzz_cache['ts'] and now - _buzz_cache['ts'] < _BUZZ_TTL:
-                return list(_buzz_cache['data'])
-            stale = list(_buzz_cache['data'])
-        try:
-            found = _resolve_buzz_pairs(_discover_x_buzz(), set(_MARKET_LIVE_CHAINS))
-        except Exception as e:
-            print(f'[x-buzz] multichain resolve failed: {type(e).__name__}', flush=True)
-            found = []
-        with _buzz_lock:
-            _buzz_cache['ts'] = now
-            if found:
-                _buzz_cache['data'] = found
-            data = list(_buzz_cache['data'] if _buzz_cache['data'] else stale)
-        if found:
-            by_chain = {}
-            for c in found:
-                by_chain[c['chain']] = by_chain.get(c['chain'], 0) + 1
-            print(f'[x-buzz] {len(found)} token(s) buzzing on X: ' +
-                  ', '.join(f'{n} on {ch}' for ch, n in sorted(by_chain.items())), flush=True)
-        return data
+        fetched_before = bool(_buzz_cache['ts'])
+        stale = list(_buzz_cache['data'])
+    if fetched_before:
+        if _buzz_refresh_lock.acquire(blocking=False):
+            def _refresh_in_background():
+                try:
+                    _buzz_refresh_locked()
+                except Exception as e:
+                    print(f'[x-buzz] background refresh failed: {type(e).__name__}', flush=True)
+                finally:
+                    _buzz_refresh_lock.release()
+            threading.Thread(target=_refresh_in_background, daemon=True, name='x-buzz-refresh').start()
+        return stale
+    if not _buzz_refresh_lock.acquire(timeout=2.5):
+        return stale
+    try:
+        return _buzz_refresh_locked()
+    finally:
+        _buzz_refresh_lock.release()
+
 
 def _match_buzz_to_mints(tickers: list[str]) -> list[dict]:
     """Solana-only view of the buzz, for the narrative trading agent.
@@ -19136,6 +19226,13 @@ def api_app_lock_retired():
 # it. What is stored is a hash, what is handed out rotates on every use, and
 # a disconnect ends it everywhere.
 DEVICE_TOKEN_DAYS = 3650
+DEVICE_RENEW_SECONDS = 3600   # renew a remembered login at most this often
+# A page fires a dozen API calls at once. When the browser has no remembered
+# login yet, each of them used to mint one (a write each) before the first
+# answer could set the cookie. One mint per browser per minute is enough;
+# the other answers leave the cookie to it.
+_device_mint_recent: dict = {}
+_device_mint_lock = threading.Lock()
 DEVICE_COOKIE_NAME = 'orca_device'
 
 
@@ -19226,7 +19323,7 @@ def _redeem_device_token(token: str) -> tuple:
         conn = sqlite3.connect(DB_FILE)
         try:
             row = conn.execute(
-                'SELECT id, user_id, wallet, expires_at, revoked FROM device_sessions '
+                'SELECT id, user_id, wallet, expires_at, revoked, last_used_at FROM device_sessions '
                 'WHERE token_hash=?', (h,)).fetchone()
             # The ANSWER stays uniform -- a guesser must not learn which of
             # these it was. The LOG does not: when somebody says "I was signed
@@ -19236,7 +19333,7 @@ def _redeem_device_token(token: str) -> tuple:
             if not row:
                 print('[device-session] refused: no such token', flush=True)
                 return '', ''
-            row_id, user_id, wallet, expires_at, revoked = row
+            row_id, user_id, wallet, expires_at, revoked, last_used_at = row
             if revoked:
                 print(f'[device-session] refused: token was revoked '
                       f'(wallet {wallet[:6]}…) — a Disconnect, or already spent '
@@ -19247,12 +19344,16 @@ def _redeem_device_token(token: str) -> tuple:
                 print(f'[device-session] refused: expired {age_days:.1f} days after '
                       f'issue (wallet {wallet[:6]}…)', flush=True)
                 return '', ''
-            conn.execute(
-                'UPDATE device_sessions SET last_used_at=?, expires_at=? WHERE id=?',
-                (now, now + DEVICE_TOKEN_DAYS * 86400, row_id))
-            conn.commit()
-            print(f'[device-session] resumed {wallet[:6]}… from a remembered '
-                  f'login', flush=True)
+            # Renewing is a database write, and every page view of every
+            # signed-in visitor came through here. The expiry is years away,
+            # so once an hour is plenty.
+            if now - float(last_used_at or 0) >= DEVICE_RENEW_SECONDS:
+                conn.execute(
+                    'UPDATE device_sessions SET last_used_at=?, expires_at=? WHERE id=?',
+                    (now, now + DEVICE_TOKEN_DAYS * 86400, row_id))
+                conn.commit()
+                print(f'[device-session] resumed {wallet[:6]}… from a remembered '
+                      f'login', flush=True)
             return wallet, token
         finally:
             conn.close()
@@ -19326,6 +19427,15 @@ def _persist_remembered_session(response):
             if remembered_wallet == wallet:
                 token = candidate
         if not token:
+            browser = (wallet, request.remote_addr or '',
+                       hashlib.sha256((request.headers.get('User-Agent') or '').encode()).hexdigest()[:16])
+            now = time.time()
+            with _device_mint_lock:
+                if now - _device_mint_recent.get(browser, 0) < 60:
+                    return response
+                if len(_device_mint_recent) > 20000:
+                    _device_mint_recent.clear()
+                _device_mint_recent[browser] = now
             uid = session.get('user_id') or get_or_create_user(wallet)
             token = _issue_device_token(uid, wallet)
         if token:
@@ -21979,18 +22089,19 @@ def social_feed():
                    ELSE created_at END) < ?''')
         extra_params.append(before_norm)
     where_clause = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
-    try:
-        rows = conn.execute('''
-            SELECT * FROM (
+
+    def _norm_ts(col):
+        return (f"(CASE WHEN {col} LIKE '%T%' THEN replace(replace({col},'T',' '),'Z','') "
+                f"ELSE {col} END)")
+    posts_sql = """
                 SELECT fp.id, fp.wallet, fp.content, fp.created_at,
                        'p' as kind,
                        u.username, NULL as symbol, NULL as mint_address, NULL as pnl_pct,
                        (fp.wallet = ?) as is_own, NULL as entry_price, NULL as exit_price,
                        u.avatar_url, u.is_verified, NULL as repost_of, fp.image_url
                 FROM feed_posts fp
-                LEFT JOIN users u ON fp.wallet = u.wallet_address
-            ''' + ('' if posts_only else '''
-                UNION ALL
+                LEFT JOIN users u ON fp.wallet = u.wallet_address"""
+    trades_sql = """
                 SELECT t.id, u.wallet_address as wallet, NULL as content,
                        t.timestamp as created_at,
                        't' as kind,
@@ -22003,9 +22114,8 @@ def social_feed():
                        (u.wallet_address = ?) as is_own, t.entry_price, t.exit_price,
                        u.avatar_url, u.is_verified, NULL as repost_of, NULL as image_url
                 FROM trades t
-                LEFT JOIN users u ON t.user_id = u.id
-            ''') + '''
-                UNION ALL
+                LEFT JOIN users u ON t.user_id = u.id"""
+    reposts_sql = """
                 SELECT fr.id, fr.reposter_wallet as wallet, NULL as content,
                        fr.created_at,
                        'r' as kind,
@@ -22014,15 +22124,33 @@ def social_feed():
                        ru.avatar_url, ru.is_verified, fr.post_id as repost_of, NULL as image_url
                 FROM feed_reposts fr
                 LEFT JOIN users ru ON fr.reposter_wallet = ru.wallet_address
-                WHERE ''' + _valid_post_interaction_sql('fr') + '''
-            )
-        ''' + where_clause + '''
-            ORDER BY
-              CASE WHEN created_at LIKE '%T%'
-                   THEN replace(replace(created_at,'T',' '),'Z','')
-                   ELSE created_at END DESC LIMIT ?
-        ''', (my_wallet,) + (() if posts_only else (my_wallet,)) + (my_wallet,)
-            + tuple(extra_params) + (page_limit,)).fetchall()
+                WHERE """ + _valid_post_interaction_sql('fr')
+    # The plain feed (no Following/Calls filter) is what every Home load asks
+    # for. There each source -- posts, trades, reposts -- hands over only its
+    # own newest page before the merge; the merged newest page is always
+    # among those, so the result is the same. Sorting the whole union first
+    # read and sorted every post ever made, on every Home load.
+    if not [c for c in conditions if not c.lstrip().startswith('(CASE WHEN created_at')]:
+        branches, params = [], []
+        for sql, ts, has_where in ((posts_sql, 'fp.created_at', False),
+                                   (None if posts_only else trades_sql, 't.timestamp', False),
+                                   (reposts_sql, 'fr.created_at', True)):
+            if sql is None:
+                continue
+            cond = ((' AND ' if has_where else ' WHERE ') + _norm_ts(ts) + ' < ?') if before_norm else ''
+            branches.append(f'SELECT * FROM ({sql}{cond} ORDER BY {_norm_ts(ts)} DESC LIMIT ?)')
+            params += [my_wallet] + ([before_norm] if before_norm else []) + [page_limit]
+        feed_sql = ('SELECT * FROM (' + ' UNION ALL '.join(branches) + ') ORDER BY '
+                    + _norm_ts('created_at') + ' DESC LIMIT ?')
+        feed_params = tuple(params) + (page_limit,)
+    else:
+        feed_sql = ('SELECT * FROM (' + posts_sql + ('' if posts_only else ' UNION ALL ' + trades_sql)
+                    + ' UNION ALL ' + reposts_sql + ') ' + where_clause
+                    + ' ORDER BY ' + _norm_ts('created_at') + ' DESC LIMIT ?')
+        feed_params = ((my_wallet,) + (() if posts_only else (my_wallet,)) + (my_wallet,)
+                       + tuple(extra_params) + (page_limit,))
+    try:
+        rows = conn.execute(feed_sql, feed_params).fetchall()
 
         # Batch-fetch like/reply counts for exactly the rows on this page instead
         # of a correlated subquery per row (which forced SQLite to compute counts
@@ -22040,8 +22168,8 @@ def social_feed():
             reply_rows = conn.execute(
                 f'''SELECT r.post_id, COUNT(*), MAX(r.created_at)
                     FROM feed_replies r
-                    LEFT JOIN feed_posts fp ON r.post_id='p'||fp.id
-                    LEFT JOIN trades t ON r.post_id='t'||t.id
+                    LEFT JOIN feed_posts fp ON fp.id = CAST(substr(r.post_id, 2) AS INTEGER) AND r.post_id='p'||fp.id
+                    LEFT JOIN trades t ON t.id = CAST(substr(r.post_id, 2) AS INTEGER) AND r.post_id='t'||t.id
                     WHERE r.post_id IN ({ph})
                       AND datetime(r.created_at) >=
                           datetime(COALESCE(fp.created_at, t.timestamp))
@@ -23747,13 +23875,25 @@ def _feed_post_created_at(conn, post_id):
     return row[0] if row else None
 
 
+def _post_row_by_id_sql(prefix, column):
+    """Join condition: `column` (a 'p123'-style post id) names this table's row.
+
+    `'p'||id = column` alone cannot use the primary key, so SQLite scanned the
+    whole table for every like, reply and repost it checked -- with 20,000
+    posts one feed page took 8 seconds and held a server thread all that time.
+    Looking the row up by its id first makes it one primary-key step; the
+    exact comparison stays, so 'p012' still matches nothing, as before."""
+    return (f"id = CAST(substr({column}, 2) AS INTEGER) AND '{prefix}'||id = {column}")
+
+
 def _valid_post_interaction_sql(alias):
     """SQL predicate: interaction must belong to this incarnation of its post."""
+    col = f'{alias}.post_id'
     return (
         f"datetime({alias}.created_at) >= datetime(COALESCE("
-        f"(SELECT created_at FROM feed_posts WHERE 'p'||id={alias}.post_id),"
-        f"(SELECT timestamp FROM trades WHERE 't'||id={alias}.post_id),"
-        f"(SELECT created_at FROM group_posts WHERE 'g'||id={alias}.post_id)))"
+        f"(SELECT created_at FROM feed_posts WHERE {_post_row_by_id_sql('p', col)}),"
+        f"(SELECT timestamp FROM trades WHERE {_post_row_by_id_sql('t', col)}),"
+        f"(SELECT created_at FROM group_posts WHERE {_post_row_by_id_sql('g', col)})))"
     )
 
 
@@ -30820,8 +30960,30 @@ def _get_scanner_cached() -> list:
                     _scanner_refresh_lock.release()
             threading.Thread(target=_refresh_in_background, daemon=True, name='scanner-refresh').start()
         return data
-    with _scanner_refresh_lock:
+    # Nothing cached yet (a restart), or the last refresh came back empty
+    # (DexScreener down or answering nothing). Every caller used to queue on
+    # the refresh lock behind a network call, and each one then tried the
+    # network again. Under load that took every server thread, and the whole
+    # app -- not only Live Market -- stood still. Now one caller fetches; the
+    # rest wait a moment at most, and a refresh that just failed is not
+    # retried by every request.
+    if time.time() - _scanner_cache.get('attempt_ts', 0) < _SCANNER_RETRY_SECONDS:
+        return data or []
+    if not _scanner_refresh_lock.acquire(timeout=_SCANNER_COLD_WAIT_SECONDS):
+        with _scanner_lock:
+            return _scanner_cache['data'] or []
+    try:
+        # Someone else may have just fetched (or just failed) while we waited.
+        if time.time() - _scanner_cache.get('attempt_ts', 0) < _SCANNER_RETRY_SECONDS:
+            with _scanner_lock:
+                return _scanner_cache['data'] or []
         return _refresh_scanner_cached()
+    finally:
+        _scanner_refresh_lock.release()
+
+
+_SCANNER_COLD_WAIT_SECONDS = 2.5   # how long a caller waits for someone else's first fetch
+_SCANNER_RETRY_SECONDS = 10        # an empty/failed refresh is retried after this, not per request
 
 
 def _scanner_carry_over(fresh: list, now: float) -> list:
@@ -30842,7 +31004,10 @@ def _refresh_scanner_cached() -> list:
     with _scanner_lock:
         if now - _scanner_cache['ts'] < 15 and _scanner_cache['data']:
             return _scanner_cache['data']
-    fresh = _get_scanner_candidates()   # network: never while holding a lock
+    try:
+        fresh = _get_scanner_candidates()   # network: never while holding a lock
+    finally:
+        _scanner_cache['attempt_ts'] = time.time()
     with _scanner_lock:
         data = _scanner_carry_over(fresh, time.time())
     # The scanner already receives a real USD price and the exact pool for
