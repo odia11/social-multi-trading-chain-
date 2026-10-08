@@ -23,6 +23,7 @@ _GROUP_MANAGER_ACTIONS = frozenset({
 
 _OWNER_ONLY_ADMIN_PATHS = frozenset({
     '/api/admin/invite',
+    '/api/admin/invite/cancel',
     '/api/admin/role/change',
     '/api/admin/role/remove',
     '/api/admin/features/toggle',

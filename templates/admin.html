@@ -1406,8 +1406,12 @@ function _groupOf(view) {
 }
 function showGroup(g) {
   var allowed = _ROLE_TABS[_userRole] || [];
-  var first = (_GROUPS[g] || []).filter(function(v) { return allowed.indexOf(v) >= 0; })[0];
-  if (first) showView(first);
+  var pages = (_GROUPS[g] || []).filter(function(v) { return allowed.indexOf(v) >= 0; });
+  // A tab with a badge opens the page the badge comes from (Trading 9+ ->
+  // AI filters when that is where the waiting items are), not just its first page.
+  var waiting = pages.filter(function(v) { return (_badgeCounts[v] || 0) > 0; })[0];
+  var target = waiting || pages[0];
+  if (target) showView(target);
 }
 var _badgeCounts = {};
 function _setBadge(key, n) {
@@ -2428,11 +2432,23 @@ async function loadPendingInvites() {
         '<div class="admin-member-name">' + _escHtml(short) + '</div>' +
         '<div class="admin-member-sub">Pending · sent ' + (inv.created_at||'—') + '</div>' +
       '</div>' +
-      '<span class="tag ' + tagCls + '" style="flex-shrink:0">' + inv.role + '</span>' +
-      '<span style="font-size:10px;color:var(--muted);flex-shrink:0">⏳</span>' +
+      '<span class="tag ' + tagCls + '" style="flex-shrink:0">' + _escHtml(inv.role) + '</span>' +
+      '<button class="btn btn-ghost" style="padding:4px 8px;font-size:16px;line-height:1;flex-shrink:0;color:var(--muted);min-height:32px" ' +
+      'onclick="cancelInvite(' + Number(inv.id) + ')" title="Cancel invite" aria-label="Cancel invite">\xd7</button>' +
       '</div>';
   }).join('');
   document.getElementById('pending-invites-list').innerHTML = rows;
+}
+
+async function cancelInvite(id) {
+  if (!(await openConfirmModal({text:'Cancel this invite?', danger:true}))) return;
+  var r = await fetch('/api/admin/invite/cancel', {
+    method:'POST', credentials:'include',
+    headers:{'Content-Type':'application/json','X-CSRF-Token':window._csrfToken},
+    body: JSON.stringify({id: id})
+  }).then(r => r.json()).catch(() => null);
+  if (r?.ok) { toast('✓ Invite cancelled', true); loadPendingInvites(); }
+  else toast('Error: ' + (r?.msg || 'Failed'), false);
 }
 
 // ── Admin roles list ──
@@ -2441,6 +2457,11 @@ async function loadAdminRoles() {
   var list = document.getElementById('admin-access-list');
   if (!list) return;
   var members = r?.members || [];
+  if (!r || !r.ok) {
+    list.innerHTML = '<div style="padding:16px 0;text-align:center;color:var(--muted);font-size:13px">' +
+      (r && r.msg === 'Forbidden' ? 'Only an owner can manage the team' : 'Could not load the team. Pull to refresh.') + '</div>';
+    return;
+  }
   if (!members.length) {
     list.innerHTML = '<div style="padding:16px 0;text-align:center;color:var(--muted);font-size:13px">No members yet</div>';
     return;
@@ -2455,7 +2476,7 @@ function _roleTagCls(role) {
   return 'tag-muted';
 }
 function _memberRow(m) {
-  var w      = m.wallet || '';
+  var w      = String(m.wallet || '').replace(/[^1-9A-HJ-NP-Za-km-z]/g, '');   // an address, nothing else in the markup
   var ini    = w.slice(0,2).toUpperCase();
   var short  = w.length >= 8 ? w.slice(0,6) + '…' + w.slice(-4) : w;
   var avBg   = w === '{{ wallet }}' ? 'var(--accent)' : _av(w);
@@ -2469,9 +2490,9 @@ function _memberRow(m) {
     '<div class="admin-member-av" style="background:' + avBg + '">' + ini + '</div>' +
     '<div class="admin-member-info">' +
       '<div class="admin-member-name">' + short + '</div>' +
-      '<div class="admin-member-sub">' + (isOwner ? 'Owner wallet' : 'Invited ' + (m.invited_at||'')) + '</div>' +
+      '<div class="admin-member-sub">' + (isOwner ? 'Owner wallet' : 'Invited ' + _escHtml(m.invited_at||'')) + '</div>' +
     '</div>' +
-    '<span class="tag ' + _roleTagCls(m.role) + '" style="flex-shrink:0;' + badgeCursor + '" ' + badgeClick + '>' + m.role + '</span>' +
+    '<span class="tag ' + _roleTagCls(m.role) + '" style="flex-shrink:0;' + badgeCursor + '" ' + badgeClick + '>' + _escHtml(m.role) + '</span>' +
     removeBtn +
     '</div>';
 }
