@@ -105,6 +105,42 @@ def photo_url(chat_id, photo_v):
     return '/api/group-chats/%d/photo?v=%d' % (chat_id, photo_v) if photo_v else ''
 
 
+_DIMS = {}
+
+
+def _image_size(message_id, data_uri):
+    """(width, height) of a stored photo, so the chat can keep its place free
+    before the photo has loaded. Read from the header only, and remembered."""
+    if message_id in _DIMS:
+        return _DIMS[message_id]
+    size = (0, 0)
+    try:
+        from PIL import Image
+        import io
+        size = Image.open(io.BytesIO(base64.b64decode(data_uri.split(',', 1)[1]))).size
+    except Exception:
+        pass
+    if len(_DIMS) > 5000:
+        _DIMS.clear()
+    _DIMS[message_id] = size
+    return size
+
+
+def _out_message(chat_id, row, uid, people):
+    """A message row (id, sender_id, kind, body, created_at) as the chat gets it.
+    Photos are sent as an address, not inline: a chat with a few photos was
+    megabytes of text that the phone had to take apart on every visit."""
+    mid, sender, kind, body, created_at = row
+    out = {'id': mid, 'sender_id': sender, 'kind': kind, 'body': body, 'created_at': created_at, 'mine': sender == uid,
+           'sender': _name_of(people[sender]) if sender in people else '',
+           'sender_wallet': people[sender][2] if sender in people else '',
+           'sender_avatar': (people[sender][3] or '') if sender in people else ''}
+    if kind == 'image':
+        out['w'], out['h'] = _image_size(mid, body)
+        out['body'] = '/api/group-chats/%d/messages/%d/image' % (chat_id, mid)
+    return out
+
+
 def _users(c, ids):
     ids = list(ids)
     if not ids:
@@ -441,16 +477,7 @@ def install(d):
             if not _member_role(c, chat_id, uid):
                 return fail('Group not found', 404)
             photo = c.execute('SELECT photo FROM group_chats WHERE id=?', (chat_id,)).fetchone()[0]
-        m = re.match(r'^data:(image/(?:jpeg|jpg|png|gif|webp));base64,(.+)$', photo or '', re.S)
-        if not m:
-            return fail('No photo', 404)
-        try:
-            raw = base64.b64decode(m.group(2), validate=True)
-        except ValueError:
-            return fail('No photo', 404)
-        resp = app.response_class(raw, mimetype=m.group(1).replace('image/jpg', 'image/jpeg'))
-        resp.headers['X-Content-Type-Options'] = 'nosniff'
-        return resp
+        return _image_response(photo)
 
     @app.route('/api/group-chats/<int:chat_id>', methods=['DELETE'])
     @d.rate_limit(10, 60)
@@ -535,11 +562,32 @@ def install(d):
                           (rows[-1][0], chat_id, uid))
                 c.execute("UPDATE notifications SET is_read=1 WHERE user_id=? AND link=? AND is_read=0",
                           (uid, '/messages?group=%d' % chat_id))
-        return jsonify({'ok': True, 'messages': [
-            {'id': r[0], 'sender_id': r[1], 'kind': r[2], 'body': r[3], 'created_at': r[4], 'mine': r[1] == uid,
-             'sender': _name_of(people[r[1]]) if r[1] in people else '',
-             'sender_wallet': people[r[1]][2] if r[1] in people else '',
-             'sender_avatar': (people[r[1]][3] or '') if r[1] in people else ''} for r in rows]})
+        return jsonify({'ok': True, 'messages': [_out_message(chat_id, r, uid, people) for r in rows]})
+
+    @app.route('/api/group-chats/<int:chat_id>/messages/<int:message_id>/image', methods=['GET'])
+    @d.rate_limit(600, 60)
+    def group_chats_image(chat_id, message_id):
+        with connect() as c:
+            wallet, uid = me(c)
+            if not uid:
+                return fail('No wallet connected', 401)
+            if not _member_role(c, chat_id, uid):
+                return fail('Group not found', 404)
+            row = c.execute("SELECT body FROM group_chat_messages WHERE id=? AND chat_id=? AND kind='image'",
+                            (message_id, chat_id)).fetchone()
+        return _image_response(row[0] if row else '')
+
+    def _image_response(data_uri):
+        m = re.match(r'^data:(image/(?:jpeg|jpg|png|gif|webp));base64,(.+)$', data_uri or '', re.S)
+        if not m:
+            return fail('No photo', 404)
+        try:
+            raw = base64.b64decode(m.group(2), validate=True)
+        except ValueError:
+            return fail('No photo', 404)
+        resp = app.response_class(raw, mimetype=m.group(1).replace('image/jpg', 'image/jpeg'))
+        resp.headers['X-Content-Type-Options'] = 'nosniff'
+        return resp
 
     @app.route('/api/group-chats/<int:chat_id>/messages', methods=['POST'])
     @d.rate_limit(30, 60)
@@ -576,9 +624,9 @@ def install(d):
                                               (chat_id, uid))]
         preview = '📷 Photo' if kind == 'image' else (text[:60] + ('…' if len(text) > 60 else ''))
         _announce(others, group, '%s: %s' % (sender, preview), chat_id, actor_wallet=wallet)
-        return jsonify({'ok': True, 'message': {'id': mid, 'sender_id': uid, 'kind': kind, 'body': text,
-                                                'created_at': now, 'mine': True, 'sender': sender,
-                                                'sender_wallet': wallet, 'sender_avatar': ''}})
+        msg = _out_message(chat_id, (mid, uid, kind, text, now), uid, {})
+        msg.update({'sender': sender, 'sender_wallet': wallet})
+        return jsonify({'ok': True, 'message': msg})
 
     def _announce(user_ids, group_name, line, chat_id, actor_wallet=None):
         """One unread bell entry per group per member, and a push per message

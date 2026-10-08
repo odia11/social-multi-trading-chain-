@@ -114,13 +114,13 @@ function renderList(){
   var chips=document.getElementById('oa-inbox-filters');
   if(chips&&chats.length)chips.hidden=false;
   if(!chats.length){
-    s.innerHTML=q||filter?'':'<button type="button" class="gc-cta" data-gc-new>'
+    setHtml(s,q||filter?'':'<button type="button" class="gc-cta" data-gc-new>'
       +'<span class="gc-cta-ico">'+ICON.groupAdd+'</span>'
-      +'<span class="gc-cta-copy"><b>New group</b><small>Chat with your followers, together</small></span></button>';
+      +'<span class="gc-cta-copy"><b>New group</b><small>Chat with your followers, together</small></span></button>');
     return;
   }
-  if(!shown.length){s.innerHTML='';return;}
-  s.innerHTML='<div class="oa-active-title gc-title">Groups</div>'+shown.map(function(c){
+  if(!shown.length){setHtml(s,'');return;}
+  setHtml(s,'<div class="oa-active-title gc-title">Groups</div>'+shown.map(function(c){
     var unread=c.unread>0;
     return '<div class="conv-row-wrap gc-row-wrap'+(unread?' is-unread':'')+'" data-gc="'+c.id+'">'
       +'<div class="conv-row" role="button" tabindex="0" aria-label="Open group '+esc(c.name)+'">'
@@ -131,8 +131,10 @@ function renderList(){
       +'<div class="conv-bottom"><div class="conv-preview'+(unread?' unread':'')+'">'+previewOf(c)+'</div>'
       +(unread?'<span class="conv-badge" aria-label="'+c.unread+' unread">'+(c.unread>99?'99+':c.unread)+'</span>':'')
       +'</div></div></div></div>';
-  }).join('');
+  }).join(''));
 }
+// The list is refreshed every few seconds; only touch the page when it changed.
+function setHtml(el,html){if(el.__gcHtml!==html){el.__gcHtml=html;el.innerHTML=html;}}
 // What the list looked like, for the next visit to paint before the chats.
 function remember(){
   var s=document.getElementById('gc-section');
@@ -225,9 +227,7 @@ function messageHtml(m,prev){
   if(!prev||dayLabel(prev.created_at)!==day)html+='<div class="gc-day"><span>'+esc(day)+'</span></div>';
   if(m.kind==='system')return html+'<div class="gc-sys" data-mid="'+m.id+'"><span>'+esc(m.body)+'</span></div>';
   var runStart=!prev||prev.kind==='system'||prev.sender_id!==m.sender_id||dayLabel(prev.created_at)!==day;
-  var body=m.kind==='image'
-    ?(safeImg(m.body)?'<img class="gc-img" src="'+esc(safeImg(m.body))+'" alt="Photo" loading="lazy">':'')
-    :esc(m.body).replace(/\n/g,'<br>');
+  var body=m.kind==='image'?photoHtml(m):esc(m.body).replace(/\n/g,'<br>');
   var cls='gc-msg'+(m.mine?' mine':'')+(runStart?' run-start':'')+(m.pending?' pending':'')+(m.failed?' failed':'')+(m.kind==='image'?' is-image':'');
   html+='<div class="'+cls+'" data-mid="'+esc(m.id)+'">';
   if(!m.mine){
@@ -239,20 +239,59 @@ function messageHtml(m,prev){
     +'<span class="gc-time">'+(m.failed?'Not sent · tap to retry':(m.pending?'Sending…':esc(clock(m.created_at))))+'</span></div></div>';
   return html;
 }
-function renderMessages(stick){
-  var t=threadEl(),box=t.querySelector('.gc-msgs'),body=t.querySelector('.gc-th-body');
-  var near=body.scrollHeight-body.scrollTop-body.clientHeight<120;
-  var ms=open.messages,html='';
-  for(var i=0;i<ms.length;i++)html+=messageHtml(ms[i],ms[i-1]);
-  box.innerHTML=html||'<div class="gc-empty">Say hi to the group 👋</div>';
-  if(stick||near)body.scrollTop=body.scrollHeight;
+// A photo keeps its place free before it has loaded (its size comes with the
+// message), so the chat does not jump while you read.
+function photoHtml(m){
+  var src=safeImg(m.body);if(!src)return '';
+  var w=Number(m.w)||0,h=Number(m.h)||0,style='';
+  if(w>0&&h>0)style=' style="width:'+Math.round(Math.min(260,340*w/h))+'px;aspect-ratio:'+w+'/'+h+'"';
+  return '<img class="gc-img" src="'+esc(src)+'" alt="Photo" loading="lazy" decoding="async"'+style+'>';
 }
-function mergeMessages(list){
-  var have={};open.messages.forEach(function(m){have[m.id]=1;});
-  var added=false;
-  list.forEach(function(m){if(!have[m.id]){open.messages.push(m);added=true;}});
-  list.forEach(function(m){if(m.id>open.lastId)open.lastId=m.id;});
+// Each message (with its day line) is one item, so a new message is added on
+// its own instead of the whole chat -- photos included -- being rebuilt.
+function itemHtml(m,prev){return '<div class="gc-item" data-key="'+esc(m.id)+'">'+messageHtml(m,prev)+'</div>';}
+function msgBox(){return threadEl().querySelector('.gc-msgs');}
+function nearBottom(){var b=threadEl().querySelector('.gc-th-body');return b.scrollHeight-b.scrollTop-b.clientHeight<120;}
+function toBottom(){var b=threadEl().querySelector('.gc-th-body');b.scrollTop=b.scrollHeight;}
+function itemEl(id){
+  var items=msgBox().children;
+  for(var i=items.length-1;i>=0;i--)if(items[i].getAttribute('data-key')===String(id))return items[i];
+  return null;
+}
+function refreshItem(i){
+  var m=open.messages[i];if(!m)return;
+  var el=itemEl(m.id);if(el)el.outerHTML=itemHtml(m,open.messages[i-1]);
+}
+function renderMessages(stick){
+  var box=msgBox(),near=nearBottom();
+  var ms=open.messages,html='';
+  for(var i=0;i<ms.length;i++)html+=itemHtml(ms[i],ms[i-1]);
+  box.innerHTML=html||'<div class="gc-empty">Say hi to the group 👋</div>';
+  if(stick||near)toBottom();
+}
+// Server messages in id order; your own unsent ones stay at the end.
+function addMessages(list,stick){
+  var near=nearBottom(),added=0,box=msgBox();
+  (list||[]).forEach(function(m){
+    if(typeof m.id==='number'&&m.id>open.lastId)open.lastId=m.id;
+    if(open.messages.some(function(x){return x.id===m.id;}))return;
+    var pos=open.messages.length;
+    while(pos>0&&(typeof open.messages[pos-1].id!=='number'||open.messages[pos-1].id>m.id))pos--;
+    open.messages.splice(pos,0,m);
+    var empty=box.querySelector('.gc-empty');if(empty)empty.remove();
+    var next=open.messages[pos+1],nextEl=next?itemEl(next.id):null,html=itemHtml(m,open.messages[pos-1]);
+    if(nextEl)nextEl.insertAdjacentHTML('beforebegin',html);else box.insertAdjacentHTML('beforeend',html);
+    if(next)refreshItem(pos+1);
+    added++;
+  });
+  if(added&&(stick||near))toBottom();
   return added;
+}
+function removeMessage(m){
+  var i=open.messages.indexOf(m);if(i<0)return;
+  open.messages.splice(i,1);
+  var el=itemEl(m.id);if(el)el.remove();
+  refreshItem(i);
 }
 function fetchNew(){
   if(!open||document.hidden)return;
@@ -265,7 +304,7 @@ function fetchNew(){
       return;
     }
     var news=(d.messages||[]).filter(function(m){return m.kind==='system';}).length;
-    if(mergeMessages(d.messages||[]))renderMessages(false);
+    addMessages(d.messages,false);
     // Someone renamed it, changed the photo, or changed who is in it.
     if(news)api('/api/group-chats/'+id).then(function(x){if(x.ok)adopt(x.chat);});
   });
@@ -289,7 +328,9 @@ function openGroup(id,push){
   });
   api('/api/group-chats/'+id+'/messages').then(function(d){
     if(!open||open.id!==id||!d.ok)return;
-    open.messages=[];mergeMessages(d.messages||[]);renderMessages(true);
+    open.messages=(d.messages||[]).slice();
+    open.messages.forEach(function(m){if(m.id>open.lastId)open.lastId=m.id;});
+    renderMessages(true);
     c.unread=0;renderList();
   });
   if(pollTimer)window.clearInterval(pollTimer);
@@ -343,31 +384,34 @@ function sendText(){
 }
 function postMessage(payload,local){
   var id=open.id,tmp='p'+(++pendingSeq);
-  var msg={id:tmp,sender_id:0,kind:local.kind,body:local.body,created_at:new Date().toISOString().slice(0,19).replace('T',' '),
+  var msg={id:tmp,sender_id:0,kind:local.kind,body:local.body,w:local.w,h:local.h,created_at:new Date().toISOString().slice(0,19).replace('T',' '),
            mine:true,pending:true,sender:'You'};
-  open.messages.push(msg);renderMessages(true);
+  open.messages.push(msg);
+  var box=msgBox(),empty=box.querySelector('.gc-empty');if(empty)empty.remove();
+  box.insertAdjacentHTML('beforeend',itemHtml(msg,open.messages[open.messages.length-2]));
+  toBottom();
   sending++;
   api('/api/group-chats/'+id+'/messages',{method:'POST',body:payload}).then(function(d){
     sending--;
     if(!open||open.id!==id)return;
-    var i=open.messages.indexOf(msg);
     if(d.ok&&d.message){
-      if(i>=0)open.messages.splice(i,1);
-      mergeMessages([d.message]);
+      // Your own photo stays on screen as it is: no reload, no flicker.
+      if(d.message.kind==='image'&&msg.kind==='image'){d.message.body=msg.body;}
+      removeMessage(msg);
+      addMessages([d.message],true);
     }else{
       msg.pending=false;msg.failed=true;msg.retry=payload;
+      refreshItem(open.messages.indexOf(msg));
       toast(d.msg||'Message not sent');
     }
-    open.messages.sort(function(a,b){return (typeof a.id==='number'?a.id:1e15)-(typeof b.id==='number'?b.id:1e15);});
-    renderMessages(true);
   });
 }
 function retry(mid){
   if(!open)return;
   var m=open.messages.find(function(x){return String(x.id)===String(mid);});
   if(!m||!m.failed)return;
-  open.messages.splice(open.messages.indexOf(m),1);
-  postMessage(m.retry,{kind:m.kind,body:m.body});
+  removeMessage(m);
+  postMessage(m.retry,{kind:m.kind,body:m.body,w:m.w,h:m.h});
 }
 function sendPhoto(file){
   if(!/^image\/(jpeg|png|gif|webp)$/.test(file.type)){toast('Choose a JPEG, PNG, GIF or WebP photo');return;}
@@ -375,14 +419,19 @@ function sendPhoto(file){
   var reader=new FileReader();
   reader.onload=function(){
     var src=String(reader.result||'');
-    if(file.type==='image/gif'){postMessage({message:src,message_type:'image'},{kind:'image',body:src});return;}
+    if(file.type==='image/gif'){
+      var g=new Image();
+      g.onload=function(){postMessage({message:src,message_type:'image'},{kind:'image',body:src,w:g.naturalWidth,h:g.naturalHeight});};
+      g.onerror=function(){toast('That photo could not be read');};
+      g.src=src;return;
+    }
     var img=new Image();
     img.onload=function(){
       var max=1600,w=img.naturalWidth,h=img.naturalHeight,k=Math.min(1,max/Math.max(w,h));
       var cv=document.createElement('canvas');cv.width=Math.round(w*k);cv.height=Math.round(h*k);
       cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
       var out=cv.toDataURL('image/jpeg',0.85);
-      postMessage({message:out,message_type:'image'},{kind:'image',body:out});
+      postMessage({message:out,message_type:'image'},{kind:'image',body:out,w:cv.width,h:cv.height});
     };
     img.onerror=function(){toast('That photo could not be read');};
     img.src=src;

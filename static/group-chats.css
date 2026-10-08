@@ -66,7 +66,8 @@ html.gc-lock,html.gc-lock body{overflow:hidden!important}
 .gc-msg.failed .gc-bubble{border-color:var(--gc-red);cursor:pointer}
 .gc-msg.failed .gc-time{color:var(--gc-red)}
 .gc-msg.is-image .gc-bubble{padding:4px 4px 5px}
-.gc-img{display:block;max-width:100%;max-height:340px;border-radius:13px;cursor:zoom-in}
+.gc-item{display:contents}
+.gc-img{display:block;max-width:100%;height:auto;max-height:340px;object-fit:cover;border-radius:13px;cursor:zoom-in;background:rgba(255,255,255,.04)}
 .gc-msg.is-image .gc-time{padding-right:6px}
 .gc-composer{display:flex;align-items:flex-end;gap:6px;padding:8px 10px calc(env(safe-area-inset-bottom,0px) + 8px);border-top:1px solid var(--gc-line);background:#0b0f15;flex-shrink:0}
 .gc-composer{position:relative}

@@ -72,6 +72,15 @@ check('people outside the group cannot load it', dave.get(r['chat']['photo'], ba
 check('...and "changed the group photo" shows in the chat', 'bob changed the group photo' in lines(carol, gid))
 check('only photos are accepted', bob.put('/api/group-chats/%d/photo' % gid, json={'photo': 'data:text/html;base64,PGI+'}, headers=H, base_url=BASE).status_code == 400)
 
+r = bob.post('/api/group-chats/%d/messages' % gid, json={'message': png('#00b894'), 'message_type': 'image'}, headers=H, base_url=BASE).get_json()
+got = [m for m in carol.get('/api/group-chats/%d/messages' % gid, base_url=BASE).get_json()['messages'] if m['kind'] == 'image']
+check('photos in the chat come as an address with their size, not as megabytes of text',
+      got and got[-1]['body'] == '/api/group-chats/%d/messages/%d/image' % (gid, got[-1]['id']) and got[-1]['w'] > 0 and got[-1]['h'] > 0
+      and r['message']['body'] == got[-1]['body'], str(got)[:200])
+ph = carol.get(got[-1]['body'], base_url=BASE)
+check('...members load the photo itself', ph.status_code == 200 and ph.mimetype.startswith('image/') and Image.open(io.BytesIO(ph.data)).size == (got[-1]['w'], got[-1]['h']))
+check('...nobody else can', dave.get(got[-1]['body'], base_url=BASE).status_code == 404
+      and carol.get('/api/group-chats/%d/messages/%d/image' % (gid + 999, got[-1]['id']), base_url=BASE).status_code == 404)
 check('an admin removes a member', bob.delete('/api/group-chats/%d/members/%d' % (gid, U[4]), headers=H, base_url=BASE).get_json()['ok'])
 check('...but not the owner', bob.delete('/api/group-chats/%d/members/%d' % (gid, U[0]), headers=H, base_url=BASE).status_code == 403)
 alice.put('/api/group-chats/%d/members/%d' % (gid, U[2]), json={'role': 'admin'}, headers=H, base_url=BASE)
@@ -117,9 +126,9 @@ server = subprocess.Popen([sys.executable, '-c',
     'd.app.run(host="127.0.0.1",port=%d,debug=False,use_reloader=False,threaded=True)' % PORT],
     env=dict(os.environ, PYTHONPATH=ROOT), cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 DRIVER = r'''
-import asyncio, json, os
+import asyncio, json, os, sqlite3
 from playwright.async_api import async_playwright
-PORT, COOKIE, SHOTS, GID, PHOTO = %d, %r, %r, %d, %r
+PORT, COOKIE, SHOTS, GID, PHOTO, DB, BOB = %d, %r, %r, %d, %r, %r, %d
 async def run(b, theme, w, h):
     ctx = await b.new_context(viewport={'width': w, 'height': h}, is_mobile=w < 600, has_touch=w < 600)
     await ctx.add_init_script("try{localStorage.setItem('oa_theme','%%s');localStorage.setItem('orcagent_tips_seen','1')}catch(e){}" %% theme)
@@ -151,6 +160,14 @@ async def run(b, theme, w, h):
     out['emojiInput'] = await page.evaluate("document.querySelector('.gc-input').value")
     await page.click('.gc-send'); await page.wait_for_selector('.gc-msg.mine:not(.pending)', timeout=10000)
     out['emojiSent'] = await page.evaluate("[[...document.querySelectorAll('.gc-msg.mine .gc-text')].pop().textContent, document.querySelector('.gc-emoji-panel').hidden]")
+    # A message from someone else arrives: the messages already on screen stay as they are.
+    await page.evaluate("document.querySelectorAll('.gc-item').forEach(e=>e.__seen=1)")
+    con = sqlite3.connect(DB); con.execute("INSERT INTO group_chat_messages (chat_id, sender_id, kind, body, created_at) VALUES (?,?,'text',?,datetime('now'))", (GID, BOB, 'fresh one ' + tag)); con.commit(); con.close()
+    for _ in range(40):
+        if await page.evaluate("[...document.querySelectorAll('.gc-text')].some(e=>e.textContent==='fresh one %%s')" %% tag): break
+        await page.wait_for_timeout(200)
+    out['incremental'] = await page.evaluate("(()=>{const it=[...document.querySelectorAll('.gc-item')];"
+        "return [it.length, it.filter(e=>!e.__seen).length, it[it.length-1].textContent.indexOf('fresh one %%s')>=0, it.filter(e=>!e.__seen).map(e=>e.textContent.slice(0,40))]})()" %% tag)
     await page.click('.gc-icon-btn[data-gc-info]'); await page.wait_for_selector('.gc-member', timeout=5000); await page.wait_for_timeout(450)
     out['owner'] = await page.evaluate("""[!!document.querySelector('.gc-info-photo .gc-info-cam'), !!document.querySelector('.gc-delete'),
         document.querySelectorAll('.gc-more').length, [...document.querySelectorAll('.gc-member small')].map(e=>e.textContent)[0],
@@ -188,7 +205,7 @@ async def main():
         await b.close()
     print('@@' + json.dumps(res))
 asyncio.run(main())
-''' % (PORT, COOKIE, SHOTS, gid, PHOTO)
+''' % (PORT, COOKIE, SHOTS, gid, PHOTO, d.DB_FILE, U[1])
 B = {}
 try:
     for _ in range(60):
@@ -210,6 +227,9 @@ for i, tag in enumerate(('dark_390', 'light_360', 'dark_1280')):
         check('BROWSER %s: with the keyboard open the chat fills exactly what is visible: header on top, composer on the keyboard' % tag,
               k[0] == 300 and k[1] == k[3] and k[2] == 300, str(k))
         check('BROWSER %s: ...and fills the screen again when it closes' % tag, m.get('keyboardClosed') is True, str(m.get('keyboardClosed')))
+    inc = m.get('incremental') or [0, -1, False]
+    check('BROWSER %s: a new message is added on its own; the chat is not rebuilt' % tag,
+          inc[0] > 3 and inc[1] == 1 and inc[2] is True, str(inc))
     check('BROWSER %s: the composer has an emoji panel like DMs, fully on screen' % tag, m.get('emojiPanel') == [35, True], str(m.get('emojiPanel')))
     check('BROWSER %s: tapping emojis types them into the message' % tag, m.get('emojiInput') == 'to the moon 🚀💎', str(m.get('emojiInput')))
     check('BROWSER %s: ...and they are sent, the panel closes' % tag, m.get('emojiSent') == ['to the moon 🚀💎', True], str(m.get('emojiSent')))
