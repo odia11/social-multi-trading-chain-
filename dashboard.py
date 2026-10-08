@@ -18937,7 +18937,7 @@ def _navbar_html(active_nav: str = '') -> Markup:
   <nav class="pt-nb-nav" id="pt-nb-nav">%(nav_links)s<div class="pt-nb-nav-sep pt-nb-mobile-only"></div>%(more_items_mobile)s</nav>
   <div class="pt-nb-search-wrap">
     <span class="pt-nb-search-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
-    <input class="pt-nb-search" id="pt-nb-search-input" placeholder="Search token, address, trader&#8230;" autocomplete="off">
+    <input class="pt-nb-search" id="pt-nb-search-input" type="search" inputmode="search" aria-label="Search tokens and traders" placeholder="Search token, address, trader&#8230;" autocomplete="off">
     <div class="pt-nb-search-results" id="pt-nb-search-results"></div>
   </div>
   <div class="pt-nb-right">

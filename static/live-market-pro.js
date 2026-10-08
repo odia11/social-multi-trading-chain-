@@ -2750,6 +2750,18 @@ function launchCardHtml(l){
     +'<div class="pt-launch-meta">'+esc(l.quote_asset)+' · '+_launchAge(l.finalized_at||l.created_at)+'</div></div>'
     +'<span class="pt-launch-buy">Buy</span></div>';
 }
+/* The strip appeared once its fetch answered and pushed the token list down.
+   The cards seen last this session are shown straight away instead; the
+   fresh list replaces them in place. */
+var _LAUNCH_CACHE_KEY='oa_lm_launches_v1';
+function restoreLaunches(){
+  try{
+    var markup=sessionStorage.getItem(_LAUNCH_CACHE_KEY);
+    var wrap=document.getElementById('pt-launch-wrap'), rail=document.getElementById('pt-launch-rail');
+    if(!markup || !wrap || !rail) return;
+    rail.innerHTML=markup; _launchMarkup=markup; wrap.style.display='';
+  }catch(e){}
+}
 function loadLaunches(){
   _routeScope.fetch('/api/token-launches?page=1', {credentials:'include'})
     .then(function(r){ return r.json(); })
@@ -2758,9 +2770,10 @@ function loadLaunches(){
       if(!wrap || !rail || _railsBeingTouched['pt-launch-rail']) return;
       var list=((d && d.launches) || []).slice(0, 12);
       // No launches yet: no empty strip.
-      if(!list.length){ wrap.style.display='none'; _launchMarkup=null; return; }
+      if(!list.length){ wrap.style.display='none'; _launchMarkup=null; try{ sessionStorage.setItem(_LAUNCH_CACHE_KEY,''); }catch(e){} return; }
       wrap.style.display='';
       var markup=list.map(launchCardHtml).join('');
+      try{ sessionStorage.setItem(_LAUNCH_CACHE_KEY, markup); }catch(e){}
       if(markup!==_launchMarkup){
         var keep=rail.scrollLeft; rail.innerHTML=markup; _launchMarkup=markup; rail.scrollLeft=keep;
       }
@@ -2825,9 +2838,20 @@ function loadTape(){
    heading say "24h". Fetched once and rendered into both the compact
    top-of-feed rail (renderTraderRail, mobile+desktop, above the fold) and
    the fuller right-rail list (desktop only, has the Copy-trade button). */
+/* The Top traders rail appeared once /api/leaderboard answered and pushed
+   the token list 144px down. The traders seen last this session are drawn
+   straight away; the fresh list replaces them in place. */
+var _TRADERS_CACHE_KEY='oa_lm_traders_v1';
+function restoreTraders(){
+  try{
+    var rows=JSON.parse(sessionStorage.getItem(_TRADERS_CACHE_KEY)||'null');
+    if(Array.isArray(rows) && rows.length) renderTraderRail(rows);
+  }catch(e){}
+}
 function loadTraders(){
   _routeScope.fetch('/api/leaderboard').then(function(r){ return r.json(); }).then(function(rows){
     rows = Array.isArray(rows) ? rows : [];
+    try{ sessionStorage.setItem(_TRADERS_CACHE_KEY, JSON.stringify(rows.slice(0, 20))); }catch(e){}
     var identity=JSON.stringify([rows,_copyStatus.copying,_copyStatus.target]);
     if(identity===_traderIdentity) return;
     _traderIdentity=identity;
@@ -3133,8 +3157,10 @@ _routeScope.addEventListener(document,'DOMContentLoaded', function(){
     loadWatchlistSet().then(patchWatchButtons);
   }
   loadSurges();
+  restoreLaunches();
   loadLaunches();
   loadTape();
+  restoreTraders();
   loadTraders();
   loadWatchlist();
   loadPulse();

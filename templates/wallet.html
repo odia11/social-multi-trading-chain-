@@ -719,6 +719,7 @@ html,body{background:#080e11}
 @media(max-width:768px){.wlt-center{max-height:none;overflow:visible}.wlt-hdr{padding:21px 16px 0}.wlt-title{font-size:25px}.wlt-content{padding:18px 16px 130px}.wlt-hero{padding:22px 18px 7px}.wlt-hero-num{font-size:36px}.wlt-action-ic{min-height:54px}.portfolio-tabs{gap:30px}}
 .wallet-scope-note{font-size:12px;color:var(--muted,#8b96a5);margin-top:6px;line-height:1.35}
 </style>
+<link rel="stylesheet" href="/static/tip-experience.css?v={{ app_version }}">
 </head>
 <body>
 {{ navbar_html('wallet') }}
@@ -2944,7 +2945,6 @@ initPullToRefresh({ onRefresh: function(){
 }});
 </script>
 
-<link rel="stylesheet" href="/static/tip-experience.css?v={{ app_version }}">
 <script src="/static/tip-experience.js?v={{ app_version }}" defer></script>
 <script>
 // /wallet#deposit (Home's Deposit button) opens the deposit sheet directly;

@@ -42,7 +42,12 @@ html,body{background:#080e11}
 .page-wrap{max-width:800px}
 .page-title-row{margin:12px 0 24px}
 .page-title{font-size:27px;letter-spacing:-.035em}
-.bot-live-indicator{display:flex;align-items:center;gap:9px;color:var(--green);font-size:14px;font-weight:700}
+.bot-live-indicator{display:flex;align-items:center;gap:9px;color:var(--green);font-size:14px;font-weight:700;white-space:nowrap}
+/* The trade lists and the controls below them wait for the first trades
+   (or this session's last ones) instead of growing from "Loading…" and
+   pushing the controls down; shown after 2.5s whatever happens. */
+@keyframes oaBotReveal{to{visibility:visible}}
+.page-wrap.oa-bot-loading .bot-activity,.page-wrap.oa-bot-loading .strategy-card{visibility:hidden;animation:oaBotReveal 0s linear 2.5s forwards}
 #bot-live-lamp{width:11px;height:11px;border-radius:50%;background:#77838b}
 #bot-live-lamp.active{background:var(--green);box-shadow:0 0 13px #38d39f66}
 .status-card,.strategy-card{border:1px solid #29353d;border-radius:19px;background:linear-gradient(145deg,#162025,#11191e);box-shadow:inset 0 1px #ffffff08;margin-bottom:15px}
@@ -72,7 +77,7 @@ html,body{background:#080e11}
 <body class="oa-bot-page">
 {% include '_low_balance_modal.html' %}
 {{ navbar_html('bot') }}
-<div class="page-wrap">
+<div class="page-wrap oa-bot-loading">
   <div class="page-title-row"><div class="page-title"><span class="bot-lightning">ϟ</span> Auto Trading</div><div class="bot-live-indicator"><span id="bot-live-lamp"></span><span id="bot-live-word">Checking</span></div></div>
 
   <section class="status-card">
@@ -136,7 +141,13 @@ function tokenHref(t){return t.mint_address&&(!t.chain||t.chain==='solana')?'/li
 /* What the bot holds and what it last bought and sold -- the same data as Live Trades. */
 function openRow(p){return'<a class="ba-row" href="'+tokenHref(p)+'"><div class="ba-main"><b>$'+esc(p.token)+'</b><small>Bought at '+price(p.entry_price)+(p.opened_ts?' · '+ago(p.opened_ts):'')+'</small></div><div class="ba-res"><b class="'+cls(p.pnl_pct)+'">'+pct(p.pnl_pct)+'</b><small class="'+cls(p.pnl_pct)+'">'+(p.price_known?usd(p.pnl_usd,true):'price unavailable')+'</small></div></a>'}
 function closedRow(t){return'<a class="ba-row" href="'+tokenHref(t)+'"><div class="ba-main"><b>$'+esc(t.token)+'</b><small>'+price(t.entry_price)+' → '+price(t.exit_price)+' · '+esc(t.exit_reason)+(t.sold_ts?' · '+ago(t.sold_ts):'')+'</small></div><div class="ba-res"><b class="'+cls(t.pnl_usd)+'">'+usd(t.pnl_usd,true)+'</b><small class="'+cls(t.pnl_pct)+'">'+pct(t.pnl_pct)+'</small></div></a>'}
-async function loadActivity(overview){var d=await fetch('/api/live-trades',{credentials:'include',cache:'no-store'}).then(r=>r.json()).catch(()=>null);if(overview)await overview.catch(function(){});if(!d||!d.ok)return;var open=(d.positions||[]).slice(0,5),closed=(d.trades||[]).slice(0,5);document.getElementById('ba-open-count').textContent=(d.positions||[]).length?(d.positions||[]).length+' open':'';document.getElementById('ba-open').innerHTML=open.length?open.map(openRow).join(''):'<div class="ba-empty">'+(running?'Scanning the market — the next buy shows up here.':'Nothing held. Turn the bot on and every buy shows up here.')+'</div>';document.getElementById('ba-closed').innerHTML=closed.length?closed.map(closedRow).join(''):'<div class="ba-empty">No finished trades yet. Each sell shows up here with its entry, exit and result.</div>'}
+function _baShown(){var w=document.querySelector('.page-wrap.oa-bot-loading');if(w)w.classList.remove('oa-bot-loading')}
+async function loadActivity(overview){var d=await fetch('/api/live-trades',{credentials:'include',cache:'no-store'}).then(r=>r.json()).catch(()=>null);if(overview)await overview.catch(function(){});if(!d||!d.ok){_baShown();return}var open=(d.positions||[]).slice(0,5),closed=(d.trades||[]).slice(0,5);document.getElementById('ba-open-count').textContent=(d.positions||[]).length?(d.positions||[]).length+' open':'';document.getElementById('ba-open').innerHTML=open.length?open.map(openRow).join(''):'<div class="ba-empty">'+(running?'Scanning the market — the next buy shows up here.':'Nothing held. Turn the bot on and every buy shows up here.')+'</div>';document.getElementById('ba-closed').innerHTML=closed.length?closed.map(closedRow).join(''):'<div class="ba-empty">No finished trades yet. Each sell shows up here with its entry, exit and result.</div>';try{sessionStorage.setItem(_BA_CACHE_KEY,JSON.stringify({t:Date.now(),count:document.getElementById('ba-open-count').textContent,open:document.getElementById('ba-open').innerHTML,closed:document.getElementById('ba-closed').innerHTML}))}catch(e){}_baShown()}
+/* The lists grew from "Loading…" to five trades after the page was shown and
+   pushed the controls below them down. The last ones seen this session are
+   shown straight away instead; the fresh copy replaces them in place. */
+var _BA_CACHE_KEY='oa_bot_activity_v1';
+(function(){try{var c=JSON.parse(sessionStorage.getItem(_BA_CACHE_KEY)||'null');if(!c||Date.now()-c.t>15*60*1000)return;document.getElementById('ba-open-count').textContent=c.count||'';document.getElementById('ba-open').innerHTML=c.open;document.getElementById('ba-closed').innerHTML=c.closed;_baShown()}catch(e){}})();
 function blAgo(t){var s=Math.max(0,Date.now()/1000-t);return s<60?'just now':s<3600?Math.max(1,Math.round(s/60))+'m ago':s<86400?Math.round(s/3600)+'h ago':Math.round(s/86400)+'d ago'}
 function renderLearning(d){var t=document.getElementById('bl-toggle'),st=document.getElementById('bl-status'),ls=document.getElementById('bl-list'),lg=document.getElementById('bl-log');if(!d||!d.ok){st.textContent='Learning status unavailable right now.';return}t.checked=!!d.enabled;var items=[],mb=d.market_brain||{};if(d.enabled){if(d.score_floor!=null)items.push('Only buys with entry score <b>'+esc(d.score_floor)+'+</b>');(d.avoid||[]).forEach(function(a){items.push('Your trades: skips <b>'+esc(a)+'</b>')});(mb.avoid||[]).forEach(function(a){items.push('Market shadow: avoids <b>'+esc(a)+'</b>')})}var personal=!d.enabled?'Off — the bot uses your own settings and safety rules only.':d.trades_analysed<d.needs?('Personal learning: '+d.trades_analysed+'/'+d.needs+' finished bot trades.'):items.length?(d.measuring?'Personal change is being tested on the next trades.':'Personal learning active from '+d.trades_analysed+' finished bot trades.'):('Personal learning analysed '+d.trades_analysed+' trades — no extra rule needed.');var market=mb.ready?(' Market brain active: '+Number(mb.resolved||0)+' resolved paper candidates.'):(' Market brain learning: '+Number(mb.resolved||0)+'/'+Number(mb.needs||40)+' resolved paper candidates.');st.textContent=personal+market;ls.innerHTML=items.map(function(x){return'<li>'+x+'</li>'}).join('');lg.innerHTML=(d.log||[]).slice(0,4).map(function(e){return'<div><time>'+blAgo(e.at)+'</time>'+esc(e.message)+'</div>'}).join('')}
 async function loadLearning(){var d=await fetch('/api/bot/learning',{credentials:'include',cache:'no-store'}).then(function(r){return r.json()}).catch(function(){return null});renderLearning(d)}

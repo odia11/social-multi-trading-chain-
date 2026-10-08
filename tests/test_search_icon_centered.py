@@ -14,7 +14,8 @@ def check(name, cond):
     checks.append(bool(cond)); print(('PASS ' if cond else 'FAIL ') + name)
 
 def rule(css, sel):
-    m = re.search(re.escape(sel) + r'\{([^}]*)\}', css)
+    # The selector may be one of a list (e.g. also html.oa-route-home body ...).
+    m = re.search(re.escape(sel) + r'(?:\s*,[^{]*)?\{([^}]*)\}', css)
     return m.group(1) if m else ''
 
 portal = rule(NAV, '#pt-nb-search-portal .pt-nb-search-icon')
