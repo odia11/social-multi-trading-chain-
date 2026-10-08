@@ -131,6 +131,15 @@ async def run(b, theme, w, h):
     tag = '%%s_%%d' %% (theme, w); out = {}
     await page.goto('http://127.0.0.1:%%d/messages?group=%%d' %% (PORT, GID), wait_until='load')
     await page.wait_for_selector('#gc-thread:not([hidden]) .gc-sys', timeout=15000)
+    await page.click('.gc-emoji'); await page.wait_for_selector('.gc-emoji-panel:not([hidden])', timeout=5000)
+    out['emojiPanel'] = await page.evaluate("(()=>{const r=document.querySelector('.gc-emoji-panel').getBoundingClientRect();"
+                                            "return [document.querySelectorAll('.gc-emoji-panel button').length, r.left>=0&&r.right<=innerWidth&&r.top>=0]})()")
+    if SHOTS: await page.screenshot(path=SHOTS + '/emoji_' + tag + '.png')
+    await page.fill('.gc-input', 'to the moon ')
+    await page.click('.gc-emoji-panel button[aria-label=\"🚀\"]'); await page.click('.gc-emoji-panel button[aria-label=\"💎\"]')
+    out['emojiInput'] = await page.evaluate("document.querySelector('.gc-input').value")
+    await page.click('.gc-send'); await page.wait_for_selector('.gc-msg.mine:not(.pending)', timeout=10000)
+    out['emojiSent'] = await page.evaluate("[[...document.querySelectorAll('.gc-msg.mine .gc-text')].pop().textContent, document.querySelector('.gc-emoji-panel').hidden]")
     await page.click('.gc-icon-btn[data-gc-info]'); await page.wait_for_selector('.gc-member', timeout=5000); await page.wait_for_timeout(450)
     out['owner'] = await page.evaluate("""[!!document.querySelector('.gc-info-photo .gc-info-cam'), !!document.querySelector('.gc-delete'),
         document.querySelectorAll('.gc-more').length, [...document.querySelectorAll('.gc-member small')].map(e=>e.textContent)[0],
@@ -185,6 +194,9 @@ finally:
 
 for i, tag in enumerate(('dark_390', 'light_360', 'dark_1280')):
     m = B.get(tag, {})
+    check('BROWSER %s: the composer has an emoji panel like DMs, fully on screen' % tag, m.get('emojiPanel') == [35, True], str(m.get('emojiPanel')))
+    check('BROWSER %s: tapping emojis types them into the message' % tag, m.get('emojiInput') == 'to the moon 🚀💎', str(m.get('emojiInput')))
+    check('BROWSER %s: ...and they are sent, the panel closes' % tag, m.get('emojiSent') == ['to the moon 🚀💎', True], str(m.get('emojiSent')))
     o = m.get('owner') or [False, False, 0, '', False]
     check('BROWSER %s: the owner sees a camera on the photo, Delete group, and options per member' % tag,
           o[0] and o[1] and o[2] == 3 and o[3] == 'Group owner' and o[4], str(o))

@@ -71,9 +71,12 @@ var ICON={
   send:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>',
   check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg>',
   camera:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
+  smile:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01"/><path d="M15 9h.01"/></svg>',
   more:'<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
   close:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>'
 };
+// The same set as the emoji panel in direct messages.
+var EMOJI=['😀','😂','🤣','😍','🥰','😎','🤔','😅','😉','😢','😭','😡','😱','😴','🥳','🤯','🙌','👏','👍','👎','🙏','🤝','💪','👀','🔥','💯','✅','❌','🚀','📈','📉','💰','💎','❤️','🎉'];
 var VERIFIED='<svg class="conv-verified" viewBox="0 0 24 24" aria-label="Verified"><circle cx="12" cy="12" r="12" fill="#f7b955"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#0a0b0e" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 function avatarHtml(cls,name,seed,url){
@@ -165,6 +168,8 @@ function threadEl(){
     +'<form class="gc-composer" autocomplete="off">'
     +'<button type="button" class="gc-icon-btn gc-photo" aria-label="Send a photo">'+ICON.photo+'</button>'
     +'<input type="file" accept="image/jpeg,image/png,image/gif,image/webp" class="gc-file" hidden>'
+    +'<button type="button" class="gc-icon-btn gc-emoji" aria-label="Emoji" aria-expanded="false">'+ICON.smile+'</button>'
+    +'<div class="gc-emoji-panel" role="dialog" aria-label="Emoji" hidden>'+EMOJI.map(function(e){return '<button type="button" aria-label="'+e+'">'+e+'</button>';}).join('')+'</div>'
     +'<textarea class="gc-input" rows="1" maxlength="1000" placeholder="Message" aria-label="Message"></textarea>'
     +'<button type="submit" class="gc-send" aria-label="Send" disabled>'+ICON.send+'</button></form>';
   document.body.appendChild(t);
@@ -176,10 +181,31 @@ function threadEl(){
   input.addEventListener('keydown',function(e){
     if(e.key==='Enter'&&!e.shiftKey&&!('ontouchstart' in window)){e.preventDefault();form.requestSubmit?form.requestSubmit():form.dispatchEvent(new Event('submit',{cancelable:true}));}
   });
-  form.addEventListener('submit',function(e){e.preventDefault();sendText();});
+  form.addEventListener('submit',function(e){e.preventDefault();emojiPanel(false);sendText();});
+  var smile=t.querySelector('.gc-emoji'),panel=t.querySelector('.gc-emoji-panel');
+  smile.addEventListener('click',function(){emojiPanel(panel.hidden);});
+  // pointerdown + preventDefault keeps the keyboard (and the cursor) where it is.
+  panel.addEventListener('pointerdown',function(e){if(e.target.closest('button'))e.preventDefault();});
+  panel.addEventListener('click',function(e){
+    var b=e.target.closest('button');if(!b)return;
+    var em=b.textContent,a=input.selectionStart,z=input.selectionEnd;
+    if(typeof a!=='number'){a=z=input.value.length;}
+    if((input.value.length+em.length)>1000)return;
+    input.value=input.value.slice(0,a)+em+input.value.slice(z);
+    input.selectionStart=input.selectionEnd=a+em.length;
+    input.dispatchEvent(new Event('input'));
+  });
+  document.addEventListener('pointerdown',function(e){
+    if(!panel.hidden&&!panel.contains(e.target)&&!smile.contains(e.target))emojiPanel(false);
+  });
   t.querySelector('.gc-photo').addEventListener('click',function(){t.querySelector('.gc-file').click();});
   t.querySelector('.gc-file').addEventListener('change',function(){var f=this.files&&this.files[0];this.value='';if(f)sendPhoto(f);});
   return t;
+}
+function emojiPanel(show){
+  var t=document.getElementById('gc-thread');if(!t)return;
+  var panel=t.querySelector('.gc-emoji-panel');
+  panel.hidden=!show;t.querySelector('.gc-emoji').setAttribute('aria-expanded',show?'true':'false');
 }
 function paintHeader(){
   var t=threadEl();if(!open)return;
@@ -276,7 +302,7 @@ function adopt(chat){
 }
 function closeGroup(fromPop){
   if(pollTimer){window.clearInterval(pollTimer);pollTimer=null;}
-  open=null;window.__oaOpenGroupId=null;
+  open=null;window.__oaOpenGroupId=null;emojiPanel(false);
   var t=document.getElementById('gc-thread');if(t)t.hidden=true;
   closeSheet();
   document.documentElement.classList.remove('gc-lock');document.body.classList.remove('gc-open');
@@ -626,6 +652,8 @@ document.addEventListener('click',function(e){
 document.addEventListener('keydown',function(e){
   if(e.key!=='Escape')return;
   if(document.getElementById('gc-sheet')){closeSheet();return;}
+  var ep=document.querySelector('#gc-thread .gc-emoji-panel');
+  if(ep&&!ep.hidden){emojiPanel(false);return;}
   if(open)closeGroup();
 });
 window.addEventListener('popstate',function(){
