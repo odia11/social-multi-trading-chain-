@@ -71,24 +71,48 @@ CREATE TABLE token_calls(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,wa
     def publish(self, when, tokens=TOKENS, sol=152.0):
         return p.publish_due(self.db, when.timestamp(), live_data=lambda: (tokens, sol))
 
-    def test_a_call_milestone_and_a_new_call_go_out_first_and_only_once(self):
+    def test_call_posts_come_now_and_then_not_every_half_hour(self):
+        # A post every 30 minutes, as before -- but posts about calls only now
+        # and then (at most one per CALL_MIN_GAP, in a slot the draw picks),
+        # so the feed is not filled with calls.
         cid = self.call(2, 'POPCAT', 0.0001, 0.00024, DAY0 - dt.timedelta(days=2), mc=141_000_000)
-        new = self.call(3, 'FWOG', 0.04, 0.041, DAY0 - dt.timedelta(minutes=40), note='Volume picking up, holding support.')
-        self.publish(DAY0)
-        self.publish(DAY0 + dt.timedelta(minutes=30))
-        first, second = self.posts()
+        new = None
+        for i in range(48):
+            if i == 8:   # someone makes a call at 04:00
+                new = self.call(3, 'FWOG', 0.04, 0.041, DAY0 + dt.timedelta(hours=4) - dt.timedelta(minutes=5),
+                                note='Volume picking up, holding support.')
+            self.publish(DAY0 + dt.timedelta(minutes=30 * i))
+        with sqlite3.connect(self.db) as c:
+            rows = c.execute("SELECT topic, created_at FROM platform_assistant_events WHERE kind='post' ORDER BY created_at").fetchall()
+        self.assertEqual(len(rows), 48, 'a post every half hour, as before')
+        call_rows = [(t, at) for t, at in rows if t.startswith(live.CALL_TOPICS)]
+        self.assertEqual([t for t, _ in call_rows].count('milestone:%d:2' % cid), 1)
+        self.assertEqual([t for t, _ in call_rows].count('call:%d' % new), 1)
+        gaps = [b - a for (_, a), (_, b) in zip(call_rows, call_rows[1:])]
+        self.assertTrue(all(g >= live.CALL_MIN_GAP for g in gaps), gaps)
+        self.assertLessEqual(len(call_rows), 12, 'at most one call post per two hours')
+        self.assertGreaterEqual(len(rows) - len(call_rows), 36, 'most half-hours are not about calls')
+        with sqlite3.connect(self.db) as c:
+            texts = dict(c.execute("SELECT e.topic, p.content FROM platform_assistant_events e JOIN feed_posts p "
+                                   "ON e.post_id='p'||p.id WHERE e.kind='post'").fetchall())
+        first = texts['milestone:%d:2' % cid]
         self.assertIn('$POPCAT', first)
         self.assertIn('2.4x', first)   # where it stands now, not the rounded milestone
         self.assertIn('@chartwizard', first)
         self.assertTrue(first.endswith('__CALL__' + json.dumps({'id': cid})))
+        second = texts['call:%d' % new]
         self.assertIn('@solqueen', second)
         self.assertIn('Volume picking up, holding support.', second)
         self.assertTrue(second.endswith('__CALL__' + json.dumps({'id': new})))
-        self.assertEqual(self.topics()[:2], ['milestone:%d:2' % cid, 'call:%d' % new])
-        for i in range(2, 10):
-            self.publish(DAY0 + dt.timedelta(minutes=30 * i))
-        self.assertEqual(self.topics().count('milestone:%d:2' % cid), 1)
-        self.assertEqual(self.topics().count('call:%d' % new), 1)
+
+    def test_a_call_slot_is_never_within_two_hours_of_the_last_call_post(self):
+        with sqlite3.connect(self.db) as c:
+            c.execute("INSERT INTO platform_assistant_events VALUES('x','post',NULL,'p1',NULL,'call:1',?)",
+                      (DAY0.timestamp() - 3600,))
+            self.assertFalse(any(live.call_slot(c, DAY0.timestamp(), i) for i in range(200)))
+            c.execute("UPDATE platform_assistant_events SET created_at=?", (DAY0.timestamp() - 3 * 3600,))
+            picks = sum(live.call_slot(c, DAY0.timestamp(), i) for i in range(1000))
+        self.assertTrue(250 <= picks <= 450, picks)   # about CALL_CHANCE of the slots
 
     def test_trending_tokens_rotate_with_a_live_chart_and_a_cooldown(self):
         for i in range(4):

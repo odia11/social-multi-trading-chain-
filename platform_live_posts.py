@@ -30,12 +30,20 @@ HOUR = 3600
 TRENDING_COOLDOWN = 6 * HOUR
 TRENDING_MIN_CHANGE = 5.0
 MOST_CALLED_COOLDOWN = 24 * HOUR
-NEW_CALL_WINDOW = 3 * HOUR
+NEW_CALL_WINDOW = 6 * HOUR   # call posts come every few hours, so a new call can wait for one
 MILESTONES = (2, 3, 5, 10)
 MILESTONE_WINDOW_DAYS = 7
 BEST_CALL_MIN = 1.2
 NFA = 'Not financial advice.'
 ROTATION = ('trending', 'best_call', 'trending', 'most_called', 'trending', 'pulse', 'trending', 'top_caller')
+# Posts about calls (a milestone, a new call, the best call, the most called
+# token, the top caller) come now and then, not every half hour: at most one
+# every CALL_MIN_GAP, and even then only in a slot the draw picks. The other
+# half-hours carry trending tokens, the market pulse or a product post.
+CALL_TOPICS = ('milestone:', 'call:', 'best:', 'mostcalled:', 'topcaller:')
+CALL_KINDS = ('best_call', 'most_called', 'top_caller')
+CALL_MIN_GAP = 2 * HOUR
+CALL_CHANCE = 0.35
 
 
 def usd(v):
@@ -302,14 +310,27 @@ def pulse(c, now, tokens, sol_usd):
     return [(topic, _pick(texts, topic), None, '')]
 
 
+def call_slot(c, now, slot_index):
+    """Whether this half-hour may be about calls: the last call post is at
+    least CALL_MIN_GAP ago and this slot's draw (fixed per slot, so a restart
+    decides the same) falls under CALL_CHANCE."""
+    gaps = [g for g in (_since(c, t + '%', now) for t in CALL_TOPICS) if g is not None]
+    if gaps and min(gaps) < CALL_MIN_GAP:
+        return False
+    draw = int(hashlib.sha256(('call-slot:%d' % slot_index).encode()).hexdigest()[:8], 16) / 0xFFFFFFFF
+    return draw < CALL_CHANCE
+
+
 def candidates(c, now, slot_index, tokens=None, sol_usd=0.0):
     """Every post that could go out now, best first:
     (topic, [phrasings], picture spec or None, live-card embed or '').
     The post carries the picture; only when no picture could be made does
-    it carry the live card instead."""
+    it carry the live card instead. Call posts only in a call slot."""
     out = []
-    out += milestone(c, now)
-    out += new_calls(c, now)
+    calls_now = call_slot(c, now, slot_index)
+    if calls_now:
+        out += milestone(c, now)
+        out += new_calls(c, now)
     kinds = {
         'trending': lambda: trending(c, now, tokens),
         'best_call': lambda: best_call(c, now),
@@ -320,7 +341,7 @@ def candidates(c, now, slot_index, tokens=None, sol_usd=0.0):
     start = slot_index % len(ROTATION)
     seen = set()
     for k in ROTATION[start:] + ROTATION[:start]:
-        if k in seen:
+        if k in seen or (k in CALL_KINDS and not calls_now):
             continue
         seen.add(k)
         try:
