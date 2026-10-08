@@ -532,8 +532,50 @@ function _updateMsgBadge() {
   if (badge) { badge.textContent = total || ''; badge.style.display = total ? '' : 'none'; }
 }
 
+// Retain inbox rows and decoded images during polls. Only changed text,
+// attributes or newly inserted/removed children need DOM writes. Keeping
+// the row also keeps its swipe/click handlers and keyboard focus intact.
+function _syncInboxNode(old, fresh){
+  if(old.nodeType!==fresh.nodeType || old.nodeName!==fresh.nodeName){ old.replaceWith(fresh); return; }
+  if(old.nodeType===3){ if(old.nodeValue!==fresh.nodeValue) old.nodeValue=fresh.nodeValue; return; }
+  if(old.nodeType!==1) return;
+  Array.from(old.attributes).forEach(function(a){ if(!fresh.hasAttribute(a.name)) old.removeAttribute(a.name); });
+  Array.from(fresh.attributes).forEach(function(a){ if(old.getAttribute(a.name)!==a.value) old.setAttribute(a.name,a.value); });
+  if(Array.from(fresh.children).some(function(n){return n.hasAttribute('data-peer-id');})){
+    _reconcileInbox(old,fresh.innerHTML,'data-peer-id'); return;
+  }
+  var children=Array.from(fresh.childNodes);
+  children.forEach(function(child,index){
+    var current=old.childNodes[index];
+    if(current) _syncInboxNode(current,child); else old.appendChild(child);
+  });
+  while(old.childNodes.length>children.length) old.lastChild.remove();
+}
+function _reconcileInbox(el, html, keyAttr){
+  if(el._oaInboxHtml===html) return;
+  var box=document.createElement('div'); box.innerHTML=html;
+  var pool=new Map(), kept=new Set();
+  function key(node,index){return node.hasAttribute(keyAttr) ? node.getAttribute(keyAttr) : 'fixed:'+index;}
+  Array.from(el.children).forEach(function(node,index){pool.set(key(node,index),node);});
+  var cursor=el.firstElementChild;
+  Array.from(box.children).forEach(function(fresh,index){
+    var markup=fresh.outerHTML, old=pool.get(key(fresh,index)), root=fresh;
+    if(old && old.nodeName===fresh.nodeName){
+      if(old._oaInboxHtml!==markup) _syncInboxNode(old,fresh);
+      root=old;
+    }
+    root._oaInboxHtml=markup;
+    if(root!==cursor) el.insertBefore(root,cursor);
+    kept.add(root); cursor=root.nextElementSibling;
+  });
+  Array.from(el.children).forEach(function(node){if(!kept.has(node)) node.remove();});
+  el._oaInboxHtml=html;
+}
+var _convLoadInFlight=false;
 var _lastConvSig = null;
 async function loadConversations() {
+  if(document.hidden || _convLoadInFlight) return;
+  _convLoadInFlight=true;
   try {
     var r = await fetch('/api/messages');
     var d = await r.json();
@@ -543,17 +585,8 @@ async function loadConversations() {
     }
     if (d.ok) {
       _conversations = d.conversations || [];
-      // Skip the (expensive, main-thread-blocking) full conv-list rebuild on
-      // this 5s poll when nothing actually changed -- same fix
-      // _renderMessages() already has for the message-thread poll (see its
-      // own comment): rebuilding the whole list every cycle regardless was
-      // real work happening every 5s no matter what page state you were in,
-      // including while a thread was open and you were mid-scroll reading
-      // it -- that's what made scrolling anywhere on this page stutter
-      // roughly every 5 seconds.
-      var sig = _conversations.map(function(c){
-        return c.peer_id+':'+c.unread+':'+c.last_ts+':'+c.last_msg+':'+(c.peer_online?1:0);
-      }).join(',');
+      // Include profile metadata as well as previews and unread status.
+      var sig = JSON.stringify(_conversations);
       if (sig !== _lastConvSig) {
         // A swipe/delete/search interaction must not freeze future refreshes.
         // Only mark the snapshot as displayed once the list actually rendered.
@@ -566,7 +599,7 @@ async function loadConversations() {
   } catch(e) {
     // Preserve already-rendered conversations during a transient network issue.
     if (_lastConvSig === null) document.getElementById('conv-list').innerHTML = '<div class="msgs-left-empty">Could not connect.</div>';
-  }
+  } finally { _convLoadInFlight=false; }
 }
 
 function _filterConvs(q) {
@@ -640,7 +673,7 @@ function _renderInboxChrome() {
   if (strip) {
     var online = _conversations.filter(function(c){ return c.peer_online; }).slice(0, 12);
     strip.hidden = !online.length;
-    strip.innerHTML = online.length
+    var activeHtml = online.length
       ? '<div class="oa-active-title">Active now</div><div class="oa-active-row">'
         + online.map(function(c){
             var name = c.peer_username || _short(c.peer_wallet || '');
@@ -652,7 +685,10 @@ function _renderInboxChrome() {
               + '<span class="oa-active-name">'+_esc(name)+'</span></button>';
           }).join('') + '</div>'
       : '';
+    _reconcileInbox(strip,activeHtml,'data-peer-id');
     strip.querySelectorAll('.oa-active-peer').forEach(function(btn){
+      if(btn._oaInboxBound) return;
+      btn._oaInboxBound=true;
       btn.addEventListener('click', function(){
         var id = parseInt(btn.dataset.peerId, 10);
         var c = _conversations.find(function(x){ return x.peer_id === id; });
@@ -696,6 +732,7 @@ function _renderConvList() {
   var el = document.getElementById('conv-list');
   _renderInboxChrome();
   if (!_conversations.length) {
+    el._oaInboxHtml=null;
     el.innerHTML = '<div class="msgs-left-empty oa-inbox-empty">'
       + '<div class="oa-inbox-empty-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>'
       + '<strong>No messages yet</strong>'
@@ -708,6 +745,7 @@ function _renderConvList() {
     ? _conversations.filter(function(c){ return c.unread > 0; })
     : _conversations;
   if (!list.length) {
+    el._oaInboxHtml=null;
     el.innerHTML = '<div class="msgs-left-empty oa-inbox-empty">'
       + '<div class="oa-inbox-empty-ico">✨</div>'
       + '<strong>You\'re all caught up</strong>'
@@ -716,7 +754,7 @@ function _renderConvList() {
       + '</div>';
     return true;
   }
-  el.innerHTML = list.map(function(c) {
+  var rowsHtml = list.map(function(c) {
     var name   = c.peer_username || _short(c.peer_wallet || '');
     var color  = _avatarColor(c.peer_wallet || String(c.peer_id));
     var ini    = (name[0] || '?').toUpperCase();
@@ -763,7 +801,10 @@ function _renderConvList() {
       + '</div>'
       + '</div>';
   }).join('');
+  _reconcileInbox(el,rowsHtml,'data-peer-id');
   el.querySelectorAll('.conv-row-wrap').forEach(function(wrap){
+    if(wrap._oaInboxBound) return;
+    wrap._oaInboxBound=true;
     var peerId = parseInt(wrap.dataset.peerId, 10);
     var content = wrap.querySelector('.conv-row');
     var delBtn = wrap.querySelector('.conv-delete-btn');
