@@ -53,6 +53,11 @@ jobs:
       - name: Python compile check
         run: python -m compileall -q .
 
+      - name: Wallet account regressions
+        run: |
+          node --check static/new-wallet.js
+          python -m pytest -q tests/test_new_wallet_accounts.py tests/test_wallet_onboarding.py tests/test_guest_startup_no_legacy_onboarding.py
+
       - name: Bot +7% and trading intelligence regressions
         run: |
           python tests/test_bot_entry_7pct_policy.py
