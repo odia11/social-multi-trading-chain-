@@ -1,4 +1,4 @@
-"""Home feed "Trending now" hero card (trending_hero.py + home-trending-hero.js).
+"""Trending now (trending_hero.py): the hero token, votes and likes -- no longer a card on Home.
 
 - a token appears automatically when it trends (real volume, liquidity,
   price move, more buyers than sellers) and passes the scam filter;
@@ -139,26 +139,12 @@ check('a token that was never the hero cannot be voted on',
       vote('bull', mint='Rand0mMint111111111111111111111111111111pump').status_code == 409)
 check('garbage mints are refused', like(mint='<script>').status_code == 409)
 
-# ── assets are on the home page ──
+# ── the home feed no longer shows it ──
+# The card (carousel, LIVE badge, Bullish/Bearish) was too busy on Home and
+# was taken out; the endpoints above stay for the trending share page and
+# OrcAgent's own posts.
 html = open(os.path.join(os.path.dirname(__file__), '..', 'dashboard.html')).read()
-check('home loads the hero script and styles',
-      '/static/home-trending-hero.js?v=__ASSET_VER__' in html and '/static/home-trending-hero.css?v=__ASSET_VER__' in html)
-# Shown as a POST in the feed, not a block above it.
-js = open(os.path.join(os.path.dirname(__file__), '..', 'static', 'home-trending-hero.js')).read()
-check('rendered as a feed post (fc-card) from OrcAgent',
-      "host.className='fc-card oa-th-post'" in js and '<span class="fc-name">OrcAgent</span>' in js)
-check('...placed in the feed, right before the posts',
-      "document.getElementById('center-feed')" in js and 'feed.parentNode.insertBefore(host,feed)' in js)
-check('...with the token card as its attachment and votes/like as its action row',
-      'oa-th-embed' in js and 'oa-th-act oa-th-vote bull' in js and 'oa-th-act oa-th-like' in js)
-check('...autoplays the carousel calmly from right to left',
-      'AUTOPLAY_MS = 6500' in js and 'OrcPageLifecycle.setInterval(advance,AUTOPLAY_MS)' in js
-      and 'translate3d(-' in js and 'oa-th-clone' in js)
-check('...uses each token banner as the full card background',
-      'data-banner=' in js and 'card.style.backgroundImage' in js)
-css=open(os.path.join(os.path.dirname(__file__), '..', 'static', 'home-trending-hero.css')).read()
-check('...uses the approved thin strip layout with the next card visibly peeking in',
-      'height:68px' in css and 'flex-basis:95%' in css and 'oa-th-strip-id' in css
-      and 'oa-th-strip-stat' in css and 'gap:10px' in css)
-check('...only on the For You tab', "active.dataset.tab!=='foryou'" in js)
+check('Home does not load the trending card any more',
+      'home-trending-hero' not in html
+      and not os.path.exists(os.path.join(os.path.dirname(__file__), '..', 'static', 'home-trending-hero.js')))
 raise SystemExit(0 if all(checks) else 1)

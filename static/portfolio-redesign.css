@@ -13,7 +13,10 @@ body.oa-portfolio .wlt-hero-top>div:first-child{min-width:0;flex:1;z-index:1}
 body.oa-portfolio .wlt-hero-lbl{color:#b6c1c8;letter-spacing:0;text-transform:none;font:650 14px var(--ui)}
 body.oa-portfolio #pf-total{font:750 clamp(31px,7vw,43px)/1.25 var(--mono,monospace);letter-spacing:-.05em;color:#f9fafb;margin-top:10px;white-space:nowrap}
 body.oa-portfolio .wlt-hero-usd{color:#43dca4;font:700 12px var(--ui);margin-top:5px;line-height:1.45}
-body.oa-portfolio .pf-tradeable{color:#8898a0;font-size:10px;font-weight:500;margin-top:5px}
+body.oa-portfolio .pf-tradeable{color:#8898a0;font:500 11px var(--ui);margin-top:8px}
+/* Status (refreshing, prices missing, change this session): quiet, and gone when there is none. */
+body.oa-portfolio .pf-status{color:#8898a0;font:500 11px var(--ui);margin-top:4px}
+body.oa-portfolio .pf-status:empty{display:none}
 body.oa-portfolio .pf-spark{width:110px;height:76px;flex:0 0 110px;align-self:center;overflow:visible;margin-right:-4px;margin-top:12px}
 body.oa-portfolio .wlt-hero-refresh{position:absolute;right:-10px;top:-11px;width:25px;height:25px;opacity:.65;font-size:12px;border:0;background:transparent}
 body.oa-portfolio .wlt-hero-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:18px 0 0;padding-top:14px;border-top:1px solid #2b3940}

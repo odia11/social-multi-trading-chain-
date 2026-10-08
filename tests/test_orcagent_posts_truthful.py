@@ -67,7 +67,6 @@ EVIDENCE = {
     'profile': ('templates/profile.html', 'pf-avatar-input'),
     'risk': ('protection_exits.py', ''),
     'feed_filters': ('dashboard.html', '>Following<'),
-    'bullish_bearish': ('static/home-trending-hero.js', 'Bullish'),
     'search': ('dashboard.py', 'Search token, address, trader'),
     'top_traders': ('templates/live_market_pro.html', 'Top traders · 24h'),
     'market_pulse': ('templates/live_market_pro.html', 'Market pulse · 24h'),
@@ -96,6 +95,10 @@ check('no post about an invitations dashboard: /invitations only goes to Home',
       'invitation' not in text and "def invitations_page():\n        return redirect('/')" in read('call_invitations.py'))
 check('no post saying your wallet approves each tip: tips go out from the OrcAgent wallet',
       'approves every tip' not in text and 'signTransaction' not in read('templates', 'profile.html'))
+check('no post about voting Bullish/Bearish in the feed: the trending card left the home feed',
+      'bullish' not in text and 'home-trending-hero' not in read('dashboard.html'))
+check('...and an earlier post saying so is removed again (the clean-up list has a new version)',
+      any('Bullish or Bearish' in t for t in p.RETIRED) and "'retired_posts_cleanup_v2'" in read('platform_assistant.py'))
 check('no post about a Trends tab: only the phone layout has one',
       'trends' not in text)
 check('no post about sharing token cards in DMs or calls in groups',
@@ -126,7 +129,7 @@ with sqlite3.connect(db) as c:
     c.execute("INSERT INTO feed_replies(user_id,post_id,message) VALUES(2,?,'nice')", ('p%d' % bad_id,))
     c.execute("INSERT INTO post_likes VALUES(?,2)", ('p%d' % bad_id,))
     c.execute("INSERT INTO notifications VALUES(1,'like','x',?, 'memberwallet')", ('/#post-p%d' % bad_id,))
-    c.execute("DELETE FROM platform_assistant_settings WHERE key='retired_posts_cleanup_v1'")
+    c.execute("DELETE FROM platform_assistant_settings WHERE key='retired_posts_cleanup_v2'")
 p.initialize(db)   # a restart after the deploy
 with sqlite3.connect(db) as c:
     left = {r[0] for r in c.execute('SELECT id FROM feed_posts')}

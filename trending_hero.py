@@ -26,9 +26,8 @@ ANNOUNCING IT
 When a token becomes the hero, every member who has notifications on gets an
 in-app notification and a phone push ("$WOJAK is trending"), tagged
 TREND_PUSH_TAG so a newer one replaces an older one on the phone. Tapping it
-opens the home feed scrolled to the card (TREND_LINK). Once the card is
-actually on screen in the app, the app closes that phone notification and
-marks the in-app one read (POST /api/home/trending-hero/seen). A background
+opens that token in the Live Market (trend_link); the home feed no longer
+shows a trending card, it was too busy there. A background
 loop checks every ANNOUNCE_POLL_SECONDS, so it does not wait for a visitor.
 Limits, so it never becomes noise: each token is announced at most once per
 ANNOUNCE_REPEAT_HOURS, and at most one announcement per ANNOUNCE_MIN_GAP
@@ -49,6 +48,7 @@ import sqlite3
 import threading
 import time
 from contextlib import contextmanager
+from urllib.parse import quote
 
 from flask import jsonify, request
 
@@ -58,7 +58,6 @@ STAY = {'change': 15.0, 'volume': 30_000.0, 'liquidity': 15_000.0, 'mcap': 30_00
         'buy_min': 0.50, 'buy_max': 0.985}
 CACHE_SECONDS = 20
 TREND_PUSH_TAG = 'orc-trending'
-TREND_LINK = '/?trending=1#trending'
 ANNOUNCE_POLL_SECONDS = 60
 ANNOUNCE_REPEAT_HOURS = 12
 ANNOUNCE_MIN_GAP = 30 * 60
@@ -298,6 +297,16 @@ def _claim_announcement(d, mint, now) -> bool:
     return True
 
 
+def trend_link(token) -> str:
+    """Where an alert opens: the token itself in the Live Market (Solana),
+    else its public trending page."""
+    chain = (token.get('chain') or 'solana').lower()
+    mint = quote(str(token.get('mint') or ''), safe='')
+    if chain == 'solana':
+        return f'/live-market?mint={mint}&profile=1'
+    return f'/trending/{quote(chain, safe="")}/{mint}'
+
+
 def announce(d, token, now=None) -> int:
     """Notify members that `token` is trending. Returns how many members got
     the in-app notification (0 when throttled). Never raises."""
@@ -308,15 +317,15 @@ def announce(d, token, now=None) -> int:
         if not _claim_announcement(d, token['mint'], now):
             return 0
         title, body = announcement_text(token)
+        link = trend_link(token)
         content = f'{title} · {body}'
         with _db(d) as conn:
-            # Only the newest trending alert matters: older ones point at a
-            # card that has already been replaced.
+            # Only the newest trending alert matters.
             conn.execute("UPDATE notifications SET is_read=1 WHERE type='trending' AND is_read=0")
             cur = conn.execute(
                 "INSERT INTO notifications (user_id, type, content, link, actor_wallet) "
                 "SELECT id, 'trending', ?, ?, NULL FROM users WHERE COALESCE(pref_notifications, 1) = 1",
-                (content, TREND_LINK))
+                (content, link))
             count = cur.rowcount
             push_ids = [r[0] for r in conn.execute(
                 'SELECT DISTINCT u.id FROM users u JOIN push_subscriptions p ON p.user_id = u.id '
@@ -325,7 +334,7 @@ def announce(d, token, now=None) -> int:
         if not icon.startswith('https://') or len(icon) > 500:
             icon = ''
         if push_ids:
-            d._send_push_notifications_bulk(push_ids, title, body, TREND_LINK, icon, TREND_PUSH_TAG)
+            d._send_push_notifications_bulk(push_ids, title, body, link, icon, TREND_PUSH_TAG)
         print(f"[trending-hero] announced ${token.get('symbol')} to {count} member(s), "
               f"{len(push_ids)} with push", flush=True)
         return count

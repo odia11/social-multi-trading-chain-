@@ -38,9 +38,9 @@ function paint(value){
   var d=value&&value.detail||{},total=d.total==null?NaN:Number(d.total);
   if(!Number.isFinite(total)||total<0)return;
   put('pf-total',money(total));
-  put('pf-sol-equivalent',d.total_sol==null?'SOL equivalent unavailable':'≈ '+Number(d.total_sol).toLocaleString('en-US',{maximumFractionDigits:4})+' SOL · portfolio equivalent');
-  if(d.stale||d.inventory_complete===false){put('pf-performance','Last confirmed balance · refreshing…');return;}
-  if(d.valuation_complete===false){put('pf-performance','Some prices unavailable · estimated known value');return;}
+  put('pf-sol-equivalent',d.total_sol==null?'SOL equivalent unavailable':'≈ '+Number(d.total_sol).toLocaleString('en-US',{maximumFractionDigits:4})+' SOL');
+  if(d.stale||d.inventory_complete===false){put('pf-performance','Refreshing…');return;}
+  if(d.valuation_complete===false){put('pf-performance','Some token prices unavailable');return;}
   remember(total);
   if(!samples.length||samples[samples.length-1]!==total){
     samples.push(total);if(samples.length>24)samples.shift();
@@ -48,8 +48,8 @@ function paint(value){
   spark();
   if(samples.length>1){
     var first=samples[0],diff=total-first;
-    put('pf-performance','Session '+(diff>=0?'+':'−')+money(Math.abs(diff))+' · live balance');
-  }else put('pf-performance','Live portfolio value');
+    put('pf-performance',Math.abs(diff)<0.005?'':(diff>=0?'+':'−')+money(Math.abs(diff))+' this session');
+  }else put('pf-performance','');
 }
 document.addEventListener('orca:portfolio-value',paint);
 function boot(){
@@ -58,8 +58,8 @@ function boot(){
     put('pf-total',money(cached));
     samples=[cached];
     spark();
-    put('pf-performance','Last confirmed balance · refreshing…');
-    setTimeout(function(){if(window.__orcaPortfolioValue==null)put('pf-performance','Last confirmed balance · retrying live update…')},12000);
+    put('pf-performance','Refreshing…');
+    setTimeout(function(){if(window.__orcaPortfolioValue==null)put('pf-performance','Last confirmed balance')},12000);
   }
 
 }

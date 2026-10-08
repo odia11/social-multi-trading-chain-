@@ -77,7 +77,6 @@ THESES = (
 ('reposts', 'Found a call worth sharing with your followers? Repost it. The original author keeps the credit and your followers see it in their feed.'),
 ('profile', 'Your profile is where others get to know you as a trader. Add a picture and a username so people recognise your calls and replies in the feed.'),
 ('risk', 'Memecoins move fast in both directions. Only trade with money you can afford to lose, and use a stop loss if that suits your plan. OrcAgent gives you the tools; the decision is always yours.'),
-('bullish_bearish', 'See a trending token in the feed? Vote Bullish or Bearish on it to show how you read the move, and see how others voted.'),
 ('search', 'Looking for something specific? Use the search at the top to find a token, an address or a trader on OrcAgent.'),
 ('top_traders', 'Live Market shows the top traders of the last 24 hours. Open a profile to see who they are and what they trade.'),
 ('market_pulse', 'Market pulse on Live Market shows the trades of the last 24 hours, how many traders are online and how many tokens are tracked.'),
@@ -90,8 +89,9 @@ THESES = (
 
 # Product texts OrcAgent used to post that were not true: video posts, an
 # invitations dashboard, token cards in DMs, calls in groups, the wallet
-# approving each tip, Token Launch. Posts it already published with exactly
-# one of these texts are removed once, at start-up.
+# approving each tip, Token Launch, voting Bullish/Bearish on a trending card
+# in the feed (that card is gone). Posts it already published with exactly
+# one of these texts are removed once per version of this list, at start-up.
 RETIRED = (
     'A useful invitation starts with an idea worth discussing. Share a personal call link and track the new accounts and qualifying trades it brings in. Your invitation totals are private.',
     'Your shared calls can be explored by others. Your invitation dashboard totals are private. OrcAgent keeps the public idea and your personal tracking in their respective places.',
@@ -101,6 +101,7 @@ RETIRED = (
     'Groups bring traders with a shared interest into one conversation. Join a group, share calls and discuss ideas with people who watch the same tokens.',
     'Posts can include a short video of up to 30 seconds. Show a chart walkthrough or explain your idea in your own words, right in the feed.',
     'Thinking of launching a Solana token? Token Launch walks you through it step by step, and you approve the launch in your own wallet. Read every step before you confirm.',
+    'See a trending token in the feed? Vote Bullish or Bearish on it to show how you read the move, and see how others voted.',
 )
 
 # English platform guidance; both English and Dutch keywords are understood.
@@ -210,7 +211,7 @@ def _remove_retired_posts(c):
     """Once: delete the posts OrcAgent itself published with a RETIRED text,
     with their replies, likes, reposts and notifications. Only posts recorded
     as published by this assistant, from the official account, are touched."""
-    key = 'retired_posts_cleanup_v1'
+    key = 'retired_posts_cleanup_v2'   # v2: the Bullish/Bearish card text
     if c.execute('SELECT 1 FROM platform_assistant_settings WHERE key=?', (key,)).fetchone():
         return 0
     author = identity(c)

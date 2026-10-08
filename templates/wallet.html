@@ -747,10 +747,10 @@ html,body{background:#080e11}
           <!-- Portfolio valuation is shown in USDC; trading remains native SOL. -->
           <div class="wlt-hero-lbl">OrcAgent Trading Wallet</div>
           <div class="wlt-hero-num" id="pf-total">—</div>
-          <div class="wlt-hero-usd" id="pf-sol-equivalent">SOL equivalent loading…</div>
-          <div class="wlt-hero-usd">Estimated value in USDC · trading uses SOL</div>
-          <div class="wlt-hero-usd" id="pf-performance">Live Solana balance</div>
-          <div class="wlt-hero-usd pf-tradeable">Available to trade in OrcAgent: <span id="avail">—</span> <span id="avail-sub">SOL on Solana</span></div>
+          <div class="wlt-hero-usd" id="pf-sol-equivalent">&nbsp;</div>
+          <!-- One quiet status line, empty while all is well. -->
+          <div class="wlt-hero-usd pf-status" id="pf-performance"></div>
+          <div class="wlt-hero-usd pf-tradeable">Available to trade: <span id="avail">—</span> <span id="avail-sub">SOL</span></div>
         </div>
         <svg class="pf-spark" viewBox="0 0 122 73" role="img" aria-label="Portfolio trend during this session"><path id="pf-spark-fill" fill="url(#pf-spark-gradient)" d=""></path><path id="pf-spark-line" d="" stroke="#37dc9d" stroke-width="2.5" fill="none" stroke-linejoin="round" stroke-linecap="round"></path><defs><linearGradient id="pf-spark-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#32d99a" stop-opacity=".27"></stop><stop offset="100%" stop-color="#32d99a" stop-opacity="0"></stop></linearGradient></defs></svg><button class="wlt-hero-refresh" onclick="loadBalance()" aria-label="Refresh balance" title="Refresh">↻</button>
       </div>
@@ -2666,7 +2666,7 @@ function loadUsdcSummary(){
     // This is the balance a trade is actually funded from, so it is the one
     // the hero shows.
     var _availEl=document.getElementById('avail')
-    if(_availEl) _availEl.textContent=Number(snap.available_to_trade_sol||0).toFixed(6)
+    if(_availEl) _availEl.textContent=String(Number(Number(snap.available_to_trade_sol||0).toFixed(4)))
     var _cUsdc=document.getElementById('convert-usdc-bal')
     if(_cUsdc) _cUsdc.textContent='$'+parseFloat(d.solana_usdc).toFixed(2)
     _usdcLoadedOnce=true
@@ -2717,7 +2717,7 @@ function _paintPortfolioBreakdown(snap){
   set('pf-sol-asset',solAmount.toLocaleString('en-US',{maximumFractionDigits:8})+' SOL')
   set('pf-sol-value',_pfMoney(sol)+(solPrice>0?' · '+_pfMoney(solPrice)+'/SOL':''))
   set('oa-pf-scope',snap.stale?'Last confirmed balances · refreshing…':snap.inventory_complete===false
-    ?'Verified balances · full token scan retrying'
+    ?'Checking all tokens…'
     :'Everything in your Solana trading wallet')
   return true
 }
@@ -2746,9 +2746,9 @@ function _paintPortfolioSnapshotInstant(snap){
   var total=Number(snap.total_usd),stable=Number(snap.stable&&snap.stable.total_usdc)
   var solValue=Number(snap.sol&&snap.sol.value_usd),solAmount=Number(snap.sol&&snap.sol.amount)
   var totalEl=document.getElementById('pf-total');if(totalEl)totalEl.textContent=total.toFixed(2)+' USDC'
-  var equivalent=document.getElementById('pf-sol-equivalent');if(equivalent)equivalent.textContent=snap.total_sol==null?'SOL equivalent unavailable':'≈ '+Number(snap.total_sol).toLocaleString('en-US',{maximumFractionDigits:4})+' SOL · portfolio equivalent'
-  var perf=document.getElementById('pf-performance');if(perf)perf.textContent=snap.stale?'Last confirmed balance · refreshing…':snap.inventory_complete===false?'Verified balances · full token scan retrying':snap.valuation_complete===false?'Some prices unavailable · estimated known value':'Live Solana balance'
-  var avail=document.getElementById('avail');if(avail)avail.textContent=Number(snap.available_to_trade_sol||0).toFixed(6)
+  var equivalent=document.getElementById('pf-sol-equivalent');if(equivalent)equivalent.textContent=snap.total_sol==null?'SOL equivalent unavailable':'≈ '+Number(snap.total_sol).toLocaleString('en-US',{maximumFractionDigits:4})+' SOL'
+  var perf=document.getElementById('pf-performance');if(perf)perf.textContent=snap.stale?'Refreshing…':snap.inventory_complete===false?'Checking all tokens…':snap.valuation_complete===false?'Some token prices unavailable':''
+  var avail=document.getElementById('avail');if(avail)avail.textContent=String(Number(Number(snap.available_to_trade_sol||0).toFixed(4)))
   var usdcAsset=document.getElementById('pf-usdc-asset');if(usdcAsset&&Number.isFinite(stable))usdcAsset.textContent='$'+stable.toFixed(2)
   var solAsset=document.getElementById('pf-sol-asset');if(solAsset&&Number.isFinite(solValue))solAsset.textContent='$'+solValue.toFixed(2)
   if(Number.isFinite(solAmount)){

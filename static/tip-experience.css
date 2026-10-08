@@ -9,6 +9,8 @@
 .oa-tip-receipt-icon{width:54px;height:54px;border:1px solid #3d7c65;background:#173629;border-radius:50%;display:grid;place-items:center;font-size:27px;color:#46daa3}
 .oa-tip-receipt h2{font-size:21px;font-weight:800}
 .oa-tip-receipt-amount{font-size:32px;font-weight:800;color:#ffcd6d;font-variant-numeric:tabular-nums}
+.oa-tip-receipt-usd{margin-top:-8px;font:700 15px 'JetBrains Mono',monospace;color:#c8ced6;font-variant-numeric:tabular-nums}
+.oa-tip-receipt-usd:empty{display:none}
 .oa-tip-receipt-peer{font-size:13px;color:#a8b5bf}
 .oa-tip-receipt-meta{width:100%;padding:14px;background:#151d22;border:1px solid #303d45;border-radius:13px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px}
 .oa-tip-pill{font-size:11px;font-weight:800;display:inline-block;border:1px solid #626b73;border-radius:20px;padding:5px 9px;color:#c5cdd4;white-space:nowrap}
