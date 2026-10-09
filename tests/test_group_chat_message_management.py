@@ -1,5 +1,6 @@
 """Own-message mutations, incremental updates and atomic ownership transfer."""
 import os
+import sqlite3
 from pathlib import Path
 import subprocess
 import sys
@@ -53,6 +54,17 @@ changed=req(a,root+'/messages?after='+str(mid)+'&changes_since=0').json
 assert len(changed['updates'][0]['likes'])==2 and changed['updates'][0]['liked']
 unliked=req(a,likes_path,'POST',{}).json
 assert not unliked['liked'] and len(unliked['likes'])==1
+# Choosing another emoji switches the one reaction per member; same emoji toggles off.
+r=req(b,likes_path,'POST',{'emoji':'😂'}).json
+assert r['liked'] and r['likes'][0]['emoji']=='😂' and len(r['likes'])==1
+assert req(b,likes_path,'POST',{'emoji':'😂'}).json['likes']==[]
+for emoji in d._DM_REACTION_EMOJIS:
+ assert req(b,likes_path,'POST',{'emoji':emoji}).status_code==200
+assert req(b,likes_path,'POST',[]).status_code==400
+for invalid in ['<script>', '🧨', None, [], 1]:
+ assert req(b,likes_path,'POST',{'emoji':invalid}).status_code==400
+assert req(outside,likes_path,'POST',{'emoji':'🔥'}).status_code==404
+assert req(b,likes_path,'POST',{'emoji':'❤️'}).status_code==200
 assert req(a,path,'PUT',{'message':'new'},{}).status_code==403
 assert req(b,path,'PUT',{'message':'stolen'}).status_code==403
 assert req(b,path,'DELETE').status_code==403
@@ -111,6 +123,18 @@ print('GROUP_MESSAGE_MANAGEMENT_PASS')
 '''
 
 class GroupMessageManagement(unittest.TestCase):
+    def test_existing_hearts_survive_idempotent_schema_upgrade(self):
+        from group_chats import initialize
+        with tempfile.TemporaryDirectory() as data:
+            path=str(Path(data)/'legacy.db')
+            with sqlite3.connect(path) as db:
+                db.execute('CREATE TABLE group_chat_likes(message_id INTEGER,user_id INTEGER,created_at TEXT,PRIMARY KEY(message_id,user_id))')
+                db.execute("INSERT INTO group_chat_likes VALUES(12,34,'2026-10-09')")
+            initialize(path)
+            initialize(path)
+            with sqlite3.connect(path) as db:
+                self.assertEqual(db.execute('SELECT message_id,user_id,emoji FROM group_chat_likes').fetchall(),[(12,34,'❤️')])
+
     def test_production_auth_mutations_updates_and_owner_transfer(self):
         with tempfile.TemporaryDirectory() as data:
             env={**os.environ,'DATA_DIR':data,'PYTHONPATH':str(Path(__file__).resolve().parents[1])}

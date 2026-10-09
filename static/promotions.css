@@ -31,3 +31,23 @@
 .promo-ad-heading .promo-ad-title{min-width:0}
 .promo-ad .promo-active{display:inline-flex;width:18px;height:18px;flex-shrink:0;padding:0;border:0;border-radius:0;background:none;color:#42c889}
 .promo-active svg{display:block;width:100%;height:100%}
+/* Compact automatic strip; native horizontal scrolling works both ways. */
+.promo-placement-block .promo-swipe-track{position:relative;display:flex;grid-template-columns:none;gap:10px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;min-width:0;max-width:100%;padding:2px 0;touch-action:pan-x pan-y}
+.promo-swipe-track::-webkit-scrollbar{display:none}
+.promo-swipe-track .promo-ad{flex:0 0 min(288px,calc(100vw - 72px));width:min(288px,calc(100vw - 72px));min-height:80px;height:80px;padding:11px;gap:9px;align-items:center;border-radius:12px}
+.promo-swipe-track .promo-ad[hidden]{display:none}
+.promo-swipe-track .promo-logo{width:32px;height:32px;margin:0}
+.promo-swipe-track .promo-ad-content{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 7px;align-content:center;align-self:stretch}
+.promo-swipe-track .promo-ad-heading{grid-column:1 / -1;gap:5px;overflow:hidden}
+.promo-swipe-track .promo-ad-title{font-size:12px}
+.promo-swipe-track .promo-active{width:15px;height:15px}
+.promo-swipe-track .promo-ad-labels{min-height:0;flex-wrap:nowrap;margin-left:auto}
+.promo-swipe-track .promo-sponsored{font-size:9px;padding:2px 5px}
+.promo-swipe-track p{display:block;min-height:0;align-self:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px;line-height:1.4;margin:0}
+.promo-swipe-track .promo-ad-content>a{font-size:10px;padding:5px 7px;margin:0;align-self:center;white-space:nowrap}
+.promo-strip-controls{display:flex;justify-content:space-between;align-items:center;margin-top:3px;color:var(--sub,#9ba3af);font:10px system-ui}
+.promo-strip-controls[hidden]{display:none}
+.promo-strip-controls>div{display:flex;gap:3px}
+.promo-strip-controls button{display:grid;place-items:center;width:28px;height:24px;border:0;border-radius:6px;background:transparent;color:var(--sub,#9ba3af);font:15px system-ui;cursor:pointer}
+.promo-strip-controls button:focus-visible,.promo-swipe-track:focus-visible{outline:2px solid #f7b955;outline-offset:2px}
+.promo-placement-block{min-width:0;max-width:100%}

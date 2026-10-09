@@ -63,6 +63,9 @@ def initialize(path):
                 PRIMARY KEY(message_id,user_id)
             );
         ''')
+        reaction_columns = {r[1] for r in c.execute('PRAGMA table_info(group_chat_likes)')}
+        if 'emoji' not in reaction_columns:
+            c.execute("ALTER TABLE group_chat_likes ADD COLUMN emoji TEXT NOT NULL DEFAULT '❤️'")
         have = {r[1] for r in c.execute('PRAGMA table_info(group_chats)')}
         if 'photo' not in have:
             c.execute("ALTER TABLE group_chats ADD COLUMN photo TEXT NOT NULL DEFAULT ''")
@@ -152,12 +155,12 @@ def install(d):
             return {}
         marks=','.join('?' * len(ids))
         likes={}
-        for mid, liker, username, wallet, avatar in c.execute(
-                'SELECT l.message_id,l.user_id,u.username,u.wallet_address,u.avatar_url '
+        for mid, liker, username, wallet, avatar, emoji in c.execute(
+                'SELECT l.message_id,l.user_id,u.username,u.wallet_address,u.avatar_url,l.emoji '
                 'FROM group_chat_likes l JOIN users u ON u.id=l.user_id '
                 'WHERE l.message_id IN (%s) ORDER BY l.created_at,l.user_id' % marks, ids):
             likes.setdefault(mid,[]).append({'user_id':liker,'username':_name_of((liker,username,wallet)),
-                                          'wallet':wallet,'avatar':avatar or '', 'mine':liker==uid})
+                                          'wallet':wallet,'avatar':avatar or '', 'mine':liker==uid,'emoji':emoji})
         return likes
 
     @app.route('/api/group-chats/<int:chat_id>/messages/<int:message_id>/likes', methods=['GET', 'POST'])
@@ -175,11 +178,21 @@ def install(d):
             if not row or row[0] in ('system','deleted'):
                 return fail('Message not found',404)
             if request.method=='POST':
-                existing=c.execute('SELECT 1 FROM group_chat_likes WHERE message_id=? AND user_id=?',(message_id,uid)).fetchone()
-                if existing:
+                body=request.get_json(silent=True)
+                if body is None:
+                    body={}
+                if not isinstance(body,dict):
+                    return fail('Invalid reaction',400)
+                emoji=body.get('emoji','❤️')
+                if not isinstance(emoji,str) or emoji not in d._DM_REACTION_EMOJIS:
+                    return fail('Invalid reaction',400)
+                existing=c.execute('SELECT emoji FROM group_chat_likes WHERE message_id=? AND user_id=?',(message_id,uid)).fetchone()
+                if existing and existing[0]==emoji:
                     c.execute('DELETE FROM group_chat_likes WHERE message_id=? AND user_id=?',(message_id,uid))
                 else:
-                    c.execute('INSERT INTO group_chat_likes VALUES(?,?,?)',(message_id,uid,_now()))
+                    c.execute('INSERT INTO group_chat_likes(message_id,user_id,created_at,emoji) VALUES(?,?,?,?) '
+                              'ON CONFLICT(message_id,user_id) DO UPDATE SET emoji=excluded.emoji,created_at=excluded.created_at',
+                              (message_id,uid,_now(),emoji))
                 c.execute('UPDATE group_chats SET change_version=change_version+1 WHERE id=?',(chat_id,))
                 version=c.execute('SELECT change_version FROM group_chats WHERE id=?',(chat_id,)).fetchone()[0]
                 c.execute('UPDATE group_chat_messages SET version=? WHERE id=?',(version,message_id))

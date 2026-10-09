@@ -195,3 +195,15 @@ html.gc-lock,html.gc-lock body{overflow:hidden!important}
 .gc-like-pill.gc-like-empty{color:var(--gc-muted);background:transparent;border-color:transparent;box-shadow:none;font-size:11px;padding:3px 7px;min-height:28px}
 .gc-like-empty span{font-size:18px;color:var(--gc-gold);line-height:1}
 .gc-like-pill.gc-like-empty:hover{border-color:var(--gc-gold);color:var(--gc-gold)}
+/* Same touch reaction picker as direct messages; scrolling stays native. */
+.gc-bubble,.gc-bubble *{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.gc-msg{touch-action:pan-y}
+.gc-reaction-menu{position:fixed;z-index:9999;max-width:calc(100vw - 16px);padding:8px;border:1px solid var(--gc-line);border-radius:24px;background:var(--gc-card2);color:var(--gc-text);box-shadow:0 14px 42px #0007;box-sizing:border-box;touch-action:none;-webkit-touch-callout:none;user-select:none}
+.gc-reaction-choices{display:flex;gap:3px}
+.gc-reaction-menu button{width:38px;height:38px;border:0;border-radius:50%;padding:0;background:transparent;color:inherit;font-size:23px;cursor:pointer;touch-action:manipulation}
+.gc-reaction-menu button:hover,.gc-reaction-menu button:focus-visible{background:#ffffff12;outline:2px solid var(--gc-gold)}
+.gc-reaction-menu .gc-reaction-more{background:#ffffff08;color:var(--gc-muted);font-size:27px}
+.gc-reaction-menu .gc-reaction-copy{width:100%;height:40px;margin-top:7px;border-top:1px solid var(--gc-line);border-radius:0;text-align:left;padding:0 8px;font:600 14px system-ui}
+.gc-reaction-grid{display:grid;grid-template-columns:repeat(8,38px);gap:3px;padding-top:8px;border-top:1px solid var(--gc-line)}
+.gc-like-row{flex-wrap:wrap;gap:4px}.gc-like-people{font-size:10px}
+@media(max-width:360px){.gc-reaction-menu button{width:34px;height:36px}.gc-reaction-grid{grid-template-columns:repeat(7,34px)}}
