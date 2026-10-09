@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="oa-portfolio-root">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
@@ -721,7 +721,7 @@ html,body{background:#080e11}
 </style>
 <link rel="stylesheet" href="/static/tip-experience.css?v={{ app_version }}">
 </head>
-<body>
+<body class="oa-portfolio pf-view-assets">
 {{ navbar_html('wallet') }}
 <div id="app">
 
@@ -2530,6 +2530,7 @@ var _portfolioSnapshotData=null
 var _portfolioSnapshotAt=0
 var _portfolioSnapshotPromise=null
 var _portfolioForcedPromise=null
+var _PORTFOLIO_REQUEST_TIMEOUT=12000
 
 // Keep the COMPLETE last confirmed portfolio snapshot on-device, scoped to
 // this wallet. Page navigation can therefore paint total + USDC + SOL + token
@@ -2587,8 +2588,15 @@ function _getPortfolioSnapshot(forceFresh){
     return _portfolioForcedPromise
   }
   var url='/api/portfolio/snapshot'+(forceFresh?'?bust=1':'')
-  _portfolioSnapshotPromise=fetch(url,{credentials:'include',cache:'no-store'})
+  // Bound the whole response, including its JSON body. A stalled request must
+  // not keep every balance/asset painter and all later refreshes waiting.
+  var controller=new AbortController(),deadline
+  var read=fetch(url,{credentials:'include',cache:'no-store',signal:controller.signal})
     .then(function(r){if(!r.ok)throw new Error('snapshot unavailable');return r.json()})
+  var timeout=new Promise(function(resolve,reject){
+    deadline=setTimeout(function(){reject(new Error('snapshot timed out'));controller.abort()},_PORTFOLIO_REQUEST_TIMEOUT)
+  })
+  _portfolioSnapshotPromise=Promise.race([read,timeout])
     .then(function(d){
       if(!d||!d.ok)throw new Error((d&&d.msg)||'snapshot failed')
       if(d.inventory_complete===false&&_portfolioSnapshotData&&_portfolioSnapshotData.inventory_complete!==false){
@@ -2597,7 +2605,15 @@ function _getPortfolioSnapshot(forceFresh){
       _portfolioSnapshotData=d;_portfolioSnapshotAt=Date.now();_rememberPortfolioSnapshot(d)
       _paintPortfolioSnapshotInstant(d);return d
     })
-    .finally(function(){_portfolioSnapshotPromise=null})
+    .catch(function(err){
+      var cached=!!_portfolioSnapshotData
+      var status=document.getElementById('pf-performance')
+      if(status)status.textContent=cached?'Last confirmed balance · refresh unavailable':'Balance temporarily unavailable · retrying'
+      var scope=document.getElementById('oa-pf-scope')
+      if(scope)scope.textContent=cached?'Last confirmed balances · retrying':'Balances temporarily unavailable · retrying'
+      throw err
+    })
+    .finally(function(){clearTimeout(deadline);_portfolioSnapshotPromise=null})
   return _portfolioSnapshotPromise
 }
 window.OrcAgentGetPortfolioSnapshot=_getPortfolioSnapshot

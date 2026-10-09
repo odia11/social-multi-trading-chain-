@@ -110,9 +110,6 @@ body.oa-portfolio.pf-view-assets .oa-pf-breakdown,body.oa-portfolio.pf-view-asse
 body.oa-portfolio.pf-view-assets .oa-pf-breakdown{display:block}
 @media(max-width:420px){body.oa-portfolio .oa-pf-breakdown{padding:13px}body.oa-portfolio .oa-pf-breakdown-item{min-height:66px;padding:10px}body.oa-portfolio .oa-pf-breakdown-item>strong{font-size:14px}}
 
-/* Portfolio is rebuilt by portfolio-redesign.js once the page has loaded
-   (titles, Assets header, tabs). Drawn before that, everything below the
-   header moved when it ran. It waits for that build now -- the same task
-   that adds body.oa-portfolio -- and shows after 2.5s whatever happens. */
-@keyframes oaPortfolioReveal{to{visibility:visible}}
-html.oa-route-wallet body:not(.oa-portfolio) .wlt-center{visibility:hidden;animation:oaPortfolioReveal 0s linear 2.5s forwards}
+/* The server renders the Portfolio presentation classes. Its content stays
+   visible even if presentation JavaScript is delayed or fails to download. */
+html.oa-route-wallet .wlt-center{visibility:visible}
