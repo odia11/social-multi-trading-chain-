@@ -112,7 +112,21 @@ try:
               const stable=list.querySelector('img');
               window.fetch=()=>Promise.reject(new Error('Temporary test outage'));await loadConversations();
               out.networkFailureRetains=stable===list.querySelector('img');
-              window.fetch=nativeFetch;return out;
+              window.fetch=nativeFetch;
+              const visible=el=>getComputedStyle(el).display!=='none';
+              out.directSeparated=visible(list)&&!visible(document.getElementById('gc-section'));
+              const searchState=document.getElementById('msgs-search');searchState.value='Renamed';_filterConvs('Renamed');
+              _setInboxTab('groups');
+              out.groupsSeparated=!visible(list)&&visible(document.getElementById('gc-section'))&&searchState.value==='';
+              searchState.value='Beta';_filterConvs('Beta');document.dispatchEvent(new Event('oa-inbox-tabchange'));
+              _setConvFilter('unread');
+              out.groupUnreadEmpty=!document.querySelector('[data-gc="7"]')&&document.getElementById('gc-section').textContent.includes('No unread');
+              _setInboxTab('direct');
+              out.directStateRetained=searchState.value==='Renamed'&&_convFilter==='all';
+              _setInboxTab('groups');out.groupFilterRetained=_convFilter==='unread';
+              _setConvFilter('all');_setInboxTab('direct');
+              window.__savedGroup=document.querySelector('[data-gc="7"]');window.__savedGroupImg=__savedGroup.querySelector('img');
+              return out;
             }''')
             groups['chats'][0]['last']['text']='Updated group preview';groups['chats'][0]['unread']=4
             out['groupUpdated']=await page.evaluate('''async()=>{await OrcAgentGroupChats.reload();return __savedGroup===document.querySelector('[data-gc="7"]')&&__savedGroupImg===__savedGroup.querySelector('img')&&__savedGroup.querySelector('.conv-preview').textContent.includes('Updated group preview')&&__savedGroup.querySelector('.conv-badge').textContent==='4';}''')

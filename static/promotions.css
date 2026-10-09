@@ -26,3 +26,8 @@
 .promo-placement-block.feed .promo-placement-grid,.promo-placement-block.banner .promo-placement-grid{grid-template-columns:1fr}
 .promo-directory-grid{align-items:stretch}
 @media(max-width:760px){.promo-placement-grid{grid-template-columns:1fr}.promo-ad{padding:14px}.promo-placement-block>header{font-size:12px}}
+
+.promo-ad-heading{display:flex;align-items:center;gap:6px;min-width:0}
+.promo-ad-heading .promo-ad-title{min-width:0}
+.promo-ad .promo-active{display:inline-flex;width:18px;height:18px;flex-shrink:0;padding:0;border:0;border-radius:0;background:none;color:#42c889}
+.promo-active svg{display:block;width:100%;height:100%}
