@@ -218,3 +218,6 @@ _install_call_live_data(_dashboard)
 
 from token_promotions import install as _install_token_promotions
 _install_token_promotions(_dashboard)
+
+from public_avatar_cache import install as _install_public_avatar_cache
+_install_public_avatar_cache(_dashboard)

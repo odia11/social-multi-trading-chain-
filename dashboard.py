@@ -19385,7 +19385,7 @@ def _restore_remembered_request():
     Explicit resume handles its own token precedence; read-only browsing is
     left alone. Logout must recover too so it can revoke an expired session.
     """
-    if (request.path.startswith('/static/') or request.method == 'OPTIONS'
+    if (request.path.startswith(('/static/', '/avatar/photo/')) or request.method == 'OPTIONS'
             or request.path == '/api/session/resume' or session.get('wallet')):
         return None
     token = request.cookies.get(DEVICE_COOKIE_NAME, '')
@@ -19420,7 +19420,7 @@ def _persist_remembered_session(response):
     """
     # /media/ is public, immutable video-post files (video_uploads.py) --
     # like /static/, never per-user, so never 'no-store, private'.
-    if (request.path.startswith(('/static/', '/media/')) or request.path == '/api/logout'
+    if (request.path.startswith(('/static/', '/media/', '/avatar/photo/')) or request.path == '/api/logout'
             or request.method == 'OPTIONS' or response.status_code >= 400):
         return response
     wallet = _authenticated_wallet()
