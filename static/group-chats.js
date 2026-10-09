@@ -22,6 +22,7 @@ function api(path,opts){
   var init={method:opts.method||'GET',credentials:'same-origin',cache:'no-store',headers:{}};
   if(opts.body!==undefined){init.headers['Content-Type']='application/json';init.body=JSON.stringify(opts.body);}
   if(init.method!=='GET')init.headers['X-CSRF-Token']=csrf();
+  if(opts.signal)init.signal=opts.signal;
   return fetch(path,init).then(function(r){return r.json().catch(function(){return {ok:false,msg:'Something went wrong'};});})
     .catch(function(){return {ok:false,msg:'No connection. Try again.'};});
 }
@@ -268,7 +269,15 @@ function mergeMessages(list,updatesOnly){
   var added=false;
   list.forEach(function(m){
     if(have[m.id]===undefined){if(!updatesOnly){have[m.id]=open.messages.length;open.messages.push(m);added=true;}}
-    else{var previous=open.messages[have[m.id]];if(!previous._likePending&&(m.version||0)>=(previous.version||0)&&(m.body!==previous.body||m.kind!==previous.kind||m.edited_at!==previous.edited_at||JSON.stringify(m.likes||[])!==JSON.stringify(previous.likes||[]))){open.messages[have[m.id]]=m;added=true;}}
+    else{
+      var previous=open.messages[have[m.id]];
+      if(!previous._likePending&&(m.version||0)>=(previous.version||0)){
+        var contentChanged=m.body!==previous.body||m.kind!==previous.kind||m.edited_at!==previous.edited_at;
+        var likesChanged=!!m.liked!==!!previous.liked||JSON.stringify(m.likes||[])!==JSON.stringify(previous.likes||[]);
+        open.messages[have[m.id]]=m;
+        if(contentChanged)added=true;else if(likesChanged)paintLike(m);
+      }
+    }
     if(!updatesOnly&&m.id>open.lastId)open.lastId=m.id;
   });
   return added;
@@ -671,20 +680,46 @@ function likeHtml(m){
   if(!likes.length)return '<div class="gc-like-row"><button type="button" class="gc-like-pill gc-like-empty" data-message-like="'+m.id+'" aria-label="Like message" aria-pressed="false"><span aria-hidden="true">♡</span> Like</button></div>';
   return '<div class="gc-like-row"><button type="button" class="gc-like-pill'+(m.liked?' liked':'')+'" data-message-like="'+m.id+'" aria-label="'+(m.liked?'Remove like':'Like message')+'" aria-pressed="'+!!m.liked+'">❤️'+(likes.length>1?' <span>'+likes.length+'</span>':'')+'</button><button type="button" class="gc-like-people" data-like-people="'+m.id+'" aria-label="See who liked this message">View likes</button></div>';
 }
+// A reaction must never rebuild the chat: mounted photos and message rows
+// can carry runtime attributes that differ from their original HTML.
+function paintLike(m){
+  var box=document.querySelector('#gc-thread .gc-msgs');if(!box)return;
+  var row=Array.from(box.children).find(function(el){return el.dataset.mid===String(m.id);});
+  if(!row)return;
+  var stack=row.querySelector('.gc-message-stack');if(!stack)return;
+  var current=stack.querySelector('.gc-like-row');
+  var template=document.createElement('template');template.innerHTML=likeHtml(m);
+  var next=template.content.firstElementChild;
+  if(current){
+    if(!next){current.remove();return;}
+    // Retain the tapped button (and keyboard focus) across confirmations.
+    var button=current.querySelector('[data-message-like]'),replacement=next.querySelector('[data-message-like]');
+    if(button&&replacement){
+      button.className=replacement.className;
+      button.setAttribute('aria-label',replacement.getAttribute('aria-label'));
+      button.setAttribute('aria-pressed',replacement.getAttribute('aria-pressed'));
+      if(button.innerHTML!==replacement.innerHTML)button.innerHTML=replacement.innerHTML;
+      button.disabled=!!m._likePending;
+      var people=current.querySelector('[data-like-people]'),newPeople=next.querySelector('[data-like-people]');
+      if(people&&!newPeople)people.remove();else if(!people&&newPeople)current.appendChild(newPeople);
+    }else current.replaceWith(next);
+  }else if(next){stack.insertBefore(next,stack.querySelector('.gc-time'));next.querySelector('button').disabled=!!m._likePending;}
+}
 function toggleLike(mid){
   if(!open)return;
-  var id=open.id,m=open.messages.find(function(x){return String(x.id)===String(mid);});
+  var thread=open,id=thread.id,m=thread.messages.find(function(x){return String(x.id)===String(mid);});
   if(!m||m._likePending||m.pending||m.failed||m.kind==='deleted'||m.kind==='system')return;
   var previous=(m.likes||[]).slice(),was=!!m.liked;
   var own=open.members.find(isMe)||{username:'You',wallet:window._myWallet||''};
   m.likes=previous.filter(function(l){return !l.mine;});m.liked=!was;
   if(!was)m.likes.push({user_id:own.user_id,username:own.username,wallet:own.wallet,avatar:own.avatar||'',mine:true});
-  m._likePending=true;renderMessages(false);
-  api('/api/group-chats/'+id+'/messages/'+mid+'/likes',{method:'POST',body:{}}).then(function(d){
-    m._likePending=false;if(!open||open.id!==id)return;
+  m._likePending=true;paintLike(m);
+  var controller=new AbortController(),timeout=setTimeout(function(){controller.abort();},12000);
+  api('/api/group-chats/'+id+'/messages/'+mid+'/likes',{method:'POST',body:{},signal:controller.signal}).then(function(d){
+    clearTimeout(timeout);m._likePending=false;if(open!==thread)return;
     if(d.ok){m.likes=d.likes;m.liked=d.liked;m.version=d.version;}
     else{m.likes=previous;m.liked=was;toast(d.msg||'Could not like message');}
-    renderMessages(false);fetchNew();
+    paintLike(m);fetchNew();
   });
 }
 function showLikes(mid){
