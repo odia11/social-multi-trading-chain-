@@ -1678,40 +1678,74 @@ function _pfRenderSafety(card, d){
   });
   box.hidden = false;
 }
+function _pfProfileLink(user, cls){
+  var wallet = String(user.wallet_address || '');
+  var link = _pfNode(wallet ? 'a' : 'span', cls);
+  if(wallet){
+    link.href = '/profile/' + encodeURIComponent(wallet);
+    link.setAttribute('aria-label', 'View profile of ' + (user.username || 'trader'));
+  }
+  return link;
+}
+function _pfUserAvatar(user, cls){
+  var avatar = _pfProfileLink(user, cls);
+  avatar.appendChild(_pfNode('span', 'pt-pf-avatar-initials', (user.username || '?').replace(/^@/, '').slice(0, 2).toUpperCase()));
+  var src = safeMediaUrl(user.avatar_url);
+  if(src){
+    var img = document.createElement('img');
+    img.src = src;
+    img.alt = '';
+    img.decoding = 'async';
+    img.addEventListener('error', function(){ img.remove(); }, {once: true});
+    avatar.appendChild(img);
+  }
+  return avatar;
+}
 function _pfRenderCommunity(card, c){
   var box = card.querySelector('.pt-pf-community');
   if(!box) return;
   var users = c.users || [], holders = Number(c.holders) || 0;
   var events = _pfActivity[card.dataset.mint] || [];
+  var token = ST.tokens[Number(card.dataset.idx)];
+  var symbol = token && token.symbol || 'this token';
   box.replaceChildren();
-  // "On OrcAgent": who you follow holds it, then the latest buys and sells
-  // by you and the people you follow.
   var hd = _pfNode('div', 'pt-pf-comm-hd');
   hd.appendChild(_pfNode('h3', 'pt-pf-h', 'On OrcAgent'));
+  hd.appendChild(_pfNode('span', 'pt-pf-comm-label', 'Activity'));
+  box.appendChild(hd);
   var who = _pfNode('div', 'pt-pf-comm-who');
   if(users.length){
-    var avs = _pfNode('div', 'pt-friend-avs');
-    users.slice(0, 3).forEach(function(u){
-      var src = u.avatar_url && safeMediaUrl(u.avatar_url);
-      if(src){ var img = document.createElement('img'); img.src = src; img.alt = ''; avs.appendChild(img); }
-      else avs.appendChild(_pfNode('div', 'ph', (u.username || '?').slice(0, 1).toUpperCase()));
-    });
+    var avs = _pfNode('div', 'pt-pf-friend-avatars');
+    users.slice(0, 3).forEach(function(u){ avs.appendChild(_pfUserAvatar(u, 'pt-pf-avatar pt-pf-friend-avatar')); });
     who.appendChild(avs);
-    who.appendChild(_pfNode('span', null, users.length + (users.length === 1 ? ' friend holds it' : ' friends hold it')));
+    who.appendChild(_pfNode('span', null, users.length + (users.length === 1 ? ' friend holds ' : ' friends hold ') + symbol));
   } else {
     who.appendChild(_pfNode('span', null, holders ? holders + ' trader' + (holders === 1 ? '' : 's') + ' hold it' : 'No friends hold it yet'));
   }
-  hd.appendChild(who);
-  box.appendChild(hd);
+  box.appendChild(who);
   if(events.length){
+    var list = _pfNode('div', 'pt-pf-act-list');
     events.slice(0, 5).forEach(function(e){
       var buy = e.side === 'buy', row = _pfNode('div', 'pt-pf-act');
-      row.appendChild(_pfNode('span', 'pt-pf-act-side ' + (buy ? 'buy' : 'sell'), buy ? 'BUY' : 'SELL'));
-      row.appendChild(_pfNode('span', 'pt-pf-act-who', e.you ? 'You' : '@' + (e.username || 'trader')));
-      row.appendChild(_pfNode('span', 'pt-pf-act-usd mono', _pfUsd(e.usd)));
-      row.appendChild(_pfNode('span', 'pt-pf-act-ago', fmtAge(Number(e.ts) * 1000)));
-      box.appendChild(row);
+      row.appendChild(_pfUserAvatar(e, 'pt-pf-avatar pt-pf-act-avatar'));
+      var identity = _pfNode('div', 'pt-pf-act-identity');
+      var name = _pfProfileLink(e, 'pt-pf-act-who');
+      name.appendChild(_pfNode('span', 'pt-pf-act-name', e.you ? 'You' : '@' + (e.username || 'trader').replace(/^@/, '')));
+      if(e.wallet_address){
+        var arrow = _pfNode('span', 'pt-pf-act-arrow', '›');
+        arrow.setAttribute('aria-hidden', 'true');
+        name.appendChild(arrow);
+      }
+      identity.appendChild(name);
+      identity.appendChild(_pfNode('div', 'pt-pf-act-ago', (buy ? 'Bought ' : 'Sold ') + symbol + ' · ' + fmtAge(Number(e.ts) * 1000) + ' ago'));
+      row.appendChild(identity);
+      var amount = _pfNode('div', 'pt-pf-act-amount');
+      amount.appendChild(_pfNode('span', 'pt-pf-act-usd mono', _pfUsd(e.usd)));
+      amount.appendChild(_pfNode('span', 'pt-pf-act-side ' + (buy ? 'buy' : 'sell'), buy ? 'BUY' : 'SELL'));
+      row.appendChild(amount);
+      list.appendChild(row);
     });
+    box.appendChild(list);
   } else {
     box.appendChild(_pfNode('div', 'pt-pf-comm-empty', 'Buys and sells by you and the people you follow show up here'));
   }

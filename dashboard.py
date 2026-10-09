@@ -13748,6 +13748,7 @@ def api_token_co_traders(mint):
             'username':    username or short,
             'avatar_url':  avatar_url or '',
             'wallet':      short,
+            'wallet_address': w_addr,
             'entry_price': round(entry, 8),
             'pnl_current': pnl,
         })
@@ -13850,7 +13851,7 @@ def api_token_activity(mint):
         if not name and w_addr:
             name = w_addr[:4] + '...' + w_addr[-4:]
         out.append({'side': side, 'usd': usd, 'ts': ts, 'user_id': uid, 'you': uid == me_id,
-                    'username': name or '', 'avatar_url': avatar or ''})
+                    'username': name or '', 'avatar_url': avatar or '', 'wallet_address': w_addr or ''})
     return jsonify({'ok': True, 'events': out})
 
 
