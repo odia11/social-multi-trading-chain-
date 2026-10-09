@@ -3014,6 +3014,18 @@ function scrollToCard(idx){
   if(!wasHi) _routeScope.setTimeout(function(){ card.classList.remove('hi'); }, 1600);
 }
 
+// Buy links open the existing confirmation sheet once, for the exact mint.
+// Opening it never submits a trade; the member still chooses an amount and confirms.
+function _openRequestedBuy(mint){
+  var url = new URL(location.href);
+  if(url.searchParams.get('buy') !== '1' || (url.searchParams.get('mint') || url.searchParams.get('addr')) !== mint) return;
+  var idx = ST.tokens.findIndex(function(t){ return t.mint === mint; });
+  if(idx < 0) return;
+  url.searchParams.delete('buy');
+  history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+  openBuyPanel(idx);
+}
+
 function prependSearchedToken(mint, sym, pairAddr){
   return _routeScope.fetch('/api/token/info/'+encodeURIComponent(mint)).then(function(r){ return r.json(); }).then(function(info){
     var tok;
@@ -3035,7 +3047,7 @@ function prependSearchedToken(mint, sym, pairAddr){
     ST.tokens = [tok].concat(ST.tokens.filter(function(t){ return t.mint !== tok.mint; }));
     renderFeedList();
     updateHeaderCounts();
-    _routeScope.setTimeout(function(){ if(_profileMint===tok.mint) syncTokenProfile(); else scrollToCard(0); }, 60);
+    _routeScope.setTimeout(function(){ if(_profileMint===tok.mint) syncTokenProfile(); else scrollToCard(0); _openRequestedBuy(tok.mint); }, 60);
   }).catch(function(){});
 }
 

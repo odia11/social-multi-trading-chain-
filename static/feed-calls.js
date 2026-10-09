@@ -105,7 +105,7 @@
       + '</div>'
       + '<small class="fcall-live-status" role="status">Updating…</small>'
       + '<div class="fcall-actions">'
-        + '<button type="button" class="fcall-buy" onclick="event.stopPropagation();if(typeof showTokenCard===\'function\')showTokenCard(' + jsArg(sym) + ',' + jsArg(c.mint) + ')">Buy $' + esc(sym) + '</button>'
+        + '<a class="fcall-buy" href="/live-market?mint=' + encodeURIComponent(c.mint) + '&amp;profile=1&amp;buy=1" onclick="event.stopPropagation()">Buy $' + esc(sym) + '</a>'
         + '<button type="button" class="oa-share-call" data-call-id="' + esc(c.id) + '">Share call</button>'
         + '<a class="fcall-chart" href="/call/' + encodeURIComponent(c.id) + '/trade" onclick="event.stopPropagation()">Chart</a>'
       + '</div>'
