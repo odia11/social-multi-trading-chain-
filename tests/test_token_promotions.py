@@ -139,6 +139,35 @@ class Promotions(unittest.TestCase):
         for t in {r['starts'] for r in replies}:
             self.assertLessEqual(sum(r['starts']<=t<r['ends'] for r in replies),10)
 
+    def test_designated_wallet_demo_without_balance_price_or_public_inventory(self):
+        payload=dict(package='premium',token_mint=MINT,description='Demo test',demo=True,payment_method='trading')
+        self.assertEqual(self.client.post('/api/promote/create',json=payload,headers={'X-CSRF-Token':'csrf'}).status_code,403)
+        self.login(self.client,promo.DEMO_WALLET)
+        self.d._sol_price_usd=0
+        self.d._get_trading_wallet_address=lambda wallet:None
+        self.assertTrue(self.client.get('/api/promote/packages').json['can_demo'])
+        ids=[]
+        for i in range(15):
+            r=self.client.post('/api/promote/create',json=payload,headers={'X-CSRF-Token':'csrf'})
+            self.assertEqual(r.status_code,200,r.json)
+            self.assertEqual(r.json['lamports'],0)
+            ids.append(r.json['promotion_id'])
+            self.assertEqual(self.client.post(f'/api/promote/{ids[-1]}/simulate-confirm',json={},headers={'X-CSRF-Token':'csrf'}).status_code,200)
+            self.assertEqual(self.client.post(f'/api/promote/{ids[-1]}/simulate-confirm',json={},headers={'X-CSRF-Token':'csrf'}).status_code,200)
+        self.assertEqual(self.client.get('/api/promote/directory').json['campaigns'],[])
+        for place in promo.CAPACITY:
+            self.assertEqual(self.client.get('/api/promote/featured?placement='+place).json['promotions'],[])
+        self.assertTrue(all(c['status']=='demo_active' for c in self.client.get('/api/promote/mine').json['campaigns']))
+        with promo.connection(self.path) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM promotion_used_payments').fetchone()[0],0)
+            now=int(time.time())
+            self.assertEqual(promo.next_slot(db,['feed','market','banner'],86400,now)[0],now)
+        self.d._sol_price_usd=100
+        paid=self.create().json['promotion_id']
+        self.assertEqual(self.client.post(f'/api/promote/{paid}/simulate-confirm',json={},headers={'X-CSRF-Token':'csrf'}).status_code,403)
+        self.login(self.client,'stranger')
+        self.assertEqual(self.client.post(f'/api/promote/{ids[0]}/simulate-confirm',json={},headers={'X-CSRF-Token':'csrf'}).status_code,403)
+
     def test_exact_finalized_signer_and_transfer(self):
         identifier=self.create().json['promotion_id']
         with promo.connection(self.path) as db:row=dict(db.execute('SELECT * FROM promotion_campaigns WHERE id=?',(identifier,)).fetchone())

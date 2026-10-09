@@ -23,7 +23,11 @@ request ID. External wallet payments require that quote's payer to sign. All
 activation requires a finalized, successful, post-quote-creation system transfer
 from that signer to the stored treasury for at least the exact quoted lamports.
 A signature is unique across campaigns; legacy payment signatures cannot be
-reused. The old simulate-confirm endpoint is disabled.
+reused. The simulate-confirm endpoint is restricted to demo campaigns owned by the
+designated wallet `Cdn8WftaYycdudV9yeeQPY1A1Tgo1bMa9eV4Tv9SeAM9`.
+It cannot activate paid advertising. This wallet can create demo campaigns
+without a trading wallet, SOL balance or price quote. Demo campaigns remain
+private in My campaigns, spend no SOL and consume no real inventory.
 
 A background sweep reconciles submitted signatures without signing or sending
 money. My campaigns also reconciles them. The external-wallet frontend stores a

@@ -18,6 +18,7 @@ PACKAGES = {
     'premium': {'name': 'Premium', 'usd': 50, 'hours': 48, 'placements': ['feed', 'market', 'banner']},
 }
 CAPACITY = {'feed': 10, 'market': 10, 'banner': 5}
+DEMO_WALLET = "Cdn8WftaYycdudV9yeeQPY1A1Tgo1bMa9eV4Tv9SeAM9"
 QUOTE_SECONDS = 600
 
 @contextmanager
@@ -194,12 +195,15 @@ def install(d):
 
     @app.get('/api/promote/packages')
     def promotion_packages():
-        return result(packages=PACKAGES, capacity=CAPACITY, quote_seconds=QUOTE_SECONDS)
+        return result(packages=PACKAGES, capacity=CAPACITY, quote_seconds=QUOTE_SECONDS, can_demo=d._authenticated_wallet()==DEMO_WALLET)
 
     @d.rate_limit(10, 60)
     def create():
         wallet = authenticated()
         body = request.get_json(silent=True) or {}
+        demo=body.get('demo') is True
+        if demo and wallet!=DEMO_WALLET:
+            return error('Demo mode is restricted to the designated wallet',403)
         package = body.get('package')
         if not isinstance(package, str) or package not in PACKAGES:
             return error('Choose Basic, Spotlight or Premium')
@@ -213,22 +217,22 @@ def install(d):
             website, social = safe_url(body.get('website')), safe_url(body.get('social'))
             info = token_info(mint)
             price = float(d._sol_price_usd or 0)
-            if not math.isfinite(price) or price <= 0:
+            if not demo and (not math.isfinite(price) or price <= 0):
                 return error('SOL price unavailable. No payment quote created.', 503)
             if not d.is_valid_solana_address(d.ADMIN_WALLET):
                 return error('Promotion payments are not configured', 503)
             pack = PACKAGES[package]
-            amount = int((Decimal(pack['usd']) / Decimal(str(price)) * 10**9).to_integral_value(rounding=ROUND_CEILING))
+            amount = 0 if demo else int((Decimal(pack['usd']) / Decimal(str(price)) * 10**9).to_integral_value(rounding=ROUND_CEILING))
             now = int(time.time())
             payer = wallet
-            if body.get('payment_method') == 'trading':
+            if not demo and body.get('payment_method') == 'trading':
                 payer = d._get_trading_wallet_address(wallet)
                 if not payer:
                     raise ValueError('Create and fund your trading wallet first')
-            method = 'trading' if body.get('payment_method') == 'trading' else 'external'
+            method = 'demo' if demo else 'trading' if body.get('payment_method') == 'trading' else 'external'
             with connection(d.DB_FILE, True) as db:
                 count = db.execute("SELECT COUNT(*) FROM promotion_campaigns WHERE wallet=? AND status='pending' AND quote_until>?", (wallet, now)).fetchone()[0]
-                if count >= 3:
+                if count >= 3 and not demo:
                     return error('You already have three open payment quotes. Finish one or wait for expiry.', 429)
                 earliest=now
                 if body.get('extend_campaign') is not None:
@@ -240,7 +244,7 @@ def install(d):
                     if not previous or previous['mint']!=mint:
                         raise ValueError('Campaign to extend was not found for this token')
                     earliest=max(now,previous['ends'])
-                start, end = next_slot(db, pack['placements'], pack['hours'] * 3600, now, earliest=earliest)
+                start, end = (now,now+pack['hours']*3600) if demo else next_slot(db, pack['placements'], pack['hours'] * 3600, now, earliest=earliest)
                 logo = info.get('image_url') or info.get('logo') or ''
                 try:
                     logo = safe_url(logo)
@@ -251,11 +255,13 @@ def install(d):
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                     (wallet,mint,str(info['symbol'])[:20],str(info['name'])[:80],logo,description,website,social,package,pack['usd'],amount,payer,d.ADMIN_WALLET,now,now+QUOTE_SECONDS,start,end,method))
                 identifier = cur.lastrowid
+                if demo:
+                    db.execute("UPDATE promotion_campaigns SET status='demo_pending' WHERE id=?",(identifier,))
                 db.executemany('INSERT INTO promotion_slots(campaign,placement) VALUES(?,?)', [(identifier,p) for p in pack['placements']])
             return result(promotion_id=identifier, treasury_wallet=d.ADMIN_WALLET, payer=payer,
                 amount_sol=amount/1e9, lamports=amount, amount_usd=pack['usd'], duration_hours=pack['hours'],
                 starts=start, ends=end, quote_until=now+QUOTE_SECONDS, payment_method=method,
-                network_fee_extra=True)
+                network_fee_extra=not demo, demo=demo)
         except ValueError as exc:
             return error(str(exc))
 
@@ -316,12 +322,28 @@ def install(d):
         state = row['status']
         if state == 'confirmed':
             state = 'scheduled' if row['starts'] > now else 'expired' if row['ends'] <= now else 'active'
-        elif not row['signature'] and row['quote_until'] <= now:
+        elif row['status']=='demo_active':
+            state='demo_active' if row['ends']>now else 'demo_expired'
+        elif row['status']=='pending' and not row['signature'] and row['quote_until'] <= now:
             state = 'quote_expired'
         return result(status=state, starts=row['starts'], ends=row['ends'], quote_until=row['quote_until'], tx_signature=row['signature'])
 
     def simulate(promotion_id):
-        return error('Demo confirmation is disabled for paid advertising', 403)
+        wallet=authenticated()
+        if wallet!=DEMO_WALLET:
+            return error('Demo mode is restricted to the designated wallet',403)
+        with connection(d.DB_FILE,True) as db:
+            row=db.execute('SELECT * FROM promotion_campaigns WHERE id=? AND wallet=?',(promotion_id,wallet)).fetchone()
+            if not row:
+                return error('Campaign not found',404)
+            if row['payment_method']!='demo':
+                return error('A paid campaign cannot be demo-confirmed',403)
+            if row['status']=='demo_pending':
+                now=int(time.time())
+                duration=row['ends']-row['starts']
+                db.execute("UPDATE promotion_campaigns SET status='demo_active',confirmed=?,starts=?,ends=? WHERE id=?",(now,now,now+duration,promotion_id))
+        return result(status='demo_active',demo=True)
+
 
     @app.get('/api/promote/mine')
     @d.rate_limit(60,60)
@@ -351,7 +373,9 @@ def install(d):
                 item['placements']=[r[0] for r in db.execute('SELECT placement FROM promotion_slots WHERE campaign=?',(row['id'],))]
                 if row['status']=='confirmed':
                     item['status']='scheduled' if row['starts']>now else 'expired' if row['ends']<=now else 'active'
-                elif not row['signature'] and row['quote_until'] <= now:
+                elif row['status']=='demo_active':
+                    item['status']='demo_active' if row['ends']>now else 'demo_expired'
+                elif row['status']=='pending' and not row['signature'] and row['quote_until'] <= now:
                     item['status']='quote_expired'
                 item['click_history']=[dict(r) for r in db.execute('''SELECT (clicked/3600)*3600 AS hour,COUNT(*) AS clicks
                     FROM promotion_deliveries WHERE campaign=? AND clicked IS NOT NULL GROUP BY hour ORDER BY hour''',(row['id'],))]
