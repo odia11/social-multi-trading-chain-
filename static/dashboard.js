@@ -9316,15 +9316,28 @@ function _syncFeedCounters(oldRoot, fresh){
 // A transient avatar error must not leave a hidden Image cached in a card
 // forever. Retry only failed photos; decoded photos keep their DOM and URL.
 var _feedAvatarScope=null;
+var _feedAvatarRetryEpoch=Date.now();
+var _FEED_AVATAR_LOAD_TIMEOUT=6000;
 function _feedAvatarSource(img){return img.dataset.feedAvatarSource||img.getAttribute('src')||'';}
 function _feedAvatarLoaded(img){
   img.style.display='';
   img.dataset.feedAvatarFailed='0';
   if(img._feedAvatarTimer&&_feedAvatarScope)_feedAvatarScope.clearTimeout(img._feedAvatarTimer);
   img._feedAvatarTimer=null;
+  if(img._feedAvatarWatch&&_feedAvatarScope)_feedAvatarScope.clearTimeout(img._feedAvatarWatch);
+  img._feedAvatarWatch=null;
+}
+function _watchFeedAvatar(img){
+  if(img._feedAvatarWatch||img._feedAvatarTimer||!img.isConnected||Number(img.dataset.feedAvatarRetries||0)>=2)return;
+  img._feedAvatarWatch=_feedAvatarScope.setTimeout(function(){
+    img._feedAvatarWatch=null;
+    if(img.isConnected&&img.naturalWidth===0)_feedAvatarFailed(img);
+  },_FEED_AVATAR_LOAD_TIMEOUT);
 }
 function _feedAvatarFailed(img){
   img.style.display='none';img.dataset.feedAvatarFailed='1';
+  if(img._feedAvatarWatch&&_feedAvatarScope)_feedAvatarScope.clearTimeout(img._feedAvatarWatch);
+  img._feedAvatarWatch=null;
   if(!img.isConnected||img._feedAvatarTimer||Number(img.dataset.feedAvatarRetries||0)>=2)return;
   if(!_feedAvatarScope||!_feedAvatarScope.isActive())_initFeedAvatars(document);
   if(!_feedAvatarScope||!_feedAvatarScope.isActive()||img._feedAvatarTimer)return;
@@ -9337,9 +9350,9 @@ function _feedAvatarFailed(img){
     try{
       var url=new URL(src,location.href);
       // Retry a same-origin cacheable photo without reusing a cached failure.
-      if(url.origin===location.origin){url.searchParams.set('avatar_retry',String(Date.now()));src=url.href;}
+      if(url.origin===location.origin){url.searchParams.set('avatar_retry',String(_feedAvatarRetryEpoch)+'-'+attempt);src=url.href;}
     }catch(_){}
-    img.loading='eager';img.src=src;
+    img.loading='eager';img.src=src;_watchFeedAvatar(img);
   },attempt*800);
 }
 function _initFeedAvatars(root){
@@ -9347,21 +9360,29 @@ function _initFeedAvatars(root){
     _feedAvatarScope=OrcPageLifecycle.createScope('feed-avatar-recovery',document.body);
     function recover(){
       if(document.hidden)return;
+      _feedAvatarRetryEpoch=Date.now();
       document.querySelectorAll('.fc-avatar img,.fc-ri-avatar img,.fc-reply-avatar img').forEach(function(img){
+        if(img.naturalWidth>0){_feedAvatarLoaded(img);return;}
         if(img.dataset.feedAvatarFailed==='1'&&!img._feedAvatarTimer){img.dataset.feedAvatarRetries='0';_feedAvatarFailed(img);}
+        else _watchFeedAvatar(img);
       });
     }
     _feedAvatarScope.onCleanup(function(){
-      document.querySelectorAll('.fc-avatar img,.fc-ri-avatar img,.fc-reply-avatar img').forEach(function(img){img._feedAvatarTimer=null;});
+      document.querySelectorAll('.fc-avatar img,.fc-ri-avatar img,.fc-reply-avatar img').forEach(function(img){img._feedAvatarTimer=null;img._feedAvatarWatch=null;});
     });
     _feedAvatarScope.addEventListener(window,'online',recover);
     _feedAvatarScope.addEventListener(document,'visibilitychange',recover);
+    _feedAvatarScope.addEventListener(document,'orca:lifecycle-resume',recover);
   }
   (root||document).querySelectorAll('.fc-avatar img,.fc-ri-avatar img,.fc-reply-avatar img').forEach(function(img){
     if(!img.dataset.feedAvatarSource)img.dataset.feedAvatarSource=img.getAttribute('src')||'';
+    // Start small profile photos immediately, even deep in a scrollable feed.
+    // Every avatar is tiny and the versioned URL is shared across its posts.
+    img.loading='eager';
     img.onload=function(){_feedAvatarLoaded(img);};
     img.onerror=function(){_feedAvatarFailed(img);};
     if(img.complete){if(img.naturalWidth>0)_feedAvatarLoaded(img);else _feedAvatarFailed(img);}
+    else _watchFeedAvatar(img);
   });
 }
 function _reuseFeedMedia(oldRoot, fresh){
@@ -9714,11 +9735,11 @@ function _renderFeedCard(e, cardIndex){
   /* ── avatar ── */
   var bg = (typeof _lbAvatarColor==='function') ? _lbAvatarColor(e.username||e.wallet||'?') : '#21252c';
   var ini = (e.username||e.wallet||'?')[0].toUpperCase();
-  // Photos are never lazy in the first visible cards; eager/high-priority
+  // Profile photos are always eager; the first visible cards get high-priority
   // fetch starts as soon as the feed DOM is inserted. A gold-on-dark initial
   // stays visible behind the image, so there is no empty circle while loading.
   var firstAvatar = typeof cardIndex === 'number' && cardIndex < 8;
-  var avatarPriority = firstAvatar ? ' loading="eager" fetchpriority="high"' : ' loading="lazy"';
+  var avatarPriority = firstAvatar ? ' loading="eager" fetchpriority="high"' : ' loading="eager"';
   var imgHtml = e.avatar_url ? '<img src="'+esc(e.avatar_url)+'" alt=""'+avatarPriority+' decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%;z-index:2" onerror="_feedAvatarFailed(this)" onload="_feedAvatarLoaded(this)">' : '';
   var verifiedBadge = e.verified ? '<span style="position:absolute;bottom:-1px;right:-1px;width:14px;height:14px;background:#f7b955;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px;color:#0a0b0e;border:1.5px solid #0a0b0e;font-weight:700">✓</span>' : '';
 
