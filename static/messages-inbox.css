@@ -157,3 +157,15 @@
   #msgs-left .conv-preview{font-size:13.5px!important}
 }
 @media(prefers-reduced-motion:reduce){#msgs-left .conv-row,#msgs-left .oa-active-av{transition:none}}
+
+/* Keep conversation types separate, including the cached first paint. */
+#msgs-left[data-inbox-tab="direct"] #gc-section,
+#msgs-left[data-inbox-tab="groups"] #conv-list,
+#msgs-left[data-inbox-tab="groups"] #oa-active-strip{display:none!important}
+.oa-inbox-tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:16px;padding:4px;border:1px solid var(--ib-line,#282d35);border-radius:12px;background:var(--bg,#080d11)}
+.oa-inbox-tabs button{display:flex;align-items:center;justify-content:center;gap:7px;min-height:40px;padding:8px;border:0;border-radius:9px;background:transparent;color:var(--sub,#9ba3af);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer}
+#msgs-left[data-inbox-tab="direct"] .oa-inbox-tabs [data-inbox-tab="direct"],#msgs-left[data-inbox-tab="groups"] .oa-inbox-tabs [data-inbox-tab="groups"]{background:var(--bg2,#151a22);color:var(--text,#eef1f5);box-shadow:0 1px 4px #0002}
+.oa-inbox-tabs button:focus-visible{outline:2px solid #f7b955;outline-offset:2px}
+.oa-inbox-tabs b:not(:empty){min-width:18px;padding:2px 5px;border-radius:20px;background:#f7b955;color:#080d11;font-size:10px}
+#msgs-left[data-inbox-tab="groups"] #gc-section{overflow-y:auto;flex:1;min-height:0;padding:10px 12px 20px}
+@media(max-width:767px){#msgs-left[data-inbox-tab="groups"] #gc-section{overflow:visible}}

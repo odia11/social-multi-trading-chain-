@@ -191,3 +191,7 @@ html.gc-lock,html.gc-lock body{overflow:hidden!important}
 .gc-like-people{border:0;background:transparent;color:var(--gc-muted);font:500 10px/1.4 system-ui;cursor:pointer;padding:5px 0}
 .gc-like-people:hover{color:var(--gc-text)}
 .gc-like-list .gc-member{text-decoration:none;color:inherit}
+
+.gc-like-pill.gc-like-empty{color:var(--gc-muted);background:transparent;border-color:transparent;box-shadow:none;font-size:11px;padding:3px 7px;min-height:28px}
+.gc-like-empty span{font-size:18px;color:var(--gc-gold);line-height:1}
+.gc-like-pill.gc-like-empty:hover{border-color:var(--gc-gold);color:var(--gc-gold)}

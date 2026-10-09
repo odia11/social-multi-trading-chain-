@@ -107,24 +107,24 @@ function setListHtml(s,html){
 }
 function renderList(){
   var s=section();if(!s)return;
-  var filter=window._convFilter==='unread';
-  var q=((document.getElementById('msgs-search')||{}).value||'').trim().toLowerCase();
+  var filter=(window._inboxTab==='groups'?window._convFilter:((window._inboxFilters||{}).groups))==='unread';
+  var q=(window._inboxTab==='groups'?((document.getElementById('msgs-search')||{}).value||''):((window._inboxQueries||{}).groups||'')).trim().toLowerCase();
+  window._groupInboxChats=chats;
+  if(typeof window._renderInboxChrome==='function')window._renderInboxChrome();
   var shown=chats.filter(function(c){
     if(filter&&!c.unread)return false;
     if(q&&c.name.toLowerCase().indexOf(q)<0)return false;
     return true;
   });
   if(!q&&!filter)setTimeout(remember,0);
-  var chips=document.getElementById('oa-inbox-filters');
-  if(chips&&chats.length)chips.hidden=false;
   if(!chats.length){
     setListHtml(s,q||filter?'':'<button type="button" class="gc-cta" data-gc-new>'
       +'<span class="gc-cta-ico">'+ICON.groupAdd+'</span>'
       +'<span class="gc-cta-copy"><b>New group</b><small>Chat with your followers, together</small></span></button>');
     return;
   }
-  if(!shown.length){setListHtml(s,'');return;}
-  setListHtml(s,'<div class="oa-active-title gc-title">Groups</div>'+shown.map(function(c){
+  if(!shown.length){setListHtml(s,'<div class="msgs-left-empty">'+(q?'No groups found.':'No unread group chats.')+'</div>');return;}
+  setListHtml(s,shown.map(function(c){
     var unread=c.unread>0;
     return '<div class="conv-row-wrap gc-row-wrap'+(unread?' is-unread':'')+'" data-gc="'+c.id+'">'
       +'<div class="conv-row" role="button" tabindex="0" aria-label="Open group '+esc(c.name)+'">'
@@ -294,6 +294,7 @@ function fetchNew(){
   });
 }
 function openGroup(id,push){
+  if(window._setInboxTab)window._setInboxTab("groups");
   id=Number(id);if(!id)return;
   var c=chats.find(function(x){return x.id===id;})||{id:id,name:'Group',members:0};
   open={id:id,name:c.name,role:c.role,photo:c.photo||'',members:[],messages:[],lastId:0,changeVersion:0};
@@ -666,7 +667,8 @@ function transferOwner(m,id){
   };
 }
 function likeHtml(m){
-  var likes=m.likes||[];if(!likes.length||m.kind==='deleted')return '';
+  var likes=m.likes||[];if(m.pending||m.failed||m.kind==='deleted'||m.kind==='system')return '';
+  if(!likes.length)return '<div class="gc-like-row"><button type="button" class="gc-like-pill gc-like-empty" data-message-like="'+m.id+'" aria-label="Like message" aria-pressed="false"><span aria-hidden="true">♡</span> Like</button></div>';
   return '<div class="gc-like-row"><button type="button" class="gc-like-pill'+(m.liked?' liked':'')+'" data-message-like="'+m.id+'" aria-label="'+(m.liked?'Remove like':'Like message')+'" aria-pressed="'+!!m.liked+'">❤️'+(likes.length>1?' <span>'+likes.length+'</span>':'')+'</button><button type="button" class="gc-like-people" data-like-people="'+m.id+'" aria-label="See who liked this message">View likes</button></div>';
 }
 function toggleLike(mid){
@@ -761,7 +763,7 @@ document.addEventListener('click',function(e){
   var like=e.target.closest('[data-message-like]');if(like){toggleLike(like.dataset.messageLike);return;}
   var people=e.target.closest('[data-like-people]');if(people){showLikes(people.dataset.likePeople);return;}
   var options=e.target.closest('[data-message-menu]');if(options){messageMenu(options.dataset.messageMenu);return;}
-  if(e.target.closest('[data-gc-new]')){e.preventDefault();newGroup();return;}
+  if(e.target.closest('[data-gc-new]')){e.preventDefault();if(window._setInboxTab)window._setInboxTab('groups');newGroup();return;}
   var row=e.target.closest('.gc-row-wrap');
   if(row){openGroup(row.dataset.gc);return;}
   if(e.target.closest('[data-gc-close]')){closeGroup();return;}
@@ -802,6 +804,7 @@ function boot(){
   });
   listTimer=every(function(){if(!document.hidden&&!open)loadList();},12000);
 }
+document.addEventListener('oa-inbox-tabchange',renderList);
 window.OrcAgentGroupChats={open:openGroup,reload:loadList};
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
