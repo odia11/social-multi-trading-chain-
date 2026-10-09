@@ -254,7 +254,7 @@ function renderMessages(stick){
   var existing={};Array.from(box.children).forEach(function(el){if(el.dataset.mid)existing[el.dataset.mid]=el;});
   var cursor=box.firstElementChild;
   Array.from(template.content.children).forEach(function(next){
-    var old=next.dataset.mid&&existing[next.dataset.mid];
+    var old=next.dataset.mid?existing[next.dataset.mid]:(cursor&&!cursor.dataset.mid&&cursor.outerHTML===next.outerHTML?cursor:null);
     var el=old&&old.outerHTML===next.outerHTML?old:next;
     if(el===cursor)cursor=cursor.nextElementSibling;
     else box.insertBefore(el,cursor);
