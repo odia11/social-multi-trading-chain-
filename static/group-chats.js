@@ -82,7 +82,7 @@ var VERIFIED='<svg class="conv-verified" viewBox="0 0 24 24" aria-label="Verifie
 
 function avatarHtml(cls,name,seed,url){
   var img=safeImg(url);
-  return '<span class="'+cls+'" style="--oa-av:'+esc(color(seed))+'">'+esc(initial(name))
+  return '<span class="'+cls+'"'+(img&&cls==='gc-msg-av'?' role="button" tabindex="0" aria-label="View profile photo"':'')+' style="--oa-av:'+esc(color(seed))+'">'+esc(initial(name))
     +(img?'<img src="'+esc(img)+'" alt="" loading="lazy" onerror="this.remove()">':'')+'</span>';
 }
 
@@ -762,30 +762,17 @@ function messageMenu(mid){
   });
 }
 function setPhoto(file){
-  if(!open)return;
-  if(!/^image\/(jpeg|png|gif|webp)$/.test(file.type)){toast('Choose a JPEG, PNG, GIF or WebP photo');return;}
-  if(file.size>12*1024*1024){toast('That photo is too large');return;}
-  var id=open.id,reader=new FileReader();
-  reader.onload=function(){
-    var img=new Image();
-    img.onload=function(){
-      // Square, centred, 512 px: what an avatar needs.
-      var side=Math.min(img.naturalWidth,img.naturalHeight),out=Math.min(512,side);
-      var cv=document.createElement('canvas');cv.width=cv.height=out;
-      cv.getContext('2d').drawImage(img,(img.naturalWidth-side)/2,(img.naturalHeight-side)/2,side,side,0,0,out,out);
-      toast('Updating photo…');
-      api('/api/group-chats/'+id+'/photo',{method:'PUT',body:{photo:cv.toDataURL('image/jpeg',0.86)}}).then(function(d){
-        if(!d.ok){toast(d.msg||'Could not change the photo');return;}
-        adopt(d.chat);fetchNew();
-        if(document.querySelector('.gc-sheet-info'))showInfo();
-        toast('Group photo updated');
-      });
-    };
-    img.onerror=function(){toast('That photo could not be read');};
-    img.src=String(reader.result||'');
-  };
-  reader.readAsDataURL(file);
+  if(!open)return;var id=open.id;
+  OrcAgentEditPhoto(file,{title:'Position group photo',circle:true}).then(function(photo){
+    if(!photo)return;toast('Updating photo…');
+    return api('/api/group-chats/'+id+'/photo',{method:'PUT',body:{photo:photo}}).then(function(d){
+      if(!d.ok){toast(d.msg||'Could not change the photo');return;}
+      if(!open||open.id!==id)return;
+      adopt(d.chat);fetchNew();if(document.querySelector('.gc-sheet-info'))showInfo();toast('Group photo updated');
+    });
+  }).catch(function(e){toast(e.message||'Could not change the photo');});
 }
+
 function isMe(m){return !!(window._myWallet&&m.wallet===window._myWallet);}
 
 var REACTION_MAIN=['❤️','😂','😮','😢','😡','👍','🔥'];
@@ -853,6 +840,8 @@ function addHeaderButton(){
   row.insertBefore(b,compose);
 }
 document.addEventListener('click',function(e){
+  var avatar=e.target.closest('.gc-msg-av img,.gc-th-av img');
+  if(avatar){e.preventDefault();e.stopPropagation();OrcAgentViewPhoto(avatar.src);return;}
   var like=e.target.closest('[data-message-like]');if(like){toggleLike(like.dataset.messageLike,like.dataset.emoji);return;}
   var people=e.target.closest('[data-like-people]');if(people){showLikes(people.dataset.likePeople);return;}
   var options=e.target.closest('[data-message-menu]');if(options){messageMenu(options.dataset.messageMenu);return;}
@@ -872,6 +861,7 @@ document.addEventListener('dblclick',function(e){
   var message=bubble.closest('.gc-msg');if(message)toggleLike(message.dataset.mid);
 });
 document.addEventListener('keydown',function(e){
+  if((e.key==='Enter'||e.key===' ')&&e.target.matches('.gc-msg-av[role="button"]')){e.preventDefault();var img=e.target.querySelector('img');if(img)OrcAgentViewPhoto(img.src);return;}
   if(e.key!=='Escape')return;
   if(reactionMenu){closeReactionMenu();return;}
   if(document.getElementById('gc-sheet')){closeSheet();return;}

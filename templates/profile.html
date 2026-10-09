@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/static/photo-tools.js?v={{ app_version }}" defer></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
 <title>{{ display_name }} — OrcAgent</title>
@@ -372,7 +373,7 @@ html,body{min-height:100%;background:#0a0b0e;color:#eef1f5;font-family:'Geist',s
         {% if avatar_url %}
           {% if is_own_profile|default(false) %}
           <img class="pf-avatar-img" id="pf-avatar-img" src="{{ avatar_url }}" alt="{{ display_name }}" style="cursor:pointer"
-               onclick="_onAvatarClick()" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+               onclick="_showAvatarLightbox(this.src)" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
           {% else %}
           <img class="pf-avatar-img" src="{{ avatar_url }}" alt="{{ display_name }}" style="cursor:pointer"
                onclick="_showAvatarLightbox(this.src)" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
@@ -899,9 +900,9 @@ async function _saveEditProfile(){
 
 document.addEventListener('keydown',function(e){ if(e.key==='Escape'){ closeFollowListModal(); closeShareModal(); _closeEditProfileModal(); } });
 
-function _showAvatarLightbox(url){if(!url)return;document.getElementById('avatar-lightbox-img').src=url;document.getElementById('avatar-lightbox').classList.add('open');}
+function _showAvatarLightbox(url){OrcAgentViewPhoto(url);}
 function _closeAvatarLightbox(){document.getElementById('avatar-lightbox').classList.remove('open');document.getElementById('avatar-lightbox-img').src='';}
-function _showBannerLightbox(url){if(!url)return;document.getElementById('banner-lightbox-img').src=url;document.getElementById('banner-lightbox').classList.add('open');}
+function _showBannerLightbox(url){OrcAgentViewPhoto(url);}
 function _closeBannerLightbox(){document.getElementById('banner-lightbox').classList.remove('open');document.getElementById('banner-lightbox-img').src='';}
 document.addEventListener('keydown',function(e){if(e.key==='Escape'){_closeAvatarLightbox();_closeBannerLightbox();}});
 
@@ -930,14 +931,12 @@ function _onAvatarFileProfile(input){
     input.value = '';
     return;
   }
-  if (file.size > 2*1024*1024) {
-    _avatarMsg('✗ Image too large (max 2 MB)', 'err');
+  if (file.size > 12*1024*1024) {
+    _avatarMsg('✗ Image too large (max 12 MB)', 'err');
     input.value = '';
     return;
   }
-  var reader = new FileReader();
-  reader.onload = function(e){ _uploadAvatarProfile(e.target.result); };
-  reader.readAsDataURL(file);
+  OrcAgentEditPhoto(file,{title:'Position profile photo',circle:true}).then(function(data){if(data)_uploadAvatarProfile(data);}).catch(function(e){_avatarMsg(e.message,'err');});
   input.value = '';
 }
 
@@ -960,7 +959,7 @@ async function _uploadAvatarProfile(dataUrl){
         img.id = 'pf-avatar-img';
         img.alt = 'avatar';
         img.style.cursor = 'pointer';
-        img.onclick = _onAvatarClick;
+        img.onclick = function(){_showAvatarLightbox(this.src);};
         img.onerror = function(){ this.style.display='none'; if (fallback) fallback.style.display='flex'; };
         wrap.insertBefore(img, wrap.firstChild);
       }
@@ -1026,14 +1025,13 @@ function _onBannerFile(input){
     input.value = '';
     return;
   }
-  if (file.size > 2*1024*1024) {
-    _bannerMsg('✗ Image too large (max 2 MB)', 'err');
+  if (file.size > 12*1024*1024) {
+    _bannerMsg('✗ Image too large (max 12 MB)', 'err');
     input.value = '';
     return;
   }
-  var reader = new FileReader();
-  reader.onload = function(e){ _uploadBanner(e.target.result); };
-  reader.readAsDataURL(file);
+  var cover=document.querySelector('.pf-cover').getBoundingClientRect();
+  OrcAgentEditPhoto(file,{title:'Position profile banner',aspect:cover.width/cover.height}).then(function(data){if(data)_uploadBanner(data);}).catch(function(e){_bannerMsg(e.message,'err');});
   input.value = '';
 }
 
