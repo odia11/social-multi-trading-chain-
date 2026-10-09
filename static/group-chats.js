@@ -359,6 +359,7 @@ if(window.visualViewport){
   window.visualViewport.addEventListener('scroll',fitViewport);
 }
 function closeGroup(fromPop){
+  closeReactionMenu();
   if(pollTimer){window.clearInterval(pollTimer);pollTimer=null;}
   open=null;window.__oaOpenGroupId=null;emojiPanel(false);
   var t=document.getElementById('gc-thread');
@@ -677,45 +678,47 @@ function transferOwner(m,id){
 }
 function likeHtml(m){
   var likes=m.likes||[];if(m.pending||m.failed||m.kind==='deleted'||m.kind==='system')return '';
-  if(!likes.length)return '<div class="gc-like-row"><button type="button" class="gc-like-pill gc-like-empty" data-message-like="'+m.id+'" aria-label="Like message" aria-pressed="false"><span aria-hidden="true">♡</span> Like</button></div>';
-  return '<div class="gc-like-row"><button type="button" class="gc-like-pill'+(m.liked?' liked':'')+'" data-message-like="'+m.id+'" aria-label="'+(m.liked?'Remove like':'Like message')+'" aria-pressed="'+!!m.liked+'">❤️'+(likes.length>1?' <span>'+likes.length+'</span>':'')+'</button><button type="button" class="gc-like-people" data-like-people="'+m.id+'" aria-label="See who liked this message">View likes</button></div>';
+  if(!likes.length)return '<div class="gc-like-row"><button type="button" class="gc-like-pill gc-like-empty" data-message-like="'+m.id+'" data-emoji="❤️" aria-label="Like message" aria-pressed="false"><span aria-hidden="true">♡</span></button></div>';
+  var grouped={};likes.forEach(function(l){var emoji=l.emoji||'❤️';if(!grouped[emoji])grouped[emoji]={count:0,mine:false};grouped[emoji].count++;grouped[emoji].mine=grouped[emoji].mine||l.mine;});
+  return '<div class="gc-like-row">'+Object.keys(grouped).map(function(emoji){var g=grouped[emoji];return '<button type="button" class="gc-like-pill'+(g.mine?' liked':'')+'" data-message-like="'+m.id+'" data-emoji="'+esc(emoji)+'" aria-label="'+(g.mine?'Remove':'Add')+' '+esc(emoji)+' reaction" aria-pressed="'+!!g.mine+'">'+esc(emoji)+(g.count>1?' <span>'+g.count+'</span>':'')+'</button>';}).join('')+'<button type="button" class="gc-like-people" data-like-people="'+m.id+'" aria-label="See who reacted to this message">View reactions</button></div>';
 }
-// A reaction must never rebuild the chat: mounted photos and message rows
-// can carry runtime attributes that differ from their original HTML.
+// Patch only reaction controls, preserving mounted photos, messages and focus.
 function paintLike(m){
   var box=document.querySelector('#gc-thread .gc-msgs');if(!box)return;
-  var row=Array.from(box.children).find(function(el){return el.dataset.mid===String(m.id);});
-  if(!row)return;
+  var row=Array.from(box.children).find(function(el){return el.dataset.mid===String(m.id);});if(!row)return;
   var stack=row.querySelector('.gc-message-stack');if(!stack)return;
-  var current=stack.querySelector('.gc-like-row');
-  var template=document.createElement('template');template.innerHTML=likeHtml(m);
+  var current=stack.querySelector('.gc-like-row'),template=document.createElement('template');template.innerHTML=likeHtml(m);
   var next=template.content.firstElementChild;
-  if(current){
-    if(!next){current.remove();return;}
-    // Retain the tapped button (and keyboard focus) across confirmations.
-    var button=current.querySelector('[data-message-like]'),replacement=next.querySelector('[data-message-like]');
-    if(button&&replacement){
-      button.className=replacement.className;
-      button.setAttribute('aria-label',replacement.getAttribute('aria-label'));
-      button.setAttribute('aria-pressed',replacement.getAttribute('aria-pressed'));
-      if(button.innerHTML!==replacement.innerHTML)button.innerHTML=replacement.innerHTML;
-      button.disabled=!!m._likePending;
-      var people=current.querySelector('[data-like-people]'),newPeople=next.querySelector('[data-like-people]');
-      if(people&&!newPeople)people.remove();else if(!people&&newPeople)current.appendChild(newPeople);
-    }else current.replaceWith(next);
-  }else if(next){stack.insertBefore(next,stack.querySelector('.gc-time'));next.querySelector('button').disabled=!!m._likePending;}
+  if(!next){if(current)current.remove();return;}
+  if(!current){current=next;stack.insertBefore(current,stack.querySelector('.gc-time'));}
+  else{
+    var buttons={};current.querySelectorAll('[data-emoji]').forEach(function(b){buttons[b.dataset.emoji]=b;});
+    var keep=[];
+    Array.from(next.children).forEach(function(n){
+      var b=n.dataset.emoji?buttons[n.dataset.emoji]:current.querySelector('[data-like-people]');
+      if(b){b.className=n.className;b.setAttribute('aria-label',n.getAttribute('aria-label'));if(n.hasAttribute('aria-pressed'))b.setAttribute('aria-pressed',n.getAttribute('aria-pressed'));if(b.innerHTML!==n.innerHTML)b.innerHTML=n.innerHTML;}
+      else b=n;
+      keep.push(b);
+    });
+    Array.from(current.children).forEach(function(b){if(keep.indexOf(b)<0)b.remove();});
+    keep.forEach(function(b,i){if(current.children[i]!==b)current.insertBefore(b,current.children[i]||null);});
+  }
+  current.querySelectorAll('[data-message-like]').forEach(function(b){b.disabled=!!m._likePending;});
 }
-function toggleLike(mid){
+function toggleLike(mid,emoji){
+  emoji=emoji||"❤️";
   if(!open)return;
   var thread=open,id=thread.id,m=thread.messages.find(function(x){return String(x.id)===String(mid);});
   if(!m||m._likePending||m.pending||m.failed||m.kind==='deleted'||m.kind==='system')return;
   var previous=(m.likes||[]).slice(),was=!!m.liked;
+  var previousMine=previous.find(function(l){return l.mine;});
+  var remove=previousMine&&(previousMine.emoji||'❤️')===emoji;
   var own=open.members.find(isMe)||{username:'You',wallet:window._myWallet||''};
-  m.likes=previous.filter(function(l){return !l.mine;});m.liked=!was;
-  if(!was)m.likes.push({user_id:own.user_id,username:own.username,wallet:own.wallet,avatar:own.avatar||'',mine:true});
+  m.likes=previous.filter(function(l){return !l.mine;});m.liked=!remove;
+  if(!remove)m.likes.push({user_id:own.user_id,username:own.username,wallet:own.wallet,avatar:own.avatar||'',mine:true,emoji:emoji});
   m._likePending=true;paintLike(m);
   var controller=new AbortController(),timeout=setTimeout(function(){controller.abort();},12000);
-  api('/api/group-chats/'+id+'/messages/'+mid+'/likes',{method:'POST',body:{},signal:controller.signal}).then(function(d){
+  api('/api/group-chats/'+id+'/messages/'+mid+'/likes',{method:'POST',body:{emoji:emoji},signal:controller.signal}).then(function(d){
     clearTimeout(timeout);m._likePending=false;if(open!==thread)return;
     if(d.ok){m.likes=d.likes;m.liked=d.liked;m.version=d.version;}
     else{m.likes=previous;m.liked=was;toast(d.msg||'Could not like message');}
@@ -724,12 +727,12 @@ function toggleLike(mid){
 }
 function showLikes(mid){
   if(!open)return;var id=open.id;
-  var el=sheet('<h3>Message likes</h3><div class="gc-like-list">Loading…</div>','gc-sheet-menu');
+  var el=sheet('<h3>Message reactions</h3><div class="gc-like-list">Loading…</div>','gc-sheet-menu');
   api('/api/group-chats/'+id+'/messages/'+mid+'/likes').then(function(d){
     if(!el.isConnected||!open||open.id!==id)return;
     var list=el.querySelector('.gc-like-list');
     if(!d.ok){list.textContent=d.msg||'Could not load likes';return;}
-    list.innerHTML=d.likes.length?d.likes.map(function(l){return '<a class="gc-member" href="/profile/'+encodeURIComponent(l.wallet)+'">'+avatarHtml('gc-person-av',l.username,l.wallet,l.avatar)+'<span class="gc-person-copy"><b>'+esc(l.mine?'You':l.username)+'</b></span><span>❤️</span></a>';}).join(''):'No likes yet';
+    list.innerHTML=d.likes.length?d.likes.map(function(l){return '<a class="gc-member" href="/profile/'+encodeURIComponent(l.wallet)+'">'+avatarHtml('gc-person-av',l.username,l.wallet,l.avatar)+'<span class="gc-person-copy"><b>'+esc(l.mine?'You':l.username)+'</b></span><span>'+esc(l.emoji||'❤️')+'</span></a>';}).join(''):'No reactions yet';
   });
 }
 function messageMenu(mid){
@@ -737,11 +740,11 @@ function messageMenu(mid){
   var m=open.messages.find(function(x){return String(x.id)===String(mid);});
   if(!m||m.pending||m.failed||m.kind==='system'||m.kind==='deleted')return;
   var id=open.id;
-  var el=sheet('<h3>Message options</h3><div class="gc-menu"><button type="button" data-message-act="like">'+(m.liked?'Remove like':'❤️ Like message')+'</button>'+(m.mine&&m.kind==='text'?'<button type="button" data-message-act="edit">Edit message</button>':'')+(m.mine?'<button type="button" data-message-act="delete" class="gc-menu-danger">Delete for everyone</button>':'')+'<button type="button" data-message-act="cancel">Cancel</button></div>','gc-sheet-menu');
+  var el=sheet('<h3>Message options</h3><div class="gc-menu"><button type="button" data-message-act="like">'+(m.liked?'Remove reaction':'❤️ Like message')+'</button>'+(m.mine&&m.kind==='text'?'<button type="button" data-message-act="edit">Edit message</button>':'')+(m.mine?'<button type="button" data-message-act="delete" class="gc-menu-danger">Delete for everyone</button>':'')+'<button type="button" data-message-act="cancel">Cancel</button></div>','gc-sheet-menu');
   el.addEventListener('click',function(e){
     var button=e.target.closest('[data-message-act]');if(!button)return;
     if(button.dataset.messageAct==='cancel'){closeSheet();return;}
-    if(button.dataset.messageAct==='like'){closeSheet();toggleLike(mid);return;}
+    if(button.dataset.messageAct==='like'){closeSheet();var current=open&&open.messages.find(function(x){return String(x.id)===String(mid);});var mine=current&&(current.likes||[]).find(function(l){return l.mine;});toggleLike(mid,mine?(mine.emoji||'❤️'):'❤️');return;}
     if(!m.mine)return;
     var editing=button.dataset.messageAct==='edit';
     var form=sheet('<h3>'+(editing?'Edit message':'Delete message?')+'</h3>'+(editing?'<textarea class="gc-edit-input" maxlength="1000" aria-label="Edit message"></textarea>':'<p>This message will be deleted for everyone in the group.</p>')+'<div class="gc-menu"><button type="button" class="gc-message-confirm'+(editing?'':' gc-menu-danger')+'">'+(editing?'Save changes':'Delete for everyone')+'</button><button type="button" class="gc-message-cancel">Cancel</button></div>','gc-sheet-menu');
@@ -785,6 +788,61 @@ function setPhoto(file){
 }
 function isMe(m){return !!(window._myWallet&&m.wallet===window._myWallet);}
 
+var REACTION_MAIN=['❤️','😂','😮','😢','😡','👍','🔥'];
+var REACTION_MORE=['🙌','👏','🙏','💯','🚀','💰','🤑','📈','📉','💎','🐳','🤝','😍','🥳','😎','🤔','😅','😭','🤯','👀','✅','❌','💀','🫡'];
+var reactionMenu=null,press=null,pressTimer=null,swallowUntil=0;
+var reactionScope=window.OrcPageLifecycle?window.OrcPageLifecycle.createScope('group-reactions',document.getElementById('conv-list')):null;
+function reactionListen(target,type,fn,opts){if(reactionScope)reactionScope.addEventListener(target,type,fn,opts);else target.addEventListener(type,fn,opts);}
+if(reactionScope)reactionScope.onCleanup(closeReactionMenu);
+function closeReactionMenu(){if(reactionMenu)reactionMenu.remove();reactionMenu=null;clearTimeout(pressTimer);press=null;}
+function placeReactionMenu(menu,wrap,x,y){
+  var rect=wrap.querySelector('.gc-bubble').getBoundingClientRect(),vv=window.visualViewport;
+  var leftBound=vv?vv.offsetLeft:0,topBound=vv?vv.offsetTop:0,w=vv?vv.width:innerWidth,h=vv?vv.height:innerHeight;
+  var mw=menu.offsetWidth,mh=menu.offsetHeight;
+  menu.style.left=Math.max(leftBound+8,Math.min(x-mw/2,leftBound+w-mw-8))+'px';
+  var top=rect.top-mh-10;
+  if(top<topBound+8)top=rect.bottom+10;
+  menu.style.top=Math.max(topBound+8,Math.min(top,topBound+h-mh-8))+'px';
+}
+function openReactionMenu(wrap,x,y){
+  if(!open||!wrap)return;
+  var mid=wrap.dataset.mid,m=open.messages.find(function(m){return String(m.id)===mid;});
+  if(!m||m.pending||m.failed||m.kind==='deleted'||m.kind==='system')return;
+  closeReactionMenu();
+  var menu=document.createElement('div');menu.className='gc-reaction-menu';menu.setAttribute('role','dialog');menu.setAttribute('aria-label','React to message');
+  var row=document.createElement('div');row.className='gc-reaction-choices';
+  function emojiButton(emoji){
+    var b=document.createElement('button');b.type='button';b.textContent=emoji;b.setAttribute('aria-label','React '+emoji);
+    var committed=false;
+    function choose(e){e.preventDefault();e.stopPropagation();if(committed)return;committed=true;toggleLike(mid,emoji);closeReactionMenu();}
+    b.addEventListener('pointerup',choose);b.addEventListener('click',choose);return b;
+  }
+  REACTION_MAIN.forEach(function(e){row.appendChild(emojiButton(e));});
+  var more=document.createElement('button');more.type='button';more.textContent='+';more.className='gc-reaction-more';more.setAttribute('aria-label','More reactions');
+  more.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();if(menu.querySelector('.gc-reaction-grid'))return;more.hidden=true;var grid=document.createElement('div');grid.className='gc-reaction-grid';REACTION_MORE.forEach(function(emoji){grid.appendChild(emojiButton(emoji));});menu.appendChild(grid);placeReactionMenu(menu,wrap,x,y);});
+  row.appendChild(more);menu.appendChild(row);
+  if(m.kind==='text'){
+    var copy=document.createElement('button');copy.type='button';copy.className='gc-reaction-copy';copy.textContent='Copy text';
+    copy.addEventListener('click',function(){closeReactionMenu();try{navigator.clipboard.writeText(m.body).then(function(){toast('Copied');},function(){toast('Could not copy');});}catch(_){toast('Could not copy');}});menu.appendChild(copy);
+  }
+  document.body.appendChild(menu);reactionMenu=menu;placeReactionMenu(menu,wrap,x,y);
+}
+reactionListen(document,'contextmenu',function(e){var wrap=e.target.closest('#gc-thread .gc-msg');if(!wrap)return;e.preventDefault();openReactionMenu(wrap,e.clientX,e.clientY);});
+reactionListen(document,'pointerdown',function(e){
+  if(e.pointerType==='mouse'&&e.button!==0)return;
+  var wrap=e.target.closest('#gc-thread .gc-msg');if(!wrap||e.target.closest('button,a,input,textarea'))return;
+  clearTimeout(pressTimer);press={wrap:wrap,x:e.clientX,y:e.clientY};
+  pressTimer=setTimeout(function(){if(!press)return;var p=press;try{var selection=window.getSelection();if(selection)selection.removeAllRanges();}catch(_){}openReactionMenu(p.wrap,p.x,p.y);swallowUntil=Date.now()+1500;press=null;},360);
+},{passive:true});
+reactionListen(document,'pointermove',function(e){if(press&&(Math.abs(press.x-e.clientX)>10||Math.abs(press.y-e.clientY)>10)){clearTimeout(pressTimer);press=null;}},{passive:true});
+['pointerup','pointercancel'].forEach(function(t){reactionListen(document,t,function(){clearTimeout(pressTimer);press=null;},{passive:true});});
+reactionListen(document,'selectstart',function(e){if(e.target.closest('#gc-thread .gc-bubble'))e.preventDefault();});
+reactionListen(document,'click',function(e){
+  if(reactionMenu&&reactionMenu.contains(e.target))return;
+  if(Date.now()<swallowUntil){swallowUntil=0;e.preventDefault();e.stopImmediatePropagation();return;}
+  if(reactionMenu)closeReactionMenu();
+},true);
+
 /* ── wiring ───────────────────────────────────────────────────────────── */
 function addHeaderButton(){
   var row=document.querySelector('.msgs-left-title-row'),compose=row&&row.querySelector('.msgs-new-btn');
@@ -795,7 +853,7 @@ function addHeaderButton(){
   row.insertBefore(b,compose);
 }
 document.addEventListener('click',function(e){
-  var like=e.target.closest('[data-message-like]');if(like){toggleLike(like.dataset.messageLike);return;}
+  var like=e.target.closest('[data-message-like]');if(like){toggleLike(like.dataset.messageLike,like.dataset.emoji);return;}
   var people=e.target.closest('[data-like-people]');if(people){showLikes(people.dataset.likePeople);return;}
   var options=e.target.closest('[data-message-menu]');if(options){messageMenu(options.dataset.messageMenu);return;}
   if(e.target.closest('[data-gc-new]')){e.preventDefault();if(window._setInboxTab)window._setInboxTab('groups');newGroup();return;}
@@ -815,6 +873,7 @@ document.addEventListener('dblclick',function(e){
 });
 document.addEventListener('keydown',function(e){
   if(e.key!=='Escape')return;
+  if(reactionMenu){closeReactionMenu();return;}
   if(document.getElementById('gc-sheet')){closeSheet();return;}
   var ep=document.querySelector('#gc-thread .gc-emoji-panel');
   if(ep&&!ep.hidden){emojiPanel(false);return;}

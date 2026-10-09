@@ -38,7 +38,11 @@ async def main():
                 if state['fail']:
                     await r.abort(); return
                 m = messages[int(path.split('/')[-2])-1]
-                m['liked'] = not m['liked']; m['likes'] = [dict(user_id=1, username='Alice', wallet='alice', mine=True)] if m['liked'] else []
+                emoji=json.loads(r.request.post_data or '{}').get('emoji','❤️')
+                mine=next((l for l in m['likes'] if l['mine']),None)
+                m['liked']=not(mine and mine.get('emoji','❤️')==emoji)
+                m['likes']=[l for l in m['likes'] if not l['mine']]
+                if m['liked']: m['likes'].append(dict(user_id=1, username='Alice', wallet='alice', mine=True, emoji=emoji))
                 state['version'] += 1; m['version'] = state['version']
                 data = dict(ok=True, likes=m['likes'], liked=m['liked'], version=m['version'])
             elif '/messages?' in path:
@@ -80,6 +84,18 @@ async def main():
         await page.wait_for_function('button.getAttribute("aria-pressed")==="false"')
         assert await page.evaluate('rows.every(e=>e.isConnected)&&photos.every(e=>e.isConnected)&&button.isConnected'), 'Like replaced mounted messages/photos'
         assert await page.evaluate('changes') < 200, 'Like caused chat-wide mutation churn'
+        await page.locator('.gc-msg').last.dispatch_event('contextmenu', dict(clientX=180,clientY=400))
+        await page.get_by_role('button',name='React 😂',exact=True).click()
+        await page.wait_for_selector('.gc-like-pill.liked[data-emoji="😂"]')
+        await page.locator('.gc-msg').last.dispatch_event('contextmenu', dict(clientX=180,clientY=400))
+        await page.get_by_role('button',name='More reactions',exact=True).click()
+        await page.get_by_role('button',name='React 💎',exact=True).click()
+        await page.wait_for_selector('.gc-like-pill.liked[data-emoji="💎"]')
+        assert not await page.locator('.gc-like-pill[data-emoji="😂"]').count(), 'Emoji switch retained old reaction'
+        assert await page.evaluate('rows.every(e=>e.isConnected)&&photos.every(e=>e.isConnected)'), 'Emoji picker replaced photos'
+        await page.locator('.gc-msg').last.locator('.gc-message-more').click()
+        await page.get_by_role('button',name='Remove reaction',exact=True).click()
+        await page.wait_for_selector('.gc-like-pill[data-emoji="💎"]',state='detached')
         assert not errors, errors
         print('PASS: 81 messages with photos, repeated likes/unlikes, rapid taps, rollback, incoming likes, stable message/image/button DOM, no JS errors')
         await browser.close()
