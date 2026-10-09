@@ -4390,20 +4390,10 @@ async function saveUsername(){
 }
 
 function _onAvatarFile(input){
-  const file=input.files[0];
-  if(!file) return;
-  const msgEl=document.getElementById('s-avatar-msg');
-  msgEl.className='s-msg'; msgEl.textContent='';
-  if(file.size>2*1024*1024){
-    msgEl.className='s-msg err'; msgEl.textContent='✗ Image too large (max 2 MB)'; input.value=''; return;
-  }
-  const reader=new FileReader();
-  reader.onload=function(e){
-    _pendingAvatarData=e.target.result;
-    _previewAvatar(_pendingAvatarData);
-    saveAvatar();
-  };
-  reader.readAsDataURL(file);
+  const file=input.files[0];if(!file)return;input.value='';
+  OrcAgentEditPhoto(file,{title:'Position profile photo',circle:true}).then(function(data){
+    if(!data)return;_pendingAvatarData=data;_previewAvatar(data);saveAvatar();
+  }).catch(function(e){const msg=document.getElementById('s-avatar-msg');msg.className='s-msg err';msg.textContent=e.message;});
 }
 
 async function saveAvatar(){

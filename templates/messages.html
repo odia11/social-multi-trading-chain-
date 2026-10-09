@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/static/photo-tools.js?v={{ app_version }}" defer></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
 <title>Messages — OrcAgent</title>
@@ -611,13 +612,7 @@ function _filterConvs(q) {
   });
 }
 
-function _showAvatarLightbox(url){
-  var lb = document.getElementById('avatar-lightbox');
-  var img = document.getElementById('avatar-lightbox-img');
-  if(!lb || !img) return;
-  img.src = url;
-  lb.classList.add('open');
-}
+function _showAvatarLightbox(url){OrcAgentViewPhoto(url);}
 function _closeAvatarLightbox(){
   var lb = document.getElementById('avatar-lightbox');
   if(lb) lb.classList.remove('open');
