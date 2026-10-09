@@ -3088,6 +3088,7 @@ _routeScope.addEventListener(document,'click', function(e){
 
 /* ── init ── */
 _routeScope.addEventListener(document,'DOMContentLoaded', function(){
+  if(window.__oaMajorMarketProfile) return;
   var liqSlider  = document.getElementById('pt-liq-slider');
   var liqValueEl = document.getElementById('pt-liq-value');
   var _liqDebounce = null;

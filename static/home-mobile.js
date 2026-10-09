@@ -219,7 +219,7 @@ function buildMarkets(afterEl){
   }).join('')+'<a class="oa-m-view-market" href="/live-market"><b>▥</b><span>View Market</span><i>→</i></a>';
   afterEl.insertAdjacentElement('afterend',el);
   el.querySelectorAll('.oa-m-coin').forEach(function(card){
-    card.onclick=function(){location.href='/live-market'};
+    card.onclick=function(){location.href=card.dataset.sym==='SOL'?'/live-market?mint=So11111111111111111111111111111111111111112&profile=1':'/live-market?asset='+encodeURIComponent(card.dataset.sym)};
   });
   updateMajorMarkets();
   _oaMarketTimer=OrcPageLifecycle.setInterval(updateMajorMarkets,15000);
