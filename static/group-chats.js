@@ -238,11 +238,12 @@ function messageHtml(m,prev){
   if(!m.mine){
     html+=runStart?avatarHtml('gc-msg-av',m.sender,m.sender_wallet,m.sender_avatar):'<span class="gc-msg-av gc-msg-av-space"></span>';
   }
-  html+='<div class="gc-bubble">'
+  html+='<div class="gc-message-stack"><div class="gc-bubble">'
     +(!m.mine&&runStart?'<div class="gc-sender" style="--gc-name:'+esc(color(m.sender_wallet))+'">'+esc(m.sender)+'</div>':'')
     +'<div class="gc-text">'+body+'</div>'
-    +'<span class="gc-time">'+(m.edited_at&&m.kind!=='deleted'?'Edited · ':'')+(m.failed?'Not sent · tap to retry':(m.pending?'Sending…':esc(clock(m.created_at))))+'</span>'
-    +(m.mine&&!m.pending&&!m.failed&&m.kind!=='deleted'?'<button type="button" class="gc-message-more" data-message-menu="'+m.id+'" aria-label="Message options">'+ICON.more+'</button>':'')+'</div></div>';
+    +(!m.pending&&!m.failed&&m.kind!=='deleted'?'<button type="button" class="gc-message-more" data-message-menu="'+m.id+'" aria-label="Message options">'+ICON.more+'</button>':'')+'</div>'
+    +likeHtml(m)
+    +'<span class="gc-time">'+(m.edited_at&&m.kind!=='deleted'?'Edited · ':'')+(m.failed?'Not sent · tap to retry':(m.pending?'Sending…':esc(clock(m.created_at))))+'</span></div></div>';
   return html;
 }
 function renderMessages(stick){
@@ -267,16 +268,17 @@ function mergeMessages(list,updatesOnly){
   var added=false;
   list.forEach(function(m){
     if(have[m.id]===undefined){if(!updatesOnly){have[m.id]=open.messages.length;open.messages.push(m);added=true;}}
-    else{var previous=open.messages[have[m.id]];if((m.version||0)>=(previous.version||0)&&(m.body!==previous.body||m.kind!==previous.kind||m.edited_at!==previous.edited_at)){open.messages[have[m.id]]=m;added=true;}}
+    else{var previous=open.messages[have[m.id]];if(!previous._likePending&&(m.version||0)>=(previous.version||0)&&(m.body!==previous.body||m.kind!==previous.kind||m.edited_at!==previous.edited_at||JSON.stringify(m.likes||[])!==JSON.stringify(previous.likes||[]))){open.messages[have[m.id]]=m;added=true;}}
     if(!updatesOnly&&m.id>open.lastId)open.lastId=m.id;
   });
   return added;
 }
 function fetchNew(){
-  if(!open||document.hidden)return;
+  if(!open||document.hidden||open.messages.some(function(m){return m._likePending;}))return;
   var id=open.id;
   return api('/api/group-chats/'+id+'/messages?after='+open.lastId+'&changes_since='+(open.changeVersion||0)).then(function(d){
     if(!open||open.id!==id)return;
+    if(open.messages.some(function(m){return m._likePending;}))return;
     if(!d.ok){
       // Deleted by its owner, or you were removed.
       if(/not found/i.test(d.msg||'')){chats=chats.filter(function(c){return c.id!==id;});toast('This group is no longer available');closeGroup();}
@@ -663,15 +665,47 @@ function transferOwner(m,id){
     });
   };
 }
+function likeHtml(m){
+  var likes=m.likes||[];if(!likes.length||m.kind==='deleted')return '';
+  return '<div class="gc-like-row"><button type="button" class="gc-like-pill'+(m.liked?' liked':'')+'" data-message-like="'+m.id+'" aria-label="'+(m.liked?'Remove like':'Like message')+'" aria-pressed="'+!!m.liked+'">❤️'+(likes.length>1?' <span>'+likes.length+'</span>':'')+'</button><button type="button" class="gc-like-people" data-like-people="'+m.id+'" aria-label="See who liked this message">View likes</button></div>';
+}
+function toggleLike(mid){
+  if(!open)return;
+  var id=open.id,m=open.messages.find(function(x){return String(x.id)===String(mid);});
+  if(!m||m._likePending||m.pending||m.failed||m.kind==='deleted'||m.kind==='system')return;
+  var previous=(m.likes||[]).slice(),was=!!m.liked;
+  var own=open.members.find(isMe)||{username:'You',wallet:window._myWallet||''};
+  m.likes=previous.filter(function(l){return !l.mine;});m.liked=!was;
+  if(!was)m.likes.push({user_id:own.user_id,username:own.username,wallet:own.wallet,avatar:own.avatar||'',mine:true});
+  m._likePending=true;renderMessages(false);
+  api('/api/group-chats/'+id+'/messages/'+mid+'/likes',{method:'POST',body:{}}).then(function(d){
+    m._likePending=false;if(!open||open.id!==id)return;
+    if(d.ok){m.likes=d.likes;m.liked=d.liked;m.version=d.version;}
+    else{m.likes=previous;m.liked=was;toast(d.msg||'Could not like message');}
+    renderMessages(false);fetchNew();
+  });
+}
+function showLikes(mid){
+  if(!open)return;var id=open.id;
+  var el=sheet('<h3>Message likes</h3><div class="gc-like-list">Loading…</div>','gc-sheet-menu');
+  api('/api/group-chats/'+id+'/messages/'+mid+'/likes').then(function(d){
+    if(!el.isConnected||!open||open.id!==id)return;
+    var list=el.querySelector('.gc-like-list');
+    if(!d.ok){list.textContent=d.msg||'Could not load likes';return;}
+    list.innerHTML=d.likes.length?d.likes.map(function(l){return '<a class="gc-member" href="/profile/'+encodeURIComponent(l.wallet)+'">'+avatarHtml('gc-person-av',l.username,l.wallet,l.avatar)+'<span class="gc-person-copy"><b>'+esc(l.mine?'You':l.username)+'</b></span><span>❤️</span></a>';}).join(''):'No likes yet';
+  });
+}
 function messageMenu(mid){
   if(!open)return;
   var m=open.messages.find(function(x){return String(x.id)===String(mid);});
-  if(!m||!m.mine||m.pending||m.failed||m.kind==='system'||m.kind==='deleted')return;
+  if(!m||m.pending||m.failed||m.kind==='system'||m.kind==='deleted')return;
   var id=open.id;
-  var el=sheet('<h3>Message options</h3><div class="gc-menu">'+(m.kind==='text'?'<button type="button" data-message-act="edit">Edit message</button>':'')+'<button type="button" data-message-act="delete" class="gc-menu-danger">Delete for everyone</button><button type="button" data-message-act="cancel">Cancel</button></div>','gc-sheet-menu');
+  var el=sheet('<h3>Message options</h3><div class="gc-menu"><button type="button" data-message-act="like">'+(m.liked?'Remove like':'❤️ Like message')+'</button>'+(m.mine&&m.kind==='text'?'<button type="button" data-message-act="edit">Edit message</button>':'')+(m.mine?'<button type="button" data-message-act="delete" class="gc-menu-danger">Delete for everyone</button>':'')+'<button type="button" data-message-act="cancel">Cancel</button></div>','gc-sheet-menu');
   el.addEventListener('click',function(e){
     var button=e.target.closest('[data-message-act]');if(!button)return;
     if(button.dataset.messageAct==='cancel'){closeSheet();return;}
+    if(button.dataset.messageAct==='like'){closeSheet();toggleLike(mid);return;}
+    if(!m.mine)return;
     var editing=button.dataset.messageAct==='edit';
     var form=sheet('<h3>'+(editing?'Edit message':'Delete message?')+'</h3>'+(editing?'<textarea class="gc-edit-input" maxlength="1000" aria-label="Edit message"></textarea>':'<p>This message will be deleted for everyone in the group.</p>')+'<div class="gc-menu"><button type="button" class="gc-message-confirm'+(editing?'':' gc-menu-danger')+'">'+(editing?'Save changes':'Delete for everyone')+'</button><button type="button" class="gc-message-cancel">Cancel</button></div>','gc-sheet-menu');
     var input=form.querySelector('.gc-edit-input');if(input){input.value=m.body;input.focus();}
@@ -724,6 +758,8 @@ function addHeaderButton(){
   row.insertBefore(b,compose);
 }
 document.addEventListener('click',function(e){
+  var like=e.target.closest('[data-message-like]');if(like){toggleLike(like.dataset.messageLike);return;}
+  var people=e.target.closest('[data-like-people]');if(people){showLikes(people.dataset.likePeople);return;}
   var options=e.target.closest('[data-message-menu]');if(options){messageMenu(options.dataset.messageMenu);return;}
   if(e.target.closest('[data-gc-new]')){e.preventDefault();newGroup();return;}
   var row=e.target.closest('.gc-row-wrap');
@@ -734,6 +770,11 @@ document.addEventListener('click',function(e){
   if(failed){retry(failed.dataset.mid);return;}
   var img=e.target.closest('.gc-img');
   if(img&&typeof window._showImgLightbox==='function'){window._showImgLightbox(img.src);}
+});
+document.addEventListener('dblclick',function(e){
+  if(e.target.closest('button,a,input,textarea,img'))return;
+  var bubble=e.target.closest('#gc-thread .gc-bubble');if(!bubble)return;
+  var message=bubble.closest('.gc-msg');if(message)toggleLike(message.dataset.mid);
 });
 document.addEventListener('keydown',function(e){
   if(e.key!=='Escape')return;
