@@ -4691,8 +4691,6 @@ async function loadSettingsPage(){
   try{
     var d=await fetch('/api/settings/get').then(function(r){return r.json();});
     if(d.ok){
-      var b =document.getElementById('s-breakout'); if(b  && d.breakout_trigger!=null) b.value =d.breakout_trigger;
-      var mp=document.getElementById('s-maxpos');    if(mp && d.max_positions!=null)    mp.value=d.max_positions;
       _setKeyStatus(!!d.has_trading_key);
       var notifs=document.getElementById('pref-notifs'); if(notifs) notifs.checked=!!d.pref_notifications;
       var scam  =document.getElementById('pref-scam');   if(scam)   scam.checked  =!!d.pref_scam_filter;
@@ -4858,42 +4856,6 @@ async function _loadSettingsTos(){
       +'<a class="st-tos-dl-btn" href="/tos/download">⬇ Download PDF</a>';
   }catch(e){
     el.innerHTML='<div class="st-row-sub">Could not load your acceptance record.</div>';
-  }
-}
-
-/* ── Strategy save (Card 1) ── */
-async function _saveStrategy(){
-  var btn=document.getElementById('strat-save-btn');
-  var msgEl=document.getElementById('strat-msg');
-  if(!btn) return;
-  var origText=btn.textContent;
-  btn.textContent='Saving…'; btn.disabled=true;
-  try{
-    var submitted={
-      breakout_trigger: parseFloat((document.getElementById('s-breakout')||{}).value)||3,
-      max_positions:    parseInt((document.getElementById('s-maxpos')||{}).value,10)||3
-    };
-    var d=await fetch('/api/settings/save',{
-      method:'POST',
-      credentials:'include',
-      headers:{'Content-Type':'application/json','X-CSRF-Token':_csrfToken},
-      body:JSON.stringify(submitted)
-    }).then(function(r){return r.json();}).catch(function(){return null;});
-    d=d||{};
-    var adjusted=d.ok && d.max_positions!==undefined && d.max_positions!==submitted.max_positions;
-    if(adjusted){
-      var mp=document.getElementById('s-maxpos');
-      if(mp) mp.value=d.max_positions;
-    }
-    if(msgEl){
-      msgEl.className='st-save-msg '+(d.ok?'ok':'err');
-      msgEl.textContent=d.ok?(adjusted?'✓ Saved (max positions capped at '+d.max_positions+')':'✓ Saved'):'✗ '+(d.msg||'failed');
-    }
-    setTimeout(function(){ if(msgEl) msgEl.textContent=''; },3000);
-  }catch(e){
-    if(msgEl){ msgEl.className='st-save-msg err'; msgEl.textContent='✗ Network error'; }
-  }finally{
-    btn.textContent=origText; btn.disabled=false;
   }
 }
 
