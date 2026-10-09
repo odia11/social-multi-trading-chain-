@@ -740,11 +740,11 @@ function messageMenu(mid){
   var m=open.messages.find(function(x){return String(x.id)===String(mid);});
   if(!m||m.pending||m.failed||m.kind==='system'||m.kind==='deleted')return;
   var id=open.id;
-  var el=sheet('<h3>Message options</h3><div class="gc-menu"><button type="button" data-message-act="like">'+(m.liked?'Remove like':'❤️ Like message')+'</button>'+(m.mine&&m.kind==='text'?'<button type="button" data-message-act="edit">Edit message</button>':'')+(m.mine?'<button type="button" data-message-act="delete" class="gc-menu-danger">Delete for everyone</button>':'')+'<button type="button" data-message-act="cancel">Cancel</button></div>','gc-sheet-menu');
+  var el=sheet('<h3>Message options</h3><div class="gc-menu"><button type="button" data-message-act="like">'+(m.liked?'Remove reaction':'❤️ Like message')+'</button>'+(m.mine&&m.kind==='text'?'<button type="button" data-message-act="edit">Edit message</button>':'')+(m.mine?'<button type="button" data-message-act="delete" class="gc-menu-danger">Delete for everyone</button>':'')+'<button type="button" data-message-act="cancel">Cancel</button></div>','gc-sheet-menu');
   el.addEventListener('click',function(e){
     var button=e.target.closest('[data-message-act]');if(!button)return;
     if(button.dataset.messageAct==='cancel'){closeSheet();return;}
-    if(button.dataset.messageAct==='like'){closeSheet();toggleLike(mid);return;}
+    if(button.dataset.messageAct==='like'){closeSheet();var current=open&&open.messages.find(function(x){return String(x.id)===String(mid);});var mine=current&&(current.likes||[]).find(function(l){return l.mine;});toggleLike(mid,mine?(mine.emoji||'❤️'):'❤️');return;}
     if(!m.mine)return;
     var editing=button.dataset.messageAct==='edit';
     var form=sheet('<h3>'+(editing?'Edit message':'Delete message?')+'</h3>'+(editing?'<textarea class="gc-edit-input" maxlength="1000" aria-label="Edit message"></textarea>':'<p>This message will be deleted for everyone in the group.</p>')+'<div class="gc-menu"><button type="button" class="gc-message-confirm'+(editing?'':' gc-menu-danger')+'">'+(editing?'Save changes':'Delete for everyone')+'</button><button type="button" class="gc-message-cancel">Cancel</button></div>','gc-sheet-menu');

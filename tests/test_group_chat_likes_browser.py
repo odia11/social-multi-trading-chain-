@@ -93,6 +93,9 @@ async def main():
         await page.wait_for_selector('.gc-like-pill.liked[data-emoji="💎"]')
         assert not await page.locator('.gc-like-pill[data-emoji="😂"]').count(), 'Emoji switch retained old reaction'
         assert await page.evaluate('rows.every(e=>e.isConnected)&&photos.every(e=>e.isConnected)'), 'Emoji picker replaced photos'
+        await page.locator('.gc-msg').last.locator('.gc-message-more').click()
+        await page.get_by_role('button',name='Remove reaction',exact=True).click()
+        await page.wait_for_selector('.gc-like-pill[data-emoji="💎"]',state='detached')
         assert not errors, errors
         print('PASS: 81 messages with photos, repeated likes/unlikes, rapid taps, rollback, incoming likes, stable message/image/button DOM, no JS errors')
         await browser.close()
