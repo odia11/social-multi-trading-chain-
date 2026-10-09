@@ -353,6 +353,7 @@ def install(d):
     @d.rate_limit(20, 60)
     def group_chats_remove(chat_id, member_id):
         with connect() as c:
+            c.execute('BEGIN IMMEDIATE')
             wallet, uid = me(c)
             if not uid:
                 return fail('No wallet connected', 401)
@@ -414,6 +415,7 @@ def install(d):
         if role not in ('admin', 'member'):
             return fail('Invalid role', 400)
         with connect() as c:
+            c.execute('BEGIN IMMEDIATE')
             wallet, uid = me(c)
             if not uid:
                 return fail('No wallet connected', 401)
@@ -490,6 +492,7 @@ def install(d):
     def group_chats_delete(chat_id):
         """The owner deletes the group for everyone."""
         with connect() as c:
+            c.execute('BEGIN IMMEDIATE')
             wallet, uid = me(c)
             if not uid:
                 return fail('No wallet connected', 401)
@@ -497,7 +500,6 @@ def install(d):
                 return fail('Group not found', 404)
             if owner_of(c, chat_id) != uid:
                 return fail('Only the owner can delete the group', 403)
-            c.execute('BEGIN IMMEDIATE')
             name = c.execute('SELECT name FROM group_chats WHERE id=?', (chat_id,)).fetchone()[0]
             actor = _name_of(_users(c, [uid])[uid])
             others = [r[0] for r in c.execute('SELECT user_id FROM group_chat_members WHERE chat_id=? AND user_id!=?',
@@ -516,6 +518,7 @@ def install(d):
     @d.rate_limit(20, 60)
     def group_chats_leave(chat_id):
         with connect() as c:
+            c.execute('BEGIN IMMEDIATE')
             wallet, uid = me(c)
             if not uid:
                 return fail('No wallet connected', 401)

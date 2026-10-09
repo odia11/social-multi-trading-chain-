@@ -80,6 +80,14 @@ assert info['is_owner'] and sum(m['owner'] for m in info['members'])==1
 assert req(a,root+'/owner','POST',{'user_id':uids[0]}).status_code==403
 assert req(a,root,'DELETE').status_code==403
 assert any('transferred ownership to bob' in m['body'] for m in req(b,root+'/messages').json['messages'])
+import concurrent.futures
+third=req(a,'/api/group-chats','POST',{'name':'Atomic crew','user_ids':[uids[1]]}).json['chat']['id']
+def transfer_once(_):
+ cl=app.test_client()
+ with cl.session_transaction(base_url=base) as s:s.update(wallet=wallets[0],user_id=uids[0],csrf_token='x'*40)
+ return req(cl,'/api/group-chats/'+str(third)+'/owner','POST',{'user_id':uids[1]}).status_code
+with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+ assert sorted(pool.map(transfer_once,range(2)))==[200,403]
 print('GROUP_MESSAGE_MANAGEMENT_PASS')
 '''
 
