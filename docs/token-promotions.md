@@ -26,8 +26,10 @@ A signature is unique across campaigns; legacy payment signatures cannot be
 reused. The simulate-confirm endpoint is restricted to demo campaigns owned by the
 designated wallet `Cdn8WftaYycdudV9yeeQPY1A1Tgo1bMa9eV4Tv9SeAM9`.
 It cannot activate paid advertising. This wallet can create demo campaigns
-without a trading wallet, SOL balance or price quote. Demo campaigns remain
-private in My campaigns, spend no SOL and consume no real inventory.
+without a trading wallet, SOL balance or price quote. Active demo campaigns are visible to everyone in the directory and their selected
+Home / Live Market placements with a Demo label. They use the same rotation and
+view/click tracking, spend no SOL and consume no paid inventory. Paid campaigns
+are selected first. Existing active demos become visible without reactivation.
 
 A background sweep reconciles submitted signatures without signing or sending
 money. My campaigns also reconciles them. The external-wallet frontend stores a

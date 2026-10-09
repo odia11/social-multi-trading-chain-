@@ -139,7 +139,7 @@ class Promotions(unittest.TestCase):
         for t in {r['starts'] for r in replies}:
             self.assertLessEqual(sum(r['starts']<=t<r['ends'] for r in replies),10)
 
-    def test_designated_wallet_demo_without_balance_price_or_public_inventory(self):
+    def test_designated_wallet_public_demo_without_balance_price_or_paid_inventory(self):
         payload=dict(package='premium',token_mint=MINT,description='Demo test',demo=True,payment_method='trading')
         self.assertEqual(self.client.post('/api/promote/create',json=payload,headers={'X-CSRF-Token':'csrf'}).status_code,403)
         self.login(self.client,promo.DEMO_WALLET)
@@ -154,9 +154,17 @@ class Promotions(unittest.TestCase):
             ids.append(r.json['promotion_id'])
             self.assertEqual(self.client.post(f'/api/promote/{ids[-1]}/simulate-confirm',json={},headers={'X-CSRF-Token':'csrf'}).status_code,200)
             self.assertEqual(self.client.post(f'/api/promote/{ids[-1]}/simulate-confirm',json={},headers={'X-CSRF-Token':'csrf'}).status_code,200)
-        self.assertEqual(self.client.get('/api/promote/directory').json['campaigns'],[])
+        visitor=self.app.test_client()
+        directory=visitor.get('/api/promote/directory').json['campaigns']
+        self.assertEqual(len(directory),15)
+        self.assertTrue(all(c['demo'] for c in directory))
         for place in promo.CAPACITY:
-            self.assertEqual(self.client.get('/api/promote/featured?placement='+place).json['promotions'],[])
+            ads=visitor.get('/api/promote/featured?placement='+place).json['promotions']
+            self.assertEqual(len(ads),3 if place=='market' else 1)
+            self.assertTrue(all(c['demo'] for c in ads))
+        receipt=ads[0]['receipt']
+        self.assertEqual(visitor.post('/api/promote/event',json={'receipt':receipt,'event':'view'}).status_code,200)
+        self.assertEqual(visitor.post('/api/promote/event',json={'receipt':receipt,'event':'click'}).status_code,200)
         self.assertTrue(all(c['status']=='demo_active' for c in self.client.get('/api/promote/mine').json['campaigns']))
         with promo.connection(self.path) as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM promotion_used_payments').fetchone()[0],0)
@@ -164,6 +172,15 @@ class Promotions(unittest.TestCase):
             self.assertEqual(promo.next_slot(db,['feed','market','banner'],86400,now)[0],now)
         self.d._sol_price_usd=100
         paid=self.create().json['promotion_id']
+        with promo.connection(self.path,True) as db:
+            db.execute("UPDATE promotion_campaigns SET status='confirmed',confirmed=? WHERE id=?",(int(time.time()),paid))
+        selected=visitor.get('/api/promote/featured?placement=feed').json['promotions']
+        self.assertEqual(selected[0]['id'],paid)
+        self.assertFalse(selected[0]['demo'])
+        with promo.connection(self.path,True) as db:
+            db.execute("UPDATE promotion_campaigns SET ends=0 WHERE status='demo_active'")
+        self.assertFalse(any(c['demo'] for c in visitor.get('/api/promote/directory').json['campaigns']))
+        self.assertEqual(visitor.get('/api/promote/featured?placement=banner').json['promotions'],[])
         self.assertEqual(self.client.post(f'/api/promote/{paid}/simulate-confirm',json={},headers={'X-CSRF-Token':'csrf'}).status_code,403)
         self.login(self.client,'stranger')
         self.assertEqual(self.client.post(f'/api/promote/{ids[0]}/simulate-confirm',json={},headers={'X-CSRF-Token':'csrf'}).status_code,403)

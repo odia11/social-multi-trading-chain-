@@ -125,7 +125,9 @@ def safe_url(value):
 
 
 def public(row):
-    return {k: row[k] for k in ('id','mint','symbol','name','logo','description','website','social','package','starts','ends')}
+    item = {k: row[k] for k in ('id','mint','symbol','name','logo','description','website','social','package','starts','ends')}
+    item['demo'] = row['status'].startswith('demo_')
+    return item
 
 
 def verify_payment(d, row):
@@ -399,9 +401,9 @@ def install(d):
             # Outstanding selections count too, so concurrent viewers cannot
             # all select the same currently underexposed campaign.
             rows=db.execute('''SELECT c.* FROM promotion_campaigns c JOIN promotion_slots s ON c.id=s.campaign
-                WHERE c.status='confirmed' AND c.starts<=? AND c.ends>? AND s.placement=?
-                ORDER BY (SELECT COUNT(*) FROM promotion_deliveries v WHERE v.campaign=c.id AND v.placement=s.placement AND (v.viewed IS NOT NULL OR v.created>?)) ASC,
-                s.deliveries ASC,c.confirmed ASC,c.id ASC LIMIT ?''',(now,now,placement,now-10,limit)).fetchall()
+                WHERE (c.status='confirmed' OR (c.status='demo_active' AND c.wallet=?)) AND c.starts<=? AND c.ends>? AND s.placement=?
+                ORDER BY (c.status='confirmed') DESC, (SELECT COUNT(*) FROM promotion_deliveries v WHERE v.campaign=c.id AND v.placement=s.placement AND (v.viewed IS NOT NULL OR v.created>?)) ASC,
+                s.deliveries ASC,c.confirmed ASC,c.id ASC LIMIT ?''',(DEMO_WALLET,now,now,placement,now-10,limit)).fetchall()
             ads=[]
             for row in rows:
                 receipt=secrets.token_urlsafe(24)
@@ -446,9 +448,9 @@ def install(d):
         query=str(request.args.get('q',''))[:80]
         now=int(time.time())
         with connection(d.DB_FILE) as db:
-            rows=db.execute('''SELECT * FROM promotion_campaigns WHERE status='confirmed' AND starts<=? AND ends>?
+            rows=db.execute('''SELECT * FROM promotion_campaigns WHERE (status='confirmed' OR (status='demo_active' AND wallet=?)) AND starts<=? AND ends>?
                 AND (instr(lower(symbol),lower(?))>0 OR instr(lower(name),lower(?))>0 OR mint=?)
-                ORDER BY id DESC LIMIT 21 OFFSET ?''',(now,now,query,query,query,offset)).fetchall()
+                ORDER BY id DESC LIMIT 21 OFFSET ?''',(DEMO_WALLET,now,now,query,query,query,offset)).fetchall()
         return result(campaigns=[public(r) for r in rows[:20]],has_more=len(rows)>20)
 
     @app.post('/api/promote/<int:promotion_id>/pay')
@@ -493,7 +495,7 @@ def install(d):
     def placements_assets(response):
         if response.status_code==200 and response.mimetype=='text/html' and request.path in ('/','/live-market') and not response.direct_passthrough:
             html=response.get_data(as_text=True)
-            assets='<meta name="promo-csrf-token" content="'+d._get_csrf_token()+'"><link rel="stylesheet" href="/static/promotions.css?v=1"><script defer src="/static/promotion-placements.js?v=1"></script>'
+            assets='<meta name="promo-csrf-token" content="'+d._get_csrf_token()+'"><link rel="stylesheet" href="/static/promotions.css?v=1"><script defer src="/static/promotion-placements.js?v=2"></script>'
             response.set_data(html.replace('</head>',assets+'</head>',1))
         return response
 
