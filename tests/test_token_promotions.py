@@ -157,7 +157,7 @@ class Promotions(unittest.TestCase):
         visitor=self.app.test_client()
         directory=visitor.get('/api/promote/directory').json['campaigns']
         self.assertEqual(len(directory),15)
-        self.assertTrue(all(c['demo'] for c in directory))
+        self.assertTrue(all(c['demo'] and c['active'] for c in directory))
         for place in promo.CAPACITY:
             ads=visitor.get('/api/promote/featured?placement='+place).json['promotions']
             self.assertEqual(len(ads),3 if place=='market' else 1)
@@ -177,6 +177,7 @@ class Promotions(unittest.TestCase):
         selected=visitor.get('/api/promote/featured?placement=feed').json['promotions']
         self.assertEqual(selected[0]['id'],paid)
         self.assertFalse(selected[0]['demo'])
+        self.assertTrue(selected[0]['active'])
         with promo.connection(self.path,True) as db:
             db.execute("UPDATE promotion_campaigns SET ends=0 WHERE status='demo_active'")
         self.assertFalse(any(c['demo'] for c in visitor.get('/api/promote/directory').json['campaigns']))

@@ -6,3 +6,23 @@
 .promo-page *,.promo-sidebar *{box-sizing:border-box}.promo-page label{min-width:0}.promo-page .promo-package-popular{float:right;color:#080d11;background:#f7b955;border-radius:6px;padding:3px 7px;font-size:10px;margin:0}
 
 #promo-demo-control{display:flex;gap:10px;align-items:center;padding:14px;border:1px solid #f7b955;border-radius:10px}#promo-demo-control input{width:auto;margin:0;accent-color:#f7b955}
+
+/* Promotion cards share stable geometry across market, feed and directory. */
+.promo-ad,.promo-ad *{box-sizing:border-box}
+.promo-ad{align-items:flex-start;padding:16px;gap:12px;height:100%;color:var(--text,#eef1f5)}
+.promo-ad .promo-logo{width:40px;height:40px;margin-top:2px}
+.promo-ad-content{display:flex;flex-direction:column;align-self:stretch;gap:8px}
+.promo-ad .promo-ad-title{display:block;min-width:0;margin:0;font-size:14px;font-weight:700;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.promo-ad-labels{display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-height:21px}
+.promo-ad .promo-sponsored,.promo-ad .promo-active{display:inline-flex;align-items:center;flex-shrink:0;white-space:nowrap;margin:0;padding:3px 7px;border-radius:6px;font-size:10px;font-weight:600;line-height:1.5}
+.promo-ad .promo-active{color:#22c55e;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.22)}
+.promo-ad p{margin:0 0 4px;line-height:1.55;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;min-height:37px}
+.promo-ad-content>a{align-self:flex-start;margin-top:auto;padding:7px 12px;font-weight:600;line-height:1.4;white-space:nowrap}
+.promo-ad-links{flex-wrap:wrap;margin-top:0;gap:10px}
+.promo-ad-links:empty{display:none}
+.promo-placement-block>header{align-items:center;gap:12px;line-height:1.4}
+.promo-placement-block>header a{text-decoration:none;white-space:nowrap;font-size:12px}
+.promo-placement-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));align-items:stretch}
+.promo-placement-block.feed .promo-placement-grid,.promo-placement-block.banner .promo-placement-grid{grid-template-columns:1fr}
+.promo-directory-grid{align-items:stretch}
+@media(max-width:760px){.promo-placement-grid{grid-template-columns:1fr}.promo-ad{padding:14px}.promo-placement-block>header{font-size:12px}}

@@ -127,6 +127,7 @@ def safe_url(value):
 def public(row):
     item = {k: row[k] for k in ('id','mint','symbol','name','logo','description','website','social','package','starts','ends')}
     item['demo'] = row['status'].startswith('demo_')
+    item['active'] = row['status'] in ('confirmed','demo_active') and row['starts'] <= time.time() < row['ends']
     return item
 
 
@@ -495,7 +496,7 @@ def install(d):
     def placements_assets(response):
         if response.status_code==200 and response.mimetype=='text/html' and request.path in ('/','/live-market') and not response.direct_passthrough:
             html=response.get_data(as_text=True)
-            assets='<meta name="promo-csrf-token" content="'+d._get_csrf_token()+'"><link rel="stylesheet" href="/static/promotions.css?v=1"><script defer src="/static/promotion-placements.js?v=2"></script>'
+            assets='<meta name="promo-csrf-token" content="'+d._get_csrf_token()+'"><link rel="stylesheet" href="/static/promotions.css?v=3"><script defer src="/static/promotion-placements.js?v=3"></script>'
             response.set_data(html.replace('</head>',assets+'</head>',1))
         return response
 
