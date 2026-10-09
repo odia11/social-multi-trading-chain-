@@ -9323,12 +9323,63 @@ function _syncFeedCounters(oldRoot, fresh){
     }
   });
 }
+// A transient avatar error must not leave a hidden Image cached in a card
+// forever. Retry only failed photos; decoded photos keep their DOM and URL.
+var _feedAvatarScope=null;
+function _feedAvatarSource(img){return img.dataset.feedAvatarSource||img.getAttribute('src')||'';}
+function _feedAvatarLoaded(img){
+  img.style.display='';
+  img.dataset.feedAvatarFailed='0';
+  if(img._feedAvatarTimer&&_feedAvatarScope)_feedAvatarScope.clearTimeout(img._feedAvatarTimer);
+  img._feedAvatarTimer=null;
+}
+function _feedAvatarFailed(img){
+  img.style.display='none';img.dataset.feedAvatarFailed='1';
+  if(!img.isConnected||img._feedAvatarTimer||Number(img.dataset.feedAvatarRetries||0)>=2)return;
+  if(!_feedAvatarScope||!_feedAvatarScope.isActive())_initFeedAvatars(document);
+  if(!_feedAvatarScope||!_feedAvatarScope.isActive()||img._feedAvatarTimer)return;
+  var attempt=Number(img.dataset.feedAvatarRetries||0)+1;
+  img.dataset.feedAvatarRetries=String(attempt);
+  img._feedAvatarTimer=_feedAvatarScope.setTimeout(function(){
+    img._feedAvatarTimer=null;
+    if(!img.isConnected)return;
+    var src=_feedAvatarSource(img);
+    try{
+      var url=new URL(src,location.href);
+      // Retry a same-origin cacheable photo without reusing a cached failure.
+      if(url.origin===location.origin){url.searchParams.set('avatar_retry',String(Date.now()));src=url.href;}
+    }catch(_){}
+    img.loading='eager';img.src=src;
+  },attempt*800);
+}
+function _initFeedAvatars(root){
+  if(!_feedAvatarScope||!_feedAvatarScope.isActive()){
+    _feedAvatarScope=OrcPageLifecycle.createScope('feed-avatar-recovery',document.body);
+    function recover(){
+      if(document.hidden)return;
+      document.querySelectorAll('.fc-avatar img,.fc-ri-avatar img,.fc-reply-avatar img').forEach(function(img){
+        if(img.dataset.feedAvatarFailed==='1'&&!img._feedAvatarTimer){img.dataset.feedAvatarRetries='0';_feedAvatarFailed(img);}
+      });
+    }
+    _feedAvatarScope.onCleanup(function(){
+      document.querySelectorAll('.fc-avatar img,.fc-ri-avatar img,.fc-reply-avatar img').forEach(function(img){img._feedAvatarTimer=null;});
+    });
+    _feedAvatarScope.addEventListener(window,'online',recover);
+    _feedAvatarScope.addEventListener(document,'visibilitychange',recover);
+  }
+  (root||document).querySelectorAll('.fc-avatar img,.fc-ri-avatar img,.fc-reply-avatar img').forEach(function(img){
+    if(!img.dataset.feedAvatarSource)img.dataset.feedAvatarSource=img.getAttribute('src')||'';
+    img.onload=function(){_feedAvatarLoaded(img);};
+    img.onerror=function(){_feedAvatarFailed(img);};
+    if(img.complete){if(img.naturalWidth>0)_feedAvatarLoaded(img);else _feedAvatarFailed(img);}
+  });
+}
 function _reuseFeedMedia(oldRoot, fresh){
   // A real edit still refreshes its text, while an unchanged photo URL
   // keeps the decoded Image element. A changed avatar URL loads normally.
   ['.fc-avatar img','.fc-post-image','.fc-post-video'].forEach(function(sel){
     var a=oldRoot.querySelector(sel), b=fresh.querySelector(sel);
-    if(a && b && a.getAttribute('src')===b.getAttribute('src')) b.replaceWith(a);
+    if(a && b && (sel==='.fc-avatar img' ? _feedAvatarSource(a)===_feedAvatarSource(b) : a.getAttribute('src')===b.getAttribute('src'))) b.replaceWith(a);
   });
   var reply=oldRoot.querySelector('.fc-reply-box'), next=fresh.querySelector('.fc-reply-box');
   if(reply && next && reply.id===next.id) next.replaceWith(reply);
@@ -9379,6 +9430,7 @@ function _feedNextSlice(fn){
   return requestAnimationFrame(fn);
 }
 function _afterFeedCardsAdded(root){
+  _initFeedAvatars(root);
   _observeFeedVideos(root);
   _initLiveCharts();
   _initTradeBanners();
@@ -9677,7 +9729,7 @@ function _renderFeedCard(e, cardIndex){
   // stays visible behind the image, so there is no empty circle while loading.
   var firstAvatar = typeof cardIndex === 'number' && cardIndex < 8;
   var avatarPriority = firstAvatar ? ' loading="eager" fetchpriority="high"' : ' loading="lazy"';
-  var imgHtml = e.avatar_url ? '<img src="'+esc(e.avatar_url)+'" alt=""'+avatarPriority+' decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%;z-index:2" onerror="this.style.display=\'none\'">' : '';
+  var imgHtml = e.avatar_url ? '<img src="'+esc(e.avatar_url)+'" alt=""'+avatarPriority+' decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%;z-index:2" onerror="_feedAvatarFailed(this)" onload="_feedAvatarLoaded(this)">' : '';
   var verifiedBadge = e.verified ? '<span style="position:absolute;bottom:-1px;right:-1px;width:14px;height:14px;background:#f7b955;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px;color:#0a0b0e;border:1.5px solid #0a0b0e;font-weight:700">✓</span>' : '';
 
   /* ── header ── */
