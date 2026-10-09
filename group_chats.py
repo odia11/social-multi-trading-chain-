@@ -56,6 +56,12 @@ def initialize(path):
                 created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_gcmsg_chat ON group_chat_messages(chat_id, id);
+            CREATE TABLE IF NOT EXISTS group_chat_likes (
+                message_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(message_id,user_id)
+            );
         ''')
         have = {r[1] for r in c.execute('PRAGMA table_info(group_chats)')}
         if 'photo' not in have:
@@ -139,6 +145,47 @@ def install(d):
 
     def connect():
         return sqlite3.connect(d.DB_FILE, timeout=10)
+
+    def likes_for(c, message_ids, uid):
+        ids=list(set(message_ids))
+        if not ids:
+            return {}
+        marks=','.join('?' * len(ids))
+        likes={}
+        for mid, liker, username, wallet, avatar in c.execute(
+                'SELECT l.message_id,l.user_id,u.username,u.wallet_address,u.avatar_url '
+                'FROM group_chat_likes l JOIN users u ON u.id=l.user_id '
+                'WHERE l.message_id IN (%s) ORDER BY l.created_at,l.user_id' % marks, ids):
+            likes.setdefault(mid,[]).append({'user_id':liker,'username':_name_of((liker,username,wallet)),
+                                          'wallet':wallet,'avatar':avatar or '', 'mine':liker==uid})
+        return likes
+
+    @app.route('/api/group-chats/<int:chat_id>/messages/<int:message_id>/likes', methods=['GET', 'POST'])
+    @d.rate_limit(60, 60)
+    def group_chats_likes(chat_id, message_id):
+        with connect() as c:
+            if request.method=='POST':
+                c.execute('BEGIN IMMEDIATE')
+            wallet, uid=me(c)
+            if not uid:
+                return fail('No wallet connected',401)
+            if not _member_role(c,chat_id,uid):
+                return fail('Group not found',404)
+            row=c.execute('SELECT kind FROM group_chat_messages WHERE chat_id=? AND id=?',(chat_id,message_id)).fetchone()
+            if not row or row[0] in ('system','deleted'):
+                return fail('Message not found',404)
+            if request.method=='POST':
+                existing=c.execute('SELECT 1 FROM group_chat_likes WHERE message_id=? AND user_id=?',(message_id,uid)).fetchone()
+                if existing:
+                    c.execute('DELETE FROM group_chat_likes WHERE message_id=? AND user_id=?',(message_id,uid))
+                else:
+                    c.execute('INSERT INTO group_chat_likes VALUES(?,?,?)',(message_id,uid,_now()))
+                c.execute('UPDATE group_chats SET change_version=change_version+1 WHERE id=?',(chat_id,))
+                version=c.execute('SELECT change_version FROM group_chats WHERE id=?',(chat_id,)).fetchone()[0]
+                c.execute('UPDATE group_chat_messages SET version=? WHERE id=?',(version,message_id))
+            likes=likes_for(c,[message_id],uid).get(message_id,[])
+            version=c.execute('SELECT version FROM group_chat_messages WHERE id=?',(message_id,)).fetchone()[0]
+        return jsonify({'ok':True,'likes':likes,'liked':any(l['mine'] for l in likes),'version':version})
 
     def add_people(c, chat_id, actor_uid, actor_name, user_ids):
         """Add connections of the actor; returns the names added."""
@@ -504,6 +551,7 @@ def install(d):
             actor = _name_of(_users(c, [uid])[uid])
             others = [r[0] for r in c.execute('SELECT user_id FROM group_chat_members WHERE chat_id=? AND user_id!=?',
                                               (chat_id, uid))]
+            c.execute('DELETE FROM group_chat_likes WHERE message_id IN (SELECT id FROM group_chat_messages WHERE chat_id=?)', (chat_id,))
             c.execute('DELETE FROM group_chat_messages WHERE chat_id=?', (chat_id,))
             c.execute('DELETE FROM group_chat_members WHERE chat_id=?', (chat_id,))
             c.execute('DELETE FROM group_chats WHERE id=?', (chat_id,))
@@ -529,6 +577,7 @@ def install(d):
             left = c.execute('SELECT user_id, role FROM group_chat_members WHERE chat_id=? ORDER BY joined_at, user_id',
                              (chat_id,)).fetchall()
             if not left:
+                c.execute('DELETE FROM group_chat_likes WHERE message_id IN (SELECT id FROM group_chat_messages WHERE chat_id=?)', (chat_id,))
                 c.execute('DELETE FROM group_chat_messages WHERE chat_id=?', (chat_id,))
                 c.execute('DELETE FROM group_chats WHERE id=?', (chat_id,))
             else:
@@ -570,6 +619,7 @@ def install(d):
                                 'WHERE chat_id=? AND version>? ORDER BY version LIMIT ?', (chat_id, changes_since, PAGE)).fetchall()
             version = max([changes_since] + [r[6] for r in updates])
             people = _users(c, {r[1] for r in rows + updates if r[1]})
+            reactions=likes_for(c,[r[0] for r in rows + updates],uid)
             if rows:
                 c.execute('UPDATE group_chat_members SET last_read_id=MAX(last_read_id, ?) WHERE chat_id=? AND user_id=?',
                           (rows[-1][0], chat_id, uid))
@@ -579,6 +629,7 @@ def install(d):
             return [
             {'id': r[0], 'sender_id': r[1], 'kind': r[2], 'body': r[3], 'created_at': r[4], 'mine': r[1] == uid,
              'edited_at': r[5], 'version': r[6],
+             'likes': reactions.get(r[0],[]), 'liked': any(l['mine'] for l in reactions.get(r[0],[])),
              'sender': _name_of(people[r[1]]) if r[1] in people else '',
              'sender_wallet': people[r[1]][2] if r[1] in people else '',
              'sender_avatar': (people[r[1]][3] or '') if r[1] in people else ''} for r in items]
@@ -612,6 +663,7 @@ def install(d):
             c.execute('UPDATE group_chats SET change_version=change_version+1 WHERE id=?', (chat_id,))
             version = c.execute('SELECT change_version FROM group_chats WHERE id=?', (chat_id,)).fetchone()[0]
             if request.method == 'DELETE':
+                c.execute('DELETE FROM group_chat_likes WHERE message_id=?', (message_id,))
                 c.execute("UPDATE group_chat_messages SET kind='deleted',body='',version=? WHERE id=?", (version, message_id))
             else:
                 c.execute('UPDATE group_chat_messages SET body=?,edited_at=?,version=? WHERE id=?', (text, _now(), version, message_id))

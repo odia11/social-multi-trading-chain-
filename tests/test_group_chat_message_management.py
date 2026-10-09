@@ -39,6 +39,20 @@ created=req(a,'/api/group-chats','POST',{'name':'Test crew','user_ids':[uids[1]]
 assert created.status_code==200,created.json
 gid=created.json['chat']['id'];root='/api/group-chats/'+str(gid)
 msg=req(a,root+'/messages','POST',{'message':'Original'}).json['message'];mid=msg['id'];path=root+'/messages/'+str(mid)
+likes_path=path+'/likes'
+assert req(b,likes_path,'POST',{},{}).status_code==403
+assert req(outside,likes_path,'POST',{}).status_code==404
+assert req(outside,likes_path).status_code==404
+assert req(app.test_client(),likes_path,'POST',{}).status_code==401
+liked=req(b,likes_path,'POST',{}).json
+assert liked['liked'] and len(liked['likes'])==1 and liked['likes'][0]['mine']
+assert req(a,likes_path,'POST',{}).json['liked']
+people=req(b,likes_path).json
+assert {l['username'] for l in people['likes']}=={'alice','bob'} and sum(l['mine'] for l in people['likes'])==1
+changed=req(a,root+'/messages?after='+str(mid)+'&changes_since=0').json
+assert len(changed['updates'][0]['likes'])==2 and changed['updates'][0]['liked']
+unliked=req(a,likes_path,'POST',{}).json
+assert not unliked['liked'] and len(unliked['likes'])==1
 assert req(a,path,'PUT',{'message':'new'},{}).status_code==403
 assert req(b,path,'PUT',{'message':'stolen'}).status_code==403
 assert req(b,path,'DELETE').status_code==403
@@ -62,11 +76,14 @@ changes=req(b,root+'/messages?after='+str(mid)+'&changes_since='+str(version)).j
 assert changes['updates'][0]['kind']=='deleted' and changes['updates'][0]['body']==''
 assert req(a,path,'DELETE').status_code==200
 assert req(a,path,'PUT',{'message':'restore'}).status_code==409
+assert req(b,likes_path,'POST',{}).status_code==404
+with sqlite3.connect(d.DB_FILE) as db:assert db.execute('SELECT COUNT(*) FROM group_chat_likes WHERE message_id=?',(mid,)).fetchone()[0]==0
 assert req(b,'/api/messages/unread_count').json['count']==0
 with sqlite3.connect(d.DB_FILE) as db:
  sysid=db.execute("SELECT id FROM group_chat_messages WHERE chat_id=? AND kind='system' LIMIT 1",(gid,)).fetchone()[0]
  photoid=db.execute("INSERT INTO group_chat_messages(chat_id,sender_id,kind,body,created_at) VALUES(?,?,'image','photo',datetime())",(gid,uids[0])).lastrowid
 assert req(a,root+'/messages/'+str(sysid),'DELETE').status_code==403
+assert req(a,root+'/messages/'+str(sysid)+'/likes','POST',{}).status_code==404
 assert req(a,root+'/messages/'+str(photoid),'PUT',{'message':'text'}).status_code==400
 assert req(a,root+'/messages/'+str(photoid),'DELETE').status_code==200
 other=req(a,'/api/group-chats','POST',{'name':'Other','user_ids':[uids[1]]}).json['chat']['id']
