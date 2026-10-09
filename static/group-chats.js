@@ -232,6 +232,7 @@ function messageHtml(m,prev){
   var body=m.kind==='image'
     ?(safeImg(m.body)?'<img class="gc-img" src="'+esc(safeImg(m.body))+'" alt="Photo" loading="lazy">':'')
     :esc(m.body).replace(/\n/g,'<br>');
+  if(m.kind==='deleted')body='<span class="gc-deleted-text">Message deleted</span>';
   var cls='gc-msg'+(m.mine?' mine':'')+(runStart?' run-start':'')+(m.pending?' pending':'')+(m.failed?' failed':'')+(m.kind==='image'?' is-image':'');
   html+='<div class="'+cls+'" data-mid="'+esc(m.id)+'">';
   if(!m.mine){
@@ -240,7 +241,8 @@ function messageHtml(m,prev){
   html+='<div class="gc-bubble">'
     +(!m.mine&&runStart?'<div class="gc-sender" style="--gc-name:'+esc(color(m.sender_wallet))+'">'+esc(m.sender)+'</div>':'')
     +'<div class="gc-text">'+body+'</div>'
-    +'<span class="gc-time">'+(m.failed?'Not sent · tap to retry':(m.pending?'Sending…':esc(clock(m.created_at))))+'</span></div></div>';
+    +'<span class="gc-time">'+(m.edited_at&&m.kind!=='deleted'?'Edited · ':'')+(m.failed?'Not sent · tap to retry':(m.pending?'Sending…':esc(clock(m.created_at))))+'</span>'
+    +(m.mine&&!m.pending&&!m.failed&&m.kind!=='deleted'?'<button type="button" class="gc-message-more" data-message-menu="'+m.id+'" aria-label="Message options">'+ICON.more+'</button>':'')+'</div></div>';
   return html;
 }
 function renderMessages(stick){
@@ -248,20 +250,32 @@ function renderMessages(stick){
   var near=body.scrollHeight-body.scrollTop-body.clientHeight<120;
   var ms=open.messages,html='';
   for(var i=0;i<ms.length;i++)html+=messageHtml(ms[i],ms[i-1]);
-  box.innerHTML=html||'<div class="gc-empty">Say hi to the group 👋</div>';
+  var template=document.createElement('template');template.innerHTML=html||'<div class="gc-empty">Say hi to the group 👋</div>';
+  var existing={};Array.from(box.children).forEach(function(el){if(el.dataset.mid)existing[el.dataset.mid]=el;});
+  var cursor=box.firstElementChild;
+  Array.from(template.content.children).forEach(function(next){
+    var old=next.dataset.mid?existing[next.dataset.mid]:(cursor&&!cursor.dataset.mid&&cursor.outerHTML===next.outerHTML?cursor:null);
+    var el=old&&old.outerHTML===next.outerHTML?old:next;
+    if(el===cursor)cursor=cursor.nextElementSibling;
+    else box.insertBefore(el,cursor);
+  });
+  while(cursor){var tail=cursor.nextElementSibling;cursor.remove();cursor=tail;}
   if(stick||near)body.scrollTop=body.scrollHeight;
 }
-function mergeMessages(list){
-  var have={};open.messages.forEach(function(m){have[m.id]=1;});
+function mergeMessages(list,updatesOnly){
+  var have={};open.messages.forEach(function(m,i){have[m.id]=i;});
   var added=false;
-  list.forEach(function(m){if(!have[m.id]){open.messages.push(m);added=true;}});
-  list.forEach(function(m){if(m.id>open.lastId)open.lastId=m.id;});
+  list.forEach(function(m){
+    if(have[m.id]===undefined){if(!updatesOnly){have[m.id]=open.messages.length;open.messages.push(m);added=true;}}
+    else{var previous=open.messages[have[m.id]];if((m.version||0)>=(previous.version||0)&&(m.body!==previous.body||m.kind!==previous.kind||m.edited_at!==previous.edited_at)){open.messages[have[m.id]]=m;added=true;}}
+    if(!updatesOnly&&m.id>open.lastId)open.lastId=m.id;
+  });
   return added;
 }
 function fetchNew(){
   if(!open||document.hidden)return;
   var id=open.id;
-  api('/api/group-chats/'+id+'/messages?after='+open.lastId).then(function(d){
+  return api('/api/group-chats/'+id+'/messages?after='+open.lastId+'&changes_since='+(open.changeVersion||0)).then(function(d){
     if(!open||open.id!==id)return;
     if(!d.ok){
       // Deleted by its owner, or you were removed.
@@ -269,7 +283,10 @@ function fetchNew(){
       return;
     }
     var news=(d.messages||[]).filter(function(m){return m.kind==='system';}).length;
-    if(mergeMessages(d.messages||[]))renderMessages(false);
+    var changed=mergeMessages(d.messages||[]);
+    changed=mergeMessages(d.updates||[],true)||changed;
+    open.changeVersion=Math.max(open.changeVersion||0,d.change_version||0);
+    if(changed)renderMessages(false);
     // Someone renamed it, changed the photo, or changed who is in it.
     if(news)api('/api/group-chats/'+id).then(function(x){if(x.ok)adopt(x.chat);});
   });
@@ -277,7 +294,7 @@ function fetchNew(){
 function openGroup(id,push){
   id=Number(id);if(!id)return;
   var c=chats.find(function(x){return x.id===id;})||{id:id,name:'Group',members:0};
-  open={id:id,name:c.name,role:c.role,photo:c.photo||'',members:[],messages:[],lastId:0};
+  open={id:id,name:c.name,role:c.role,photo:c.photo||'',members:[],messages:[],lastId:0,changeVersion:0};
   window.__oaOpenGroupId=id;
   var t=threadEl();t.hidden=false;atBottom=true;fitViewport();
   document.documentElement.classList.add('gc-lock');document.body.classList.add('gc-open');
@@ -293,7 +310,7 @@ function openGroup(id,push){
   });
   api('/api/group-chats/'+id+'/messages').then(function(d){
     if(!open||open.id!==id||!d.ok)return;
-    open.messages=[];mergeMessages(d.messages||[]);renderMessages(true);
+    open.messages=[];mergeMessages(d.messages||[]);open.changeVersion=d.change_version||0;renderMessages(true);
     c.unread=0;renderList();
   });
   if(pollTimer)window.clearInterval(pollTimer);
@@ -303,11 +320,13 @@ function openGroup(id,push){
 // The group as the server sees it now: name, photo, members, my role.
 function adopt(chat){
   if(!open||open.id!==chat.id)return;
+  var ownerChanged=open.createdBy!==chat.created_by;
   open.name=chat.name;open.role=chat.role;open.owner=!!chat.is_owner;open.photo=chat.photo||'';
   open.members=chat.members;open.createdBy=chat.created_by;
   var c=chats.find(function(x){return x.id===chat.id;});
   if(c){c.name=chat.name;c.photo=open.photo;c.role=chat.role;renderList();}
   paintHeader();
+  if(ownerChanged&&document.querySelector('#gc-sheet .gc-sheet-info'))showInfo();
 }
 // On a phone the keyboard does not shrink the page: iOS slides the visible
 // part up instead, so a chat pinned to the page showed what lies under it
@@ -612,6 +631,7 @@ function memberMenu(m){
     +(owner?(m.role==='admin'
       ?'<button type="button" data-act="member">Dismiss as admin<small>They can no longer change the group or its members</small></button>'
       :'<button type="button" data-act="admin">Make group admin<small>Can rename the group, change its photo and add or remove members</small></button>'):'')
+    +(owner?'<button type="button" data-act="owner">Make group owner<small>Transfer ownership; you remain a group admin</small></button>':'')
     +'<a href="/profile/'+encodeURIComponent(m.wallet)+'">View profile</a>'
     +'<button type="button" data-act="remove" class="gc-menu-danger">Remove from group</button>'
     +'<button type="button" data-act="back">Cancel</button></div>','gc-sheet-menu');
@@ -619,6 +639,7 @@ function memberMenu(m){
     var b=e.target.closest('[data-act]');if(!b)return;
     var act=b.dataset.act;
     if(act==='back'){showInfo();return;}
+    if(act==='owner'){transferOwner(m,id);return;}
     b.disabled=true;
     var req=act==='remove'
       ?api('/api/group-chats/'+id+'/members/'+m.user_id,{method:'DELETE'})
@@ -628,6 +649,42 @@ function memberMenu(m){
       adopt(d.chat);fetchNew();showInfo();
       toast(act==='remove'?m.username+' removed':act==='admin'?m.username+' is now an admin':m.username+' is no longer an admin');
     });
+  });
+}
+function transferOwner(m,id){
+  var el=sheet('<h3>Transfer group ownership?</h3><p>'+esc(m.username)+' will become the group owner. You will remain an admin.</p><div class="gc-menu"><button type="button" class="gc-confirm-owner">Transfer ownership</button><button type="button" class="gc-cancel-owner">Cancel</button></div>','gc-sheet-menu');
+  el.querySelector('.gc-cancel-owner').onclick=showInfo;
+  el.querySelector('.gc-confirm-owner').onclick=function(){
+    var button=this;button.disabled=true;
+    api('/api/group-chats/'+id+'/owner',{method:'POST',body:{user_id:m.user_id}}).then(function(d){
+      if(!open||open.id!==id){closeSheet();return;}
+      if(!d.ok){toast(d.msg||'Could not transfer ownership');button.disabled=false;return;}
+      adopt(d.chat);fetchNew();showInfo();toast(m.username+' is now the group owner');
+    });
+  };
+}
+function messageMenu(mid){
+  if(!open)return;
+  var m=open.messages.find(function(x){return String(x.id)===String(mid);});
+  if(!m||!m.mine||m.pending||m.failed||m.kind==='system'||m.kind==='deleted')return;
+  var id=open.id;
+  var el=sheet('<h3>Message options</h3><div class="gc-menu">'+(m.kind==='text'?'<button type="button" data-message-act="edit">Edit message</button>':'')+'<button type="button" data-message-act="delete" class="gc-menu-danger">Delete for everyone</button><button type="button" data-message-act="cancel">Cancel</button></div>','gc-sheet-menu');
+  el.addEventListener('click',function(e){
+    var button=e.target.closest('[data-message-act]');if(!button)return;
+    if(button.dataset.messageAct==='cancel'){closeSheet();return;}
+    var editing=button.dataset.messageAct==='edit';
+    var form=sheet('<h3>'+(editing?'Edit message':'Delete message?')+'</h3>'+(editing?'<textarea class="gc-edit-input" maxlength="1000" aria-label="Edit message"></textarea>':'<p>This message will be deleted for everyone in the group.</p>')+'<div class="gc-menu"><button type="button" class="gc-message-confirm'+(editing?'':' gc-menu-danger')+'">'+(editing?'Save changes':'Delete for everyone')+'</button><button type="button" class="gc-message-cancel">Cancel</button></div>','gc-sheet-menu');
+    var input=form.querySelector('.gc-edit-input');if(input){input.value=m.body;input.focus();}
+    form.querySelector('.gc-message-cancel').onclick=closeSheet;
+    form.querySelector('.gc-message-confirm').onclick=function(){
+      var save=this;if(editing&&!input.value.trim()){toast('Message cannot be empty');return;}
+      save.disabled=true;
+      api('/api/group-chats/'+id+'/messages/'+m.id,{method:editing?'PUT':'DELETE',body:editing?{message:input.value}:undefined}).then(function(d){
+        if(!open||open.id!==id){closeSheet();return;}
+        if(!d.ok){toast(d.msg||'Could not update message');save.disabled=false;return;}
+        closeSheet();fetchNew();loadList();toast(editing?'Message edited':'Message deleted for everyone');
+      });
+    };
   });
 }
 function setPhoto(file){
@@ -667,6 +724,7 @@ function addHeaderButton(){
   row.insertBefore(b,compose);
 }
 document.addEventListener('click',function(e){
+  var options=e.target.closest('[data-message-menu]');if(options){messageMenu(options.dataset.messageMenu);return;}
   if(e.target.closest('[data-gc-new]')){e.preventDefault();newGroup();return;}
   var row=e.target.closest('.gc-row-wrap');
   if(row){openGroup(row.dataset.gc);return;}

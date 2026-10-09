@@ -62,6 +62,13 @@ def initialize(path):
             c.execute("ALTER TABLE group_chats ADD COLUMN photo TEXT NOT NULL DEFAULT ''")
         if 'photo_v' not in have:
             c.execute('ALTER TABLE group_chats ADD COLUMN photo_v INTEGER NOT NULL DEFAULT 0')
+        if 'change_version' not in have:
+            c.execute('ALTER TABLE group_chats ADD COLUMN change_version INTEGER NOT NULL DEFAULT 0')
+        message_columns = {r[1] for r in c.execute('PRAGMA table_info(group_chat_messages)')}
+        for column, declaration in [('edited_at', 'TEXT'), ('version', 'INTEGER NOT NULL DEFAULT 0')]:
+            if column not in message_columns:
+                c.execute('ALTER TABLE group_chat_messages ADD COLUMN %s %s' % (column, declaration))
+        c.execute('CREATE INDEX IF NOT EXISTS idx_gcmsg_version ON group_chat_messages(chat_id,version)')
 
 
 def _now():
@@ -86,7 +93,7 @@ def unread_total(c, uid):
     row = c.execute(
         'SELECT COUNT(*) FROM group_chat_members m JOIN group_chat_messages g '
         'ON g.chat_id=m.chat_id AND g.id>m.last_read_id '
-        "WHERE m.user_id=? AND g.kind!='system' AND COALESCE(g.sender_id,0)!=?", (uid, uid)).fetchone()
+        "WHERE m.user_id=? AND g.kind NOT IN ('system','deleted') AND COALESCE(g.sender_id,0)!=?", (uid, uid)).fetchone()
     return int(row[0] or 0)
 
 
@@ -184,8 +191,8 @@ def install(d):
                 'SELECT g.id, g.name, m.role, m.last_read_id, '
                 '(SELECT COUNT(*) FROM group_chat_members x WHERE x.chat_id=g.id), '
                 '(SELECT COUNT(*) FROM group_chat_messages y WHERE y.chat_id=g.id AND y.id>m.last_read_id '
-                "   AND y.kind!='system' AND COALESCE(y.sender_id,0)!=?), "
-                '(SELECT MAX(id) FROM group_chat_messages z WHERE z.chat_id=g.id), g.photo_v '
+                "   AND y.kind NOT IN ('system','deleted') AND COALESCE(y.sender_id,0)!=?), "
+                "(SELECT MAX(id) FROM group_chat_messages z WHERE z.chat_id=g.id AND z.kind!='deleted'), g.photo_v "
                 'FROM group_chat_members m JOIN group_chats g ON g.id=m.chat_id WHERE m.user_id=?',
                 (uid, uid)).fetchall()
             last_ids = [r[6] for r in rows if r[6]]
@@ -346,6 +353,7 @@ def install(d):
     @d.rate_limit(20, 60)
     def group_chats_remove(chat_id, member_id):
         with connect() as c:
+            c.execute('BEGIN IMMEDIATE')
             wallet, uid = me(c)
             if not uid:
                 return fail('No wallet connected', 401)
@@ -373,6 +381,32 @@ def install(d):
         row = c.execute('SELECT created_by FROM group_chats WHERE id=?', (chat_id,)).fetchone()
         return row[0] if row else None
 
+    @app.post('/api/group-chats/<int:chat_id>/owner')
+    @d.rate_limit(10, 60)
+    def group_chats_transfer_owner(chat_id):
+        try:
+            target = int((request.get_json(silent=True) or {}).get('user_id'))
+        except (ValueError, TypeError):
+            return fail('Choose a group member', 400)
+        with connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            wallet, uid = me(c)
+            if not uid:
+                return fail('No wallet connected', 401)
+            if not _member_role(c, chat_id, uid):
+                return fail('Group not found', 404)
+            if owner_of(c, chat_id) != uid:
+                return fail('Only the owner can transfer ownership', 403)
+            if target == uid:
+                return fail('You already own this group', 400)
+            if not _member_role(c, chat_id, target):
+                return fail('Choose an existing group member', 404)
+            people = _users(c, [uid, target])
+            c.execute('UPDATE group_chats SET created_by=? WHERE id=?', (target, chat_id))
+            c.execute("UPDATE group_chat_members SET role='admin' WHERE chat_id=? AND user_id=?", (chat_id, target))
+            _system(c, chat_id, '%s transferred ownership to %s' % (_name_of(people[uid]), _name_of(people[target])))
+            return jsonify({'ok': True, 'chat': summary(c, uid, chat_id)})
+
     @app.route('/api/group-chats/<int:chat_id>/members/<int:member_id>', methods=['PUT'])
     @d.rate_limit(20, 60)
     def group_chats_set_role(chat_id, member_id):
@@ -381,6 +415,7 @@ def install(d):
         if role not in ('admin', 'member'):
             return fail('Invalid role', 400)
         with connect() as c:
+            c.execute('BEGIN IMMEDIATE')
             wallet, uid = me(c)
             if not uid:
                 return fail('No wallet connected', 401)
@@ -457,6 +492,7 @@ def install(d):
     def group_chats_delete(chat_id):
         """The owner deletes the group for everyone."""
         with connect() as c:
+            c.execute('BEGIN IMMEDIATE')
             wallet, uid = me(c)
             if not uid:
                 return fail('No wallet connected', 401)
@@ -464,7 +500,6 @@ def install(d):
                 return fail('Group not found', 404)
             if owner_of(c, chat_id) != uid:
                 return fail('Only the owner can delete the group', 403)
-            c.execute('BEGIN IMMEDIATE')
             name = c.execute('SELECT name FROM group_chats WHERE id=?', (chat_id,)).fetchone()[0]
             actor = _name_of(_users(c, [uid])[uid])
             others = [r[0] for r in c.execute('SELECT user_id FROM group_chat_members WHERE chat_id=? AND user_id!=?',
@@ -483,6 +518,7 @@ def install(d):
     @d.rate_limit(20, 60)
     def group_chats_leave(chat_id):
         with connect() as c:
+            c.execute('BEGIN IMMEDIATE')
             wallet, uid = me(c)
             if not uid:
                 return fail('No wallet connected', 401)
@@ -515,8 +551,9 @@ def install(d):
     def group_chats_messages(chat_id):
         try:
             after = max(0, int(request.args.get('after') or 0))
+            changes_since = max(0, int(request.args.get('changes_since') or 0))
         except ValueError:
-            after = 0
+            after = changes_since = 0
         with connect() as c:
             wallet, uid = me(c)
             if not uid:
@@ -524,22 +561,64 @@ def install(d):
             if not _member_role(c, chat_id, uid):
                 return fail('Group not found', 404)
             if after:
-                rows = c.execute('SELECT id, sender_id, kind, body, created_at FROM group_chat_messages '
+                rows = c.execute('SELECT id, sender_id, kind, body, created_at, edited_at, version FROM group_chat_messages '
                                  'WHERE chat_id=? AND id>? ORDER BY id LIMIT ?', (chat_id, after, PAGE)).fetchall()
             else:
-                rows = c.execute('SELECT * FROM (SELECT id, sender_id, kind, body, created_at FROM group_chat_messages '
+                rows = c.execute('SELECT * FROM (SELECT id, sender_id, kind, body, created_at, edited_at, version FROM group_chat_messages '
                                  'WHERE chat_id=? ORDER BY id DESC LIMIT ?) ORDER BY id', (chat_id, PAGE)).fetchall()
-            people = _users(c, {r[1] for r in rows if r[1]})
+            updates = c.execute('SELECT id, sender_id, kind, body, created_at, edited_at, version FROM group_chat_messages '
+                                'WHERE chat_id=? AND version>? ORDER BY version LIMIT ?', (chat_id, changes_since, PAGE)).fetchall()
+            version = max([changes_since] + [r[6] for r in updates])
+            people = _users(c, {r[1] for r in rows + updates if r[1]})
             if rows:
                 c.execute('UPDATE group_chat_members SET last_read_id=MAX(last_read_id, ?) WHERE chat_id=? AND user_id=?',
                           (rows[-1][0], chat_id, uid))
                 c.execute("UPDATE notifications SET is_read=1 WHERE user_id=? AND link=? AND is_read=0",
                           (uid, '/messages?group=%d' % chat_id))
-        return jsonify({'ok': True, 'messages': [
+        def serialize(items):
+            return [
             {'id': r[0], 'sender_id': r[1], 'kind': r[2], 'body': r[3], 'created_at': r[4], 'mine': r[1] == uid,
+             'edited_at': r[5], 'version': r[6],
              'sender': _name_of(people[r[1]]) if r[1] in people else '',
              'sender_wallet': people[r[1]][2] if r[1] in people else '',
-             'sender_avatar': (people[r[1]][3] or '') if r[1] in people else ''} for r in rows]})
+             'sender_avatar': (people[r[1]][3] or '') if r[1] in people else ''} for r in items]
+        return jsonify({'ok': True, 'messages': serialize(rows), 'updates': serialize(updates), 'change_version': version})
+
+    @app.route('/api/group-chats/<int:chat_id>/messages/<int:message_id>', methods=['PUT', 'DELETE'])
+    @d.rate_limit(30, 60)
+    def group_chats_change_message(chat_id, message_id):
+        with connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            wallet, uid = me(c)
+            if not uid:
+                return fail('No wallet connected', 401)
+            if not _member_role(c, chat_id, uid):
+                return fail('Group not found', 404)
+            row = c.execute('SELECT sender_id,kind FROM group_chat_messages WHERE chat_id=? AND id=?',
+                            (chat_id, message_id)).fetchone()
+            if not row:
+                return fail('Message not found', 404)
+            if row[0] != uid or row[1] == 'system':
+                return fail('You can only change your own messages', 403)
+            if row[1] == 'deleted':
+                return jsonify({'ok': True}) if request.method == 'DELETE' else fail('Message was deleted', 409)
+            text = ''
+            if request.method == 'PUT':
+                if row[1] != 'text':
+                    return fail('Only text messages can be edited', 400)
+                text = d._sanitize(str((request.get_json(silent=True) or {}).get('message') or '')).strip()
+                if not text or len(text) > MAX_TEXT:
+                    return fail('Message must contain 1 to %d characters' % MAX_TEXT, 400)
+            c.execute('UPDATE group_chats SET change_version=change_version+1 WHERE id=?', (chat_id,))
+            version = c.execute('SELECT change_version FROM group_chats WHERE id=?', (chat_id,)).fetchone()[0]
+            if request.method == 'DELETE':
+                c.execute("UPDATE group_chat_messages SET kind='deleted',body='',version=? WHERE id=?", (version, message_id))
+            else:
+                c.execute('UPDATE group_chat_messages SET body=?,edited_at=?,version=? WHERE id=?', (text, _now(), version, message_id))
+            # Do not retain the removed/old body in pending bell previews.
+            c.execute("UPDATE notifications SET content='Group message updated' WHERE link=? AND actor_wallet=? AND is_read=0",
+                      ('/messages?group=%d' % chat_id, wallet))
+        return jsonify({'ok': True})
 
     @app.route('/api/group-chats/<int:chat_id>/messages', methods=['POST'])
     @d.rate_limit(30, 60)

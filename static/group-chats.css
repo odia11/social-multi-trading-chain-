@@ -169,3 +169,13 @@ html.gc-lock,html.gc-lock body{overflow:hidden!important}
   .gc-sheet-back{align-items:center}
   .gc-sheet{border-radius:24px;border-bottom:1px solid #20262f}
 }
+
+/* Own-message actions remain accessible on touch screens and desktop. */
+.gc-bubble{position:relative}
+.gc-msg.mine .gc-bubble{padding-right:38px}
+.gc-message-more{position:absolute;right:3px;top:3px;display:grid;place-items:center;width:30px;height:30px;border:0;border-radius:8px;background:transparent;color:inherit;opacity:.65;cursor:pointer}
+.gc-message-more:hover,.gc-message-more:focus-visible{opacity:1;background:rgba(128,128,128,.15)}
+.gc-message-more svg{width:17px;height:17px}
+.gc-deleted-text{font-style:italic;opacity:.65}
+.gc-edit-input{width:100%;min-height:120px;max-height:260px;resize:vertical;box-sizing:border-box;padding:12px;border:1px solid #303742;border-radius:12px;background:#11171e;color:#eef1f5;font:inherit;line-height:1.5}
+.gc-edit-input:focus-visible{outline:2px solid #f7b955;outline-offset:2px}
