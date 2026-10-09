@@ -5098,18 +5098,28 @@ OrcPageLifecycle.setInterval(_oaPollTask(fetchLeaderboard),30000);
 OrcPageLifecycle.setInterval(_oaPollTask(fetchPumpScanner),30000);
 
 // ── VERSION POLLING ──
-let _pageVersion=null;
-(async()=>{
-  const r=await fetch('/api/version').then(r=>r.json()).catch(()=>null);
-  if(r?.version) _pageVersion=r.version;
-})();
-OrcPageLifecycle.setInterval(async()=>{
-  if(document.hidden || !_pageVersion) return;
-  const r=await fetch('/api/version').then(r=>r.json()).catch(()=>null);
-  if(r?.version && r.version!==_pageVersion){
-    document.getElementById('update-banner').style.display='flex';
-  }
-},30000);
+// Compare with the build actually loaded by this document. A restored PWA
+// page can still run old JS after a deploy; asking the server for our initial
+// version incorrectly blessed that old page as current and hid the update.
+let _pageVersion=(document.querySelector('meta[name="oa-app-version"]')||{}).content||null;
+let _pageVersionChecking=false;
+async function _checkPageVersion(){
+  if(document.hidden || _pageVersionChecking) return;
+  _pageVersionChecking=true;
+  try{
+    const r=await fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null);
+    if(!r?.version) return;
+    if(!_pageVersion){_pageVersion=r.version;return;}
+    if(r.version!==_pageVersion){
+      const banner=document.getElementById('update-banner');
+      if(banner) banner.style.display='flex';
+    }
+  }finally{_pageVersionChecking=false;}
+}
+_checkPageVersion();
+OrcPageLifecycle.setInterval(_checkPageVersion,30000);
+document.addEventListener('orca:lifecycle-resume',_checkPageVersion);
+document.addEventListener('visibilitychange',function(){if(!document.hidden)_checkPageVersion();});
 
 // ── TOKEN INCINERATOR ──
 let _incTokens=[], _incScanAll=false;
