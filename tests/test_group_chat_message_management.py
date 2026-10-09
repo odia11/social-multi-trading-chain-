@@ -10,8 +10,10 @@ PROBE = r'''
 import os, sqlite3, threading
 from cryptography.fernet import Fernet
 os.environ['ENCRYPTION_KEY']=Fernet.generate_key().decode()
+original_thread_start=threading.Thread.start
 threading.Thread.start=lambda self:None
 import app_entry
+threading.Thread.start=original_thread_start
 from flask import session
 app=app_entry.app;d=app_entry._dashboard;app.testing=True
 d._send_push_notifications_bulk=lambda *a,**k:None
