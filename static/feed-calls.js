@@ -211,7 +211,7 @@
     if(!feed) return;
     watchSparks(feed);
     scheduleLive();
-    setInterval(refreshLiveCalls, 15000);
+    OrcPageLifecycle.setInterval(refreshLiveCalls, 15000);
     document.addEventListener('visibilitychange', scheduleLive);
     window.addEventListener('pageshow', scheduleLive);
     // Only look inside what was just added. Re-scanning the whole feed on

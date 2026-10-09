@@ -1159,7 +1159,7 @@ async function _loadRrMarket(){
   var label=document.getElementById('rr-pumping-label');
   try{
     var results=await Promise.all([
-      fetch('/api/promote/featured?placement=market').then(function(r){return r.json();}).catch(function(){return null;}),
+      Promise.resolve({ok:true,promotions:[]}), // Paid placements use measured Sponsored cards.
       fetch('/api/market/top').then(function(r){return r.json();}).catch(function(){return null;}),
     ]);
     var featured=results[0], d=results[1];
