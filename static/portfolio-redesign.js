@@ -38,7 +38,8 @@ function polishWithdrawModal(){
 function removeLegacyHistoryCards(){ /* Original cards remain in Assets; the unified History owns its own view. */ }
 function boot(){
   if(location.pathname.replace(/\/+$/,'')!=='/wallet'){revealPortfolio();return}
-  if(document.body.classList.contains('oa-portfolio')){revealWhenStyled();return}
+  if(document.body.dataset.pfInitialized==='1'){revealWhenStyled();return}
+  document.body.dataset.pfInitialized='1'
   document.body.classList.add('oa-portfolio','pf-view-assets');
   document.title='Portfolio — OrcAgent';
 
