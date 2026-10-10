@@ -200,3 +200,45 @@ def test_send_failure_has_safe_diagnosis(env):
     receipt=confirm(c,t).json['tip']
     assert 'Network response delayed' in receipt['status_detail']
     assert 'fake response loss' not in str(receipt)
+
+
+def test_quote_rpc_is_bounded_and_does_not_broadcast(env):
+    d, state, client = env
+    calls = []
+    original = provider._rpc_call_any.side_effect
+
+    def rpc(d, method, params, **kw):
+        calls.append((method, kw))
+        return original(d, method, params, **kw)
+
+    with patch.object(provider, '_rpc_call_any', side_effect=rpc):
+        response = quote(client, amount_usdc=1)
+
+    assert response.status_code == 200
+    assert response.json['tip']['recipient_count'] == 6
+    for method in ('getLatestBlockhash', 'getFeeForMessage', 'getBalance'):
+        options = next(kw for name, kw in calls if name == method)
+        assert options['timeout'] == 2.5
+        assert options['max_providers'] == 3
+    assert not any(method == 'getMinimumBalanceForRentExemption' for method, _ in calls)
+    assert state['sent'] == []
+
+
+def test_quote_rpc_failure_returns_recoverable_error_without_sending(env):
+    d, state, client = env
+    original = provider._rpc_call_any.side_effect
+
+    def rpc(d, method, params, **kw):
+        if method == 'getFeeForMessage':
+            raise TimeoutError('private RPC error details')
+        return original(d, method, params, **kw)
+
+    with patch.object(provider, '_rpc_call_any', side_effect=rpc):
+        response = quote(client)
+
+    assert response.status_code == 400
+    assert response.json['ok'] is False
+    assert 'Solana did not respond in time' in response.json['msg']
+    assert 'private RPC error details' not in response.get_data(as_text=True)
+    assert rows(d, 'SELECT id FROM group_tips') == []
+    assert state['sent'] == []
