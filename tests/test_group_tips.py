@@ -283,7 +283,7 @@ def test_confirm_rejects_a_quote_containing_sender(env, tampering):
     assert response.status_code == 400
     assert 'cannot include your own account' in response.json['msg']
     assert not state['sent']
-    assert not rows(d, 'SELECT id FROM tip_transactions')
+    assert rows(d, 'SELECT state,plan FROM group_tips WHERE id=?', (tip['id'],)) == [('quoted', None)]
 
 
 def test_sender_wallet_alias_added_after_quote_is_rejected_at_confirm(env):
