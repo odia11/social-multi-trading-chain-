@@ -206,9 +206,6 @@ def _worker(d):
     while True:
         if _RECONCILE_LOCK.acquire(blocking=False):
             try:
-                group_reconcile = getattr(d, "_group_tip_reconcile", None)
-                if callable(group_reconcile):
-                    group_reconcile()
                 reconcile_pending(d)
             except Exception as exc:
                 try:

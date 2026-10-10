@@ -59,7 +59,8 @@ def env(tmp_path):
             if state['timeout']:raise TimeoutError('fake response loss')
         return result,'fake'
     with patch.object(provider,'_rpc_call_any',side_effect=rpc),patch.object(provider,'_fee_payer_rent_lamports',return_value=890880):
-        tips.install(d)
+        with patch.object(tips.threading.Thread, 'start'):
+            tips.install(d)
         yield d,state,d.app.test_client()
 
 
@@ -154,3 +155,48 @@ def test_same_amount_separate_reviews_have_distinct_signatures(env):
     d,s,c=env
     a=quote(c).json['tip'];b=quote(c).json['tip'];confirm(c,a);confirm(c,b)
     assert len(s['sent'])==2 and s['sent'][0]!=s['sent'][1]
+
+
+def test_broadcast_does_not_wait_for_status_provider(env):
+    d,s,c=env;t=quote(c).json['tip']
+    old=provider._rpc_call_any.side_effect
+    def unavailable(d,method,params,**kw):
+        if method=='getSignatureStatuses':raise TimeoutError('status RPC unavailable')
+        return old(d,method,params,**kw)
+    with patch.object(provider,'_rpc_call_any',side_effect=unavailable):
+        assert confirm(c,t).json['tip']['status']=='submitted'
+    assert len(s['sent'])==1
+
+
+def test_confirm_refreshes_blockhash_before_signing(env):
+    d,s,c=env;t=quote(c).json['tip'];fresh=Hash.new_unique()
+    old=provider._rpc_call_any.side_effect
+    def renewed(d,method,params,**kw):
+        if method=='getLatestBlockhash':
+            return {'value':{'blockhash':str(fresh),'lastValidBlockHeight':250}},'fresh-provider'
+        if method=='simulateTransaction':assert kw.get('preferred_url')=='fresh-provider'
+        return old(d,method,params,**kw)
+    with patch.object(provider,'_rpc_call_any',side_effect=renewed):confirm(c,t)
+    tx=Transaction.from_bytes(base64.b64decode(s['sent'][0]))
+    assert tx.message.recent_blockhash==fresh
+    q=json.loads(rows(d,'SELECT quote FROM group_tips WHERE id=?',(t['id'],))[0][0])
+    assert q['last_height']==250
+    confirm(c,t);assert len(s['sent'])==1
+
+
+def test_archived_transaction_prevents_false_expiry(env):
+    d,s,c=env;t=quote(c).json['tip'];confirm(c,t);s['height']=101
+    old=provider._rpc_call_any.side_effect
+    def archived(d,method,params,**kw):
+        if method=='getTransaction':return {'meta':{'err':None}},'archive'
+        return old(d,method,params,**kw)
+    with patch.object(provider,'_rpc_call_any',side_effect=archived):tips.reconcile(d,t['id'])
+    assert c.get('/api/group-chats/1/tips/'+t['id']).json['tip']['status']=='confirmed'
+    assert len(s['sent'])==1
+
+
+def test_send_failure_has_safe_diagnosis(env):
+    d,s,c=env;t=quote(c).json['tip'];s['timeout']=True
+    receipt=confirm(c,t).json['tip']
+    assert 'Network response delayed' in receipt['status_detail']
+    assert 'fake response loss' not in str(receipt)
