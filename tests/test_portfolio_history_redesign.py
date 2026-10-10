@@ -36,7 +36,7 @@ def setup_app():
     con.commit();con.close()
     app=Flask(__name__)
     d=SimpleNamespace(
-        app=app, DB_FILE=db, _authenticated_wallet=lambda:OWNER,
+        app=app, DB_FILE=db, TOKEN_PROGRAM_ID='legacy', TOKEN_2022_PROGRAM_ID='token2022', _authenticated_wallet=lambda:OWNER,
         _get_trading_wallet_address=lambda wallet:OWNER)
     with patch.object(wallet_activity,'_wallet_events',return_value=[]):
         wallet_activity.install(d)
@@ -56,8 +56,8 @@ def rpc_result(method, params):
     if method=='getTransaction':
         sig=params[0]
         initial=1_000_000_000
-        pre=[{'mint':USDC,'owner':OWNER,'uiTokenAmount':{'amount':'100000'}}]
-        post=[{'mint':USDC,'owner':OWNER,'uiTokenAmount':{'amount':'600000'}}]
+        pre=[{'mint':USDC,'owner':OWNER,'uiTokenAmount':{'amount':'100000','decimals':6}}]
+        post=[{'mint':USDC,'owner':OWNER,'uiTokenAmount':{'amount':'600000','decimals':6}}]
         if sig=='swap':
             pre[0]['uiTokenAmount']['amount']='600000'
             post[0]['uiTokenAmount']['amount']='200000'
@@ -66,7 +66,7 @@ def rpc_result(method, params):
                   'preBalances':[initial],'postBalances':[initial-5000]}
         if sig=='swap': metadata['postBalances']=[initial+2500000]
         return ({'blockTime':400 if sig=='incoming' else 300,'meta':metadata,
-                 'transaction':{'message':{'accountKeys':[{'pubkey':OWNER}]}}},'mock')
+                 'transaction':{'message':{'accountKeys':[{'pubkey':OWNER}], 'instructions':[{'program':'swap-router' if sig=='swap' else 'spl-token'}]}}},'mock')
     raise AssertionError(method)
 
 
