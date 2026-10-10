@@ -262,7 +262,7 @@ def test_sender_excluded_even_when_another_member_uses_sender_trading_wallet(env
     receipt = confirm(client, tip)
     assert receipt.status_code == 200
     assert len(state['sent']) == 1
-    assert {r[0] for r in rows(d, 'SELECT receiver_user_id FROM tip_transactions')} == {3, 4, 5, 6, 7}
+    assert {r[0] for r in rows(d, 'SELECT recipient_user_id FROM tip_transactions')} == {3, 4, 5, 6, 7}
 
 
 @pytest.mark.parametrize('tampering', ['sender_id', 'sender_wallet'])
