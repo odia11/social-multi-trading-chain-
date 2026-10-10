@@ -47,8 +47,11 @@ def _db(d):
         c.close()
 
 
-def _recipients(d, c, chat_id, uid):
+def _recipients(d, c, chat_id, uid, own_addresses=()):
     import portfolio_token_withdraw as provider
+    # A sender is never a recipient, even when a second member account points
+    # at the sender's login wallet or custodial trading wallet.
+    own_addresses = {str(address) for address in own_addresses if address}
     if chat_id > 0 and not c.execute('SELECT 1 FROM group_chat_members WHERE chat_id=? AND user_id=?', (chat_id, uid)).fetchone():
         raise ValueError('Group not found')
     rows = (c.execute('SELECT id,username,avatar_url FROM users WHERE id=? AND id!=?', (-chat_id, uid)).fetchall() if chat_id < 0 else c.execute('SELECT u.id,u.username,u.avatar_url FROM group_chat_members m JOIN users u ON u.id=m.user_id WHERE m.chat_id=? AND u.id!=? ORDER BY u.id', (chat_id, uid)).fetchall())
@@ -56,11 +59,17 @@ def _recipients(d, c, chat_id, uid):
         raise ValueError('A group tip needs 1 to 49 other members')
     result = []
     for row in rows:
+        if row[0] == uid:
+            continue
         target = provider._user_tip_wallets(d, row[0])
         address = target['solana'] if target else ''
+        if target and (address in own_addresses or target['session'] in own_addresses):
+            continue
         if not d.is_valid_solana_address(address):
             raise ValueError('A member needs to set up a Solana wallet before the group can receive a tip')
         result.append({'user_id': row[0], 'username': row[1] or 'OrcAgent member', 'avatar': row[2] or '', 'address': address})
+    if not result:
+        raise ValueError('There are no other eligible members to tip')
     if len({r['address'] for r in result}) != len(result):
         raise ValueError('Group members must have distinct receiving wallets')
     return result
@@ -321,13 +330,13 @@ def install(d):
             price = Decimal(str(sol.get('price') or 0))
             if not price.is_finite() or price <= 0 or time.time() - float(sol.get('observed_at') or 0) > 15:
                 raise ValueError('A fresh SOL price is unavailable. Try again shortly.')
-            with _db(d) as c:
-                recipients = _recipients(d, c, chat_id, uid)
             owner = d._get_trading_wallet_address(wallet)
             if not owner or not provider._wallet_keys(d, wallet):
                 raise ValueError('Create or connect your Solana trading wallet first')
-            if owner in {r['address'] for r in recipients}:
-                raise ValueError('You cannot tip your own wallet through another member')
+            with _db(d) as c:
+                recipients = _recipients(d, c, chat_id, uid, (wallet, owner))
+            if any(r['user_id'] == uid or r['address'] in (wallet, owner) for r in recipients):
+                raise ValueError('You cannot tip yourself')
             count = len(recipients)
             per = int((usd / price * Decimal(1e9) / count).to_integral_value(rounding=ROUND_DOWN))
             if per < 1 or usd / count < Decimal('.01'):
@@ -383,12 +392,16 @@ def install(d):
                 if row['state'] != 'quoted':
                     return jsonify(ok=True, tip=_public_quote(row, uid))
                 q = json.loads(row['quote'])
+                owner = d._get_trading_wallet_address(wallet)
+                if not owner or any(r['user_id'] == uid or r['address'] in (wallet, owner)
+                                    for r in q['recipients']):
+                    raise ValueError('A tip cannot include your own account. Review a new tip.')
                 if callable(getattr(d, '_rate_ok', None)) and not d._rate_ok('tip_wallet:' + wallet, 12, 3600):
                     raise ValueError('Tip limit reached. Try again later.')
                 if time.time() > q['expires']:
                     raise ValueError('This quote expired. Review a fresh quote before sending.')
                 with _db(d) as c:
-                    if _snapshot(_recipients(d, c, chat_id, uid)) != _snapshot(q['recipients']):
+                    if _snapshot(_recipients(d, c, chat_id, uid, (wallet, owner))) != _snapshot(q['recipients']):
                         raise ValueError('Group members or receiving wallets changed. Review a fresh quote.')
                 keyrow = provider._wallet_keys(d, wallet)
                 from solders.keypair import Keypair
@@ -429,7 +442,7 @@ def install(d):
                     current = c.execute('SELECT * FROM group_tips WHERE id=?', (tip_id,)).fetchone()
                     if current['state'] != 'quoted':
                         return jsonify(ok=True, tip=_public_quote(current, uid))
-                    if time.time() > q['expires'] or _snapshot(_recipients(d, c, chat_id, uid)) != _snapshot(q['recipients']):
+                    if time.time() > q['expires'] or _snapshot(_recipients(d, c, chat_id, uid, (wallet, owner))) != _snapshot(q['recipients']):
                         raise ValueError('The quote or group changed. Review again; nothing was sent.')
                     body = json.dumps({'tip_id': tip_id, 'count': len(q['recipients']), 'note': q['note'], 'status': 'submitted', 'confirmed': 0})
                     if chat_id > 0:
