@@ -187,7 +187,24 @@ function threadEl(){
     if(e.key==='Enter'&&!e.shiftKey&&!('ontouchstart' in window)){e.preventDefault();form.requestSubmit?form.requestSubmit():form.dispatchEvent(new Event('submit',{cancelable:true}));}
   });
   var bodyEl=t.querySelector('.gc-th-body');
-  bodyEl.addEventListener('scroll',function(){atBottom=bodyEl.scrollHeight-bodyEl.scrollTop-bodyEl.clientHeight<80;},{passive:true});
+  // Keep following the latest message through late photo/font layout changes.
+  // Only user interaction releases the anchor; layout-generated scroll events
+  // must not make a newly opened chat look like the user scrolled up.
+  ['wheel','touchstart','pointerdown'].forEach(function(type){
+    bodyEl.addEventListener(type,function(){atBottom=false;},{passive:true});
+  });
+  bodyEl.addEventListener('keydown',function(e){
+    if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].indexOf(e.key)>=0)atBottom=false;
+  });
+  bodyEl.addEventListener('scroll',function(){
+    if(!atBottom)atBottom=bodyEl.scrollHeight-bodyEl.scrollTop-bodyEl.clientHeight<80;
+  },{passive:true});
+  if(window.ResizeObserver){
+    var bottomObserver=new ResizeObserver(function(){keepLatestVisible(t);});
+    bottomObserver.observe(t.querySelector('.gc-msgs'));
+    bottomObserver.observe(bodyEl);
+  }
+  bodyEl.addEventListener('load',function(){keepLatestVisible(t);},true);
   // iOS may still scroll the page to show the field; keep the chat on screen.
   input.addEventListener('focus',function(){setTimeout(fitViewport,50);setTimeout(fitViewport,350);});
   input.addEventListener('blur',function(){setTimeout(fitViewport,50);});
@@ -247,6 +264,11 @@ function messageHtml(m,prev){
     +'<span class="gc-time">'+(m.edited_at&&m.kind!=='deleted'?'Edited · ':'')+(m.failed?'Not sent · tap to retry':(m.pending?'Sending…':esc(clock(m.created_at))))+'</span></div></div>';
   return html;
 }
+function keepLatestVisible(t){
+  if(!open||t.hidden||!atBottom)return;
+  var body=t.querySelector('.gc-th-body');
+  body.scrollTop=body.scrollHeight;
+}
 function renderMessages(stick){
   var t=threadEl(),box=t.querySelector('.gc-msgs'),body=t.querySelector('.gc-th-body');
   var near=body.scrollHeight-body.scrollTop-body.clientHeight<120;
@@ -262,7 +284,7 @@ function renderMessages(stick){
     else box.insertBefore(el,cursor);
   });
   while(cursor){var tail=cursor.nextElementSibling;cursor.remove();cursor=tail;}
-  if(stick||near)body.scrollTop=body.scrollHeight;
+  if(stick||near){atBottom=true;keepLatestVisible(t);}
 }
 function mergeMessages(list,updatesOnly){
   var have={};open.messages.forEach(function(m,i){have[m.id]=i;});
