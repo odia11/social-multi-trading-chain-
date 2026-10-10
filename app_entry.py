@@ -182,6 +182,9 @@ _install_following_traders(_dashboard)
 from group_chats import install as _install_group_chats
 _install_group_chats(_dashboard)
 
+from group_tips import install as _install_group_tips
+_install_group_tips(_dashboard)
+
 from call_invitations import install as _install_call_invitations
 _install_call_invitations(_dashboard)
 

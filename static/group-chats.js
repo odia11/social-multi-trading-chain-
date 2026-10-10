@@ -98,6 +98,7 @@ function section(){
 }
 function previewOf(c){
   var l=c.last;if(!l)return 'No messages yet';
+  if(l.kind==='tip')return '🎁 Group tip';
   if(l.kind==='system')return esc(l.text);
   var who=l.mine?'You: ':(l.sender?esc(l.sender)+': ':'');
   return who+(l.kind==='image'?'📷 Photo':esc(l.text));
@@ -172,12 +173,14 @@ function threadEl(){
     +'<div class="gc-th-body"><div class="gc-msgs" aria-live="polite"></div></div>'
     +'<form class="gc-composer" autocomplete="off">'
     +'<button type="button" class="gc-icon-btn gc-photo" aria-label="Send a photo">'+ICON.photo+'</button>'
+    +'<button type="button" class="gc-icon-btn gc-tip" aria-label="Tip the group">'+window.OrcChatTip.gift+'</button>'
     +'<input type="file" accept="image/jpeg,image/png,image/gif,image/webp" class="gc-file" hidden>'
     +'<button type="button" class="gc-icon-btn gc-emoji" aria-label="Emoji" aria-expanded="false">'+ICON.smile+'</button>'
     +'<div class="gc-emoji-panel" role="dialog" aria-label="Emoji" hidden>'+EMOJI.map(function(e){return '<button type="button" aria-label="'+e+'">'+e+'</button>';}).join('')+'</div>'
     +'<textarea class="gc-input" rows="1" maxlength="1000" placeholder="Message" aria-label="Message"></textarea>'
     +'<button type="submit" class="gc-send" aria-label="Send" disabled>'+ICON.send+'</button></form>';
   document.body.appendChild(t);
+  t.querySelector('.gc-tip').onclick=function(){if(open)window.OrcChatTip.start({group:true,base:'/api/group-chats/'+open.id+'/tips',refresh:fetchNew});};
   var input=t.querySelector('.gc-input'),send=t.querySelector('.gc-send'),form=t.querySelector('.gc-composer');
   input.addEventListener('input',function(){
     send.disabled=!input.value.trim();
@@ -251,6 +254,7 @@ function messageHtml(m,prev){
   var body=m.kind==='image'
     ?(safeImg(m.body)?'<img class="gc-img" src="'+esc(safeImg(m.body))+'" alt="Photo" loading="lazy">':'')
     :esc(m.body).replace(/\n/g,'<br>');
+  if(m.kind==='tip')body=window.OrcChatTip.card(m.body,true);
   if(m.kind==='deleted')body='<span class="gc-deleted-text">Message deleted</span>';
   var cls='gc-msg'+(m.mine?' mine':'')+(runStart?' run-start':'')+(m.pending?' pending':'')+(m.failed?' failed':'')+(m.kind==='image'?' is-image':'');
   html+='<div class="'+cls+'" data-mid="'+esc(m.id)+'">';
@@ -260,8 +264,8 @@ function messageHtml(m,prev){
   html+='<div class="gc-message-stack"><div class="gc-bubble">'
     +(!m.mine&&runStart?'<div class="gc-sender" style="--gc-name:'+esc(color(m.sender_wallet))+'">'+esc(m.sender)+'</div>':'')
     +'<div class="gc-text">'+body+'</div>'
-    +(!m.pending&&!m.failed&&m.kind!=='deleted'?'<button type="button" class="gc-message-more" data-message-menu="'+m.id+'" aria-label="Message options">'+ICON.more+'</button>':'')+'</div>'
-    +likeHtml(m)
+    +(!m.pending&&!m.failed&&m.kind!=='deleted'&&m.kind!=='tip'?'<button type="button" class="gc-message-more" data-message-menu="'+m.id+'" aria-label="Message options">'+ICON.more+'</button>':'')+'</div>'
+    +(m.kind==='tip'?'':likeHtml(m))
     +'<span class="gc-time">'+(m.edited_at&&m.kind!=='deleted'?'Edited · ':'')+(m.failed?'Not sent · tap to retry':(m.pending?'Sending…':esc(clock(m.created_at))))+'</span></div></div>';
   return html;
 }
@@ -395,6 +399,7 @@ if(window.visualViewport){
   window.visualViewport.addEventListener('scroll',fitViewport);
 }
 function closeGroup(fromPop){
+  if(window.OrcChatTip)window.OrcChatTip.close();
   closeReactionMenu();
   if(pollTimer){window.clearInterval(pollTimer);pollTimer=null;}
   open=null;window.__oaOpenGroupId=null;emojiPanel(false);
@@ -590,7 +595,7 @@ function showInfo(){
     +'<div class="gc-info-top">'
     +(admin?'<button type="button" class="gc-info-photo" aria-label="Change group photo">'+avatarHtml('gc-info-av',open.name,'g'+open.id,open.photo)
            +'<span class="gc-info-cam">'+ICON.camera+'</span></button>'
-           +'<input type="file" accept="image/jpeg,image/png,image/gif,image/webp" class="gc-photo-file" hidden>'
+    +'<input type="file" accept="image/jpeg,image/png,image/gif,image/webp" class="gc-photo-file" hidden>'
            +(open.photo?'<button type="button" class="gc-link gc-photo-remove">Remove photo</button>':'')
            :avatarHtml('gc-info-av',open.name,'g'+open.id,open.photo))
     +(admin?'<div class="gc-rename"><input class="gc-name-input" maxlength="40" value="'+esc(open.name)+'" aria-label="Group name"><button type="button" class="gc-ghost gc-save" disabled>Save</button></div>'
@@ -886,6 +891,7 @@ function addHeaderButton(){
   row.insertBefore(b,compose);
 }
 document.addEventListener('click',function(e){
+  var tip=e.target.closest('[data-chat-tip][data-tip-group="true"]');if(tip&&open){window.OrcChatTip.view({group:true,base:'/api/group-chats/'+open.id+'/tips',refresh:fetchNew},tip.dataset.chatTip);return;}
   var avatar=e.target.closest('.gc-msg-av img,.gc-th-av img');
   if(avatar){e.preventDefault();e.stopPropagation();OrcAgentViewPhoto(avatar.src);return;}
   var like=e.target.closest('[data-message-like]');if(like){toggleLike(like.dataset.messageLike,like.dataset.emoji);return;}

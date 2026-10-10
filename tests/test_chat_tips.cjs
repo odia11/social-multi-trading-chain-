@@ -1,0 +1,16 @@
+const fs=require('fs'),assert=require('assert');
+const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwright');
+(async()=>{const root=require('path').resolve(__dirname,'..');const browser=await chromium.launch({executablePath:process.env.ORCAGENT_CHROMIUM||undefined,args:['--no-sandbox','--disable-gpu','--no-zygote']});
+for(const group of [true,false])for(const width of [320,390])for(const theme of ['dark','light']){
+const page=await browser.newPage({viewport:{width,height:844},isMobile:true,hasTouch:true});let quotes=0,sends=0,errors=[];page.on('pageerror',e=>errors.push(String(e)));
+const tip={id:'a'.repeat(32),status:'quoted',sender:true,recipient_count:group?6:1,per_person_usdc:group?1:6,per_person_sol:group?.01:.06,total_sol:.06,fee_sol:.000005,total_debit_sol:.060005,price_usdc:100,note:'Coffee',recipients:[{user_id:2,username:'Bob'}]};
+await page.route('https://tips.test/**',r=>{const p=new URL(r.request().url()).pathname;let data={ok:true,tip};if(p.endsWith('/quote'))quotes++;if(p.endsWith('/confirm')){sends++;data={ok:true,tip:{...tip,status:'submitted'}};}else if(p.includes(tip.id))data={ok:true,tip:{...tip,status:'confirmed'}};return r.fulfill({contentType:p==='/'?'text/html':'application/json',body:p==='/'?'<html data-theme="'+theme+'"><meta name="csrf-token" content="valid"><body><button id="trigger">Tip</button></body></html>':JSON.stringify(data)});});
+await page.goto('https://tips.test/');await page.addStyleTag({content:fs.readFileSync(root+'/static/group-chats.css','utf8')});await page.addScriptTag({content:fs.readFileSync(root+'/static/page-lifecycle.js','utf8')});await page.addScriptTag({content:fs.readFileSync(root+'/static/chat-tips.js','utf8')});await page.evaluate(g=>{window.ctx={group:g,name:'Bob',base:g?'/api/group-chats/1/tips':'/api/messages/2/tips'};OrcChatTip.start(ctx);},group);
+await page.click('.ct-review');await page.waitForSelector('.ct-confirm');assert.equal(quotes,1);assert((await page.locator('.ct-summary').innerText()).includes('0.060005 SOL'));
+assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'no horizontal overflow');
+await page.click('.ct-confirm');await page.waitForSelector('.ct-done');assert.equal(sends,1);assert((await page.locator('.ct-content').innerText()).includes('Confirming on-chain'));await page.click('.ct-done');
+// Reopen resumes the previous receipt, without offering a second send.
+await page.evaluate(()=>OrcChatTip.start(ctx));await page.waitForSelector('.ct-status.confirmed');assert.equal(quotes,1);assert.equal(sends,1);await page.keyboard.press('Escape');assert.equal(await page.locator('.ct-back').count(),0);
+await page.evaluate(g=>{document.body.insertAdjacentHTML('beforeend',OrcChatTip.card(JSON.stringify({tip_id:'b'.repeat(32),count:6,status:'submitted',note:'<img src=x onerror=alert(1)>'}),g));},group);
+assert.equal(await page.locator('.ct-card img').count(),0);assert(!await page.locator('.ct-card').innerText().then(t=>t.includes('6.00')));assert.deepEqual(errors,[]);await page.close();}
+await browser.close();console.log('PASS group/DM reviewed tipping, confirmation, resume, escaping and 320/390px light/dark layouts (8 cases)');})();
