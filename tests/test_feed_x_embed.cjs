@@ -19,16 +19,9 @@ const context={
     isActive(){return true;},
     intersectionObserver(callback,opts){return new FakeObserver(callback,opts);},
     onCleanup(){},
-  }}},twttr:{widgets:{createTweet(id,target,opts){
-    renderCount++;
-    assert.equal(id,'1234567890123456789');
-    assert.equal(opts.dnt,true);
-    assert.equal(opts.theme,'dark');
-    target.rendered=true;
-    return Promise.resolve({tagName:'IFRAME'});
-  }}}},
+  }}},fetch(){renderCount++;return Promise.resolve({ok:true,json(){return Promise.resolve({ok:true,tweet:{id:'1234567890123456789',url:'https://x.com/test/status/1234567890123456789',name:'Test',username:'test',text:'Public post',media:[]}});}});}},
   IntersectionObserver:FakeObserver,
-  URL, Promise, setTimeout, clearTimeout,
+  URL, Promise, AbortController, Date, setTimeout, clearTimeout,
 };
 vm.createContext(context);
 vm.runInContext(src,context);
@@ -76,7 +69,7 @@ assert.equal(x.stripEmbeddedStatusUrl('https://example.org/info'),
 assert.equal(x.stripEmbeddedStatusUrl('https://evilx.com/name/status/210896351890948915'),
              'https://evilx.com/name/status/210896351890948915');
 assert.equal(x.stripEmbeddedStatusUrl('Nothing to embed'),'Nothing to embed');
-assert.ok(x.card(tweet).includes('Open on X'),'visible fallback is still needed');
+assert.ok(x.card(tweet).includes('oa-x-source'),'attribution link stays available');
 assert.ok(feed.includes('window.OrcFeedXEmbed.stripEmbeddedStatusUrl(_rawContent)'));
 assert.ok(feed.includes('window.OrcFeedXEmbed.card(e.content)'),
           'Original content must still be used to build the embed');
@@ -95,7 +88,7 @@ assert.ok(feed.includes('window.OrcFeedXEmbed.dispose(root)'));
 assert.ok(csp.includes('https://platform.twitter.com') && csp.includes('https://syndication.twitter.com'));
 
 function root(){
-  const slot={textContent:'',rendered:false,replaceChildren(){this.textContent='';}};
+  const slot={textContent:'',innerHTML:'',replaceChildren(){this.textContent='';}};
   return {dataset:{xPostId:'1234567890123456789'},isConnected:true,
     querySelector(q){return q==='.oa-x-post-slot'?slot:null},slot};
 }
@@ -109,7 +102,12 @@ FakeObserver.current.callback([{isIntersecting:true,target:first}]);
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(renderCount,1);
   assert.equal(first.dataset.xState,'ready');
-  assert.equal(first.slot.rendered,true);
+  assert.ok(first.slot.innerHTML.includes('Public post'));
+  assert.ok(!first.slot.innerHTML.includes('fc-actions'));
+  const dangerous=x.renderTweet({id:'12345',url:'https://x.com/test/status/12345',name:'<script>x</script>',username:'test',text:'<img src=x onerror=alert(1)>',media:[{url:'https://evil.test/a.png'}]});
+  assert.ok(!dangerous.includes('<script>') && !dangerous.includes('<img src=x'));
+  assert.ok(!dangerous.includes('evil.test'));
+  assert.ok(dangerous.includes('&lt;img'));
   x.observe(parent);
   assert.equal(renderCount,1,'refresh must not reload same tweet');
   const second=root();

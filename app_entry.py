@@ -14,6 +14,7 @@ from portfolio_wallet_activity import install as _install_portfolio_wallet_activ
 from profile_portfolio_balance import install as _install_profile_portfolio_balance
 from search_seo import install as _install_search_seo
 from app_performance import install as _install_app_performance
+from x_feed_preview import install as _install_x_feed_preview
 from x_post_preview_fix import install as _install_x_post_preview_fix
 from x_share_cache_bust import install as _install_x_share_cache_bust
 from share_canonical_routes import install as _install_share_canonical_routes
@@ -67,6 +68,7 @@ _install_search_seo(_dashboard)
 
 _install_app_performance(_dashboard)
 _install_x_post_preview_fix(_dashboard)
+_install_x_feed_preview(_dashboard)
 _install_x_share_cache_bust(_dashboard)
 _install_share_canonical_routes(_dashboard)
 _install_mobile_ui_hotfix(_dashboard)

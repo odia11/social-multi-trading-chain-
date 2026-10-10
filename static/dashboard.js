@@ -9920,7 +9920,7 @@ function _renderFeedCard(e, cardIndex){
     : '';
 
   return (repostBanner ? '<div class="fc-repost-wrap">'+repostBanner : '')
-    +'<div class="fc-card" id="'+esc(cardId)+'" data-post-content="'+esc(e.content||'')+'" '
+    +'<div class="fc-card'+(xTweetHtml?' fc-x-shared':'')+'" id="'+esc(cardId)+'" data-post-content="'+esc(e.content||'')+'" '
       +'onclick="_fcCardClick(event,\''+esc(safePostId)+'\')" style="cursor:pointer">'
     +menuHtml
     +(e.avatar_url
@@ -9955,9 +9955,10 @@ function _renderFeedCard(e, cardIndex){
       +'onclick="_feedToggleLike(this,\''+esc(safePostId)+'\')" '
       +'onmousedown="_fcLikePressStart(\''+esc(safePostId)+'\')" onmouseup="_fcLikePressEnd()" onmouseleave="_fcLikePressEnd()" '
       +'data-like-press="'+esc(safePostId)+'">'
-      +_OA_FEED_ICON.like+'<span class="fc-heart-ico" style="display:none">'+(e.liked_by_me ? '❤️' : '♡')+'</span>'
+      +_OA_FEED_ICON.like+(xTweetHtml?'<span class="oa-x-like-label">Like</span>':'')+'<span class="fc-heart-ico" style="display:none">'+(e.liked_by_me ? '❤️' : '♡')+'</span>'
       +'<span class="fc-like-count" onclick="event.stopPropagation();_fcOpenLikedBy(\''+esc(safePostId)+'\')" title="See who liked this">'+esc(String(e.like_count||0))+'</span>'
     +'</button>'
+    +(xTweetHtml?'<a class="fc-action oa-action-tip" href="'+_profileHref+'?tip=1" title="Tip this OrcAgent author" aria-label="Tip this OrcAgent author"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M5 12v9h14v-9M12 8v13M12 8H8.5A2.5 2.5 0 1 1 11 5.5L12 8Zm0 0h3.5A2.5 2.5 0 1 0 13 5.5L12 8Z"/></svg><span>Tip</span></a>':'')
     +'<div class="fc-share-wrap">'
     +'<button class="fc-action fc-share-btn" onclick="event.stopPropagation();_fcShareToggle(\''+esc(safePostId)+'\')" title="Share">'+_SHARE_ICON_SVG+'</button>'
     +'<div class="fc-share-dd" id="fc-share-dd-'+esc(safePostId)+'" style="display:none">'
