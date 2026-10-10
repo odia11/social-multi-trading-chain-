@@ -38,9 +38,9 @@
     var before=original.slice(0,tweet.start);
     var after=original.slice(tweet.end);
     return (before+after)
-      .replace(/[ \\t]{2,}/g,' ')
-      .replace(/[ \\t]+\\n/g,'\\n')
-      .replace(/\\n[ \\t]+/g,'\\n')
+      .replace(/[ \t]{2,}/g,' ')
+      .replace(/[ \t]+\n/g,'\n')
+      .replace(/\n[ \t]+/g,'\n')
       .trim();
   }
 
