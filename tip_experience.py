@@ -91,9 +91,10 @@ def record_submitted(d, sender_wallet, sender_user_id, recipient_user_id,
     _schema(d)
     note = ''.join(c for c in str(note or '') if c.isprintable()).strip()[:100]
     with _db(d) as conn:
+        conn.execute('BEGIN IMMEDIATE')
         previous = conn.execute(
-            'SELECT id FROM tip_transactions WHERE tx_hash=? AND chain=? LIMIT 1',
-            (tx_hash, chain)).fetchone()
+            'SELECT id FROM tip_transactions WHERE tx_hash=? AND chain=? AND recipient_user_id=? LIMIT 1',
+            (tx_hash, chain, recipient_user_id)).fetchone()
         if previous:
             return int(previous['id'])
         cur = conn.execute("""INSERT INTO tip_transactions
@@ -205,6 +206,9 @@ def _worker(d):
     while True:
         if _RECONCILE_LOCK.acquire(blocking=False):
             try:
+                group_reconcile = getattr(d, "_group_tip_reconcile", None)
+                if callable(group_reconcile):
+                    group_reconcile()
                 reconcile_pending(d)
             except Exception as exc:
                 try:

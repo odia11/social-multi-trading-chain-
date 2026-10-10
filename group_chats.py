@@ -275,7 +275,7 @@ def install(d):
                 for r in c.execute('SELECT g.chat_id, g.kind, g.body, g.created_at, g.sender_id, u.username, u.wallet_address '
                                    'FROM group_chat_messages g LEFT JOIN users u ON u.id=g.sender_id '
                                    'WHERE g.id IN (%s)' % marks, last_ids):
-                    last[r[0]] = {'kind': r[1], 'text': '' if r[1] == 'image' else r[2][:120], 'created_at': r[3],
+                    last[r[0]] = {'kind': r[1], 'text': '' if r[1] == 'image' else 'Group tip' if r[1] == 'tip' else r[2][:120], 'created_at': r[3],
                                   'mine': r[4] == uid, 'sender': (_name_of((r[4], r[5], r[6])) if r[4] else '')}
             # A few faces per group for its avatar.
             faces = {}
@@ -699,7 +699,7 @@ def install(d):
                             (chat_id, message_id, _history_floor(c, chat_id, uid))).fetchone()
             if not row:
                 return fail('Message not found', 404)
-            if row[0] != uid or row[1] == 'system':
+            if row[0] != uid or row[1] in ('system','tip'):
                 return fail('You can only change your own messages', 403)
             if row[1] == 'deleted':
                 return jsonify({'ok': True}) if request.method == 'DELETE' else fail('Message was deleted', 409)

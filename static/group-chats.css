@@ -211,3 +211,21 @@ html.gc-lock,html.gc-lock body{overflow:hidden!important}
 .gc-history-setting{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 20px;border-bottom:1px solid var(--gc-line);font-size:14px}
 .gc-history-setting small{display:block;color:var(--gc-muted);font-size:12px;margin-top:4px}
 .gc-history-toggle{width:22px;height:22px;accent-color:var(--gc-accent);flex-shrink:0}
+
+/* Shared group / personal tipping sheet. */
+.ct-back{z-index:10050!important;position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center;padding:12px;overflow:auto}
+.ct-sheet{position:relative;width:min(480px,100%);padding:26px!important;max-height:90dvh;overflow:auto;background:#10161e!important;color:#f4f5f7;border:1px solid #2b333d;border-radius:24px!important;font-family:inherit}
+.ct-close{position:absolute;right:14px;top:10px;border:0;background:none;color:inherit;font:28px system-ui;cursor:pointer}
+.ct-gift{display:grid;place-items:center;color:#f7b955;background:rgba(247,185,85,.12);width:46px;height:46px;border-radius:14px;margin-bottom:15px}
+.ct-sheet h2{font-size:24px;font-weight:700;line-height:1.2;margin:0 0 8px}.ct-sub{color:#929ba8;font-size:13px;line-height:1.5;margin:10px 0 18px}
+.ct-label{display:block;font-size:11px;letter-spacing:1px;color:#929ba8;margin:18px 0 8px;font-weight:700}
+.ct-amount{display:flex;align-items:center;gap:12px;border:1px solid #303a46;border-radius:16px;padding:15px}.ct-amount input{width:100%;min-width:0;border:0;outline:0;background:none;color:inherit;font-size:36px;font-weight:700}.ct-amount b{color:#929ba8;font-size:16px}
+.ct-presets{display:flex;gap:8px}.ct-presets button{flex:1;padding:11px 4px;background:none;color:inherit;border:1px solid #303a46;border-radius:12px;cursor:pointer}.ct-presets .selected{border-color:#f7b955;color:#f7b955;background:rgba(247,185,85,.08)}
+.ct-note{box-sizing:border-box;width:100%;background:none;color:inherit;border:1px solid #303a46;border-radius:12px;padding:14px;font-size:16px;font-family:inherit}
+.ct-line{display:flex;justify-content:space-between;gap:15px;margin:16px 0;font-size:13px}.ct-line span{color:#929ba8}.ct-line b{text-align:right;overflow-wrap:anywhere}
+.ct-summary{border-top:1px solid #303a46;margin-top:20px;padding-top:4px}.ct-recipients{font-size:13px;color:#929ba8}.ct-recipients div{padding-top:8px}.ct-recipients summary{cursor:pointer;color:#f7b955}
+.ct-sheet .gc-primary{display:block;width:100%;border:0;border-radius:14px;min-height:48px;background:#f7b955;color:#10161e;font-weight:700;font-size:16px;cursor:pointer}.ct-sheet button:disabled{opacity:.55;cursor:wait}.ct-secondary{display:block;margin:14px auto 0;border:0;background:none;color:inherit;cursor:pointer}.ct-error{color:#ff7c83;font-size:13px;line-height:1.5}.ct-note-preview{border-left:2px solid #f7b955;padding-left:12px;font-size:14px}
+.ct-status{display:inline-block;color:#f7b955;background:rgba(247,185,85,.1);padding:5px 9px;border-radius:8px;font-size:12px}.ct-status.confirmed{color:#35ce9b;background:rgba(53,206,155,.12)}
+.ct-card{display:grid;gap:10px;min-width:180px;max-width:290px;padding:8px 4px}.ct-card>svg{color:#f7b955}.ct-card>b{font-size:11px;letter-spacing:1px}.ct-card p{margin:0;font-size:13px}.ct-card button{background:none;color:inherit;font-weight:700;text-align:left;border:0;padding:10px 0 2px;cursor:pointer}.ct-card .ct-status{justify-self:start}.gc-tip{flex-shrink:0}
+[data-theme="light"] .ct-sheet{background:#fff!important;color:#17202c;border-color:#e5e3dd}[data-theme="light"] .ct-sub,[data-theme="light"] .ct-label,[data-theme="light"] .ct-line span,[data-theme="light"] .ct-amount b{color:#727b88}[data-theme="light"] .ct-amount,[data-theme="light"] .ct-note,[data-theme="light"] .ct-presets button,[data-theme="light"] .ct-summary{border-color:#e5e3dd}[data-theme="light"] .ct-presets .selected{color:#a97419;border-color:#dda02e}[data-theme="light"] .ct-recipients summary{color:#a97419}
+@media(max-width:400px){.ct-sheet{padding:22px 18px!important}.gc-composer{gap:5px!important}.gc-composer .gc-icon-btn{width:34px;min-width:34px}.msgs-input-bar{gap:5px!important}.msgs-input-bar .msgs-attach-btn{width:32px;min-width:32px}}
