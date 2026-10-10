@@ -389,6 +389,11 @@ def light_css(css, variables=None):
             continue
         if KEEP_SELECTOR_RE.search(prelude):
             continue
+        # Explicit light-theme rules already contain their intended colours.
+        # Remapping them turns dark text pale and dark scrims into white veils.
+        if re.search(r'\[\s*data-theme\s*=\s*[\"\x27]?light[\"\x27]?\s*\]', prelude, re.I):
+            out.append('%s{%s}' % (prelude, body))
+            continue
         sel = prefix_selector(prelude)
         if not sel:
             continue
