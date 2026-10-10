@@ -222,7 +222,7 @@ function buildMarkets(afterEl){
     card.onclick=function(){location.href=card.dataset.sym==='SOL'?'/live-market?mint=So11111111111111111111111111111111111111112&profile=1':'/live-market?asset='+encodeURIComponent(card.dataset.sym)};
   });
   updateMajorMarkets();
-  _oaMarketTimer=OrcPageLifecycle.setInterval(updateMajorMarkets,15000);
+  _oaMarketTimer=OrcPageLifecycle.setInterval(updateMajorMarkets,1000);
   return el;
 }
 document.addEventListener('visibilitychange',function(){if(!document.hidden)updateMajorMarkets()});

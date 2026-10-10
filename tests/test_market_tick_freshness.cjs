@@ -1,0 +1,8 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert'),path=require('path');
+const src=fs.readFileSync(path.join(__dirname,'../static/live-market-pro.js'),'utf8');
+const block=src.slice(src.indexOf('function tickLivePrices(){'),src.indexOf('function startLivePrices(){'));
+let url,applied=[],badges=[];const now=Date.now()/1000;
+const state={0:{mint:'So11111111111111111111111111111111111111112',chain:'solana',candles:[{}],timer:1},1:{mint:'TOKEN',chain:'solana',pair:'EXACT',candles:[{}],timer:1},2:{mint:'HIDDEN',chain:'solana',pair:'OFFSCREEN',candles:[{}]}};
+const ctx={Date,Number,Math,URLSearchParams,Error,_chartTimers:state,_profileMint:'',_priceInFlight:false,_priceNextAt:0,_priceFailures:0,_pricePollBaseMs:1000,document:{visibilityState:'visible',getElementById:()=>null},ST:{tokens:[{mint:'So11111111111111111111111111111111111111112'},{}]},_setPriceFreshness:(...args)=>badges.push(args),_applyLivePrice:(...args)=>applied.push(args),_routeScope:{fetch:async u=>{url=u;return{ok:true,status:200,json:async()=>({chains:{solana:{exact:2}},observed_at:{solana:{exact:now-8}},major:{prices:{SOL:{price:110,change24h:3,observed_at:now}}},server_ts:now})}}}};
+vm.createContext(ctx);vm.runInContext(block,ctx);ctx.tickLivePrices();
+setImmediate(()=>{assert(url.includes('major=1'));const qs=new URLSearchParams(url.split('?')[1]);assert.deepEqual(JSON.parse(qs.get('groups')),{solana:['EXACT']});assert.equal(applied.length,2);assert(applied.some(a=>Number(a[1])===0&&a[2]===110));assert(applied.some(a=>Number(a[1])===1&&a[3]===now-8));assert(badges.some(a=>Number(a[0])===1&&a[1]===now-8));assert(!ctx._priceInFlight);console.log('PASS one batch for visible token + native SOL, hidden cards excluded, source timestamps preserved');});

@@ -400,6 +400,36 @@
       out.appendChild(el('b', null, left + ' of ' + perDay + ' left'));
     });
   }
+  function showCallSuccess(result, token){
+    var previous=document.activeElement,wrap=el('div','fcall-success-wrap');
+    var sym=String(result.symbol||token.symbol||'').replace(/^\$+/, '');
+    var post=Number(result.post_id),call=Number(result.id);
+    var href=post>0&&Number.isInteger(post)?'/post/p'+post:call>0&&Number.isInteger(call)?'/call/'+call:'/live-market?mint='+encodeURIComponent(token.mint)+'&profile=1';
+    wrap.innerHTML='<section class="fcall-success" role="dialog" aria-modal="true" aria-labelledby="fcall-success-title">'
+      +'<button type="button" class="fcall-success-close" aria-label="Close">×</button>'
+      +'<span class="fcall-success-check" aria-hidden="true">✓</span>'
+      +'<h2 id="fcall-success-title">Call posted</h2>'
+      +'<p>Your call is in the feed. Performance tracking has started.</p>'
+      +'<div class="fcall-success-token">'+tileHtml(token,'fcall-tile')+'<div><b>$'+esc(sym)+'</b><small>Entry price '+esc(fmtPrice(result.price))+'</small></div></div>'
+      +'<a class="fcall-success-view" href="'+esc(href)+'">View call <span aria-hidden="true">→</span></a>'
+      +'<button type="button" class="fcall-success-done">Back to feed</button></section>';
+    document.body.appendChild(wrap);
+    document.documentElement.classList.add('fcall-sheet-open');
+    function close(){wrap.remove();document.documentElement.classList.remove('fcall-sheet-open');document.removeEventListener('keydown',keys);if(previous&&previous.isConnected)previous.focus();}
+    function keys(e){
+      if(e.key==='Escape'){e.preventDefault();close();}
+      if(e.key==='Tab'){
+        var nodes=wrap.querySelectorAll('button,a'),first=nodes[0],last=nodes[nodes.length-1];
+        if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}
+        else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
+      }
+    }
+    wrap.querySelector('.fcall-success-close').onclick=close;
+    wrap.querySelector('.fcall-success-done').onclick=close;
+    wrap.addEventListener('click',function(e){if(e.target===wrap)close();});
+    document.addEventListener('keydown',keys);
+    wrap.querySelector('.fcall-success-view').focus();
+  }
   function submit(){
     if(!picked || busy) return;
     busy = true; updateSubmit(); setMsg('');
@@ -410,7 +440,7 @@
         busy = false;
         if(!res.ok || !res.d.ok){ setMsg(res.d.msg || 'Could not place the call — try again', true); updateSubmit(); return; }
         closeSheet();
-        if(typeof openAlertModal === 'function') openAlertModal({text: 'You called $' + (res.d.symbol || picked.symbol) + '. It is in the feed and tracked live.'});
+        showCallSuccess(res.d,picked);
         if(typeof loadHomeFeed === 'function') loadHomeFeed();
         window._feedCallsTabChanged && window._feedCallsTabChanged(typeof _homeFeedFilter !== 'undefined' ? _homeFeedFilter : '');
       })

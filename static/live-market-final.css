@@ -106,3 +106,6 @@ body.oa-live-v2 .pt-chart-scrub-dot{width:10px!important;height:10px!important;b
 body.oa-live-v2 .pt-chart-scrub-tip{background:#0d1824!important;border:1px solid rgba(247,185,85,.45)!important;color:#f3f5f8!important;font:700 11px/1.2 'JetBrains Mono',monospace!important;padding:5px 8px!important;border-radius:7px!important;z-index:8!important}
 .pt-chart-wrap.pt-scrubbing .pt-price-pill{opacity:.25!important;transition:opacity .15s}
 body.oa-live-v2 .pt-price.pt-scrubbing,.pt-price.pt-scrubbing{color:#f7b955!important;transition:none}
+
+.pt-chart-live.pt-price-stale{color:var(--muted,#8a919c)}
+.pt-price-stale .pt-chart-live-dot{background:#8a919c;animation:none;box-shadow:none}

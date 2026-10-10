@@ -19,35 +19,43 @@ def install(dashboard):
 
     # Public BTC/ETH/SOL USD quotes. One backend call for all three Home cards;
     # short shared cache avoids three upstream calls per user every refresh.
-    _home_quote_cache = {'at': 0.0, 'quotes': {}, 'attempt': 0.0}
+    _home_quote_cache = {'at': 0.0, 'quotes': {}, 'attempt': 0.0, 'opens': {}, 'busy': False}
     _home_quote_lock = threading.Lock()
 
-    @app.route('/api/home/major-prices')
-    def home_major_prices():
+    def major_quote_snapshot():
         now = time.monotonic()
         with _home_quote_lock:
             quotes = _home_quote_cache['quotes']
-            if quotes and now - _home_quote_cache['at'] < 12:
-                return jsonify({'ok': True, 'prices': quotes, 'stale': False})
+            if quotes and now - _home_quote_cache['at'] < 1:
+                return {'ok': True, 'prices': dict(quotes), 'stale': False}
             # Do not pound the provider during a temporary upstream outage.
-            if now - _home_quote_cache['attempt'] < 8:
-                return jsonify({'ok': bool(quotes), 'prices': quotes,
-                                'stale': True})
+            if _home_quote_cache['busy'] or now - _home_quote_cache['attempt'] < 1:
+                return {'ok': bool(quotes), 'prices': dict(quotes), 'stale': True}
             _home_quote_cache['attempt'] = now
+            _home_quote_cache['busy'] = True
 
         def read_quote(symbol):
-            response = requests.get(
-                'https://api.exchange.coinbase.com/products/' + symbol + '-USD/stats',
-                headers={'Accept': 'application/json', 'User-Agent': 'OrcAgent/1.0'},
-                timeout=4,
-            )
+            headers = {'Accept': 'application/json', 'User-Agent': 'OrcAgent/1.0'}
+            url = 'https://api.exchange.coinbase.com/products/' + symbol + '-USD/'
+            with _home_quote_lock:
+                opened_hit = _home_quote_cache['opens'].get(symbol)
+            if not opened_hit or now - opened_hit[0] >= 60:
+                response = requests.get(url + 'stats', headers=headers, timeout=2)
+                response.raise_for_status()
+                opened = float(response.json()['open'])
+                if not (0 < opened < 1e9):
+                    raise ValueError('Invalid exchange open')
+                with _home_quote_lock:
+                    _home_quote_cache['opens'][symbol] = (now, opened)
+            else:
+                opened = opened_hit[1]
+            response = requests.get(url + 'ticker', headers=headers, timeout=2)
             response.raise_for_status()
             data = response.json()
-            last = float(data['last'])
-            opened = float(data['open'])
-            if not (0 < last < 1e9 and 0 < opened < 1e9):
+            last = float(data['price'])
+            if not (0 < last < 1e9):
                 raise ValueError('Invalid exchange quote')
-            return symbol, {'price': last,
+            return symbol, {'price': last, 'observed_at': time.time(),
                             'change24h': round((last / opened - 1) * 100, 2)}
 
         fresh = {}
@@ -66,8 +74,14 @@ def install(dashboard):
                     **_home_quote_cache['quotes'], **fresh}
                 _home_quote_cache['at'] = time.monotonic()
             quotes = dict(_home_quote_cache['quotes'])
-        response = jsonify({'ok': bool(quotes), 'prices': quotes,
-                            'stale': not bool(fresh)})
+            _home_quote_cache['busy'] = False
+        return {'ok': bool(quotes), 'prices': quotes, 'stale': not bool(fresh)}
+
+    dashboard._major_quote_snapshot = major_quote_snapshot
+
+    @app.route('/api/home/major-prices')
+    def home_major_prices():
+        response = jsonify(major_quote_snapshot())
         response.headers['Cache-Control'] = 'no-store'
         return response
 

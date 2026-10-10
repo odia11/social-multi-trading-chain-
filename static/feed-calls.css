@@ -131,3 +131,18 @@ html.fcall-sheet-open,html.fcall-sheet-open body{overflow:hidden}
 }
 
 .fcall-live-status{display:block;color:var(--muted,#8b929d);font-size:11px;margin:8px 0;}
+
+.fcall-success-wrap{position:fixed;inset:0;z-index:100001;background:rgba(4,8,12,.58);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
+.fcall-success{position:relative;width:100%;max-width:380px;padding:28px 24px 18px;box-sizing:border-box;border-radius:24px;background:#10151c;color:#edf1f5;border:1px solid #2a3038;box-shadow:0 20px 80px #0005;font-family:Geist,system-ui,sans-serif}
+.fcall-success-close{position:absolute;right:14px;top:12px;width:32px;height:32px;border:0;border-radius:50%;background:transparent;color:#8a919c;font-size:26px;cursor:pointer}
+.fcall-success-check{display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:50%;background:#30c79720;color:#30c797;font-size:24px;margin-bottom:16px}
+.fcall-success h2{margin:0 0 8px;font-size:24px;font-weight:750;letter-spacing:-.6px}
+.fcall-success p{font-size:14px;line-height:1.5;color:#949ca8;margin:0 0 20px}
+.fcall-success-token{display:flex;align-items:center;gap:12px;padding:14px;border:1px solid #2a3038;border-radius:14px;margin-bottom:20px;min-width:0}
+.fcall-success-token>div{min-width:0}.fcall-success-token b{display:block;font-size:17px;overflow-wrap:anywhere}.fcall-success-token small{display:block;font-size:12px;color:#949ca8;margin-top:4px}
+.fcall-success-view{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-radius:12px;background:#f7b955;color:#11151b;text-decoration:none;font-weight:700;font-size:14px}
+.fcall-success-done{width:100%;padding:14px 0 0;border:0;background:transparent;color:#949ca8;font:inherit;font-size:13px;cursor:pointer}
+html[data-theme="light"] .fcall-success{background:#fff;color:#121820;border-color:#e3e6eb}
+html[data-theme="light"] .fcall-success-token{border-color:#e3e6eb}
+html[data-theme="light"] .fcall-success p,html[data-theme="light"] .fcall-success-token small,html[data-theme="light"] .fcall-success-done{color:#66717e}
+html[data-theme="light"] .fcall-success-wrap{background:rgba(20,28,40,.38)}

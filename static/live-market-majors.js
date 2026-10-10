@@ -35,13 +35,13 @@ scope.addEventListener(document,'DOMContentLoaded',function(){
       var change=panel.querySelector('.major-change'),pct=Number(quote.change24h);
       change.textContent=Number.isFinite(pct)?(pct>=0?'+':'')+pct.toFixed(2)+'% · 24h':'24h change unavailable';
       change.classList.toggle('down',pct<0);
-      panel.querySelector('.major-status').textContent=data.stale?'Last received price · temporarily delayed':'Updated '+new Date().toLocaleTimeString();
+      panel.querySelector('.major-status').textContent=(data.stale||!quote.observed_at||Date.now()/1000-quote.observed_at>5)?'Last received price · temporarily delayed':'Updated '+new Date().toLocaleTimeString();
     }catch(_){panel.querySelector('.major-status').textContent='Market price temporarily unavailable. Retrying…';}
     finally{busy=false;}
   }
   window.OrcAgentRefreshLiveMarket=refresh;
   refresh();
-  scope.setInterval(refresh,15000);
+  scope.setInterval(refresh,1000);
   scope.addEventListener(document,'visibilitychange',function(){if(!document.hidden)refresh();});
 });
 })();
