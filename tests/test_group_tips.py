@@ -242,3 +242,68 @@ def test_quote_rpc_failure_returns_recoverable_error_without_sending(env):
     assert 'private RPC error details' not in response.get_data(as_text=True)
     assert rows(d, 'SELECT id FROM group_tips') == []
     assert state['sent'] == []
+
+
+def test_sender_excluded_even_when_another_member_uses_sender_trading_wallet(env):
+    d, state, client = env
+    with sqlite3.connect(d.DB_FILE) as db:
+        owner = db.execute('SELECT wallet_address FROM users WHERE id=1').fetchone()[0]
+        linked = db.execute('SELECT wallet_address FROM users WHERE id=2').fetchone()[0]
+    d._get_trading_wallet_address = lambda wallet: owner if wallet == linked else wallet
+
+    response = quote(client, amount_usdc=6)
+    assert response.status_code == 200
+    tip = response.json['tip']
+    assert tip['recipient_count'] == 5
+    assert {r['user_id'] for r in tip['recipients']} == {3, 4, 5, 6, 7}
+    assert tip['per_person_usdc'] == pytest.approx(1.2)
+    assert not state['sent']
+
+    receipt = confirm(client, tip)
+    assert receipt.status_code == 200
+    assert len(state['sent']) == 1
+    assert {r[0] for r in rows(d, 'SELECT recipient_user_id FROM tip_transactions')} == {3, 4, 5, 6, 7}
+
+
+@pytest.mark.parametrize('tampering', ['sender_id', 'sender_wallet'])
+def test_confirm_rejects_a_quote_containing_sender(env, tampering):
+    d, state, client = env
+    tip = quote(client).json['tip']
+    with sqlite3.connect(d.DB_FILE) as db:
+        q = json.loads(db.execute('SELECT quote FROM group_tips WHERE id=?',
+                                  (tip['id'],)).fetchone()[0])
+        if tampering == 'sender_id':
+            q['recipients'][0]['user_id'] = 1
+        else:
+            q['recipients'][0]['address'] = db.execute(
+                'SELECT wallet_address FROM users WHERE id=1').fetchone()[0]
+        db.execute('UPDATE group_tips SET quote=? WHERE id=?',
+                   (json.dumps(q), tip['id']))
+    response = confirm(client, tip)
+    assert response.status_code == 400
+    assert 'cannot include your own account' in response.json['msg']
+    assert not state['sent']
+    assert rows(d, 'SELECT state,plan FROM group_tips WHERE id=?', (tip['id'],)) == [('quoted', None)]
+
+
+def test_sender_wallet_alias_added_after_quote_is_rejected_at_confirm(env):
+    d, state, client = env
+    tip = quote(client).json['tip']
+    with sqlite3.connect(d.DB_FILE) as db:
+        owner = db.execute('SELECT wallet_address FROM users WHERE id=1').fetchone()[0]
+        linked = db.execute('SELECT wallet_address FROM users WHERE id=2').fetchone()[0]
+    d._get_trading_wallet_address = lambda wallet: owner if wallet == linked else wallet
+    response = confirm(client, tip)
+    assert response.status_code == 400
+    assert not state['sent']
+
+
+def test_no_group_tip_if_every_other_member_uses_sender_wallet(env):
+    d, state, client = env
+    with sqlite3.connect(d.DB_FILE) as db:
+        owner = db.execute('SELECT wallet_address FROM users WHERE id=1').fetchone()[0]
+    d._get_trading_wallet_address = lambda wallet: owner
+    response = quote(client)
+    assert response.status_code == 400
+    assert 'no other eligible members' in response.json['msg']
+    assert not state['sent']

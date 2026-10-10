@@ -180,7 +180,7 @@ function threadEl(){
     +'<textarea class="gc-input" rows="1" maxlength="1000" placeholder="Message" aria-label="Message"></textarea>'
     +'<button type="submit" class="gc-send" aria-label="Send" disabled>'+ICON.send+'</button></form>';
   document.body.appendChild(t);
-  t.querySelector('.gc-tip').onclick=function(){if(open&&window.OrcChatTip)window.OrcChatTip.start({group:true,base:'/api/group-chats/'+open.id+'/tips',refresh:fetchNew});};
+  t.querySelector('.gc-tip').onclick=function(){if(open&&window.OrcChatTip)window.OrcChatTip.start({group:true,base:'/api/group-chats/'+open.id+'/tips',otherMemberCount:open.members&&open.members.length?Math.max(0,open.members.length-1):null,refresh:fetchNew});};
   var input=t.querySelector('.gc-input'),send=t.querySelector('.gc-send'),form=t.querySelector('.gc-composer');
   input.addEventListener('input',function(){
     send.disabled=!input.value.trim();
