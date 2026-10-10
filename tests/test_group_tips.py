@@ -96,6 +96,17 @@ def test_equal_split_review_and_private_confirmation(env):
     assert json.loads(rows(d,'SELECT body FROM group_chat_messages')[0][0])['status']=='confirmed'
     tips.reconcile(d,t['id']);assert len(rows(d,'SELECT id FROM notifications'))==6
 
+    # A sender may remove the chat card even while chain status is changing.
+    # Reconciliation must NOT resurrect that card; the private ledger remains.
+    with sqlite3.connect(d.DB_FILE) as db:
+        db.execute("UPDATE group_chat_messages SET kind='deleted',body='__tip_removed_from_chat__' WHERE chat_id=1")
+        db.execute("UPDATE group_tips SET state='submitted' WHERE id=?", (t['id'],))
+    tips.reconcile(d, t['id'])
+    assert rows(d, 'SELECT kind,body FROM group_chat_messages') == [
+        ('deleted', '__tip_removed_from_chat__')]
+    assert len(rows(d, "SELECT id FROM tip_transactions WHERE status='confirmed'")) == 6
+
+
 
 def test_membership_changed_expiry_and_csrf(env):
     d,s,c=env;t=quote(c).json['tip']

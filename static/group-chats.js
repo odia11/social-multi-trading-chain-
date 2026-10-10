@@ -250,6 +250,8 @@ function messageHtml(m,prev){
   var day=dayLabel(m.created_at);
   if(!prev||dayLabel(prev.created_at)!==day)html+='<div class="gc-day"><span>'+esc(day)+'</span></div>';
   if(m.kind==='system')return html+'<div class="gc-sys" data-mid="'+m.id+'"><span>'+esc(m.body)+'</span></div>';
+  // Deleted tip cards disappear fully; versioned tombstones still sync to peers.
+  if(m.kind==='deleted'&&m.body==='__tip_removed_from_chat__')return html;
   var runStart=!prev||prev.kind==='system'||prev.sender_id!==m.sender_id||dayLabel(prev.created_at)!==day;
   var body=m.kind==='image'
     ?(safeImg(m.body)?'<img class="gc-img" src="'+esc(safeImg(m.body))+'" alt="Photo" loading="lazy">':'')
@@ -264,7 +266,7 @@ function messageHtml(m,prev){
   html+='<div class="gc-message-stack"><div class="gc-bubble">'
     +(!m.mine&&runStart?'<div class="gc-sender" style="--gc-name:'+esc(color(m.sender_wallet))+'">'+esc(m.sender)+'</div>':'')
     +'<div class="gc-text">'+body+'</div>'
-    +(!m.pending&&!m.failed&&m.kind!=='deleted'&&m.kind!=='tip'?'<button type="button" class="gc-message-more" data-message-menu="'+m.id+'" aria-label="Message options">'+ICON.more+'</button>':'')+'</div>'
+    +(!m.pending&&!m.failed&&m.kind!=='deleted'&&(m.kind!=='tip'||m.mine)?'<button type="button" class="gc-message-more" data-message-menu="'+m.id+'" aria-label="Message options">'+ICON.more+'</button>':'')+'</div>'
     +(m.kind==='tip'?'':likeHtml(m))
     +'<span class="gc-time">'+(m.edited_at&&m.kind!=='deleted'?'Edited · ':'')+(m.failed?'Not sent · tap to retry':(m.pending?'Sending…':esc(clock(m.created_at))))+'</span></div></div>';
   return html;
@@ -789,16 +791,17 @@ function showLikes(mid){
 function messageMenu(mid){
   if(!open)return;
   var m=open.messages.find(function(x){return String(x.id)===String(mid);});
-  if(!m||m.pending||m.failed||m.kind==='system'||m.kind==='deleted')return;
+  if(!m||m.pending||m.failed||m.kind==='system'||m.kind==='deleted'||(m.kind==='tip'&&!m.mine))return;
   var id=open.id;
-  var el=sheet('<h3>Message options</h3><div class="gc-menu"><button type="button" data-message-act="like">'+(m.liked?'Remove reaction':'❤️ Like message')+'</button>'+(m.mine&&m.kind==='text'?'<button type="button" data-message-act="edit">Edit message</button>':'')+(m.mine?'<button type="button" data-message-act="delete" class="gc-menu-danger">Delete for everyone</button>':'')+'<button type="button" data-message-act="cancel">Cancel</button></div>','gc-sheet-menu');
+  var isTip=m.kind==='tip';
+  var el=sheet('<h3>'+(isTip?'Group tip options':'Message options')+'</h3><div class="gc-menu">'+(!isTip?'<button type="button" data-message-act="like">'+(m.liked?'Remove reaction':'❤️ Like message')+'</button>':'')+(m.mine&&m.kind==='text'?'<button type="button" data-message-act="edit">Edit message</button>':'')+(m.mine?'<button type="button" data-message-act="delete" class="gc-menu-danger">'+(isTip?'Delete tip from chat':'Delete for everyone')+'</button>':'')+'<button type="button" data-message-act="cancel">Cancel</button></div>','gc-sheet-menu');
   el.addEventListener('click',function(e){
     var button=e.target.closest('[data-message-act]');if(!button)return;
     if(button.dataset.messageAct==='cancel'){closeSheet();return;}
     if(button.dataset.messageAct==='like'){closeSheet();var current=open&&open.messages.find(function(x){return String(x.id)===String(mid);});var mine=current&&(current.likes||[]).find(function(l){return l.mine;});toggleLike(mid,mine?(mine.emoji||'❤️'):'❤️');return;}
     if(!m.mine)return;
     var editing=button.dataset.messageAct==='edit';
-    var form=sheet('<h3>'+(editing?'Edit message':'Delete message?')+'</h3>'+(editing?'<textarea class="gc-edit-input" maxlength="1000" aria-label="Edit message"></textarea>':'<p>This message will be deleted for everyone in the group.</p>')+'<div class="gc-menu"><button type="button" class="gc-message-confirm'+(editing?'':' gc-menu-danger')+'">'+(editing?'Save changes':'Delete for everyone')+'</button><button type="button" class="gc-message-cancel">Cancel</button></div>','gc-sheet-menu');
+    var form=sheet('<h3>'+(editing?'Edit message':isTip?'Remove group tip?':'Delete message?')+'</h3>'+(editing?'<textarea class="gc-edit-input" maxlength="1000" aria-label="Edit message"></textarea>':'<p>'+(isTip?'The tip card will disappear for everyone in this group. This does not cancel or refund SOL transfers. Receipts remain in Portfolio history.':'This message will be deleted for everyone in the group.')+'</p>')+'<div class="gc-menu"><button type="button" class="gc-message-confirm'+(editing?'':' gc-menu-danger')+'">'+(editing?'Save changes':isTip?'Remove tip from chat':'Delete for everyone')+'</button><button type="button" class="gc-message-cancel">Cancel</button></div>','gc-sheet-menu');
     var input=form.querySelector('.gc-edit-input');if(input){input.value=m.body;input.focus();}
     form.querySelector('.gc-message-cancel').onclick=closeSheet;
     form.querySelector('.gc-message-confirm').onclick=function(){
@@ -807,7 +810,7 @@ function messageMenu(mid){
       api('/api/group-chats/'+id+'/messages/'+m.id,{method:editing?'PUT':'DELETE',body:editing?{message:input.value}:undefined}).then(function(d){
         if(!open||open.id!==id){closeSheet();return;}
         if(!d.ok){toast(d.msg||'Could not update message');save.disabled=false;return;}
-        closeSheet();fetchNew();loadList();toast(editing?'Message edited':'Message deleted for everyone');
+        closeSheet();fetchNew();loadList();toast(editing?'Message edited':isTip?'Tip removed from group chat':'Message deleted for everyone');
       });
     };
   });
