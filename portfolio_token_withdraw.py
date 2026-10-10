@@ -136,7 +136,7 @@ def _rpc_call(url, method, params, timeout=15):
 
 
 def _rpc_call_any(d, method, params, require_nonempty=False, preferred_url=None,
-                  timeout=None, max_providers=None):
+                  timeout=None, max_providers=None, skip_demo=False):
     """Read from the first healthy Solana RPC, returning (result, url).
 
     An empty token-account list is not considered authoritative while other
@@ -152,6 +152,11 @@ def _rpc_call_any(d, method, params, require_nonempty=False, preferred_url=None,
         # provider first; other providers remain as transport fallbacks.
         urls.remove(preferred_url)
         urls.insert(0, preferred_url)
+    # Money-moving chat tips opt in to excluding nonfunctional shared demo
+    # endpoints; other users of the provider retain their existing RPC order.
+    if skip_demo:
+        urls = [u for u in urls if '/v2/demo' not in u.lower()
+                and 'api-key=demo' not in u.lower()]
     # Only opt-in read-only callers use reduced RPC deadlines; payment
     # submission and confirmation keep the existing failover behaviour.
     if max_providers is not None:
