@@ -699,7 +699,7 @@ def install(d):
                             (chat_id, message_id, _history_floor(c, chat_id, uid))).fetchone()
             if not row:
                 return fail('Message not found', 404)
-            if row[0] != uid or row[1] in ('system','tip'):
+            if row[0] != uid or row[1] == 'system':
                 return fail('You can only change your own messages', 403)
             if row[1] == 'deleted':
                 return jsonify({'ok': True}) if request.method == 'DELETE' else fail('Message was deleted', 409)
@@ -714,7 +714,12 @@ def install(d):
             version = c.execute('SELECT change_version FROM group_chats WHERE id=?', (chat_id,)).fetchone()[0]
             if request.method == 'DELETE':
                 c.execute('DELETE FROM group_chat_likes WHERE message_id=?', (message_id,))
-                c.execute("UPDATE group_chat_messages SET kind='deleted',body='',version=? WHERE id=?", (version, message_id))
+                # Keep a tombstone for incremental synchronization, but no tip
+                # receipt data: the sender can remove a card for all members
+                # without cancelling the blockchain transfer or Portfolio ledger.
+                removed = '__tip_removed_from_chat__' if row[1] == 'tip' else ''
+                c.execute("UPDATE group_chat_messages SET kind='deleted',body=?,version=? WHERE id=?",
+                          (removed, version, message_id))
             else:
                 c.execute('UPDATE group_chat_messages SET body=?,edited_at=?,version=? WHERE id=?', (text, _now(), version, message_id))
             # Do not retain the removed/old body in pending bell previews.
