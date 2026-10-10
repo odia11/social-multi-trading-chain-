@@ -1,12 +1,8 @@
-/* OrcAgent Home: safe, lazy X/Twitter status embeds. No data is fetched from X
- * until a post actually approaches the viewport. The embedded status URL is
- * hidden from the post text, but Open on X stays available as the fallback.
- * X controls whether public tweets are embeddable.
- */
+/* Lazy native X previews. Original attribution and media are preserved;
+ * engagement belongs to the OrcAgent post through its single action bar. */
 (function(global){
   'use strict';
-  var observer=null, scope=null, scriptPromise=null;
-  var scriptUrl='https://platform.twitter.com/widgets.js';
+  var observer=null, scope=null;
   var allowedHosts={'x.com':1,'www.x.com':1,'twitter.com':1,
                     'www.twitter.com':1,'mobile.twitter.com':1};
 
@@ -49,49 +45,51 @@
       .trim();
   }
 
+  function esc(value){
+    return String(value==null?'':value).replace(/[&<>"']/g,function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+  function link(url,body,cls){
+    return '<a class="'+(cls||'')+'" href="'+esc(url)+'" target="_blank" rel="noopener noreferrer nofollow">'+body+'</a>';
+  }
+  function mediaUrl(raw){
+    try{var u=new URL(raw);return u.protocol==='https:'&&!u.username&&!u.password&&!u.port&&
+      /^(pbs|abs)\.twimg\.com$/.test(u.hostname)?u.href:'';}catch(e){return '';}
+  }
   function card(text){
     var tweet=statusFromText(text);
     if(!tweet)return '';
-    // Identifiers contain digits only and URLs contain an allowlisted X path.
-    return '<div class="oa-x-post" data-x-post-id="'+tweet.id+'" role="group" aria-label="Tweet preview" onclick="event.stopPropagation()">'
-      +'<div class="oa-x-post-head"><span class="oa-x-post-brand">𝕏 <span>Tweet</span></span>'
-      +'<a href="'+tweet.url+'" target="_blank" rel="noopener noreferrer nofollow" onclick="event.stopPropagation()">Open on X ↗</a></div>'
-      +'<div class="oa-x-post-slot" aria-live="polite"><span class="oa-x-post-loading">Tweet preview</span></div>'
-      +'</div>';
+    return '<div class="oa-x-post" data-x-post-id="'+tweet.id+'" data-x-post-url="'+tweet.url+'" role="group" aria-label="Post from X" onclick="event.stopPropagation()">'
+      +'<div class="oa-x-post-slot" aria-live="polite"><span class="oa-x-post-loading">Loading post…</span>'
+      +link(tweet.url,'𝕏','oa-x-source')+'</div></div>';
   }
-
-  function getWidgets(){
-    if(global.twttr&&global.twttr.widgets&&typeof global.twttr.widgets.createTweet==='function')
-      return Promise.resolve(global.twttr.widgets);
-    if(scriptPromise)return scriptPromise;
-    scriptPromise=new Promise(function(resolve,reject){
-      var script=document.createElement('script'), finished=false;
-      var timeout=setTimeout(function(){end(new Error('X widget timed out'));},12000);
-      function end(err){
-        if(finished)return;finished=true;clearTimeout(timeout);
-        if(err){reject(err);return;}
-        if(global.twttr&&typeof global.twttr.ready==='function'){
-          global.twttr.ready(function(t){
-            if(t&&t.widgets&&typeof t.widgets.createTweet==='function')resolve(t.widgets);
-            else reject(new Error('X widgets unavailable'));
-          });
-        }else reject(new Error('X widgets unavailable'));
-      }
-      script.async=true;script.src=scriptUrl;
-      script.onload=function(){end();};
-      script.onerror=function(){end(new Error('X widget blocked'));};
-      document.head.appendChild(script);
+  function renderTweet(t,quoted){
+    var parsed=statusFromText(t.url);
+    if(!parsed||parsed.id!==t.id)throw new Error('Invalid tweet');
+    var avatar=mediaUrl(t.avatar),media='';
+    (Array.isArray(t.media)?t.media:[]).slice(0,4).forEach(function(m){
+      var src=mediaUrl(m.url);if(!src)return;
+      var ratio=Number(m.width)>0&&Number(m.height)>0?' style="aspect-ratio:'+Number(m.width)+'/'+Number(m.height)+'"':'';
+      media+=link(t.url,'<img src="'+esc(src)+'" alt="'+esc(m.alt||'Media from the original X post')+'" loading="lazy" decoding="async"'+ratio+'>'
+        +(m.type==='video'?'<span class="oa-x-video-label">▶ Watch on X</span>':''),'oa-x-media-item');
     });
-    return scriptPromise;
+    var date=new Date(t.created_at),stamp=isNaN(date.getTime())?'':date.toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
+    return '<div class="oa-x-native'+(quoted?' oa-x-quote':'')+'"><div class="oa-x-author">'
+      +link(t.url,(avatar?'<img class="oa-x-avatar" src="'+esc(avatar)+'" alt="" loading="lazy" decoding="async">':'')
+        +'<span class="oa-x-identity"><strong>'+esc(t.name)+(t.verified?'<span class="oa-x-verified" aria-label="Verified on X">✓</span>':'')+'</strong><span>@'+esc(t.username)+'</span></span>','oa-x-author-link')
+      +link(t.url,'𝕏','oa-x-source')+'</div><div class="oa-x-text">'+esc(t.text)+'</div>'
+      +(media?'<div class="oa-x-media'+(t.media.length>1?' oa-x-media-grid':'')+'">'+media+'</div>':'')
+      +(!quoted&&t.quote?renderTweet(t.quote,true):'')
+      +(stamp?link(t.url,'<time datetime="'+esc(t.created_at)+'">'+esc(stamp)+'</time>','oa-x-date'):'')+'</div>';
   }
-
   function fallback(root){
     if(!root.isConnected)return;
     root.dataset.xState='fallback';
     var slot=root.querySelector('.oa-x-post-slot');
-    if(slot){slot.textContent='Preview unavailable. Use Open on X to see this tweet.';}
+    if(slot)slot.innerHTML='<span class="oa-x-post-loading">This post is unavailable.</span>'
+      +link('https://x.com/i/status/'+root.dataset.xPostId,'View on X ↗','oa-x-fallback');
   }
-
   function load(root){
     if(!root.isConnected||root.dataset.xState)return;
     var id=root.dataset.xPostId;
@@ -99,16 +97,16 @@
     root.dataset.xState='loading';
     var slot=root.querySelector('.oa-x-post-slot');
     if(!slot)return;
-    slot.textContent='Loading tweet from X…';
-    getWidgets().then(function(widgets){
-      if(!root.isConnected)return null;
-      slot.replaceChildren();
-      return widgets.createTweet(id,slot,{theme:'dark',dnt:true,conversation:'none',cards:'visible',align:'center',lang:'en'});
-    }).then(function(iframe){
-      if(!root.isConnected)return;
-      if(!iframe){fallback(root);return;}
-      root.dataset.xState='ready';
-    }).catch(function(){fallback(root);});
+    var controller=new AbortController();
+    var timer=setTimeout(function(){controller.abort();},15000);
+    global.fetch('/api/x-post/'+id,{signal:controller.signal,credentials:'same-origin'})
+      .then(function(response){if(!response.ok)throw new Error('Unavailable');return response.json();})
+      .then(function(data){
+        if(!root.isConnected)return;
+        if(!data.ok||!data.tweet||data.tweet.id!==id)throw new Error('Unavailable');
+        slot.innerHTML=renderTweet(data.tweet,false);
+        root.dataset.xState='ready';
+      }).catch(function(){fallback(root);}).finally(function(){clearTimeout(timer);});
   }
 
   function observe(container){
@@ -143,6 +141,6 @@
     if(old&&next&&old.dataset.xPostId===next.dataset.xPostId)next.replaceWith(old);
   }
   global.OrcFeedXEmbed={statusFromText:statusFromText,stripEmbeddedStatusUrl:stripEmbeddedStatusUrl,
-                        card:card,observe:observe,
+                        card:card,renderTweet:renderTweet,observe:observe,
                         dispose:dispose,reuse:reuse};
 })(window);

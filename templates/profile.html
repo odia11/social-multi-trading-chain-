@@ -1218,6 +1218,14 @@ var _tipSending = false;
 
 function _tipEl(id){ return document.getElementById(id); }
 function _openTip(){ _tipEl('tip-back').classList.add('open'); _tipPrice(); _tipEl('tip-amount').focus(); }
+// Feed Tip links open the existing reviewed payment flow for this profile.
+// Opening never submits a payment; the user still confirms the tip explicitly.
+{% if not is_own_profile|default(false) %}
+if(new URLSearchParams(location.search).get('tip')==='1'){
+  document.addEventListener('DOMContentLoaded',function(){_openTip();},{once:true});
+}
+{% endif %}
+
 function _closeTip(){ if(!_tipSending) _tipEl('tip-back').classList.remove('open'); }
 
 // Tips go in SOL or USDC (Solana USDC, an SPL token). SOL tips take the
