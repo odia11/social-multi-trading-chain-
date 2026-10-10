@@ -218,10 +218,59 @@ def test_quote_rpc_is_bounded_and_does_not_broadcast(env):
     assert response.json['tip']['recipient_count'] == 6
     for method in ('getLatestBlockhash', 'getFeeForMessage', 'getBalance'):
         options = next(kw for name, kw in calls if name == method)
-        assert options['timeout'] == 2.5
+        assert options['timeout'] == 4
+        assert options['skip_demo'] is True
+        assert options['preferred_url'] is not None
         assert options['max_providers'] == 3
     assert not any(method == 'getMinimumBalanceForRentExemption' for method, _ in calls)
     assert state['sent'] == []
+
+
+def test_group_quote_and_confirmation_prefer_operational_rpc(env):
+    d, state, client = env
+    calls = []
+    original = provider._rpc_call_any.side_effect
+
+    def rpc(d, method, params, **kw):
+        calls.append((method, dict(kw)))
+        return original(d, method, params, **kw)
+
+    with patch.object(provider, '_rpc_call_any', side_effect=rpc):
+        tip = quote(client, amount_usdc=1).json['tip']
+        confirmed = confirm(client, tip)
+
+    assert confirmed.status_code == 200
+    assert len(state['sent']) == 1
+    quote_call = next(kw for method, kw in calls if method == 'getLatestBlockhash')
+    assert quote_call['preferred_url'] == 'https://solana-rpc.publicnode.com'
+    assert quote_call['skip_demo'] is True
+    assert any(method == 'simulateTransaction' and kw['skip_demo'] is True
+               for method, kw in calls)
+    assert any(method == 'sendTransaction' and kw['skip_demo'] is True
+               for method, kw in calls)
+
+
+def test_chat_tips_filter_broken_demo_rpc_but_retain_live_fallback():
+    d = SimpleNamespace(
+        CLAIM_SOL_RPCS=['https://solana-mainnet.g.alchemy.com/v2/demo',
+                        'https://mainnet.helius-rpc.com/?api-key=demo',
+                        'https://api.mainnet-beta.solana.com'])
+    calls = []
+
+    def rpc(url, method, params, timeout=15):
+        calls.append(url)
+        if 'publicnode.com' in url:
+            raise TimeoutError('test provider timed out')
+        return {'value': {'blockhash': 'test'}}
+
+    with patch.object(provider, '_rpc_call', side_effect=rpc):
+        result, url = provider._rpc_call_any(
+            d, 'getLatestBlockhash', [], preferred_url='https://solana-rpc.publicnode.com',
+            timeout=4, max_providers=3, skip_demo=True)
+    assert result['value']['blockhash'] == 'test'
+    assert url == 'https://api.mainnet-beta.solana.com'
+    assert calls == ['https://solana-rpc.publicnode.com',
+                     'https://api.mainnet-beta.solana.com']
 
 
 def test_quote_rpc_failure_returns_recoverable_error_without_sending(env):

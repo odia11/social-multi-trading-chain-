@@ -127,6 +127,14 @@ def _public_quote(row, uid):
     return result
 
 
+def _tip_rpc(d):
+    import portfolio_token_withdraw as provider
+    # PublicNode supports the methods required by group tips. The first
+    # configured providers can include rate-limited demo endpoints.
+    return next((u for u in provider._rpc_urls(d)
+                 if u.rstrip('/') == 'https://solana-rpc.publicnode.com'), None)
+
+
 def _quote_read(d, method, params, preferred_url=None):
     """Bounded read-only Solana RPC for the pre-payment quote screen.
 
@@ -136,8 +144,8 @@ def _quote_read(d, method, params, preferred_url=None):
     import portfolio_token_withdraw as provider
     try:
         return provider._rpc_call_any(
-            d, method, params, preferred_url=preferred_url,
-            timeout=2.5, max_providers=3)
+            d, method, params, preferred_url=preferred_url or _tip_rpc(d),
+            timeout=4, max_providers=3, skip_demo=True)
     except Exception as exc:
         d.app.logger.warning('group tip quote RPC %s failed: %s',
                              method, type(exc).__name__)
@@ -148,7 +156,7 @@ def _preferred_rpc(d, q):
     import portfolio_token_withdraw as provider
     urls = provider._rpc_urls(d)
     index = q.get('rpc_index')
-    return urls[index] if isinstance(index, int) and 0 <= index < len(urls) else None
+    return urls[index] if isinstance(index, int) and 0 <= index < len(urls) else _tip_rpc(d)
 
 
 _ERROR_TEXT = {
@@ -173,7 +181,7 @@ def _broadcast(d, row, q, plan):
             provider._rpc_call_any(d, 'sendTransaction', [batch['encoded'],
                 {'encoding': 'base64', 'skipPreflight': False,
                  'preflightCommitment': 'confirmed', 'maxRetries': 3}],
-                preferred_url=_preferred_rpc(d, q))
+                preferred_url=_preferred_rpc(d, q), skip_demo=True)
             batch.pop('error', None)
         except Exception as exc:
             code = getattr(exc, 'reason_code', 'network_retry')
@@ -188,7 +196,7 @@ def _archived_status(d, signature, q):
     import portfolio_token_withdraw as provider
     tx, _ = provider._rpc_call_any(d, 'getTransaction',
         [signature, {'commitment': 'confirmed', 'maxSupportedTransactionVersion': 0}],
-        preferred_url=_preferred_rpc(d, q))
+        preferred_url=_preferred_rpc(d, q), skip_demo=True)
     if tx is None:
         return 'expired'
     if isinstance(tx, dict) and isinstance(tx.get('meta'), dict):
@@ -235,13 +243,15 @@ def _reconcile_locked(d, tip_id):
             _broadcast(d, row, q, plan)
             return
         statuses, _ = provider._rpc_call_any(d, 'getSignatureStatuses',
-            [[b['signature'] for b in plan], {'searchTransactionHistory': True}], preferred_url=_preferred_rpc(d, q))
+            [[b['signature'] for b in plan], {'searchTransactionHistory': True}],
+            preferred_url=_preferred_rpc(d, q), skip_demo=True)
         values = statuses.get('value') if isinstance(statuses, dict) else None
         if not isinstance(values, list) or len(values) != len(plan):
             return
         height = None
         if any(v is None for v in values):
-            height, _ = provider._rpc_call_any(d, 'getBlockHeight', [{'commitment': 'finalized'}])
+            height, _ = provider._rpc_call_any(d, 'getBlockHeight', [{'commitment': 'finalized'}],
+                                               preferred_url=_preferred_rpc(d, q), skip_demo=True)
             if not isinstance(height, int):
                 return
         for batch, status in zip(plan, values):
@@ -376,6 +386,8 @@ def install(d):
                  'total': total, 'fee': sum(fees), 'fees': fees, 'blockhash': block['blockhash'],
                  'last_height': block['lastValidBlockHeight'], 'expires': time.time() + 45,
                  'note': d._sanitize(str(body.get('message') or '')).strip()[:100]}
+            quote_urls = provider._rpc_urls(d)
+            q['rpc_index'] = quote_urls.index(quote_rpc_url) if quote_rpc_url in quote_urls else None
             with _db(d) as c:
                 c.execute("DELETE FROM group_tips WHERE state='quoted' AND created<?", (time.time()-86400,))
                 c.execute('INSERT INTO group_tips(id,chat_id,sender_id,wallet,quote,created) VALUES(?,?,?,?,?,?)',
@@ -420,7 +432,9 @@ def install(d):
                 from solders.message import to_bytes_versioned
                 # The review's blockhash may already be old. Refresh it BEFORE
                 # signing; amounts, recipients and reviewed fees remain fixed.
-                fresh, rpc_url = provider._rpc_call_any(d, 'getLatestBlockhash', [{'commitment': 'confirmed'}])
+                fresh, rpc_url = provider._rpc_call_any(
+                    d, 'getLatestBlockhash', [{'commitment': 'confirmed'}],
+                    preferred_url=_preferred_rpc(d, q), skip_demo=True)
                 q['blockhash'] = fresh['value']['blockhash']
                 q['last_height'] = fresh['value']['lastValidBlockHeight']
                 urls = provider._rpc_urls(d)
@@ -430,19 +444,27 @@ def install(d):
                     key = Keypair.from_base58_string(secret)
                     if str(key.pubkey()) != q['owner']:
                         raise ValueError('Your trading wallet changed. Review a fresh quote.')
-                    balance, _ = provider._rpc_call_any(d, 'getBalance', [q['owner'], {'commitment': 'confirmed'}])
-                    floor = max(provider._fee_payer_rent_lamports(d), int(d.SOL_NETWORK_RESERVE * 1e9))
+                    balance, _ = provider._rpc_call_any(
+                        d, 'getBalance', [q['owner'], {'commitment': 'confirmed'}],
+                        preferred_url=rpc_url, skip_demo=True)
+                    # Fee-payer rent is also protected by network simulation.
+                    # Avoid a slow unrelated RPC that can expire the blockhash.
+                    floor = max(provider._FEE_PAYER_RENT_FALLBACK, int(d.SOL_NETWORK_RESERVE * 1e9))
                     if int(balance['value']) < q['total'] + q['fee'] + floor:
                         raise ValueError('Not enough SOL for the reviewed total and wallet reserve')
                     for i, msg in enumerate(_messages(q['owner'], q['recipients'], q['per'], q['blockhash'], tip_id)):
-                        fee, _ = provider._rpc_call_any(d, 'getFeeForMessage', [base64.b64encode(to_bytes_versioned(msg)).decode(), {'commitment': 'confirmed'}])
+                        fee, _ = provider._rpc_call_any(
+                            d, 'getFeeForMessage', [base64.b64encode(to_bytes_versioned(msg)).decode(), {'commitment': 'confirmed'}],
+                            preferred_url=rpc_url, skip_demo=True)
                         if not isinstance(fee, dict) or fee.get('value') != q['fees'][i]:
                             raise ValueError('Network fee changed. Review a fresh quote.')
                         tx = Transaction([key], msg, Hash.from_string(q['blockhash']))
                         if len(bytes(tx)) > 1232:
                             raise ValueError('Group tip transaction is too large')
                         encoded = base64.b64encode(bytes(tx)).decode()
-                        result, _ = provider._rpc_call_any(d, 'simulateTransaction', [encoded, {'encoding': 'base64', 'sigVerify': True, 'commitment': 'confirmed'}], preferred_url=rpc_url)
+                        result, _ = provider._rpc_call_any(
+                            d, 'simulateTransaction', [encoded, {'encoding': 'base64', 'sigVerify': True, 'commitment': 'confirmed'}],
+                            preferred_url=rpc_url, skip_demo=True)
                         if not isinstance(result, dict) or not isinstance(result.get('value'), dict) or result['value'].get('err') is not None:
                             raise ValueError('A receiving wallet or the network rejected this tip. Nothing was sent.')
                         plan.append({'users': [r['user_id'] for r in q['recipients'][i*BATCH_SIZE:(i+1)*BATCH_SIZE]],
