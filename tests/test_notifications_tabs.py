@@ -31,7 +31,7 @@ js = ('var _activeTab, _personal, _selectMode=false;\n'
       'function _buildPersonalRow(n,u,icon){return icon}\n' + row_fn + '\n'
       'function tab(t){ _activeTab=t; var rows=[];\n' + split + '\n return rows.map(function(r){return r.n.type+":"+_rowHtml(r.n)}).join(",") }\n'
       '_personal=[{type:"trending",content:"x"},{type:"like",content:"x"},{type:"trade",content:"x"},'
-      '{type:"system",content:"x"},{type:"tip",content:"x"},{type:"bridge",content:"x"}];\n'
+      '{type:"system",content:"x"},{type:"tip",content:"x"},{type:"bridge",content:"x"},{type:"deposit",content:"You received 1 SOL"}];\n'
       'console.log(JSON.stringify({trades:tab("trades"),social:tab("social"),tips:tab("tips")}))')
 out = subprocess.run(['node', '-e', js], capture_output=True, text=True)
 import json
@@ -42,6 +42,8 @@ check('a trending alert is under Trades, with a flame -- not under Social with a
 check('...trades and bridges stay under Trades, likes under Social, tips under Tips',
       'trade:' in got.get('trades', '') and 'bridge:' in got.get('trades', '')
       and 'like:social' in got.get('social', '') and got.get('tips') == 'tip:tip')
+check('confirmed deposits appear under Trades with the funds icon',
+      'deposit:tip' in got.get('trades', '') and 'deposit' not in got.get('social', ''))
 check('...and a system notice gets the bell, not the heart', 'system:system' in got.get('social', ''))
 check('the flame icon exists', "'market':" in html and '.ntf-icon.market{' in html)
 

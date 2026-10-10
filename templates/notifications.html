@@ -276,6 +276,9 @@ function _rowHtml(n){
     // (hidden in select mode along with the other per-row actions).
     var shareBtn = _selectMode ? '' : '<button class="ntf-share-btn" data-content="' + _esc(n.content) + '" data-link="' + _esc(n.link || '') + '" onclick="_shareTrade(this,event)">Share</button>';
     return _buildPersonalRow(n, isUnread, iconCls, bodyHtml, n.link || '#', shareBtn);
+  } else if(type === 'deposit'){
+    iconCls = 'tip';
+    bodyHtml = '<div class="ntf-text">' + _ntfContentHtml(n) + '</div>';
   } else if(type === 'tip'){
     iconCls = 'tip';
     bodyHtml = '<div class="ntf-text">' + _ntfContentHtml(n) + '</div>';
@@ -363,7 +366,7 @@ function _render(){
   var rows = [];
   // Trades: your own trades, bridges, and market alerts (a token trending).
   // A trending alert used to land under Social, drawn with a like's heart.
-  var NOTIF_TRADE_TYPES = {trade:1, bridge:1, trending:1};
+  var NOTIF_TRADE_TYPES = {trade:1, bridge:1, trending:1, deposit:1};
   _personal.forEach(function(n){
     var isTradeType = !!NOTIF_TRADE_TYPES[n.type];
     if((_activeTab === 'social' && !isTradeType && n.type!=='tip')

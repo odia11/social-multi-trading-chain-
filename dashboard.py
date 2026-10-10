@@ -17919,7 +17919,7 @@ def get_notifications():
         })
     return jsonify(result)
 
-NOTIF_TRADE_TYPES = ('trade', 'bridge')
+NOTIF_TRADE_TYPES = ('trade', 'bridge', 'deposit')
 
 @app.route('/api/notifications/mine', methods=['GET'])
 @rate_limit(60, 60)

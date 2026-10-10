@@ -16,6 +16,7 @@ var AUTO_DISMISS_MS=4200;
 var MAX_BATCH=8;
 var STORAGE_KEY='oa_live_notification_last_id_v1';
 var lastId=readLastId();
+var primed=lastId>0;
 var queue=[];
 var showing=false;
 var inFlight=false;
@@ -52,6 +53,7 @@ function labelFor(type){
   type=String(type||'').toLowerCase();
   if(type==='message')return'New message';
   if(type==='tip')return'Tip received';
+  if(type==='deposit')return'Funds received';
   if(type==='follow')return'New follower';
   if(type==='follow_call')return'New token call';
   if(type==='follow_post')return'New post from a trader you follow';
@@ -70,7 +72,7 @@ function labelFor(type){
 function glyphFor(type){
   type=String(type||'').toLowerCase();
   if(type==='message')return'✉';
-  if(type==='tip')return'$';
+  if(type==='tip'||type==='deposit')return'$';
   if(type==='follow')return'+';
   if(type==='mention')return'@';
   if(type==='like'||type==='reply_like'||type==='reaction')return'♥';
@@ -278,13 +280,19 @@ function showNext(){
 function enqueue(items){
   items.sort(function(a,b){return Number(a.id)-Number(b.id)});
   items.forEach(function(n){queue.push(n)});
+  if(items.some(function(n){return n.type==='deposit';})){
+    document.dispatchEvent(new CustomEvent('orca:portfolio-changed'));
+    if(typeof window.OrcAgentGetPortfolioSnapshot==='function'){
+      window.OrcAgentGetPortfolioSnapshot(true).catch(function(){});
+    }
+  }
   refreshBadges();
   showNext();
 }
 function poll(initial){
   if(inFlight||document.hidden&&!initial)return;
   inFlight=true;
-  var baseline=(lastId===0);
+  var baseline=!primed;
   var url='/api/notifications/mine?category=all&limit='+(baseline?'1':String(MAX_BATCH));
   if(!baseline)url+='&after_id='+encodeURIComponent(lastId);
   fetch(url,{credentials:'include',cache:'no-store'})
@@ -296,6 +304,9 @@ function poll(initial){
       if(!d||!d.ok||!Array.isArray(d.notifications))return;
       var items=d.notifications.filter(function(n){return n&&Number(n.id)>0});
       if(baseline){
+        // An empty inbox is a valid baseline too. Otherwise the first real
+        // notification is silently swallowed as the next baseline.
+        primed=true;
         if(items.length){
           lastId=Math.max.apply(null,items.map(function(n){return Number(n.id)||0}));
           writeLastId(lastId);
