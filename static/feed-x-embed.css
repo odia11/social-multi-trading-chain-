@@ -1,0 +1,14 @@
+/* One lightweight native shell; X's own iframe provides the tweet content. */
+.oa-x-post{width:min(100%,560px);max-width:100%;box-sizing:border-box;border:1px solid #343840;
+  background:#101419;border-radius:15px;overflow:hidden;margin:10px 0 14px;
+  cursor:default;text-align:left;color:#ecf0f4}
+.oa-x-post-head{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:10px 14px;border-bottom:1px solid #2a2f36;font-size:12px}
+.oa-x-post-brand{font-weight:800;color:#eff2f6;font-size:17px;line-height:1}
+.oa-x-post-brand span{font-size:11px;font-weight:650;color:#aeb5c0;margin-left:5px}
+.oa-x-post-head a{color:#f7b955;font-size:12px;font-weight:650;text-decoration:none;white-space:nowrap}
+.oa-x-post-head a:hover{text-decoration:underline}
+.oa-x-post-slot{padding:6px 8px 8px;min-height:38px;max-width:100%;overflow:hidden}
+.oa-x-post-slot iframe{max-width:100%!important;margin:0 auto!important}
+.oa-x-post-loading{display:block;color:#a6aeba;font-size:12px;padding:10px 4px}
+@media(max-width:600px){.oa-x-post{width:100%;margin:10px 0}.oa-x-post-head{padding:10px 11px}}
