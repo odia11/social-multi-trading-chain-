@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 PROBE = r'''
-import os, sqlite3, threading
+import os, sqlite3, threading, json
 from cryptography.fernet import Fernet
 os.environ['ENCRYPTION_KEY']=Fernet.generate_key().decode()
 original_thread_start=threading.Thread.start
@@ -98,6 +98,29 @@ assert req(a,root+'/messages/'+str(sysid),'DELETE').status_code==403
 assert req(a,root+'/messages/'+str(sysid)+'/likes','POST',{}).status_code==404
 assert req(a,root+'/messages/'+str(photoid),'PUT',{'message':'text'}).status_code==400
 assert req(a,root+'/messages/'+str(photoid),'DELETE').status_code==200
+
+# Group tip cards are removable by their sender ONLY. The existing payment
+# record remains and the versioned chat tombstone carries no receipt details.
+tipid='e'*32
+with sqlite3.connect(d.DB_FILE) as db:
+ tip_body=json.dumps({'tip_id':tipid,'count':1,'note':'Private gift','status':'confirmed'})
+ tip_mid=db.execute("INSERT INTO group_chat_messages(chat_id,sender_id,kind,body,created_at) VALUES(?,?,'tip',?,datetime('now'))",(gid,uids[0],tip_body)).lastrowid
+ db.execute("INSERT INTO group_tips(id,chat_id,sender_id,wallet,quote,created,state,message_id) VALUES(?,?,?,?,?,?,'confirmed',?)",(tipid,gid,uids[0],wallets[0],'{}',1.0,tip_mid))
+tip_path=root+'/messages/'+str(tip_mid)
+before_tip_delete=req(b,root+'/messages').json['change_version']
+assert req(b,tip_path,'DELETE').status_code==403
+assert req(outside,tip_path,'DELETE').status_code==404
+assert req(a,tip_path,'PUT',{'message':'fake tip'}).status_code==400
+assert req(a,tip_path,'DELETE',h={}).status_code==403
+assert req(a,tip_path,'DELETE').status_code==200
+assert req(a,tip_path,'DELETE').status_code==200
+tip_updates=req(b,root+'/messages?changes_since='+str(before_tip_delete)).json
+tomb=next(m for m in tip_updates['updates'] if m['id']==tip_mid)
+assert tomb['kind']=='deleted' and tomb['body']=='__tip_removed_from_chat__'
+assert 'Private gift' not in str(tomb)
+with sqlite3.connect(d.DB_FILE) as db:
+ assert db.execute('SELECT state,message_id FROM group_tips WHERE id=?',(tipid,)).fetchone()==('confirmed',tip_mid)
+
 other=req(a,'/api/group-chats','POST',{'name':'Other','user_ids':[uids[1]]}).json['chat']['id']
 assert req(a,'/api/group-chats/'+str(other)+'/messages/'+str(mid),'DELETE').status_code==404
 assert req(b,root+'/owner','POST',{'user_id':uids[0]}).status_code==403
@@ -137,7 +160,7 @@ class GroupMessageManagement(unittest.TestCase):
 
     def test_production_auth_mutations_updates_and_owner_transfer(self):
         with tempfile.TemporaryDirectory() as data:
-            env={**os.environ,'DATA_DIR':data,'PYTHONPATH':str(Path(__file__).resolve().parents[1])}
+            env={**os.environ,'DATA_DIR':data,'PYTHONPATH':str(Path(__file__).resolve().parents[1])+os.pathsep+os.environ.get('PYTHONPATH','')}
             run=subprocess.run([sys.executable,'-c',PROBE],env=env,capture_output=True,text=True,timeout=90)
             self.assertEqual(run.returncode,0,run.stdout[-2000:]+run.stderr[-2000:])
             self.assertIn('GROUP_MESSAGE_MANAGEMENT_PASS',run.stdout)

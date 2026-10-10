@@ -285,13 +285,15 @@ def _reconcile_locked(d, tip_id):
         with _db(d) as c:
             c.execute('BEGIN IMMEDIATE')
             c.execute('UPDATE group_tips SET plan=?,state=? WHERE id=?', (json.dumps(plan), state, tip_id))
-            old = c.execute('SELECT body FROM group_chat_messages WHERE id=?', (row['message_id'],)).fetchone() if row['chat_id'] > 0 else None
+            old = c.execute('SELECT kind,body FROM group_chat_messages WHERE chat_id=? AND id=?', (row['chat_id'], row['message_id'])).fetchone() if row['chat_id'] > 0 else None
             if row['chat_id'] < 0:
                 c.execute('UPDATE direct_messages SET message=? WHERE id=?', (body, row['message_id']))
-            if old and old['body'] != body:
+            # A sender-deleted tip must stay hidden even if chain reconciliation
+            # updates its status after the deletion. Keep all payment records.
+            if old and old['kind'] == 'tip' and old['body'] != body:
                 c.execute('UPDATE group_chats SET change_version=change_version+1 WHERE id=?', (row['chat_id'],))
                 version = c.execute('SELECT change_version FROM group_chats WHERE id=?', (row['chat_id'],)).fetchone()[0]
-                c.execute('UPDATE group_chat_messages SET body=?,version=? WHERE id=?', (body, version, row['message_id']))
+                c.execute("UPDATE group_chat_messages SET body=?,version=? WHERE chat_id=? AND id=? AND kind='tip'", (body, version, row['chat_id'], row['message_id']))
         if pending and time.time() - row['attempt'] >= 3:
             _broadcast(d, row, q, plan)
 
