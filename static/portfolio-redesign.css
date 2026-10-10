@@ -113,3 +113,6 @@ body.oa-portfolio.pf-view-assets .oa-pf-breakdown{display:block}
 /* The server renders the Portfolio presentation classes. Its content stays
    visible even if presentation JavaScript is delayed or fails to download. */
 html.oa-route-wallet .wlt-center{visibility:visible}
+
+/* Small, explicit per-token USD quotes remain readable beside large balances. */
+body.oa-portfolio .tok-unit-price{font:500 10px var(--ui);color:#8f9da4;white-space:nowrap}

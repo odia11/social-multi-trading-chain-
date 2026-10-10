@@ -2491,7 +2491,9 @@ function _renderHoldings(spl){
     // cur===0 means no price data at all (e.g. a token DexScreener has no
     // listing for) -- showing "$0.00" there reads as "this is worthless",
     // when really we just don't know. "—" is honest about the difference.
-    var usdStr=cur>0?('$'+usd.toFixed(2)):'—'
+    var usdStr=cur>0?(usd>0&&usd<0.005?'<$0.01':'$'+usd.toFixed(2)):'—'
+    var priceStr=cur>0?'$'+(cur<0.0001?cur.toExponential(3):cur.toLocaleString('en-US',{maximumFractionDigits:8}))+'/token':'Price unavailable'
+    var priceHtml='<div class="tok-pct tok-unit-price" style="color:var(--muted)">'+esc(priceStr)+'</div>'
     return '<div class="tok-row-block" data-mint="'+esc(x.mint||'')+'">'
       +'<div class="tok-row">'
         +logoHtml
@@ -2501,6 +2503,7 @@ function _renderHoldings(spl){
         +'</div>'
         +'<div class="tok-val">'
           +'<div class="tok-usd">'+usdStr+'</div>'
+          +priceHtml
           +pnlHtml
         +'</div>'
         +'<button class="tok-trade-btn" onclick="event.stopPropagation();_toggleTokTrade('+realI+')" title="Trade">⇄</button>'

@@ -96,6 +96,81 @@ def _prices(d, mints):
                 out.update(result)
     return out
 
+# Jupiter's token index often has the verified mint's icon and USD quote before
+# DexScreener has a usable pool. Cache short-lived results across wallet polls;
+# never infer identity from a ticker or use an unrelated pair's price.
+_JUPITER_CACHE = {}
+_JUPITER_LOCK = threading.Lock()
+_BASE58 = set('123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz')
+
+def _jupiter_details(d, mints):
+    valid = list(dict.fromkeys(m for m in mints if isinstance(m, str)
+                              and 32 <= len(m) <= 44 and set(m) <= _BASE58))
+    if not valid:
+        return {}
+    now = time.monotonic()
+    found, pending = {}, []
+    with _JUPITER_LOCK:
+        for mint in valid:
+            cached = _JUPITER_CACHE.get(mint)
+            if cached and now < cached[0]:
+                if cached[1]:
+                    found[mint] = dict(cached[1])
+            else:
+                pending.append(mint)
+    if not pending:
+        return found
+
+    def batch(names):
+        for host in ('https://lite-api.jup.ag', 'https://api.jup.ag'):
+            try:
+                url = host + '/tokens/v2/search?query=' + ','.join(names)
+                r = d.requests.get(url, timeout=4,
+                    headers={'Accept': 'application/json', 'User-Agent': 'OrcAgent/1.0'})
+                if r.status_code != 200:
+                    continue
+                rows = r.json()
+                if not isinstance(rows, list):
+                    continue
+                results = {}
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    mint = row.get('id')
+                    if mint not in names:
+                        continue
+                    price = num(row.get('usdPrice'))
+                    icon = row.get('icon') or ''
+                    if not (isinstance(icon, str) and icon.startswith('https://')
+                            and len(icon) <= 2048):
+                        icon = ''
+                    results[mint] = dict(
+                        symbol=str(row.get('symbol') or mint[:6])[:32],
+                        name=str(row.get('name') or '')[:160],
+                        logo_url=icon, price_usd=price)
+                return results
+            except Exception:
+                continue
+        return {}
+
+    chunks = [pending[i:i+50] for i in range(0, len(pending), 50)]
+    with ThreadPoolExecutor(max_workers=min(3, len(chunks))) as ex:
+        for names, results in zip(chunks, ex.map(batch, chunks)):
+            with _JUPITER_LOCK:
+                for mint in names:
+                    data = results.get(mint, {})
+                    # Unlisted mints are retried quickly as new markets appear.
+                    ttl = 30 if data.get('price_usd') else 18
+                    _JUPITER_CACHE[mint] = (time.monotonic() + ttl, data)
+                    if data:
+                        found[mint] = dict(data)
+                if len(_JUPITER_CACHE) > 5000:
+                    expired = [k for k, (expires, _) in _JUPITER_CACHE.items()
+                               if expires < time.monotonic()]
+                    for k in expired:
+                        _JUPITER_CACHE.pop(k, None)
+    return found
+
 def fetch(d, wallet, owner=None):
     owner = owner or wallet
     key = (d.DB_FILE, wallet, owner)
@@ -133,6 +208,18 @@ def fetch(d, wallet, owner=None):
         spl = _parse(accounts, owner)
         mints = [d.SOL_MINT] + [r['mint'] for r in spl]
         prices = _prices(d, mints)
+        # DexScreener provides market liquidity/price; Jupiter fills in
+        # missing token images, symbols and newly indexed token prices.
+        needs_details = [mint for mint in mints
+                         if not prices.get(mint, {}).get('logo_url')
+                         or not num(prices.get(mint, {}).get('price_usd'))]
+        for mint, detail in _jupiter_details(d, needs_details).items():
+            market = prices.setdefault(mint, {})
+            for field in ('symbol', 'name', 'logo_url'):
+                if not market.get(field) and detail.get(field):
+                    market[field] = detail[field]
+            if not num(market.get('price_usd')) and num(detail.get('price_usd')):
+                market['price_usd'] = num(detail['price_usd'])
         old = {r['mint']:r for r in (previous or {}).get('tokens',[])}
         hints = {}
         try:
@@ -157,7 +244,15 @@ def fetch(d, wallet, owner=None):
                             name='Solana' if r.get('is_native') else 'Wrapped SOL')
                 price = price or num(d._sol_price_usd)
             if not price and num((old.get(mint) or {}).get('price_usd')) > 0:
-                meta = dict(old[mint]); price = num(meta.get('price_usd')); outdated.append(mint)
+                # Preserve the last real price during an API outage while still
+                # keeping a newly discovered icon/name from the live index.
+                live_meta = meta
+                meta = dict(old[mint])
+                meta.update({k: v for k, v in live_meta.items() if v})
+                price = num(old[mint].get('price_usd'))
+                outdated.append(mint)
+            if not meta.get('logo_url') and old.get(mint, {}).get('logo_url'):
+                meta['logo_url'] = old[mint]['logo_url']
             if not price and r['amount'] > 0:
                 unpriced.append(mint)
             assets.append(dict(r, is_native=bool(r.get('is_native')),
