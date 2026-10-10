@@ -37,8 +37,13 @@
     // author's own text. The stored post is never changed.
     var before=original.slice(0,tweet.start);
     var after=original.slice(tweet.end);
+    // Joining both sides must not insert a blank line or two spaces where
+    // the status URL used to be (especially for link-only lines on iPhone).
+    if(/\n[ \t]*$/.test(before) && /^[ \t]*\n/.test(after))
+      after=after.replace(/^[ \t]*\n/,'');
+    else if(/[ \t]$/.test(before) && /^[ \t]/.test(after))
+      after=after.replace(/^[ \t]+/,'');
     return (before+after)
-      .replace(/[ \t]{2,}/g,' ')
       .replace(/[ \t]+\n/g,'\n')
       .replace(/\n[ \t]+/g,'\n')
       .trim();
