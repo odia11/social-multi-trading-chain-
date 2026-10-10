@@ -68,7 +68,8 @@ class ReasonerTests(unittest.TestCase):
         self.assertNotIn("evil.example",result[1])
         self.assertEqual(len(req.calls),1)
         payload=req.calls[0][1]["json"]
-        self.assertIn("university tutor",payload["system"])
+        self.assertIn("Speak as OrcAgent",payload["system"])
+        self.assertIn("Facts, privacy and safety always outrank the persona",payload["system"])
         self.assertIn("OrcAgent buys use SOL",payload["system"])
         self.assertEqual(payload["temperature"],0.2)
         self.assertNotIn("balance",payload["messages"][0]["content"].lower())

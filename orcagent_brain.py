@@ -405,8 +405,6 @@ def reply(question, asker="user", thread=(), deterministic=None, now=None):
         return None  # a reviewed platform answer fits better
     # Stays labelled 'scope': platform_learning learns from these questions.
     return ("scope", _pick((
-        "Fair question, but I don't have a sharp answer for that one without making something up, and I don't do that. "
-        "Ask me to explain a crypto term, react to this thread, give a take on a token, or help with anything on OrcAgent.",
-        "That one's outside what I can answer well right now. Try me on a trading concept, a token you're looking at, "
-        "a summary of this thread, or anything about OrcAgent.",
+        "I need a little more context. Which part do you want me to unpack?",
+        "Give me one more detail so I can give you a useful answer. What are you trying to figure out?",
     ), seed))
