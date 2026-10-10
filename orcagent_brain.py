@@ -209,6 +209,27 @@ def _clean(text):
     return re.sub(r"\s+", " ", str(text or "")).strip()
 
 
+def greeting(question):
+    """Recognise a complete social greeting, including tags to other people.
+
+    Only this classifier drops mentions: price/action parsers keep their
+    original input, and a greeting followed by a request must reach them.
+    """
+    q = re.sub(r'(?<![\w@])@[\w]+', ' ', str(question or ''))
+    q = _clean(q).lower().replace('\u2019', "'")
+    audience = r'(?:guys|both|all|everyone|bro|brother|mate|jullie|allemaal)'
+    pattern = (r"(?:(?:hi|hello|hey|hoi|hallo)[\s,!]+)?"
+               r"(?:how are (?:you|u)(?:\s+" + audience + r")?(?: doing)?"
+               r"|how(?:'s| is) it going(?:\s+" + audience + r")?"
+               r"|hoe gaat het(?: met (?:je|jou|jullie))?)"
+               r"[\s!?.,]*")
+    if not re.fullmatch(pattern, q):
+        return None
+    if re.search(r'\b(?:guys|both|all|everyone|jullie|allemaal)\b', q):
+        return 'welcome', "I'm doing well, thanks! How are you guys doing?"
+    return 'welcome', "I'm doing well, thanks! How about you? What can I help you with on OrcAgent today?"
+
+
 def _term(question):
     """The glossary term a question is about, or None."""
     q = question.lower()
@@ -339,6 +360,10 @@ def reply(question, asker="user", thread=(), deterministic=None, now=None):
     seed = q.lower() + "|" + (asker or "")
     now = time.time() if now is None else now
     thread = list(thread or ())
+
+    social = greeting(q) if topic in (None, 'scope', 'welcome') else None
+    if social:
+        return social
 
     if MATH.match(q) and re.search(r"\d", q) and re.search(r"[+\-*/%^x×÷]", q):
         value = _calc(q)
