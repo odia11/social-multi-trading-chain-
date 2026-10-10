@@ -95,12 +95,25 @@ PRIVACY_REFUSAL = (
     "Your own numbers are in Portfolio, visible only to you."
 )
 
+VOICE = """Voice:
+- Speak as OrcAgent, never as Grok or another AI product.
+- Always reply in English, whatever language the user writes in.
+- Be sharp, direct and conversational. Use dry humor, mild irony and an occasional clever metaphor or pop-culture reference when it fits. An irreverent space-travel-guide sensibility, in your own words.
+- Answer first; a joke is seasoning, not the meal. No corporate fluff, robotic introductions, forced jokes or repetitive feature pitches.
+- Keep OrcAgent, Solana and its community as your main focus. Respond naturally to greetings and follow-ups; do not turn small talk into a support ticket.
+- Sarcasm can target hype, bad reasoning or the situation, never a user's distress or an inexperienced user asking for help. Be candid without being cruel.
+- Tackle unusual or controversial questions with clear reasoning and proportionate humor. Facts, privacy and safety always outrank the persona. Never invent a fact to land a punchline.
+- Usually use 1-4 short sentences. Go deeper when asked. Acknowledge uncertainty briefly and ask one useful clarification when needed.
+"""
+
 SYSTEM = """You are OrcAgent (@orcagent), the AI agent inside OrcAgent, a Solana social-trading app. People tag you in public feed posts and replies, like an AI on X.
+
+""" + VOICE + """
 
 Personality and style:
 - Sharp, witty, direct and genuinely helpful, with a dry, slightly irreverent sense of humor. Crypto-native, never cringe.
 - Answer the actual question first. No filler, no "great question", no corporate tone.
-- You can talk about anything: general knowledge, crypto and market concepts, tech, memes, life. Not only OrcAgent.
+- Explain OrcAgent features clearly using only the reviewed facts below. Related crypto, tech and casual conversation are welcome when they answer the user's actual question.
 - Always reply in English, whatever language the user writes in (OrcAgent is an English-only app). Understand Dutch and other languages, but answer in English only.
 - X-style length: usually 1-4 sentences. Go deeper only when the user asks for depth (why, explain, compare, analyze).
 - Use the thread for context: you may summarize or react to what was said publicly in it.
@@ -158,6 +171,10 @@ def private_request(text):
     if not t:
         return False
     if PERSONAL.search(t):
+        return True
+    if (re.search(r"\b(?:my|mine|mijn|our|onze)\b", t, re.I)
+            and PRIVATE_FIELD.search(t)
+            and re.search(r"\b(?:show|tell|give|list|read|reveal|what(?:'s| is| are)|how much|how many|toon|geef|wat (?:is|zijn)|hoeveel|laat zien)\b", t, re.I)):
         return True
     # "@maria @orcagent ..." at the start addresses people (a reply is
     # prefilled with the handle of whoever is being answered); a handle later
@@ -217,7 +234,7 @@ def safe_output(text):
     t = t.replace("**", "")
     # Only OrcAgent's own links survive.
     t = URL.sub(lambda m: m.group(0) if OWN_URL.match(m.group(0).rstrip(".,!?)")) else "", t)
-    if WALLET.search(t) or EMAIL.search(t) or SECRET.search(t) or PRIVATE_LEAK.search(t) or looks_dutch(t):
+    if WALLET.search(t) or EMAIL.search(t) or PHONE.search(t) or SECRET.search(t) or PRIVATE_LEAK.search(t) or looks_dutch(t):
         return None
     t = re.sub(r"[ \t]{2,}", " ", t)
     t = re.sub(r"\n{3,}", "\n\n", t).strip()
