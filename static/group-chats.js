@@ -788,13 +788,34 @@ function showLikes(mid){
     list.innerHTML=d.likes.length?d.likes.map(function(l){return '<a class="gc-member" href="/profile/'+encodeURIComponent(l.wallet)+'">'+avatarHtml('gc-person-av',l.username,l.wallet,l.avatar)+'<span class="gc-person-copy"><b>'+esc(l.mine?'You':l.username)+'</b></span><span>'+esc(l.emoji||'❤️')+'</span></a>';}).join(''):'No reactions yet';
   });
 }
+// Accessible action rows for the mobile bottom sheet. Labels and SVG are
+// app-owned constants; never inject message content into this HTML.
+var MESSAGE_ACTION_ICONS={
+  heart:'<span aria-hidden="true">❤️</span>',
+  edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 5 3 3M4 20l4.8-.8L20 8a2.1 2.1 0 0 0-3-3L5.8 16.2z"/></svg>',
+  trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v7M14 10v7"/></svg>',
+  cancel:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>'
+};
+function messageActionRow(action,label,icon,tone){
+  return '<button type="button" class="gc-message-action gc-message-action-'+tone+'" data-message-act="'+action+'">'
+    +'<span class="gc-message-action-icon">'+MESSAGE_ACTION_ICONS[icon]+'</span>'
+    +'<span class="gc-message-action-label">'+esc(label)+'</span></button>';
+}
 function messageMenu(mid){
   if(!open)return;
   var m=open.messages.find(function(x){return String(x.id)===String(mid);});
   if(!m||m.pending||m.failed||m.kind==='system'||m.kind==='deleted'||(m.kind==='tip'&&!m.mine))return;
   var id=open.id;
   var isTip=m.kind==='tip';
-  var el=sheet('<h3>'+(isTip?'Group tip options':'Message options')+'</h3><div class="gc-menu">'+(!isTip?'<button type="button" data-message-act="like">'+(m.liked?'Remove reaction':'❤️ Like message')+'</button>':'')+(m.mine&&m.kind==='text'?'<button type="button" data-message-act="edit">Edit message</button>':'')+(m.mine?'<button type="button" data-message-act="delete" class="gc-menu-danger">'+(isTip?'Delete tip from chat':'Delete for everyone')+'</button>':'')+'<button type="button" data-message-act="cancel">Cancel</button></div>','gc-sheet-menu');
+  // Reuse the existing like/edit/delete handlers: only their presentation changes.
+  var el=sheet('<h3 class="gc-message-actions-title">'+(isTip?'Group tip options':'Message options')+'</h3>'
+    +'<div class="gc-message-actions">'
+    +(!isTip?messageActionRow('like',m.liked?'Remove reaction':'Like message','heart','like'):'')
+    +(m.mine&&m.kind==='text'?messageActionRow('edit','Edit message','edit','edit'):'')
+    +(m.mine?messageActionRow('delete',isTip?'Delete tip from chat':'Delete for everyone','trash','danger'):'')
+    +messageActionRow('cancel','Cancel','cancel','cancel')
+    +'</div>','gc-sheet-menu gc-sheet-message-actions');
+  el.closest('.gc-sheet-back').classList.add('gc-message-actions-back');
   el.addEventListener('click',function(e){
     var button=e.target.closest('[data-message-act]');if(!button)return;
     if(button.dataset.messageAct==='cancel'){closeSheet();return;}

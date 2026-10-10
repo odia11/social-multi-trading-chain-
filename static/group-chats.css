@@ -229,3 +229,141 @@ html.gc-lock,html.gc-lock body{overflow:hidden!important}
 .ct-card{display:grid;gap:10px;min-width:180px;max-width:290px;padding:8px 4px}.ct-card>svg{color:#f7b955}.ct-card>b{font-size:11px;letter-spacing:1px}.ct-card p{margin:0;font-size:13px}.ct-card button{background:none;color:inherit;font-weight:700;text-align:left;border:0;padding:10px 0 2px;cursor:pointer}.ct-card .ct-status{justify-self:start}.gc-tip{flex-shrink:0}
 [data-theme="light"] .ct-sheet{background:#fff!important;color:#17202c;border-color:#e5e3dd}[data-theme="light"] .ct-sub,[data-theme="light"] .ct-label,[data-theme="light"] .ct-line span,[data-theme="light"] .ct-amount b{color:#727b88}[data-theme="light"] .ct-amount,[data-theme="light"] .ct-note,[data-theme="light"] .ct-presets button,[data-theme="light"] .ct-summary{border-color:#e5e3dd}[data-theme="light"] .ct-presets .selected{color:#a97419;border-color:#dda02e}[data-theme="light"] .ct-recipients summary{color:#a97419}
 @media(max-width:400px){.ct-sheet{padding:22px 18px!important}.gc-composer{gap:5px!important}.gc-composer .gc-icon-btn{width:34px;min-width:34px}.msgs-input-bar{gap:5px!important}.msgs-input-bar .msgs-attach-btn{width:32px;min-width:32px}}
+
+/* Premium message actions — scoped to the three-dot menu only, so the
+   other group-management sheets and the Solana tip flow retain their styles. */
+.gc-sheet-back.gc-message-actions-back.on{
+  background:rgba(7,11,18,.55);
+  -webkit-backdrop-filter:blur(5px);
+  backdrop-filter:blur(5px);
+}
+.gc-sheet.gc-sheet-message-actions{
+  width:min(520px,100%);
+  max-height:88dvh;
+  overflow-y:auto;
+  border-radius:30px 30px 0 0;
+  border:1px solid rgba(255,255,255,.07);
+  border-bottom:0;
+  padding:12px 18px calc(env(safe-area-inset-bottom,0px) + 22px);
+  background:#10151c;
+  color:#f4f5f7;
+  box-shadow:0 -18px 54px rgba(0,0,0,.22);
+  -webkit-overflow-scrolling:touch;
+}
+.gc-sheet-message-actions .gc-sheet-handle{
+  width:48px;height:5px;margin:2px auto 20px;
+  border-radius:99px;background:#515966;
+}
+.gc-sheet-message-actions .gc-message-actions-title{
+  font:800 21px/1.23 Geist,system-ui,sans-serif;
+  letter-spacing:-.025em;
+  margin:0 4px 17px;
+  text-align:left;
+  color:inherit;
+}
+.gc-message-actions{
+  display:flex;flex-direction:column;gap:9px;min-width:0;
+}
+.gc-sheet-message-actions .gc-message-action{
+  box-sizing:border-box;
+  display:flex;flex-direction:row;align-items:center;
+  gap:15px;width:100%;min-height:70px;
+  margin:0;padding:12px 16px;
+  border-radius:19px;border:1px solid rgba(255,255,255,.06);
+  background:#1a2029;
+  color:#f3f5f7;
+  font:700 16.5px/1.3 Geist,system-ui,sans-serif;
+  text-align:left;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+  transition:background .12s ease,transform .12s ease;
+}
+.gc-sheet-message-actions .gc-message-action:active{
+  background:#252c36;transform:scale(.99);
+}
+.gc-sheet-message-actions .gc-message-action:focus-visible{
+  outline:2px solid var(--gc-gold);outline-offset:2px;
+}
+.gc-sheet-message-actions .gc-message-action-icon{
+  display:inline-flex;align-items:center;justify-content:center;flex:0 0 44px;
+  width:44px;height:44px;border-radius:50%;
+  background:#30343c;color:#e0e4e9;font-size:21px;line-height:1;
+}
+.gc-sheet-message-actions .gc-message-action-icon svg{width:22px;height:22px;display:block}
+.gc-sheet-message-actions .gc-message-action-label{min-width:0;flex:1}
+.gc-sheet-message-actions .gc-message-action-like .gc-message-action-icon{background:rgba(251,105,101,.12)}
+.gc-sheet-message-actions .gc-message-action-edit .gc-message-action-icon{background:rgba(247,185,85,.12);color:#f7b955}
+.gc-sheet-message-actions .gc-message-action-danger{
+  background:rgba(242,67,76,.09);
+  border-color:rgba(242,67,76,.13);
+  color:#ff5d6c;
+}
+.gc-sheet-message-actions .gc-message-action-danger .gc-message-action-icon{
+  background:rgba(242,67,76,.15);
+  color:#ff5d6c;
+}
+.gc-sheet-message-actions .gc-message-action-danger:active{background:rgba(242,67,76,.18)}
+.gc-sheet-message-actions .gc-message-action-cancel{
+  margin-top:11px;background:#191f27;
+}
+.gc-sheet-message-actions .gc-message-action-cancel .gc-message-action-icon{
+  color:#a8b1bd;background:#2b3039;
+}
+@media (min-width:768px){
+  .gc-sheet.gc-sheet-message-actions{
+    border-radius:28px;border-bottom:1px solid rgba(255,255,255,.07);
+    padding-bottom:22px;
+  }
+}
+@media (max-width:430px){
+  .gc-sheet.gc-sheet-message-actions{padding-left:16px;padding-right:16px}
+  .gc-sheet-message-actions .gc-message-action{
+    min-height:66px;padding:10px 14px;
+    font-size:16px;border-radius:17px;
+  }
+  .gc-sheet-message-actions .gc-message-action-icon{
+    flex-basis:42px;width:42px;height:42px;
+  }
+}
+@media (prefers-reduced-motion:reduce){
+  .gc-sheet-message-actions .gc-message-action{transition:none}
+}
+
+/* Explicit light palette: overrides automatically generated colour mapping
+   with the exact cream/white and gold appearance of the approved iPhone mock. */
+html[data-theme="light"] body .gc-sheet.gc-sheet-message-actions{
+  background:#fbfaf8!important;
+  color:#111318!important;
+  border-color:rgba(255,255,255,.6)!important;
+  box-shadow:0 -18px 52px rgba(31,33,40,.12);
+}
+html[data-theme="light"] body .gc-sheet-message-actions .gc-sheet-handle{
+  background:#c9c9c8!important;
+}
+html[data-theme="light"] body .gc-sheet-message-actions .gc-message-action{
+  background:#fff!important;color:#17191e!important;
+  border-color:rgba(29,31,37,.055)!important;
+  box-shadow:0 5px 17px rgba(32,31,27,.035);
+}
+html[data-theme="light"] body .gc-sheet-message-actions .gc-message-action:active{
+  background:#f4f2ee!important;
+}
+html[data-theme="light"] body .gc-sheet-message-actions .gc-message-action-icon{
+  background:#f1f0ee!important;color:#707070!important;
+}
+html[data-theme="light"] body .gc-sheet-message-actions .gc-message-action-like .gc-message-action-icon{
+  background:#fff0e8!important;
+}
+html[data-theme="light"] body .gc-sheet-message-actions .gc-message-action-edit .gc-message-action-icon{
+  background:#fff3df!important;color:#e3a12b!important;
+}
+html[data-theme="light"] body .gc-sheet-message-actions .gc-message-action-danger{
+  background:#fff3f3!important;border-color:rgba(225,56,66,.075)!important;
+  color:#e31e2b!important;
+}
+html[data-theme="light"] body .gc-sheet-message-actions .gc-message-action-danger .gc-message-action-icon{
+  background:#ffe5e5!important;color:#e31e2b!important;
+}
+html[data-theme="light"] body .gc-sheet-message-actions .gc-message-action-cancel{
+  background:#fff!important;
+}
