@@ -1,6 +1,7 @@
 /* OrcAgent Home: safe, lazy X/Twitter status embeds. No data is fetched from X
- * until a post actually approaches the viewport. Keep the original text link.
- * X controls whether public tweets are embeddable; always offer a direct link.
+ * until a post actually approaches the viewport. The embedded status URL is
+ * hidden from the post text, but Open on X stays available as the fallback.
+ * X controls whether public tweets are embeddable.
  */
 (function(global){
   'use strict';
@@ -12,7 +13,8 @@
   function statusFromText(text){
     var re=/(?:https?:\/\/|www\.)[^\s<>"'`]+|\b(?:x\.com|twitter\.com|mobile\.twitter\.com)\/[^\s<>"'`]+/gi, match;
     while((match=re.exec(String(text||'')))!==null){
-      var candidate=match[0].replace(/[),.!?;:\]]+$/g,'');
+      var matchedUrl=match[0].replace(/[),.!?;:\]]+$/g,'');
+      var candidate=matchedUrl;
       if(!/^https?:\/\//i.test(candidate))candidate='https://'+candidate;
       var u;
       try{u=new URL(candidate);}catch(e){continue;}
@@ -20,11 +22,31 @@
          u.username || u.password || u.port)continue;
       var m=u.pathname.match(/^\/(?:[A-Za-z0-9_]{1,15}|i|i\/web)\/status\/([0-9]{5,20})\/?$/i);
       if(!m)continue;
-      return {id:m[1],url:'https://x.com/'+
+      return {id:m[1],start:match.index,end:match.index+matchedUrl.length,url:'https://x.com/'+
         (/^\/i(?:\/web)?\/status\//i.test(u.pathname)?'i':''
           +u.pathname.split('/')[1])+'/status/'+m[1]};
     }
     return null;
+  }
+
+  function stripEmbeddedStatusUrl(text){
+    var original=String(text==null?'':text);
+    var tweet=statusFromText(original);
+    if(!tweet)return original;
+    // Remove only the URL shown by the X card; keep other links and the
+    // author's own text. The stored post is never changed.
+    var before=original.slice(0,tweet.start);
+    var after=original.slice(tweet.end);
+    // Joining both sides must not insert a blank line or two spaces where
+    // the status URL used to be (especially for link-only lines on iPhone).
+    if(/\n[ \t]*$/.test(before) && /^[ \t]*\n/.test(after))
+      after=after.replace(/^[ \t]*\n/,'');
+    else if(/[ \t]$/.test(before) && /^[ \t]/.test(after))
+      after=after.replace(/^[ \t]+/,'');
+    return (before+after)
+      .replace(/[ \t]+\n/g,'\n')
+      .replace(/\n[ \t]+/g,'\n')
+      .trim();
   }
 
   function card(text){
@@ -120,6 +142,7 @@
     var old=oldCard.querySelector('.oa-x-post'),next=newCard.querySelector('.oa-x-post');
     if(old&&next&&old.dataset.xPostId===next.dataset.xPostId)next.replaceWith(old);
   }
-  global.OrcFeedXEmbed={statusFromText:statusFromText,card:card,observe:observe,
+  global.OrcFeedXEmbed={statusFromText:statusFromText,stripEmbeddedStatusUrl:stripEmbeddedStatusUrl,
+                        card:card,observe:observe,
                         dispose:dispose,reuse:reuse};
 })(window);
