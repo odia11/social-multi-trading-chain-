@@ -9755,6 +9755,10 @@ function _renderFeedCard(e, cardIndex){
   var callHtml = '';
   if(e.content){
     var _rawContent = e.content;
+    // The X widget below already displays this tweet. Avoid a duplicate
+    // status URL above it; leave other post text, URLs and stored data intact.
+    if(window.OrcFeedXEmbed && window.OrcFeedXEmbed.stripEmbeddedStatusUrl)
+      _rawContent = window.OrcFeedXEmbed.stripEmbeddedStatusUrl(_rawContent);
     // ── Token call (feed-calls.js draws it from the server's numbers) ──
     var _postToken = null;   // the one token this post is about, if any
     var _isAgentPost = !!(e.verified && String(e.username||'').toLowerCase()==='orcagent');
