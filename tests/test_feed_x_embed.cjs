@@ -58,6 +58,29 @@ for(const raw of [
   assert.equal(x.statusFromText(raw),null,raw);
   assert.equal(x.card(raw),'',raw);
 }
+// A pasted tweet URL is only shown once: the embedded card already has
+// its own Open on X link. Ordinary post text and unrelated links survive.
+const tweet='https://x.com/pbi_trade/status/210896351890948915';
+assert.equal(x.stripEmbeddedStatusUrl(tweet),'');
+assert.equal(x.stripEmbeddedStatusUrl('x.com/pbi_trade/status/210896351890948915?s=20'),'');
+assert.equal(x.stripEmbeddedStatusUrl('https://twitter.com/pbi_trade/status/210896351890948915'),'');
+assert.equal(x.stripEmbeddedStatusUrl('See this: '+tweet),'See this:');
+assert.equal(x.stripEmbeddedStatusUrl('This is interesting '+tweet+' from today'),
+             'This is interesting from today');
+assert.equal(x.stripEmbeddedStatusUrl('Check it out\n'+tweet+'\nThoughts?'),
+             'Check it out\nThoughts?');
+assert.equal(x.stripEmbeddedStatusUrl('Look '+tweet+' and https://example.org/info'),
+             'Look and https://example.org/info');
+assert.equal(x.stripEmbeddedStatusUrl('https://example.org/info'),
+             'https://example.org/info');
+assert.equal(x.stripEmbeddedStatusUrl('https://evilx.com/name/status/210896351890948915'),
+             'https://evilx.com/name/status/210896351890948915');
+assert.equal(x.stripEmbeddedStatusUrl('Nothing to embed'),'Nothing to embed');
+assert.ok(x.card(tweet).includes('Open on X'),'visible fallback is still needed');
+assert.ok(feed.includes('window.OrcFeedXEmbed.stripEmbeddedStatusUrl(_rawContent)'));
+assert.ok(feed.includes('window.OrcFeedXEmbed.card(e.content)'),
+          'Original content must still be used to build the embed');
+
 const card=x.card('Shared https://x.com/Orcagent/status/1234567890123456789');
 assert.ok(card.includes('href="https://x.com/Orcagent/status/1234567890123456789"'));
 assert.ok(card.includes('target="_blank" rel="noopener noreferrer nofollow"'));
