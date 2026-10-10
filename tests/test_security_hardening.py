@@ -40,8 +40,10 @@ check('session cookies require HTTPS', "SESSION_COOKIE_SECURE'] = True" in HARDE
 check('session cookies use SameSite', "SESSION_COOKIE_SAMESITE'] = 'Lax'" in HARDENING)
 check('CSP disables object content', '"object-src \'none\'"' in HARDENING)
 check('CSP prevents third-party framing', '"frame-ancestors \'none\'"' in HARDENING)
-check('CSP explicitly permits only the required Dexscreener frame',
-      '"frame-src \'self\' https://dexscreener.com"' in HARDENING)
+check('CSP permits only the required Dexscreener and X embed frames',
+      '"frame-src \'self\' https://dexscreener.com https://platform.twitter.com https://syndication.twitter.com"' in HARDENING)
+check('X widget script is tightly restricted to its official provider',
+      'https://platform.twitter.com' in HARDENING and 'script-src-elem' in HARDENING)
 check('CSP script elements require a per-response nonce',
       'script-src-elem' in HARDENING and "'nonce-{nonce}'" in HARDENING)
 check('HSTS is sent', 'Strict-Transport-Security' in HARDENING)
