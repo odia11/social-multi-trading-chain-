@@ -224,3 +224,6 @@ _install_token_promotions(_dashboard)
 
 from public_avatar_cache import install as _install_public_avatar_cache
 _install_public_avatar_cache(_dashboard)
+
+from deposit_notifications import install as _install_deposit_notifications
+_install_deposit_notifications(_dashboard)

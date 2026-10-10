@@ -1,4 +1,4 @@
-"""Read-only, bounded history of actual canonical Solana USDC wallet transfers.
+"""Read-only, bounded history of confirmed Solana wallet transfers.
 
 History distinguishes real incoming/outgoing SPL transfers from swaps and from
 OrcAgent tips, which already have their own authoritative transaction ledger.
@@ -15,6 +15,7 @@ from flask import jsonify
 USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 _CACHE = {}
 _GUARD = threading.Lock()
+_ACCOUNT_CURSOR = {}
 _TTL_SECONDS = 75
 
 
@@ -67,17 +68,27 @@ def _wallet_events(d, wallet):
     except Exception:
         return []
 
-    token_result, _ = tip._rpc_call_any(
-        d, 'getTokenAccountsByOwner',
-        [owner, {'mint': USDC}, {'encoding': 'jsonParsed', 'commitment': 'confirmed'}])
     accounts = [owner]
-    for value in (token_result or {}).get('value') or []:
-        addr = value.get('pubkey')
-        if addr and addr not in accounts:
-            accounts.append(addr)
+    for program in (d.TOKEN_PROGRAM_ID, d.TOKEN_2022_PROGRAM_ID):
+        token_result, _ = tip._rpc_call_any(d, 'getTokenAccountsByOwner',
+            [owner, {'programId': program}, {'encoding': 'jsonParsed', 'commitment': 'confirmed'}])
+        for value in (token_result or {}).get('value') or []:
+            addr = value.get('pubkey')
+            if addr and addr not in accounts:
+                accounts.append(addr)
 
+    # Rotate token accounts across bounded checks instead of issuing one RPC
+    # per holding on every poll. Always include native-wallet signatures.
+    with _GUARD:
+        cursor = _ACCOUNT_CURSOR.get(owner, 0)
+        token_accounts = accounts[1:]
+        selected = [owner]
+        if token_accounts:
+            selected += [token_accounts[(cursor+i) % len(token_accounts)]
+                         for i in range(min(3, len(token_accounts)))]
+            _ACCOUNT_CURSOR[owner] = (cursor+3) % len(token_accounts)
     signatures = {}
-    for addr in accounts[:4]:
+    for addr in selected:
         try:
             result, _ = tip._rpc_call_any(
                 d, 'getSignaturesForAddress',
@@ -155,24 +166,35 @@ def _wallet_events(d, wallet):
                     'subtitle':'To your wallet' if native_raw>0 else 'From your wallet',
                     'explorer_url':tip._explorer('solana',sig)})
                 continue
-        raw = (_owner_usdc_balance(meta, 'postTokenBalances', owner) -
-               _owner_usdc_balance(meta, 'preTokenBalances', owner))
-        if not raw or _other_token_moved(meta, owner) or _native_balance_moved(meta, tx, owner):
+        # Only direct token transfers: do not mislabel swaps/launches as deposits.
+        allowed = ('system', 'compute-budget', 'spl-memo', 'spl-token',
+                   'spl-token-2022', 'spl-associated-token-account')
+        if not instructions or any(ix.get('program') not in allowed for ix in instructions):
             continue
-        value = raw / 1_000_000
-        events.append({
-            'id': 'solana-usdc:' + sig,
-            'type': 'receive' if raw > 0 else 'send',
-            'title': 'Received USDC' if raw > 0 else 'Sent USDC',
-            'subtitle': 'To your wallet' if raw > 0 else 'From your wallet',
-            'amount': value,
-            'currency': 'USDC',
-            'chain': 'solana',
-            'timestamp': int(tx.get('blockTime') or timestamp),
-            'tx_hash': sig,
-            'explorer_url': 'https://solscan.io/tx/' + sig,
-            'status': 'confirmed',
-        })
+        balances = {}
+        for side, sign in (('preTokenBalances', -1), ('postTokenBalances', 1)):
+            for entry in meta.get(side) or []:
+                if entry.get('owner') != owner:
+                    continue
+                amount = entry.get('uiTokenAmount') or {}
+                mint = entry.get('mint')
+                if not mint or 'amount' not in amount or 'decimals' not in amount:
+                    continue
+                row = balances.setdefault(mint, [0, int(amount['decimals'])])
+                row[0] += sign * int(amount['amount'])
+        for mint, (raw, decimals) in balances.items():
+            if not raw:
+                continue
+            currency = 'USDC' if mint == USDC else 'tokens'
+            events.append({'id': 'solana:'+mint+':'+sig,
+                'type': 'receive' if raw > 0 else 'send',
+                'title': ('Received ' if raw > 0 else 'Sent ') + currency,
+                'subtitle': 'To your wallet' if raw > 0 else 'From your wallet',
+                'amount': abs(raw) / 10**decimals, 'currency': currency,
+                'mint': mint, 'chain': 'solana', 'timestamp': int(tx.get('blockTime') or timestamp),
+                'tx_hash': sig, 'explorer_url': tip._explorer('solana', sig),
+                'status': 'confirmed'})
+
     return sorted(events, key=lambda e: e['timestamp'], reverse=True)[:16]
 
 
