@@ -9364,6 +9364,7 @@ function _reuseFeedMedia(oldRoot, fresh){
     var a=oldRoot.querySelector(sel), b=fresh.querySelector(sel);
     if(a && b && (sel==='.fc-avatar img' ? _feedAvatarSource(a)===_feedAvatarSource(b) : a.getAttribute('src')===b.getAttribute('src'))) b.replaceWith(a);
   });
+  if(window.OrcFeedXEmbed) window.OrcFeedXEmbed.reuse(oldRoot,fresh);
   var reply=oldRoot.querySelector('.fc-reply-box'), next=fresh.querySelector('.fc-reply-box');
   if(reply && next && reply.id===next.id) next.replaceWith(reply);
 }
@@ -9396,6 +9397,7 @@ function _reconcileFeedCards(el, items){
     if(retained.has(root)) return;
     var card=root.matches('.fc-card') ? root : root.querySelector('.fc-card');
     if(card && _feedViewObserver) _feedViewObserver.unobserve(card);
+    if(window.OrcFeedXEmbed) window.OrcFeedXEmbed.dispose(root);
     root.remove();
   });
 }
@@ -9415,6 +9417,7 @@ function _feedNextSlice(fn){
 function _afterFeedCardsAdded(root){
   _initFeedAvatars(root);
   _observeFeedVideos(root);
+  if(window.OrcFeedXEmbed) window.OrcFeedXEmbed.observe(root);
   _initLiveCharts();
   _initTradeBanners();
   _hydrateFumbles();
@@ -9876,6 +9879,10 @@ function _renderFeedCard(e, cardIndex){
     }
   }
 
+  // Embed exactly one verified X status per feed post. Keep plain post text
+  // (including its normal link) available if X blocks the embed.
+  var xTweetHtml = window.OrcFeedXEmbed && e.content ? window.OrcFeedXEmbed.card(e.content) : '';
+
   // e.wallet is already display-truncated (e.g. "679sTH...YuRp") and, without a
   // real username, e.username falls back to that SAME truncated string server-
   // side -- neither reliably resolves via /profile/<id>, which 404s into a
@@ -9926,6 +9933,7 @@ function _renderFeedCard(e, cardIndex){
     +'<div id="fc-text-'+safePostId+'">'
     +textBody
     +'</div>'
+    +xTweetHtml
     +callHtml
     +(e.image_url
       ? '<div class="fc-post-image-wrap" onclick="event.stopPropagation();_openImgLightbox('+esc(JSON.stringify(e.image_url))+')"><img class="fc-post-image" src="'+esc(e.image_url)+'" alt="" loading="lazy" decoding="async" onload="_fcImgLoaded(this)"'+(_feedImgRatio[e.image_url]?' style="aspect-ratio:'+_feedImgRatio[e.image_url]+'"':'')+'></div>'
