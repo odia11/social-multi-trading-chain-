@@ -25,6 +25,26 @@ class PostMentions(unittest.TestCase):
             self.assertEqual(c.execute('SELECT COUNT(*) FROM notifications').fetchone()[0],1)
         for text in ['@orcagent hello','@orcagent hoe gaat het?','@orcagent how are you?']:
             self.assertEqual(p.answer(text)[0],'welcome')
+    def test_plural_greeting_with_other_tag_gets_social_reply_without_model(self):
+        text='@Bitcoin_beggar @Orcagent how are you guys ?'
+        pid=self.post(text)
+        with patch.object(p.chat,'available',return_value=False):
+            rid=p.reply_to_post(self.d,pid,'member',self.now)
+        with sqlite3.connect(self.db) as c:
+            message=c.execute('SELECT message FROM feed_replies WHERE id=?',(rid,)).fetchone()[0]
+            topic=c.execute('SELECT topic FROM platform_assistant_events WHERE reply_id=?',(rid,)).fetchone()[0]
+        self.assertEqual(topic,'welcome')
+        self.assertIn("I'm doing well, thanks!",message)
+        self.assertIn('How are you guys doing?',message)
+        self.assertNotIn('making something up',message)
+        for question in ['@Orcagent how are you both?', '@Friend hey @orcagent how are you guys doing?', '@orcagent hoe gaat het met jullie?']:
+            self.assertEqual(p.answer(question)[0],'welcome')
+        # A greeting must not swallow the actual request after it.
+        question='@Friend @orcagent how are you guys? Can you buy $SOL for me?'
+        self.assertIsNone(p.brain.greeting(question))
+        self.assertNotEqual(p.answer(question)[0],'welcome')
+        self.assertIsNone(p.brain.greeting('How are you guys managing my private keys?'))
+
     def test_posts_and_comments_continue_beyond_former_reply_limits(self):
         for _ in range(21):
             self.assertIsNotNone(p.reply_to_post(self.d,self.post(),'member',self.now))

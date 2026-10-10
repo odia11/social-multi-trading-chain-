@@ -151,6 +151,9 @@ def answer(message, context=None, market=None, public=None, action_state=None):
     targeted = specific(clean, context, action_state)
     if targeted:
         return targeted
+    social = brain.greeting(raw)
+    if social:
+        return social[0], LABEL + social[1]
     token = re.fullmatch(r'\s*(?:do you know\s+|tell me about\s+|what is\s+)?\$?([a-z][a-z0-9_]{1,19})\s+token[\s?!.]*',clean)
     if token:
         symbol = token[1].upper()
@@ -160,8 +163,6 @@ def answer(message, context=None, market=None, public=None, action_state=None):
             return topic, LABEL + english
     if re.search(r'benefits?|what (?:can|does)|features?|voordelen|mogelijkheden',clean):
         return 'overview', LABEL + 'OrcAgent brings Solana charts, trading, calls and community into one app. Follow traders, share your analysis and track holdings in Portfolio.'
-    if re.fullmatch(r'\s*(?:(?:hi|hello|hey)[\s,!]+)?(?:how are you(?: doing)?|how.s it going|hoe gaat het)[\s!?.,]*',clean):
-        return 'welcome', LABEL + "I'm doing well, thanks! How about you? What can I help you with on OrcAgent today?"
     if re.fullmatch(r'\s*(?:hi|hello|hey|hello there|hallo|hoi)[\s!?.,]*',clean):
         return 'welcome', LABEL + "Hey! Welcome to OrcAgent. What would you like to explore today: calls, charts or your portfolio?"
     if re.fullmatch(r"\s*(?:i.m (?:good|fine|well)|good|fine|doing well|thanks|thank you|goed|dank je)(?:[\s,!]+(?:thanks|thank you))?[\s!?.,]*",clean):
