@@ -173,14 +173,14 @@ function threadEl(){
     +'<div class="gc-th-body"><div class="gc-msgs" aria-live="polite"></div></div>'
     +'<form class="gc-composer" autocomplete="off">'
     +'<button type="button" class="gc-icon-btn gc-photo" aria-label="Send a photo">'+ICON.photo+'</button>'
-    +'<button type="button" class="gc-icon-btn gc-tip" aria-label="Tip the group">'+window.OrcChatTip.gift+'</button>'
+    +'<button type="button" class="gc-icon-btn gc-tip" aria-label="Tip the group">'+(window.OrcChatTip?window.OrcChatTip.gift:ICON.smile)+'</button>'
     +'<input type="file" accept="image/jpeg,image/png,image/gif,image/webp" class="gc-file" hidden>'
     +'<button type="button" class="gc-icon-btn gc-emoji" aria-label="Emoji" aria-expanded="false">'+ICON.smile+'</button>'
     +'<div class="gc-emoji-panel" role="dialog" aria-label="Emoji" hidden>'+EMOJI.map(function(e){return '<button type="button" aria-label="'+e+'">'+e+'</button>';}).join('')+'</div>'
     +'<textarea class="gc-input" rows="1" maxlength="1000" placeholder="Message" aria-label="Message"></textarea>'
     +'<button type="submit" class="gc-send" aria-label="Send" disabled>'+ICON.send+'</button></form>';
   document.body.appendChild(t);
-  t.querySelector('.gc-tip').onclick=function(){if(open)window.OrcChatTip.start({group:true,base:'/api/group-chats/'+open.id+'/tips',refresh:fetchNew});};
+  t.querySelector('.gc-tip').onclick=function(){if(open&&window.OrcChatTip)window.OrcChatTip.start({group:true,base:'/api/group-chats/'+open.id+'/tips',refresh:fetchNew});};
   var input=t.querySelector('.gc-input'),send=t.querySelector('.gc-send'),form=t.querySelector('.gc-composer');
   input.addEventListener('input',function(){
     send.disabled=!input.value.trim();
@@ -254,7 +254,7 @@ function messageHtml(m,prev){
   var body=m.kind==='image'
     ?(safeImg(m.body)?'<img class="gc-img" src="'+esc(safeImg(m.body))+'" alt="Photo" loading="lazy">':'')
     :esc(m.body).replace(/\n/g,'<br>');
-  if(m.kind==='tip')body=window.OrcChatTip.card(m.body,true);
+  if(m.kind==='tip')body=window.OrcChatTip?window.OrcChatTip.card(m.body,true):'Group tip receipt';
   if(m.kind==='deleted')body='<span class="gc-deleted-text">Message deleted</span>';
   var cls='gc-msg'+(m.mine?' mine':'')+(runStart?' run-start':'')+(m.pending?' pending':'')+(m.failed?' failed':'')+(m.kind==='image'?' is-image':'');
   html+='<div class="'+cls+'" data-mid="'+esc(m.id)+'">';

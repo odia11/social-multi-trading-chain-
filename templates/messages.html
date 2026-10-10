@@ -1371,7 +1371,7 @@ function _msgRowHtml(m) {
       var tr = {}; try { tr = JSON.parse(m.message); } catch(e) {}
       bubble = '<div class="msg-bubble msg-trade">'+_renderDmTokenCard(tr)+'</div>';
     } else if (m.message_type === 'tip_receipt') {
-      bubble = '<div class="msg-bubble msg-tip">'+window.OrcChatTip.card(m.message,false)+'</div>';
+      bubble = '<div class="msg-bubble msg-tip">'+(window.OrcChatTip?window.OrcChatTip.card(m.message,false):'Personal tip receipt')+'</div>';
     } else if (_isTipText(m.message)) {
       bubble = _tipBubbleHtml(m.message, mine);
     } else {
