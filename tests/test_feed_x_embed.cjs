@@ -15,7 +15,11 @@ class FakeObserver{
 }
 let renderCount=0;
 const context={
-  window:{twttr:{widgets:{createTweet(id,target,opts){
+  window:{OrcPageLifecycle:{createScope(){return {
+    isActive(){return true;},
+    intersectionObserver(callback,opts){return new FakeObserver(callback,opts);},
+    onCleanup(){},
+  }}},twttr:{widgets:{createTweet(id,target,opts){
     renderCount++;
     assert.equal(id,'1234567890123456789');
     assert.equal(opts.dnt,true);
