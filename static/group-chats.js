@@ -198,6 +198,7 @@ function threadEl(){
   });
   bodyEl.addEventListener('scroll',function(){
     if(!atBottom)atBottom=bodyEl.scrollHeight-bodyEl.scrollTop-bodyEl.clientHeight<80;
+    if(bodyEl.scrollTop<60&&!atBottom)loadOlderMessages();
   },{passive:true});
   if(window.OrcPageLifecycle&&window.OrcPageLifecycle.resizeObserver&&window.ResizeObserver){
     var bottomObserver=window.OrcPageLifecycle.resizeObserver(function(){keepLatestVisible(t);});
@@ -304,6 +305,19 @@ function mergeMessages(list,updatesOnly){
   });
   return added;
 }
+function loadOlderMessages(){
+  if(!open||!open.hasMore||open.loadingOlder||!open.messages.length)return;
+  var chat=open, before=chat.messages[0].id;
+  chat.loadingOlder=true;
+  api('/api/group-chats/'+chat.id+'/messages?before='+before).then(function(d){
+    if(open!==chat||!d.ok)return;
+    var body=threadEl().querySelector('.gc-th-body'),height=body.scrollHeight,top=body.scrollTop;
+    mergeMessages(d.messages||[]);chat.messages.sort(function(a,b){return Number(a.id)-Number(b.id);});
+    chat.hasMore=!!d.has_more;
+    renderMessages(false);
+    body.scrollTop=top+body.scrollHeight-height;
+  }).finally(function(){chat.loadingOlder=false;});
+}
 function fetchNew(){
   if(!open||document.hidden||open.messages.some(function(m){return m._likePending;}))return;
   var id=open.id;
@@ -344,7 +358,7 @@ function openGroup(id,push){
   });
   api('/api/group-chats/'+id+'/messages').then(function(d){
     if(!open||open.id!==id||!d.ok)return;
-    open.messages=[];mergeMessages(d.messages||[]);open.changeVersion=d.change_version||0;renderMessages(true);
+    open.messages=[];mergeMessages(d.messages||[]);open.changeVersion=d.change_version||0;open.hasMore=!!d.has_more;renderMessages(true);
     c.unread=0;renderList();
   });
   if(pollTimer)window.clearInterval(pollTimer);
@@ -356,7 +370,7 @@ function adopt(chat){
   if(!open||open.id!==chat.id)return;
   var ownerChanged=open.createdBy!==chat.created_by;
   open.name=chat.name;open.role=chat.role;open.owner=!!chat.is_owner;open.photo=chat.photo||'';
-  open.members=chat.members;open.createdBy=chat.created_by;
+  open.members=chat.members;open.createdBy=chat.created_by;open.historyVisible=chat.history_visible!==false;
   var c=chats.find(function(x){return x.id===chat.id;});
   if(c){c.name=chat.name;c.photo=open.photo;c.role=chat.role;renderList();}
   paintHeader();
@@ -583,6 +597,7 @@ function showInfo(){
            :'<div class="gc-info-name">'+esc(open.name)+'</div>')
     +'<small>'+open.members.length+' members</small></div>'
     +(admin?'<button type="button" class="gc-add-row">'+'<span class="gc-cta-ico">'+ICON.groupAdd+'</span><b>Add people</b></button>':'')
+    +(admin?'<label class="gc-history-setting"><span><b>Chat history for new members</b><small>Applies to people added from now on.</small></span><input type="checkbox" class="gc-history-toggle"'+(open.historyVisible?' checked':'')+' aria-label="Show chat history to new members"></label>':'')
     +'<div class="gc-members">'+open.members.map(function(m){
       // The owner manages everyone; an admin manages members only.
       var manage=!isMe(m)&&!m.owner&&(owner||(admin&&m.role!=='admin'));
@@ -595,6 +610,15 @@ function showInfo(){
     +'<div class="gc-info-foot"><button type="button" class="gc-leave">Leave group</button>'
     +(owner?'<button type="button" class="gc-leave gc-delete">Delete group</button>':'')+'</div>','gc-sheet-info');
   el.querySelector('[data-sheet-close]').onclick=closeSheet;
+  var historyToggle=el.querySelector('.gc-history-toggle');
+  if(historyToggle)historyToggle.onchange=function(){
+    var chat=open,visible=historyToggle.checked;historyToggle.disabled=true;
+    api('/api/group-chats/'+chat.id+'/history',{method:'PUT',body:{visible:visible}}).then(function(d){
+      if(open!==chat)return;
+      if(!d.ok){historyToggle.checked=!visible;toast(d.msg||'Could not update history');return;}
+      adopt(d.chat);toast(visible?'New members can see chat history':'New members see messages from when they join');
+    }).finally(function(){historyToggle.disabled=false;});
+  };
   var add=el.querySelector('.gc-add-row');if(add)add.onclick=addPeople;
   var rename=el.querySelector('.gc-rename input'),save=el.querySelector('.gc-save');
   if(rename){

@@ -207,3 +207,7 @@ html.gc-lock,html.gc-lock body{overflow:hidden!important}
 .gc-reaction-grid{display:grid;grid-template-columns:repeat(8,38px);gap:3px;padding-top:8px;border-top:1px solid var(--gc-line)}
 .gc-like-row{flex-wrap:wrap;gap:4px}.gc-like-people{font-size:10px}
 @media(max-width:360px){.gc-reaction-menu button{width:34px;height:36px}.gc-reaction-grid{grid-template-columns:repeat(7,34px)}}
+
+.gc-history-setting{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 20px;border-bottom:1px solid var(--gc-line);font-size:14px}
+.gc-history-setting small{display:block;color:var(--gc-muted);font-size:12px;margin-top:4px}
+.gc-history-toggle{width:22px;height:22px;accent-color:var(--gc-accent);flex-shrink:0}

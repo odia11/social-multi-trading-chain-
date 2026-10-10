@@ -73,6 +73,11 @@ def initialize(path):
             c.execute('ALTER TABLE group_chats ADD COLUMN photo_v INTEGER NOT NULL DEFAULT 0')
         if 'change_version' not in have:
             c.execute('ALTER TABLE group_chats ADD COLUMN change_version INTEGER NOT NULL DEFAULT 0')
+        if 'history_visible' not in have:
+            c.execute('ALTER TABLE group_chats ADD COLUMN history_visible INTEGER NOT NULL DEFAULT 1')
+        member_columns = {r[1] for r in c.execute('PRAGMA table_info(group_chat_members)')}
+        if 'history_from_id' not in member_columns:
+            c.execute('ALTER TABLE group_chat_members ADD COLUMN history_from_id INTEGER NOT NULL DEFAULT 0')
         message_columns = {r[1] for r in c.execute('PRAGMA table_info(group_chat_messages)')}
         for column, declaration in [('edited_at', 'TEXT'), ('version', 'INTEGER NOT NULL DEFAULT 0')]:
             if column not in message_columns:
@@ -114,6 +119,12 @@ def _system(c, chat_id, text):
 def _member_role(c, chat_id, uid):
     row = c.execute('SELECT role FROM group_chat_members WHERE chat_id=? AND user_id=?', (chat_id, uid)).fetchone()
     return row[0] if row else None
+
+
+def _history_floor(c, chat_id, uid):
+    row = c.execute('SELECT history_from_id FROM group_chat_members WHERE chat_id=? AND user_id=?',
+                    (chat_id, uid)).fetchone()
+    return int(row[0]) if row else 0
 
 
 def photo_url(chat_id, photo_v):
@@ -174,7 +185,7 @@ def install(d):
                 return fail('No wallet connected',401)
             if not _member_role(c,chat_id,uid):
                 return fail('Group not found',404)
-            row=c.execute('SELECT kind FROM group_chat_messages WHERE chat_id=? AND id=?',(chat_id,message_id)).fetchone()
+            row=c.execute('SELECT kind FROM group_chat_messages WHERE chat_id=? AND id=? AND id>?',(chat_id,message_id,_history_floor(c,chat_id,uid))).fetchone()
             if not row or row[0] in ('system','deleted'):
                 return fail('Message not found',404)
             if request.method=='POST':
@@ -214,20 +225,22 @@ def install(d):
             raise ValueError('Member not found')
         now = _now()
         top = c.execute('SELECT COALESCE(MAX(id),0) FROM group_chat_messages WHERE chat_id=?', (chat_id,)).fetchone()[0]
+        visible = c.execute('SELECT history_visible FROM group_chats WHERE id=?', (chat_id,)).fetchone()[0]
+        floor = 0 if visible else top
         names = []
         for u in wanted:
-            c.execute('INSERT INTO group_chat_members (chat_id, user_id, role, joined_at, last_read_id) '
-                      "VALUES (?,?,'member',?,?)", (chat_id, u, now, top))
+            c.execute('INSERT INTO group_chat_members (chat_id, user_id, role, joined_at, last_read_id, history_from_id) '
+                      "VALUES (?,?,'member',?,?,?)", (chat_id, u, now, top, floor))
             names.append(_name_of(people[u]))
         return names
 
     def summary(c, uid, chat_id):
-        row = c.execute('SELECT id, name, created_by, created_at, photo_v FROM group_chats WHERE id=?', (chat_id,)).fetchone()
+        row = c.execute('SELECT id, name, created_by, created_at, photo_v, history_visible FROM group_chats WHERE id=?', (chat_id,)).fetchone()
         members = c.execute('SELECT user_id, role FROM group_chat_members WHERE chat_id=? ORDER BY joined_at, user_id',
                             (chat_id,)).fetchall()
         people = _users(c, [m[0] for m in members])
         return {'id': row[0], 'name': row[1], 'created_by': row[2], 'created_at': row[3],
-                'photo': photo_url(row[0], row[4]),
+                'photo': photo_url(row[0], row[4]), 'history_visible': bool(row[5]),
                 'role': dict(members).get(uid), 'is_owner': row[2] == uid,
                 'members': [{'user_id': m[0], 'role': m[1], 'owner': m[0] == row[2],
                              'username': _name_of(people[m[0]]),
@@ -252,7 +265,7 @@ def install(d):
                 '(SELECT COUNT(*) FROM group_chat_members x WHERE x.chat_id=g.id), '
                 '(SELECT COUNT(*) FROM group_chat_messages y WHERE y.chat_id=g.id AND y.id>m.last_read_id '
                 "   AND y.kind NOT IN ('system','deleted') AND COALESCE(y.sender_id,0)!=?), "
-                "(SELECT MAX(id) FROM group_chat_messages z WHERE z.chat_id=g.id AND z.kind!='deleted'), g.photo_v "
+                "(SELECT MAX(id) FROM group_chat_messages z WHERE z.chat_id=g.id AND z.id>m.history_from_id AND z.kind!='deleted'), g.photo_v "
                 'FROM group_chat_members m JOIN group_chats g ON g.id=m.chat_id WHERE m.user_id=?',
                 (uid, uid)).fetchall()
             last_ids = [r[6] for r in rows if r[6]]
@@ -374,6 +387,25 @@ def install(d):
                 return fail('Only admins can rename the group', 403)
             c.execute('UPDATE group_chats SET name=? WHERE id=?', (name, chat_id))
             _system(c, chat_id, '%s renamed the group to "%s"' % (_name_of(_users(c, [uid])[uid]), name))
+            return jsonify({'ok': True, 'chat': summary(c, uid, chat_id)})
+
+    @app.route('/api/group-chats/<int:chat_id>/history', methods=['PUT'])
+    @d.rate_limit(20, 60)
+    def group_chats_history(chat_id):
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or type(body.get('visible')) is not bool:
+            return fail('Choose whether new members can see history', 400)
+        with connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            wallet, uid = me(c)
+            if not uid:
+                return fail('No wallet connected', 401)
+            role = _member_role(c, chat_id, uid)
+            if not role:
+                return fail('Group not found', 404)
+            if role != 'admin':
+                return fail('Only admins can change history access', 403)
+            c.execute('UPDATE group_chats SET history_visible=? WHERE id=?', (int(body['visible']), chat_id))
             return jsonify({'ok': True, 'chat': summary(c, uid, chat_id)})
 
     @app.route('/api/group-chats/<int:chat_id>/members', methods=['POST'])
@@ -614,22 +646,27 @@ def install(d):
         try:
             after = max(0, int(request.args.get('after') or 0))
             changes_since = max(0, int(request.args.get('changes_since') or 0))
+            before = max(0, int(request.args.get('before') or 0))
         except ValueError:
-            after = changes_since = 0
+            after = changes_since = before = 0
         with connect() as c:
             wallet, uid = me(c)
             if not uid:
                 return fail('No wallet connected', 401)
             if not _member_role(c, chat_id, uid):
                 return fail('Group not found', 404)
-            if after:
+            floor = _history_floor(c, chat_id, uid)
+            if after and not before:
                 rows = c.execute('SELECT id, sender_id, kind, body, created_at, edited_at, version FROM group_chat_messages '
-                                 'WHERE chat_id=? AND id>? ORDER BY id LIMIT ?', (chat_id, after, PAGE)).fetchall()
+                                 'WHERE chat_id=? AND id>? ORDER BY id LIMIT ?', (chat_id, max(after, floor), PAGE)).fetchall()
             else:
                 rows = c.execute('SELECT * FROM (SELECT id, sender_id, kind, body, created_at, edited_at, version FROM group_chat_messages '
-                                 'WHERE chat_id=? ORDER BY id DESC LIMIT ?) ORDER BY id', (chat_id, PAGE)).fetchall()
-            updates = c.execute('SELECT id, sender_id, kind, body, created_at, edited_at, version FROM group_chat_messages '
-                                'WHERE chat_id=? AND version>? ORDER BY version LIMIT ?', (chat_id, changes_since, PAGE)).fetchall()
+                                 'WHERE chat_id=? AND id>? AND (?=0 OR id<?) ORDER BY id DESC LIMIT ?) ORDER BY id',
+                                 (chat_id, floor, before, before, PAGE)).fetchall()
+            has_more = bool(rows and c.execute('SELECT 1 FROM group_chat_messages WHERE chat_id=? AND id>? AND id<? LIMIT 1',
+                                               (chat_id, floor, rows[0][0])).fetchone())
+            updates = [] if before else c.execute('SELECT id, sender_id, kind, body, created_at, edited_at, version FROM group_chat_messages '
+                                'WHERE chat_id=? AND id>? AND version>? ORDER BY version LIMIT ?', (chat_id, floor, changes_since, PAGE)).fetchall()
             version = max([changes_since] + [r[6] for r in updates])
             people = _users(c, {r[1] for r in rows + updates if r[1]})
             reactions=likes_for(c,[r[0] for r in rows + updates],uid)
@@ -646,7 +683,7 @@ def install(d):
              'sender': _name_of(people[r[1]]) if r[1] in people else '',
              'sender_wallet': people[r[1]][2] if r[1] in people else '',
              'sender_avatar': (people[r[1]][3] or '') if r[1] in people else ''} for r in items]
-        return jsonify({'ok': True, 'messages': serialize(rows), 'updates': serialize(updates), 'change_version': version})
+        return jsonify({'ok': True, 'messages': serialize(rows), 'updates': serialize(updates), 'change_version': version, 'has_more': has_more})
 
     @app.route('/api/group-chats/<int:chat_id>/messages/<int:message_id>', methods=['PUT', 'DELETE'])
     @d.rate_limit(30, 60)
@@ -658,8 +695,8 @@ def install(d):
                 return fail('No wallet connected', 401)
             if not _member_role(c, chat_id, uid):
                 return fail('Group not found', 404)
-            row = c.execute('SELECT sender_id,kind FROM group_chat_messages WHERE chat_id=? AND id=?',
-                            (chat_id, message_id)).fetchone()
+            row = c.execute('SELECT sender_id,kind FROM group_chat_messages WHERE chat_id=? AND id=? AND id>?',
+                            (chat_id, message_id, _history_floor(c, chat_id, uid))).fetchone()
             if not row:
                 return fail('Message not found', 404)
             if row[0] != uid or row[1] == 'system':

@@ -31620,7 +31620,14 @@ def _market_prices_for_pairs(chain: str, wanted: list) -> dict:
     # read is in flight waits for it and takes its answer from the cache.
     with _live_price_lock:
         flight = _live_price_fetch_locks.setdefault(chain, threading.Lock())
-    held = flight.acquire(timeout=8)
+    held = flight.acquire(timeout=2)
+    if not held:
+        with _live_price_lock:
+            for a in stale:
+                hit = _live_price_cache.get((chain, a.lower()))
+                if hit and time.time() - hit[0] < _LIVE_PRICE_STALE_OK:
+                    prices[a.lower()] = hit[1]
+        return prices
     try:
         now = time.time()
         with _live_price_lock:
@@ -31634,12 +31641,12 @@ def _market_prices_for_pairs(chain: str, wanted: list) -> dict:
         stale = still
         if stale and _live_price_take():
             _market_prices_fetch(chain, dex_chain_id, stale, prices, now)
-        elif stale:
+        if stale:
             # Over the upstream budget: the last known price, a few seconds old.
             with _live_price_lock:
                 for a in stale:
                     hit = _live_price_cache.get((chain, a.lower()))
-                    if hit and now - hit[0] < _LIVE_PRICE_STALE_OK:
+                    if a.lower() not in prices and hit and now - hit[0] < _LIVE_PRICE_STALE_OK:
                         prices[a.lower()] = hit[1]
     finally:
         if held:
@@ -31732,11 +31739,14 @@ def api_market_prices_batch():
         clean[chain] = pairs[:room]
         total += len(clean[chain])
 
-    if not clean:
+    wants_major = request.args.get('major') == '1'
+    if not clean and not wants_major:
         return jsonify({'ok': True, 'chains': {}})
 
     out = {}
-    with ThreadPoolExecutor(max_workers=min(6, len(clean))) as ex:
+    major = {}
+    with ThreadPoolExecutor(max_workers=max(1, min(6, len(clean) + int(wants_major)))) as ex:
+        major_future = ex.submit(_major_quote_snapshot) if wants_major else None
         futures = {ex.submit(_market_prices_for_pairs, chain, pairs): chain
                    for chain, pairs in clean.items()}
         for fut, chain in futures.items():
@@ -31744,7 +31754,19 @@ def api_market_prices_batch():
                 out[chain] = fut.result(timeout=9)
             except Exception:
                 out[chain] = {}
-    return jsonify({'ok': True, 'chains': out, 'server_ts': time.time()})
+        if major_future:
+            try:
+                major = major_future.result(timeout=5)
+            except Exception:
+                major = {'ok': False, 'prices': {}, 'stale': True}
+    observed = {}
+    with _live_price_lock:
+        for chain, values in out.items():
+            observed[chain] = {pair: _live_price_cache.get((chain, pair), (0, 0))[0] for pair in values}
+    response = jsonify({'ok': True, 'chains': out, 'observed_at': observed,
+                        'major': major, 'server_ts': time.time()})
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
 

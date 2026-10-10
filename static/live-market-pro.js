@@ -742,11 +742,14 @@ function _syncCardPrice(st, idx, px){
   if((el=document.getElementById('pt-mcap-'+idx))) el.textContent=fmtUsd(t.market_cap);
 }
 
-function _applyLivePrice(st, idx, px){
+function _applyLivePrice(st, idx, px, observed){
   if(!st || st.destroyed) return;
   px=Number(px);
   if(!(px>0)) return;
+  if(observed&&st.observedAt&&observed<st.observedAt)return;
+  if(observed)st.observedAt=observed;
   _syncCardPrice(st, idx, px);
+  if(observed&&ST.tokens[idx])ST.tokens[idx]._liveAt=observed*1000;
   if(!st.candles || !st.candles.length || px===st.price) return;
   st.price=px;
   var last=st.candles[st.candles.length-1];
@@ -765,17 +768,31 @@ function _applyLivePrice(st, idx, px){
   updateLiveChartPrice(idx,px);
 }
 
+function _setPriceFreshness(idx, observed, now){
+  var wrap=document.getElementById('pt-chart-wrap-'+idx),badge=wrap&&wrap.querySelector('.pt-chart-live');
+  if(!badge)return;
+  var fresh=Number(observed)>0&&now-Number(observed)<5;
+  if(badge.dataset.fresh===String(fresh))return;
+  badge.dataset.fresh=String(fresh);
+  badge.classList.toggle('pt-price-stale',!fresh);
+  badge.replaceChildren();
+  var dot=document.createElement('span');dot.className='pt-chart-live-dot';badge.appendChild(dot);
+  badge.appendChild(document.createTextNode(fresh?'LIVE':'Updating…'));
+}
 function tickLivePrices(){
   if(document.visibilityState!=='visible' || _priceInFlight || Date.now()<_priceNextAt)return;
-  var groups={}, refs={};
+  var groups={}, refs={}, nativeRefs=[], requestedStates={};
   Object.keys(_chartTimers).forEach(function(idx){
     var st=_chartTimers[idx];
-    if(!st||st.destroyed||!st.pair||!st.candles)return;
+    if(!st||st.destroyed||!st.candles||(!st.timer&&st.mint!==_profileMint))return;
+    requestedStates[idx]=st;
+    if(st.chain==='solana'&&st.mint==='So11111111111111111111111111111111111111112'){nativeRefs.push(idx);return;}
+    if(!st.pair)return;
     var c=st.chain||'solana', key=(st.pair||'').toLowerCase();
     (groups[c]=groups[c]||[]).push(st.pair);
     (refs[c]=refs[c]||{})[key]=(refs[c][key]||[]).concat([idx]);
   });
-  if(!Object.keys(groups).length)return;
+  if(!Object.keys(groups).length&&!nativeRefs.length)return;
 
   // Deduplicate pair addresses per chain before serializing the request.
   Object.keys(groups).forEach(function(c){
@@ -788,6 +805,7 @@ function tickLivePrices(){
   var tickStarted=Date.now();
   var qs=new URLSearchParams();
   qs.set('groups',JSON.stringify(groups));
+  if(nativeRefs.length)qs.set('major','1');
   _routeScope.fetch('/api/market/prices-batch?'+qs.toString(),{credentials:'include',cache:'no-store'})
     .then(function(r){
       if(r.status===429||r.status===503){var e=new Error('backoff');e.retryable=true;throw e;}
@@ -795,18 +813,38 @@ function tickLivePrices(){
       return r.json();
     })
     .then(function(d){
-      if(!d||!d.chains)return;
+      if(!d||!d.chains)throw new Error('Missing live prices');
+      Object.keys(_chartTimers).forEach(function(i){var st=_chartTimers[i];_setPriceFreshness(i,st&&st.observedAt,Number(d.server_ts)||Date.now()/1000);});
       Object.keys(d.chains).forEach(function(chain){
         var prices=d.chains[chain]||{};
         Object.keys(prices).forEach(function(pair){
           var ids=(refs[chain]&&refs[chain][pair.toLowerCase()])||[];
-          ids.forEach(function(i){_applyLivePrice(_chartTimers[i],i,prices[pair]);});
+          ids.forEach(function(i){
+            if(_chartTimers[i]!==requestedStates[i])return;
+            var observed=Number(((d.observed_at||{})[chain]||{})[pair])||0;
+            _setPriceFreshness(i,observed,Number(d.server_ts)||Date.now()/1000);
+            if(observed>0)_applyLivePrice(_chartTimers[i],i,prices[pair],observed);
+          });
         });
+      });
+      var sol=d.major&&d.major.prices&&d.major.prices.SOL;
+      nativeRefs.forEach(function(i){
+        if(_chartTimers[i]!==requestedStates[i]||!ST.tokens[i]||ST.tokens[i].mint!==requestedStates[i].mint)return;
+        _setPriceFreshness(i,sol&&sol.observed_at,Number(d.server_ts)||Date.now()/1000);
+        if(sol&&sol.price>0){
+          var tok=ST.tokens[i];tok.price_change_24h=sol.change24h;
+          _applyLivePrice(_chartTimers[i],i,sol.price,sol.observed_at);
+          // Coinbase supplies the current rolling 24h change itself.
+          tok.price_change_24h=sol.change24h;
+          var chg=document.getElementById('pt-chg-'+i);
+          if(chg&&!_chartTimers[i].scrubbing){chg.textContent=fmtPct(sol.change24h)+' · 24h';chg.classList.toggle('down',sol.change24h<0);chg.classList.toggle('up',sol.change24h>=0);}
+        }
       });
       _priceFailures=0;
       _priceNextAt=tickStarted+_pricePollBaseMs;
     })
     .catch(function(){
+      Object.keys(_chartTimers).forEach(function(i){_setPriceFreshness(i,0,Date.now()/1000);});
       _priceFailures=Math.min(_priceFailures+1,3);
       _priceNextAt=Date.now()+Math.min(8000,_pricePollBaseMs*Math.pow(2,_priceFailures));
     })
@@ -981,7 +1019,7 @@ function observeCards(){
     entries.forEach(function(entry){
       var idx = entry.target.dataset.idx;
       if(entry.isIntersecting) activateCard(entry.target);
-      else unmountChart(idx);
+      else if(entry.target.dataset.mint!==_profileMint)unmountChart(idx);
     });
   }, {rootMargin:'250px 0px', threshold:0.01});
   cards.forEach(function(c){ _cardObserver.observe(c); });
@@ -1117,7 +1155,7 @@ function cardHtml(t, idx){
     +   '</div>'
     +   '<div class="pt-chart-wrap" id="pt-chart-wrap-'+idx+'">'
     +     '<svg class="pt-chart-svg" id="pt-chart-svg-'+idx+'" preserveAspectRatio="none"></svg>'
-    +     '<div class="pt-chart-live"><span class="pt-chart-live-dot"></span>LIVE</div>'
+    +     '<div class="pt-chart-live pt-price-stale"><span class="pt-chart-live-dot"></span>Updating…</div>'
     +     '<div class="pt-chart-tfs" id="pt-chart-tfs-'+idx+'">'
     +       tfPill('1m','1M') + tfPill('5m','5M', true) + tfPill('1h','1H') + tfPill('4h','4H') + tfPill('D','1D')
     +     '</div>'
@@ -1364,7 +1402,7 @@ function syncTokenProfile(){
   });
   if(active){
     var card=document.getElementById('pt-card-'+idx);
-    if(card){window.scrollTo(0,0);loadTokenProfileDetails(card,_profileMint);_pfMount(card,ST.tokens[idx]);}
+    if(card){activateCard(card);window.scrollTo(0,0);loadTokenProfileDetails(card,_profileMint);_pfMount(card,ST.tokens[idx]);}
     if(_chartTimers[idx] && _chartTimers[idx].candles)
       _routeScope.requestAnimationFrame(function(){renderChartSvg(idx,_chartTimers[idx].candles,_cardRefPrice(_chartTimers[idx],idx));});
   }
