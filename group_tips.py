@@ -75,6 +75,15 @@ def _recipients(d, c, chat_id, uid, own_addresses=()):
     return result
 
 
+def _recipient_version(c, chat_id, uid):
+    """Opaque DB state only: never derive wallets or audit keys under a write lock."""
+    sql = ('SELECT id,wallet_address,encrypted_private_key FROM users WHERE id IN (?,?) ORDER BY id'
+           if chat_id < 0 else
+           'SELECT u.id,u.wallet_address,u.encrypted_private_key FROM group_chat_members m JOIN users u ON u.id=m.user_id WHERE m.chat_id=? ORDER BY u.id')
+    args = (uid, -chat_id) if chat_id < 0 else (chat_id,)
+    return tuple(tuple(row) for row in c.execute(sql, args))
+
+
 def _snapshot(rows):
     return [(r['user_id'], r['address']) for r in rows]
 
@@ -401,6 +410,7 @@ def install(d):
                 if time.time() > q['expires']:
                     raise ValueError('This quote expired. Review a fresh quote before sending.')
                 with _db(d) as c:
+                    recipient_version = _recipient_version(c, chat_id, uid)
                     if _snapshot(_recipients(d, c, chat_id, uid, (wallet, owner))) != _snapshot(q['recipients']):
                         raise ValueError('Group members or receiving wallets changed. Review a fresh quote.')
                 keyrow = provider._wallet_keys(d, wallet)
@@ -442,7 +452,7 @@ def install(d):
                     current = c.execute('SELECT * FROM group_tips WHERE id=?', (tip_id,)).fetchone()
                     if current['state'] != 'quoted':
                         return jsonify(ok=True, tip=_public_quote(current, uid))
-                    if time.time() > q['expires'] or _snapshot(_recipients(d, c, chat_id, uid, (wallet, owner))) != _snapshot(q['recipients']):
+                    if time.time() > q['expires'] or _recipient_version(c, chat_id, uid) != recipient_version:
                         raise ValueError('The quote or group changed. Review again; nothing was sent.')
                     body = json.dumps({'tip_id': tip_id, 'count': len(q['recipients']), 'note': q['note'], 'status': 'submitted', 'confirmed': 0})
                     if chat_id > 0:

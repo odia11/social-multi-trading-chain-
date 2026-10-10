@@ -307,3 +307,42 @@ def test_no_group_tip_if_every_other_member_uses_sender_wallet(env):
     assert response.status_code == 400
     assert 'no other eligible members' in response.json['msg']
     assert not state['sent']
+
+
+
+def test_recipient_audit_write_never_runs_under_tip_write_lock(env):
+    d, state, client = env
+    blocked = []
+    def derive(wallet):
+        try:
+            with sqlite3.connect(d.DB_FILE, timeout=.05) as c:
+                c.execute('UPDATE users SET username=username WHERE wallet_address=?', (wallet,))
+        except sqlite3.OperationalError:
+            blocked.append(wallet)
+            raise
+        return wallet
+    d._get_trading_wallet_address = derive
+    t = quote(client).json['tip']
+    response = confirm(client, t)
+    assert response.status_code == 200 and response.json['ok']
+    assert not blocked, 'wallet auditing attempted while the group tip held a write lock'
+    assert len(state['sent']) == 1
+    assert confirm(client, t).json['ok']
+    assert len(state['sent']) == 1
+
+
+def test_changed_receiving_key_before_commit_prevents_broadcast(env):
+    d, state, client = env
+    t = quote(client).json['tip']
+    original = provider._rpc_call_any.side_effect
+    def rpc(*args, **kwargs):
+        result = original(*args, **kwargs)
+        if args[1] == 'simulateTransaction':
+            with sqlite3.connect(d.DB_FILE) as c:
+                c.execute("UPDATE users SET encrypted_private_key='changed' WHERE id=2")
+        return result
+    with patch.object(provider, '_rpc_call_any', side_effect=rpc):
+        response = confirm(client, t)
+    assert not response.json['ok']
+    assert not state['sent']
+    assert rows(d, "SELECT state FROM group_tips WHERE id=?", (t['id'],))[0][0] == 'quoted'
