@@ -7,6 +7,7 @@ import base64
 import json
 import sqlite3
 import time
+import threading
 import uuid
 from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
@@ -98,11 +99,66 @@ def _public_quote(row, uid):
                       recipients=[{k: r[k] for k in ('user_id', 'username', 'avatar')} for r in q['recipients']])
     if row['plan']:
         p = json.loads(row['plan'])
+        errors = [b.get('error') for b in p if b['state'] != 'confirmed' and b.get('error') in _ERROR_TEXT]
+        if errors:
+            result['status_detail'] = _ERROR_TEXT[errors[0]]
         result['confirmed_recipients'] = sum(len(b['users']) for b in p if b['state'] == 'confirmed')
         if own or recipient:
             result['transactions'] = [{'status': b['state'], 'explorer': 'https://solscan.io/tx/' + b['signature']}
                                       for b in p if own or uid in b['users']]
     return result
+
+
+def _preferred_rpc(d, q):
+    import portfolio_token_withdraw as provider
+    urls = provider._rpc_urls(d)
+    index = q.get('rpc_index')
+    return urls[index] if isinstance(index, int) and 0 <= index < len(urls) else None
+
+
+_ERROR_TEXT = {
+    'expired_blockhash': 'A transfer expired before confirmation.',
+    'insufficient_sol': 'The network rejected the available SOL balance or account reserve.',
+    'program_rejected': 'The network rejected this transaction.',
+    'network_retry': 'Network response delayed. Checking the same payment; do not send another tip.',
+    'chain_failed': 'The transaction failed on-chain. No funds were delivered by this transaction.',
+}
+
+
+def _broadcast(d, row, q, plan):
+    import portfolio_token_withdraw as provider
+    # Persist the attempt before contacting the network. A lost response is
+    # always reconciled/rebroadcast with the SAME signature, never re-signed.
+    with _db(d) as c:
+        c.execute('UPDATE group_tips SET attempt=? WHERE id=?', (time.time(), row['id']))
+    for batch in plan:
+        if batch['state'] != 'submitted':
+            continue
+        try:
+            provider._rpc_call_any(d, 'sendTransaction', [batch['encoded'],
+                {'encoding': 'base64', 'skipPreflight': False,
+                 'preflightCommitment': 'confirmed', 'maxRetries': 3}],
+                preferred_url=_preferred_rpc(d, q))
+            batch.pop('error', None)
+        except Exception as exc:
+            code = getattr(exc, 'reason_code', 'network_retry')
+            batch['error'] = code if code in _ERROR_TEXT else 'network_retry'
+            d.app.logger.warning('chat tip %s broadcast deferred: %s', row['id'][:8], batch['error'])
+    with _db(d) as c:
+        c.execute('UPDATE group_tips SET plan=? WHERE id=?', (json.dumps(plan), row['id']))
+
+
+def _archived_status(d, signature, q):
+    """A missing status alone is not evidence of failure: read the transaction."""
+    import portfolio_token_withdraw as provider
+    tx, _ = provider._rpc_call_any(d, 'getTransaction',
+        [signature, {'commitment': 'confirmed', 'maxSupportedTransactionVersion': 0}],
+        preferred_url=_preferred_rpc(d, q))
+    if tx is None:
+        return 'expired'
+    if isinstance(tx, dict) and isinstance(tx.get('meta'), dict):
+        return 'failed' if tx['meta'].get('err') is not None else 'confirmed'
+    return 'unknown'
 
 
 def reconcile(d, tip_id):
@@ -138,8 +194,13 @@ def _reconcile_locked(d, tip_id):
                 if r['user_id'] in batch['users']:
                     ledger.record_submitted(d, row['wallet'], row['sender_id'], r['user_id'], r['address'],
                                             q['per'] / 1e9, 'solana', batch['signature'], q['note'], 'SOL')
+        if not row['attempt']:
+            # Send first. An unavailable status RPC must not hold an already
+            # authorised payment until its blockhash expires.
+            _broadcast(d, row, q, plan)
+            return
         statuses, _ = provider._rpc_call_any(d, 'getSignatureStatuses',
-            [[b['signature'] for b in plan], {'searchTransactionHistory': True}])
+            [[b['signature'] for b in plan], {'searchTransactionHistory': True}], preferred_url=_preferred_rpc(d, q))
         values = statuses.get('value') if isinstance(statuses, dict) else None
         if not isinstance(values, list) or len(values) != len(plan):
             return
@@ -153,16 +214,24 @@ def _reconcile_locked(d, tip_id):
                 continue
             if status and status.get('err') is not None:
                 batch['state'] = 'failed'
+                batch['error'] = 'chain_failed'
             elif status and status.get('confirmationStatus') in ('confirmed', 'finalized'):
                 batch['state'] = 'confirmed'
             elif status is None and height > q['last_height']:
-                batch['state'] = 'failed'
+                archived = _archived_status(d, batch['signature'], q)
+                if archived == 'confirmed':
+                    batch['state'] = 'confirmed'
+                elif archived in ('expired', 'failed'):
+                    batch['state'] = 'failed'
+                    batch['error'] = 'expired_blockhash' if archived == 'expired' else 'chain_failed'
+            if batch['state'] == 'confirmed':
+                batch.pop('error', None)
             if batch['state'] in ('confirmed', 'failed'):
                 with _db(d) as c:
                     tips = c.execute('SELECT id FROM tip_transactions WHERE tx_hash=? AND sender_user_id=?',
                                      (batch['signature'], row['sender_id'])).fetchall()
                 for tip in tips:
-                    ledger._transition(d, tip['id'], batch['state'], 'Group tip transaction failed or expired' if batch['state'] == 'failed' else None)
+                    ledger._transition(d, tip['id'], batch['state'], _ERROR_TEXT.get(batch.get('error'), 'Transaction failed') if batch['state'] == 'failed' else None)
         pending = any(b['state'] == 'submitted' for b in plan)
         state = 'submitted' if pending else ('confirmed' if all(b['state'] == 'confirmed' for b in plan)
                                              else 'partial' if any(b['state'] == 'confirmed' for b in plan) else 'failed')
@@ -178,20 +247,8 @@ def _reconcile_locked(d, tip_id):
                 c.execute('UPDATE group_chats SET change_version=change_version+1 WHERE id=?', (row['chat_id'],))
                 version = c.execute('SELECT change_version FROM group_chats WHERE id=?', (row['chat_id'],)).fetchone()[0]
                 c.execute('UPDATE group_chat_messages SET body=?,version=? WHERE id=?', (body, version, row['message_id']))
-        if not pending or time.time() - row['attempt'] < 20:
-            return
-        with _db(d) as c:
-            c.execute('UPDATE group_tips SET attempt=? WHERE id=?', (time.time(), tip_id))
-        for batch in plan:
-            if batch['state'] != 'submitted':
-                continue
-            try:
-                # Never re-sign on timeouts or after expiry. Same bytes, same ID.
-                provider._rpc_call_any(d, 'sendTransaction', [batch['encoded'],
-                    {'encoding': 'base64', 'skipPreflight': False, 'preflightCommitment': 'confirmed', 'maxRetries': 3}])
-            except Exception:
-                # A transport failure is not proof that no payment happened.
-                continue
+        if pending and time.time() - row['attempt'] >= 3:
+            _broadcast(d, row, q, plan)
 
 
 def install(d):
@@ -318,6 +375,13 @@ def install(d):
                 from solders.transaction import Transaction
                 from solders.hash import Hash
                 from solders.message import to_bytes_versioned
+                # The review's blockhash may already be old. Refresh it BEFORE
+                # signing; amounts, recipients and reviewed fees remain fixed.
+                fresh, rpc_url = provider._rpc_call_any(d, 'getLatestBlockhash', [{'commitment': 'confirmed'}])
+                q['blockhash'] = fresh['value']['blockhash']
+                q['last_height'] = fresh['value']['lastValidBlockHeight']
+                urls = provider._rpc_urls(d)
+                q['rpc_index'] = urls.index(rpc_url) if rpc_url in urls else None
                 plan = []
                 with d._use_key(keyrow[0], wallet) as secret:
                     key = Keypair.from_base58_string(secret)
@@ -335,7 +399,7 @@ def install(d):
                         if len(bytes(tx)) > 1232:
                             raise ValueError('Group tip transaction is too large')
                         encoded = base64.b64encode(bytes(tx)).decode()
-                        result, _ = provider._rpc_call_any(d, 'simulateTransaction', [encoded, {'encoding': 'base64', 'sigVerify': True, 'commitment': 'confirmed'}])
+                        result, _ = provider._rpc_call_any(d, 'simulateTransaction', [encoded, {'encoding': 'base64', 'sigVerify': True, 'commitment': 'confirmed'}], preferred_url=rpc_url)
                         if not isinstance(result, dict) or not isinstance(result.get('value'), dict) or result['value'].get('err') is not None:
                             raise ValueError('A receiving wallet or the network rejected this tip. Nothing was sent.')
                         plan.append({'users': [r['user_id'] for r in q['recipients'][i*BATCH_SIZE:(i+1)*BATCH_SIZE]],
@@ -352,12 +416,13 @@ def install(d):
                         mid = c.execute("INSERT INTO group_chat_messages(chat_id,sender_id,kind,body,created_at) VALUES(?,?,'tip',?,datetime('now'))", (chat_id, uid, body)).lastrowid
                     else:
                         mid = c.execute("INSERT INTO direct_messages(sender_id,receiver_id,message,message_type) VALUES(?,?,?,'tip_receipt')", (uid, -chat_id, body)).lastrowid
-                    c.execute("UPDATE group_tips SET state='submitted',plan=?,message_id=? WHERE id=?", (json.dumps(plan), mid, tip_id))
+                    c.execute("UPDATE group_tips SET state='submitted',plan=?,message_id=?,quote=? WHERE id=?", (json.dumps(plan), mid, json.dumps(q), tip_id))
                     row = c.execute('SELECT * FROM group_tips WHERE id=?', (tip_id,)).fetchone()
             try:
                 reconcile(d, tip_id)
-            except Exception:
-                pass
+            except Exception as exc:
+                app.logger.warning('chat tip %s submission deferred: %s', tip_id[:8], type(exc).__name__)
+            wake.set()
             with _db(d) as c:
                 row = c.execute('SELECT * FROM group_tips WHERE id=?', (tip_id,)).fetchone()
             return jsonify(ok=True, tip=_public_quote(row, uid))
@@ -365,7 +430,7 @@ def install(d):
             return error(exc)
 
     @app.get('/api/group-chats/<int:chat_id>/tips/<tip_id>')
-    @d.rate_limit(30, 60)
+    @d.rate_limit(60, 60)
     def detail(chat_id, tip_id):
         try:
             wallet, uid = identity(chat_id)
@@ -390,7 +455,7 @@ def install(d):
         return confirm(-peer_id, tip_id)
 
     @app.get('/api/messages/<int:peer_id>/tips/<tip_id>')
-    @d.rate_limit(30, 60)
+    @d.rate_limit(60, 60)
     def dm_detail(peer_id, tip_id):
         # A received receipt is stored against its recipient, not its sender.
         wallet = d._authenticated_wallet()
@@ -405,11 +470,25 @@ def install(d):
 
     def reconcile_pending():
         with _db(d) as c:
-            rows = c.execute("SELECT id FROM group_tips WHERE state='submitted' ORDER BY attempt LIMIT 3").fetchall()
+            rows = c.execute("SELECT id FROM group_tips WHERE state='submitted' ORDER BY attempt LIMIT 6").fetchall()
         for row in rows:
             try:
                 reconcile(d, row['id'])
-            except Exception:
-                pass
+            except Exception as exc:
+                app.logger.warning('chat tip confirmation deferred: %s', type(exc).__name__)
+        return bool(rows)
+
+    wake = threading.Event()
+
+    def watch():
+        while True:
+            try:
+                pending = reconcile_pending()
+            except Exception as exc:
+                app.logger.warning('chat tip watcher unavailable: %s', type(exc).__name__)
+                pending = False
+            wake.wait(2 if pending else 15)
+            wake.clear()
 
     d._group_tip_reconcile = reconcile_pending
+    threading.Thread(target=watch, name='orca-chat-tip-confirmations', daemon=True).start()
