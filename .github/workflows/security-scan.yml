@@ -85,6 +85,10 @@ jobs:
           node --check static/dashboard.js
           node --check static/feed-x-embed.js
           node tests/test_feed_x_embed.cjs
+          node tests/test_first_deposit_notification.cjs
+          PYTHONPATH=. python tests/test_deposit_notifications.py
+          PYTHONPATH=. python tests/test_deposit_detection.py
+          PYTHONPATH=. python tests/test_deposit_push.py
           node tests/test_feed_reply_orphans.js
           node tests/test_agent_clean_replies.js
           node tests/test_agent_token_flow.js

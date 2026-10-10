@@ -15,7 +15,7 @@ checks = {
     'uses incremental after_id queries instead of repeatedly downloading the inbox':
         '&after_id=' in js and "after_id = max(0, int(request.args.get('after_id', 0) or 0))" in backend,
     'first page load baselines existing notifications instead of replaying old alerts':
-        "var baseline=(lastId===0);" in js and "if(baseline){" in js,
+        "var baseline=!primed;" in js and "if(baseline){" in js,
     'new events are shown while the app is visible and checked immediately on resume':
         "visibilitychange" in js and "if(!document.hidden){syncTop();pollDelay=POLL_MS;poll(false);schedule()}" in js,
     'banner auto-dismisses and all close/open paths share one cleanup flow':

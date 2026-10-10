@@ -73,7 +73,7 @@ def rpc_result(method, params):
 def test_wallet_events_are_actual_confirmed_canonical_usdc_only():
     temp,d=setup_app()
     try:
-        with patch('portfolio_token_withdraw._rpc_call_any',side_effect=lambda _,method,params:rpc_result(method,params)):
+        with patch('portfolio_token_withdraw._rpc_call_any',side_effect=lambda _,method,params,**kwargs:rpc_result(method,params)):
             events=wallet_activity._wallet_events(d,OWNER)
         assert len(events)==1
         assert events[0]['type']=='receive'

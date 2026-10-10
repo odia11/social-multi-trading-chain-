@@ -16,6 +16,8 @@ USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 _CACHE = {}
 _GUARD = threading.Lock()
 _ACCOUNT_CURSOR = {}
+_TOKEN_ACCOUNTS = {}
+_TX_CACHE = {}
 _TTL_SECONDS = 75
 
 
@@ -55,7 +57,7 @@ def _native_balance_moved(meta, tx, owner):
     return False
 
 
-def _wallet_events(d, wallet):
+def _wallet_events(d, wallet, *, since=None):
     import portfolio_token_withdraw as tip
 
     try:
@@ -68,14 +70,43 @@ def _wallet_events(d, wallet):
     except Exception:
         return []
 
+    def rpc(method, params):
+        # History must not occupy request threads with 15-second demo-provider
+        # retries. A failed token index must not disable native SOL detection.
+        preferred = 'https://solana-rpc.publicnode.com' if method != 'getTokenAccountsByOwner' else None
+        return tip._rpc_call_any(d, method, params, timeout=4, preferred_url=preferred,
+                                 max_providers=3, skip_demo=True)
+
     accounts = [owner]
+    with _GUARD:
+        accounts.extend(_TOKEN_ACCOUNTS.get(owner, []))
     for program in (d.TOKEN_PROGRAM_ID, d.TOKEN_2022_PROGRAM_ID):
-        token_result, _ = tip._rpc_call_any(d, 'getTokenAccountsByOwner',
-            [owner, {'programId': program}, {'encoding': 'jsonParsed', 'commitment': 'confirmed'}])
+        try:
+            token_result, _ = rpc('getTokenAccountsByOwner',
+                [owner, {'programId': program}, {'encoding': 'jsonParsed', 'commitment': 'confirmed'}])
+        except Exception:
+            continue
         for value in (token_result or {}).get('value') or []:
             addr = value.get('pubkey')
             if addr and addr not in accounts:
                 accounts.append(addr)
+    # A known USDC ATA can be queried even when indexed discovery is blocked.
+    try:
+        from solders.pubkey import Pubkey
+        token_program = Pubkey.from_string(d.TOKEN_PROGRAM_ID)
+        ata_program = Pubkey.from_string('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+        ata, _ = Pubkey.find_program_address(
+            [bytes(Pubkey.from_string(owner)), bytes(token_program), bytes(Pubkey.from_string(USDC))], ata_program)
+        if str(ata) not in accounts:
+            accounts.append(str(ata))
+    except (ValueError, TypeError):
+        pass
+    with _GUARD:
+        _TOKEN_ACCOUNTS[owner] = accounts[1:]
+        if len(_TOKEN_ACCOUNTS) > 1000:
+            oldest = next(iter(_TOKEN_ACCOUNTS))
+            _TOKEN_ACCOUNTS.pop(oldest, None)
+            _ACCOUNT_CURSOR.pop(oldest, None)
 
     # Rotate token accounts across bounded checks instead of issuing one RPC
     # per holding on every poll. Always include native-wallet signatures.
@@ -90,8 +121,8 @@ def _wallet_events(d, wallet):
     signatures = {}
     for addr in selected:
         try:
-            result, _ = tip._rpc_call_any(
-                d, 'getSignaturesForAddress',
+            result, _ = rpc(
+                'getSignaturesForAddress',
                 [addr, {'limit': 15, 'commitment': 'confirmed'}])
         except Exception:
             if addr == owner:
@@ -123,27 +154,51 @@ def _wallet_events(d, wallet):
 
     events = []
     started = time.monotonic()
-    for sig, timestamp in sorted(signatures.items(), key=lambda row: row[1], reverse=True)[:8]:
+    candidates = sorted(signatures.items(), key=lambda row: row[1], reverse=True)
+    if since is not None:
+        candidates = [(sig, ts) for sig, ts in candidates if not ts or ts >= since]
+    for sig, timestamp in candidates[:(32 if since is not None else 8)]:
         # Historical reads are optional UI data, never worth timing out the
         # live wallet app or starving the provider for trading RPC calls.
         if time.monotonic() - started > 8:
             break
         if sig in known:
             continue
-        try:
-            tx, _ = tip._rpc_call_any(
-                d, 'getTransaction',
-                [sig, {'encoding': 'jsonParsed', 'commitment': 'confirmed',
-                       'maxSupportedTransactionVersion': 0}])
-        except Exception:
-            continue
+        with _GUARD:
+            cached = _TX_CACHE.get(sig)
+        tx = cached[1] if cached and time.monotonic()-cached[0] < 300 else None
+        if tx is None:
+            try:
+                tx, _ = rpc('getTransaction',
+                    [sig, {'encoding': 'jsonParsed', 'commitment': 'confirmed',
+                           'maxSupportedTransactionVersion': 0}])
+            except Exception:
+                continue
+            if isinstance(tx, dict):
+                with _GUARD:
+                    _TX_CACHE[sig] = (time.monotonic(), tx)
+                    if len(_TX_CACHE) > 2048:
+                        _TX_CACHE.pop(next(iter(_TX_CACHE)), None)
         if not isinstance(tx, dict):
             continue
         meta = tx.get('meta') or {}
         if meta.get('err') is not None:
             continue
         message = (tx.get('transaction') or {}).get('message') or {}
-        instructions = message.get('instructions') or []
+        # jsonParsed still leaves ComputeBudget / Token-2022 instructions
+        # partially decoded. Resolve their program IDs instead of rejecting
+        # a normal transfer just because an instruction has no `program`.
+        programs = {
+            '11111111111111111111111111111111': 'system',
+            'ComputeBudget111111111111111111111111111111': 'compute-budget',
+            str(d.TOKEN_PROGRAM_ID): 'spl-token',
+            str(d.TOKEN_2022_PROGRAM_ID): 'spl-token-2022',
+            'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL': 'spl-associated-token-account',
+            'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr': 'spl-memo',
+            'Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo': 'spl-memo',
+        }
+        instructions = [dict(ix, program=programs.get(ix.get('programId'), ix.get('program')))
+                        for ix in message.get('instructions') or [] if isinstance(ix, dict)]
         # Plain native sends only. Do not label rent funding, swaps or launch
         # transactions as an incoming/outgoing payment.
         if instructions and all(ix.get('program') in ('system', 'compute-budget', 'spl-memo') for ix in instructions):
@@ -195,7 +250,7 @@ def _wallet_events(d, wallet):
                 'tx_hash': sig, 'explorer_url': tip._explorer('solana', sig),
                 'status': 'confirmed'})
 
-    return sorted(events, key=lambda e: e['timestamp'], reverse=True)[:16]
+    return sorted(events, key=lambda e: e['timestamp'], reverse=True)[:(64 if since is not None else 16)]
 
 
 def install(d):
