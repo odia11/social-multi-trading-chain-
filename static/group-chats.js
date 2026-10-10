@@ -199,8 +199,8 @@ function threadEl(){
   bodyEl.addEventListener('scroll',function(){
     if(!atBottom)atBottom=bodyEl.scrollHeight-bodyEl.scrollTop-bodyEl.clientHeight<80;
   },{passive:true});
-  if(window.ResizeObserver){
-    var bottomObserver=new ResizeObserver(function(){keepLatestVisible(t);});
+  if(window.OrcPageLifecycle&&window.OrcPageLifecycle.resizeObserver&&window.ResizeObserver){
+    var bottomObserver=window.OrcPageLifecycle.resizeObserver(function(){keepLatestVisible(t);});
     bottomObserver.observe(t.querySelector('.gc-msgs'));
     bottomObserver.observe(bodyEl);
   }
