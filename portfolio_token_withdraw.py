@@ -119,8 +119,8 @@ def _preflight_error_from_rpc(error):
         label[:235], gas_shortfall=gas_shortfall, reason_code=code)
 
 
-def _rpc_call(url, method, params):
-    r = requests.post(url, json={'jsonrpc':'2.0','id':1,'method':method,'params':params}, timeout=15)
+def _rpc_call(url, method, params, timeout=15):
+    r = requests.post(url, json={'jsonrpc':'2.0','id':1,'method':method,'params':params}, timeout=timeout)
     if r.status_code != 200:
         raise RuntimeError('Solana RPC HTTP %s' % r.status_code)
     body = r.json()
@@ -135,7 +135,8 @@ def _rpc_call(url, method, params):
     return body.get('result')
 
 
-def _rpc_call_any(d, method, params, require_nonempty=False, preferred_url=None):
+def _rpc_call_any(d, method, params, require_nonempty=False, preferred_url=None,
+                  timeout=None, max_providers=None):
     """Read from the first healthy Solana RPC, returning (result, url).
 
     An empty token-account list is not considered authoritative while other
@@ -151,9 +152,14 @@ def _rpc_call_any(d, method, params, require_nonempty=False, preferred_url=None)
         # provider first; other providers remain as transport fallbacks.
         urls.remove(preferred_url)
         urls.insert(0, preferred_url)
+    # Only opt-in read-only callers use reduced RPC deadlines; payment
+    # submission and confirmation keep the existing failover behaviour.
+    if max_providers is not None:
+        urls = urls[:max(1, int(max_providers))]
     for url in urls:
         try:
-            result = _rpc_call(url, method, params)
+            result = (_rpc_call(url, method, params) if timeout is None
+                      else _rpc_call(url, method, params, timeout=timeout))
             if require_nonempty:
                 value = (result or {}).get('value') if isinstance(result, dict) else None
                 if not value:
