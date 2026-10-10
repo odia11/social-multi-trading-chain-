@@ -13,7 +13,20 @@ function sol(n){return Number(n||0).toFixed(9).replace(/0+$/,'').replace(/\.$/,'
 function status(t){return t.status==='confirmed'?'Confirmed':t.status==='partial'?'Partially sent · '+(t.confirmed_recipients||0)+' of '+t.recipient_count:t.status==='failed'?'Not completed':t.status==='quoted'?'Ready to review':'Confirming on-chain';}
 function close(){if(!active)return;clearTimeout(active.timer);active.el.remove();active.trigger&&active.trigger.focus();active=null;}
 function mount(context){close();var el=document.createElement('div');el.className='gc-sheet-back on ct-back';el.innerHTML='<div class="gc-sheet ct-sheet" role="dialog" aria-modal="true" aria-label="Send a tip"><button type="button" class="ct-close" aria-label="Close">×</button><div class="ct-content"></div></div>';document.body.appendChild(el);var a=active={el:el,ctx:context,trigger:document.activeElement,timer:null};el.querySelector('.ct-close').onclick=close;el.addEventListener('click',function(e){if(e.target===el)close();});return a;}
-function api(a,path,body){var token=window._csrfToken||window._csrf||(document.querySelector('meta[name="csrf-token"]')||{}).content||'';return fetch(a.ctx.base+path,{method:body===undefined?'GET':'POST',cache:'no-store',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':token},body:body===undefined?undefined:JSON.stringify(body)}).then(function(r){return r.json();}).catch(function(){return {ok:false,msg:'Connection interrupted. Check this tip before retrying.'};});}
+function api(a,path,body){
+  var token=window._csrfToken||window._csrf||(document.querySelector('meta[name="csrf-token"]')||{}).content||'';
+  // A quote cannot transfer funds. Stop waiting if read-only price/balance
+  // checks stall, then let the sender retry without authorising a payment.
+  // NEVER apply this abort to /confirm: its result can be ambiguous on-chain.
+  var ctl=path==='/quote'&&typeof AbortController==='function'?new AbortController():null;
+  var timer=ctl?setTimeout(function(){ctl.abort();},30000):null;
+  return fetch(a.ctx.base+path,{method:body===undefined?'GET':'POST',cache:'no-store',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':token},body:body===undefined?undefined:JSON.stringify(body),signal:ctl?ctl.signal:undefined})
+    .then(function(r){return r.json().then(function(d){
+      return d&&typeof d==='object'?d:{ok:false,msg:'Invalid tip service response. Please retry.'};
+    }).catch(function(){return {ok:false,msg:'The tip service is temporarily unavailable. Please retry.'};});})
+    .catch(function(e){return {ok:false,msg:e&&e.name==='AbortError'?'Calculating took too long. No tip was sent. Please retry.':'Connection interrupted. Check this tip before retrying.'};})
+    .finally(function(){if(timer!==null)clearTimeout(timer);});
+}
 function content(a,html){if(active!==a)return false;a.el.querySelector('.ct-content').innerHTML=html;return true;}
 function error(a,msg){var e=a.el.querySelector('.ct-error');if(e)e.textContent=msg||'Tip unavailable';}
 function heading(title,sub){return '<div class="ct-gift">'+GIFT+'</div><h2>'+esc(title)+'</h2><p class="ct-sub">'+esc(sub)+'</p>';}
