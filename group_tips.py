@@ -109,6 +109,23 @@ def _public_quote(row, uid):
     return result
 
 
+def _quote_read(d, method, params, preferred_url=None):
+    """Bounded read-only Solana RPC for the pre-payment quote screen.
+
+    Trading and tip submission deliberately retain their normal RPC retries;
+    only these pre-authorization checks need a short, user-visible deadline.
+    """
+    import portfolio_token_withdraw as provider
+    try:
+        return provider._rpc_call_any(
+            d, method, params, preferred_url=preferred_url,
+            timeout=2.5, max_providers=3)
+    except Exception as exc:
+        d.app.logger.warning('group tip quote RPC %s failed: %s',
+                             method, type(exc).__name__)
+        raise ValueError('Solana did not respond in time. No tip was sent. Try again.') from exc
+
+
 def _preferred_rpc(d, q):
     import portfolio_token_withdraw as provider
     urls = provider._rpc_urls(d)
@@ -318,20 +335,23 @@ def install(d):
             total = per * count
             if total > 100 * 10**9:
                 raise ValueError('The group tip exceeds the 100 SOL limit')
-            block, _ = provider._rpc_call_any(d, 'getLatestBlockhash', [{'commitment': 'confirmed'}])
+            block, quote_rpc_url = _quote_read(d, 'getLatestBlockhash', [{'commitment': 'confirmed'}])
             from solders.message import to_bytes_versioned
             block = block['value']
             tid = uuid.uuid4().hex
             messages = _messages(owner, recipients, per, block['blockhash'], tid)
             fees = []
             for msg in messages:
-                fee, _ = provider._rpc_call_any(d, 'getFeeForMessage', [base64.b64encode(to_bytes_versioned(msg)).decode(), {'commitment': 'confirmed'}])
+                fee, _ = _quote_read(d, 'getFeeForMessage', [base64.b64encode(to_bytes_versioned(msg)).decode(), {'commitment': 'confirmed'}], preferred_url=quote_rpc_url)
                 value = fee.get('value') if isinstance(fee, dict) else None
                 if type(value) is not int or value <= 0:
                     raise ValueError('Cannot verify the network fee. No tip was sent.')
                 fees.append(value)
-            balance, _ = provider._rpc_call_any(d, 'getBalance', [owner, {'commitment': 'confirmed'}])
-            floor = max(provider._fee_payer_rent_lamports(d), int(d.SOL_NETWORK_RESERVE * 1e9))
+            balance, _ = _quote_read(d, 'getBalance', [owner, {'commitment': 'confirmed'}], preferred_url=quote_rpc_url)
+            # A plain Solana wallet needs at least this rent floor. The
+            # confirmation stage separately rechecks the live network floor.
+            # Avoid another potentially slow RPC on the review screen.
+            floor = max(provider._FEE_PAYER_RENT_FALLBACK, int(d.SOL_NETWORK_RESERVE * 1e9))
             if int(balance['value']) < total + sum(fees) + floor:
                 raise ValueError('Not enough SOL for this tip, network fees and the wallet reserve')
             q = {'recipients': recipients, 'owner': owner, 'price': str(price), 'usd': float(usd), 'per': per,
