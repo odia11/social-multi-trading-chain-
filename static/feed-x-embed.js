@@ -4,7 +4,7 @@
  */
 (function(global){
   'use strict';
-  var observer=null, scriptPromise=null;
+  var observer=null, scope=null, scriptPromise=null;
   var scriptUrl='https://platform.twitter.com/widgets.js';
   var allowedHosts={'x.com':1,'www.x.com':1,'twitter.com':1,
                     'www.twitter.com':1,'mobile.twitter.com':1};
@@ -91,8 +91,15 @@
 
   function observe(container){
     if(!container||!container.querySelectorAll)return;
-    if(!observer&&typeof IntersectionObserver==='function'){
-      observer=new IntersectionObserver(function(entries){
+    // Managed lifecycle scope disconnects and re-observes on iOS bfcache,
+    // and clears the observer when Home is unmounted.
+    if((!scope||!scope.isActive())&&global.OrcPageLifecycle){
+      scope=global.OrcPageLifecycle.createScope('feed-x-embed',container);
+      observer=null;
+      scope.onCleanup(function(){observer=null;scope=null;});
+    }
+    if(!observer&&scope&&typeof scope.intersectionObserver==='function'){
+      observer=scope.intersectionObserver(function(entries){
         entries.forEach(function(entry){
           if(!entry.isIntersecting)return;
           observer.unobserve(entry.target);load(entry.target);
